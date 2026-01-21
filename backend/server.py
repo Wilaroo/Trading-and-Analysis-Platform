@@ -957,7 +957,8 @@ async def generate_morning_watchlist():
     watchlists_col.delete_many({})
     for item in top_10:
         item["created_at"] = datetime.now(timezone.utc).isoformat()
-        watchlists_col.insert_one(item)
+        doc = item.copy()
+        watchlists_col.insert_one(doc)
     
     symbols_str = ", ".join([s["symbol"] for s in top_10[:5]])
     ai_insight = await generate_ai_analysis(
@@ -965,8 +966,14 @@ async def generate_morning_watchlist():
         f"Top mover: {top_10[0]['symbol']} with score {top_10[0]['score']}."
     )
     
+    # Clean items for return (ensure no ObjectId)
+    clean_watchlist = []
+    for item in top_10:
+        clean_item = {k: v for k, v in item.items() if k != '_id'}
+        clean_watchlist.append(clean_item)
+    
     return {
-        "watchlist": top_10,
+        "watchlist": clean_watchlist,
         "ai_insight": ai_insight,
         "generated_at": datetime.now(timezone.utc).isoformat()
     }
