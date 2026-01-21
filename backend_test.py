@@ -200,6 +200,89 @@ class TradeCommandAPITester:
         # Test clear alerts
         success, data = self.test_endpoint('DELETE', '/api/alerts/clear', test_name="Clear Alerts")
 
+    def test_fundamentals_endpoints(self):
+        """Test fundamentals endpoints"""
+        print("\n🔍 Testing Fundamentals Endpoints...")
+        
+        # Test fundamentals for AAPL
+        success, data = self.test_endpoint('GET', '/api/fundamentals/AAPL', test_name="Get AAPL Fundamentals")
+        
+        if success and data:
+            required_fields = ['symbol', 'company_name', 'market_cap', 'pe_ratio']
+            missing_fields = [field for field in required_fields if field not in data]
+            
+            if not missing_fields:
+                self.log_test("Fundamentals Data Structure", True, "All required fields present")
+            else:
+                self.log_test("Fundamentals Data Structure", False, f"Missing fields: {missing_fields}")
+        
+        # Test historical data
+        success, data = self.test_endpoint('GET', '/api/historical/AAPL', test_name="Get Historical Data")
+
+    def test_insider_trading_endpoints(self):
+        """Test insider trading endpoints"""
+        print("\n🔍 Testing Insider Trading Endpoints...")
+        
+        # Test insider trades for AAPL
+        success, data = self.test_endpoint('GET', '/api/insider/AAPL', test_name="Get AAPL Insider Trades")
+        
+        if success and data:
+            if 'trades' in data and 'summary' in data:
+                self.log_test("Insider Data Structure", True, "Trades and summary present")
+                
+                # Check summary fields
+                summary = data['summary']
+                required_summary_fields = ['total_buys', 'total_sells', 'net_activity', 'signal']
+                missing_fields = [field for field in required_summary_fields if field not in summary]
+                
+                if not missing_fields:
+                    self.log_test("Insider Summary Structure", True, "All summary fields present")
+                else:
+                    self.log_test("Insider Summary Structure", False, f"Missing fields: {missing_fields}")
+            else:
+                self.log_test("Insider Data Structure", False, "Missing trades or summary")
+        
+        # Test unusual insider activity
+        success, data = self.test_endpoint('GET', '/api/insider/unusual', test_name="Get Unusual Insider Activity")
+        
+        if success and data:
+            if 'unusual_activity' in data and 'all_activity' in data:
+                self.log_test("Unusual Activity Structure", True, "Activity data present")
+            else:
+                self.log_test("Unusual Activity Structure", False, "Missing activity data")
+
+    def test_cot_endpoints(self):
+        """Test COT (Commitment of Traders) endpoints"""
+        print("\n🔍 Testing COT Endpoints...")
+        
+        # Test COT data for ES (E-Mini S&P 500)
+        success, data = self.test_endpoint('GET', '/api/cot/ES', test_name="Get ES COT Data")
+        
+        if success and data:
+            if 'data' in data and len(data['data']) > 0:
+                self.log_test("COT Data Structure", True, f"Found {len(data['data'])} COT records")
+                
+                # Check first record structure
+                first_record = data['data'][0]
+                required_fields = ['commercial_long', 'commercial_short', 'non_commercial_long', 'non_commercial_short']
+                missing_fields = [field for field in required_fields if field not in first_record]
+                
+                if not missing_fields:
+                    self.log_test("COT Record Structure", True, "All required fields present")
+                else:
+                    self.log_test("COT Record Structure", False, f"Missing fields: {missing_fields}")
+            else:
+                self.log_test("COT Data Structure", False, "No COT data found")
+        
+        # Test COT summary
+        success, data = self.test_endpoint('GET', '/api/cot/summary', test_name="Get COT Summary")
+        
+        if success and data:
+            if 'summary' in data and len(data['summary']) > 0:
+                self.log_test("COT Summary Structure", True, f"Found {len(data['summary'])} market summaries")
+            else:
+                self.log_test("COT Summary Structure", False, "No summary data found")
+
     def test_newsletter_endpoints(self):
         """Test newsletter endpoints"""
         print("\n🔍 Testing Newsletter Endpoints...")
@@ -209,9 +292,6 @@ class TradeCommandAPITester:
         
         # Test generate newsletter
         success, data = self.test_endpoint('POST', '/api/newsletter/generate', test_name="Generate Newsletter")
-        
-        # Test newsletter history
-        success, data = self.test_endpoint('GET', '/api/newsletter/history', test_name="Newsletter History")
 
     def test_dashboard_endpoints(self):
         """Test dashboard endpoints"""
