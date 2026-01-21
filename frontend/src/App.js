@@ -37,7 +37,8 @@ import {
 } from 'recharts';
 import './App.css';
 
-const API_URL = process.env.REACT_APP_BACKEND_URL || '';
+// Use relative URL for API calls - Kubernetes ingress routes /api to backend
+const API_URL = '';
 
 // API client
 const api = axios.create({
