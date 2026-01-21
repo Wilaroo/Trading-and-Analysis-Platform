@@ -536,7 +536,7 @@ async def fetch_insider_trades(symbol: str) -> List[Dict]:
         async with httpx.AsyncClient() as client:
             # Using Finnhub free API for insider transactions
             resp = await client.get(
-                f"https://finnhub.io/api/v1/stock/insider-transactions",
+                "https://finnhub.io/api/v1/stock/insider-transactions",
                 params={"symbol": symbol.upper(), "token": "demo"},
                 timeout=10
             )
