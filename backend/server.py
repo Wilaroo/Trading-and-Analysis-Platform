@@ -808,7 +808,7 @@ async def health_check():
 @app.get("/api/quotes/{symbol}")
 async def get_quote(symbol: str):
     """Get real-time quote for a single symbol"""
-    quote = await fetch_yahoo_quote(symbol.upper())
+    quote = await fetch_quote(symbol.upper())
     if not quote:
         raise HTTPException(status_code=404, detail="Symbol not found")
     return quote
