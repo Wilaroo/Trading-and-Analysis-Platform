@@ -1290,6 +1290,9 @@ DEFAULT_STREAM_SYMBOLS = ["SPY", "QQQ", "DIA", "IWM", "VIX", "AAPL", "MSFT", "GO
 
 async def stream_quotes():
     """Background task to stream quotes to all connected clients"""
+    # Stagger initial requests to avoid rate limits
+    await asyncio.sleep(2)
+    
     while True:
         if manager.active_connections:
             try:
@@ -1298,12 +1301,17 @@ async def stream_quotes():
                 for symbols in manager.subscriptions.values():
                     all_symbols.update(symbols)
                 
-                # Fetch quotes for all symbols (with caching)
+                # Fetch quotes for all symbols (uses cache)
                 quotes = []
-                for symbol in list(all_symbols)[:15]:  # Limit to avoid rate limits
+                symbol_list = list(all_symbols)[:10]  # Limit symbols
+                
+                for i, symbol in enumerate(symbol_list):
                     quote = await fetch_quote(symbol)
                     if quote:
                         quotes.append(quote)
+                    # Small delay between requests to avoid rate limits
+                    if i < len(symbol_list) - 1:
+                        await asyncio.sleep(0.5)
                 
                 if quotes:
                     message = {
@@ -1315,8 +1323,8 @@ async def stream_quotes():
             except Exception as e:
                 print(f"Stream error: {e}")
         
-        # Wait before next update (respect rate limits)
-        await asyncio.sleep(5)  # Update every 5 seconds
+        # Wait before next update (longer to respect rate limits)
+        await asyncio.sleep(10)  # Update every 10 seconds
 
 @app.on_event("startup")
 async def startup_event():
@@ -1329,9 +1337,15 @@ async def websocket_quotes(websocket: WebSocket):
     """WebSocket endpoint for real-time quote streaming"""
     await manager.connect(websocket)
     
-    # Send initial data
+    # Send initial data (use cached or simulated to avoid rate limits)
     try:
-        initial_quotes = await fetch_multiple_quotes(DEFAULT_STREAM_SYMBOLS[:8])
+        initial_quotes = []
+        for symbol in DEFAULT_STREAM_SYMBOLS[:8]:
+            quote = await fetch_quote(symbol)
+            if quote:
+                initial_quotes.append(quote)
+            await asyncio.sleep(0.3)  # Stagger requests
+        
         await manager.send_personal_message({
             "type": "initial",
             "data": initial_quotes,
