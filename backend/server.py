@@ -1239,6 +1239,147 @@ async def get_dashboard_stats():
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
+# ===================== WEBSOCKET REAL-TIME STREAMING =====================
+
+class ConnectionManager:
+    """Manages WebSocket connections for real-time streaming"""
+    
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+        self.subscriptions: Dict[WebSocket, Set[str]] = {}
+    
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        self.subscriptions[websocket] = set()
+        print(f"WebSocket connected. Total connections: {len(self.active_connections)}")
+    
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        if websocket in self.subscriptions:
+            del self.subscriptions[websocket]
+        print(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
+    
+    def subscribe(self, websocket: WebSocket, symbols: List[str]):
+        if websocket in self.subscriptions:
+            self.subscriptions[websocket].update([s.upper() for s in symbols])
+    
+    def unsubscribe(self, websocket: WebSocket, symbols: List[str]):
+        if websocket in self.subscriptions:
+            for symbol in symbols:
+                self.subscriptions[websocket].discard(symbol.upper())
+    
+    async def send_personal_message(self, message: dict, websocket: WebSocket):
+        try:
+            await websocket.send_json(message)
+        except Exception as e:
+            print(f"Error sending message: {e}")
+    
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                print(f"Error broadcasting: {e}")
+
+manager = ConnectionManager()
+
+# Default symbols to stream
+DEFAULT_STREAM_SYMBOLS = ["SPY", "QQQ", "DIA", "IWM", "VIX", "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "AMD"]
+
+async def stream_quotes():
+    """Background task to stream quotes to all connected clients"""
+    while True:
+        if manager.active_connections:
+            try:
+                # Collect all subscribed symbols
+                all_symbols = set(DEFAULT_STREAM_SYMBOLS)
+                for symbols in manager.subscriptions.values():
+                    all_symbols.update(symbols)
+                
+                # Fetch quotes for all symbols (with caching)
+                quotes = []
+                for symbol in list(all_symbols)[:15]:  # Limit to avoid rate limits
+                    quote = await fetch_quote(symbol)
+                    if quote:
+                        quotes.append(quote)
+                
+                if quotes:
+                    message = {
+                        "type": "quotes",
+                        "data": quotes,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }
+                    await manager.broadcast(message)
+            except Exception as e:
+                print(f"Stream error: {e}")
+        
+        # Wait before next update (respect rate limits)
+        await asyncio.sleep(5)  # Update every 5 seconds
+
+@app.on_event("startup")
+async def startup_event():
+    """Start background streaming task"""
+    asyncio.create_task(stream_quotes())
+    print("WebSocket streaming started")
+
+@app.websocket("/ws/quotes")
+async def websocket_quotes(websocket: WebSocket):
+    """WebSocket endpoint for real-time quote streaming"""
+    await manager.connect(websocket)
+    
+    # Send initial data
+    try:
+        initial_quotes = await fetch_multiple_quotes(DEFAULT_STREAM_SYMBOLS[:8])
+        await manager.send_personal_message({
+            "type": "initial",
+            "data": initial_quotes,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }, websocket)
+    except Exception as e:
+        print(f"Error sending initial data: {e}")
+    
+    try:
+        while True:
+            # Receive messages from client
+            data = await websocket.receive_json()
+            
+            if data.get("action") == "subscribe":
+                symbols = data.get("symbols", [])
+                manager.subscribe(websocket, symbols)
+                await manager.send_personal_message({
+                    "type": "subscribed",
+                    "symbols": symbols
+                }, websocket)
+            
+            elif data.get("action") == "unsubscribe":
+                symbols = data.get("symbols", [])
+                manager.unsubscribe(websocket, symbols)
+                await manager.send_personal_message({
+                    "type": "unsubscribed",
+                    "symbols": symbols
+                }, websocket)
+            
+            elif data.get("action") == "ping":
+                await manager.send_personal_message({"type": "pong"}, websocket)
+    
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+        manager.disconnect(websocket)
+
+@app.get("/api/stream/status")
+async def get_stream_status():
+    """Get WebSocket streaming status"""
+    return {
+        "active_connections": len(manager.active_connections),
+        "streaming": True,
+        "update_interval_seconds": 5,
+        "default_symbols": DEFAULT_STREAM_SYMBOLS
+    }
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)
