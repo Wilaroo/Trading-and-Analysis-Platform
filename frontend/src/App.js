@@ -55,66 +55,279 @@ import './App.css';
 
 // ===================== ALERT SOUND SYSTEM =====================
 const createAlertSound = () => {
-  const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  let audioContext = null;
+  
+  const getContext = () => {
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    // Resume context if suspended (browser autoplay policy)
+    if (audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
+    return audioContext;
+  };
   
   return {
     playBullish: () => {
-      // Rising tone for bullish alert
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      
-      oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
-      oscillator.frequency.exponentialRampToValueAtTime(880, audioContext.currentTime + 0.2);
-      
-      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
-      
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + 0.3);
+      try {
+        const ctx = getContext();
+        const oscillator = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        
+        oscillator.frequency.setValueAtTime(440, ctx.currentTime);
+        oscillator.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.2);
+        
+        gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+        
+        oscillator.start(ctx.currentTime);
+        oscillator.stop(ctx.currentTime + 0.3);
+      } catch (e) {
+        console.error('Audio playback failed:', e);
+      }
     },
     
     playBearish: () => {
-      // Falling tone for bearish alert
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      
-      oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
-      oscillator.frequency.exponentialRampToValueAtTime(440, audioContext.currentTime + 0.2);
-      
-      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
-      
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + 0.3);
+      try {
+        const ctx = getContext();
+        const oscillator = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        
+        oscillator.frequency.setValueAtTime(880, ctx.currentTime);
+        oscillator.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.2);
+        
+        gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+        
+        oscillator.start(ctx.currentTime);
+        oscillator.stop(ctx.currentTime + 0.3);
+      } catch (e) {
+        console.error('Audio playback failed:', e);
+      }
     },
     
     playUrgent: () => {
-      // Double beep for urgent alerts
-      const playBeep = (startTime, freq) => {
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
+      try {
+        const ctx = getContext();
+        const playBeep = (startTime, freq) => {
+          const oscillator = ctx.createOscillator();
+          const gainNode = ctx.createGain();
+          
+          oscillator.connect(gainNode);
+          gainNode.connect(ctx.destination);
+          
+          oscillator.frequency.setValueAtTime(freq, startTime);
+          gainNode.gain.setValueAtTime(0.4, startTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.15);
+          
+          oscillator.start(startTime);
+          oscillator.stop(startTime + 0.15);
+        };
         
-        oscillator.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        
-        oscillator.frequency.setValueAtTime(freq, startTime);
-        gainNode.gain.setValueAtTime(0.4, startTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.15);
-        
-        oscillator.start(startTime);
-        oscillator.stop(startTime + 0.15);
-      };
-      
-      playBeep(audioContext.currentTime, 1000);
-      playBeep(audioContext.currentTime + 0.2, 1200);
+        playBeep(ctx.currentTime, 1000);
+        playBeep(ctx.currentTime + 0.2, 1200);
+      } catch (e) {
+        console.error('Audio playback failed:', e);
+      }
     }
   };
+};
+
+// ===================== PRICE ALERTS HOOK =====================
+const usePriceAlerts = (streamingQuotes, watchlist = []) => {
+  const [alerts, setAlerts] = useState([]);
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  const [alertThreshold, setAlertThreshold] = useState(2); // 2% change threshold
+  const previousPricesRef = useRef({});
+  const alertSoundRef = useRef(null);
+  const processedAlertsRef = useRef(new Set());
+  
+  // Initialize audio on first user interaction
+  const initializeAudio = useCallback(() => {
+    if (!alertSoundRef.current) {
+      alertSoundRef.current = createAlertSound();
+    }
+  }, []);
+  
+  // Check for price movements and trigger alerts
+  const checkPriceAlerts = useCallback((quotes) => {
+    if (!quotes || Object.keys(quotes).length === 0) return;
+    
+    const newAlerts = [];
+    const now = Date.now();
+    
+    // Get watchlist symbols (or use streaming symbols if no watchlist)
+    const symbolsToWatch = watchlist.length > 0 
+      ? watchlist.map(w => w.symbol) 
+      : Object.keys(quotes);
+    
+    symbolsToWatch.forEach(symbol => {
+      const quote = quotes[symbol];
+      if (!quote) return;
+      
+      const previousPrice = previousPricesRef.current[symbol];
+      const currentPrice = quote.price;
+      const changePercent = quote.change_percent || 0;
+      
+      // Check for significant movement (use either price change or % change)
+      let alertTriggered = false;
+      let alertType = 'info';
+      let alertMessage = '';
+      
+      // Method 1: Check absolute change percent from API
+      if (Math.abs(changePercent) >= alertThreshold) {
+        alertTriggered = true;
+        alertType = changePercent > 0 ? 'bullish' : 'bearish';
+        alertMessage = `${symbol} ${changePercent > 0 ? 'up' : 'down'} ${Math.abs(changePercent).toFixed(2)}%`;
+      }
+      
+      // Method 2: Check price change since last update (for real-time spikes)
+      if (previousPrice && currentPrice) {
+        const priceDelta = ((currentPrice - previousPrice) / previousPrice) * 100;
+        if (Math.abs(priceDelta) >= alertThreshold * 0.5) { // Half threshold for real-time
+          alertTriggered = true;
+          alertType = priceDelta > 0 ? 'bullish' : 'bearish';
+          alertMessage = `${symbol} moved ${priceDelta > 0 ? '+' : ''}${priceDelta.toFixed(2)}% in real-time`;
+        }
+      }
+      
+      // Create alert if triggered and not already processed recently
+      const alertKey = `${symbol}-${Math.floor(now / 60000)}`; // Unique per minute
+      if (alertTriggered && !processedAlertsRef.current.has(alertKey)) {
+        processedAlertsRef.current.add(alertKey);
+        
+        // Clean old processed alerts (keep last 100)
+        if (processedAlertsRef.current.size > 100) {
+          const entries = Array.from(processedAlertsRef.current);
+          processedAlertsRef.current = new Set(entries.slice(-50));
+        }
+        
+        const alert = {
+          id: `${symbol}-${now}`,
+          symbol,
+          price: currentPrice,
+          changePercent,
+          type: alertType,
+          message: alertMessage,
+          timestamp: new Date().toISOString(),
+          read: false
+        };
+        
+        newAlerts.push(alert);
+        
+        // Play sound
+        if (audioEnabled && alertSoundRef.current) {
+          if (Math.abs(changePercent) >= alertThreshold * 2) {
+            alertSoundRef.current.playUrgent();
+          } else if (alertType === 'bullish') {
+            alertSoundRef.current.playBullish();
+          } else {
+            alertSoundRef.current.playBearish();
+          }
+        }
+      }
+      
+      // Update previous price
+      previousPricesRef.current[symbol] = currentPrice;
+    });
+    
+    if (newAlerts.length > 0) {
+      setAlerts(prev => [...newAlerts, ...prev].slice(0, 50)); // Keep last 50 alerts
+    }
+  }, [watchlist, alertThreshold, audioEnabled]);
+  
+  // Process quotes when they update
+  useEffect(() => {
+    if (Object.keys(streamingQuotes).length > 0) {
+      checkPriceAlerts(streamingQuotes);
+    }
+  }, [streamingQuotes, checkPriceAlerts]);
+  
+  const clearAlerts = useCallback(() => {
+    setAlerts([]);
+  }, []);
+  
+  const dismissAlert = useCallback((alertId) => {
+    setAlerts(prev => prev.filter(a => a.id !== alertId));
+  }, []);
+  
+  return {
+    alerts,
+    audioEnabled,
+    setAudioEnabled,
+    alertThreshold,
+    setAlertThreshold,
+    initializeAudio,
+    clearAlerts,
+    dismissAlert
+  };
+};
+
+// ===================== PRICE ALERT NOTIFICATION COMPONENT =====================
+const PriceAlertNotification = ({ alerts, onDismiss, audioEnabled, setAudioEnabled }) => {
+  if (alerts.length === 0) return null;
+  
+  return (
+    <div className="fixed top-20 right-4 z-50 space-y-2 max-h-[60vh] overflow-y-auto">
+      <AnimatePresence>
+        {alerts.slice(0, 5).map((alert) => (
+          <motion.div
+            key={alert.id}
+            initial={{ opacity: 0, x: 100, scale: 0.9 }}
+            animate={{ opacity: 1, x: 0, scale: 1 }}
+            exit={{ opacity: 0, x: 100, scale: 0.9 }}
+            className={`glass-card rounded-lg p-4 min-w-[280px] border-l-4 ${
+              alert.type === 'bullish' 
+                ? 'border-l-green-500 bg-green-500/10' 
+                : alert.type === 'bearish'
+                ? 'border-l-red-500 bg-red-500/10'
+                : 'border-l-blue-500 bg-blue-500/10'
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2">
+                {alert.type === 'bullish' ? (
+                  <TrendingUp className="w-5 h-5 text-green-400" />
+                ) : alert.type === 'bearish' ? (
+                  <TrendingDown className="w-5 h-5 text-red-400" />
+                ) : (
+                  <AlertTriangle className="w-5 h-5 text-yellow-400" />
+                )}
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-white">{alert.symbol}</span>
+                    <span className={`font-mono text-sm ${
+                      alert.changePercent > 0 ? 'text-green-400' : 'text-red-400'
+                    }`}>
+                      {alert.changePercent > 0 ? '+' : ''}{alert.changePercent?.toFixed(2)}%
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-400">{alert.message}</p>
+                  <p className="text-xs text-zinc-500 mt-1">
+                    ${alert.price?.toFixed(2)} • {new Date(alert.timestamp).toLocaleTimeString()}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => onDismiss(alert.id)}
+                className="text-zinc-500 hover:text-white transition-colors"
+                data-testid={`dismiss-alert-${alert.symbol}`}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </motion.div>
+        ))}
+      </AnimatePresence>
+    </div>
+  );
 };
 
 // Use relative URL for API calls - proxy handles routing
