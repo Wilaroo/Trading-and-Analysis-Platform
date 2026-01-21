@@ -455,7 +455,7 @@ const WatchlistItem = ({ item, rank }) => (
 // ===================== PAGES =====================
 
 // Dashboard Page
-const DashboardPage = ({ data, loading, onRefresh }) => {
+const DashboardPage = ({ data, loading, onRefresh, streamingQuotes = {} }) => {
   const { stats, overview, alerts, watchlist } = data;
 
   const chartData = [
@@ -468,6 +468,12 @@ const DashboardPage = ({ data, loading, onRefresh }) => {
     { time: '12:30', value: 106 },
     { time: '13:00', value: 110 },
   ];
+
+  // Merge streaming quotes with overview data
+  const getUpdatedMover = (mover) => {
+    const streamed = streamingQuotes[mover.symbol];
+    return streamed ? { ...mover, ...streamed } : mover;
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
