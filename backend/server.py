@@ -1344,7 +1344,7 @@ async def run_scanner(
         if include_fundamentals or (category and category.lower() == "investment"):
             try:
                 fundamentals = await fetch_fundamentals(quote["symbol"])
-            except:
+            except Exception:
                 fundamentals = None
         
         # Score against strategies with detailed criteria
