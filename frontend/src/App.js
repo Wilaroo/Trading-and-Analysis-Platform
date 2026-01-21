@@ -32,7 +32,11 @@ import {
   Info,
   ExternalLink,
   Wifi,
-  WifiOff
+  WifiOff,
+  Volume2,
+  VolumeX,
+  AlertTriangle,
+  CheckCircle
 } from 'lucide-react';
 import {
   AreaChart,
@@ -48,6 +52,70 @@ import {
   Pie
 } from 'recharts';
 import './App.css';
+
+// ===================== ALERT SOUND SYSTEM =====================
+const createAlertSound = () => {
+  const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  
+  return {
+    playBullish: () => {
+      // Rising tone for bullish alert
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(880, audioContext.currentTime + 0.2);
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.3);
+    },
+    
+    playBearish: () => {
+      // Falling tone for bearish alert
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(440, audioContext.currentTime + 0.2);
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.3);
+    },
+    
+    playUrgent: () => {
+      // Double beep for urgent alerts
+      const playBeep = (startTime, freq) => {
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        oscillator.frequency.setValueAtTime(freq, startTime);
+        gainNode.gain.setValueAtTime(0.4, startTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.15);
+        
+        oscillator.start(startTime);
+        oscillator.stop(startTime + 0.15);
+      };
+      
+      playBeep(audioContext.currentTime, 1000);
+      playBeep(audioContext.currentTime + 0.2, 1200);
+    }
+  };
+};
 
 // Use relative URL for API calls - proxy handles routing
 const API_URL = '';
