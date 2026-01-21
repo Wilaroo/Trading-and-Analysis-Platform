@@ -776,44 +776,412 @@ async def generate_ai_analysis(prompt: str) -> str:
         print(f"AI Analysis error: {e}")
         return "Analysis unavailable"
 
-async def score_stock_for_strategies(symbol: str, quote_data: Dict) -> Dict:
-    """Score a stock against trading strategies"""
+async def score_stock_for_strategies(symbol: str, quote_data: Dict, fundamentals: Dict = None, category_filter: str = None) -> Dict:
+    """
+    Score a stock against all 50 trading strategies using detailed criteria.
+    Returns matched strategies with confidence scores for each.
+    """
     matched_strategies = []
+    strategy_details = []
     total_criteria_met = 0
+    total_criteria_checked = 0
     
+    # Extract quote data
     price = quote_data.get("price", 0)
     change_pct = quote_data.get("change_percent", 0)
     volume = quote_data.get("volume", 0)
+    avg_volume = quote_data.get("avg_volume", 0) or volume
+    high = quote_data.get("high", price)
+    low = quote_data.get("low", price)
+    open_price = quote_data.get("open", price)
+    prev_close = quote_data.get("prev_close", price)
     
-    if change_pct > 2:
-        matched_strategies.extend(["INT-01", "INT-04"])
-        total_criteria_met += 2
+    # Calculate derived metrics
+    rvol = (volume / avg_volume) if avg_volume > 0 else 1  # Relative Volume
+    daily_range = ((high - low) / low * 100) if low > 0 else 0
+    gap_pct = ((open_price - prev_close) / prev_close * 100) if prev_close > 0 else 0
+    vwap_estimate = (high + low + price) / 3  # Simplified VWAP
+    above_vwap = price > vwap_estimate
     
-    if change_pct > 3:
-        matched_strategies.append("INT-14")
-        total_criteria_met += 1
+    # Fundamentals data (if available)
+    pe_ratio = fundamentals.get("pe_ratio") if fundamentals else None
+    pb_ratio = fundamentals.get("price_to_book") if fundamentals else None
+    dividend_yield = fundamentals.get("dividend_yield") if fundamentals else None
+    roe = fundamentals.get("roe") if fundamentals else None
+    revenue_growth = fundamentals.get("revenue_growth") if fundamentals else None
+    beta = fundamentals.get("beta") if fundamentals else None
     
-    if -0.5 < change_pct < 0.5:
-        matched_strategies.append("INT-13")
-        total_criteria_met += 1
+    # ===================== INTRADAY STRATEGIES =====================
+    if not category_filter or category_filter == "intraday":
+        # INT-01: Trend Momentum Continuation
+        criteria_met = 0
+        if above_vwap and change_pct > 0:
+            criteria_met += 1
+        if change_pct > 0.5:  # Upward momentum
+            criteria_met += 1
+        if rvol >= 2:
+            criteria_met += 1
+        if high > open_price:  # Making higher highs
+            criteria_met += 1
+        if criteria_met >= 3:
+            matched_strategies.append("INT-01")
+            strategy_details.append({"id": "INT-01", "name": "Trend Momentum Continuation", "criteria_met": criteria_met, "total": 4, "confidence": criteria_met/4*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 4
+        
+        # INT-02: Intraday Breakout (Range High)
+        criteria_met = 0
+        if daily_range < 3:  # Tight range
+            criteria_met += 1
+        if rvol >= 1.5:
+            criteria_met += 1
+        if price >= high * 0.99:  # Near high
+            criteria_met += 1
+        if criteria_met >= 2:
+            matched_strategies.append("INT-02")
+            strategy_details.append({"id": "INT-02", "name": "Intraday Breakout", "criteria_met": criteria_met, "total": 3, "confidence": criteria_met/3*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 3
+        
+        # INT-03: Opening Range Breakout (ORB)
+        criteria_met = 0
+        orb_range = daily_range  # Using daily range as proxy
+        if orb_range < 2:  # Reasonable opening range
+            criteria_met += 1
+        if price > open_price and change_pct > 0.5:  # Break above ORH
+            criteria_met += 1
+        if rvol >= 1.2:
+            criteria_met += 1
+        if criteria_met >= 2:
+            matched_strategies.append("INT-03")
+            strategy_details.append({"id": "INT-03", "name": "Opening Range Breakout", "criteria_met": criteria_met, "total": 3, "confidence": criteria_met/3*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 3
+        
+        # INT-04: Gap-and-Go
+        criteria_met = 0
+        if abs(gap_pct) >= 3:  # Gap >= 3%
+            criteria_met += 1
+        if rvol >= 3:  # High premarket volume
+            criteria_met += 1
+        if gap_pct > 0 and price > open_price:  # Holds gap
+            criteria_met += 1
+        if above_vwap:
+            criteria_met += 1
+        if criteria_met >= 3:
+            matched_strategies.append("INT-04")
+            strategy_details.append({"id": "INT-04", "name": "Gap-and-Go", "criteria_met": criteria_met, "total": 4, "confidence": criteria_met/4*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 4
+        
+        # INT-05: Pullback in Trend (Buy the Dip)
+        criteria_met = 0
+        if change_pct > 0:  # Overall uptrend
+            criteria_met += 1
+        if price < high * 0.98 and price > low * 1.02:  # Pullback from high
+            criteria_met += 1
+        if above_vwap:
+            criteria_met += 1
+        if criteria_met >= 2:
+            matched_strategies.append("INT-05")
+            strategy_details.append({"id": "INT-05", "name": "Pullback in Trend", "criteria_met": criteria_met, "total": 3, "confidence": criteria_met/3*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 3
+        
+        # INT-06: VWAP Bounce
+        criteria_met = 0
+        if above_vwap:
+            criteria_met += 1
+        if abs(price - vwap_estimate) / vwap_estimate < 0.005:  # Near VWAP
+            criteria_met += 1
+        if change_pct > 0:
+            criteria_met += 1
+        if criteria_met >= 2:
+            matched_strategies.append("INT-06")
+            strategy_details.append({"id": "INT-06", "name": "VWAP Bounce", "criteria_met": criteria_met, "total": 3, "confidence": criteria_met/3*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 3
+        
+        # INT-07: VWAP Reversion (Fade to VWAP)
+        criteria_met = 0
+        vwap_extension = abs((price - vwap_estimate) / vwap_estimate * 100)
+        if vwap_extension >= 2:  # Extended from VWAP
+            criteria_met += 1
+        if daily_range > 3:  # Parabolic move
+            criteria_met += 1
+        if criteria_met >= 1:
+            matched_strategies.append("INT-07")
+            strategy_details.append({"id": "INT-07", "name": "VWAP Reversion", "criteria_met": criteria_met, "total": 2, "confidence": criteria_met/2*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 2
+        
+        # INT-08: Mean Reversion After Exhaustion Spike
+        criteria_met = 0
+        if daily_range >= 3:  # Wide range candles
+            criteria_met += 1
+        if rvol >= 2:  # Volume climax
+            criteria_met += 1
+        if criteria_met >= 1:
+            matched_strategies.append("INT-08")
+            strategy_details.append({"id": "INT-08", "name": "Mean Reversion Exhaustion", "criteria_met": criteria_met, "total": 2, "confidence": criteria_met/2*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 2
+        
+        # INT-10: Bull/Bear Flag Intraday
+        criteria_met = 0
+        if change_pct > 2 or change_pct < -2:  # Strong impulse
+            criteria_met += 1
+        if daily_range < 4:  # Consolidation
+            criteria_met += 1
+        if rvol >= 1.5:
+            criteria_met += 1
+        if criteria_met >= 2:
+            matched_strategies.append("INT-10")
+            strategy_details.append({"id": "INT-10", "name": "Bull/Bear Flag", "criteria_met": criteria_met, "total": 3, "confidence": criteria_met/3*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 3
+        
+        # INT-13: Intraday Range Trading
+        criteria_met = 0
+        if -0.5 < change_pct < 0.5:  # Tight range
+            criteria_met += 1
+        if rvol < 1.5:  # Low relative volume
+            criteria_met += 1
+        if daily_range < 2:
+            criteria_met += 1
+        if criteria_met >= 2:
+            matched_strategies.append("INT-13")
+            strategy_details.append({"id": "INT-13", "name": "Intraday Range Trading", "criteria_met": criteria_met, "total": 3, "confidence": criteria_met/3*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 3
+        
+        # INT-14: News/Earnings Momentum
+        criteria_met = 0
+        if abs(gap_pct) >= 3:  # Gap on news
+            criteria_met += 1
+        if rvol >= 3:  # High volume all session
+            criteria_met += 1
+        if abs(change_pct) >= 3:  # Big move
+            criteria_met += 1
+        if criteria_met >= 2:
+            matched_strategies.append("INT-14")
+            strategy_details.append({"id": "INT-14", "name": "News/Earnings Momentum", "criteria_met": criteria_met, "total": 3, "confidence": criteria_met/3*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 3
+        
+        # INT-16: High-of-Day Break Scalps
+        criteria_met = 0
+        if price >= high * 0.995:  # Near HOD
+            criteria_met += 1
+        if change_pct > 0:  # Uptrend
+            criteria_met += 1
+        if rvol >= 1.5:  # Volume building
+            criteria_met += 1
+        if criteria_met >= 2:
+            matched_strategies.append("INT-16")
+            strategy_details.append({"id": "INT-16", "name": "HOD Break Scalps", "criteria_met": criteria_met, "total": 3, "confidence": criteria_met/3*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 3
+        
+        # INT-18: Index-Correlated Trend Riding
+        criteria_met = 0
+        if beta and beta >= 1.2:  # High beta
+            criteria_met += 1
+        if change_pct > 1:  # Strong trend
+            criteria_met += 1
+        if criteria_met >= 1:
+            matched_strategies.append("INT-18")
+            strategy_details.append({"id": "INT-18", "name": "Index-Correlated Riding", "criteria_met": criteria_met, "total": 2, "confidence": criteria_met/2*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 2
     
-    if change_pct < -2:
-        matched_strategies.append("SWG-06")
-        total_criteria_met += 1
+    # ===================== SWING STRATEGIES =====================
+    if not category_filter or category_filter == "swing":
+        # SWG-01: Daily Trend Following
+        criteria_met = 0
+        if change_pct > 0:  # Uptrend
+            criteria_met += 1
+        if price > prev_close:  # Above previous close
+            criteria_met += 1
+        if volume > avg_volume:
+            criteria_met += 1
+        if criteria_met >= 2:
+            matched_strategies.append("SWG-01")
+            strategy_details.append({"id": "SWG-01", "name": "Daily Trend Following", "criteria_met": criteria_met, "total": 3, "confidence": criteria_met/3*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 3
+        
+        # SWG-02: Breakout from Multi-Week Base
+        criteria_met = 0
+        if daily_range < 3:  # Tight consolidation
+            criteria_met += 1
+        if rvol >= 1.5:  # Strong volume
+            criteria_met += 1
+        if price >= high * 0.98:  # Near breakout
+            criteria_met += 1
+        if criteria_met >= 2:
+            matched_strategies.append("SWG-02")
+            strategy_details.append({"id": "SWG-02", "name": "Multi-Week Base Breakout", "criteria_met": criteria_met, "total": 3, "confidence": criteria_met/3*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 3
+        
+        # SWG-04: Pullback After Breakout
+        criteria_met = 0
+        if change_pct < 0 and change_pct > -3:  # Light pullback
+            criteria_met += 1
+        if rvol < 1:  # Lower volume on pullback
+            criteria_met += 1
+        if criteria_met >= 1:
+            matched_strategies.append("SWG-04")
+            strategy_details.append({"id": "SWG-04", "name": "Pullback After Breakout", "criteria_met": criteria_met, "total": 2, "confidence": criteria_met/2*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 2
+        
+        # SWG-06: RSI/Stochastic Mean-Reversion
+        criteria_met = 0
+        if change_pct < -2:  # Oversold condition
+            criteria_met += 1
+        if price > low * 1.01:  # Showing bounce
+            criteria_met += 1
+        if criteria_met >= 1:
+            matched_strategies.append("SWG-06")
+            strategy_details.append({"id": "SWG-06", "name": "RSI Mean-Reversion", "criteria_met": criteria_met, "total": 2, "confidence": criteria_met/2*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 2
+        
+        # SWG-07: Earnings Breakout Continuation
+        criteria_met = 0
+        if abs(gap_pct) >= 3:  # Gap on earnings
+            criteria_met += 1
+        if price > open_price:  # Holding gap
+            criteria_met += 1
+        if rvol >= 2:
+            criteria_met += 1
+        if criteria_met >= 2:
+            matched_strategies.append("SWG-07")
+            strategy_details.append({"id": "SWG-07", "name": "Earnings Breakout", "criteria_met": criteria_met, "total": 3, "confidence": criteria_met/3*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 3
+        
+        # SWG-09: Sector Relative Strength
+        criteria_met = 0
+        if change_pct > 1.5:  # Outperforming
+            criteria_met += 1
+        if rvol >= 1.2:
+            criteria_met += 1
+        if criteria_met >= 1:
+            matched_strategies.append("SWG-09")
+            strategy_details.append({"id": "SWG-09", "name": "Sector Relative Strength", "criteria_met": criteria_met, "total": 2, "confidence": criteria_met/2*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 2
+        
+        # SWG-10: Shorting Failed Breakouts
+        criteria_met = 0
+        if change_pct < -1 and price < high * 0.98:  # Failed breakout
+            criteria_met += 1
+        if rvol >= 1.5:  # Volume on failure
+            criteria_met += 1
+        if criteria_met >= 1:
+            matched_strategies.append("SWG-10")
+            strategy_details.append({"id": "SWG-10", "name": "Failed Breakout Short", "criteria_met": criteria_met, "total": 2, "confidence": criteria_met/2*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 2
+        
+        # SWG-13: Volatility Contraction Pattern (VCP)
+        criteria_met = 0
+        if daily_range < 2:  # Tight contraction
+            criteria_met += 1
+        if rvol < 1:  # Decreasing volume
+            criteria_met += 1
+        if criteria_met >= 1:
+            matched_strategies.append("SWG-13")
+            strategy_details.append({"id": "SWG-13", "name": "VCP Pattern", "criteria_met": criteria_met, "total": 2, "confidence": criteria_met/2*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 2
     
-    if volume > 1000000:
-        total_criteria_met += 1
+    # ===================== INVESTMENT STRATEGIES =====================
+    if not category_filter or category_filter == "investment":
+        # INV-04: Value Investing
+        criteria_met = 0
+        if pe_ratio and pe_ratio < 20:  # Low P/E
+            criteria_met += 1
+        if pb_ratio and pb_ratio < 3:  # Low P/B
+            criteria_met += 1
+        if criteria_met >= 1:
+            matched_strategies.append("INV-04")
+            strategy_details.append({"id": "INV-04", "name": "Value Investing", "criteria_met": criteria_met, "total": 2, "confidence": criteria_met/2*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 2
+        
+        # INV-05: Quality Factor
+        criteria_met = 0
+        if roe and roe > 0.15:  # High ROE
+            criteria_met += 1
+        if pe_ratio and pe_ratio < 30:  # Reasonable valuation
+            criteria_met += 1
+        if criteria_met >= 1:
+            matched_strategies.append("INV-05")
+            strategy_details.append({"id": "INV-05", "name": "Quality Factor", "criteria_met": criteria_met, "total": 2, "confidence": criteria_met/2*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 2
+        
+        # INV-06: Growth Investing
+        criteria_met = 0
+        if revenue_growth and revenue_growth > 0.15:  # High growth
+            criteria_met += 1
+        if pe_ratio and pe_ratio > 20:  # Growth premium
+            criteria_met += 1
+        if criteria_met >= 1:
+            matched_strategies.append("INV-06")
+            strategy_details.append({"id": "INV-06", "name": "Growth Investing", "criteria_met": criteria_met, "total": 2, "confidence": criteria_met/2*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 2
+        
+        # INV-07: Dividend Growth
+        criteria_met = 0
+        if dividend_yield and dividend_yield > 0.01:  # Has dividend
+            criteria_met += 1
+        if dividend_yield and dividend_yield < 0.06:  # Sustainable yield
+            criteria_met += 1
+        if criteria_met >= 1:
+            matched_strategies.append("INV-07")
+            strategy_details.append({"id": "INV-07", "name": "Dividend Growth", "criteria_met": criteria_met, "total": 2, "confidence": criteria_met/2*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 2
+        
+        # INV-08: High-Yield Dividend
+        criteria_met = 0
+        if dividend_yield and dividend_yield >= 0.04:  # High yield
+            criteria_met += 1
+        if criteria_met >= 1:
+            matched_strategies.append("INV-08")
+            strategy_details.append({"id": "INV-08", "name": "High-Yield Dividend", "criteria_met": criteria_met, "total": 1, "confidence": criteria_met/1*100})
+        total_criteria_met += criteria_met
+        total_criteria_checked += 1
     
-    score = min(100, (len(matched_strategies) * 15) + (total_criteria_met * 5))
+    # Calculate final score
+    if total_criteria_checked > 0:
+        base_score = (total_criteria_met / total_criteria_checked) * 100
+    else:
+        base_score = 0
+    
+    # Boost score based on number of matching strategies
+    strategy_bonus = min(30, len(matched_strategies) * 5)
+    score = min(100, int(base_score + strategy_bonus))
     
     return {
         "symbol": symbol,
         "score": score,
         "matched_strategies": matched_strategies,
+        "strategy_details": strategy_details,
         "criteria_met": total_criteria_met,
-        "total_criteria": 10,
+        "total_criteria": total_criteria_checked,
         "change_percent": change_pct,
-        "volume": volume
+        "volume": volume,
+        "rvol": round(rvol, 2),
+        "gap_percent": round(gap_pct, 2),
+        "daily_range": round(daily_range, 2),
+        "above_vwap": above_vwap
     }
 
 # ===================== API ENDPOINTS =====================
