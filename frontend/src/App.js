@@ -303,19 +303,44 @@ const Skeleton = ({ className = '' }) => (
   <div className={`skeleton rounded ${className}`} />
 );
 
-const TickerTape = ({ indices }) => {
+const TickerTape = ({ indices, isConnected, lastUpdate }) => {
   if (!indices || indices.length === 0) return null;
   
   return (
     <div className="bg-paper border-b border-white/5 py-2 overflow-hidden">
-      <div className="flex gap-8 ticker-tape">
-        {[...indices, ...indices].map((item, idx) => (
-          <div key={idx} className="flex items-center gap-3 whitespace-nowrap">
-            <span className="text-zinc-400 text-sm">{item.symbol}</span>
-            <span className="font-mono-data text-white">${item.price?.toFixed(2)}</span>
-            <PriceDisplay value={item.change_percent} className="text-sm" />
+      <div className="flex items-center">
+        {/* Live indicator */}
+        <div className="flex items-center gap-2 px-4 border-r border-white/10">
+          {isConnected ? (
+            <>
+              <Wifi className="w-4 h-4 text-green-400" />
+              <span className="text-xs text-green-400 font-medium">LIVE</span>
+            </>
+          ) : (
+            <>
+              <WifiOff className="w-4 h-4 text-red-400" />
+              <span className="text-xs text-red-400 font-medium">OFFLINE</span>
+            </>
+          )}
+          {lastUpdate && (
+            <span className="text-xs text-zinc-500 hidden md:block">
+              {lastUpdate.toLocaleTimeString()}
+            </span>
+          )}
+        </div>
+        
+        {/* Scrolling ticker */}
+        <div className="flex-1 overflow-hidden">
+          <div className="flex gap-8 ticker-tape">
+            {[...indices, ...indices].map((item, idx) => (
+              <div key={idx} className="flex items-center gap-3 whitespace-nowrap">
+                <span className="text-zinc-400 text-sm">{item.symbol}</span>
+                <span className="font-mono-data text-white">${item.price?.toFixed(2)}</span>
+                <PriceDisplay value={item.change_percent} className="text-sm" />
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
       </div>
     </div>
   );
