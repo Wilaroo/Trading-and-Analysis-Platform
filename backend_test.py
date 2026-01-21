@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Dict, List, Any
 
 class TradeCommandAPITester:
-    def __init__(self, base_url="https://0885-emergent-e2-01jjgbp9bf3qw8hsc04qx7d8c5.preview.emergentagent.com"):
+    def __init__(self, base_url="http://localhost:8001"):
         self.base_url = base_url
         self.tests_run = 0
         self.tests_passed = 0
