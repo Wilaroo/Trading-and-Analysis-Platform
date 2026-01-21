@@ -30,7 +30,9 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Info,
-  ExternalLink
+  ExternalLink,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import {
   AreaChart,
