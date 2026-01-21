@@ -319,7 +319,7 @@ async def fetch_twelvedata_quote(symbol: str) -> Optional[Dict]:
                 change = float(data.get("change", 0))
                 change_pct = float(data.get("percent_change", 0))
                 
-                return {
+                result = {
                     "symbol": symbol,
                     "name": data.get("name", symbol),
                     "price": round(price, 2),
@@ -337,6 +337,10 @@ async def fetch_twelvedata_quote(symbol: str) -> Optional[Dict]:
                     "is_market_open": data.get("is_market_open", False),
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }
+                
+                # Cache the result
+                _quote_cache[cache_key] = (result, datetime.now(timezone.utc))
+                return result
     except Exception as e:
         print(f"Twelve Data error for {symbol}: {e}")
     
