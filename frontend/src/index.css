@@ -1,0 +1,259 @@
+@import '@fontsource/manrope/400.css';
+@import '@fontsource/manrope/500.css';
+@import '@fontsource/manrope/600.css';
+@import '@fontsource/manrope/800.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/playfair-display/400.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-default: #050505;
+  --bg-paper: #0A0A0A;
+  --bg-subtle: #121212;
+  --primary-main: #00E5FF;
+  --primary-hover: #33EBFF;
+  --primary-glow: rgba(0, 229, 255, 0.15);
+  --success: #00FF94;
+  --warning: #FFD600;
+  --error: #FF2E2E;
+  --info: #2979FF;
+  --text-primary: #FFFFFF;
+  --text-secondary: #A1A1AA;
+  --text-muted: #52525B;
+  --border-default: rgba(255, 255, 255, 0.08);
+  --border-active: rgba(0, 229, 255, 0.3);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Manrope', sans-serif;
+  background-color: var(--bg-default);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-paper);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* Selection styling */
+::selection {
+  background: var(--primary-main);
+  color: var(--bg-default);
+}
+
+/* Glass morphism utility */
+.glass {
+  backdrop-filter: blur(12px);
+  background: rgba(10, 10, 10, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.glass-card {
+  backdrop-filter: blur(12px);
+  background: rgba(10, 10, 10, 0.8);
+  border: 1px solid var(--border-default);
+  transition: border-color 0.2s ease-out;
+}
+
+.glass-card:hover {
+  border-color: var(--border-active);
+}
+
+/* Neon glow effect */
+.neon-glow {
+  box-shadow: 0 0 15px var(--primary-glow);
+}
+
+.neon-text {
+  text-shadow: 0 0 10px var(--primary-glow);
+}
+
+/* Data font for numbers */
+.font-mono-data {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Editorial font for newsletter */
+.font-editorial {
+  font-family: 'Playfair Display', serif;
+}
+
+/* Gradient backgrounds */
+.bg-gradient-radial {
+  background: radial-gradient(circle at top right, rgba(0, 229, 255, 0.05), transparent 40%);
+}
+
+/* Scanline texture */
+.scanlines {
+  background: repeating-linear-gradient(0deg, rgba(0,0,0,0.15), rgba(0,0,0,0.15) 1px, transparent 1px, transparent 2px);
+}
+
+/* Animation utilities */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 5px var(--primary-glow); }
+  50% { box-shadow: 0 0 20px var(--primary-glow); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out forwards;
+}
+
+.animate-slide-in {
+  animation: slide-in-right 0.3s ease-out forwards;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Price change colors */
+.price-up {
+  color: var(--success);
+}
+
+.price-down {
+  color: var(--error);
+}
+
+.price-neutral {
+  color: var(--text-secondary);
+}
+
+/* Badge styles */
+.badge {
+  @apply rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wide border border-current bg-opacity-10;
+}
+
+.badge-success {
+  @apply text-green-400 bg-green-400/10 border-green-400/30;
+}
+
+.badge-warning {
+  @apply text-yellow-400 bg-yellow-400/10 border-yellow-400/30;
+}
+
+.badge-error {
+  @apply text-red-400 bg-red-400/10 border-red-400/30;
+}
+
+.badge-info {
+  @apply text-cyan-400 bg-cyan-400/10 border-cyan-400/30;
+}
+
+/* Button styles */
+.btn-primary {
+  @apply bg-cyan-400 text-black font-bold px-4 py-2 rounded-sm uppercase tracking-wider;
+  @apply hover:bg-cyan-300;
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
+  transition: background-color 0.2s ease-out, box-shadow 0.2s ease-out;
+}
+
+.btn-primary:hover {
+  box-shadow: 0 0 20px rgba(0, 229, 255, 0.5);
+}
+
+.btn-secondary {
+  @apply border border-white/20 text-white px-4 py-2 rounded-sm uppercase tracking-wider;
+  @apply hover:border-white/50 hover:bg-white/5;
+  transition: border-color 0.2s ease-out, background-color 0.2s ease-out;
+}
+
+/* Table styles */
+.data-table {
+  @apply w-full;
+}
+
+.data-table th {
+  @apply text-xs uppercase tracking-widest text-zinc-500 text-left py-2 px-4 font-medium;
+}
+
+.data-table td {
+  @apply py-2 px-4 border-b border-white/5 font-mono-data;
+}
+
+.data-table tr:hover td {
+  @apply bg-white/[0.02];
+}
+
+/* Card styles */
+.card {
+  @apply bg-[#0A0A0A] rounded-lg p-6;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: border-color 0.2s ease-out;
+}
+
+.card:hover {
+  border-color: rgba(0, 229, 255, 0.3);
+}
+
+/* Ticker tape animation */
+@keyframes ticker {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.ticker-tape {
+  animation: ticker 30s linear infinite;
+}
+
+/* Loading skeleton */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-paper) 25%, var(--bg-subtle) 50%, var(--bg-paper) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Tab styles */
+.tab {
+  @apply px-4 py-2 text-sm uppercase tracking-wider text-zinc-500 border-b-2 border-transparent;
+  transition: color 0.2s ease-out, border-color 0.2s ease-out;
+}
+
+.tab:hover {
+  @apply text-zinc-300;
+}
+
+.tab.active {
+  @apply text-cyan-400 border-cyan-400;
+}
