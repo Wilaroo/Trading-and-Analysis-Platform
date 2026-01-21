@@ -283,9 +283,20 @@ class COTData(BaseModel):
 # ===================== TWELVE DATA API FOR REAL-TIME QUOTES =====================
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "demo")
 
+# Simple in-memory cache for quotes (expires after 60 seconds)
+_quote_cache = {}
+_cache_ttl = 60  # seconds
+
 async def fetch_twelvedata_quote(symbol: str) -> Optional[Dict]:
-    """Fetch real-time quote from Twelve Data API"""
+    """Fetch real-time quote from Twelve Data API with caching"""
     symbol = symbol.upper()
+    
+    # Check cache first
+    cache_key = f"quote_{symbol}"
+    if cache_key in _quote_cache:
+        cached_data, cached_time = _quote_cache[cache_key]
+        if (datetime.now(timezone.utc) - cached_time).total_seconds() < _cache_ttl:
+            return cached_data
     
     try:
         async with httpx.AsyncClient() as client:
