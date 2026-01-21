@@ -7,21 +7,45 @@ A comprehensive trading platform for tracking real-time stock quotes, scanning f
 
 ### Core Features (Jan 21, 2026)
 1. **Dashboard** - Main overview with portfolio stats, market performance chart, top movers, alerts
-2. **Strategy Scanner** - Scan stocks against 50 trading strategies with customizable filters
-3. **Trading Strategies** - 50 strategies across 3 categories:
+2. **TradingView Charts** - Interactive charts with RSI, MACD, Moving Averages via TradingView widget
+3. **Strategy Scanner** - Scan stocks against 50 trading strategies with customizable filters
+4. **Trading Strategies** - 50 strategies across 3 categories:
    - Intraday (20): Gap-and-Go, VWAP Bounce, ORB, Scalping, etc.
    - Swing (15): Daily Trend Following, VCP, Earnings Breakout, etc.
    - Investment (15): Buy-and-Hold, DCA, Value Investing, etc.
-4. **Watchlist** - AI-ranked top 10 daily picks with strategy scoring
-5. **Portfolio Tracker** - Track positions with real-time P&L
-6. **Alert Center** - In-app notifications for strategy matches
-7. **Morning Newsletter** - AI-generated daily market briefing
+5. **Watchlist** - AI-ranked top 10 daily picks with strategy scoring
+6. **Portfolio Tracker** - Track positions with real-time P&L
+7. **Alert Center** - In-app notifications for strategy matches
+8. **Morning Newsletter** - AI-generated daily market briefing
+
+### NEW Features (Jan 21, 2026)
+9. **Fundamentals Page** - Yahoo Finance data including:
+   - Valuation metrics (P/E, P/B, PEG, P/S)
+   - Profitability (Profit Margin, ROE, ROA, EPS)
+   - Growth metrics (Revenue/Earnings Growth)
+   - Financial Health (Debt/Equity, Current Ratio)
+   - Dividends (Yield, Payout Ratio)
+   - Trading Info (Beta, 52W High/Low, Short %)
+
+10. **Insider Trading Page** - Track unusual insider activity:
+    - By Symbol search with transaction history
+    - Summary showing total buys/sells, net activity, signal
+    - Unusual Activity tab showing stocks with abnormal insider buying
+
+11. **COT Data Page** - Commitment of Traders analysis:
+    - Market Summary for major futures (ES, NQ, GC, CL, 6E, ZB)
+    - Commercial vs Non-Commercial positions
+    - Net positions and weekly changes
+    - Bullish/Bearish sentiment indicators
 
 ### Technical Stack
-- **Frontend**: React + Tailwind CSS + Framer Motion + Recharts
+- **Frontend**: React + Tailwind CSS + Framer Motion + Recharts + TradingView Widget
 - **Backend**: FastAPI + MongoDB
 - **AI**: OpenAI GPT-4o via Emergent Universal Key
-- **Data**: Sample data (simulated stock prices for demo)
+- **Data Sources**: 
+  - Yahoo Finance (yfinance) for quotes and fundamentals
+  - Finnhub for news
+  - Simulated data for Insider Trading and COT (production would use SEC EDGAR / CFTC)
 
 ### API Endpoints
 - `/api/health` - Health check
@@ -36,6 +60,12 @@ A comprehensive trading platform for tracking real-time stock quotes, scanning f
 - `/api/portfolio` - Portfolio CRUD operations
 - `/api/alerts` - Alert management
 - `/api/newsletter/generate` - AI newsletter generation
+- **NEW** `/api/fundamentals/{symbol}` - Fundamental analysis
+- **NEW** `/api/historical/{symbol}` - Historical price data
+- **NEW** `/api/insider/{symbol}` - Insider trading data
+- **NEW** `/api/insider/unusual` - Unusual insider activity
+- **NEW** `/api/cot/{market}` - COT data by market
+- **NEW** `/api/cot/summary` - COT market summary
 
 ## Prioritized Backlog
 
@@ -45,13 +75,14 @@ A comprehensive trading platform for tracking real-time stock quotes, scanning f
 - [ ] User authentication system
 
 ### P1 - High Priority
+- [ ] Real SEC EDGAR integration for insider trading
+- [ ] Real CFTC data integration for COT
 - [ ] Technical indicator calculations (VWAP, EMA, RSI, etc.)
 - [ ] Price alerts with push notifications
 - [ ] Historical performance tracking
-- [ ] Strategy backtesting
 
 ### P2 - Medium Priority
-- [ ] Advanced charting with TradingView
+- [ ] Strategy backtesting
 - [ ] Custom strategy builder
 - [ ] Multi-account support
 - [ ] Export reports to PDF
@@ -63,6 +94,7 @@ A comprehensive trading platform for tracking real-time stock quotes, scanning f
 - [ ] Options chain analysis
 
 ## Notes
-- Currently using simulated stock data for demo purposes
-- AI features use Emergent Universal Key for OpenAI access
-- External preview URL may need manual refresh to wake up
+- TradingView widget integrated for professional charting
+- Insider Trading and COT data use simulated data (marked in UI)
+- External preview URL routing through Kubernetes ingress
+- All AI features use Emergent Universal Key
