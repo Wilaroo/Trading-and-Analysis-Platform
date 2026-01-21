@@ -285,9 +285,9 @@ class COTData(BaseModel):
 # ===================== TWELVE DATA API FOR REAL-TIME QUOTES =====================
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "demo")
 
-# Simple in-memory cache for quotes (expires after 60 seconds)
+# Simple in-memory cache for quotes (expires after 120 seconds to avoid rate limits)
 _quote_cache = {}
-_cache_ttl = 60  # seconds
+_cache_ttl = 120  # seconds - increased to reduce API calls
 
 async def fetch_twelvedata_quote(symbol: str) -> Optional[Dict]:
     """Fetch real-time quote from Twelve Data API with caching"""
