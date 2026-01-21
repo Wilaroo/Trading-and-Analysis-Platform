@@ -1,17 +1,19 @@
 """
 TradeCommand - Trading and Analysis Platform Backend
 Enhanced with Yahoo Finance, TradingView, Insider Trading, COT Data
+Real-Time WebSocket Streaming
 """
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Set
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 import os
 import httpx
 import asyncio
 import random
+import json
 from pymongo import MongoClient
 
 load_dotenv()
