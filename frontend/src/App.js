@@ -1701,6 +1701,42 @@ function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [dashboardData, setDashboardData] = useState({ stats: {}, overview: {}, alerts: [], watchlist: [] });
   const [loading, setLoading] = useState(true);
+  const [streamingQuotes, setStreamingQuotes] = useState({});
+
+  // WebSocket handler for real-time updates
+  const handleWebSocketMessage = useCallback((message) => {
+    if (message.type === 'quotes' || message.type === 'initial') {
+      const quotesMap = {};
+      message.data.forEach(quote => {
+        quotesMap[quote.symbol] = quote;
+      });
+      setStreamingQuotes(prev => ({ ...prev, ...quotesMap }));
+      
+      // Update indices in dashboard data
+      setDashboardData(prev => {
+        const updatedIndices = prev.overview?.indices?.map(idx => {
+          const updated = quotesMap[idx.symbol];
+          return updated ? { ...idx, ...updated } : idx;
+        }) || [];
+        
+        const updatedMovers = prev.overview?.top_movers?.map(mover => {
+          const updated = quotesMap[mover.symbol];
+          return updated ? { ...mover, ...updated } : mover;
+        }) || [];
+        
+        return {
+          ...prev,
+          overview: {
+            ...prev.overview,
+            indices: updatedIndices,
+            top_movers: updatedMovers
+          }
+        };
+      });
+    }
+  }, []);
+
+  const { isConnected, lastUpdate } = useWebSocket(handleWebSocketMessage);
 
   const loadDashboardData = useCallback(async () => {
     setLoading(true);
@@ -1725,7 +1761,7 @@ function App() {
 
   const renderPage = () => {
     switch (activeTab) {
-      case 'dashboard': return <DashboardPage data={dashboardData} loading={loading} onRefresh={loadDashboardData} />;
+      case 'dashboard': return <DashboardPage data={dashboardData} loading={loading} onRefresh={loadDashboardData} streamingQuotes={streamingQuotes} />;
       case 'chart': return <ChartsPage />;
       case 'scanner': return <ScannerPage />;
       case 'strategies': return <StrategiesPage />;
@@ -1736,7 +1772,7 @@ function App() {
       case 'cot': return <COTDataPage />;
       case 'alerts': return <AlertsPage />;
       case 'newsletter': return <NewsletterPage />;
-      default: return <DashboardPage data={dashboardData} loading={loading} onRefresh={loadDashboardData} />;
+      default: return <DashboardPage data={dashboardData} loading={loading} onRefresh={loadDashboardData} streamingQuotes={streamingQuotes} />;
     }
   };
 
@@ -1744,7 +1780,7 @@ function App() {
     <div className="min-h-screen bg-background bg-gradient-radial">
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
       <main className="ml-16 lg:ml-64 min-h-screen">
-        <TickerTape indices={dashboardData.overview?.indices} />
+        <TickerTape indices={dashboardData.overview?.indices} isConnected={isConnected} lastUpdate={lastUpdate} />
         <div className="p-6">
           <AnimatePresence mode="wait">
             <motion.div key={activeTab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
