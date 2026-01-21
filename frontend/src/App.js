@@ -52,10 +52,98 @@ import './App.css';
 // Use relative URL for API calls - proxy handles routing
 const API_URL = '';
 
+// WebSocket URL - detect protocol and construct WS URL
+const getWebSocketUrl = () => {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.host;
+  // For development with proxy, connect to backend directly
+  if (host.includes('localhost:3000')) {
+    return 'ws://localhost:8001/ws/quotes';
+  }
+  return `${protocol}//${host}/ws/quotes`;
+};
+
 const api = axios.create({
   baseURL: API_URL,
   timeout: 30000
 });
+
+// ===================== WEBSOCKET HOOK =====================
+const useWebSocket = (onMessage) => {
+  const [isConnected, setIsConnected] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const wsRef = useRef(null);
+  const reconnectTimeoutRef = useRef(null);
+
+  const connect = useCallback(() => {
+    try {
+      const wsUrl = getWebSocketUrl();
+      console.log('Connecting to WebSocket:', wsUrl);
+      
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        setIsConnected(true);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          setLastUpdate(new Date());
+          if (onMessage) {
+            onMessage(data);
+          }
+        } catch (e) {
+          console.error('Error parsing WebSocket message:', e);
+        }
+      };
+
+      ws.onclose = () => {
+        console.log('WebSocket disconnected');
+        setIsConnected(false);
+        // Reconnect after 3 seconds
+        reconnectTimeoutRef.current = setTimeout(connect, 3000);
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        setIsConnected(false);
+      };
+    } catch (e) {
+      console.error('Failed to create WebSocket:', e);
+      setIsConnected(false);
+    }
+  }, [onMessage]);
+
+  useEffect(() => {
+    connect();
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+    };
+  }, [connect]);
+
+  const subscribe = useCallback((symbols) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ action: 'subscribe', symbols }));
+    }
+  }, []);
+
+  const unsubscribe = useCallback((symbols) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ action: 'unsubscribe', symbols }));
+    }
+  }, []);
+
+  return { isConnected, lastUpdate, subscribe, unsubscribe };
+};
 
 // ===================== TRADINGVIEW WIDGET =====================
 const TradingViewWidget = ({ symbol = 'AAPL', theme = 'dark' }) => {
