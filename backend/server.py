@@ -1146,8 +1146,8 @@ async def generate_newsletter():
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
-    newsletters_col.insert_one(newsletter)
-    newsletter.pop("_id", None)
+    newsletter_doc = newsletter.copy()
+    newsletters_col.insert_one(newsletter_doc)
     
     return newsletter
 
