@@ -578,10 +578,10 @@ const DashboardPage = ({ data, loading, onRefresh, streamingQuotes = {} }) => {
             {overview?.top_movers?.map((mover, idx) => (
               <div key={idx} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
                 <div className="flex items-center gap-3">
-                  <span className="font-bold">{mover.symbol}</span>
-                  <span className="font-mono-data text-zinc-400">${mover.price?.toFixed(2)}</span>
+                  <span className="font-bold">{getUpdatedMover(mover).symbol}</span>
+                  <span className="font-mono-data text-zinc-400 transition-all">${getUpdatedMover(mover).price?.toFixed(2)}</span>
                 </div>
-                <PriceDisplay value={mover.change_percent} />
+                <PriceDisplay value={getUpdatedMover(mover).change_percent} />
               </div>
             ))}
             {(!overview?.top_movers || overview.top_movers.length === 0) && (
