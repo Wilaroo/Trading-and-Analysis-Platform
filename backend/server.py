@@ -737,7 +737,7 @@ async def fetch_market_news() -> List[Dict]:
 # ===================== HELPER FUNCTIONS =====================
 async def fetch_multiple_quotes(symbols: List[str]) -> List[Dict]:
     """Fetch multiple quotes in parallel"""
-    tasks = [fetch_yahoo_quote(sym) for sym in symbols]
+    tasks = [fetch_quote(sym) for sym in symbols]
     results = await asyncio.gather(*tasks)
     return [r for r in results if r is not None]
 
