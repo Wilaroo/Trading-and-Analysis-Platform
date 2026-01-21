@@ -280,16 +280,70 @@ class COTData(BaseModel):
     change_commercial_net: int
     change_non_commercial_net: int
 
-# ===================== YAHOO FINANCE DATA FETCHING =====================
-async def fetch_yahoo_quote(symbol: str) -> Optional[Dict]:
-    """Fetch real-time quote from Yahoo Finance"""
+# ===================== TWELVE DATA API FOR REAL-TIME QUOTES =====================
+TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "demo")
+
+async def fetch_twelvedata_quote(symbol: str) -> Optional[Dict]:
+    """Fetch real-time quote from Twelve Data API"""
     symbol = symbol.upper()
     
     try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                "https://api.twelvedata.com/quote",
+                params={"symbol": symbol, "apikey": TWELVEDATA_API_KEY},
+                timeout=10
+            )
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                
+                # Check for errors
+                if "code" in data and data["code"] != 200:
+                    print(f"Twelve Data error for {symbol}: {data.get('message')}")
+                    return None
+                
+                price = float(data.get("close", 0))
+                prev_close = float(data.get("previous_close", 0))
+                change = float(data.get("change", 0))
+                change_pct = float(data.get("percent_change", 0))
+                
+                return {
+                    "symbol": symbol,
+                    "name": data.get("name", symbol),
+                    "price": round(price, 2),
+                    "change": round(change, 2),
+                    "change_percent": round(change_pct, 2),
+                    "volume": int(data.get("volume", 0)),
+                    "high": round(float(data.get("high", price)), 2),
+                    "low": round(float(data.get("low", price)), 2),
+                    "open": round(float(data.get("open", price)), 2),
+                    "prev_close": round(prev_close, 2),
+                    "avg_volume": int(data.get("average_volume", 0)),
+                    "fifty_two_week_high": float(data.get("fifty_two_week", {}).get("high", 0)) if data.get("fifty_two_week") else None,
+                    "fifty_two_week_low": float(data.get("fifty_two_week", {}).get("low", 0)) if data.get("fifty_two_week") else None,
+                    "exchange": data.get("exchange"),
+                    "is_market_open": data.get("is_market_open", False),
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+    except Exception as e:
+        print(f"Twelve Data error for {symbol}: {e}")
+    
+    return None
+
+async def fetch_quote(symbol: str) -> Optional[Dict]:
+    """Fetch real-time quote - tries Twelve Data first, then fallback"""
+    symbol = symbol.upper()
+    
+    # Try Twelve Data first (real data)
+    quote = await fetch_twelvedata_quote(symbol)
+    if quote:
+        return quote
+    
+    # Fallback to Yahoo Finance
+    try:
         import yfinance as yf
         ticker = yf.Ticker(symbol)
-        
-        # Get real-time data
         hist = ticker.history(period="2d")
         if not hist.empty and len(hist) >= 1:
             current = hist.iloc[-1]
@@ -311,9 +365,9 @@ async def fetch_yahoo_quote(symbol: str) -> Optional[Dict]:
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
     except Exception as e:
-        print(f"Yahoo Finance error for {symbol}: {e}")
+        print(f"Yahoo Finance fallback error for {symbol}: {e}")
     
-    # Fallback to simulated data
+    # Final fallback to simulated data
     return generate_simulated_quote(symbol)
 
 def generate_simulated_quote(symbol: str) -> Dict:
