@@ -1328,18 +1328,38 @@ async def get_strategy(strategy_id: str):
 async def run_scanner(
     symbols: List[str],
     category: Optional[str] = None,
-    min_score: int = 50
+    min_score: int = 50,
+    include_fundamentals: bool = False
 ):
-    """Scan symbols against strategy criteria"""
+    """
+    Scan symbols against all 50 strategy criteria.
+    Uses detailed criteria matching for Intraday, Swing, and Investment strategies.
+    """
     quotes = await fetch_multiple_quotes([s.upper() for s in symbols])
     
     results = []
     for quote in quotes:
-        score_data = await score_stock_for_strategies(quote["symbol"], quote)
+        # Optionally fetch fundamentals for investment strategy scoring
+        fundamentals = None
+        if include_fundamentals or (category and category.lower() == "investment"):
+            try:
+                fundamentals = await fetch_fundamentals(quote["symbol"])
+            except:
+                fundamentals = None
+        
+        # Score against strategies with detailed criteria
+        score_data = await score_stock_for_strategies(
+            quote["symbol"], 
+            quote, 
+            fundamentals=fundamentals,
+            category_filter=category.lower() if category else None
+        )
+        
         if score_data["score"] >= min_score:
             results.append({
                 **score_data,
-                "quote": quote
+                "quote": quote,
+                "has_fundamentals": fundamentals is not None
             })
     
     results.sort(key=lambda x: x["score"], reverse=True)
@@ -1348,12 +1368,18 @@ async def run_scanner(
         "symbols": symbols,
         "category": category,
         "min_score": min_score,
-        "results": results[:20],
+        "results_count": len(results),
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     scans_col.insert_one(scan_doc)
     
-    return {"results": results[:20], "total_scanned": len(symbols)}
+    return {
+        "results": results[:20], 
+        "total_scanned": len(symbols),
+        "category_filter": category,
+        "min_score_filter": min_score,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
 
 @app.get("/api/scanner/presets")
 async def get_scanner_presets():
