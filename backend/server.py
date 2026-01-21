@@ -836,6 +836,12 @@ async def get_unusual_insider():
     }
 
 # ----- COT Data -----
+@app.get("/api/cot/summary")
+async def get_cot_summary_endpoint():
+    """Get COT summary for major markets"""
+    summary = await get_cot_summary()
+    return summary
+
 @app.get("/api/cot/{market}")
 async def get_cot(market: str):
     """Get COT data for a specific market"""
@@ -845,12 +851,6 @@ async def get_cot(market: str):
         "data": data,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
-
-@app.get("/api/cot/summary")
-async def get_cot_summary_endpoint():
-    """Get COT summary for major markets"""
-    summary = await get_cot_summary()
-    return summary
 
 # ----- News -----
 @app.get("/api/news")
