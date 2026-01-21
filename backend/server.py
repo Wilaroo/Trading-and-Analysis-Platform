@@ -1237,6 +1237,21 @@ async def get_historical(symbol: str, period: str = "1y"):
     return {"symbol": symbol.upper(), "data": data, "period": period}
 
 # ----- Insider Trading -----
+# NOTE: /api/insider/unusual must be defined BEFORE /api/insider/{symbol} to avoid route conflict
+@app.get("/api/insider/unusual")
+async def get_unusual_insider():
+    """Get stocks with unusual insider activity"""
+    activity = await get_unusual_insider_activity()
+    
+    # Filter only unusual activity
+    unusual = [a for a in activity if a.get("is_unusual", False)]
+    
+    return {
+        "unusual_activity": unusual,
+        "all_activity": activity,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
 @app.get("/api/insider/{symbol}")
 async def get_insider_trades(symbol: str):
     """Get insider trading data for a symbol"""
@@ -1257,20 +1272,6 @@ async def get_insider_trades(symbol: str):
             "sell_count": len([t for t in trades if t["transaction_type"] == "Sell"]),
             "signal": "BULLISH" if total_buys > total_sells else "BEARISH"
         },
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
-
-@app.get("/api/insider/unusual")
-async def get_unusual_insider():
-    """Get stocks with unusual insider activity"""
-    activity = await get_unusual_insider_activity()
-    
-    # Filter only unusual activity
-    unusual = [a for a in activity if a.get("is_unusual", False)]
-    
-    return {
-        "unusual_activity": unusual,
-        "all_activity": activity,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
