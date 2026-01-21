@@ -2024,6 +2024,17 @@ function App() {
   }, []);
 
   const { isConnected, lastUpdate } = useWebSocket(handleWebSocketMessage);
+  
+  // Price Alerts Integration
+  const {
+    alerts: priceAlerts,
+    audioEnabled,
+    setAudioEnabled,
+    alertThreshold,
+    setAlertThreshold,
+    initializeAudio,
+    dismissAlert
+  } = usePriceAlerts(streamingQuotes, dashboardData.watchlist);
 
   const loadDashboardData = useCallback(async () => {
     setLoading(true);
@@ -2045,6 +2056,16 @@ function App() {
   }, []);
 
   useEffect(() => { loadDashboardData(); }, [loadDashboardData]);
+  
+  // Initialize audio on first user interaction
+  useEffect(() => {
+    const handleFirstInteraction = () => {
+      initializeAudio();
+      document.removeEventListener('click', handleFirstInteraction);
+    };
+    document.addEventListener('click', handleFirstInteraction);
+    return () => document.removeEventListener('click', handleFirstInteraction);
+  }, [initializeAudio]);
 
   const renderPage = () => {
     switch (activeTab) {
@@ -2064,8 +2085,38 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-background bg-gradient-radial">
+    <div className="min-h-screen bg-background bg-gradient-radial" onClick={initializeAudio}>
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+      
+      {/* Price Alert Notifications */}
+      <PriceAlertNotification 
+        alerts={priceAlerts} 
+        onDismiss={dismissAlert}
+        audioEnabled={audioEnabled}
+        setAudioEnabled={setAudioEnabled}
+      />
+      
+      {/* Audio Control Button */}
+      <button
+        onClick={() => setAudioEnabled(!audioEnabled)}
+        data-testid="toggle-audio-alerts"
+        className={`fixed bottom-4 right-4 z-50 p-3 rounded-full transition-all ${
+          audioEnabled 
+            ? 'bg-primary/20 text-primary border border-primary/30' 
+            : 'bg-zinc-800 text-zinc-500 border border-zinc-700'
+        }`}
+        title={audioEnabled ? 'Disable audio alerts' : 'Enable audio alerts'}
+      >
+        {audioEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+      </button>
+      
+      {/* Alert Threshold Indicator */}
+      {audioEnabled && (
+        <div className="fixed bottom-4 right-16 z-50 bg-paper border border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-400">
+          Alert threshold: ±{alertThreshold}%
+        </div>
+      )}
+      
       <main className="ml-16 lg:ml-64 min-h-screen">
         <TickerTape indices={dashboardData.overview?.indices} isConnected={isConnected} lastUpdate={lastUpdate} />
         <div className="p-6">
