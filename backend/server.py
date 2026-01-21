@@ -1086,7 +1086,8 @@ async def generate_alerts():
                         "score": score_data["score"],
                         "change_percent": quote["change_percent"]
                     }
-                    alerts_col.insert_one(alert)
+                    alert_doc = alert.copy()
+                    alerts_col.insert_one(alert_doc)
                     new_alerts.append(alert)
     
     return {"alerts_generated": len(new_alerts), "alerts": new_alerts}
