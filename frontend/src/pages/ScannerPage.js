@@ -67,6 +67,404 @@ const ContextBadge = ({ context, size = 'sm' }) => {
   );
 };
 
+// Quick Trade Modal Component
+const QuickTradeModal = ({ isOpen, onClose, scanResult, onSuccess }) => {
+  const [templates, setTemplates] = useState([]);
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [trade, setTrade] = useState({
+    symbol: '',
+    strategy_id: '',
+    strategy_name: '',
+    entry_price: '',
+    shares: '100',
+    direction: 'long',
+    market_context: '',
+    stop_loss: '',
+    take_profit: '',
+    notes: ''
+  });
+
+  // Load templates on mount
+  useEffect(() => {
+    const loadTemplates = async () => {
+      try {
+        const res = await api.get('/api/trades/templates/list');
+        setTemplates(res.data.templates || []);
+      } catch (err) {
+        console.error('Failed to load templates:', err);
+      }
+    };
+    loadTemplates();
+  }, []);
+
+  // Initialize trade from scan result
+  useEffect(() => {
+    if (scanResult && isOpen) {
+      const context = scanResult.context?.market_context || '';
+      const bestStrategy = scanResult.strategy_details?.[0];
+      
+      // Find matching template for the strategy
+      const matchingTemplate = templates.find(t => 
+        t.strategy_id === bestStrategy?.id || 
+        (t.market_context === context && t.template_type === 'strategy')
+      );
+      
+      setTrade({
+        symbol: scanResult.symbol || '',
+        strategy_id: bestStrategy?.id || '',
+        strategy_name: bestStrategy?.name || '',
+        entry_price: scanResult.quote?.price?.toFixed(2) || '',
+        shares: matchingTemplate?.default_shares?.toString() || '100',
+        direction: context === 'MEAN_REVERSION' ? 'short' : 'long',
+        market_context: context,
+        stop_loss: '',
+        take_profit: '',
+        notes: `Scanner setup: Score ${scanResult.score}, RVOL ${scanResult.rvol?.toFixed(1)}x`
+      });
+      
+      if (matchingTemplate) {
+        setSelectedTemplate(matchingTemplate);
+      }
+    }
+  }, [scanResult, isOpen, templates]);
+
+  // Calculate SL/TP when template or entry price changes
+  useEffect(() => {
+    if (selectedTemplate && trade.entry_price) {
+      const entry = parseFloat(trade.entry_price);
+      const riskPct = (selectedTemplate.risk_percent || 1) / 100;
+      const rewardRatio = selectedTemplate.reward_ratio || 2;
+      
+      if (trade.direction === 'long') {
+        setTrade(prev => ({
+          ...prev,
+          stop_loss: (entry * (1 - riskPct)).toFixed(2),
+          take_profit: (entry * (1 + riskPct * rewardRatio)).toFixed(2)
+        }));
+      } else {
+        setTrade(prev => ({
+          ...prev,
+          stop_loss: (entry * (1 + riskPct)).toFixed(2),
+          take_profit: (entry * (1 - riskPct * rewardRatio)).toFixed(2)
+        }));
+      }
+    }
+  }, [selectedTemplate, trade.entry_price, trade.direction]);
+
+  const handleTemplateSelect = (template) => {
+    setSelectedTemplate(template);
+    setShowTemplates(false);
+    if (template) {
+      setTrade(prev => ({
+        ...prev,
+        strategy_id: template.strategy_id || prev.strategy_id,
+        strategy_name: template.strategy_name || prev.strategy_name,
+        market_context: template.market_context || prev.market_context,
+        direction: template.direction || prev.direction,
+        shares: template.default_shares?.toString() || prev.shares,
+        notes: template.notes ? `${template.notes}\n${prev.notes}` : prev.notes
+      }));
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await api.post('/api/trades', {
+        ...trade,
+        entry_price: parseFloat(trade.entry_price),
+        shares: parseFloat(trade.shares),
+        stop_loss: trade.stop_loss ? parseFloat(trade.stop_loss) : null,
+        take_profit: trade.take_profit ? parseFloat(trade.take_profit) : null
+      });
+      onSuccess?.();
+      onClose();
+    } catch (err) {
+      console.error('Failed to create trade:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  const strategyTemplates = templates.filter(t => t.template_type === 'strategy');
+  const basicTemplates = templates.filter(t => t.template_type === 'basic');
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95, y: 20 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.95, y: 20 }}
+        className="bg-paper border border-white/10 rounded-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
+              <Zap className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold">Quick Trade</h2>
+              <p className="text-sm text-zinc-500">Log trade from scanner setup</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-zinc-500 hover:text-white" data-testid="close-quick-trade">
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        {/* Scanner Info Banner */}
+        {scanResult && (
+          <div className="mb-4 p-3 rounded-lg bg-primary/10 border border-primary/20">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-xl font-bold text-primary">{scanResult.symbol}</span>
+                <span className="font-mono text-lg">${scanResult.quote?.price?.toFixed(2)}</span>
+                {scanResult.context && (
+                  <ContextBadge context={scanResult.context.market_context} />
+                )}
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-zinc-500">Scanner Score</p>
+                <p className="text-lg font-bold text-primary">{scanResult.score}</p>
+              </div>
+            </div>
+            {scanResult.strategy_details?.[0] && (
+              <p className="text-xs text-zinc-400 mt-2">
+                Top strategy: <span className="text-primary">{scanResult.strategy_details[0].id}</span> - {scanResult.strategy_details[0].name}
+              </p>
+            )}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Template Selector */}
+          <div className="relative">
+            <label className="text-xs text-zinc-500 uppercase block mb-1">
+              <BookOpen className="w-3 h-3 inline mr-1" />
+              Trade Template
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowTemplates(!showTemplates)}
+              className="w-full bg-subtle border border-white/10 rounded-lg px-3 py-2 text-left flex items-center justify-between"
+            >
+              <span className={selectedTemplate ? 'text-white' : 'text-zinc-500'}>
+                {selectedTemplate?.name || 'Select Template (Optional)'}
+              </span>
+              <ChevronDown className={`w-4 h-4 transition-transform ${showTemplates ? 'rotate-180' : ''}`} />
+            </button>
+            
+            {showTemplates && (
+              <div className="absolute z-10 w-full mt-1 bg-paper border border-white/10 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                <button
+                  type="button"
+                  onClick={() => handleTemplateSelect(null)}
+                  className="w-full px-3 py-2 text-left text-zinc-400 hover:bg-white/5 text-sm"
+                >
+                  No template
+                </button>
+                
+                {strategyTemplates.length > 0 && (
+                  <>
+                    <div className="px-3 py-1 text-xs text-zinc-500 uppercase bg-white/5">Strategy Templates</div>
+                    {strategyTemplates.map((t, idx) => (
+                      <button
+                        key={`strat-${idx}`}
+                        type="button"
+                        onClick={() => handleTemplateSelect(t)}
+                        className={`w-full px-3 py-2 text-left hover:bg-white/5 text-sm ${
+                          t.market_context === trade.market_context ? 'bg-primary/10' : ''
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span>{t.name}</span>
+                          <ContextBadge context={t.market_context} />
+                        </div>
+                      </button>
+                    ))}
+                  </>
+                )}
+                
+                {basicTemplates.length > 0 && (
+                  <>
+                    <div className="px-3 py-1 text-xs text-zinc-500 uppercase bg-white/5">Basic</div>
+                    {basicTemplates.map((t, idx) => (
+                      <button
+                        key={`basic-${idx}`}
+                        type="button"
+                        onClick={() => handleTemplateSelect(t)}
+                        className="w-full px-3 py-2 text-left hover:bg-white/5 text-sm"
+                      >
+                        {t.name}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
+            
+            {selectedTemplate && (
+              <p className="text-xs text-green-400 mt-1">
+                Risk: {selectedTemplate.risk_percent}% | R:R: {selectedTemplate.reward_ratio}:1
+              </p>
+            )}
+          </div>
+
+          {/* Trade Details */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-zinc-500 uppercase block mb-1">Strategy</label>
+              <input
+                type="text"
+                value={trade.strategy_id}
+                onChange={(e) => setTrade({...trade, strategy_id: e.target.value.toUpperCase()})}
+                className="w-full bg-subtle border border-white/10 rounded-lg px-3 py-2 text-sm"
+                placeholder="INT-01"
+                required
+              />
+            </div>
+            <div>
+              <label className="text-xs text-zinc-500 uppercase block mb-1">Direction</label>
+              <select
+                value={trade.direction}
+                onChange={(e) => setTrade({...trade, direction: e.target.value})}
+                className="w-full bg-subtle border border-white/10 rounded-lg px-3 py-2 text-sm"
+              >
+                <option value="long">LONG</option>
+                <option value="short">SHORT</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-zinc-500 uppercase block mb-1">Entry Price</label>
+              <input
+                type="number"
+                step="0.01"
+                value={trade.entry_price}
+                onChange={(e) => setTrade({...trade, entry_price: e.target.value})}
+                className="w-full bg-subtle border border-white/10 rounded-lg px-3 py-2 text-sm"
+                required
+              />
+            </div>
+            <div>
+              <label className="text-xs text-zinc-500 uppercase block mb-1">Shares</label>
+              <input
+                type="number"
+                value={trade.shares}
+                onChange={(e) => setTrade({...trade, shares: e.target.value})}
+                className="w-full bg-subtle border border-white/10 rounded-lg px-3 py-2 text-sm"
+                required
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-zinc-500 uppercase block mb-1">Stop Loss</label>
+              <input
+                type="number"
+                step="0.01"
+                value={trade.stop_loss}
+                onChange={(e) => setTrade({...trade, stop_loss: e.target.value})}
+                className="w-full bg-subtle border border-white/10 rounded-lg px-3 py-2 text-sm"
+                placeholder="Auto-calculated"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-zinc-500 uppercase block mb-1">Take Profit</label>
+              <input
+                type="number"
+                step="0.01"
+                value={trade.take_profit}
+                onChange={(e) => setTrade({...trade, take_profit: e.target.value})}
+                className="w-full bg-subtle border border-white/10 rounded-lg px-3 py-2 text-sm"
+                placeholder="Auto-calculated"
+              />
+            </div>
+          </div>
+
+          {/* Risk Preview */}
+          {trade.entry_price && trade.stop_loss && trade.take_profit && (
+            <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+              <div className="grid grid-cols-3 gap-3 text-center text-sm">
+                <div>
+                  <p className="text-xs text-zinc-500">Risk/Share</p>
+                  <p className={`font-mono ${trade.direction === 'long' ? 'text-red-400' : 'text-red-400'}`}>
+                    -${Math.abs(parseFloat(trade.entry_price) - parseFloat(trade.stop_loss)).toFixed(2)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-zinc-500">Total Risk</p>
+                  <p className="font-mono text-red-400">
+                    -${(Math.abs(parseFloat(trade.entry_price) - parseFloat(trade.stop_loss)) * parseFloat(trade.shares || 0)).toFixed(2)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-zinc-500">Potential Profit</p>
+                  <p className="font-mono text-green-400">
+                    +${(Math.abs(parseFloat(trade.take_profit) - parseFloat(trade.entry_price)) * parseFloat(trade.shares || 0)).toFixed(2)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="text-xs text-zinc-500 uppercase block mb-1">Notes</label>
+            <textarea
+              value={trade.notes}
+              onChange={(e) => setTrade({...trade, notes: e.target.value})}
+              rows={2}
+              className="w-full bg-subtle border border-white/10 rounded-lg px-3 py-2 text-sm resize-none"
+              placeholder="Trade setup notes..."
+            />
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 btn-secondary"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 btn-primary flex items-center justify-center gap-2"
+              data-testid="submit-quick-trade"
+            >
+              {loading ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <>
+                  <DollarSign className="w-4 h-4" />
+                  Log Trade
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </motion.div>
+    </motion.div>
+  );
+};
+
 // ===================== SCANNER PAGE =====================
 const ScannerPage = () => {
   const [symbols, setSymbols] = useState('AAPL, MSFT, GOOGL, NVDA, TSLA, AMD, BA, META, AMZN, NFLX');
