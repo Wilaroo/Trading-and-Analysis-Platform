@@ -189,6 +189,7 @@ function App() {
       case 'cot': return <COTDataPage />;
       case 'alerts': return <AlertsPage />;
       case 'newsletter': return <NewsletterPage />;
+      case 'market-context': return <MarketContextPage />;
       default: return <ErrorBoundary><DashboardPage data={dashboardData} loading={loading} onRefresh={loadDashboardData} streamingQuotes={streamingQuotes} /></ErrorBoundary>;
     }
   };
