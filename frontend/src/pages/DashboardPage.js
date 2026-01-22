@@ -102,22 +102,24 @@ const TradingViewMiniChart = ({ symbol = 'AAPL' }) => {
 
   useEffect(() => {
     if (containerRef.current) {
-      containerRef.current.innerHTML = '';
-      
-      const script = document.createElement('script');
-      script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.js';
-      script.type = 'text/javascript';
-      script.async = true;
-      script.innerHTML = JSON.stringify({
-        symbol: symbol,
-        width: '100%',
-        height: '100%',
-        locale: 'en',
-        dateRange: '1M',
-        colorTheme: 'dark',
-        isTransparent: true,
-        autosize: true,
-        largeChartUrl: ''
+      try {
+        containerRef.current.innerHTML = '';
+        
+        const script = document.createElement('script');
+        script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.js';
+        script.type = 'text/javascript';
+        script.async = true;
+        script.onerror = () => console.log('TradingView widget failed to load');
+        script.innerHTML = JSON.stringify({
+          symbol: symbol,
+          width: '100%',
+          height: '100%',
+          locale: 'en',
+          dateRange: '1M',
+          colorTheme: 'dark',
+          isTransparent: true,
+          autosize: true,
+          largeChartUrl: ''
       });
 
       containerRef.current.appendChild(script);
