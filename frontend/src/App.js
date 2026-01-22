@@ -22,7 +22,8 @@ import {
   NewsletterPage,
   EarningsCalendarPage,
   MarketContextPage,
-  TradeJournalPage
+  TradeJournalPage,
+  TradingRulesPage
 } from './pages';
 
 import './App.css';
