@@ -282,6 +282,80 @@ const PerformanceMatrix = ({ matrix }) => {
   );
 };
 
+// Template Selection Component
+const TemplateSelector = ({ templates, onSelect, selectedTemplate }) => {
+  const [showTemplates, setShowTemplates] = useState(false);
+  
+  const basicTemplates = templates.filter(t => t.template_type === 'basic');
+  const strategyTemplates = templates.filter(t => t.template_type === 'strategy');
+  
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setShowTemplates(!showTemplates)}
+        className="w-full bg-subtle border border-white/10 rounded-lg px-3 py-2 text-left flex items-center justify-between"
+      >
+        <span className={selectedTemplate ? 'text-white' : 'text-zinc-500'}>
+          {selectedTemplate?.name || 'Select Template (Optional)'}
+        </span>
+        <ChevronDown className={`w-4 h-4 transition-transform ${showTemplates ? 'rotate-180' : ''}`} />
+      </button>
+      
+      {showTemplates && (
+        <div className="absolute z-10 w-full mt-1 bg-paper border border-white/10 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+          <button
+            type="button"
+            onClick={() => { onSelect(null); setShowTemplates(false); }}
+            className="w-full px-3 py-2 text-left text-zinc-400 hover:bg-white/5"
+          >
+            No template (manual entry)
+          </button>
+          
+          {basicTemplates.length > 0 && (
+            <>
+              <div className="px-3 py-1 text-xs text-zinc-500 uppercase bg-white/5">Basic Templates</div>
+              {basicTemplates.map((t, idx) => (
+                <button
+                  key={`basic-${idx}`}
+                  type="button"
+                  onClick={() => { onSelect(t); setShowTemplates(false); }}
+                  className="w-full px-3 py-2 text-left hover:bg-white/5 flex items-center justify-between"
+                >
+                  <span>{t.name}</span>
+                  <span className={`text-xs ${t.direction === 'long' ? 'text-green-400' : 'text-red-400'}`}>
+                    {t.direction?.toUpperCase()}
+                  </span>
+                </button>
+              ))}
+            </>
+          )}
+          
+          {strategyTemplates.length > 0 && (
+            <>
+              <div className="px-3 py-1 text-xs text-zinc-500 uppercase bg-white/5">Strategy Templates</div>
+              {strategyTemplates.map((t, idx) => (
+                <button
+                  key={`strat-${idx}`}
+                  type="button"
+                  onClick={() => { onSelect(t); setShowTemplates(false); }}
+                  className="w-full px-3 py-2 text-left hover:bg-white/5"
+                >
+                  <div className="flex items-center justify-between">
+                    <span>{t.name}</span>
+                    <ContextBadge context={t.market_context} />
+                  </div>
+                  <p className="text-xs text-zinc-500 mt-0.5">{t.strategy_id} • {t.direction}</p>
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ===================== TRADE JOURNAL PAGE =====================
 const TradeJournalPage = () => {
   const [trades, setTrades] = useState([]);
@@ -291,11 +365,14 @@ const TradeJournalPage = () => {
   const [showNewTrade, setShowNewTrade] = useState(false);
   const [showCloseTrade, setShowCloseTrade] = useState(null);
   const [filter, setFilter] = useState('all');
+  const [templates, setTemplates] = useState([]);
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
   
   // New trade form state
   const [newTrade, setNewTrade] = useState({
     symbol: '',
     strategy_id: '',
+    strategy_name: '',
     entry_price: '',
     shares: '',
     direction: 'long',
@@ -311,15 +388,17 @@ const TradeJournalPage = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [tradesRes, perfRes, matrixRes] = await Promise.all([
+      const [tradesRes, perfRes, matrixRes, templatesRes] = await Promise.all([
         api.get('/api/trades', { params: { status: filter !== 'all' ? filter : undefined } }),
         api.get('/api/trades/performance'),
-        api.get('/api/trades/performance/matrix')
+        api.get('/api/trades/performance/matrix'),
+        api.get('/api/trades/templates/list')
       ]);
       
       setTrades(tradesRes.data.trades || []);
       setPerformance(perfRes.data);
       setMatrix(matrixRes.data);
+      setTemplates(templatesRes.data.templates || []);
     } catch (err) {
       console.error('Failed to load trade data:', err);
     } finally {
@@ -328,6 +407,45 @@ const TradeJournalPage = () => {
   }, [filter]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Handle template selection
+  const handleTemplateSelect = (template) => {
+    setSelectedTemplate(template);
+    if (template) {
+      setNewTrade(prev => ({
+        ...prev,
+        strategy_id: template.strategy_id || prev.strategy_id,
+        strategy_name: template.strategy_name || prev.strategy_name,
+        market_context: template.market_context || prev.market_context,
+        direction: template.direction || prev.direction,
+        shares: template.default_shares?.toString() || prev.shares,
+        notes: template.notes || prev.notes
+      }));
+    }
+  };
+
+  // Calculate SL/TP from template when entry price changes
+  const handleEntryPriceChange = (value) => {
+    const entry = parseFloat(value);
+    setNewTrade(prev => {
+      const updated = { ...prev, entry_price: value };
+      
+      if (entry && selectedTemplate && !prev.stop_loss && !prev.take_profit) {
+        const riskPct = (selectedTemplate.risk_percent || 1) / 100;
+        const rewardRatio = selectedTemplate.reward_ratio || 2;
+        
+        if (prev.direction === 'long') {
+          updated.stop_loss = (entry * (1 - riskPct)).toFixed(2);
+          updated.take_profit = (entry * (1 + riskPct * rewardRatio)).toFixed(2);
+        } else {
+          updated.stop_loss = (entry * (1 + riskPct)).toFixed(2);
+          updated.take_profit = (entry * (1 - riskPct * rewardRatio)).toFixed(2);
+        }
+      }
+      
+      return updated;
+    });
+  };
 
   const handleCreateTrade = async (e) => {
     e.preventDefault();
@@ -340,8 +458,9 @@ const TradeJournalPage = () => {
         take_profit: newTrade.take_profit ? parseFloat(newTrade.take_profit) : null
       });
       setShowNewTrade(false);
+      setSelectedTemplate(null);
       setNewTrade({
-        symbol: '', strategy_id: '', entry_price: '', shares: '',
+        symbol: '', strategy_id: '', strategy_name: '', entry_price: '', shares: '',
         direction: 'long', market_context: '', stop_loss: '', take_profit: '', notes: ''
       });
       loadData();
