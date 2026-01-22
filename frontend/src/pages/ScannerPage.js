@@ -845,6 +845,16 @@ const ScannerPage = () => {
                           )}
                         </div>
                       </td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => setQuickTradeResult({ ...result, context })}
+                          className="btn-primary py-1.5 px-3 text-xs flex items-center gap-1 whitespace-nowrap"
+                          data-testid={`quick-trade-${result.symbol}`}
+                        >
+                          <Zap className="w-3 h-3" />
+                          Trade
+                        </button>
+                      </td>
                       <td>
                         <ChevronRight className="w-4 h-4 text-zinc-500" />
                       </td>
