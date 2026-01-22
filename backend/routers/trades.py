@@ -218,3 +218,108 @@ async def delete_trade(trade_id: str):
         raise HTTPException(400, "Cannot delete closed trades or trade not found")
     
     return {"success": True, "message": "Trade deleted"}
+
+
+# ==================== TRADE TEMPLATES ====================
+
+@router.get("/templates/defaults")
+async def get_default_templates():
+    """Get default system templates for quick trade logging"""
+    if not trade_journal_service:
+        raise HTTPException(500, "Trade journal service not initialized")
+    
+    defaults = await trade_journal_service.get_default_templates()
+    return {
+        "templates": defaults,
+        "count": len(defaults)
+    }
+
+
+@router.get("/templates/list")
+async def get_templates(template_type: Optional[str] = None):
+    """Get all user trade templates"""
+    if not trade_journal_service:
+        raise HTTPException(500, "Trade journal service not initialized")
+    
+    user_templates = await trade_journal_service.get_templates(template_type)
+    default_templates = await trade_journal_service.get_default_templates()
+    
+    # Combine user templates with defaults
+    all_templates = default_templates + user_templates
+    
+    return {
+        "templates": all_templates,
+        "user_count": len(user_templates),
+        "default_count": len(default_templates)
+    }
+
+
+@router.post("/templates/create")
+async def create_template(template: TemplateCreate):
+    """Create a new trade template"""
+    if not trade_journal_service:
+        raise HTTPException(500, "Trade journal service not initialized")
+    
+    result = await trade_journal_service.create_template(template.dict())
+    return result
+
+
+@router.put("/templates/{template_id}")
+async def update_template(template_id: str, updates: TemplateCreate):
+    """Update a trade template"""
+    if not trade_journal_service:
+        raise HTTPException(500, "Trade journal service not initialized")
+    
+    result = await trade_journal_service.update_template(template_id, updates.dict())
+    
+    if not result:
+        raise HTTPException(404, "Template not found")
+    
+    return result
+
+
+@router.delete("/templates/{template_id}")
+async def delete_template(template_id: str):
+    """Delete a trade template"""
+    if not trade_journal_service:
+        raise HTTPException(500, "Trade journal service not initialized")
+    
+    success = await trade_journal_service.delete_template(template_id)
+    
+    if not success:
+        raise HTTPException(404, "Template not found")
+    
+    return {"success": True, "message": "Template deleted"}
+
+
+@router.post("/from-template")
+async def create_trade_from_template(trade: TemplateTradeCreate):
+    """Create a trade using a template"""
+    if not trade_journal_service:
+        raise HTTPException(500, "Trade journal service not initialized")
+    
+    trade_data = {
+        "symbol": trade.symbol.upper(),
+        "entry_price": trade.entry_price,
+    }
+    
+    # Add optional fields if provided
+    if trade.shares is not None:
+        trade_data["shares"] = trade.shares
+    if trade.direction:
+        trade_data["direction"] = trade.direction
+    if trade.market_context:
+        trade_data["market_context"] = trade.market_context
+    if trade.stop_loss is not None:
+        trade_data["stop_loss"] = trade.stop_loss
+    if trade.take_profit is not None:
+        trade_data["take_profit"] = trade.take_profit
+    if trade.notes:
+        trade_data["notes"] = trade.notes
+    
+    result = await trade_journal_service.log_trade_from_template(
+        trade.template_id,
+        trade_data
+    )
+    
+    return result
