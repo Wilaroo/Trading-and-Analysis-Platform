@@ -616,8 +616,8 @@ const ScannerPage = () => {
               onChange={(e) => setCategory(e.target.value)}
               className="w-full bg-subtle border border-white/10 rounded-lg px-4 py-2 text-white focus:border-primary/50 focus:outline-none"
             >
-              <option value="">All Strategies (69)</option>
-              <option value="intraday">Intraday (39)</option>
+              <option value="">All Strategies (77)</option>
+              <option value="intraday">Intraday (47)</option>
               <option value="swing">Swing (15)</option>
               <option value="investment">Investment (15)</option>
             </select>
