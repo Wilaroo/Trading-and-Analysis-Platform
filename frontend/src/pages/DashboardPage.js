@@ -132,8 +132,6 @@ const MarketOverviewCard = ({ symbol = 'SPY' }) => {
     </div>
   );
 };
-  );
-};
 
 // ===================== DASHBOARD PAGE =====================
 const DashboardPage = ({ data, loading, onRefresh, streamingQuotes }) => {
