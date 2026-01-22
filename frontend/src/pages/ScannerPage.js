@@ -224,20 +224,42 @@ const ScannerPage = () => {
           </div>
         </div>
         
-        {/* Market Context Toggle */}
-        <div className="mt-4 pt-4 border-t border-white/5">
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input 
-              type="checkbox" 
-              checked={analyzeContext} 
-              onChange={(e) => setAnalyzeContext(e.target.checked)}
-              className="w-4 h-4 rounded bg-white/10 border-white/20 text-primary focus:ring-primary"
-            />
-            <span className="flex items-center gap-2 text-sm">
-              <BarChart3 className="w-4 h-4 text-primary" />
-              Auto-classify market context (Trending/Consolidation/Mean Reversion)
-            </span>
-          </label>
+        {/* Smart Analysis Options */}
+        <div className="mt-4 pt-4 border-t border-white/5 space-y-3">
+          <div className="flex flex-wrap gap-6">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={analyzeContext} 
+                onChange={(e) => { setAnalyzeContext(e.target.checked); if (!e.target.checked) setSmartFilter(false); }}
+                className="w-4 h-4 rounded bg-white/10 border-white/20 text-primary focus:ring-primary"
+              />
+              <span className="flex items-center gap-2 text-sm">
+                <BarChart3 className="w-4 h-4 text-primary" />
+                Market Context Analysis
+              </span>
+            </label>
+            
+            <label className={`flex items-center gap-3 cursor-pointer ${!analyzeContext ? 'opacity-50' : ''}`}>
+              <input 
+                type="checkbox" 
+                checked={smartFilter} 
+                onChange={(e) => setSmartFilter(e.target.checked)}
+                disabled={!analyzeContext}
+                className="w-4 h-4 rounded bg-white/10 border-white/20 text-primary focus:ring-primary"
+              />
+              <span className="flex items-center gap-2 text-sm">
+                <Zap className="w-4 h-4 text-yellow-400" />
+                Smart Recommendations (prioritize context-aligned strategies)
+              </span>
+            </label>
+          </div>
+          
+          {analyzeContext && smartFilter && (
+            <p className="text-xs text-zinc-500 bg-primary/5 px-3 py-2 rounded-lg border border-primary/20">
+              💡 Smart mode ranks results by strategy alignment with market context. Strategies that match the context are highlighted with ★
+            </p>
+          )}
         </div>
         
         <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-white/5">
@@ -254,15 +276,74 @@ const ScannerPage = () => {
         </button>
       </Card>
 
-      {results.length > 0 && (
+      {/* Context Filter Bar */}
+      {results.length > 0 && analyzeContext && Object.keys(marketContexts).length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm text-zinc-500">Filter by context:</span>
+          <button
+            onClick={() => setContextFilter('')}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+              contextFilter === '' ? 'bg-primary text-white' : 'bg-white/5 text-zinc-400 hover:bg-white/10'
+            }`}
+          >
+            All ({results.length})
+          </button>
+          {contextCounts.TRENDING > 0 && (
+            <button
+              onClick={() => setContextFilter('TRENDING')}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors flex items-center gap-1 ${
+                contextFilter === 'TRENDING' ? 'bg-green-500 text-white' : 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
+              }`}
+            >
+              <TrendingUp className="w-3 h-3" />
+              Trending ({contextCounts.TRENDING})
+            </button>
+          )}
+          {contextCounts.CONSOLIDATION > 0 && (
+            <button
+              onClick={() => setContextFilter('CONSOLIDATION')}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors flex items-center gap-1 ${
+                contextFilter === 'CONSOLIDATION' ? 'bg-yellow-500 text-white' : 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30'
+              }`}
+            >
+              <Activity className="w-3 h-3" />
+              Range ({contextCounts.CONSOLIDATION})
+            </button>
+          )}
+          {contextCounts.MEAN_REVERSION > 0 && (
+            <button
+              onClick={() => setContextFilter('MEAN_REVERSION')}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors flex items-center gap-1 ${
+                contextFilter === 'MEAN_REVERSION' ? 'bg-purple-500 text-white' : 'bg-purple-500/20 text-purple-400 hover:bg-purple-500/30'
+              }`}
+            >
+              <Target className="w-3 h-3" />
+              Reversion ({contextCounts.MEAN_REVERSION})
+            </button>
+          )}
+        </div>
+      )}
+
+      {filteredResults.length > 0 && (
         <Card hover={false}>
-          <h2 className="font-semibold mb-4">Scan Results ({results.length})</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-semibold">
+              {smartFilter && analyzeContext ? 'Smart Results' : 'Scan Results'} ({filteredResults.length})
+              {contextFilter && <span className="text-sm text-zinc-500 ml-2">— {contextFilter.replace('_', ' ')}</span>}
+            </h2>
+            {smartFilter && analyzeContext && (
+              <span className="text-xs text-primary bg-primary/10 px-2 py-1 rounded">
+                Sorted by context alignment
+              </span>
+            )}
+          </div>
           <div className="overflow-x-auto">
             <table className="data-table">
               <thead>
                 <tr>
                   <th>Symbol</th>
                   {analyzeContext && <th>Context</th>}
+                  {smartFilter && analyzeContext && <th>Alignment</th>}
                   <th>Score</th>
                   <th>Price</th>
                   <th>Change</th>
