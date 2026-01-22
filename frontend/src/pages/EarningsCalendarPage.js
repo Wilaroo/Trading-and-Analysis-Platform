@@ -376,7 +376,7 @@ const EarningsCalendarPage = () => {
           <p className="text-2xl font-bold">{calendar.filter(c => c.time === 'After Close').length}</p>
         </Card>
         <Card className="text-center">
-          <p className="text-xs text-zinc-500 uppercase">High IV (>50%)</p>
+          <p className="text-xs text-zinc-500 uppercase">High IV (&gt;50%)</p>
           <p className="text-2xl font-bold text-yellow-400">
             {calendar.filter(c => c.implied_volatility?.current_iv > 50).length}
           </p>
