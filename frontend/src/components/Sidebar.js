@@ -79,19 +79,24 @@ export const Sidebar = ({ activeTab, setActiveTab }) => {
             className={`w-full flex items-center gap-3 px-4 py-3 transition-all ${
               activeTab === item.id
                 ? 'bg-primary/10 text-primary border-r-2 border-primary'
-                : 'text-zinc-400 hover:text-white hover:bg-white/5'
+                : item.highlight 
+                  ? 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/10' 
+                  : 'text-zinc-400 hover:text-white hover:bg-white/5'
             }`}
           >
-            <item.icon className="w-5 h-5 flex-shrink-0" />
+            <item.icon className={`w-5 h-5 flex-shrink-0 ${item.highlight && activeTab !== item.id ? 'text-amber-400' : ''}`} />
             <AnimatePresence>
               {isExpanded && (
                 <motion.span
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="whitespace-nowrap"
+                  className="whitespace-nowrap flex items-center gap-2"
                 >
                   {item.label}
+                  {item.highlight && activeTab !== item.id && (
+                    <span className="px-1.5 py-0.5 text-[10px] bg-amber-500/20 text-amber-400 rounded font-medium">NEW</span>
+                  )}
                 </motion.span>
               )}
             </AnimatePresence>
