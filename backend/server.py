@@ -1444,6 +1444,41 @@ async def generate_morning_watchlist():
         "generated_at": datetime.now(timezone.utc).isoformat()
     }
 
+@app.post("/api/watchlist/add")
+async def add_to_watchlist(data: dict):
+    """Add a symbol to watchlist manually"""
+    symbol = data.get("symbol", "").upper()
+    if not symbol:
+        raise HTTPException(status_code=400, detail="Symbol is required")
+    
+    # Check if already exists
+    existing = watchlists_col.find_one({"symbol": symbol})
+    if existing:
+        return {"message": f"{symbol} already in watchlist", "symbol": symbol}
+    
+    # Get quote data
+    quote = await fetch_real_time_quote(symbol)
+    
+    doc = {
+        "symbol": symbol,
+        "score": 50,  # Default score for manual adds
+        "matched_strategies": [],
+        "added_at": datetime.now(timezone.utc).isoformat(),
+        "manual": True
+    }
+    
+    watchlists_col.insert_one(doc)
+    
+    return {"message": f"{symbol} added to watchlist", "symbol": symbol}
+
+@app.delete("/api/watchlist/{symbol}")
+async def remove_from_watchlist(symbol: str):
+    """Remove a symbol from watchlist"""
+    result = watchlists_col.delete_one({"symbol": symbol.upper()})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail=f"{symbol} not found in watchlist")
+    return {"message": f"{symbol} removed from watchlist", "symbol": symbol.upper()}
+
 # ----- Portfolio -----
 @app.get("/api/portfolio")
 async def get_portfolio():
