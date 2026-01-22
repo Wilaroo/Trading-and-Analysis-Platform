@@ -2,7 +2,7 @@
 TradeCommand - Trading and Analysis Platform Backend
 Enhanced with Yahoo Finance, TradingView, Insider Trading, COT Data
 Real-Time WebSocket Streaming
-Now with Finnhub integration (60 calls/min) and Notifications
+Now with Finnhub integration (60 calls/min), Notifications, and Market Context Analysis
 """
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,7 +23,9 @@ load_dotenv()
 # Import services and routers
 from services.stock_data import get_stock_service
 from services.notifications import get_notification_service
+from services.market_context import get_market_context_service
 from routers.notifications import router as notifications_router, init_notification_service
+from routers.market_context import router as market_context_router, init_market_context_service
 
 app = FastAPI(title="TradeCommand API")
 
@@ -42,12 +44,15 @@ db = mongo_client[os.environ.get("DB_NAME", "tradecommand")]
 # Initialize services
 stock_service = get_stock_service()
 notification_service = get_notification_service(db)
+market_context_service = get_market_context_service()
 
 # Initialize routers with services
 init_notification_service(notification_service)
+init_market_context_service(market_context_service)
 
 # Include routers
 app.include_router(notifications_router)
+app.include_router(market_context_router)
 
 # Collections
 strategies_col = db["strategies"]
