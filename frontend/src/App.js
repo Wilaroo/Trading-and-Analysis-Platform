@@ -146,8 +146,8 @@ function App() {
 
   const renderPage = () => {
     switch (activeTab) {
-      case 'dashboard': return <DashboardPage data={dashboardData} loading={loading} onRefresh={loadDashboardData} streamingQuotes={streamingQuotes} />;
-      case 'chart': return <ChartsPage />;
+      case 'dashboard': return <ErrorBoundary><DashboardPage data={dashboardData} loading={loading} onRefresh={loadDashboardData} streamingQuotes={streamingQuotes} /></ErrorBoundary>;
+      case 'chart': return <ErrorBoundary><ChartsPage /></ErrorBoundary>;
       case 'scanner': return <ScannerPage />;
       case 'strategies': return <StrategiesPage />;
       case 'watchlist': return <WatchlistPage />;
@@ -157,7 +157,7 @@ function App() {
       case 'cot': return <COTDataPage />;
       case 'alerts': return <AlertsPage />;
       case 'newsletter': return <NewsletterPage />;
-      default: return <DashboardPage data={dashboardData} loading={loading} onRefresh={loadDashboardData} streamingQuotes={streamingQuotes} />;
+      default: return <ErrorBoundary><DashboardPage data={dashboardData} loading={loading} onRefresh={loadDashboardData} streamingQuotes={streamingQuotes} /></ErrorBoundary>;
     }
   };
 
