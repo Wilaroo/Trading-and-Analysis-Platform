@@ -700,6 +700,7 @@ const TradeJournalPage = () => {
                 onClose={setShowCloseTrade}
                 onEdit={() => {}}
                 onDelete={handleDeleteTrade}
+                onUpdateNotes={handleUpdateNotes}
               />
             ))}
           </div>
