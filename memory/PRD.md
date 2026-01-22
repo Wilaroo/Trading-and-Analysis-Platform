@@ -27,6 +27,7 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 - Trade logging with entry/exit tracking
 - Strategy performance analytics by market context
 - Trade Templates for quick logging (basic + strategy-specific)
+- **Quick Trade from Scanner** - One-click trade logging from scanner results
 - P&L tracking and win rate analysis
 
 ### Portfolio & Watchlist
