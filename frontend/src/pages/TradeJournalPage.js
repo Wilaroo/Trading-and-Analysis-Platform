@@ -708,7 +708,7 @@ const TradeJournalPage = () => {
           <div className="text-center py-12">
             <BookOpen className="w-12 h-12 text-zinc-600 mx-auto mb-4" />
             <p className="text-zinc-500">No trades yet</p>
-            <p className="text-zinc-600 text-sm mt-1">Click "Log Trade" to record your first trade</p>
+            <p className="text-zinc-600 text-sm mt-1">Click &quot;Log Trade&quot; to record your first trade</p>
           </div>
         )}
       </Card>
