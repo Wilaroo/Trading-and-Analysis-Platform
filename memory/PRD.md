@@ -1,7 +1,7 @@
 # TradeCommand - Trading and Analysis Platform
 
 ## Overview
-A comprehensive trading platform with REAL-TIME market data, technical analysis, AI-powered insights, audio/visual price alerts, and now **Earnings Calendar** with IV analysis.
+A comprehensive trading platform with REAL-TIME market data, technical analysis, AI-powered insights, audio/visual price alerts, VST fundamental scoring, and Earnings Calendar with IV analysis.
 
 ## What's Been Implemented (Jan 22, 2026)
 
@@ -10,78 +10,71 @@ A comprehensive trading platform with REAL-TIME market data, technical analysis,
 2. **TradingView Charts** - Interactive professional charts with RSI, MACD, MA indicators
 3. **Strategy Scanner** - Scan stocks against 50 detailed trading strategies
 4. **Trading Strategies** - 50 strategies (20 Intraday, 15 Swing, 15 Investment)
-5. **Earnings Calendar** - NEW! Full earnings tracking with IV, whispers, historical data
-6. **Watchlist** - AI-ranked top 10 daily picks with MongoDB persistence
-7. **Portfolio Tracker** - Real-time P&L with live prices (MongoDB persisted)
-8. **Alert Center** - Strategy match notifications
-9. **Morning Newsletter** - AI-generated daily briefing
+5. **VST Scoring System** - VectorVest-style fundamental scoring (RV, RS, RT) on 0-10 scale
+6. **Earnings Calendar** - Full earnings tracking with IV, whispers, historical data
+7. **Watchlist** - AI-ranked top 10 daily picks with MongoDB persistence
+8. **Portfolio Tracker** - Real-time P&L with live prices (MongoDB persisted)
+9. **Alert Center** - Strategy match notifications with adjustable thresholds
+10. **Morning Newsletter** - AI-generated daily briefing
 
-### ✅ NEW: Earnings Calendar
-Complete earnings tracking system with:
+### ✅ VST Scoring System (NEW - Iteration 4)
+VectorVest-style fundamental analysis with scores on 0-10 scale:
 
-**Calendar Features:**
-- Date range navigation (weekly view)
-- List view and Calendar view modes
-- Filter by symbol
-- Quick stats (Total Reports, Before Open, After Close, High IV)
+**Relative Value (RV):**
+- Expected return calculation
+- Valuation score (P/E, P/B analysis)
+- PEG ratio scoring
+- ROE component
 
-**Earnings Data:**
-- Company name and ticker
-- Earnings date and time (BMO/AMC)
-- Fiscal quarter
-- EPS Estimate vs Whisper EPS
-- Analyst count and revisions
-- Sentiment (Bullish/Bearish/Neutral/Very Bullish/Very Bearish)
+**Relative Safety (RS):**
+- Leverage/liquidity metrics
+- Profitability assessment
+- Returns quality
+- Volatility (Beta-based)
 
-**Implied Volatility Analysis:**
-- Current IV
-- IV Rank and Percentile
-- Expected Move (% and $)
-- Straddle/Strangle cost
-- IV Term Structure chart (7-90 DTE)
-- IV Crush expected
-- Strategy suggestions (e.g., "IV elevated - consider selling premium")
+**Relative Timing (RT):**
+- Momentum scoring (1W, 1M, 3M returns)
+- Trend position (SMA20/SMA50)
+- RSI momentum
 
-**Earnings Whispers:**
-- Whisper EPS vs Consensus
-- Whisper sentiment
-- Beat probability
-- Confidence level
-- Historical beat rate
+**VST Composite:**
+- Weighted combination: RV 35%, RS 30%, RT 35%
+- Recommendations: STRONG BUY, BUY, HOLD, SELL
+- Color coding: Green (≥7), Blue (≥5.5), Yellow (≥4), Red (<4)
 
-**Historical Performance:**
-- Last 8 quarters of data
-- EPS estimates vs actuals
-- Revenue estimates vs actuals
-- EPS surprise %
-- Stock reaction (1-day, 5-day)
-- IV before/after earnings
-- IV crush %
-- Volume vs average
+### ✅ Custom Alert Threshold
+- Adjustable threshold slider (0.5% to 10%)
+- Audio toggle for alerts
+- Real-time indicator display
+- Persisted to localStorage
 
-**Statistics:**
-- Beat rate
-- Average surprise
-- Average stock reaction
-- Max positive/negative reaction
-- Average IV crush
+### ✅ TradingView Integration (Fixed)
+- Error overlay suppressed via CSS
+- Full chart functionality with technical indicators
+- RSI, MACD, Moving Averages displayed
+- Symbol switching with popular stocks presets
 
 ### ✅ Audio/Visual Price Alerts
 - Adjustable threshold (0.5% - 10%)
 - Audio tones for bullish/bearish moves
 - Visual toast notifications
-- Settings panel
+- Settings panel via gear icon
 
-### ✅ Frontend Refactoring Complete
+### ✅ Frontend Architecture
 App.js split into modular components:
-- `/pages/` - 12 page components (including EarningsCalendarPage)
-- `/components/` - Sidebar, TickerTape, PriceAlertNotification
+- `/pages/` - 12 page components (including FundamentalsPage with VST)
+- `/components/` - Sidebar, TickerTape, PriceAlertNotification, AlertSettingsPanel
 - `/hooks/` - useWebSocket, usePriceAlerts
 - `/utils/` - api, alertSounds
 
 ## API Endpoints
 
-### Earnings Calendar (NEW)
+### VST Scoring (NEW)
+- `GET /api/vst/{symbol}` - Full VST analysis with RV, RS, RT scores
+- `POST /api/vst/batch` - Batch VST scoring for multiple symbols
+- `GET /api/fundamentals/{symbol}` - Basic fundamental data
+
+### Earnings Calendar
 - `GET /api/earnings/calendar` - Get earnings calendar (date range filter)
 - `GET /api/earnings/{symbol}` - Detailed earnings data for symbol
 - `GET /api/earnings/iv/{symbol}` - IV analysis for earnings
@@ -94,26 +87,45 @@ App.js split into modular components:
 - `GET/POST/DELETE /api/portfolio`
 
 ## Data Sources
-- **Real-time quotes**: Twelve Data API
+- **Real-time quotes**: Twelve Data API (8 req/min limit, cached)
+- **VST Scoring**: Uses Twelve Data + calculated metrics
 - **Earnings data**: SIMULATED (realistic data generation)
 - **Fundamentals/Insider/COT**: MOCKED (simulated when APIs unavailable)
+
+## Known Limitations
+- WebSocket shows OFFLINE but REST polling works
+- Twelve Data API rate limit (8 req/min) - uses caching
+- Insider Trading and COT data are mocked
+- VST uses hardcoded benchmark values (BOND_YIELD=4.5%, MARKET_AVG_RETURN=10%)
+
+## Test Coverage
+- Backend: 22 pytest tests (100% pass rate)
+- Frontend: All features tested via Playwright
+- Test files: `/app/backend/tests/test_vst_and_features.py`
 
 ## Files Structure
 ```
 /app/frontend/src/
 ├── pages/
-│   ├── EarningsCalendarPage.js   # NEW - Earnings with IV, whispers, history
+│   ├── FundamentalsPage.js    # VST Scoring display
+│   ├── EarningsCalendarPage.js
 │   ├── DashboardPage.js
 │   ├── ChartsPage.js
 │   ├── ScannerPage.js
 │   └── ... (12 pages total)
 ├── components/
-│   ├── Sidebar.js (updated with Earnings nav)
+│   ├── Sidebar.js
+│   ├── PriceAlertNotification.js  # Includes AlertSettingsPanel
 │   └── ...
+├── hooks/
+│   └── usePriceAlerts.js  # Alert threshold management
 └── App.js
 ```
 
-## Next Steps (Backlog)
-- **P1**: User Authentication (Interactive Brokers integration)
-- **P2**: Refactor backend into routers/services
-- **P3**: Integrate real earnings APIs (e.g., Alpha Vantage, Financial Modeling Prep)
+## Priority Backlog
+- **P1**: Replace Twelve Data with Finnhub (60 calls/min free tier)
+- **P1**: Add Earnings Notifications for watchlist stocks
+- **P2**: Refactor backend server.py into routers/services
+- **P2**: User Authentication system
+- **P3**: Interactive Brokers integration
+- **P3**: Replace mock data (Insider Trading, COT) with real APIs
