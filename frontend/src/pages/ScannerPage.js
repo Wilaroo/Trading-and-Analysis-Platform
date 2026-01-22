@@ -478,6 +478,8 @@ const ScannerPage = () => {
   const [analyzeContext, setAnalyzeContext] = useState(true);
   const [smartFilter, setSmartFilter] = useState(true);
   const [contextFilter, setContextFilter] = useState(''); // Filter by specific context
+  const [quickTradeResult, setQuickTradeResult] = useState(null); // For Quick Trade modal
+  const [tradeSuccess, setTradeSuccess] = useState(false);
 
   useEffect(() => { loadPresets(); }, []);
 
