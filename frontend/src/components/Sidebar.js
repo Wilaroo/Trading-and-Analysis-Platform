@@ -14,7 +14,8 @@ import {
   LineChart,
   ChevronRight,
   Calendar,
-  BarChart3
+  BarChart3,
+  ClipboardList
 } from 'lucide-react';
 
 const navItems = [
@@ -23,6 +24,7 @@ const navItems = [
   { id: 'market-context', icon: BarChart3, label: 'Market Context' },
   { id: 'scanner', icon: Search, label: 'Scanner' },
   { id: 'strategies', icon: BookOpen, label: 'Strategies' },
+  { id: 'trade-journal', icon: ClipboardList, label: 'Trade Journal' },
   { id: 'earnings', icon: Calendar, label: 'Earnings' },
   { id: 'watchlist', icon: Eye, label: 'Watchlist' },
   { id: 'portfolio', icon: Briefcase, label: 'Portfolio' },
