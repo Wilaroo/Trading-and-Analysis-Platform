@@ -96,43 +96,42 @@ const AlertItem = ({ alert }) => (
   </motion.div>
 );
 
-// TradingView Mini Chart
-const TradingViewMiniChart = ({ symbol = 'AAPL' }) => {
-  const containerRef = useRef(null);
-
+// Simple Market Overview Card (replacing TradingView to avoid error overlay)
+const MarketOverviewCard = ({ symbol = 'SPY' }) => {
+  const [quote, setQuote] = useState(null);
+  
   useEffect(() => {
-    if (containerRef.current) {
+    const fetchQuote = async () => {
       try {
-        containerRef.current.innerHTML = '';
-        
-        const script = document.createElement('script');
-        script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.js';
-        script.type = 'text/javascript';
-        script.async = true;
-        script.onerror = () => console.log('TradingView widget failed to load');
-        script.innerHTML = JSON.stringify({
-          symbol: symbol,
-          width: '100%',
-          height: '100%',
-          locale: 'en',
-          dateRange: '1M',
-          colorTheme: 'dark',
-          isTransparent: true,
-          autosize: true,
-          largeChartUrl: ''
-        });
-
-        containerRef.current.appendChild(script);
+        const res = await api.get(`/api/quotes/${symbol}`);
+        setQuote(res.data);
       } catch (e) {
-        console.log('TradingView widget error:', e);
+        console.log('Failed to fetch quote:', e);
       }
-    }
+    };
+    fetchQuote();
+    const interval = setInterval(fetchQuote, 30000);
+    return () => clearInterval(interval);
   }, [symbol]);
-
+  
   return (
-    <div className="tradingview-widget-container h-full" ref={containerRef}>
-      <div className="tradingview-widget-container__widget h-full"></div>
+    <div className="h-full flex flex-col items-center justify-center">
+      <p className="text-zinc-500 text-sm">{symbol}</p>
+      <p className="text-3xl font-bold font-mono mt-2">
+        ${quote?.price?.toFixed(2) || '--'}
+      </p>
+      {quote?.change_percent !== undefined && (
+        <div className={`flex items-center gap-1 mt-2 ${quote.change_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+          {quote.change_percent >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+          <span className="text-xl font-mono">
+            {quote.change_percent >= 0 ? '+' : ''}{quote.change_percent?.toFixed(2)}%
+          </span>
+        </div>
+      )}
+      <p className="text-xs text-zinc-500 mt-2">Real-time quote</p>
     </div>
+  );
+};
   );
 };
 
