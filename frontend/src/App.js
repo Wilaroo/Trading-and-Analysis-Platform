@@ -20,7 +20,8 @@ import {
   COTDataPage,
   AlertsPage,
   NewsletterPage,
-  EarningsCalendarPage
+  EarningsCalendarPage,
+  MarketContextPage
 } from './pages';
 
 import './App.css';
