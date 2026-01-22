@@ -1526,17 +1526,24 @@ async def get_portfolio():
     return {"positions": [], "summary": {"total_value": 0, "total_cost": 0, "total_gain_loss": 0, "total_gain_loss_percent": 0}}
 
 @app.post("/api/portfolio/add")
-async def add_position(symbol: str, shares: float, avg_cost: float):
+async def add_position(data: dict):
     """Add position to portfolio"""
+    symbol = data.get("symbol", "").upper()
+    shares = data.get("shares")
+    avg_cost = data.get("avg_cost")
+    
+    if not symbol or shares is None or avg_cost is None:
+        raise HTTPException(status_code=400, detail="symbol, shares, and avg_cost are required")
+    
     position = {
-        "symbol": symbol.upper(),
-        "shares": shares,
-        "avg_cost": avg_cost,
+        "symbol": symbol,
+        "shares": float(shares),
+        "avg_cost": float(avg_cost),
         "added_at": datetime.now(timezone.utc).isoformat()
     }
     
     portfolios_col.update_one(
-        {"symbol": symbol.upper()},
+        {"symbol": symbol},
         {"$set": position},
         upsert=True
     )
