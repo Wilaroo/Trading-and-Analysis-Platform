@@ -609,7 +609,7 @@ class CatalystScoringService:
     
     async def save_catalyst(self, symbol: str, catalyst_data: Dict) -> Dict:
         """Save catalyst score to database"""
-        if not self.db:
+        if self.db is None:
             return catalyst_data
         
         doc = {
@@ -630,7 +630,7 @@ class CatalystScoringService:
         limit: int = 50
     ) -> List[Dict]:
         """Get catalysts with optional filters"""
-        if not self.db:
+        if self.db is None:
             return []
         
         query = {}
