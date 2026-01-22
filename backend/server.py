@@ -1456,9 +1456,6 @@ async def add_to_watchlist(data: dict):
     if existing:
         return {"message": f"{symbol} already in watchlist", "symbol": symbol}
     
-    # Get quote data
-    quote = await fetch_real_time_quote(symbol)
-    
     doc = {
         "symbol": symbol,
         "score": 50,  # Default score for manual adds
