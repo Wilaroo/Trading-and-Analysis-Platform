@@ -74,6 +74,8 @@ const ScannerPage = () => {
   const [selectedResult, setSelectedResult] = useState(null);
   const [marketContexts, setMarketContexts] = useState({});
   const [analyzeContext, setAnalyzeContext] = useState(true);
+  const [smartFilter, setSmartFilter] = useState(true);
+  const [contextFilter, setContextFilter] = useState(''); // Filter by specific context
 
   useEffect(() => { loadPresets(); }, []);
 
@@ -110,14 +112,66 @@ const ScannerPage = () => {
     finally { setLoading(false); }
   };
 
-  // Get recommended strategies based on market context
+  // Enhanced context-aware strategy mapping
   const getContextStrategies = (context) => {
     const strategies = {
-      TRENDING: ['INT-01', 'INT-02', 'INT-05', 'INT-14', 'INT-15'],
-      CONSOLIDATION: ['INT-09', 'INT-13', 'INT-17'],
-      MEAN_REVERSION: ['INT-07', 'INT-08', 'INT-11']
+      TRENDING: {
+        primary: ['INT-01', 'INT-02', 'INT-05', 'INT-10', 'INT-14', 'INT-15', 'INT-16', 'SWG-01', 'SWG-04', 'SWG-05'],
+        secondary: ['INT-03', 'INT-04', 'INT-06', 'INT-18', 'SWG-02', 'SWG-09'],
+        avoid: ['INT-13', 'SWG-03']
+      },
+      CONSOLIDATION: {
+        primary: ['INT-09', 'INT-12', 'INT-13', 'INT-17', 'INT-19', 'SWG-03', 'SWG-13'],
+        secondary: ['INT-02', 'INT-03', 'SWG-02', 'SWG-11'],
+        avoid: ['INT-01', 'INT-04', 'INT-14']
+      },
+      MEAN_REVERSION: {
+        primary: ['INT-07', 'INT-08', 'INT-11', 'INT-20', 'SWG-06', 'SWG-10', 'SWG-14'],
+        secondary: ['INT-06', 'INT-12', 'INT-19', 'SWG-03', 'SWG-11'],
+        avoid: ['INT-01', 'INT-04', 'INT-15']
+      }
     };
-    return strategies[context] || [];
+    return strategies[context] || { primary: [], secondary: [], avoid: [] };
+  };
+
+  // Filter and sort results based on smart filtering
+  const getFilteredResults = () => {
+    let filtered = [...results];
+    
+    // Filter by context if selected
+    if (contextFilter && analyzeContext) {
+      filtered = filtered.filter(r => 
+        marketContexts[r.symbol]?.market_context === contextFilter
+      );
+    }
+    
+    // Apply smart sorting if enabled
+    if (smartFilter && analyzeContext) {
+      filtered = filtered.map(r => {
+        const context = marketContexts[r.symbol];
+        const contextStrategies = context ? getContextStrategies(context.market_context) : { primary: [], secondary: [] };
+        const allRecommended = [...(contextStrategies.primary || []), ...(contextStrategies.secondary || [])];
+        
+        // Count context matches
+        const matches = r.matched_strategies?.filter(s => allRecommended.includes(s)).length || 0;
+        const alignment = r.matched_strategies?.length > 0 
+          ? (matches / r.matched_strategies.length) * 100 
+          : 0;
+        
+        return {
+          ...r,
+          contextAlignment: alignment,
+          contextMatches: matches,
+          smartScore: r.score + (alignment * 0.3) // Boost score by context alignment
+        };
+      });
+      
+      // Sort by smart score
+      filtered.sort((a, b) => b.smartScore - a.smartScore);
+    }
+    
+    return filtered;
+  };
   };
 
   return (
