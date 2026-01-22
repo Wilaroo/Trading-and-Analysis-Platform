@@ -19,7 +19,8 @@ import {
   InsiderTradingPage,
   COTDataPage,
   AlertsPage,
-  NewsletterPage
+  NewsletterPage,
+  EarningsCalendarPage
 } from './pages';
 
 import './App.css';
