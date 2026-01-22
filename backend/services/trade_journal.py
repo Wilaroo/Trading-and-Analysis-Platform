@@ -391,6 +391,259 @@ class TradeJournalService:
             "top_combinations": best_combos[:10],
             "worst_combinations": best_combos[-5:] if len(best_combos) > 5 else []
         }
+    
+    # ==================== TRADE TEMPLATES ====================
+    
+    async def create_template(self, template_data: Dict) -> Dict:
+        """
+        Create a trade template for quick logging
+        
+        Fields:
+        - name: Template name (required)
+        - template_type: 'basic' or 'strategy' (required)
+        - strategy_id: Strategy ID for strategy templates
+        - strategy_name: Strategy name for strategy templates
+        - market_context: Pre-filled market context
+        - direction: Default direction (long/short)
+        - default_shares: Default number of shares
+        - risk_percent: Default risk % for stop loss calculation
+        - reward_ratio: R:R ratio for take profit calculation
+        - notes: Default notes template
+        """
+        now = datetime.now(timezone.utc)
+        
+        template = {
+            "name": template_data["name"],
+            "template_type": template_data.get("template_type", "basic"),
+            "strategy_id": template_data.get("strategy_id", ""),
+            "strategy_name": template_data.get("strategy_name", ""),
+            "market_context": template_data.get("market_context", ""),
+            "direction": template_data.get("direction", "long"),
+            "default_shares": template_data.get("default_shares"),
+            "risk_percent": template_data.get("risk_percent", 1.0),
+            "reward_ratio": template_data.get("reward_ratio", 2.0),
+            "notes": template_data.get("notes", ""),
+            "is_default": template_data.get("is_default", False),
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat()
+        }
+        
+        result = self.templates_col.insert_one(template)
+        template["id"] = str(result.inserted_id)
+        
+        return {k: v for k, v in template.items() if k != "_id"}
+    
+    async def get_templates(self, template_type: str = None) -> List[Dict]:
+        """Get all trade templates"""
+        query = {}
+        if template_type:
+            query["template_type"] = template_type
+        
+        templates = list(self.templates_col.find(query, {"_id": 1}))
+        
+        result = []
+        for t in templates:
+            template = self.templates_col.find_one(
+                {"_id": t["_id"]},
+                {"_id": 0}
+            )
+            template["id"] = str(t["_id"])
+            result.append(template)
+        
+        return result
+    
+    async def get_template(self, template_id: str) -> Optional[Dict]:
+        """Get a specific template by ID"""
+        from bson import ObjectId
+        template = self.templates_col.find_one(
+            {"_id": ObjectId(template_id)},
+            {"_id": 0}
+        )
+        if template:
+            template["id"] = template_id
+        return template
+    
+    async def update_template(self, template_id: str, updates: Dict) -> Dict:
+        """Update a trade template"""
+        from bson import ObjectId
+        
+        allowed_fields = ["name", "strategy_id", "strategy_name", "market_context", 
+                         "direction", "default_shares", "risk_percent", "reward_ratio", 
+                         "notes", "is_default"]
+        
+        update_data = {k: v for k, v in updates.items() if k in allowed_fields}
+        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        
+        self.templates_col.update_one(
+            {"_id": ObjectId(template_id)},
+            {"$set": update_data}
+        )
+        
+        return await self.get_template(template_id)
+    
+    async def delete_template(self, template_id: str) -> bool:
+        """Delete a trade template"""
+        from bson import ObjectId
+        result = self.templates_col.delete_one({"_id": ObjectId(template_id)})
+        return result.deleted_count > 0
+    
+    async def get_default_templates(self) -> List[Dict]:
+        """Get the default system templates"""
+        defaults = [
+            {
+                "name": "Quick Long",
+                "template_type": "basic",
+                "strategy_id": "",
+                "strategy_name": "",
+                "market_context": "",
+                "direction": "long",
+                "default_shares": 100,
+                "risk_percent": 1.0,
+                "reward_ratio": 2.0,
+                "notes": "",
+                "is_default": True,
+                "is_system": True
+            },
+            {
+                "name": "Quick Short",
+                "template_type": "basic",
+                "strategy_id": "",
+                "strategy_name": "",
+                "market_context": "",
+                "direction": "short",
+                "default_shares": 100,
+                "risk_percent": 1.0,
+                "reward_ratio": 2.0,
+                "notes": "",
+                "is_default": True,
+                "is_system": True
+            },
+            {
+                "name": "Trend Momentum (INT-01)",
+                "template_type": "strategy",
+                "strategy_id": "INT-01",
+                "strategy_name": "Trend Momentum Continuation",
+                "market_context": "TRENDING",
+                "direction": "long",
+                "default_shares": 100,
+                "risk_percent": 1.0,
+                "reward_ratio": 2.5,
+                "notes": "Entry above VWAP, RVOL > 2",
+                "is_default": True,
+                "is_system": True
+            },
+            {
+                "name": "ORB Breakout (INT-03)",
+                "template_type": "strategy",
+                "strategy_id": "INT-03",
+                "strategy_name": "Opening Range Breakout",
+                "market_context": "TRENDING",
+                "direction": "long",
+                "default_shares": 100,
+                "risk_percent": 0.5,
+                "reward_ratio": 3.0,
+                "notes": "ORB 5-30min, break above ORH with volume",
+                "is_default": True,
+                "is_system": True
+            },
+            {
+                "name": "Mean Reversion (INT-07)",
+                "template_type": "strategy",
+                "strategy_id": "INT-07",
+                "strategy_name": "VWAP Reversion",
+                "market_context": "MEAN_REVERSION",
+                "direction": "short",
+                "default_shares": 100,
+                "risk_percent": 1.0,
+                "reward_ratio": 2.0,
+                "notes": "Fade parabolic move to VWAP target",
+                "is_default": True,
+                "is_system": True
+            },
+            {
+                "name": "Range Trade (INT-13)",
+                "template_type": "strategy",
+                "strategy_id": "INT-13",
+                "strategy_name": "Intraday Range Trading",
+                "market_context": "CONSOLIDATION",
+                "direction": "long",
+                "default_shares": 100,
+                "risk_percent": 0.75,
+                "reward_ratio": 1.5,
+                "notes": "Long support, short resistance in range",
+                "is_default": True,
+                "is_system": True
+            },
+            {
+                "name": "Swing Breakout (SWG-02)",
+                "template_type": "strategy",
+                "strategy_id": "SWG-02",
+                "strategy_name": "Multi-Week Base Breakout",
+                "market_context": "CONSOLIDATION",
+                "direction": "long",
+                "default_shares": 50,
+                "risk_percent": 2.0,
+                "reward_ratio": 3.0,
+                "notes": "Breakout from tight multi-week base",
+                "is_default": True,
+                "is_system": True
+            },
+            {
+                "name": "Earnings Gap (INT-04)",
+                "template_type": "strategy",
+                "strategy_id": "INT-04",
+                "strategy_name": "Gap-and-Go",
+                "market_context": "TRENDING",
+                "direction": "long",
+                "default_shares": 100,
+                "risk_percent": 1.5,
+                "reward_ratio": 2.0,
+                "notes": "Gap > 3%, RVOL > 3, above VWAP",
+                "is_default": True,
+                "is_system": True
+            }
+        ]
+        return defaults
+    
+    async def log_trade_from_template(self, template_id: str, trade_data: Dict) -> Dict:
+        """
+        Log a trade using a template
+        trade_data overrides template defaults
+        """
+        # Get template
+        template = await self.get_template(template_id) if template_id else None
+        
+        # Merge template with trade_data
+        merged_data = {
+            "strategy_id": template.get("strategy_id", "") if template else "",
+            "strategy_name": template.get("strategy_name", "") if template else "",
+            "market_context": template.get("market_context", "") if template else "",
+            "direction": template.get("direction", "long") if template else "long",
+            "shares": template.get("default_shares", 100) if template else 100,
+            "notes": template.get("notes", "") if template else ""
+        }
+        
+        # Override with provided trade_data
+        merged_data.update(trade_data)
+        
+        # Calculate stop loss and take profit if entry_price provided
+        if trade_data.get("entry_price") and template:
+            entry = float(trade_data["entry_price"])
+            risk_pct = template.get("risk_percent", 1.0) / 100
+            reward_ratio = template.get("reward_ratio", 2.0)
+            
+            if merged_data["direction"] == "long":
+                if not trade_data.get("stop_loss"):
+                    merged_data["stop_loss"] = round(entry * (1 - risk_pct), 2)
+                if not trade_data.get("take_profit"):
+                    merged_data["take_profit"] = round(entry * (1 + risk_pct * reward_ratio), 2)
+            else:  # short
+                if not trade_data.get("stop_loss"):
+                    merged_data["stop_loss"] = round(entry * (1 + risk_pct), 2)
+                if not trade_data.get("take_profit"):
+                    merged_data["take_profit"] = round(entry * (1 - risk_pct * reward_ratio), 2)
+        
+        return await self.log_trade(merged_data)
 
 
 # Singleton instance
