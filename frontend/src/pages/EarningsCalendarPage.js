@@ -558,6 +558,9 @@ const EarningsCalendarPage = () => {
                     </div>
                   </div>
 
+                  {/* Catalyst Scorer */}
+                  <QuickCatalystScorer symbol={selectedEarning.symbol} />
+
                   {/* Implied Volatility Section */}
                   <Card hover={false}>
                     <h3 className="font-semibold mb-4 flex items-center gap-2">
