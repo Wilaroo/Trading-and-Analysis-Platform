@@ -466,6 +466,38 @@ class TradingRulesEngine:
                     "Price action flat/choppy after turn",
                     "9-EMA flat for 15+ min after turn"
                 ],
+                "first_vwap_pullback": [
+                    "Buying too extended/parabolic",
+                    "Pullback goes below premarket high",
+                    "Choppy or slow opening auction",
+                    "Pullback breaks below VWAP"
+                ],
+                "first_move_up": [
+                    "Slow controlled buying (buying program)",
+                    "Initial buying breaks important resistance",
+                    "Buying pressure after entry",
+                    "VWAP acts as support (institutions buying)"
+                ],
+                "first_move_down": [
+                    "Slow controlled selling (selling program)",
+                    "Initial selling breaks important support",
+                    "Selling pressure after entry",
+                    "VWAP acts as resistance (institutions selling)"
+                ],
+                "bella_fade": [
+                    "Negative catalyst weighing on stock",
+                    "Stock consolidates near lows for long",
+                    "Stock breaks support",
+                    "Catalyst more than 8 (too strong)",
+                    "Breaking strong technical level"
+                ],
+                "back_through_open": [
+                    "Catalyst not at least 8+",
+                    "Market trending opposite direction",
+                    "Chop or pause after entry - should work right away",
+                    "Range-bound market",
+                    "Market fading moves"
+                ],
                 "breaking_news": [
                     "Overreacting without catalyst scoring",
                     "Ignoring market context",
