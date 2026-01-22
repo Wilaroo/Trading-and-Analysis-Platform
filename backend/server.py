@@ -32,6 +32,8 @@ from routers.market_context import router as market_context_router, init_market_
 from routers.trades import router as trades_router, init_trade_journal_service
 from routers.catalyst import router as catalyst_router, init_catalyst_service
 from routers.rules import router as rules_router, init_trading_rules
+from routers.ib import router as ib_router, init_ib_service
+from services.ib_service import get_ib_service
 
 app = FastAPI(title="TradeCommand API")
 
