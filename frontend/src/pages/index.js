@@ -9,3 +9,4 @@ export { default as InsiderTradingPage } from './InsiderTradingPage';
 export { default as COTDataPage } from './COTDataPage';
 export { default as AlertsPage } from './AlertsPage';
 export { default as NewsletterPage } from './NewsletterPage';
+export { default as EarningsCalendarPage } from './EarningsCalendarPage';
