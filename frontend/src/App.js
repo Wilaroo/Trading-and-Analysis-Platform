@@ -151,6 +151,7 @@ function App() {
       case 'chart': return <ErrorBoundary><ChartsPage /></ErrorBoundary>;
       case 'scanner': return <ScannerPage />;
       case 'strategies': return <StrategiesPage />;
+      case 'earnings': return <EarningsCalendarPage />;
       case 'watchlist': return <WatchlistPage />;
       case 'portfolio': return <PortfolioPage />;
       case 'fundamentals': return <FundamentalsPage />;
