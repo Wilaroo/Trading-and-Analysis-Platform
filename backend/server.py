@@ -1530,6 +1530,25 @@ async def get_fundamentals(symbol: str):
     data = await fetch_fundamentals(symbol.upper())
     return data
 
+@app.get("/api/vst/{symbol}")
+async def get_vst_scores(symbol: str):
+    """Get VST (Value, Safety, Timing) scores for a symbol"""
+    analysis = await get_full_vst_analysis(symbol.upper())
+    return analysis
+
+@app.post("/api/vst/batch")
+async def get_vst_batch(symbols: List[str]):
+    """Get VST scores for multiple symbols"""
+    results = []
+    for symbol in symbols[:20]:  # Limit to 20 symbols
+        try:
+            analysis = await get_full_vst_analysis(symbol.upper())
+            results.append(analysis)
+        except Exception as e:
+            print(f"VST error for {symbol}: {e}")
+            results.append({"symbol": symbol.upper(), "error": str(e)})
+    return {"results": results, "count": len(results)}
+
 @app.get("/api/historical/{symbol}")
 async def get_historical(symbol: str, period: str = "1y"):
     """Get historical price data"""
