@@ -330,8 +330,8 @@ class TestDashboard:
         data = response.json()
         
         assert "portfolio_value" in data
-        assert "total_strategies" in data
-        assert data["total_strategies"] == 50
+        assert "strategies_count" in data
+        assert data["strategies_count"] == 50
 
 
 if __name__ == "__main__":
