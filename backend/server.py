@@ -41,6 +41,7 @@ newsletters_col = db["newsletters"]
 scans_col = db["scans"]
 insider_col = db["insider_trades"]
 cot_col = db["cot_data"]
+earnings_col = db["earnings"]
 
 # ===================== TRADING STRATEGIES DATA =====================
 TRADING_STRATEGIES = {
