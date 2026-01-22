@@ -29,7 +29,7 @@ class CatalystScoringService:
     
     def __init__(self, db=None):
         self.db = db
-        if db:
+        if db is not None:
             self.catalysts_col = db["catalysts"]
             self.templates_col = db["catalyst_templates"]
     
