@@ -24,6 +24,41 @@ import {
 
 import './App.css';
 
+// Error Boundary to catch TradingView widget errors
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.log('Caught error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback || <div className="p-4 text-zinc-500">Widget loading error</div>;
+    }
+    return this.props.children;
+  }
+}
+
+// Suppress third-party script errors in development
+if (typeof window !== 'undefined') {
+  window.addEventListener('error', (event) => {
+    if (event.message === 'Script error.' || 
+        event.filename?.includes('tradingview') ||
+        event.filename?.includes('widget')) {
+      event.preventDefault();
+      return false;
+    }
+  });
+}
+
 // ===================== MAIN APP =====================
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
