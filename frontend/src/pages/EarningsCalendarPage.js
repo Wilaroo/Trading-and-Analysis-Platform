@@ -13,7 +13,9 @@ import {
   Target,
   Zap,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  Star,
+  Calculator
 } from 'lucide-react';
 import {
   AreaChart,
@@ -49,6 +51,189 @@ const PriceDisplay = ({ value, className = '' }) => {
       {isPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
       {isPositive ? '+' : ''}{value.toFixed(2)}%
     </span>
+  );
+};
+
+// Catalyst Score Badge Component
+const CatalystScoreBadge = ({ score, rating, bias, size = 'md' }) => {
+  const getBgColor = (rating) => {
+    if (rating === 'A+' || rating === 'A') return 'bg-green-500/30 border-green-500';
+    if (rating === 'B+' || rating === 'B') return 'bg-green-500/20 border-green-500/50';
+    if (rating === 'C') return 'bg-yellow-500/20 border-yellow-500/50';
+    if (rating === 'D') return 'bg-red-500/20 border-red-500/50';
+    return 'bg-red-500/30 border-red-500';
+  };
+  
+  const getTextColor = (rating) => {
+    if (rating === 'A+' || rating === 'A' || rating === 'B+' || rating === 'B') return 'text-green-400';
+    if (rating === 'C') return 'text-yellow-400';
+    return 'text-red-400';
+  };
+  
+  return (
+    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border ${getBgColor(rating)}`}>
+      <Star className={`${size === 'lg' ? 'w-5 h-5' : 'w-4 h-4'} ${getTextColor(rating)}`} />
+      <div className="text-center">
+        <p className={`${size === 'lg' ? 'text-xl' : 'text-lg'} font-bold ${getTextColor(rating)}`}>
+          {score >= 0 ? '+' : ''}{score}
+        </p>
+        <p className="text-xs text-zinc-400">{rating} • {bias}</p>
+      </div>
+    </div>
+  );
+};
+
+// Quick Catalyst Scorer Component
+const QuickCatalystScorer = ({ symbol, onScore }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [inputs, setInputs] = useState({
+    eps_beat_pct: 0,
+    revenue_beat_pct: 0,
+    guidance: 'inline',
+    price_reaction_pct: 0,
+    volume_multiple: 1.0
+  });
+
+  const handleScore = async () => {
+    setLoading(true);
+    try {
+      const res = await api.post('/api/catalyst/score/quick', {
+        symbol,
+        ...inputs
+      });
+      setResult(res.data);
+      if (onScore) onScore(res.data);
+    } catch (err) {
+      console.error('Scoring failed:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!isOpen) {
+    return (
+      <button
+        onClick={() => setIsOpen(true)}
+        className="btn-secondary flex items-center gap-2"
+        data-testid="open-catalyst-scorer"
+      >
+        <Calculator className="w-4 h-4" />
+        Score Catalyst
+      </button>
+    );
+  }
+
+  return (
+    <Card hover={false} className="mt-4">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-semibold flex items-center gap-2">
+          <Calculator className="w-5 h-5 text-primary" />
+          Catalyst Scorer - {symbol}
+        </h3>
+        <button onClick={() => setIsOpen(false)} className="text-zinc-500 hover:text-white">
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+        <div>
+          <label className="text-xs text-zinc-500 block mb-1">EPS Beat %</label>
+          <input
+            type="number"
+            step="0.1"
+            value={inputs.eps_beat_pct}
+            onChange={(e) => setInputs({...inputs, eps_beat_pct: parseFloat(e.target.value) || 0})}
+            className="w-full bg-subtle border border-white/10 rounded px-2 py-1.5 text-sm"
+            placeholder="5.2"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-zinc-500 block mb-1">Revenue Beat %</label>
+          <input
+            type="number"
+            step="0.1"
+            value={inputs.revenue_beat_pct}
+            onChange={(e) => setInputs({...inputs, revenue_beat_pct: parseFloat(e.target.value) || 0})}
+            className="w-full bg-subtle border border-white/10 rounded px-2 py-1.5 text-sm"
+            placeholder="2.1"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-zinc-500 block mb-1">Guidance</label>
+          <select
+            value={inputs.guidance}
+            onChange={(e) => setInputs({...inputs, guidance: e.target.value})}
+            className="w-full bg-subtle border border-white/10 rounded px-2 py-1.5 text-sm"
+          >
+            <option value="raised">Raised</option>
+            <option value="inline">In-line</option>
+            <option value="lowered">Lowered</option>
+            <option value="cut">Cut</option>
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-zinc-500 block mb-1">Price Move %</label>
+          <input
+            type="number"
+            step="0.1"
+            value={inputs.price_reaction_pct}
+            onChange={(e) => setInputs({...inputs, price_reaction_pct: parseFloat(e.target.value) || 0})}
+            className="w-full bg-subtle border border-white/10 rounded px-2 py-1.5 text-sm"
+            placeholder="4.5"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-zinc-500 block mb-1">Volume (x avg)</label>
+          <input
+            type="number"
+            step="0.1"
+            value={inputs.volume_multiple}
+            onChange={(e) => setInputs({...inputs, volume_multiple: parseFloat(e.target.value) || 1})}
+            className="w-full bg-subtle border border-white/10 rounded px-2 py-1.5 text-sm"
+            placeholder="2.3"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4">
+        <button
+          onClick={handleScore}
+          disabled={loading}
+          className="btn-primary flex items-center gap-2"
+          data-testid="calculate-catalyst-score"
+        >
+          {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+          Calculate Score
+        </button>
+
+        {result && (
+          <div className="flex items-center gap-4">
+            <CatalystScoreBadge 
+              score={result.raw_score} 
+              rating={result.rating} 
+              bias={result.bias}
+              size="lg"
+            />
+            <p className="text-sm text-zinc-400">{result.interpretation}</p>
+          </div>
+        )}
+      </div>
+
+      {result && (
+        <div className="mt-4 grid grid-cols-4 gap-2">
+          {Object.entries(result.components).map(([key, comp]) => (
+            <div key={key} className="bg-white/5 rounded p-2 text-center">
+              <p className="text-xs text-zinc-500 capitalize">{key.replace('_', ' ')}</p>
+              <p className={`font-bold ${comp.score >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {comp.score >= 0 ? '+' : ''}{comp.score}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 };
 
