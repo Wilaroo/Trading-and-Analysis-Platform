@@ -68,9 +68,10 @@ class TradeJournalService:
         }
         
         result = self.trades_col.insert_one(trade)
-        trade["_id"] = str(result.inserted_id)
+        trade["id"] = str(result.inserted_id)
         
-        return {k: v for k, v in trade.items() if k != "_id" or k == "_id"}
+        # Remove MongoDB _id from response
+        return {k: v for k, v in trade.items() if k != "_id"}
     
     async def close_trade(self, trade_id: str, exit_price: float, notes: str = "") -> Dict:
         """Close an open trade and calculate P&L"""
