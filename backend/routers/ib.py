@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 from services.ib_service import IBService
 
-router = APIRouter(prefix="/ib", tags=["Interactive Brokers"])
+router = APIRouter(prefix="/api/ib", tags=["Interactive Brokers"])
 
 # Service instance (will be injected)
 _ib_service: Optional[IBService] = None
