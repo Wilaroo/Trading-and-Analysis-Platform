@@ -1,105 +1,140 @@
 # TradeCommand - Trading and Analysis Platform
 
-## Overview
-Professional trading platform with real-time data, market context classification, smart strategy recommendations, and **Strategy Performance Tracking** to analyze which strategies work best in each market context.
+## Product Overview
+TradeCommand is a comprehensive trading and analysis platform designed for active traders. It provides real-time stock data, strategy scanning, portfolio tracking, trade journaling, and earnings analysis with AI-powered catalyst scoring.
 
-## What's Been Implemented (Jan 22, 2026)
+## Core Requirements
 
-### ✅ NEW: Strategy Performance Tracking (Trade Journal)
-Track trades and analyze performance by strategy and market context:
+### Real-time Market Data
+- Live stock quotes via Finnhub API
+- Market indices tracking (SPY, QQQ, DIA, IWM, VIX)
+- WebSocket for live price streaming
+- Audio/visual price alerts with adjustable thresholds
 
-**Features:**
-- **Log Trades**: Symbol, strategy, entry/exit prices, shares, direction, market context
-- **Performance Summary**: Total trades, win rate, P&L, avg P&L, best context
-- **Context Breakdown**: Win rate and P&L per market context (Trending/Consolidation/Mean Reversion)
-- **Strategy-Context Matrix**: Best and worst strategy-context combinations
-- **Filter Views**: All / Open / Closed trades
+### Strategy Scanner (50+ Strategies)
+- Intraday and swing trading strategies
+- Smart recommendations based on market context
+- Strategy filtering by market conditions (Trending, Consolidation, Mean Reversion)
+- RVOL and ATR-based market context classification
 
-**Insights Provided:**
-- Which contexts perform best (e.g., "Trending: 100% win rate")
-- Which strategies to avoid in certain contexts
-- Overall trading statistics
+### Earnings Calendar
+- Upcoming earnings with implied volatility analysis
+- Whisper EPS and sentiment tracking
+- Catalyst Scoring System (-10 to +10 scale)
+- IV percentile and expected move calculations
 
-### ✅ Smart Strategy Recommendations
-- Scanner auto-classifies market context
-- Highlights strategies that match context (★)
-- Shows strategies to avoid (✕)
-- Context alignment scoring
+### Trade Journal
+- Trade logging with entry/exit tracking
+- Strategy performance analytics by market context
+- Trade Templates for quick logging (basic + strategy-specific)
+- P&L tracking and win rate analysis
 
-### ✅ Market Context Classification
-- **TRENDING**: High RVOL, Rising ATR
-- **CONSOLIDATION**: Low RVOL, Declining ATR, Tight range
-- **MEAN REVERSION**: Overextended price, High z-score
+### Portfolio & Watchlist
+- Position tracking with average cost basis
+- Watchlist management
+- Real-time P&L calculations
 
-### ✅ Core Features
-- Dashboard with real-time portfolio tracking
-- TradingView charts with RSI, MACD, MA
-- 50-strategy scanner with smart filtering
-- VST fundamental scoring (0-10 scale)
+### VST Fundamental Scoring
+- 0-10 scale fundamental scoring
+- Revenue growth, margin analysis, earnings quality
+- Comparative valuation metrics
+
+## Technical Architecture
+
+### Backend (FastAPI)
+- `/app/backend/server.py` - Main application
+- `/app/backend/services/` - Business logic modules
+  - `stock_data.py` - Finnhub API integration
+  - `catalyst_scoring.py` - Earnings catalyst scoring
+  - `trade_journal.py` - Trade logging and templates
+  - `market_context.py` - Market classification
+  - `notifications.py` - Alert system
+  - `strategy_recommendations.py` - Smart scanner
+- `/app/backend/routers/` - API endpoints
+  - `catalyst.py` - Catalyst scoring endpoints
+  - `trades.py` - Trade journal and templates
+  - `market_context.py` - Context analysis
+  - `notifications.py` - Alerts
+
+### Frontend (React)
+- `/app/frontend/src/pages/` - Page components
+- `/app/frontend/src/components/` - Reusable UI
+- `/app/frontend/src/utils/api.js` - API client
+
+### Database (MongoDB)
+- `positions` - Portfolio positions
+- `watchlist` - User watchlist
+- `trades` - Trade journal entries
+- `trade_templates` - Custom trade templates
+- `catalysts` - Catalyst scores
+- `alerts` - Price alerts
+
+## Implemented Features (as of Jan 2026)
+
+### Phase 1 - Core Platform ✅
+- Dashboard with market overview
+- Real-time quotes via Finnhub
+- Portfolio and watchlist management
+- TradingView charting integration
+
+### Phase 2 - Strategy & Analysis ✅
+- Strategy scanner (50 strategies)
+- VST fundamental scoring
+- Market context analysis
+- Smart strategy recommendations
+
+### Phase 3 - Trade Journal ✅
+- Trade logging with P&L tracking
+- Strategy performance analytics
+- Performance matrix by context
+- Trade Templates (basic + strategy)
+
+### Phase 4 - Earnings & Catalyst ✅
 - Earnings calendar with IV analysis
-- Earnings notifications for watchlist
-- Watchlist & Portfolio (MongoDB persisted)
-
-### ✅ Data Sources
-- **Finnhub API** (60 calls/min) - Real-time quotes
-- Historical candle data for context analysis
+- Whisper EPS tracking
+- Catalyst Scoring System (-10 to +10)
+- Quick catalyst scorer in UI
 
 ## API Endpoints
 
-### Trade Journal API (NEW)
-- `POST /api/trades` - Log new trade
-- `GET /api/trades` - Get trades (with filters)
-- `GET /api/trades/open` - Get open positions
-- `POST /api/trades/{id}/close` - Close trade
-- `GET /api/trades/performance` - Performance summary
-- `GET /api/trades/performance/matrix` - Strategy-context matrix
+### Catalyst Scoring
+- `POST /api/catalyst/score/quick` - Quick earnings score
+- `GET /api/catalyst/score-guide` - Scoring rubric
+- `GET /api/catalyst/history/{symbol}` - Symbol history
+- `GET /api/catalyst/recent` - Recent scores
 
-### Other APIs
-- Market Context: `/api/market-context/*`
-- Quotes: `/api/quotes/{symbol}`
-- VST: `/api/vst/{symbol}`
-- Notifications: `/api/notifications/*`
+### Trade Journal & Templates
+- `POST /api/trades` - Create trade
+- `GET /api/trades` - List trades
+- `PUT /api/trades/{id}/close` - Close trade
+- `GET /api/trades/performance` - Analytics
+- `GET /api/trades/templates/defaults` - System templates
+- `GET /api/trades/templates/list` - All templates
+- `POST /api/trades/from-template` - Create from template
 
-## Files Structure
-```
-/app/backend/
-├── routers/
-│   ├── notifications.py
-│   ├── market_context.py
-│   └── trades.py                 # NEW
-├── services/
-│   ├── stock_data.py
-│   ├── market_context.py
-│   ├── strategy_recommendations.py
-│   └── trade_journal.py          # NEW
-└── server.py
+### Market Context
+- `POST /api/market-context/analyze` - Analyze symbols
+- `GET /api/market-context/summary` - Watchlist summary
 
-/app/frontend/src/pages/
-├── TradeJournalPage.js           # NEW
-├── MarketContextPage.js
-├── ScannerPage.js
-└── ... (14 pages total)
-```
+## Pending/Future Tasks
 
-## MongoDB Collections
-- `trades` - Trade records
-- `strategy_performance` - Cached performance metrics
-- `watchlists`, `portfolios`, etc.
+### P1 - Backend Refactoring
+- Move remaining logic from server.py to services/routers
+- Portfolio and watchlist modules
 
-## Sample Data
-```
-Trades: 5
-Win Rate: 80%
-P&L: $1,950
+### P2 - Notifications Enhancement
+- Real-time earnings notifications
+- Toast/badge for imminent earnings
 
-By Context:
-- TRENDING: 100% win, +$1,200
-- MEAN_REVERSION: 100% win, +$900
-- CONSOLIDATION: 0% win, -$150
-```
+### P3 - Authentication
+- User authentication system
+- Multi-user support
 
-## Priority Backlog
-- **P2**: User Authentication
-- **P2**: Export trade history to CSV
-- **P3**: Interactive Brokers integration
-- **P3**: Replace mock data with real APIs
+### P4 - Integrations
+- Interactive Brokers API
+- Replace mock data (Insider Trading, COT)
+
+## Notes
+- **Mocked Data**: Insider trading and COT data use simulated values
+- **API Key**: Finnhub API key in `/app/backend/.env`
+- **No Auth**: Currently single-user mode without authentication
