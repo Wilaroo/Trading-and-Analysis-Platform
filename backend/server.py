@@ -367,43 +367,8 @@ async def fetch_twelvedata_quote(symbol: str) -> Optional[Dict]:
     return None
 
 async def fetch_quote(symbol: str) -> Optional[Dict]:
-    """Fetch real-time quote - tries Twelve Data first, then fallback"""
-    symbol = symbol.upper()
-    
-    # Try Twelve Data first (real data)
-    quote = await fetch_twelvedata_quote(symbol)
-    if quote:
-        return quote
-    
-    # Fallback to Yahoo Finance
-    try:
-        import yfinance as yf
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period="2d")
-        if not hist.empty and len(hist) >= 1:
-            current = hist.iloc[-1]
-            prev = hist.iloc[-2] if len(hist) >= 2 else hist.iloc[-1]
-            prev_close = prev['Close']
-            change = current['Close'] - prev_close
-            change_pct = (change / prev_close) * 100 if prev_close else 0
-            
-            return {
-                "symbol": symbol,
-                "price": round(current['Close'], 2),
-                "change": round(change, 2),
-                "change_percent": round(change_pct, 2),
-                "volume": int(current['Volume']),
-                "high": round(current['High'], 2),
-                "low": round(current['Low'], 2),
-                "open": round(current['Open'], 2),
-                "prev_close": round(prev_close, 2),
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-    except Exception as e:
-        print(f"Yahoo Finance fallback error for {symbol}: {e}")
-    
-    # Final fallback to simulated data
-    return generate_simulated_quote(symbol)
+    """Fetch real-time quote - uses new StockDataService with Finnhub priority"""
+    return await stock_service.get_quote(symbol)
 
 def generate_simulated_quote(symbol: str) -> Dict:
     """Generate simulated quote data"""
