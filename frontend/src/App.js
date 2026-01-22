@@ -50,12 +50,41 @@ class ErrorBoundary extends React.Component {
 
 // Suppress third-party script errors in development
 if (typeof window !== 'undefined') {
+  // Hide the webpack dev server error overlay
+  const hideErrorOverlay = () => {
+    const overlay = document.getElementById('webpack-dev-server-client-overlay');
+    if (overlay) {
+      overlay.style.display = 'none';
+    }
+    // Also hide any iframe overlays
+    document.querySelectorAll('iframe').forEach(iframe => {
+      if (iframe.id?.includes('overlay') || iframe.src?.includes('overlay')) {
+        iframe.style.display = 'none';
+      }
+    });
+  };
+  
+  // Run periodically to catch any newly created overlays
+  setInterval(hideErrorOverlay, 500);
+  
   window.addEventListener('error', (event) => {
     if (event.message === 'Script error.' || 
         event.filename?.includes('tradingview') ||
-        event.filename?.includes('widget')) {
+        event.filename?.includes('widget') ||
+        event.message?.includes('Script error')) {
       event.preventDefault();
+      event.stopPropagation();
+      hideErrorOverlay();
       return false;
+    }
+  });
+  
+  // Also catch unhandled promise rejections
+  window.addEventListener('unhandledrejection', (event) => {
+    if (event.reason?.message?.includes('Script error') ||
+        event.reason?.stack?.includes('tradingview')) {
+      event.preventDefault();
+      hideErrorOverlay();
     }
   });
 }
