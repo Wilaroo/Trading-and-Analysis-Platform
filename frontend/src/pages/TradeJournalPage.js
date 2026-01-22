@@ -18,7 +18,10 @@ import {
   Trash2,
   RefreshCw,
   Award,
-  AlertTriangle
+  AlertTriangle,
+  ChevronDown,
+  FileText,
+  Zap
 } from 'lucide-react';
 import api from '../utils/api';
 
