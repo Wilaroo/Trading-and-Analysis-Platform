@@ -58,7 +58,7 @@ const PortfolioPage = () => {
 
   const removePosition = async (symbol) => {
     try {
-      await api.delete(`/api/portfolio/positions/${symbol}`);
+      await api.delete(`/api/portfolio/${symbol}`);
       loadPortfolio();
     } catch (err) { console.error('Failed to remove position:', err); }
   };
