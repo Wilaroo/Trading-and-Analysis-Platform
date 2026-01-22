@@ -504,6 +504,31 @@ class TradingRulesEngine:
                     "Range-bound market",
                     "Market fading moves"
                 ],
+                "9_ema_scalp": [
+                    "No strong catalyst or setup",
+                    "Choppy opening move",
+                    "Too big a move before 9-EMA test (trend near end)"
+                ],
+                "abc_scalp": [
+                    "Trendline not well connected with red bars",
+                    "Trendline not smooth with wicks above",
+                    "Last candle out of place from trendline"
+                ],
+                "big_dog_consolidation": [
+                    "Consolidation less than 15 minutes",
+                    "Volume not declining into breakout",
+                    "Price below VWAP/9-EMA/21-EMA during consolidation"
+                ],
+                "volume_capitulation": [
+                    "Capitulation volume less than 2x 2nd highest bar",
+                    "Move not overextended",
+                    "No tape confirmation on flush"
+                ],
+                "hod_breakout": [
+                    "Catalyst less than 9",
+                    "Earlier in day (works best afternoon)",
+                    "HOD break doesn't hold - reclaims below"
+                ],
                 "breaking_news": [
                     "Overreacting without catalyst scoring",
                     "Ignoring market context",
