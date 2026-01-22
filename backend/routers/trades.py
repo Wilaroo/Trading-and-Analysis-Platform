@@ -43,6 +43,32 @@ class TradeUpdate(BaseModel):
     shares: Optional[float] = None
 
 
+class TemplateCreate(BaseModel):
+    name: str
+    template_type: str = "basic"  # basic or strategy
+    strategy_id: Optional[str] = ""
+    strategy_name: Optional[str] = ""
+    market_context: Optional[str] = ""
+    direction: Optional[str] = "long"
+    default_shares: Optional[float] = 100
+    risk_percent: Optional[float] = 1.0
+    reward_ratio: Optional[float] = 2.0
+    notes: Optional[str] = ""
+    is_default: Optional[bool] = False
+
+
+class TemplateTradeCreate(BaseModel):
+    template_id: Optional[str] = None
+    symbol: str
+    entry_price: float
+    shares: Optional[float] = None
+    direction: Optional[str] = None
+    market_context: Optional[str] = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    notes: Optional[str] = None
+
+
 @router.post("")
 async def create_trade(trade: TradeCreate):
     """Log a new trade"""
