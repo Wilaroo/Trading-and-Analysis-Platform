@@ -658,17 +658,38 @@ const TradeJournalPage = () => {
               initial={{ scale: 0.95 }}
               animate={{ scale: 1 }}
               exit={{ scale: 0.95 }}
-              className="bg-paper border border-white/10 rounded-xl max-w-lg w-full p-6"
+              className="bg-paper border border-white/10 rounded-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold">Log New Trade</h2>
-                <button onClick={() => setShowNewTrade(false)} className="text-zinc-500 hover:text-white">
+                <h2 className="text-xl font-bold flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-primary" />
+                  Log New Trade
+                </h2>
+                <button onClick={() => { setShowNewTrade(false); setSelectedTemplate(null); }} className="text-zinc-500 hover:text-white">
                   <X className="w-6 h-6" />
                 </button>
               </div>
               
               <form onSubmit={handleCreateTrade} className="space-y-4">
+                {/* Template Selector */}
+                <div>
+                  <label className="text-xs text-zinc-500 uppercase block mb-1">
+                    <Zap className="w-3 h-3 inline mr-1" />
+                    Quick Template
+                  </label>
+                  <TemplateSelector 
+                    templates={templates}
+                    selectedTemplate={selectedTemplate}
+                    onSelect={handleTemplateSelect}
+                  />
+                  {selectedTemplate && (
+                    <p className="text-xs text-green-400 mt-1">
+                      Template applied: {selectedTemplate.risk_percent}% risk, {selectedTemplate.reward_ratio}:1 R:R
+                    </p>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs text-zinc-500 uppercase block mb-1">Symbol *</label>
