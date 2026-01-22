@@ -16,12 +16,14 @@ class TradeJournalService:
         self.db = db
         self.trades_col = db["trades"]
         self.performance_col = db["strategy_performance"]
+        self.templates_col = db["trade_templates"]
         
         # Create indexes for efficient querying
         self.trades_col.create_index([("symbol", 1), ("entry_date", -1)])
         self.trades_col.create_index([("strategy_id", 1)])
         self.trades_col.create_index([("market_context", 1)])
         self.trades_col.create_index([("status", 1)])
+        self.templates_col.create_index([("name", 1)])
     
     async def log_trade(self, trade_data: Dict) -> Dict:
         """
