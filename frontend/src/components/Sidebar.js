@@ -12,7 +12,8 @@ import {
   Users,
   PieChart,
   LineChart,
-  ChevronRight
+  ChevronRight,
+  Calendar
 } from 'lucide-react';
 
 const navItems = [
@@ -20,6 +21,7 @@ const navItems = [
   { id: 'chart', icon: LineChart, label: 'Charts' },
   { id: 'scanner', icon: Search, label: 'Scanner' },
   { id: 'strategies', icon: BookOpen, label: 'Strategies' },
+  { id: 'earnings', icon: Calendar, label: 'Earnings' },
   { id: 'watchlist', icon: Eye, label: 'Watchlist' },
   { id: 'portfolio', icon: Briefcase, label: 'Portfolio' },
   { id: 'fundamentals', icon: PieChart, label: 'Fundamentals' },
