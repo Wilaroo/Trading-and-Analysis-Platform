@@ -674,7 +674,12 @@ class TradingRulesEngine:
             "Mean Reversion": 0,
             "Breaking News": 0,
             "Fashionably Late": 0,
-            "Range Break": 0
+            "Range Break": 0,
+            "First VWAP Pullback": 0,
+            "First Move Up": 0,
+            "First Move Down": 0,
+            "Bella Fade": 0,
+            "Back-Through Open": 0
         }
         
         # Add points for regime preference
