@@ -1,120 +1,113 @@
 # TradeCommand - Trading and Analysis Platform
 
 ## Overview
-A comprehensive trading platform with REAL-TIME market data, technical analysis, VST fundamental scoring, **Market Context Classification** (Trending/Consolidation/Mean Reversion), and Earnings Notifications.
+A comprehensive trading platform with REAL-TIME market data, technical analysis, VST fundamental scoring, **Market Context Classification**, and **Smart Strategy Recommendations**.
 
-## What's Been Implemented (Jan 22, 2026 - Session 2)
+## What's Been Implemented (Jan 22, 2026)
 
-### ✅ NEW: Market Context Analysis System
-Auto-classify stocks into 3 market contexts based on your trading document:
+### ✅ Smart Strategy Recommendations (NEW)
+Intelligent filtering of 50 strategies based on market context:
 
-**1. TRENDING Market**
-- Identification: High RVOL (≥1.5), Rising ATR, Clear price direction
-- Trade Styles: Breakout Confirmation, Pullback Continuation, Momentum Trading
-- Sub-types: AGGRESSIVE (high volatility) or PASSIVE (gradual movement)
-- Recommended Strategies: INT-01, INT-02, INT-03, INT-05, INT-14, INT-15
+**How it works:**
+1. Scanner analyzes each stock's market context (Trending/Consolidation/Mean Reversion)
+2. Maps context to optimal strategies using research-backed recommendations
+3. Highlights matching strategies with ★ and avoid strategies with ✕
+4. Ranks results by "Context Alignment" score
 
-**2. CONSOLIDATION (Range) Market**
-- Identification: Low RVOL (<1.0), Declining ATR, Tight range (<5%)
+**Features:**
+- **Alignment Column**: Shows what % of matched strategies fit the context
+- **Context Filter Bar**: One-click filter by Trending/Range/Reversion
+- **Smart Sorting**: Results sorted by context alignment when enabled
+- **Visual Indicators**: ★ for recommended, ✕ for avoid strategies
+- **Avoid Strategies**: Strategies marked to avoid in current context (red/strikethrough)
+
+**Strategy Mappings:**
+| Context | Primary Strategies | Secondary | Avoid |
+|---------|-------------------|-----------|-------|
+| TRENDING | INT-01, INT-02, INT-05, INT-10, INT-14, INT-15, SWG-01, SWG-04 | INT-03, INT-04, INT-06, SWG-02 | INT-13, SWG-03 |
+| CONSOLIDATION | INT-09, INT-12, INT-13, INT-17, INT-19, SWG-03, SWG-13 | INT-02, INT-03, SWG-02 | INT-01, INT-04, INT-14 |
+| MEAN_REVERSION | INT-07, INT-08, INT-11, INT-20, SWG-06, SWG-10, SWG-14 | INT-06, INT-12, SWG-03 | INT-01, INT-04, INT-15 |
+
+### ✅ Market Context Analysis System
+Auto-classify stocks into 3 contexts:
+
+**TRENDING**: High RVOL, Rising ATR, Clear direction
+- Trade Styles: Breakout Confirmation, Pullback Continuation, Momentum
+
+**CONSOLIDATION**: Low RVOL, Declining ATR, Tight range
 - Trade Styles: Range Trading, Scalping, Rubber Band Setup
-- Recommended Strategies: INT-09, INT-12, INT-13, INT-17
 
-**3. MEAN REVERSION Market**
-- Identification: Overextended price (>2 std devs), High z-score
+**MEAN REVERSION**: Overextended price, High z-score
 - Trade Styles: VWAP Reversion, Exhaustion Reversal, Key Level Reversal
-- Recommended Strategies: INT-07, INT-08, INT-11, INT-12
 
 ### ✅ Market Context Dashboard (`/market-context`)
-- **Summary Cards**: Visual breakdown of Trending/Consolidation/Mean Reversion stocks
-- **Expandable Stock Cards**: Click to see detailed metrics (ATR, Trend, Range, Extension)
-- **Custom Symbol Analysis**: Analyze any ticker on-demand
-- **Recommended Trade Styles**: Context-appropriate strategy suggestions
+- Summary cards showing context distribution
+- Expandable stock cards with detailed metrics
+- Custom symbol analysis
+- Recommended trade styles per context
 
-### ✅ Enhanced Strategy Scanner
-- **New "Context" Column**: Shows market context badge for each scanned stock
-- **Context Match Highlighting**: Strategies that match the market context are highlighted with ★
-- **Auto-classify Toggle**: Enable/disable market context analysis during scan
-- **Parallel Analysis**: Scanner fetches quotes AND context simultaneously
+### ✅ Core Features
+1. **Dashboard** - Real-time portfolio tracking, top movers
+2. **TradingView Charts** - Professional charts with indicators
+3. **Strategy Scanner** - 50 strategies with smart context filtering
+4. **VST Scoring** - VectorVest-style fundamental scoring (0-10)
+5. **Earnings Calendar** - IV analysis, whispers, historical data
+6. **Earnings Notifications** - Alerts for watchlist stocks
+7. **Watchlist/Portfolio** - MongoDB persistence
 
-### ✅ ATR-Based Consolidation Detection
-- Calculates 14-period ATR and ATR trend (Rising/Declining/Flat)
-- ATR change percentage used for consolidation signals
-- Declining ATR (-10% or more) indicates consolidation
-
-### ✅ Core Features (All Working)
-1. **Dashboard** - Real-time portfolio tracking, market overview, top movers
-2. **TradingView Charts** - Interactive professional charts with RSI, MACD, MA
-3. **Strategy Scanner** - 50 strategies with market context integration
-4. **VST Scoring System** - VectorVest-style fundamental scoring (0-10 scale)
-5. **Earnings Calendar** - Full earnings tracking with IV analysis
-6. **Earnings Notifications** - Alerts for watchlist stocks with upcoming earnings
-7. **Watchlist** - AI-ranked picks with MongoDB persistence
-8. **Portfolio Tracker** - Real-time P&L tracking
-9. **Alert Center** - Strategy match + earnings notifications
-
-### ✅ Finnhub Integration (60 calls/min)
-- Primary data provider with fallback chain
-- Real-time quotes and historical candle data
-- Company profiles and earnings calendar
+### ✅ Finnhub Integration
+- 60 calls/min (vs 8 for Twelve Data)
+- Real-time quotes and historical candles
+- Company profiles
 
 ## API Endpoints
 
-### Market Context API (NEW)
-- `GET /api/market-context/{symbol}` - Full context analysis for a symbol
-- `POST /api/market-context/batch` - Batch analysis for multiple symbols
-- `GET /api/market-context/watchlist/analysis` - Analyze all watchlist stocks
-- `GET /api/market-context/strategies/{context}` - Get strategies for context type
+### Strategy Recommendations API (NEW)
+- `GET /api/market-context/recommendations/{symbol}` - Smart recommendations for a symbol
+- `GET /api/market-context/matrix` - Context-strategy mapping matrix
 
-### Notifications API
-- `GET /api/notifications` - Get all notifications
-- `GET /api/notifications/check-earnings` - Check for earnings notifications
-- `GET /api/notifications/earnings-summary` - Watchlist earnings summary
+### Market Context API
+- `GET /api/market-context/{symbol}` - Context analysis
+- `POST /api/market-context/batch` - Batch analysis
+- `GET /api/market-context/watchlist/analysis` - Watchlist analysis
 
 ### Other APIs
 - `GET /api/quotes/{symbol}` - Real-time quote (Finnhub)
-- `GET /api/vst/{symbol}` - VST fundamental scoring
-- `GET /api/earnings/calendar` - Earnings calendar
+- `GET /api/vst/{symbol}` - VST scoring
+- `GET /api/notifications` - Notifications
 - CRUD: `/api/watchlist`, `/api/portfolio`
 
 ## Files Structure
 ```
 /app/backend/
 ├── routers/
-│   ├── notifications.py      # Notifications endpoints
-│   └── market_context.py     # Market context endpoints
+│   ├── notifications.py
+│   └── market_context.py
 ├── services/
-│   ├── stock_data.py         # Finnhub/multi-provider service
-│   ├── notifications.py      # Notification logic
-│   └── market_context.py     # Context classification logic
+│   ├── stock_data.py              # Finnhub provider
+│   ├── notifications.py
+│   ├── market_context.py          # Context classification
+│   └── strategy_recommendations.py # NEW: Smart filtering
 └── server.py
 
 /app/frontend/src/
 ├── pages/
-│   ├── MarketContextPage.js  # NEW: Context dashboard
-│   ├── ScannerPage.js        # UPDATED: With context column
-│   ├── AlertsPage.js         # UPDATED: Earnings notifications
+│   ├── MarketContextPage.js       # Context dashboard
+│   ├── ScannerPage.js             # UPDATED: Smart recommendations
 │   └── ... (13 pages total)
-├── components/
-│   └── Sidebar.js            # UPDATED: Market Context nav
 └── App.js
 ```
 
 ## Configuration
 ```
-# /app/backend/.env
 FINNHUB_API_KEY=d5p596hr01qs8sp44dn0d5p596hr01qs8sp44dng
 TWELVEDATA_API_KEY=demo
 MONGO_URL=mongodb://localhost:27017
 DB_NAME=tradecommand
 ```
 
-## Test Results
-- All quotes using Finnhub (60 calls/min)
-- Market Context working with real historical data
-- Scanner shows context badges and highlights matching strategies
-
 ## Priority Backlog
-- **P2**: Continue backend refactoring (move more endpoints to routers)
 - **P2**: User Authentication system
+- **P2**: Continue backend refactoring
 - **P3**: Interactive Brokers integration
-- **P3**: Replace mock data (Insider Trading, COT) with real APIs
+- **P3**: Replace mock data with real APIs
