@@ -1022,7 +1022,52 @@ const ScannerPage = () => {
                   )}
                 </div>
               </div>
+              
+              {/* Quick Trade Button */}
+              <div className="mt-6 pt-4 border-t border-white/10">
+                <button
+                  onClick={() => { setSelectedResult(null); setQuickTradeResult(selectedResult); }}
+                  className="btn-primary w-full flex items-center justify-center gap-2"
+                  data-testid="modal-quick-trade-btn"
+                >
+                  <Zap className="w-5 h-5" />
+                  Quick Trade {selectedResult.symbol}
+                </button>
+              </div>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      {/* Quick Trade Modal */}
+      <AnimatePresence>
+        <QuickTradeModal 
+          isOpen={!!quickTradeResult}
+          onClose={() => { setQuickTradeResult(null); setTradeSuccess(false); }}
+          scanResult={quickTradeResult}
+          onSuccess={() => setTradeSuccess(true)}
+        />
+      </AnimatePresence>
+      
+      {/* Trade Success Toast */}
+      <AnimatePresence>
+        {tradeSuccess && (
+          <motion.div
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className="fixed bottom-4 right-4 bg-green-500/20 border border-green-500/30 rounded-lg px-4 py-3 flex items-center gap-3 z-50"
+          >
+            <div className="w-8 h-8 rounded-full bg-green-500/30 flex items-center justify-center">
+              <Zap className="w-4 h-4 text-green-400" />
+            </div>
+            <div>
+              <p className="font-medium text-green-400">Trade Logged!</p>
+              <p className="text-xs text-zinc-400">View in Trade Journal</p>
+            </div>
+            <button onClick={() => setTradeSuccess(false)} className="text-zinc-500 hover:text-white ml-2">
+              <X className="w-4 h-4" />
+            </button>
           </motion.div>
         )}
       </AnimatePresence>
