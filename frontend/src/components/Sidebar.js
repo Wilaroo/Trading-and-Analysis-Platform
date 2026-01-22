@@ -16,12 +16,14 @@ import {
   Calendar,
   BarChart3,
   ClipboardList,
-  ScrollText
+  ScrollText,
+  Zap
 } from 'lucide-react';
 
 const navItems = [
   { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { id: 'chart', icon: LineChart, label: 'Charts' },
+  { id: 'ib-trading', icon: Zap, label: 'IB Trading', highlight: true },
   { id: 'market-context', icon: BarChart3, label: 'Market Context' },
   { id: 'scanner', icon: Search, label: 'Scanner' },
   { id: 'strategies', icon: BookOpen, label: 'Strategies' },
