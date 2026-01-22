@@ -184,3 +184,58 @@ async def get_strategies_for_context(context: str):
         raise HTTPException(400, f"Invalid context. Use: TRENDING, CONSOLIDATION, MEAN_REVERSION")
     
     return strategies[context]
+
+
+@router.get("/recommendations/{symbol}")
+async def get_smart_recommendations(symbol: str, include_secondary: bool = True, max_risk: str = "High"):
+    """
+    Get smart strategy recommendations for a symbol based on its market context
+    """
+    if not market_context_service:
+        raise HTTPException(500, "Market context service not initialized")
+    
+    from services.strategy_recommendations import get_strategy_recommendation_service
+    
+    # Get market context
+    context_data = await market_context_service.analyze_symbol(symbol)
+    market_context = context_data.get("market_context", "")
+    sub_type = context_data.get("sub_type")
+    
+    if not market_context:
+        raise HTTPException(400, "Could not determine market context for symbol")
+    
+    # Get recommendations
+    strategy_service = get_strategy_recommendation_service()
+    recommendations = strategy_service.get_recommended_strategies(
+        market_context, 
+        sub_type, 
+        include_secondary, 
+        max_risk
+    )
+    
+    return {
+        "symbol": symbol,
+        "market_context": market_context,
+        "sub_type": sub_type,
+        "confidence": context_data.get("confidence", 0),
+        "metrics": context_data.get("metrics", {}),
+        "recommendations": recommendations,
+        "summary": f"For {symbol} in {market_context} market, focus on {', '.join(recommendations['trade_styles'][:2])}"
+    }
+
+
+@router.get("/matrix")
+async def get_context_strategy_matrix():
+    """
+    Get a matrix showing which strategies work best for each market context
+    """
+    from services.strategy_recommendations import get_strategy_recommendation_service
+    
+    strategy_service = get_strategy_recommendation_service()
+    matrix = strategy_service.get_context_strategy_matrix()
+    
+    return {
+        "matrix": matrix,
+        "description": "Shows recommended strategy counts and top strategies for each market context"
+    }
+
