@@ -426,12 +426,13 @@ const ScannerPage = () => {
                             const isAvoid = (contextData.avoid || []).includes(s);
                             return (
                               <span key={i} className={`badge text-xs ${
+                                isAvoid ? 'bg-red-500/20 text-red-400 border-red-500/30 line-through opacity-60' :
                                 isContextMatch ? 'bg-primary/30 text-primary border-primary/50 ring-1 ring-primary/30' :
                                 s.startsWith('INT') ? 'badge-info' : 
                                 s.startsWith('SWG') ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : 
                                 'bg-green-500/20 text-green-400 border-green-500/30'
-                              }`} title={isContextMatch ? 'Matches market context!' : ''}>
-                                {s}{isContextMatch && ' ★'}
+                              }`} title={isAvoid ? 'Avoid in this context' : isContextMatch ? 'Matches market context!' : ''}>
+                                {s}{isContextMatch && ' ★'}{isAvoid && ' ✕'}
                               </span>
                             );
                           })}
