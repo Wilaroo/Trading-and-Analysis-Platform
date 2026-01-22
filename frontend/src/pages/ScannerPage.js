@@ -355,9 +355,10 @@ const ScannerPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {results.map((result, idx) => {
+                {filteredResults.map((result, idx) => {
                   const context = marketContexts[result.symbol];
-                  const contextStrategies = context ? getContextStrategies(context.market_context) : [];
+                  const contextData = context ? getContextStrategies(context.market_context) : { primary: [], secondary: [], avoid: [] };
+                  const allRecommended = [...(contextData.primary || []), ...(contextData.secondary || [])];
                   
                   return (
                     <tr key={idx} className="cursor-pointer hover:bg-white/5" onClick={() => setSelectedResult({ ...result, context })}>
@@ -372,6 +373,30 @@ const ScannerPage = () => {
                           ) : (
                             <span className="text-zinc-500 text-xs">-</span>
                           )}
+                        </td>
+                      )}
+                      {smartFilter && analyzeContext && (
+                        <td>
+                          <div className="flex items-center gap-2">
+                            <div className={`w-12 h-2 rounded-full overflow-hidden ${
+                              result.contextAlignment >= 70 ? 'bg-green-500/30' : 
+                              result.contextAlignment >= 40 ? 'bg-yellow-500/30' : 'bg-white/10'
+                            }`}>
+                              <div 
+                                className={`h-full rounded-full ${
+                                  result.contextAlignment >= 70 ? 'bg-green-500' : 
+                                  result.contextAlignment >= 40 ? 'bg-yellow-500' : 'bg-zinc-500'
+                                }`}
+                                style={{ width: `${result.contextAlignment || 0}%` }}
+                              />
+                            </div>
+                            <span className={`text-xs font-medium ${
+                              result.contextAlignment >= 70 ? 'text-green-400' : 
+                              result.contextAlignment >= 40 ? 'text-yellow-400' : 'text-zinc-500'
+                            }`}>
+                              {Math.round(result.contextAlignment || 0)}%
+                            </span>
+                          </div>
                         </td>
                       )}
                       <td>
@@ -397,7 +422,8 @@ const ScannerPage = () => {
                       <td>
                         <div className="flex flex-wrap gap-1 max-w-[200px]">
                           {result.matched_strategies?.slice(0, 4).map((s, i) => {
-                            const isContextMatch = contextStrategies.includes(s);
+                            const isContextMatch = allRecommended.includes(s);
+                            const isAvoid = (contextData.avoid || []).includes(s);
                             return (
                               <span key={i} className={`badge text-xs ${
                                 isContextMatch ? 'bg-primary/30 text-primary border-primary/50 ring-1 ring-primary/30' :
