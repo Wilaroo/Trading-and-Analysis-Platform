@@ -1604,6 +1604,293 @@ async def clear_alerts():
     result = alerts_col.delete_many({})
     return {"deleted": result.deleted_count}
 
+# ----- Earnings Calendar -----
+async def generate_earnings_data(symbol: str, earnings_date: str) -> Dict:
+    """Generate simulated earnings data for a symbol"""
+    random.seed(hash(symbol + earnings_date))
+    
+    # Simulate historical earnings data
+    eps_estimates = round(random.uniform(0.5, 5.0), 2)
+    eps_actual = round(eps_estimates * random.uniform(0.85, 1.25), 2)
+    revenue_estimates = round(random.uniform(10, 100), 2)  # In billions
+    revenue_actual = round(revenue_estimates * random.uniform(0.92, 1.15), 2)
+    
+    # Historical earnings (last 4 quarters)
+    historical = []
+    for i in range(4):
+        quarter_date = (datetime.now() - timedelta(days=90 * (i + 1))).strftime("%Y-%m-%d")
+        hist_eps_est = round(eps_estimates * random.uniform(0.8, 1.2), 2)
+        hist_eps_act = round(hist_eps_est * random.uniform(0.85, 1.25), 2)
+        surprise_pct = round(((hist_eps_act - hist_eps_est) / abs(hist_eps_est)) * 100, 2) if hist_eps_est != 0 else 0
+        historical.append({
+            "date": quarter_date,
+            "quarter": f"Q{4 - i} {datetime.now().year - (1 if i >= 2 else 0)}",
+            "eps_estimate": hist_eps_est,
+            "eps_actual": hist_eps_act,
+            "eps_surprise": round(hist_eps_act - hist_eps_est, 2),
+            "eps_surprise_percent": surprise_pct,
+            "revenue_estimate": round(revenue_estimates * random.uniform(0.85, 1.15), 2),
+            "revenue_actual": round(revenue_estimates * random.uniform(0.88, 1.18), 2),
+            "stock_reaction": round(random.uniform(-8, 12), 2)  # % move after earnings
+        })
+    
+    # Implied volatility data
+    current_iv = round(random.uniform(25, 80), 1)
+    historical_iv = round(current_iv * random.uniform(0.7, 1.3), 1)
+    iv_rank = round(random.uniform(20, 95), 1)
+    iv_percentile = round(random.uniform(15, 98), 1)
+    expected_move = round(random.uniform(3, 15), 2)
+    
+    # Earnings whispers (analyst expectations vs whisper numbers)
+    whisper_eps = round(eps_estimates * random.uniform(0.95, 1.15), 2)
+    analyst_count = random.randint(5, 35)
+    
+    # Sentiment data
+    sentiments = ["Bullish", "Bearish", "Neutral", "Very Bullish", "Very Bearish"]
+    sentiment_weights = [0.25, 0.15, 0.35, 0.15, 0.10]
+    whisper_sentiment = random.choices(sentiments, weights=sentiment_weights)[0]
+    
+    return {
+        "symbol": symbol,
+        "earnings_date": earnings_date,
+        "time": random.choice(["Before Open", "After Close"]),
+        "fiscal_quarter": f"Q{random.randint(1, 4)} {datetime.now().year}",
+        
+        # Estimates
+        "eps_estimate": eps_estimates,
+        "revenue_estimate_b": revenue_estimates,
+        "whisper_eps": whisper_eps,
+        "whisper_vs_consensus": round(((whisper_eps - eps_estimates) / eps_estimates) * 100, 2),
+        
+        # Analyst data
+        "analyst_count": analyst_count,
+        "analyst_revisions_up": random.randint(0, analyst_count // 2),
+        "analyst_revisions_down": random.randint(0, analyst_count // 3),
+        
+        # Implied Volatility
+        "implied_volatility": {
+            "current_iv": current_iv,
+            "historical_iv_30d": historical_iv,
+            "iv_rank": iv_rank,
+            "iv_percentile": iv_percentile,
+            "expected_move_percent": expected_move,
+            "expected_move_dollar": round(random.uniform(5, 50), 2),
+            "straddle_price": round(random.uniform(2, 20), 2),
+            "iv_crush_expected": round(random.uniform(15, 45), 1)
+        },
+        
+        # Whisper data
+        "whisper": {
+            "eps": whisper_eps,
+            "sentiment": whisper_sentiment,
+            "confidence": round(random.uniform(50, 95), 1),
+            "beat_probability": round(random.uniform(35, 75), 1),
+            "historical_beat_rate": round(random.uniform(50, 85), 1)
+        },
+        
+        # Historical earnings
+        "historical_earnings": historical,
+        
+        # Average surprise
+        "avg_eps_surprise_4q": round(sum(h["eps_surprise_percent"] for h in historical) / 4, 2),
+        "avg_stock_reaction_4q": round(sum(h["stock_reaction"] for h in historical) / 4, 2)
+    }
+
+@app.get("/api/earnings/calendar")
+async def get_earnings_calendar(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    symbols: Optional[str] = None
+):
+    """Get earnings calendar for a date range"""
+    
+    # Default to this week
+    if not start_date:
+        start_date = datetime.now().strftime("%Y-%m-%d")
+    if not end_date:
+        end_date = (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d")
+    
+    # Major companies with earnings
+    earnings_companies = [
+        {"symbol": "AAPL", "name": "Apple Inc.", "sector": "Technology"},
+        {"symbol": "MSFT", "name": "Microsoft Corp.", "sector": "Technology"},
+        {"symbol": "GOOGL", "name": "Alphabet Inc.", "sector": "Technology"},
+        {"symbol": "AMZN", "name": "Amazon.com Inc.", "sector": "Consumer Cyclical"},
+        {"symbol": "META", "name": "Meta Platforms Inc.", "sector": "Technology"},
+        {"symbol": "NVDA", "name": "NVIDIA Corp.", "sector": "Technology"},
+        {"symbol": "TSLA", "name": "Tesla Inc.", "sector": "Consumer Cyclical"},
+        {"symbol": "JPM", "name": "JPMorgan Chase", "sector": "Financial"},
+        {"symbol": "V", "name": "Visa Inc.", "sector": "Financial"},
+        {"symbol": "JNJ", "name": "Johnson & Johnson", "sector": "Healthcare"},
+        {"symbol": "UNH", "name": "UnitedHealth Group", "sector": "Healthcare"},
+        {"symbol": "HD", "name": "Home Depot", "sector": "Consumer Cyclical"},
+        {"symbol": "PG", "name": "Procter & Gamble", "sector": "Consumer Defensive"},
+        {"symbol": "MA", "name": "Mastercard", "sector": "Financial"},
+        {"symbol": "DIS", "name": "Walt Disney Co.", "sector": "Communication"},
+        {"symbol": "NFLX", "name": "Netflix Inc.", "sector": "Communication"},
+        {"symbol": "CRM", "name": "Salesforce Inc.", "sector": "Technology"},
+        {"symbol": "AMD", "name": "Advanced Micro Devices", "sector": "Technology"},
+        {"symbol": "INTC", "name": "Intel Corp.", "sector": "Technology"},
+        {"symbol": "BA", "name": "Boeing Co.", "sector": "Industrials"},
+    ]
+    
+    # Filter by symbols if provided
+    if symbols:
+        symbol_list = [s.strip().upper() for s in symbols.split(",")]
+        earnings_companies = [c for c in earnings_companies if c["symbol"] in symbol_list]
+    
+    # Generate earnings dates for the range
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d")
+    
+    calendar = []
+    for company in earnings_companies:
+        # Generate a random earnings date within the range
+        random.seed(hash(company["symbol"] + start_date))
+        days_offset = random.randint(0, (end - start).days)
+        earnings_date = (start + timedelta(days=days_offset)).strftime("%Y-%m-%d")
+        
+        # Get full earnings data
+        earnings_data = await generate_earnings_data(company["symbol"], earnings_date)
+        earnings_data["company_name"] = company["name"]
+        earnings_data["sector"] = company["sector"]
+        
+        calendar.append(earnings_data)
+    
+    # Sort by date
+    calendar.sort(key=lambda x: x["earnings_date"])
+    
+    # Group by date
+    grouped = {}
+    for item in calendar:
+        date = item["earnings_date"]
+        if date not in grouped:
+            grouped[date] = {"date": date, "count": 0, "before_open": [], "after_close": []}
+        grouped[date]["count"] += 1
+        if item["time"] == "Before Open":
+            grouped[date]["before_open"].append(item)
+        else:
+            grouped[date]["after_close"].append(item)
+    
+    return {
+        "calendar": calendar,
+        "grouped_by_date": list(grouped.values()),
+        "start_date": start_date,
+        "end_date": end_date,
+        "total_count": len(calendar)
+    }
+
+@app.get("/api/earnings/{symbol}")
+async def get_earnings_detail(symbol: str):
+    """Get detailed earnings data for a specific symbol"""
+    
+    # Get next earnings date (simulated)
+    random.seed(hash(symbol))
+    days_until_earnings = random.randint(1, 45)
+    earnings_date = (datetime.now() + timedelta(days=days_until_earnings)).strftime("%Y-%m-%d")
+    
+    earnings_data = await generate_earnings_data(symbol.upper(), earnings_date)
+    
+    # Add more detailed historical data
+    detailed_history = []
+    for i in range(8):  # Last 8 quarters
+        quarter_date = (datetime.now() - timedelta(days=90 * (i + 1))).strftime("%Y-%m-%d")
+        random.seed(hash(symbol + quarter_date))
+        
+        eps_est = round(random.uniform(0.5, 5.0), 2)
+        eps_act = round(eps_est * random.uniform(0.85, 1.25), 2)
+        rev_est = round(random.uniform(10, 100), 2)
+        rev_act = round(rev_est * random.uniform(0.92, 1.15), 2)
+        
+        detailed_history.append({
+            "date": quarter_date,
+            "quarter": f"Q{((4 - i) % 4) + 1} {datetime.now().year - ((i + 1) // 4)}",
+            "eps_estimate": eps_est,
+            "eps_actual": eps_act,
+            "eps_surprise": round(eps_act - eps_est, 2),
+            "eps_surprise_percent": round(((eps_act - eps_est) / abs(eps_est)) * 100, 2) if eps_est != 0 else 0,
+            "revenue_estimate_b": rev_est,
+            "revenue_actual_b": rev_act,
+            "revenue_surprise_percent": round(((rev_act - rev_est) / abs(rev_est)) * 100, 2) if rev_est != 0 else 0,
+            "stock_price_before": round(random.uniform(100, 500), 2),
+            "stock_price_after": round(random.uniform(100, 500), 2),
+            "stock_reaction_1d": round(random.uniform(-10, 15), 2),
+            "stock_reaction_5d": round(random.uniform(-15, 20), 2),
+            "iv_before": round(random.uniform(30, 80), 1),
+            "iv_after": round(random.uniform(20, 50), 1),
+            "volume_vs_avg": round(random.uniform(1.5, 5.0), 2)
+        })
+    
+    earnings_data["detailed_history"] = detailed_history
+    
+    # Calculate statistics
+    beat_count = sum(1 for h in detailed_history if h["eps_surprise"] > 0)
+    earnings_data["statistics"] = {
+        "beat_rate": round((beat_count / len(detailed_history)) * 100, 1),
+        "avg_surprise": round(sum(h["eps_surprise_percent"] for h in detailed_history) / len(detailed_history), 2),
+        "avg_stock_reaction": round(sum(h["stock_reaction_1d"] for h in detailed_history) / len(detailed_history), 2),
+        "max_positive_reaction": max(h["stock_reaction_1d"] for h in detailed_history),
+        "max_negative_reaction": min(h["stock_reaction_1d"] for h in detailed_history),
+        "avg_iv_crush": round(sum((h["iv_before"] - h["iv_after"]) for h in detailed_history) / len(detailed_history), 1)
+    }
+    
+    return earnings_data
+
+@app.get("/api/earnings/iv/{symbol}")
+async def get_earnings_iv(symbol: str):
+    """Get implied volatility analysis for earnings"""
+    random.seed(hash(symbol + "iv"))
+    
+    # Current IV data
+    current_iv = round(random.uniform(25, 80), 1)
+    iv_30d = round(current_iv * random.uniform(0.7, 1.1), 1)
+    iv_60d = round(current_iv * random.uniform(0.65, 1.0), 1)
+    
+    # IV term structure (days to expiration)
+    term_structure = []
+    for dte in [7, 14, 21, 30, 45, 60, 90]:
+        term_structure.append({
+            "dte": dte,
+            "iv": round(current_iv * (1 + random.uniform(-0.15, 0.25) * (30 - dte) / 30), 1)
+        })
+    
+    # Historical IV before earnings
+    historical_iv = []
+    for i in range(4):
+        historical_iv.append({
+            "quarter": f"Q{4 - i}",
+            "iv_1w_before": round(random.uniform(35, 90), 1),
+            "iv_1d_before": round(random.uniform(40, 100), 1),
+            "iv_1d_after": round(random.uniform(20, 50), 1),
+            "iv_crush_percent": round(random.uniform(25, 55), 1),
+            "actual_move": round(random.uniform(2, 15), 2),
+            "expected_move": round(random.uniform(4, 18), 2),
+            "move_vs_expected": round(random.uniform(-50, 50), 1)
+        })
+    
+    return {
+        "symbol": symbol.upper(),
+        "current_iv": current_iv,
+        "iv_30d_avg": iv_30d,
+        "iv_60d_avg": iv_60d,
+        "iv_rank": round(random.uniform(20, 95), 1),
+        "iv_percentile": round(random.uniform(15, 98), 1),
+        "term_structure": term_structure,
+        "historical_earnings_iv": historical_iv,
+        "expected_move": {
+            "percent": round(random.uniform(4, 15), 2),
+            "dollar": round(random.uniform(5, 50), 2),
+            "straddle_cost": round(random.uniform(3, 25), 2),
+            "strangle_cost": round(random.uniform(2, 18), 2)
+        },
+        "recommendation": random.choice([
+            "IV elevated - consider selling premium",
+            "IV low relative to historical - consider buying straddles",
+            "Neutral IV - wait for better setup",
+            "High IV rank - good for iron condors"
+        ])
+    }
+
 # ----- Newsletter -----
 @app.get("/api/newsletter/latest")
 async def get_latest_newsletter():
