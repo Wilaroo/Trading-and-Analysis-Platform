@@ -1,1 +1,9 @@
 /* Additional App styles */
+
+/* Hide React development error overlay for third-party script errors */
+iframe#webpack-dev-server-client-overlay,
+.error-overlay,
+[data-nextjs-dialog],
+#webpack-dev-server-client-overlay {
+  display: none !important;
+}
