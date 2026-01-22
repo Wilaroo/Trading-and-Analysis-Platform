@@ -148,7 +148,8 @@ const StrategyRecommender = () => {
             onChange={(e) => setTimeOfDay(e.target.value)}
             className="w-full bg-subtle border border-white/10 rounded px-2 py-1.5 text-sm"
           >
-            <option value="opening_drive">Opening Drive (9:30-9:45)</option>
+            <option value="opening_auction">Opening Auction (9:30-9:35)</option>
+            <option value="opening_drive">Opening Drive (9:35-9:45)</option>
             <option value="morning_momentum">Morning Momentum (9:45-10:00)</option>
             <option value="morning_session">Morning Session (10:00-10:45)</option>
             <option value="late_morning">Late Morning (10:45-11:30)</option>
