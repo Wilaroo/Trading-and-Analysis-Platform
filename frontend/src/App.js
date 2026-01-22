@@ -195,6 +195,7 @@ function App() {
       case 'market-context': return <MarketContextPage />;
       case 'trade-journal': return <TradeJournalPage />;
       case 'trading-rules': return <TradingRulesPage />;
+      case 'ib-trading': return <IBTradingPage />;
       default: return <ErrorBoundary><DashboardPage data={dashboardData} loading={loading} onRefresh={loadDashboardData} streamingQuotes={streamingQuotes} /></ErrorBoundary>;
     }
   };
