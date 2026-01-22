@@ -11,7 +11,13 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 - WebSocket for live price streaming
 - Audio/visual price alerts with adjustable thresholds
 
-### Strategy Scanner (50+ Strategies)
+### Interactive Brokers Integration ✅ NEW
+- Connect to IB Gateway for paper trading
+- Real-time market data streaming from IB
+- Place/cancel orders (Market, Limit, Stop, Stop-Limit)
+- View account summary, positions, and open orders
+
+### Strategy Scanner (77 Strategies)
 - Intraday and swing trading strategies
 - Smart recommendations based on market context
 - Strategy filtering by market conditions (Trending, Consolidation, Mean Reversion)
@@ -29,6 +35,13 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 - Trade Templates for quick logging (basic + strategy-specific)
 - **Quick Trade from Scanner** - One-click trade logging from scanner results
 - P&L tracking and win rate analysis
+- Inline notes editing
+
+### Trading Rules Engine
+- Consolidated trading knowledge from 18+ PDFs
+- Dynamic strategy recommendations based on market conditions
+- Game plan framework and daily routines
+- Common mistakes and avoidance rules
 
 ### Portfolio & Watchlist
 - Position tracking with average cost basis
@@ -46,19 +59,24 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 - `/app/backend/server.py` - Main application
 - `/app/backend/services/` - Business logic modules
   - `stock_data.py` - Finnhub API integration
+  - `ib_service.py` - Interactive Brokers integration ✅ NEW
   - `catalyst_scoring.py` - Earnings catalyst scoring
   - `trade_journal.py` - Trade logging and templates
   - `market_context.py` - Market classification
   - `notifications.py` - Alert system
+  - `trading_rules.py` - Trading rules engine
   - `strategy_recommendations.py` - Smart scanner
 - `/app/backend/routers/` - API endpoints
+  - `ib.py` - Interactive Brokers endpoints ✅ NEW
   - `catalyst.py` - Catalyst scoring endpoints
   - `trades.py` - Trade journal and templates
+  - `rules.py` - Trading rules endpoints
   - `market_context.py` - Context analysis
   - `notifications.py` - Alerts
 
 ### Frontend (React)
 - `/app/frontend/src/pages/` - Page components
+  - `IBTradingPage.js` - Interactive Brokers trading UI ✅ NEW
 - `/app/frontend/src/components/` - Reusable UI
 - `/app/frontend/src/utils/api.js` - API client
 
@@ -79,7 +97,7 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 - TradingView charting integration
 
 ### Phase 2 - Strategy & Analysis ✅
-- Strategy scanner (50 strategies)
+- Strategy scanner (77 strategies)
 - VST fundamental scoring
 - Market context analysis
 - Smart strategy recommendations
@@ -89,7 +107,8 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 - Strategy performance analytics
 - Performance matrix by context
 - Trade Templates (basic + strategy)
-- **Quick Trade from Scanner** (Jan 2026)
+- Quick Trade from Scanner
+- Inline notes editing
 
 ### Phase 4 - Earnings & Catalyst ✅
 - Earnings calendar with IV analysis
@@ -97,7 +116,34 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 - Catalyst Scoring System (-10 to +10)
 - Quick catalyst scorer in UI
 
+### Phase 5 - Trading Rules Engine ✅
+- Consolidated knowledge from 18+ user PDFs
+- Dynamic strategy recommender
+- Game plan and daily routine frameworks
+- Common mistakes avoidance
+
+### Phase 6 - Interactive Brokers Integration ✅ NEW (Jan 22, 2026)
+- IB Gateway connection (port 4002 for paper trading)
+- Account summary with net liquidation, buying power, cash
+- Position tracking from IB
+- Order placement (Market, Limit, Stop, Stop-Limit)
+- Open orders management with cancel functionality
+- Auto-refresh of account data
+
 ## API Endpoints
+
+### Interactive Brokers ✅ NEW
+- `GET /api/ib/status` - Connection status
+- `POST /api/ib/connect` - Connect to IB Gateway
+- `POST /api/ib/disconnect` - Disconnect from IB
+- `GET /api/ib/account/summary` - Account summary
+- `GET /api/ib/account/positions` - Current positions
+- `GET /api/ib/quote/{symbol}` - Real-time quote
+- `POST /api/ib/order` - Place order
+- `DELETE /api/ib/order/{order_id}` - Cancel order
+- `GET /api/ib/orders/open` - Open orders
+- `GET /api/ib/executions` - Today's fills
+- `GET /api/ib/historical/{symbol}` - Historical data
 
 ### Catalyst Scoring
 - `POST /api/catalyst/score/quick` - Quick earnings score
@@ -113,15 +159,28 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 - `GET /api/trades/templates/defaults` - System templates
 - `GET /api/trades/templates/list` - All templates
 - `POST /api/trades/from-template` - Create from template
+- `PATCH /api/trades/{trade_id}/notes` - Update trade notes
+
+### Trading Rules
+- `GET /api/rules/recommend` - Strategy recommendations
+- `GET /api/rules/game-plan` - Daily game plan
+- `GET /api/rules/avoidance` - Universal avoidance rules
 
 ### Market Context
 - `POST /api/market-context/analyze` - Analyze symbols
 - `GET /api/market-context/summary` - Watchlist summary
 
+## IB Gateway Configuration
+- **Host**: 127.0.0.1
+- **Port**: 4002 (paper trading)
+- **Client ID**: 1
+- **Account ID**: DUN615665
+
 ## Pending/Future Tasks
 
 ### P1 - Backend Refactoring
 - Move remaining logic from server.py to services/routers
+- Migrate 77 hardcoded strategies to MongoDB collection
 - Portfolio and watchlist modules
 
 ### P2 - Notifications Enhancement
@@ -132,11 +191,11 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 - User authentication system
 - Multi-user support
 
-### P4 - Integrations
-- Interactive Brokers API
-- Replace mock data (Insider Trading, COT)
+### P4 - Data Sources
+- Replace mock data (Insider Trading, COT) with real APIs
 
 ## Notes
 - **Mocked Data**: Insider trading and COT data use simulated values
-- **API Key**: Finnhub API key in `/app/backend/.env`
+- **API Keys**: Finnhub API key in `/app/backend/.env`
+- **IB Gateway Required**: Must have IB Gateway running on port 4002 for paper trading
 - **No Auth**: Currently single-user mode without authentication
