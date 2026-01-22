@@ -475,6 +475,106 @@ class MarketContextService:
             "recommended_styles": []
         }
     
+    async def _fetch_historical_data(self, symbol: str) -> List[Dict]:
+        """Fetch historical candle data from Finnhub"""
+        try:
+            import finnhub
+            import os
+            from datetime import datetime, timedelta
+            
+            finnhub_key = os.environ.get("FINNHUB_API_KEY", "")
+            if not finnhub_key or finnhub_key == "demo":
+                return []
+            
+            client = finnhub.Client(api_key=finnhub_key)
+            
+            # Get last 30 days of daily candles
+            end_time = int(datetime.now().timestamp())
+            start_time = int((datetime.now() - timedelta(days=30)).timestamp())
+            
+            loop = asyncio.get_event_loop()
+            candles = await loop.run_in_executor(
+                None,
+                lambda: client.stock_candles(symbol, 'D', start_time, end_time)
+            )
+            
+            if candles and candles.get('s') == 'ok':
+                historical_data = []
+                for i in range(len(candles['c'])):
+                    historical_data.append({
+                        "date": datetime.fromtimestamp(candles['t'][i]).strftime("%Y-%m-%d"),
+                        "open": candles['o'][i],
+                        "high": candles['h'][i],
+                        "low": candles['l'][i],
+                        "close": candles['c'][i],
+                        "volume": candles['v'][i]
+                    })
+                return historical_data
+        except Exception as e:
+            print(f"Finnhub historical data error for {symbol}: {e}")
+        
+        return []
+    
+    def _generate_simulated_history(self, symbol: str, days: int = 30) -> List[Dict]:
+        """Generate simulated historical data for analysis when real data unavailable"""
+        import random
+        from datetime import datetime, timedelta
+        
+        base_prices = {
+            "SPY": 475, "QQQ": 415, "DIA": 385, "IWM": 198, "VIX": 15,
+            "AAPL": 186, "MSFT": 379, "GOOGL": 143, "AMZN": 178, "NVDA": 495,
+            "TSLA": 249, "META": 358, "AMD": 146, "NFLX": 479, "CRM": 278,
+            "BA": 178, "JPM": 195, "V": 280, "JNJ": 160, "WMT": 165,
+        }
+        
+        base_price = base_prices.get(symbol.upper(), random.uniform(50, 300))
+        
+        # Generate different patterns for variety
+        patterns = ['trending_up', 'trending_down', 'consolidation', 'mean_reversion']
+        pattern = random.choice(patterns)
+        
+        historical_data = []
+        current_price = base_price
+        base_volume = random.randint(10000000, 50000000)
+        
+        for i in range(days):
+            date = (datetime.now() - timedelta(days=days-i)).strftime("%Y-%m-%d")
+            
+            # Apply pattern
+            if pattern == 'trending_up':
+                daily_change = random.uniform(0, 0.02)  # Bias upward
+                volume_mult = 1.2 if random.random() > 0.7 else 1.0
+            elif pattern == 'trending_down':
+                daily_change = random.uniform(-0.02, 0)  # Bias downward
+                volume_mult = 1.2 if random.random() > 0.7 else 1.0
+            elif pattern == 'consolidation':
+                daily_change = random.uniform(-0.005, 0.005)  # Small moves
+                volume_mult = 0.7 + random.random() * 0.3  # Lower volume
+            else:  # mean_reversion
+                # Oscillate around base
+                deviation = (current_price - base_price) / base_price
+                daily_change = -deviation * 0.1 + random.uniform(-0.01, 0.01)
+                volume_mult = 1.0 + abs(deviation)
+            
+            current_price *= (1 + daily_change)
+            daily_range = random.uniform(0.01, 0.03)
+            
+            high = current_price * (1 + daily_range/2)
+            low = current_price * (1 - daily_range/2)
+            open_price = current_price * (1 + random.uniform(-daily_range/3, daily_range/3))
+            volume = int(base_volume * volume_mult * random.uniform(0.8, 1.2))
+            
+            historical_data.append({
+                "date": date,
+                "open": round(open_price, 2),
+                "high": round(high, 2),
+                "low": round(low, 2),
+                "close": round(current_price, 2),
+                "volume": volume
+            })
+        
+        return historical_data
+    
     async def analyze_batch(self, symbols: List[str]) -> Dict[str, Dict]:
         """Analyze market context for multiple symbols"""
         results = {}
