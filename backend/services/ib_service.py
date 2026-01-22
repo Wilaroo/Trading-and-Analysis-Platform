@@ -110,7 +110,7 @@ class IBService:
             for symbol, ticker in self.market_data_subscriptions.items():
                 try:
                     self.ib.cancelMktData(ticker.contract)
-                except:
+                except Exception:
                     pass
             self.market_data_subscriptions.clear()
             
