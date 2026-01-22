@@ -190,6 +190,22 @@ async def close_trade(trade_id: str, close_data: TradeClose):
         raise HTTPException(400, str(e))
 
 
+@router.patch("/{trade_id}")
+async def patch_trade(trade_id: str, updates: TradeUpdate):
+    """Update an open trade (PATCH method)"""
+    if not trade_journal_service:
+        raise HTTPException(500, "Trade journal service not initialized")
+    
+    # Filter out None values
+    update_dict = {k: v for k, v in updates.dict().items() if v is not None}
+    
+    if not update_dict:
+        raise HTTPException(400, "No updates provided")
+    
+    result = await trade_journal_service.update_trade(trade_id, update_dict)
+    return result
+
+
 @router.put("/{trade_id}")
 async def update_trade(trade_id: str, updates: TradeUpdate):
     """Update an open trade"""
