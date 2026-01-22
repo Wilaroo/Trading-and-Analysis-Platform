@@ -9,7 +9,8 @@ import {
   TrendingDown,
   Activity,
   Target,
-  BarChart3
+  BarChart3,
+  Zap
 } from 'lucide-react';
 import api from '../utils/api';
 
