@@ -89,6 +89,7 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 - Strategy performance analytics
 - Performance matrix by context
 - Trade Templates (basic + strategy)
+- **Quick Trade from Scanner** (Jan 2026)
 
 ### Phase 4 - Earnings & Catalyst ✅
 - Earnings calendar with IV analysis
