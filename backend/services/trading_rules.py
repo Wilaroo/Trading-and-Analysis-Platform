@@ -721,8 +721,17 @@ class TradingRulesEngine:
         
         # Opening auction bonus for early times
         if time_of_day in ["opening_auction", "opening_drive"]:
-            for strat in ["First VWAP Pullback", "First Move Up", "First Move Down", "Bella Fade", "Back-Through Open"]:
+            for strat in ["First VWAP Pullback", "First Move Up", "First Move Down", "Bella Fade", "Back-Through Open", "Up Through Open", "Opening Drive"]:
                 strategy_scores[strat] += 3
+        
+        # Afternoon bonus
+        if time_of_day in ["afternoon", "close"]:
+            strategy_scores["HOD Breakout"] += 3
+        
+        # Consolidation strategies for mid-session
+        if time_of_day in ["morning_session", "late_morning"]:
+            for strat in ["Big Dog Consolidation", "Spencer Scalp", "ABC Scalp", "9 EMA Scalp"]:
+                strategy_scores[strat] += 2
         
         # Sort and return top recommendations
         sorted_strategies = sorted(strategy_scores.items(), key=lambda x: x[1], reverse=True)
