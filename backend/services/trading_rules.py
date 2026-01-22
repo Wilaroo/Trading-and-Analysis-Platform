@@ -318,12 +318,23 @@ class TradingRulesEngine:
                     "description": "Exit on momentum waves",
                     "first_wave": "1/2 into first rush slowing",
                     "second_wave": "1/2 into grinding acceleration",
-                    "applies_to": ["HitchHiker"]
+                    "applies_to": ["HitchHiker", "Bella Fade"]
+                },
+                "move2move": {
+                    "description": "Exit in 2 legs based on price action",
+                    "first_leg": "1/2 into first leg of move",
+                    "second_leg": "1/2 into second leg continuation",
+                    "applies_to": ["First Move Up", "First Move Down", "Gap Give and Go"]
                 },
                 "full_exit": {
                     "description": "All out at single target",
                     "target": "VWAP",
-                    "applies_to": ["Back$ide"]
+                    "applies_to": ["Back$ide", "First VWAP Pullback"]
+                },
+                "momentum_exit": {
+                    "description": "Exit when momentum dies",
+                    "triggers": ["Close below 9-EMA", "Two-bar break against"],
+                    "applies_to": ["Back-Through Open"]
                 }
             },
             "measured_moves": {
