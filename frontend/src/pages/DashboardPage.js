@@ -243,14 +243,14 @@ const DashboardPage = ({ data, loading, onRefresh, streamingQuotes }) => {
             </div>
           </Card>
 
-          {/* Mini Chart */}
+          {/* Market Overview */}
           <Card hover={false}>
             <h2 className="font-semibold mb-4 flex items-center gap-2">
               <Activity className="w-5 h-5 text-primary" />
               S&P 500 Overview
             </h2>
             <div className="h-64">
-              <TradingViewMiniChart symbol="AMEX:SPY" />
+              <MarketOverviewCard symbol="SPY" />
             </div>
           </Card>
         </div>
