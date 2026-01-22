@@ -26,10 +26,12 @@ from services.notifications import get_notification_service
 from services.market_context import get_market_context_service
 from services.trade_journal import get_trade_journal_service
 from services.catalyst_scoring import get_catalyst_scoring_service
+from services.trading_rules import get_trading_rules_engine
 from routers.notifications import router as notifications_router, init_notification_service
 from routers.market_context import router as market_context_router, init_market_context_service
 from routers.trades import router as trades_router, init_trade_journal_service
 from routers.catalyst import router as catalyst_router, init_catalyst_service
+from routers.rules import router as rules_router, init_trading_rules
 
 app = FastAPI(title="TradeCommand API")
 
@@ -51,18 +53,21 @@ notification_service = get_notification_service(db)
 market_context_service = get_market_context_service()
 trade_journal_service = get_trade_journal_service(db)
 catalyst_scoring_service = get_catalyst_scoring_service(db)
+trading_rules_engine = get_trading_rules_engine()
 
 # Initialize routers with services
 init_notification_service(notification_service)
 init_market_context_service(market_context_service)
 init_trade_journal_service(trade_journal_service)
 init_catalyst_service(catalyst_scoring_service, stock_service)
+init_trading_rules(trading_rules_engine)
 
 # Include routers
 app.include_router(notifications_router)
 app.include_router(market_context_router)
 app.include_router(trades_router)
 app.include_router(catalyst_router)
+app.include_router(rules_router)
 
 # Collections
 strategies_col = db["strategies"]
