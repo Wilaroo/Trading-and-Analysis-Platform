@@ -82,9 +82,16 @@ const StatCard = ({ label, value, icon: Icon, color = 'primary', subtext }) => (
 );
 
 // Trade Row Component
-const TradeRow = ({ trade, onClose, onEdit, onDelete }) => {
+const TradeRow = ({ trade, onClose, onEdit, onDelete, onUpdateNotes }) => {
   const isOpen = trade.status === 'open';
   const isProfitable = trade.pnl > 0;
+  const [showNotesInput, setShowNotesInput] = useState(false);
+  const [localNotes, setLocalNotes] = useState(trade.notes || '');
+  
+  const handleSaveNotes = () => {
+    onUpdateNotes(trade.id, localNotes);
+    setShowNotesInput(false);
+  };
   
   return (
     <motion.div
@@ -108,7 +115,7 @@ const TradeRow = ({ trade, onClose, onEdit, onDelete }) => {
             )}
           </div>
           
-          <div>
+          <div className="flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-bold text-lg">{trade.symbol}</span>
               <span className={`text-xs px-2 py-0.5 rounded ${
@@ -154,8 +161,51 @@ const TradeRow = ({ trade, onClose, onEdit, onDelete }) => {
               {trade.holding_days !== null && ` • ${trade.holding_days} day${trade.holding_days !== 1 ? 's' : ''}`}
             </p>
             
-            {trade.notes && (
-              <p className="text-xs text-zinc-400 mt-2 italic">"{trade.notes}"</p>
+            {/* Notes Section */}
+            {showNotesInput ? (
+              <div className="mt-3 space-y-2">
+                <textarea
+                  value={localNotes}
+                  onChange={(e) => setLocalNotes(e.target.value)}
+                  placeholder="Add trade notes..."
+                  rows={2}
+                  className="w-full bg-subtle border border-white/10 rounded-lg px-3 py-2 text-sm resize-none focus:border-primary/50 focus:outline-none"
+                  autoFocus
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleSaveNotes}
+                    className="text-xs bg-primary/20 text-primary px-3 py-1 rounded hover:bg-primary/30 transition-colors"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => { setShowNotesInput(false); setLocalNotes(trade.notes || ''); }}
+                    className="text-xs bg-white/5 text-zinc-400 px-3 py-1 rounded hover:bg-white/10 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : trade.notes ? (
+              <div 
+                className="mt-2 p-2 bg-white/5 rounded-lg cursor-pointer hover:bg-white/10 transition-colors group"
+                onClick={() => setShowNotesInput(true)}
+              >
+                <p className="text-xs text-zinc-400 italic flex items-start gap-2">
+                  <FileText className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                  <span className="flex-1">{trade.notes}</span>
+                  <Edit3 className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </p>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowNotesInput(true)}
+                className="mt-2 text-xs text-zinc-500 hover:text-primary flex items-center gap-1 transition-colors"
+              >
+                <Plus className="w-3 h-3" />
+                Add notes
+              </button>
             )}
           </div>
         </div>
@@ -183,11 +233,11 @@ const TradeRow = ({ trade, onClose, onEdit, onDelete }) => {
                   <CheckCircle className="w-4 h-4" />
                 </button>
                 <button
-                  onClick={() => onEdit(trade)}
+                  onClick={() => setShowNotesInput(true)}
                   className="p-2 text-zinc-400 hover:bg-white/10 rounded-lg transition-colors"
-                  title="Edit"
+                  title="Add/Edit Notes"
                 >
-                  <Edit3 className="w-4 h-4" />
+                  <FileText className="w-4 h-4" />
                 </button>
               </>
             )}
@@ -198,6 +248,15 @@ const TradeRow = ({ trade, onClose, onEdit, onDelete }) => {
                 title="Delete"
               >
                 <Trash2 className="w-4 h-4" />
+              </button>
+            )}
+            {!isOpen && (
+              <button
+                onClick={() => setShowNotesInput(true)}
+                className="p-2 text-zinc-400 hover:bg-white/10 rounded-lg transition-colors"
+                title="Add/Edit Notes"
+              >
+                <FileText className="w-4 h-4" />
               </button>
             )}
           </div>
