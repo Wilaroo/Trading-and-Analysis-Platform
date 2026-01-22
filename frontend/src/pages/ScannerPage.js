@@ -754,6 +754,7 @@ const ScannerPage = () => {
                   <th>RVOL</th>
                   <th>Gap%</th>
                   <th>Strategies Matched</th>
+                  <th>Trade</th>
                   <th></th>
                 </tr>
               </thead>
