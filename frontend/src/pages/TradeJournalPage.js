@@ -722,7 +722,7 @@ const TradeJournalPage = () => {
                       type="number"
                       step="0.01"
                       value={newTrade.entry_price}
-                      onChange={(e) => setNewTrade({...newTrade, entry_price: e.target.value})}
+                      onChange={(e) => handleEntryPriceChange(e.target.value)}
                       className="w-full bg-subtle border border-white/10 rounded-lg px-3 py-2"
                       placeholder="150.00"
                       required
