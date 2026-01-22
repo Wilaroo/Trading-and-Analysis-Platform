@@ -166,8 +166,14 @@ class TradingRulesEngine:
     def _build_time_rules(self) -> Dict:
         return {
             "optimal_windows": {
+                "opening_auction": {
+                    "time": "9:30-9:35 AM",
+                    "strategies": ["Back-Through Open", "First VWAP Pullback", "Bella Fade", "First Move Up", "First Move Down"],
+                    "characteristics": ["Maximum institutional activity", "Opening order flow", "Liquidity grabs"],
+                    "caution": "Widest spreads, fastest moves - require tape reading skills"
+                },
                 "opening_drive": {
-                    "time": "9:30-9:45 AM",
+                    "time": "9:35-9:45 AM",
                     "strategies": ["Gap Give and Go", "HitchHiker", "ORB"],
                     "characteristics": ["Highest volatility", "Gap resolution", "Institutional positioning"],
                     "caution": "Wide stops, fast moves"
