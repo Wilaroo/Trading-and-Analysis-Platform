@@ -120,9 +120,12 @@ const TradingViewMiniChart = ({ symbol = 'AAPL' }) => {
           isTransparent: true,
           autosize: true,
           largeChartUrl: ''
-      });
+        });
 
-      containerRef.current.appendChild(script);
+        containerRef.current.appendChild(script);
+      } catch (e) {
+        console.log('TradingView widget error:', e);
+      }
     }
   }, [symbol]);
 
