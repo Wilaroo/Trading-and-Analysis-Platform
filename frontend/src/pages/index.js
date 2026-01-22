@@ -11,3 +11,4 @@ export { default as AlertsPage } from './AlertsPage';
 export { default as NewsletterPage } from './NewsletterPage';
 export { default as EarningsCalendarPage } from './EarningsCalendarPage';
 export { default as MarketContextPage } from './MarketContextPage';
+export { default as TradeJournalPage } from './TradeJournalPage';
