@@ -699,7 +699,7 @@ class TradingRulesEngine:
         
         # Volume bonus
         if rvol >= 3.0:
-            for strat in ["Spencer Scalp", "HitchHiker", "Gap Give and Go", "ORB"]:
+            for strat in ["Spencer Scalp", "HitchHiker", "Gap Give and Go", "ORB", "First VWAP Pullback", "Back-Through Open"]:
                 strategy_scores[strat] += 2
         if rvol >= 5.0:
             strategy_scores["Rubber Band"] += 3
@@ -708,6 +708,13 @@ class TradingRulesEngine:
         if has_catalyst:
             strategy_scores["Breaking News"] += 4
             strategy_scores["Gap Give and Go"] += 2
+            strategy_scores["Back-Through Open"] += 3
+            strategy_scores["First VWAP Pullback"] += 2
+        
+        # Opening auction bonus for early times
+        if time_of_day in ["opening_auction", "opening_drive"]:
+            for strat in ["First VWAP Pullback", "First Move Up", "First Move Down", "Bella Fade", "Back-Through Open"]:
+                strategy_scores[strat] += 3
         
         # Sort and return top recommendations
         sorted_strategies = sorted(strategy_scores.items(), key=lambda x: x[1], reverse=True)
