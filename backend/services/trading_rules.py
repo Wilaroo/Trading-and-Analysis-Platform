@@ -679,7 +679,15 @@ class TradingRulesEngine:
             "First Move Up": 0,
             "First Move Down": 0,
             "Bella Fade": 0,
-            "Back-Through Open": 0
+            "Back-Through Open": 0,
+            "9 EMA Scalp": 0,
+            "ABC Scalp": 0,
+            "Up Through Open": 0,
+            "Gap Pick and Roll": 0,
+            "Big Dog Consolidation": 0,
+            "Volume Capitulation": 0,
+            "HOD Breakout": 0,
+            "Opening Drive": 0
         }
         
         # Add points for regime preference
