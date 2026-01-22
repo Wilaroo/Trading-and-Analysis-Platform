@@ -23,7 +23,8 @@ import {
   EarningsCalendarPage,
   MarketContextPage,
   TradeJournalPage,
-  TradingRulesPage
+  TradingRulesPage,
+  IBTradingPage
 } from './pages';
 
 import './App.css';
