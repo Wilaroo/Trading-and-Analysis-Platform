@@ -10,7 +10,10 @@ import {
   Activity,
   Target,
   BarChart3,
-  Zap
+  Zap,
+  BookOpen,
+  DollarSign,
+  ChevronDown
 } from 'lucide-react';
 import api from '../utils/api';
 
