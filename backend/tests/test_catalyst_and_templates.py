@@ -271,7 +271,7 @@ class TestTradeCreationWithTemplate:
         assert response.status_code == 200
         
         data = response.json()
-        assert data["symbol"] == payload["symbol"]
+        assert data["symbol"] == payload["symbol"].upper()
         assert data["strategy_id"] == "INT-01"
         assert data["entry_price"] == 150.00
         assert data["shares"] == 100
@@ -301,7 +301,7 @@ class TestTradeCreationWithTemplate:
         assert response.status_code == 200
         
         data = response.json()
-        assert data["symbol"] == payload["symbol"]
+        assert data["symbol"] == payload["symbol"].upper()
         assert data["entry_price"] == 200.00
         assert "id" in data
         
@@ -377,7 +377,7 @@ class TestTradeJournalIntegration:
         get_response = requests.get(f"{BASE_URL}/api/trades/{trade_id}")
         assert get_response.status_code == 200
         fetched_trade = get_response.json()
-        assert fetched_trade["symbol"] == trade_payload["symbol"]
+        assert fetched_trade["symbol"] == trade_payload["symbol"].upper()
         assert fetched_trade["status"] == "open"
         
         # Step 4: Close the trade
