@@ -191,6 +191,7 @@ function App() {
       case 'alerts': return <AlertsPage />;
       case 'newsletter': return <NewsletterPage />;
       case 'market-context': return <MarketContextPage />;
+      case 'trade-journal': return <TradeJournalPage />;
       default: return <ErrorBoundary><DashboardPage data={dashboardData} loading={loading} onRefresh={loadDashboardData} streamingQuotes={streamingQuotes} /></ErrorBoundary>;
     }
   };
