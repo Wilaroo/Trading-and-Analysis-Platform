@@ -172,14 +172,22 @@ const ScannerPage = () => {
     
     return filtered;
   };
-  };
+
+  const filteredResults = getFilteredResults();
+
+  // Count contexts for filter buttons
+  const contextCounts = Object.values(marketContexts).reduce((acc, ctx) => {
+    const context = ctx.market_context;
+    acc[context] = (acc[context] || 0) + 1;
+    return acc;
+  }, {});
 
   return (
     <div className="space-y-6 animate-fade-in" data-testid="scanner-page">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Strategy Scanner</h1>
-          <p className="text-zinc-500 text-sm mt-1">Scan stocks against 50 detailed strategy criteria with market context</p>
+          <p className="text-zinc-500 text-sm mt-1">Scan stocks against 50 strategies with smart context-aware recommendations</p>
         </div>
       </div>
 
