@@ -1,107 +1,119 @@
 # TradeCommand - Trading and Analysis Platform
 
 ## Overview
-A comprehensive trading platform with REAL-TIME market data, technical analysis, AI-powered insights, and audio/visual price alerts.
+A comprehensive trading platform with REAL-TIME market data, technical analysis, AI-powered insights, audio/visual price alerts, and now **Earnings Calendar** with IV analysis.
 
 ## What's Been Implemented (Jan 22, 2026)
 
 ### ✅ Core Features (All Working)
-1. **Dashboard** - Real-time portfolio tracking, market overview, top movers, alerts
+1. **Dashboard** - Real-time portfolio tracking, market overview, top movers
 2. **TradingView Charts** - Interactive professional charts with RSI, MACD, MA indicators
-3. **Strategy Scanner** - Scan stocks against 50 detailed trading strategies with criteria matching
+3. **Strategy Scanner** - Scan stocks against 50 detailed trading strategies
 4. **Trading Strategies** - 50 strategies (20 Intraday, 15 Swing, 15 Investment)
-5. **Watchlist** - AI-ranked top 10 daily picks with manual add/remove (MongoDB persisted)
-6. **Portfolio Tracker** - Real-time P&L with live prices (MongoDB persisted)
-7. **Alert Center** - Strategy match notifications
-8. **Morning Newsletter** - AI-generated daily briefing
+5. **Earnings Calendar** - NEW! Full earnings tracking with IV, whispers, historical data
+6. **Watchlist** - AI-ranked top 10 daily picks with MongoDB persistence
+7. **Portfolio Tracker** - Real-time P&L with live prices (MongoDB persisted)
+8. **Alert Center** - Strategy match notifications
+9. **Morning Newsletter** - AI-generated daily briefing
+
+### ✅ NEW: Earnings Calendar
+Complete earnings tracking system with:
+
+**Calendar Features:**
+- Date range navigation (weekly view)
+- List view and Calendar view modes
+- Filter by symbol
+- Quick stats (Total Reports, Before Open, After Close, High IV)
+
+**Earnings Data:**
+- Company name and ticker
+- Earnings date and time (BMO/AMC)
+- Fiscal quarter
+- EPS Estimate vs Whisper EPS
+- Analyst count and revisions
+- Sentiment (Bullish/Bearish/Neutral/Very Bullish/Very Bearish)
+
+**Implied Volatility Analysis:**
+- Current IV
+- IV Rank and Percentile
+- Expected Move (% and $)
+- Straddle/Strangle cost
+- IV Term Structure chart (7-90 DTE)
+- IV Crush expected
+- Strategy suggestions (e.g., "IV elevated - consider selling premium")
+
+**Earnings Whispers:**
+- Whisper EPS vs Consensus
+- Whisper sentiment
+- Beat probability
+- Confidence level
+- Historical beat rate
+
+**Historical Performance:**
+- Last 8 quarters of data
+- EPS estimates vs actuals
+- Revenue estimates vs actuals
+- EPS surprise %
+- Stock reaction (1-day, 5-day)
+- IV before/after earnings
+- IV crush %
+- Volume vs average
+
+**Statistics:**
+- Beat rate
+- Average surprise
+- Average stock reaction
+- Max positive/negative reaction
+- Average IV crush
 
 ### ✅ Audio/Visual Price Alerts
-- **Audio Alerts** - Rising tone for bullish, falling tone for bearish, double beep for urgent (>4%)
-- **Visual Notifications** - Toast notifications slide in from right with color-coded borders
-- **Toggle Control** - Speaker icon at bottom right to enable/disable audio
-- **Settings Panel** - Click gear icon to adjust threshold (0.5% - 10%)
-- **Threshold saved** to localStorage for persistence
-
-### ✅ Enhanced Strategy Scanner (50 Strategies)
-**Intraday Strategies (INT-01 to INT-20):**
-- Checks VWAP position, RVOL (Relative Volume), Gap %, Daily Range
-- Returns confidence scores for each matched strategy
-
-**Swing Strategies (SWG-01 to SWG-15):**
-- Daily trend following, breakout patterns, pullback setups
-
-**Investment Strategies (INV-01 to INV-15):**
-- Uses fundamental data (P/E, P/B, ROE, dividend yield)
-
-### ✅ Watchlist & Portfolio Persistence
-- **MongoDB Collections**: `watchlists`, `portfolios`
-- **Watchlist APIs**: GET, POST /add, DELETE /{symbol}
-- **Portfolio APIs**: GET, POST /add, DELETE /{symbol}
+- Adjustable threshold (0.5% - 10%)
+- Audio tones for bullish/bearish moves
+- Visual toast notifications
+- Settings panel
 
 ### ✅ Frontend Refactoring Complete
-The monolithic App.js (2100+ lines) has been split into:
-
-```
-/app/frontend/src/
-├── components/
-│   ├── index.js
-│   ├── Sidebar.js
-│   ├── TickerTape.js
-│   ├── PriceAlertNotification.js
-│   └── shared/
-│       └── index.js (Card, StatsCard, PriceDisplay, Badge, etc.)
-├── hooks/
-│   ├── index.js
-│   ├── useWebSocket.js
-│   └── usePriceAlerts.js
-├── pages/
-│   ├── index.js
-│   ├── DashboardPage.js
-│   ├── ChartsPage.js
-│   ├── ScannerPage.js
-│   ├── StrategiesPage.js
-│   ├── WatchlistPage.js
-│   ├── PortfolioPage.js
-│   ├── FundamentalsPage.js
-│   ├── InsiderTradingPage.js
-│   ├── COTDataPage.js
-│   ├── AlertsPage.js
-│   └── NewsletterPage.js
-├── utils/
-│   ├── api.js
-│   └── alertSounds.js
-└── App.js (now ~200 lines)
-```
-
-## Technical Stack
-- **Frontend**: React + Tailwind CSS + TradingView Widget + Web Audio API
-- **Backend**: FastAPI + MongoDB
-- **Data**: Twelve Data API (real-time), Yahoo Finance (fallback), Simulated (fallback)
-- **AI**: OpenAI GPT via Emergent Universal Key
+App.js split into modular components:
+- `/pages/` - 12 page components (including EarningsCalendarPage)
+- `/components/` - Sidebar, TickerTape, PriceAlertNotification
+- `/hooks/` - useWebSocket, usePriceAlerts
+- `/utils/` - api, alertSounds
 
 ## API Endpoints
 
-### Scanner (Enhanced)
-- `POST /api/scanner/scan` - Scan with detailed 50-strategy criteria
-  - Returns: score, rvol, gap_percent, daily_range, above_vwap, strategy_details
+### Earnings Calendar (NEW)
+- `GET /api/earnings/calendar` - Get earnings calendar (date range filter)
+- `GET /api/earnings/{symbol}` - Detailed earnings data for symbol
+- `GET /api/earnings/iv/{symbol}` - IV analysis for earnings
 
-### Watchlist
-- `GET /api/watchlist` - Get watchlist
-- `POST /api/watchlist/add` - Add symbol manually
-- `POST /api/watchlist/generate` - AI generate watchlist
-- `DELETE /api/watchlist/{symbol}` - Remove symbol
+### Scanner
+- `POST /api/scanner/scan` - Scan with 50-strategy criteria
 
-### Portfolio
-- `GET /api/portfolio` - Get positions with live P&L
-- `POST /api/portfolio/add` - Add position
-- `DELETE /api/portfolio/{symbol}` - Remove position
+### Watchlist & Portfolio
+- `GET/POST/DELETE /api/watchlist`
+- `GET/POST/DELETE /api/portfolio`
 
-## Known Issues
-- **TradingView Widget**: Shows error overlay in development mode (third-party script error, doesn't affect functionality)
-- **WebSocket**: May show OFFLINE but REST API works as fallback
-- **Data Sources**: Fundamentals, Insider, COT use simulated data when live APIs unavailable
+## Data Sources
+- **Real-time quotes**: Twelve Data API
+- **Earnings data**: SIMULATED (realistic data generation)
+- **Fundamentals/Insider/COT**: MOCKED (simulated when APIs unavailable)
+
+## Files Structure
+```
+/app/frontend/src/
+├── pages/
+│   ├── EarningsCalendarPage.js   # NEW - Earnings with IV, whispers, history
+│   ├── DashboardPage.js
+│   ├── ChartsPage.js
+│   ├── ScannerPage.js
+│   └── ... (12 pages total)
+├── components/
+│   ├── Sidebar.js (updated with Earnings nav)
+│   └── ...
+└── App.js
+```
 
 ## Next Steps (Backlog)
 - **P1**: User Authentication (Interactive Brokers integration)
-- **P2**: Refactor backend into routers/services  
-- **P3**: Replace simulated data with real SEC EDGAR/CFTC APIs
+- **P2**: Refactor backend into routers/services
+- **P3**: Integrate real earnings APIs (e.g., Alpha Vantage, Financial Modeling Prep)
