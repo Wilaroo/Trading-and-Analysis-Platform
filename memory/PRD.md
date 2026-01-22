@@ -1,157 +1,119 @@
 # TradeCommand - Trading and Analysis Platform
 
 ## Overview
-A comprehensive trading platform with REAL-TIME market data, technical analysis, AI-powered insights, audio/visual price alerts, VST fundamental scoring, Earnings Calendar with IV analysis, and now **Earnings Notifications** for watchlist stocks.
+A comprehensive trading platform with REAL-TIME market data, technical analysis, VST fundamental scoring, **Market Context Classification** (Trending/Consolidation/Mean Reversion), and Earnings Notifications.
 
 ## What's Been Implemented (Jan 22, 2026 - Session 2)
 
+### ✅ NEW: Market Context Analysis System
+Auto-classify stocks into 3 market contexts based on your trading document:
+
+**1. TRENDING Market**
+- Identification: High RVOL (≥1.5), Rising ATR, Clear price direction
+- Trade Styles: Breakout Confirmation, Pullback Continuation, Momentum Trading
+- Sub-types: AGGRESSIVE (high volatility) or PASSIVE (gradual movement)
+- Recommended Strategies: INT-01, INT-02, INT-03, INT-05, INT-14, INT-15
+
+**2. CONSOLIDATION (Range) Market**
+- Identification: Low RVOL (<1.0), Declining ATR, Tight range (<5%)
+- Trade Styles: Range Trading, Scalping, Rubber Band Setup
+- Recommended Strategies: INT-09, INT-12, INT-13, INT-17
+
+**3. MEAN REVERSION Market**
+- Identification: Overextended price (>2 std devs), High z-score
+- Trade Styles: VWAP Reversion, Exhaustion Reversal, Key Level Reversal
+- Recommended Strategies: INT-07, INT-08, INT-11, INT-12
+
+### ✅ Market Context Dashboard (`/market-context`)
+- **Summary Cards**: Visual breakdown of Trending/Consolidation/Mean Reversion stocks
+- **Expandable Stock Cards**: Click to see detailed metrics (ATR, Trend, Range, Extension)
+- **Custom Symbol Analysis**: Analyze any ticker on-demand
+- **Recommended Trade Styles**: Context-appropriate strategy suggestions
+
+### ✅ Enhanced Strategy Scanner
+- **New "Context" Column**: Shows market context badge for each scanned stock
+- **Context Match Highlighting**: Strategies that match the market context are highlighted with ★
+- **Auto-classify Toggle**: Enable/disable market context analysis during scan
+- **Parallel Analysis**: Scanner fetches quotes AND context simultaneously
+
+### ✅ ATR-Based Consolidation Detection
+- Calculates 14-period ATR and ATR trend (Rising/Declining/Flat)
+- ATR change percentage used for consolidation signals
+- Declining ATR (-10% or more) indicates consolidation
+
 ### ✅ Core Features (All Working)
 1. **Dashboard** - Real-time portfolio tracking, market overview, top movers
-2. **TradingView Charts** - Interactive professional charts with RSI, MACD, MA indicators
-3. **Strategy Scanner** - Scan stocks against 50 detailed trading strategies
-4. **Trading Strategies** - 50 strategies (20 Intraday, 15 Swing, 15 Investment)
-5. **VST Scoring System** - VectorVest-style fundamental scoring (RV, RS, RT) on 0-10 scale
-6. **Earnings Calendar** - Full earnings tracking with IV, whispers, historical data
-7. **Earnings Notifications** - **NEW!** Get notified when watchlist stocks have upcoming earnings
-8. **Watchlist** - AI-ranked top 10 daily picks with MongoDB persistence
-9. **Portfolio Tracker** - Real-time P&L with live prices (MongoDB persisted)
-10. **Alert Center** - Strategy match notifications with adjustable thresholds
-11. **Morning Newsletter** - AI-generated daily briefing
+2. **TradingView Charts** - Interactive professional charts with RSI, MACD, MA
+3. **Strategy Scanner** - 50 strategies with market context integration
+4. **VST Scoring System** - VectorVest-style fundamental scoring (0-10 scale)
+5. **Earnings Calendar** - Full earnings tracking with IV analysis
+6. **Earnings Notifications** - Alerts for watchlist stocks with upcoming earnings
+7. **Watchlist** - AI-ranked picks with MongoDB persistence
+8. **Portfolio Tracker** - Real-time P&L tracking
+9. **Alert Center** - Strategy match + earnings notifications
 
-### ✅ NEW: Finnhub Integration (Session 2)
-Upgraded stock data provider with 60 calls/minute (vs 8 for Twelve Data):
-- **Primary**: Finnhub API (60 calls/min free tier)
-- **Fallback 1**: Twelve Data API (8 calls/min)
-- **Fallback 2**: Yahoo Finance
-- **Fallback 3**: Simulated data
-
-**StockDataService** (`/app/backend/services/stock_data.py`):
-- Unified interface for multiple data providers
-- Smart caching (60s for quotes, 1hr for fundamentals)
-- Rate limiting protection
-- Batch quote fetching with concurrency control
-
-### ✅ NEW: Earnings Notifications (Session 2)
-Automatic notifications for watchlist stocks with upcoming earnings:
-
-**Features:**
-- Checks watchlist stocks against earnings calendar
-- Notifies 7 days before earnings
-- Priority levels (high for high IV, medium otherwise)
-- Earnings summary cards showing:
-  - Watchlist stock count
-  - Earnings this week
-  - Earnings next week
-  - High IV earnings count
-
-**NotificationService** (`/app/backend/services/notifications.py`):
-- Automatic earnings notification generation
-- Mark read/unread functionality
-- Notification cleanup (30 days)
-- Price alert notifications
-
-### ✅ NEW: Backend Refactoring (Session 2)
-Started modularizing the monolithic `server.py`:
-
-**New Structure:**
-```
-/app/backend/
-├── routers/
-│   ├── __init__.py
-│   └── notifications.py    # Notifications endpoints
-├── services/
-│   ├── __init__.py
-│   ├── stock_data.py       # Finnhub/TwelveData/Yahoo provider
-│   └── notifications.py    # Earnings notifications logic
-├── models/                 # (future: Pydantic models)
-└── server.py               # Main app (still large, needs more refactoring)
-```
-
-### ✅ Alert Center Enhancement (Session 2)
-Enhanced `/app/frontend/src/pages/AlertsPage.js`:
-- **Tab Navigation**: Strategy Alerts | Earnings Notifications
-- **Earnings Summary Cards**: Visual overview of upcoming earnings
-- **Check Earnings Button**: Manually trigger earnings notification check
-- **Unified notification management**: Mark read, delete, filter
+### ✅ Finnhub Integration (60 calls/min)
+- Primary data provider with fallback chain
+- Real-time quotes and historical candle data
+- Company profiles and earnings calendar
 
 ## API Endpoints
 
-### NEW: Notifications API
-- `GET /api/notifications` - Get all notifications (with unread_only filter)
-- `GET /api/notifications/check-earnings` - Check for new earnings notifications
-- `GET /api/notifications/earnings-summary` - Get watchlist earnings summary
-- `POST /api/notifications/{key}/read` - Mark notification as read
-- `POST /api/notifications/mark-all-read` - Mark all as read
-- `DELETE /api/notifications/{key}` - Delete notification
-- `DELETE /api/notifications/cleanup/{days}` - Clean old notifications
+### Market Context API (NEW)
+- `GET /api/market-context/{symbol}` - Full context analysis for a symbol
+- `POST /api/market-context/batch` - Batch analysis for multiple symbols
+- `GET /api/market-context/watchlist/analysis` - Analyze all watchlist stocks
+- `GET /api/market-context/strategies/{context}` - Get strategies for context type
 
-### VST Scoring
-- `GET /api/vst/{symbol}` - Full VST analysis with RV, RS, RT scores
-- `POST /api/vst/batch` - Batch VST scoring for multiple symbols
+### Notifications API
+- `GET /api/notifications` - Get all notifications
+- `GET /api/notifications/check-earnings` - Check for earnings notifications
+- `GET /api/notifications/earnings-summary` - Watchlist earnings summary
 
-### Stock Quotes (Updated)
-- `GET /api/quotes/{symbol}` - Now uses StockDataService with Finnhub priority
-
-### Other Endpoints (unchanged)
-- `GET /api/fundamentals/{symbol}` - Basic fundamental data
-- `GET /api/earnings/calendar` - Get earnings calendar
-- `GET/POST/DELETE /api/watchlist`
-- `GET/POST/DELETE /api/portfolio`
-
-## Data Sources
-- **Real-time quotes**: Finnhub API (primary, 60 calls/min) → Twelve Data → Yahoo Finance → Simulated
-- **VST Scoring**: Uses quote + fundamental data from providers
-- **Earnings data**: SIMULATED (realistic data generation)
-- **Fundamentals/Insider/COT**: MOCKED (simulated when APIs unavailable)
-
-## Configuration
-
-### Environment Variables (`/app/backend/.env`)
-```
-MONGO_URL=mongodb://localhost:27017
-DB_NAME=tradecommand
-FINNHUB_API_KEY=demo          # Get free key at finnhub.io/register
-TWELVEDATA_API_KEY=demo
-EMERGENT_LLM_KEY=sk-emergent-xxx
-```
-
-**To get better data reliability:**
-1. Sign up at https://finnhub.io/register
-2. Copy your API key from the Dashboard
-3. Update FINNHUB_API_KEY in `/app/backend/.env`
-4. Restart backend: `sudo supervisorctl restart backend`
-
-## Test Coverage
-- Backend: 22 pytest tests (100% pass rate)
-- Frontend: All features tested via Playwright
-- Test files: `/app/backend/tests/test_vst_and_features.py`
+### Other APIs
+- `GET /api/quotes/{symbol}` - Real-time quote (Finnhub)
+- `GET /api/vst/{symbol}` - VST fundamental scoring
+- `GET /api/earnings/calendar` - Earnings calendar
+- CRUD: `/api/watchlist`, `/api/portfolio`
 
 ## Files Structure
 ```
 /app/backend/
-├── routers/notifications.py      # NEW: Notifications router
-├── services/stock_data.py        # NEW: Multi-provider stock service
-├── services/notifications.py     # NEW: Notification logic
-└── server.py                     # Main app (refactored)
+├── routers/
+│   ├── notifications.py      # Notifications endpoints
+│   └── market_context.py     # Market context endpoints
+├── services/
+│   ├── stock_data.py         # Finnhub/multi-provider service
+│   ├── notifications.py      # Notification logic
+│   └── market_context.py     # Context classification logic
+└── server.py
 
 /app/frontend/src/
 ├── pages/
-│   ├── AlertsPage.js            # UPDATED: With earnings notifications
-│   ├── FundamentalsPage.js      # VST Scoring display
-│   └── ... (12 pages total)
+│   ├── MarketContextPage.js  # NEW: Context dashboard
+│   ├── ScannerPage.js        # UPDATED: With context column
+│   ├── AlertsPage.js         # UPDATED: Earnings notifications
+│   └── ... (13 pages total)
 ├── components/
-│   └── PriceAlertNotification.js  # Alert threshold slider
+│   └── Sidebar.js            # UPDATED: Market Context nav
 └── App.js
 ```
 
-## Known Limitations
-- WebSocket shows OFFLINE but REST polling works
-- Finnhub free tier has 15-min delay on quotes
-- Insider Trading and COT data are mocked
-- VST uses hardcoded benchmark values
+## Configuration
+```
+# /app/backend/.env
+FINNHUB_API_KEY=d5p596hr01qs8sp44dn0d5p596hr01qs8sp44dng
+TWELVEDATA_API_KEY=demo
+MONGO_URL=mongodb://localhost:27017
+DB_NAME=tradecommand
+```
+
+## Test Results
+- All quotes using Finnhub (60 calls/min)
+- Market Context working with real historical data
+- Scanner shows context badges and highlights matching strategies
 
 ## Priority Backlog
-- **P1**: Get real Finnhub API key for better data (user action needed)
 - **P2**: Continue backend refactoring (move more endpoints to routers)
 - **P2**: User Authentication system
 - **P3**: Interactive Brokers integration
