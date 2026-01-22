@@ -13,12 +13,14 @@ import {
   PieChart,
   LineChart,
   ChevronRight,
-  Calendar
+  Calendar,
+  BarChart3
 } from 'lucide-react';
 
 const navItems = [
   { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { id: 'chart', icon: LineChart, label: 'Charts' },
+  { id: 'market-context', icon: BarChart3, label: 'Market Context' },
   { id: 'scanner', icon: Search, label: 'Scanner' },
   { id: 'strategies', icon: BookOpen, label: 'Strategies' },
   { id: 'earnings', icon: Calendar, label: 'Earnings' },
