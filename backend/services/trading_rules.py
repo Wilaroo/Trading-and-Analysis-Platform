@@ -131,7 +131,13 @@ class TradingRulesEngine:
                 "consolidation_decrease": {
                     "description": "Volume should decrease during consolidation",
                     "threshold": "50% or less of prior candles",
-                    "applies_to": ["Spencer Scalp", "Gap Give and Go", "Puppy Dog", "HitchHiker"]
+                    "applies_to": ["Spencer Scalp", "Gap Give and Go", "Puppy Dog", "HitchHiker", "Big Dog Consolidation"]
+                },
+                "volume_capitulation": {
+                    "description": "Extreme volume spike signaling exhaustion/capitulation",
+                    "threshold": "2x or more the 2nd highest volume candle of day",
+                    "applies_to": ["Volume Capitulation (Stuffed Trade)"],
+                    "significance": "Buyers giving up - orders absorbed by sellers"
                 },
                 "breakout_increase": {
                     "description": "Volume should spike on breakout",
