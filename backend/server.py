@@ -56,6 +56,7 @@ market_context_service = get_market_context_service()
 trade_journal_service = get_trade_journal_service(db)
 catalyst_scoring_service = get_catalyst_scoring_service(db)
 trading_rules_engine = get_trading_rules_engine()
+ib_service = get_ib_service()
 
 # Initialize routers with services
 init_notification_service(notification_service)
@@ -63,6 +64,7 @@ init_market_context_service(market_context_service)
 init_trade_journal_service(trade_journal_service)
 init_catalyst_service(catalyst_scoring_service, stock_service)
 init_trading_rules(trading_rules_engine)
+init_ib_service(ib_service)
 
 # Include routers
 app.include_router(notifications_router)
@@ -70,6 +72,7 @@ app.include_router(market_context_router)
 app.include_router(trades_router)
 app.include_router(catalyst_router)
 app.include_router(rules_router)
+app.include_router(ib_router)
 
 # Collections
 strategies_col = db["strategies"]
