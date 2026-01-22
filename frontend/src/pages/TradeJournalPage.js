@@ -557,6 +557,15 @@ const TradeJournalPage = () => {
     }
   };
 
+  const handleUpdateNotes = async (tradeId, notes) => {
+    try {
+      await api.patch(`/api/trades/${tradeId}`, { notes });
+      loadData();
+    } catch (err) {
+      console.error('Failed to update trade notes:', err);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in" data-testid="trade-journal-page">
       {/* Header */}
