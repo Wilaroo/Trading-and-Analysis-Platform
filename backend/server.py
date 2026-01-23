@@ -1746,12 +1746,13 @@ async def generate_alerts():
     quotes = await fetch_multiple_quotes(symbols)
     
     new_alerts = []
+    all_strategies = get_all_strategies_cached()
     for quote in quotes:
         score_data = await score_stock_for_strategies(quote["symbol"], quote)
         
         if score_data["score"] >= 60:
             for strategy_id in score_data["matched_strategies"][:2]:
-                strategy = next((s for s in ALL_STRATEGIES if s["id"] == strategy_id), None)
+                strategy = next((s for s in all_strategies if s["id"] == strategy_id), None)
                 if strategy:
                     alert = {
                         "symbol": quote["symbol"],
