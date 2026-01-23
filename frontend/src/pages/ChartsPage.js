@@ -1,45 +1,219 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { RefreshCw, LineChart } from 'lucide-react';
+import { LineChart, Loader2, Wifi, WifiOff, RefreshCw } from 'lucide-react';
+import { createChart, ColorType } from 'lightweight-charts';
+import api from '../utils/api';
 
-// ===================== TRADINGVIEW WIDGET =====================
-const TradingViewWidget = ({ symbol = 'AAPL', theme = 'dark' }) => {
-  const containerRef = useRef(null);
+// ===================== IB REAL-TIME CHART =====================
+const IBRealtimeChart = ({ symbol, isConnected }) => {
+  const chartContainerRef = useRef(null);
+  const chartRef = useRef(null);
+  const candleSeriesRef = useRef(null);
+  const volumeSeriesRef = useRef(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [hasData, setHasData] = useState(false);
+  const [timeframe, setTimeframe] = useState('5 mins');
+  const [duration, setDuration] = useState('1 D');
+  const [lastUpdate, setLastUpdate] = useState(null);
 
+  // Create chart on mount
   useEffect(() => {
-    if (containerRef.current) {
-      containerRef.current.innerHTML = '';
-      
-      const script = document.createElement('script');
-      script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
-      script.type = 'text/javascript';
-      script.async = true;
-      script.innerHTML = JSON.stringify({
-        autosize: true,
-        symbol: symbol,
-        interval: 'D',
-        timezone: 'America/New_York',
-        theme: theme,
-        style: '1',
-        locale: 'en',
-        enable_publishing: false,
-        hide_top_toolbar: false,
-        hide_legend: false,
-        save_image: false,
-        calendar: false,
-        hide_volume: false,
-        support_host: 'https://www.tradingview.com',
-        backgroundColor: 'rgba(5, 5, 5, 1)',
-        gridColor: 'rgba(255, 255, 255, 0.06)',
-        studies: ['RSI@tv-basicstudies', 'MASimple@tv-basicstudies', 'MACD@tv-basicstudies']
+    if (!chartContainerRef.current || !symbol) return;
+
+    let chart = null;
+    
+    try {
+      chart = createChart(chartContainerRef.current, {
+        layout: {
+          background: { type: ColorType.Solid, color: '#0A0A0A' },
+          textColor: '#9CA3AF',
+        },
+        grid: {
+          vertLines: { color: '#1F2937' },
+          horzLines: { color: '#1F2937' },
+        },
+        width: chartContainerRef.current.clientWidth || 800,
+        height: chartContainerRef.current.clientHeight || 500,
+        timeScale: {
+          timeVisible: true,
+          secondsVisible: false,
+          borderColor: '#374151',
+        },
+        rightPriceScale: {
+          borderColor: '#374151',
+        },
+        crosshair: {
+          mode: 1,
+          vertLine: { color: '#00E5FF', width: 1, style: 2 },
+          horzLine: { color: '#00E5FF', width: 1, style: 2 },
+        },
       });
 
-      containerRef.current.appendChild(script);
+      chartRef.current = chart;
+
+      const candleSeries = chart.addCandlestickSeries({
+        upColor: '#00FF94',
+        downColor: '#FF2E2E',
+        borderUpColor: '#00FF94',
+        borderDownColor: '#FF2E2E',
+        wickUpColor: '#00FF94',
+        wickDownColor: '#FF2E2E',
+      });
+      candleSeriesRef.current = candleSeries;
+
+      const volumeSeries = chart.addHistogramSeries({
+        color: '#26a69a',
+        priceFormat: { type: 'volume' },
+        priceScaleId: '',
+        scaleMargins: { top: 0.85, bottom: 0 },
+      });
+      volumeSeriesRef.current = volumeSeries;
+
+      const handleResize = () => {
+        if (chartContainerRef.current && chart) {
+          chart.applyOptions({ 
+            width: chartContainerRef.current.clientWidth,
+            height: chartContainerRef.current.clientHeight
+          });
+        }
+      };
+      window.addEventListener('resize', handleResize);
+
+      return () => {
+        window.removeEventListener('resize', handleResize);
+        if (chart) chart.remove();
+      };
+    } catch (err) {
+      console.error('Error creating chart:', err);
     }
-  }, [symbol, theme]);
+  }, [symbol]);
+
+  // Fetch data
+  useEffect(() => {
+    if (!symbol) return;
+
+    const fetchData = async () => {
+      setLoading(true);
+      setError(null);
+      
+      try {
+        const response = await api.get(`/api/ib/historical/${symbol}?duration=${encodeURIComponent(duration)}&bar_size=${encodeURIComponent(timeframe)}`);
+        
+        if (response.data.bars && response.data.bars.length > 0) {
+          const candleData = response.data.bars.map(bar => ({
+            time: new Date(bar.date).getTime() / 1000,
+            open: bar.open,
+            high: bar.high,
+            low: bar.low,
+            close: bar.close,
+          }));
+          
+          const volumeData = response.data.bars.map(bar => ({
+            time: new Date(bar.date).getTime() / 1000,
+            value: bar.volume,
+            color: bar.close >= bar.open ? '#00FF9433' : '#FF2E2E33',
+          }));
+
+          if (candleSeriesRef.current) candleSeriesRef.current.setData(candleData);
+          if (volumeSeriesRef.current) volumeSeriesRef.current.setData(volumeData);
+          if (chartRef.current) chartRef.current.timeScale().fitContent();
+          
+          setHasData(true);
+          setLastUpdate(new Date());
+        } else {
+          setHasData(false);
+          setError('No data available. Connect to IB Gateway.');
+        }
+      } catch (err) {
+        console.error('Error fetching chart data:', err);
+        setHasData(false);
+        setError('Connect to IB Gateway for real-time charts');
+      }
+      
+      setLoading(false);
+    };
+
+    fetchData();
+    
+    // Auto-refresh every 10 seconds when connected
+    const interval = setInterval(() => {
+      if (isConnected) fetchData();
+    }, 10000);
+    
+    return () => clearInterval(interval);
+  }, [symbol, timeframe, duration, isConnected]);
+
+  const timeframes = [
+    { label: '1m', value: '1 min', duration: '1 D' },
+    { label: '5m', value: '5 mins', duration: '1 D' },
+    { label: '15m', value: '15 mins', duration: '2 D' },
+    { label: '30m', value: '30 mins', duration: '1 W' },
+    { label: '1H', value: '1 hour', duration: '1 W' },
+    { label: '4H', value: '4 hours', duration: '1 M' },
+    { label: 'D', value: '1 day', duration: '6 M' },
+    { label: 'W', value: '1 week', duration: '1 Y' },
+  ];
 
   return (
-    <div className="tradingview-widget-container h-full" ref={containerRef}>
-      <div className="tradingview-widget-container__widget h-full"></div>
+    <div className="h-full flex flex-col bg-[#0A0A0A] rounded-lg border border-white/10 overflow-hidden">
+      {/* Chart Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-[#0A0A0A]">
+        <div className="flex items-center gap-4">
+          <span className="text-xl font-bold text-white">{symbol}</span>
+          <div className="flex items-center gap-2">
+            {isConnected ? (
+              <span className="flex items-center gap-1.5 text-xs text-green-400">
+                <Wifi className="w-3 h-3" />
+                IB Real-time
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-xs text-yellow-400">
+                <WifiOff className="w-3 h-3" />
+                Disconnected
+              </span>
+            )}
+          </div>
+          {lastUpdate && (
+            <span className="text-[10px] text-zinc-500">
+              Updated: {lastUpdate.toLocaleTimeString()}
+            </span>
+          )}
+        </div>
+        
+        <div className="flex items-center gap-2">
+          {timeframes.map(tf => (
+            <button
+              key={tf.value}
+              onClick={() => { setTimeframe(tf.value); setDuration(tf.duration); }}
+              className={`px-2 py-1 text-xs rounded transition-all
+                ${timeframe === tf.value 
+                  ? 'bg-cyan-400 text-black font-medium' 
+                  : 'text-zinc-400 hover:text-white hover:bg-white/10'
+                }
+              `}
+            >
+              {tf.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      
+      {/* Chart Container */}
+      <div className="flex-1 relative min-h-[400px]">
+        {loading && !hasData && (
+          <div className="absolute inset-0 flex items-center justify-center bg-[#0A0A0A] z-10">
+            <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+          </div>
+        )}
+        {error && !hasData && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0A0A0A] z-10 p-4">
+            <LineChart className="w-16 h-16 text-zinc-700 mb-4" />
+            <span className="text-zinc-400 text-sm text-center mb-2">{error}</span>
+            <span className="text-zinc-500 text-xs">Start IB Gateway and click Connect</span>
+          </div>
+        )}
+        <div ref={chartContainerRef} className="w-full h-full" />
+      </div>
     </div>
   );
 };
@@ -48,21 +222,63 @@ const TradingViewWidget = ({ symbol = 'AAPL', theme = 'dark' }) => {
 const ChartsPage = () => {
   const [symbol, setSymbol] = useState('AAPL');
   const [inputSymbol, setInputSymbol] = useState('AAPL');
-  const popularSymbols = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'SPY', 'QQQ', 'BTC-USD'];
+  const [isConnected, setIsConnected] = useState(false);
+  const popularSymbols = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'SPY', 'QQQ', 'IWM'];
+
+  // Check IB connection status
+  useEffect(() => {
+    const checkConnection = async () => {
+      try {
+        const response = await api.get('/api/ib/status');
+        setIsConnected(response.data.connected);
+      } catch (err) {
+        setIsConnected(false);
+      }
+    };
+    
+    checkConnection();
+    const interval = setInterval(checkConnection, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleConnect = async () => {
+    try {
+      await api.post('/api/ib/connect');
+      setIsConnected(true);
+    } catch (err) {
+      console.error('Failed to connect:', err);
+    }
+  };
 
   const handleSymbolChange = () => {
     setSymbol(inputSymbol.toUpperCase());
   };
 
   return (
-    <div className="space-y-6 animate-fade-in" data-testid="charts-page">
+    <div className="space-y-4 animate-fade-in h-full" data-testid="charts-page">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <LineChart className="w-6 h-6 text-primary" />
-            TradingView Charts
+            Real-Time Charts
           </h1>
-          <p className="text-zinc-500 text-sm">Professional charting with technical indicators</p>
+          <p className="text-zinc-500 text-sm">IB Gateway powered real-time charting</p>
+        </div>
+        
+        {/* Connection Status */}
+        <div className="flex items-center gap-3">
+          <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`} />
+          <span className="text-xs text-zinc-400">
+            {isConnected ? 'IB Connected' : 'Disconnected'}
+          </span>
+          {!isConnected && (
+            <button
+              onClick={handleConnect}
+              className="text-xs px-3 py-1.5 bg-cyan-400 text-black font-medium rounded hover:bg-cyan-300 transition-colors"
+            >
+              Connect
+            </button>
+          )}
         </div>
       </div>
 
@@ -111,8 +327,8 @@ const ChartsPage = () => {
       </div>
 
       {/* Chart Container */}
-      <div className="bg-paper rounded-lg border border-white/10 overflow-hidden" style={{ height: 'calc(100vh - 300px)', minHeight: '500px' }}>
-        <TradingViewWidget symbol={symbol} theme="dark" />
+      <div className="bg-paper rounded-lg border border-white/10 overflow-hidden" style={{ height: 'calc(100vh - 320px)', minHeight: '500px' }}>
+        <IBRealtimeChart symbol={symbol} isConnected={isConnected} />
       </div>
     </div>
   );
