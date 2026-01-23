@@ -151,6 +151,32 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 - New API endpoints: search, categories, CRUD operations
 - Significantly reduced `server.py` file size (~450 lines removed)
 
+### Phase 9 - Universal Scoring Engine ✅ NEW (Jan 2026)
+- **Comprehensive stock scoring system (0-100)** with letter grades (A+ to D)
+- **Five scoring categories:**
+  - Technical (35%): VWAP position, RVOL by market cap, Gap%, MA distance, pattern recognition
+  - Fundamental (20%): VectorVest-style scoring (Value, Safety, Growth, Timing)
+  - Catalyst (20%): SMB system + major fundamental changes (earnings surprises, news)
+  - Risk (10%): Float requirements, short interest, R:R ratio, liquidity
+  - Context (15%): Market regime alignment, sector strength, strategy matching
+- **User's custom rules integrated:**
+  - Above VWAP = prioritize LONG, Below VWAP = prioritize SHORT
+  - RVOL thresholds: 5x small cap, 3x mid cap, 2x large cap
+  - Gap threshold: ≥4%
+  - Extended above MAs = mean reversion SHORT, Extended below = rubber band LONG
+  - Minimum 50M float
+  - Short squeeze watchlist (>20% SI + 250K shares available)
+- **Direction bias calculation:** STRONG_LONG, LONG, NEUTRAL, SHORT, STRONG_SHORT
+- **Timeframe recommendations:** Intraday, Swing, Long-term
+- **3 key support/resistance levels** per ticker
+- **Success probability (20-90%)** based on rule compliance and historical patterns
+- **API endpoints:**
+  - `POST /api/scoring/analyze` - Single stock analysis
+  - `POST /api/scoring/batch` - Multiple stocks
+  - `POST /api/scoring/top-picks` - Filtered top picks
+  - `GET /api/scoring/criteria` - View scoring weights/rules
+  - `GET /api/scoring/timeframes` - Timeframe criteria
+
 ### Phase 8 - Trade Opportunities Dashboard ✅ (Dec 2025 - Jan 2026)
 - **New consolidated "Trade Opportunities" page** - Replaces multiple scattered pages
 - **IB Market Scanner Integration** - Scan US stocks in real-time via IB API:
