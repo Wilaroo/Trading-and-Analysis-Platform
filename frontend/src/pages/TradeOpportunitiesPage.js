@@ -1314,7 +1314,25 @@ const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
   const [historicalData, setHistoricalData] = useState(null);
   const [loading, setLoading] = useState(true);
   
-  const { symbol, quote } = opportunity || {};
+  // Stop-Loss / Take-Profit state
+  const [entryPrice, setEntryPrice] = useState(null);
+  const [stopLoss, setStopLoss] = useState(null);
+  const [takeProfit, setTakeProfit] = useState(null);
+  const [showLevels, setShowLevels] = useState(false);
+  
+  const { symbol, quote, features } = opportunity || {};
+  
+  // Calculate suggested SL/TP based on ATR
+  useEffect(() => {
+    if (quote?.price) {
+      const price = quote.price;
+      const atr = features?.atr_14 || price * 0.02; // Default 2% if no ATR
+      
+      setEntryPrice(price);
+      setStopLoss(parseFloat((price - atr * 1.5).toFixed(2)));
+      setTakeProfit(parseFloat((price + atr * 3).toFixed(2)));
+    }
+  }, [quote, features]);
   
   useEffect(() => {
     if (!symbol) return;
@@ -1335,6 +1353,11 @@ const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
   }, [symbol]);
 
   if (!opportunity) return null;
+
+  // Calculate R:R ratio
+  const riskPerShare = entryPrice && stopLoss ? entryPrice - stopLoss : 0;
+  const rewardPerShare = entryPrice && takeProfit ? takeProfit - entryPrice : 0;
+  const rrRatio = riskPerShare > 0 ? (rewardPerShare / riskPerShare).toFixed(1) : 0;
 
   const tabs = [
     { id: 'overview', label: 'Overview', icon: BarChart3 },
