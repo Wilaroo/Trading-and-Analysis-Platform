@@ -747,6 +747,66 @@ class IBService:
             raise ConnectionError(response.error)
         return response.data
     
+    async def run_scanner(
+        self,
+        scan_type: str = "TOP_PERC_GAIN",
+        instrument: str = "STK",
+        location: str = "STK.US.MAJOR",
+        max_results: int = 50
+    ) -> List[Dict]:
+        """Run IB market scanner
+        
+        Scan types include:
+        - TOP_PERC_GAIN: Top % gainers
+        - TOP_PERC_LOSE: Top % losers
+        - MOST_ACTIVE: Most active by volume
+        - HOT_BY_VOLUME: Hot by volume
+        - HIGH_OPEN_GAP: High opening gap
+        - LOW_OPEN_GAP: Low opening gap
+        - GAP_UP: Gap up stocks
+        - GAP_DOWN: Gap down stocks
+        - TOP_TRADE_COUNT: Most trades
+        - HIGH_VS_13W_HL: Near 13-week high
+        - LOW_VS_13W_HL: Near 13-week low
+        - HIGH_VS_52W_HL: Near 52-week high
+        - LOW_VS_52W_HL: Near 52-week low
+        """
+        response = self._send_request(
+            IBCommand.RUN_SCANNER,
+            {
+                "scan_type": scan_type,
+                "instrument": instrument,
+                "location": location,
+                "max_results": max_results
+            },
+            timeout=60.0
+        )
+        if not response.success:
+            raise ConnectionError(response.error)
+        return response.data
+    
+    async def get_quotes_batch(self, symbols: List[str]) -> List[Dict]:
+        """Get quotes for multiple symbols"""
+        response = self._send_request(
+            IBCommand.GET_QUOTES_BATCH,
+            {"symbols": symbols},
+            timeout=30.0
+        )
+        if not response.success:
+            raise ConnectionError(response.error)
+        return response.data
+    
+    async def get_fundamentals(self, symbol: str) -> Dict:
+        """Get fundamental data for a symbol"""
+        response = self._send_request(
+            IBCommand.GET_FUNDAMENTALS,
+            {"symbol": symbol},
+            timeout=30.0
+        )
+        if not response.success:
+            raise ConnectionError(response.error)
+        return response.data
+    
     def shutdown(self):
         """Shutdown the worker thread"""
         if self._worker_thread and self._worker_thread.is_alive():
