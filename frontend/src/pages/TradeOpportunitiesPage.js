@@ -171,9 +171,9 @@ const IBChart = ({ symbol }) => {
     
     try {
       // Create chart
-      chart = createChart(chartContainerRef.current, {
+      chart = LightweightCharts.createChart(chartContainerRef.current, {
         layout: {
-          background: { type: ColorType.Solid, color: '#0A0A0A' },
+          background: { type: 'solid', color: '#0A0A0A' },
           textColor: '#9CA3AF',
         },
         grid: {
