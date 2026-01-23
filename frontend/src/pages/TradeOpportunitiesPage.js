@@ -1489,6 +1489,17 @@ const TradeOpportunitiesPage = () => {
 
   return (
     <div className="min-h-screen bg-[#050505] text-white">
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toast && (
+          <Toast 
+            message={toast.message} 
+            type={toast.type} 
+            onClose={() => setToast(null)} 
+          />
+        )}
+      </AnimatePresence>
+      
       {/* Header */}
       <div className="border-b border-white/10 px-6 py-4">
         <div className="flex items-center justify-between">
