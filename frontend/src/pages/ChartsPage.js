@@ -17,14 +17,14 @@ const IBRealtimeChart = ({ symbol, isConnected }) => {
   const [lastUpdate, setLastUpdate] = useState(null);
 
   const timeframes = [
-    { label: '1m', value: '1 min', duration: '1 D' },
-    { label: '5m', value: '5 mins', duration: '1 D' },
-    { label: '15m', value: '15 mins', duration: '2 D' },
-    { label: '30m', value: '30 mins', duration: '1 W' },
-    { label: '1H', value: '1 hour', duration: '1 W' },
-    { label: '4H', value: '4 hours', duration: '1 M' },
-    { label: 'D', value: '1 day', duration: '6 M' },
-    { label: 'W', value: '1 week', duration: '1 Y' },
+    { label: '1m', value: '1 min', dur: '1 D' },
+    { label: '5m', value: '5 mins', dur: '1 D' },
+    { label: '15m', value: '15 mins', dur: '2 D' },
+    { label: '30m', value: '30 mins', dur: '1 W' },
+    { label: '1H', value: '1 hour', dur: '1 W' },
+    { label: '4H', value: '4 hours', dur: '1 M' },
+    { label: 'D', value: '1 day', dur: '6 M' },
+    { label: 'W', value: '1 week', dur: '1 Y' },
   ];
 
   // Create chart on mount
@@ -95,12 +95,8 @@ const IBRealtimeChart = ({ symbol, isConnected }) => {
         };
         window.addEventListener('resize', handleResize);
 
-        return () => {
-          window.removeEventListener('resize', handleResize);
-        };
       } catch (err) {
         console.error('Error creating chart:', err);
-        setError('Failed to initialize chart');
       }
     }, 100);
 
@@ -111,15 +107,6 @@ const IBRealtimeChart = ({ symbol, isConnected }) => {
         chartRef.current = null;
       }
     };
-  }, [symbol]);
-
-      return () => {
-        window.removeEventListener('resize', handleResize);
-        if (chart) chart.remove();
-      };
-    } catch (err) {
-      console.error('Error creating chart:', err);
-    }
   }, [symbol]);
 
   // Fetch data
@@ -177,17 +164,6 @@ const IBRealtimeChart = ({ symbol, isConnected }) => {
     return () => clearInterval(interval);
   }, [symbol, timeframe, duration, isConnected]);
 
-  const timeframes = [
-    { label: '1m', value: '1 min', duration: '1 D' },
-    { label: '5m', value: '5 mins', duration: '1 D' },
-    { label: '15m', value: '15 mins', duration: '2 D' },
-    { label: '30m', value: '30 mins', duration: '1 W' },
-    { label: '1H', value: '1 hour', duration: '1 W' },
-    { label: '4H', value: '4 hours', duration: '1 M' },
-    { label: 'D', value: '1 day', duration: '6 M' },
-    { label: 'W', value: '1 week', duration: '1 Y' },
-  ];
-
   return (
     <div className="h-full flex flex-col bg-[#0A0A0A] rounded-lg border border-white/10 overflow-hidden">
       {/* Chart Header */}
@@ -218,7 +194,7 @@ const IBRealtimeChart = ({ symbol, isConnected }) => {
           {timeframes.map(tf => (
             <button
               key={tf.value}
-              onClick={() => { setTimeframe(tf.value); setDuration(tf.duration); }}
+              onClick={() => { setTimeframe(tf.value); setDuration(tf.dur); }}
               className={`px-2 py-1 text-xs rounded transition-all
                 ${timeframe === tf.value 
                   ? 'bg-cyan-400 text-black font-medium' 
@@ -233,7 +209,7 @@ const IBRealtimeChart = ({ symbol, isConnected }) => {
       </div>
       
       {/* Chart Container */}
-      <div className="flex-1 relative min-h-[400px]">
+      <div className="flex-1 relative" style={{ minHeight: '400px' }}>
         {loading && !hasData && (
           <div className="absolute inset-0 flex items-center justify-center bg-[#0A0A0A] z-10">
             <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
@@ -246,7 +222,7 @@ const IBRealtimeChart = ({ symbol, isConnected }) => {
             <span className="text-zinc-500 text-xs">Start IB Gateway and click Connect</span>
           </div>
         )}
-        <div ref={chartContainerRef} className="w-full h-full" />
+        <div ref={chartContainerRef} className="absolute inset-0" />
       </div>
     </div>
   );
