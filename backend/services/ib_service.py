@@ -472,6 +472,137 @@ class IBWorkerThread(threading.Thread):
             
         except Exception as e:
             return IBResponse(success=False, error=str(e))
+    
+    def _do_run_scanner(self, params: Dict) -> IBResponse:
+        """Run IB market scanner"""
+        if not self.ib or not self.ib.isConnected():
+            return IBResponse(success=False, error="Not connected to IB")
+        
+        try:
+            from ib_insync import ScannerSubscription
+            
+            scan_type = params.get("scan_type", "TOP_PERC_GAIN")
+            instrument = params.get("instrument", "STK")
+            location = params.get("location", "STK.US.MAJOR")
+            max_results = params.get("max_results", 50)
+            
+            # Create scanner subscription
+            sub = ScannerSubscription(
+                instrument=instrument,
+                locationCode=location,
+                scanCode=scan_type,
+                numberOfRows=max_results,
+                abovePrice=5.0,
+                belowPrice=10000.0,
+                aboveVolume=100000,
+                marketCapAbove=100000000,  # $100M minimum
+            )
+            
+            # Run the scan
+            scan_results = self.ib.reqScannerData(sub)
+            self.ib.sleep(2)  # Wait for results
+            
+            results = []
+            for item in scan_results:
+                contract = item.contractDetails.contract
+                results.append({
+                    "symbol": contract.symbol,
+                    "sec_type": contract.secType,
+                    "exchange": contract.primaryExchange or contract.exchange,
+                    "currency": contract.currency,
+                    "rank": item.rank,
+                    "distance": getattr(item, 'distance', None),
+                    "benchmark": getattr(item, 'benchmark', None),
+                    "projection": getattr(item, 'projection', None),
+                    "legs_str": getattr(item, 'legsStr', None),
+                })
+            
+            return IBResponse(success=True, data=results)
+            
+        except Exception as e:
+            logger.error(f"Error running scanner: {e}")
+            return IBResponse(success=False, error=str(e))
+    
+    def _do_get_quotes_batch(self, symbols: List[str]) -> IBResponse:
+        """Get quotes for multiple symbols"""
+        if not self.ib or not self.ib.isConnected():
+            return IBResponse(success=False, error="Not connected to IB")
+        
+        try:
+            from ib_insync import Stock
+            
+            quotes = []
+            contracts = []
+            
+            # Create and qualify contracts
+            for symbol in symbols[:50]:  # Limit to 50 at a time
+                contract = Stock(symbol.upper(), "SMART", "USD")
+                contracts.append(contract)
+            
+            self.ib.qualifyContracts(*contracts)
+            
+            # Request market data for all
+            tickers = []
+            for contract in contracts:
+                ticker = self.ib.reqMktData(contract, "", True, False)
+                tickers.append((contract.symbol, ticker))
+            
+            self.ib.sleep(2)  # Wait for data
+            
+            for symbol, ticker in tickers:
+                if ticker:
+                    price = ticker.last if ticker.last and ticker.last > 0 else ticker.close
+                    prev_close = ticker.close if ticker.close else 0
+                    change = (price - prev_close) if price and prev_close else 0
+                    change_pct = (change / prev_close * 100) if prev_close else 0
+                    
+                    quotes.append({
+                        "symbol": symbol,
+                        "price": price or 0,
+                        "bid": ticker.bid if ticker.bid else 0,
+                        "ask": ticker.ask if ticker.ask else 0,
+                        "volume": int(ticker.volume) if ticker.volume else 0,
+                        "change": round(change, 2),
+                        "change_percent": round(change_pct, 2),
+                        "high": ticker.high if ticker.high else 0,
+                        "low": ticker.low if ticker.low else 0,
+                        "open": ticker.open if ticker.open else 0,
+                        "prev_close": prev_close,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+            
+            return IBResponse(success=True, data=quotes)
+            
+        except Exception as e:
+            logger.error(f"Error getting batch quotes: {e}")
+            return IBResponse(success=False, error=str(e))
+    
+    def _do_get_fundamentals(self, symbol: str) -> IBResponse:
+        """Get fundamental data for a symbol"""
+        if not self.ib or not self.ib.isConnected():
+            return IBResponse(success=False, error="Not connected to IB")
+        
+        try:
+            from ib_insync import Stock
+            
+            contract = Stock(symbol.upper(), "SMART", "USD")
+            self.ib.qualifyContracts(contract)
+            
+            # Get fundamental data - this returns XML string
+            fundamentals = self.ib.reqFundamentalData(contract, "ReportSnapshot")
+            
+            # Basic parsing of key metrics (IB returns XML)
+            data = {
+                "symbol": symbol.upper(),
+                "raw_data": fundamentals[:1000] if fundamentals else None,  # Truncate for response
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+            return IBResponse(success=True, data=data)
+            
+        except Exception as e:
+            logger.error(f"Error getting fundamentals: {e}")
+            return IBResponse(success=False, error=str(e))
 
 
 class IBService:
