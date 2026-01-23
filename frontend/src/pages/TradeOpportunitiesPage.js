@@ -616,6 +616,30 @@ const TradeOpportunitiesPage = () => {
     return () => clearInterval(interval);
   }, [isConnected]);
   
+  // Load market context
+  useEffect(() => {
+    const loadMarketContext = async () => {
+      try {
+        const response = await api.get('/api/market-context');
+        if (response.data) {
+          setMarketContext({
+            regime: response.data.regime || response.data.market_context || 'Unknown',
+            spy_change: response.data.spy?.change_percent || 0,
+            qqq_change: response.data.qqq?.change_percent || 0,
+            vix: response.data.vix?.price || '--',
+            rvol: response.data.rvol || '--'
+          });
+        }
+      } catch (err) {
+        console.error('Failed to load market context:', err);
+      }
+    };
+    
+    loadMarketContext();
+    const interval = setInterval(loadMarketContext, 60000); // Every minute
+    return () => clearInterval(interval);
+  }, []);
+  
   // Connect to IB
   const handleConnect = async () => {
     try {
