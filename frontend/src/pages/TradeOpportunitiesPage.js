@@ -1659,17 +1659,19 @@ const TradeOpportunitiesPage = () => {
     setError(null);
     
     try {
-      console.log('Running scanner:', selectedScanType);
+      console.log('Running enhanced scanner:', selectedScanType);
       
-      // Run IB scanner
-      const scanResponse = await api.post('/api/ib/scanner', {
+      // Run enhanced IB scanner with conviction scoring
+      const scanResponse = await api.post('/api/ib/scanner/enhanced', {
         scan_type: selectedScanType,
-        max_results: 50
+        max_results: 30,
+        calculate_features: true
       });
       
-      console.log('Scanner response:', scanResponse.data);
+      console.log('Enhanced scanner response:', scanResponse.data);
       
       const scanResults = scanResponse.data.results || [];
+      const highConvictionCount = scanResponse.data.high_conviction_count || 0;
       
       if (scanResults.length === 0) {
         console.log('No scanner results');
@@ -1679,28 +1681,11 @@ const TradeOpportunitiesPage = () => {
         return;
       }
       
-      console.log('Scanner found', scanResults.length, 'symbols');
+      console.log('Scanner found', scanResults.length, 'symbols,', highConvictionCount, 'high conviction');
       
-      // Get quotes for scanned symbols
-      const symbols = scanResults.map(r => r.symbol);
-      let quotes = [];
-      
-      try {
-        const quotesResponse = await api.post('/api/ib/quotes/batch', symbols);
-        quotes = quotesResponse.data.quotes || [];
-        console.log('Got quotes for', quotes.length, 'symbols');
-      } catch (quoteErr) {
-        console.error('Error getting quotes:', quoteErr);
-        // Continue without quotes
-      }
-      
-      // Create quote lookup
-      const quoteLookup = {};
-      quotes.forEach(q => { quoteLookup[q.symbol] = q; });
-      
-      // Match strategies and create opportunities
+      // Map results to opportunities with conviction data
       const opps = scanResults.map(result => {
-        const quote = quoteLookup[result.symbol] || { 
+        const quote = result.quote || { 
           symbol: result.symbol, 
           price: 0, 
           change_percent: 0,
@@ -1712,7 +1697,6 @@ const TradeOpportunitiesPage = () => {
         
         if (strategies.length > 0) {
           if (selectedScanType === 'TOP_PERC_GAIN' || selectedScanType === 'HIGH_OPEN_GAP') {
-            // Match bullish intraday strategies
             matchedStrategies = strategies.filter(s => 
               s.category === 'intraday' && (
                 s.name.toLowerCase().includes('momentum') || 
@@ -1723,7 +1707,6 @@ const TradeOpportunitiesPage = () => {
               )
             );
           } else if (selectedScanType === 'TOP_PERC_LOSE' || selectedScanType === 'LOW_OPEN_GAP') {
-            // Match bearish/fade strategies
             matchedStrategies = strategies.filter(s => 
               s.category === 'intraday' && (
                 s.name.toLowerCase().includes('fade') || 
@@ -1732,7 +1715,6 @@ const TradeOpportunitiesPage = () => {
               )
             );
           } else if (selectedScanType === 'MOST_ACTIVE' || selectedScanType === 'HOT_BY_VOLUME') {
-            // Match high volume strategies
             matchedStrategies = strategies.filter(s => 
               s.category === 'intraday' && (
                 s.name.toLowerCase().includes('volume') ||
@@ -1741,18 +1723,15 @@ const TradeOpportunitiesPage = () => {
               )
             );
           } else if (selectedScanType === 'HIGH_VS_52W_HL') {
-            // Match breakout strategies for 52W highs
             matchedStrategies = strategies.filter(s => 
               s.name.toLowerCase().includes('breakout') ||
               s.name.toLowerCase().includes('trend') ||
               s.category === 'swing'
             );
           } else {
-            // Default: get some intraday strategies
             matchedStrategies = strategies.filter(s => s.category === 'intraday');
           }
           
-          // Limit to top 5
           matchedStrategies = matchedStrategies.slice(0, 5);
         }
         
@@ -1762,7 +1741,11 @@ const TradeOpportunitiesPage = () => {
           quote,
           strategies: matchedStrategies,
           catalystScore: null,
-          marketContext: marketContext?.regime || 'Unknown'
+          marketContext: marketContext?.regime || 'Unknown',
+          // New conviction data
+          conviction: result.conviction,
+          features: result.features,
+          highConviction: result.high_conviction
         };
       });
       
