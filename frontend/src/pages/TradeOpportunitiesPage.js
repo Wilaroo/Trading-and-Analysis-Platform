@@ -151,7 +151,7 @@ const playTradeSound = (type = 'success') => {
 };
 
 // ===================== IB REAL-TIME CHART COMPONENT =====================
-const IBChart = ({ symbol }) => {
+const IBChart = ({ symbol, entryPrice, stopLoss, takeProfit }) => {
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
