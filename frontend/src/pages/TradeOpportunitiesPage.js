@@ -1313,26 +1313,33 @@ const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
   const [activeTab, setActiveTab] = useState('overview');
   const [historicalData, setHistoricalData] = useState(null);
   const [loading, setLoading] = useState(true);
-  
-  // Stop-Loss / Take-Profit state
-  const [entryPrice, setEntryPrice] = useState(null);
-  const [stopLoss, setStopLoss] = useState(null);
-  const [takeProfit, setTakeProfit] = useState(null);
   const [showLevels, setShowLevels] = useState(false);
+  
+  // Manual override state for SL/TP
+  const [manualEntry, setManualEntry] = useState(null);
+  const [manualSL, setManualSL] = useState(null);
+  const [manualTP, setManualTP] = useState(null);
   
   const { symbol, quote, features } = opportunity || {};
   
   // Calculate suggested SL/TP based on ATR
-  useEffect(() => {
-    if (quote?.price) {
-      const price = quote.price;
-      const atr = features?.atr_14 || price * 0.02; // Default 2% if no ATR
-      
-      setEntryPrice(price);
-      setStopLoss(parseFloat((price - atr * 1.5).toFixed(2)));
-      setTakeProfit(parseFloat((price + atr * 3).toFixed(2)));
-    }
+  const suggestedLevels = useMemo(() => {
+    if (!quote?.price) return { entry: 0, sl: 0, tp: 0 };
+    
+    const price = quote.price;
+    const atr = features?.atr_14 || price * 0.02; // Default 2% if no ATR
+    
+    return {
+      entry: price,
+      sl: parseFloat((price - atr * 1.5).toFixed(2)),
+      tp: parseFloat((price + atr * 3).toFixed(2))
+    };
   }, [quote, features]);
+  
+  // Use manual values if set, otherwise use suggested
+  const entryPrice = manualEntry ?? suggestedLevels.entry;
+  const stopLoss = manualSL ?? suggestedLevels.sl;
+  const takeProfit = manualTP ?? suggestedLevels.tp;
   
   useEffect(() => {
     if (!symbol) return;
