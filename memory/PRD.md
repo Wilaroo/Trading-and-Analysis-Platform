@@ -130,7 +130,7 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 - Game plan and daily routine frameworks
 - Common mistakes avoidance
 
-### Phase 6 - Interactive Brokers Integration ✅ NEW (Jan 22, 2026)
+### Phase 6 - Interactive Brokers Integration ✅ (Jan 22, 2026)
 - IB Gateway connection (port 4002 for paper trading)
 - Account summary with net liquidation, buying power, cash
 - Position tracking from IB
@@ -141,6 +141,15 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
   - All IB operations now run in dedicated `IBWorkerThread` with its own event loop
   - Queue-based communication between FastAPI and IB thread for Windows compatibility
   - Eliminates asyncio event loop conflicts with ib_insync on Python 3.11+
+
+### Phase 7 - Backend Refactoring ✅ NEW (Dec 2025)
+- **Migrated 77 strategies from hardcoded data to MongoDB**
+- Created `/app/backend/services/strategy_service.py` for strategy CRUD operations
+- Created `/app/backend/routers/strategies.py` for strategy API endpoints
+- Created `/app/backend/data/strategies_data.py` to store strategy seed data
+- Auto-seeds strategies on first startup
+- New API endpoints: search, categories, CRUD operations
+- Significantly reduced `server.py` file size (~450 lines removed)
 
 ## API Endpoints
 
