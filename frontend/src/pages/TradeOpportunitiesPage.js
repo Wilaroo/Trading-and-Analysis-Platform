@@ -977,13 +977,7 @@ const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
                 </div>
                 
                 {/* Chart Placeholder */}
-                <div className="bg-zinc-900 rounded-lg p-4 h-64 flex items-center justify-center">
-                  {loading ? (
-                    <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
-                  ) : (
-                    <p className="text-zinc-500">TradingView Chart Integration</p>
-                  )}
-                </div>
+                <IBChart symbol={symbol} />
                 
                 {/* Strategy Matches */}
                 <div>
