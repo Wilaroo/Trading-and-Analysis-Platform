@@ -1068,17 +1068,24 @@ const TradeOpportunitiesPage = () => {
     };
   }, [autoScan, isConnected, runScanner]);
   
-  // Handle trade
+  // Handle trade - Opens quick trade modal
   const handleTrade = async (opportunity, action) => {
-    try {
-      // For now, just log the trade intent
-      console.log(`Trade: ${action} ${opportunity.symbol}`);
-      
-      // Could open a trade modal or directly place order
-      alert(`Would ${action} ${opportunity.symbol} - Implement order modal`);
-    } catch (err) {
-      console.error('Trade error:', err);
-    }
+    setTradeModal({
+      isOpen: true,
+      opportunity,
+      action
+    });
+  };
+  
+  // Handle successful trade
+  const handleTradeSuccess = (orderData) => {
+    console.log('Trade successful:', orderData);
+    // Optionally refresh positions/account data
+  };
+  
+  // Close trade modal
+  const closeTradeModal = () => {
+    setTradeModal({ isOpen: false, opportunity: null, action: null });
   };
 
   return (
