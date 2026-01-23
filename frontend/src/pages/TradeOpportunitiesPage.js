@@ -498,6 +498,334 @@ const Toast = ({ message, type = 'success', onClose }) => {
   );
 };
 
+// ===================== TOP PICKS PANEL =====================
+const TopPicksPanel = ({ opportunities, isConnected, onTrade, onSelectTicker }) => {
+  const [timeframe, setTimeframe] = useState('all');
+  const [direction, setDirection] = useState('all');
+  const [scoredPicks, setScoredPicks] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+
+  // Score opportunities when they change
+  useEffect(() => {
+    const scoreOpportunities = async () => {
+      if (!opportunities || opportunities.length === 0) {
+        setScoredPicks([]);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        // Prepare stock data for scoring
+        const stocksToScore = opportunities.map(opp => ({
+          symbol: opp.symbol,
+          current_price: opp.quote?.price || 0,
+          vwap: opp.quote?.vwap || opp.quote?.price || 0,
+          rvol: opp.quote?.rvol || 1,
+          gap_percent: opp.quote?.change_percent || 0,
+          market_cap: opp.quote?.market_cap || 10000000000,
+          high: opp.quote?.high || opp.quote?.price || 0,
+          low: opp.quote?.low || opp.quote?.price || 0,
+          prev_close: opp.quote?.prev_close || opp.quote?.price || 0,
+          volume: opp.quote?.volume || 0,
+          avg_volume: opp.quote?.avg_volume || 1000000,
+          float_shares: opp.quote?.float || 50000000,
+          patterns: opp.matched_strategies?.map(s => s.name) || []
+        }));
+
+        const response = await api.post('/api/scoring/batch', {
+          stocks: stocksToScore,
+          market_data: { regime: 'neutral' }
+        });
+
+        if (response.data.scores) {
+          setScoredPicks(response.data.scores);
+        }
+      } catch (err) {
+        console.error('Error scoring opportunities:', err);
+        // Fallback: create basic scores from existing data
+        const basicScores = opportunities.map(opp => ({
+          symbol: opp.symbol,
+          composite_score: 50 + (opp.quote?.change_percent || 0) * 2,
+          grade: 'C',
+          direction: opp.quote?.change_percent > 0 ? 'LONG' : 'SHORT',
+          primary_timeframe: 'intraday',
+          success_probability: { probability: 50, confidence: 'MEDIUM' },
+          key_levels: { support_levels: [], resistance_levels: [] },
+          quick_stats: {
+            rvol: opp.quote?.rvol || 1,
+            gap_pct: opp.quote?.change_percent || 0,
+            vwap_position: 'UNKNOWN'
+          }
+        }));
+        setScoredPicks(basicScores);
+      }
+      setLoading(false);
+    };
+
+    scoreOpportunities();
+  }, [opportunities]);
+
+  // Filter picks
+  const filteredPicks = scoredPicks.filter(pick => {
+    if (timeframe !== 'all' && pick.primary_timeframe !== timeframe) return false;
+    if (direction === 'long' && !pick.direction?.includes('LONG')) return false;
+    if (direction === 'short' && !pick.direction?.includes('SHORT')) return false;
+    return true;
+  }).slice(0, 10);
+
+  const getGradeColor = (grade) => {
+    if (grade?.startsWith('A')) return 'text-green-400';
+    if (grade?.startsWith('B')) return 'text-cyan-400';
+    if (grade?.startsWith('C')) return 'text-yellow-400';
+    return 'text-red-400';
+  };
+
+  const getDirectionIcon = (dir) => {
+    if (dir?.includes('LONG')) return <TrendingUp className="w-4 h-4 text-green-400" />;
+    if (dir?.includes('SHORT')) return <TrendingDown className="w-4 h-4 text-red-400" />;
+    return <Activity className="w-4 h-4 text-zinc-400" />;
+  };
+
+  const getProbabilityColor = (prob) => {
+    if (prob >= 70) return 'text-green-400';
+    if (prob >= 50) return 'text-yellow-400';
+    return 'text-red-400';
+  };
+
+  return (
+    <Card className="mb-4">
+      {/* Header */}
+      <div 
+        className="flex items-center justify-between cursor-pointer"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-center gap-2">
+          <Target className="w-5 h-5 text-cyan-400" />
+          <h3 className="text-sm font-bold uppercase tracking-wider">Top Picks</h3>
+          <span className="text-xs text-zinc-500">({filteredPicks.length})</span>
+        </div>
+        <ChevronRight className={`w-4 h-4 text-zinc-400 transition-transform ${expanded ? 'rotate-90' : ''}`} />
+      </div>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            {/* Filters */}
+            <div className="flex gap-2 mt-3 mb-3">
+              {/* Timeframe Filter */}
+              <div className="flex gap-1">
+                {[
+                  { id: 'all', label: 'All' },
+                  { id: 'intraday', label: 'Day' },
+                  { id: 'swing', label: 'Swing' },
+                  { id: 'longterm', label: 'Long' }
+                ].map(tf => (
+                  <button
+                    key={tf.id}
+                    onClick={(e) => { e.stopPropagation(); setTimeframe(tf.id); }}
+                    className={`px-2 py-1 text-[10px] rounded transition-all
+                      ${timeframe === tf.id 
+                        ? 'bg-cyan-400 text-black font-medium' 
+                        : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                      }
+                    `}
+                  >
+                    {tf.label}
+                  </button>
+                ))}
+              </div>
+              
+              {/* Direction Filter */}
+              <div className="flex gap-1 ml-2">
+                {[
+                  { id: 'all', label: 'All', icon: null },
+                  { id: 'long', label: '↑', icon: null },
+                  { id: 'short', label: '↓', icon: null }
+                ].map(d => (
+                  <button
+                    key={d.id}
+                    onClick={(e) => { e.stopPropagation(); setDirection(d.id); }}
+                    className={`px-2 py-1 text-[10px] rounded transition-all
+                      ${direction === d.id 
+                        ? d.id === 'long' ? 'bg-green-500 text-black font-medium'
+                          : d.id === 'short' ? 'bg-red-500 text-white font-medium'
+                          : 'bg-cyan-400 text-black font-medium'
+                        : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                      }
+                    `}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Loading State */}
+            {loading && (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="w-5 h-5 text-cyan-400 animate-spin" />
+                <span className="text-xs text-zinc-500 ml-2">Scoring...</span>
+              </div>
+            )}
+
+            {/* No Picks */}
+            {!loading && filteredPicks.length === 0 && (
+              <div className="text-center py-4">
+                <p className="text-xs text-zinc-500">No picks available. Run a scan first.</p>
+              </div>
+            )}
+
+            {/* Picks List */}
+            {!loading && filteredPicks.length > 0 && (
+              <div className="space-y-2">
+                {filteredPicks.map((pick, idx) => (
+                  <motion.div
+                    key={pick.symbol}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: idx * 0.05 }}
+                    className="bg-zinc-900/50 rounded-lg p-3 hover:bg-zinc-800/50 transition-colors cursor-pointer"
+                    onClick={() => onSelectTicker && onSelectTicker(pick)}
+                  >
+                    {/* Top Row: Symbol, Score, Direction */}
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-white">{pick.symbol}</span>
+                        <span className={`text-lg font-bold ${getGradeColor(pick.grade)}`}>
+                          {pick.grade}
+                        </span>
+                        <span className="text-xs text-zinc-500">
+                          ({pick.composite_score?.toFixed(0)})
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {getDirectionIcon(pick.direction)}
+                        <span className={`text-xs font-medium ${
+                          pick.direction?.includes('LONG') ? 'text-green-400' : 
+                          pick.direction?.includes('SHORT') ? 'text-red-400' : 'text-zinc-400'
+                        }`}>
+                          {pick.direction?.replace('STRONG_', '⚡')}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Middle Row: Stats */}
+                    <div className="flex items-center gap-4 text-[10px] mb-2">
+                      <span className="text-zinc-500">
+                        RVOL: <span className="text-white">{pick.quick_stats?.rvol?.toFixed(1) || '-'}</span>
+                      </span>
+                      <span className="text-zinc-500">
+                        Gap: <span className={pick.quick_stats?.gap_pct > 0 ? 'text-green-400' : 'text-red-400'}>
+                          {pick.quick_stats?.gap_pct?.toFixed(1) || 0}%
+                        </span>
+                      </span>
+                      <span className="text-zinc-500">
+                        VWAP: <span className="text-white">{pick.quick_stats?.vwap_position || '-'}</span>
+                      </span>
+                      <span className={`px-1.5 py-0.5 rounded ${
+                        pick.primary_timeframe === 'intraday' ? 'bg-purple-500/20 text-purple-400' :
+                        pick.primary_timeframe === 'swing' ? 'bg-blue-500/20 text-blue-400' :
+                        'bg-green-500/20 text-green-400'
+                      }`}>
+                        {pick.primary_timeframe?.toUpperCase()}
+                      </span>
+                    </div>
+
+                    {/* Success Probability */}
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-zinc-500">Success:</span>
+                        <div className="flex items-center gap-1">
+                          <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                            <div 
+                              className={`h-full rounded-full ${
+                                pick.success_probability?.probability >= 70 ? 'bg-green-400' :
+                                pick.success_probability?.probability >= 50 ? 'bg-yellow-400' :
+                                'bg-red-400'
+                              }`}
+                              style={{ width: `${pick.success_probability?.probability || 0}%` }}
+                            />
+                          </div>
+                          <span className={`text-xs font-mono ${getProbabilityColor(pick.success_probability?.probability)}`}>
+                            {pick.success_probability?.probability || 0}%
+                          </span>
+                        </div>
+                      </div>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                        pick.success_probability?.confidence === 'HIGH' ? 'bg-green-500/20 text-green-400' :
+                        pick.success_probability?.confidence === 'MEDIUM' ? 'bg-yellow-500/20 text-yellow-400' :
+                        'bg-red-500/20 text-red-400'
+                      }`}>
+                        {pick.success_probability?.confidence}
+                      </span>
+                    </div>
+
+                    {/* Key Levels */}
+                    {pick.key_levels && (
+                      <div className="grid grid-cols-2 gap-2 text-[10px]">
+                        <div>
+                          <span className="text-green-400">Support:</span>
+                          <div className="flex gap-1 mt-0.5">
+                            {pick.key_levels.support_levels?.slice(0, 3).map((lvl, i) => (
+                              <span key={i} className="px-1 py-0.5 bg-green-500/10 text-green-400 rounded">
+                                ${lvl.price?.toFixed(2)}
+                              </span>
+                            ))}
+                            {(!pick.key_levels.support_levels || pick.key_levels.support_levels.length === 0) && (
+                              <span className="text-zinc-600">-</span>
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-red-400">Resistance:</span>
+                          <div className="flex gap-1 mt-0.5">
+                            {pick.key_levels.resistance_levels?.slice(0, 3).map((lvl, i) => (
+                              <span key={i} className="px-1 py-0.5 bg-red-500/10 text-red-400 rounded">
+                                ${lvl.price?.toFixed(2)}
+                              </span>
+                            ))}
+                            {(!pick.key_levels.resistance_levels || pick.key_levels.resistance_levels.length === 0) && (
+                              <span className="text-zinc-600">-</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Trade Buttons */}
+                    {isConnected && (
+                      <div className="flex gap-2 mt-2 pt-2 border-t border-white/5">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onTrade && onTrade({ symbol: pick.symbol, quote: {} }, 'BUY'); }}
+                          className="flex-1 py-1.5 text-[10px] font-bold uppercase bg-green-500/20 text-green-400 rounded hover:bg-green-500/30 transition-colors"
+                        >
+                          Buy
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onTrade && onTrade({ symbol: pick.symbol, quote: {} }, 'SELL'); }}
+                          className="flex-1 py-1.5 text-[10px] font-bold uppercase bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-colors"
+                        >
+                          Short
+                        </button>
+                      </div>
+                    )}
+                  </motion.div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </Card>
+  );
+};
+
 // ===================== SUB-COMPONENTS =====================
 
 // Connection Status Indicator
