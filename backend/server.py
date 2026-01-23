@@ -35,9 +35,11 @@ from routers.rules import router as rules_router, init_trading_rules
 from routers.ib import router as ib_router, init_ib_service
 from routers.strategies import router as strategies_router, init_strategy_service
 from routers.scoring import router as scoring_router
+from routers.features import router as features_router
 from services.ib_service import get_ib_service
 from services.strategy_service import get_strategy_service
 from services.scoring_engine import get_scoring_engine
+from services.feature_engine import get_feature_engine
 from data.strategies_data import ALL_STRATEGIES_DATA
 
 app = FastAPI(title="TradeCommand API")
