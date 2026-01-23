@@ -255,16 +255,6 @@ const QuickTradeModal = ({ opportunity, action, onClose, onSuccess }) => {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   
-  // Set default limit price to current price
-  useEffect(() => {
-    if (quote?.price) {
-      setLimitPrice(quote.price.toFixed(2));
-      // For stops, set slightly below (buy) or above (sell) current price
-      const stopOffset = isBuy ? 0.98 : 1.02;
-      setStopPrice((quote.price * stopOffset).toFixed(2));
-    }
-  }, [quote, isBuy]);
-  
   const handleSubmit = async () => {
     setIsSubmitting(true);
     setError(null);
