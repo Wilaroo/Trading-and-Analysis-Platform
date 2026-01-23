@@ -253,7 +253,7 @@ const IBChart = ({ symbol }) => {
 
   // Fetch data when symbol or timeframe changes
   useEffect(() => {
-    if (!symbol || !candleSeriesRef.current) return;
+    if (!symbol) return;
 
     const fetchData = async () => {
       setLoading(true);
@@ -277,13 +277,24 @@ const IBChart = ({ symbol }) => {
             color: bar.close >= bar.open ? '#00FF9433' : '#FF2E2E33',
           }));
 
-          candleSeriesRef.current.setData(candleData);
-          volumeSeriesRef.current.setData(volumeData);
-          chartRef.current?.timeScale().fitContent();
+          if (candleSeriesRef.current) {
+            candleSeriesRef.current.setData(candleData);
+          }
+          if (volumeSeriesRef.current) {
+            volumeSeriesRef.current.setData(volumeData);
+          }
+          if (chartRef.current) {
+            chartRef.current.timeScale().fitContent();
+          }
+          setHasData(true);
+        } else {
+          setHasData(false);
+          setError('No chart data available. Connect to IB Gateway.');
         }
       } catch (err) {
         console.error('Error fetching chart data:', err);
-        setError('Failed to load chart data. Check IB connection.');
+        setHasData(false);
+        setError('Chart data unavailable. Connect to IB Gateway to view real-time charts.');
       }
       
       setLoading(false);
@@ -291,10 +302,12 @@ const IBChart = ({ symbol }) => {
 
     fetchData();
     
-    // Refresh data every 30 seconds for real-time updates
-    const interval = setInterval(fetchData, 30000);
+    // Refresh data every 30 seconds for real-time updates (only if we have data)
+    const interval = setInterval(() => {
+      if (hasData) fetchData();
+    }, 30000);
     return () => clearInterval(interval);
-  }, [symbol, timeframe, duration]);
+  }, [symbol, timeframe, duration, hasData]);
 
   const timeframes = [
     { label: '1m', value: '1 min', duration: '1 D' },
