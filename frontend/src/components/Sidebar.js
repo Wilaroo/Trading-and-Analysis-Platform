@@ -17,18 +17,22 @@ import {
   BarChart3,
   ClipboardList,
   ScrollText,
-  Zap
+  Zap,
+  Target
 } from 'lucide-react';
 
 const navItems = [
+  { id: 'opportunities', icon: Target, label: 'Trade Opportunities', highlight: true, isNew: true },
   { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { id: 'trade-journal', icon: ClipboardList, label: 'Trade Journal' },
   { id: 'chart', icon: LineChart, label: 'Charts' },
-  { id: 'ib-trading', icon: Zap, label: 'IB Trading', highlight: true },
+  { id: 'ib-trading', icon: Zap, label: 'IB Trading' },
+  // Legacy pages (can be accessed but not primary)
+  { id: 'divider1', divider: true, label: 'Legacy' },
   { id: 'market-context', icon: BarChart3, label: 'Market Context' },
   { id: 'scanner', icon: Search, label: 'Scanner' },
   { id: 'strategies', icon: BookOpen, label: 'Strategies' },
   { id: 'trading-rules', icon: ScrollText, label: 'Trading Rules' },
-  { id: 'trade-journal', icon: ClipboardList, label: 'Trade Journal' },
   { id: 'earnings', icon: Calendar, label: 'Earnings' },
   { id: 'watchlist', icon: Eye, label: 'Watchlist' },
   { id: 'portfolio', icon: Briefcase, label: 'Portfolio' },
