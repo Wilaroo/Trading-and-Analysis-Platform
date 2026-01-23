@@ -129,6 +129,10 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 - Order placement (Market, Limit, Stop, Stop-Limit)
 - Open orders management with cancel functionality
 - Auto-refresh of account data
+- **Bug Fix (Dec 2025)**: Resolved order placement timeout by implementing threaded architecture
+  - All IB operations now run in dedicated `IBWorkerThread` with its own event loop
+  - Queue-based communication between FastAPI and IB thread for Windows compatibility
+  - Eliminates asyncio event loop conflicts with ib_insync on Python 3.11+
 
 ## API Endpoints
 
