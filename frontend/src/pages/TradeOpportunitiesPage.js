@@ -151,93 +151,104 @@ const playTradeSound = (type = 'success') => {
 };
 
 // ===================== IB REAL-TIME CHART COMPONENT =====================
-const IBChart = ({ symbol, onClose }) => {
+const IBChart = ({ symbol }) => {
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
   const volumeSeriesRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [hasData, setHasData] = useState(false);
   const [timeframe, setTimeframe] = useState('5 mins');
   const [duration, setDuration] = useState('1 D');
 
+  // Create chart on mount
   useEffect(() => {
     if (!chartContainerRef.current || !symbol) return;
 
-    // Create chart
-    const chart = createChart(chartContainerRef.current, {
-      layout: {
-        background: { type: ColorType.Solid, color: '#0A0A0A' },
-        textColor: '#9CA3AF',
-      },
-      grid: {
-        vertLines: { color: '#1F2937' },
-        horzLines: { color: '#1F2937' },
-      },
-      width: chartContainerRef.current.clientWidth,
-      height: 300,
-      timeScale: {
-        timeVisible: true,
-        secondsVisible: false,
-        borderColor: '#374151',
-      },
-      rightPriceScale: {
-        borderColor: '#374151',
-      },
-      crosshair: {
-        mode: 1,
-        vertLine: {
-          color: '#00E5FF',
-          width: 1,
-          style: 2,
+    let chart = null;
+    
+    try {
+      // Create chart
+      chart = createChart(chartContainerRef.current, {
+        layout: {
+          background: { type: ColorType.Solid, color: '#0A0A0A' },
+          textColor: '#9CA3AF',
         },
-        horzLine: {
-          color: '#00E5FF',
-          width: 1,
-          style: 2,
+        grid: {
+          vertLines: { color: '#1F2937' },
+          horzLines: { color: '#1F2937' },
         },
-      },
-    });
+        width: chartContainerRef.current.clientWidth || 600,
+        height: 300,
+        timeScale: {
+          timeVisible: true,
+          secondsVisible: false,
+          borderColor: '#374151',
+        },
+        rightPriceScale: {
+          borderColor: '#374151',
+        },
+        crosshair: {
+          mode: 1,
+          vertLine: {
+            color: '#00E5FF',
+            width: 1,
+            style: 2,
+          },
+          horzLine: {
+            color: '#00E5FF',
+            width: 1,
+            style: 2,
+          },
+        },
+      });
 
-    chartRef.current = chart;
+      chartRef.current = chart;
 
-    // Add candlestick series
-    const candleSeries = chart.addCandlestickSeries({
-      upColor: '#00FF94',
-      downColor: '#FF2E2E',
-      borderUpColor: '#00FF94',
-      borderDownColor: '#FF2E2E',
-      wickUpColor: '#00FF94',
-      wickDownColor: '#FF2E2E',
-    });
-    candleSeriesRef.current = candleSeries;
+      // Add candlestick series
+      const candleSeries = chart.addCandlestickSeries({
+        upColor: '#00FF94',
+        downColor: '#FF2E2E',
+        borderUpColor: '#00FF94',
+        borderDownColor: '#FF2E2E',
+        wickUpColor: '#00FF94',
+        wickDownColor: '#FF2E2E',
+      });
+      candleSeriesRef.current = candleSeries;
 
-    // Add volume series
-    const volumeSeries = chart.addHistogramSeries({
-      color: '#26a69a',
-      priceFormat: {
-        type: 'volume',
-      },
-      priceScaleId: '',
-      scaleMargins: {
-        top: 0.8,
-        bottom: 0,
-      },
-    });
-    volumeSeriesRef.current = volumeSeries;
+      // Add volume series
+      const volumeSeries = chart.addHistogramSeries({
+        color: '#26a69a',
+        priceFormat: {
+          type: 'volume',
+        },
+        priceScaleId: '',
+        scaleMargins: {
+          top: 0.8,
+          bottom: 0,
+        },
+      });
+      volumeSeriesRef.current = volumeSeries;
 
-    // Handle resize
-    const handleResize = () => {
-      if (chartContainerRef.current) {
-        chart.applyOptions({ width: chartContainerRef.current.clientWidth });
-      }
-    };
-    window.addEventListener('resize', handleResize);
+      // Handle resize
+      const handleResize = () => {
+        if (chartContainerRef.current && chart) {
+          chart.applyOptions({ width: chartContainerRef.current.clientWidth });
+        }
+      };
+      window.addEventListener('resize', handleResize);
 
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      chart.remove();
-    };
+      return () => {
+        window.removeEventListener('resize', handleResize);
+        if (chart) {
+          chart.remove();
+        }
+      };
+    } catch (err) {
+      console.error('Error creating chart:', err);
+      setError('Failed to initialize chart');
+    }
   }, [symbol]);
 
   // Fetch data when symbol or timeframe changes
