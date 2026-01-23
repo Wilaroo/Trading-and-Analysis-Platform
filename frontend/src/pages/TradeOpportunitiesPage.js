@@ -1635,6 +1635,9 @@ const TradeOpportunitiesPage = () => {
         <div className="col-span-12 lg:col-span-3 space-y-4 overflow-y-auto">
           <AccountPanel account={account} positions={positions} />
           
+          {/* Active Trades Panel - Real-time P&L */}
+          <ActiveTradesPanel trades={activeTrades} onRemove={removeActiveTrade} />
+          
           {/* Quick Stats */}
           <Card>
             <h3 className="text-sm font-medium uppercase tracking-wider mb-3">Today&apos;s Stats</h3>
@@ -1650,6 +1653,10 @@ const TradeOpportunitiesPage = () => {
               <div className="flex items-center justify-between text-sm">
                 <span className="text-zinc-500">Strategies</span>
                 <span className="font-mono">{strategies.length}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-zinc-500">Active Trades</span>
+                <span className="font-mono text-cyan-400">{activeTrades.length}</span>
               </div>
             </div>
           </Card>
