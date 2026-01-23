@@ -401,8 +401,6 @@ class UniversalScoringEngine:
         
         # 1. Earnings Impact (40 points swing)
         earnings_surprise_pct = data.get("earnings_surprise_pct", 0)
-        revenue_surprise_pct = data.get("revenue_surprise_pct", 0)
-        guidance_change = data.get("guidance_change", "none")  # raised, lowered, none
         
         # Large earnings surprises per user's rules
         if abs(earnings_surprise_pct) > 20:
