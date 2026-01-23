@@ -52,6 +52,67 @@ async def get_batch_market_context(request: SymbolsRequest):
     }
 
 
+@router.get("")
+async def get_market_overview():
+    """
+    Get overall market context/overview for SPY, QQQ, VIX
+    """
+    if not market_context_service:
+        raise HTTPException(500, "Market context service not initialized")
+    
+    try:
+        # Analyze key market indicators
+        results = await market_context_service.analyze_batch(["SPY", "QQQ"])
+        summary = market_context_service.get_context_summary(results)
+        
+        spy_data = next((r for r in results if r.get("symbol") == "SPY"), {})
+        qqq_data = next((r for r in results if r.get("symbol") == "QQQ"), {})
+        
+        # Determine overall market regime
+        spy_context = spy_data.get("market_context", "UNKNOWN")
+        qqq_context = qqq_data.get("market_context", "UNKNOWN")
+        
+        if spy_context == qqq_context:
+            regime = spy_context.replace("_", " ").title()
+        elif "TRENDING" in spy_context or "TRENDING" in qqq_context:
+            regime = "Trending"
+        elif "CONSOLIDATION" in spy_context or "CONSOLIDATION" in qqq_context:
+            regime = "Range"
+        else:
+            regime = "Mixed"
+        
+        return {
+            "regime": regime,
+            "spy": {
+                "symbol": "SPY",
+                "price": spy_data.get("price", 0),
+                "change_percent": spy_data.get("change_percent", 0),
+                "context": spy_context,
+                "rvol": spy_data.get("rvol", 0)
+            },
+            "qqq": {
+                "symbol": "QQQ",
+                "price": qqq_data.get("price", 0),
+                "change_percent": qqq_data.get("change_percent", 0),
+                "context": qqq_context,
+                "rvol": qqq_data.get("rvol", 0)
+            },
+            "vix": {
+                "price": summary.get("market_breadth", {}).get("vix", 0)
+            },
+            "summary": summary
+        }
+    except Exception as e:
+        # Return default values on error
+        return {
+            "regime": "Unknown",
+            "spy": {"symbol": "SPY", "price": 0, "change_percent": 0},
+            "qqq": {"symbol": "QQQ", "price": 0, "change_percent": 0},
+            "vix": {"price": 0},
+            "error": str(e)
+        }
+
+
 @router.get("/watchlist/analysis")
 async def get_watchlist_context(db=None):
     """
