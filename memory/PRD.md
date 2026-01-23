@@ -151,7 +151,7 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 - New API endpoints: search, categories, CRUD operations
 - Significantly reduced `server.py` file size (~450 lines removed)
 
-### Phase 8 - Trade Opportunities Dashboard ✅ NEW (Dec 2025)
+### Phase 8 - Trade Opportunities Dashboard ✅ (Dec 2025 - Jan 2026)
 - **New consolidated "Trade Opportunities" page** - Replaces multiple scattered pages
 - **IB Market Scanner Integration** - Scan US stocks in real-time via IB API:
   - Top % Gainers/Losers
@@ -164,6 +164,13 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
   - Matching strategies with criteria
   - Trading rules and warnings
   - One-click trade buttons
+- **Quick Trade from Scanner** ✅ NEW (Jan 2026) - One-click order placement:
+  - Buy/Short buttons on every opportunity card
+  - Quick trade modal with quantity presets (10, 50, 100, 500)
+  - Order types: Market, Limit, Stop, Stop-Limit
+  - Auto-populated limit/stop prices from current quote
+  - Estimated cost/proceeds calculator
+  - Direct order execution via IB API
 - **Strategy names displayed properly** - "INT-VWAP Bounce" instead of "INT-06"
 - **Account panel** - Shows net liquidation, buying power, P&L, positions
 - **Market Context panel** - Current regime, SPY/QQQ/VIX status
