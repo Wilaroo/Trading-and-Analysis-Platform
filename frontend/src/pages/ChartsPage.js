@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { LineChart, Loader2, Wifi, WifiOff } from 'lucide-react';
-import { createChart, ColorType } from 'lightweight-charts';
+import * as LightweightCharts from 'lightweight-charts';
 import api from '../utils/api';
 
 // ===================== IB REAL-TIME CHART =====================
@@ -39,9 +39,9 @@ const IBRealtimeChart = ({ symbol, isConnected }) => {
         const containerWidth = chartContainerRef.current.clientWidth || 800;
         const containerHeight = chartContainerRef.current.clientHeight || 500;
         
-        const chart = createChart(chartContainerRef.current, {
+        const chart = LightweightCharts.createChart(chartContainerRef.current, {
           layout: {
-            background: { type: ColorType.Solid, color: '#0A0A0A' },
+            background: { type: 'solid', color: '#0A0A0A' },
             textColor: '#9CA3AF',
           },
           grid: {
