@@ -126,9 +126,9 @@ const ScannerSelector = ({ selectedScan, onSelect, isScanning }) => {
     { id: 'TOP_PERC_GAIN', label: 'Top Gainers', icon: TrendingUp },
     { id: 'TOP_PERC_LOSE', label: 'Top Losers', icon: TrendingDown },
     { id: 'MOST_ACTIVE', label: 'Most Active', icon: Activity },
+    { id: 'HOT_BY_VOLUME', label: 'Hot Volume', icon: Volume2 },
     { id: 'HIGH_OPEN_GAP', label: 'Gap Up', icon: ArrowUpRight },
     { id: 'LOW_OPEN_GAP', label: 'Gap Down', icon: ArrowDownRight },
-    { id: 'HIGH_VS_52W_HL', label: '52W High', icon: TrendUp },
   ];
 
   return (
