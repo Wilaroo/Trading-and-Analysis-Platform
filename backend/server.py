@@ -74,6 +74,7 @@ init_trade_journal_service(trade_journal_service)
 init_catalyst_service(catalyst_scoring_service, stock_service)
 init_trading_rules(trading_rules_engine)
 init_ib_service(ib_service)
+init_strategy_service(strategy_service)
 
 # Include routers
 app.include_router(notifications_router)
@@ -82,6 +83,7 @@ app.include_router(trades_router)
 app.include_router(catalyst_router)
 app.include_router(rules_router)
 app.include_router(ib_router)
+app.include_router(strategies_router)
 
 # Collections
 strategies_col = db["strategies"]
