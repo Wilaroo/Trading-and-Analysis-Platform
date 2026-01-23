@@ -828,7 +828,7 @@ class IBService:
         response = self._send_request(
             IBCommand.GET_QUOTES_BATCH,
             {"symbols": symbols},
-            timeout=30.0
+            timeout=90.0  # Increased timeout for batch processing
         )
         if not response.success:
             raise ConnectionError(response.error)
