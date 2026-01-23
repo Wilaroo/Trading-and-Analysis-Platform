@@ -59,10 +59,11 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 ## Technical Architecture
 
 ### Backend (FastAPI)
-- `/app/backend/server.py` - Main application
+- `/app/backend/server.py` - Main application (refactored)
 - `/app/backend/services/` - Business logic modules
   - `stock_data.py` - Finnhub API integration
-  - `ib_service.py` - Interactive Brokers integration ✅ NEW
+  - `ib_service.py` - Interactive Brokers integration ✅ 
+  - `strategy_service.py` - Strategy CRUD operations ✅ NEW (refactored)
   - `catalyst_scoring.py` - Earnings catalyst scoring
   - `trade_journal.py` - Trade logging and templates
   - `market_context.py` - Market classification
@@ -70,20 +71,24 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
   - `trading_rules.py` - Trading rules engine
   - `strategy_recommendations.py` - Smart scanner
 - `/app/backend/routers/` - API endpoints
-  - `ib.py` - Interactive Brokers endpoints ✅ NEW
+  - `ib.py` - Interactive Brokers endpoints
+  - `strategies.py` - Strategy CRUD endpoints ✅ NEW (refactored)
   - `catalyst.py` - Catalyst scoring endpoints
   - `trades.py` - Trade journal and templates
   - `rules.py` - Trading rules endpoints
   - `market_context.py` - Context analysis
   - `notifications.py` - Alerts
+- `/app/backend/data/` - Data files
+  - `strategies_data.py` - 77 strategy definitions ✅ NEW (moved from server.py)
 
 ### Frontend (React)
 - `/app/frontend/src/pages/` - Page components
-  - `IBTradingPage.js` - Interactive Brokers trading UI ✅ NEW
+  - `IBTradingPage.js` - Interactive Brokers trading UI
 - `/app/frontend/src/components/` - Reusable UI
 - `/app/frontend/src/utils/api.js` - API client
 
 ### Database (MongoDB)
+- `strategies` - Trading strategies (77 strategies) ✅ NEW
 - `positions` - Portfolio positions
 - `watchlist` - User watchlist
 - `trades` - Trade journal entries
