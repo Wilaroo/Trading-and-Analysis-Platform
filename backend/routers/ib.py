@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from services.ib_service import IBService
+from services.feature_engine import get_feature_engine
 
 router = APIRouter(prefix="/api/ib", tags=["Interactive Brokers"])
 
