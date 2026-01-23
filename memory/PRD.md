@@ -142,7 +142,7 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
   - Queue-based communication between FastAPI and IB thread for Windows compatibility
   - Eliminates asyncio event loop conflicts with ib_insync on Python 3.11+
 
-### Phase 7 - Backend Refactoring ✅ NEW (Dec 2025)
+### Phase 7 - Backend Refactoring ✅ (Dec 2025)
 - **Migrated 77 strategies from hardcoded data to MongoDB**
 - Created `/app/backend/services/strategy_service.py` for strategy CRUD operations
 - Created `/app/backend/routers/strategies.py` for strategy API endpoints
@@ -150,6 +150,25 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 - Auto-seeds strategies on first startup
 - New API endpoints: search, categories, CRUD operations
 - Significantly reduced `server.py` file size (~450 lines removed)
+
+### Phase 8 - Trade Opportunities Dashboard ✅ NEW (Dec 2025)
+- **New consolidated "Trade Opportunities" page** - Replaces multiple scattered pages
+- **IB Market Scanner Integration** - Scan US stocks in real-time via IB API:
+  - Top % Gainers/Losers
+  - Most Active by volume
+  - Gap Up/Down stocks
+  - 52-week High/Low
+- **Strategy Matching** - Auto-matches scanned stocks to 77 trading strategies
+- **Ticker Detail Modal** - Click any ticker to see full analysis:
+  - Price data, volume, high/low
+  - Matching strategies with criteria
+  - Trading rules and warnings
+  - One-click trade buttons
+- **Strategy names displayed properly** - "INT-VWAP Bounce" instead of "INT-06"
+- **Account panel** - Shows net liquidation, buying power, P&L, positions
+- **Market Context panel** - Current regime, SPY/QQQ/VIX status
+- **Auto-scan mode** - Automatically scans every 60 seconds when enabled
+- **Sidebar reorganized** - Trade Opportunities at top, legacy pages grouped below
 
 ## API Endpoints
 
