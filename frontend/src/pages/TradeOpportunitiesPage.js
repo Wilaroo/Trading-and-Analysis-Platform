@@ -295,6 +295,50 @@ const IBChart = ({ symbol, entryPrice, stopLoss, takeProfit }) => {
             chartRef.current.timeScale().fitContent();
           }
           setHasData(true);
+          
+          // Add price lines for entry, stop-loss, take-profit if provided
+          if (candleSeriesRef.current) {
+            // Remove existing price lines
+            candleSeriesRef.current.createPriceLine && candleSeriesRef.current.priceLines?.forEach(line => {
+              candleSeriesRef.current.removePriceLine(line);
+            });
+            
+            // Entry price line (cyan)
+            if (entryPrice && entryPrice > 0) {
+              candleSeriesRef.current.createPriceLine({
+                price: entryPrice,
+                color: '#00E5FF',
+                lineWidth: 2,
+                lineStyle: 0, // Solid
+                axisLabelVisible: true,
+                title: 'Entry',
+              });
+            }
+            
+            // Stop-loss line (red)
+            if (stopLoss && stopLoss > 0) {
+              candleSeriesRef.current.createPriceLine({
+                price: stopLoss,
+                color: '#FF2E2E',
+                lineWidth: 2,
+                lineStyle: 2, // Dashed
+                axisLabelVisible: true,
+                title: 'Stop',
+              });
+            }
+            
+            // Take-profit line (green)
+            if (takeProfit && takeProfit > 0) {
+              candleSeriesRef.current.createPriceLine({
+                price: takeProfit,
+                color: '#00FF94',
+                lineWidth: 2,
+                lineStyle: 2, // Dashed
+                axisLabelVisible: true,
+                title: 'Target',
+              });
+            }
+          }
         } else {
           setHasData(false);
           setError('No chart data available. Connect to IB Gateway.');
@@ -315,7 +359,7 @@ const IBChart = ({ symbol, entryPrice, stopLoss, takeProfit }) => {
       if (hasData) fetchData();
     }, 30000);
     return () => clearInterval(interval);
-  }, [symbol, timeframe, duration, hasData]);
+  }, [symbol, timeframe, duration, hasData, entryPrice, stopLoss, takeProfit]);
 
   const timeframes = [
     { label: '1m', value: '1 min', duration: '1 D' },
