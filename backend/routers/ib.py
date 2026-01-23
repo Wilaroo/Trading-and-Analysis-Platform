@@ -302,6 +302,141 @@ async def run_market_scanner(request: ScannerRequest):
         raise HTTPException(status_code=500, detail=f"Error running scanner: {str(e)}")
 
 
+class EnhancedScannerRequest(BaseModel):
+    scan_type: str = Field(default="TOP_PERC_GAIN", description="Scanner type")
+    max_results: int = Field(default=25, ge=1, le=50, description="Max results")
+    calculate_features: bool = Field(default=True, description="Calculate technical features")
+
+
+@router.post("/scanner/enhanced")
+async def run_enhanced_scanner(request: EnhancedScannerRequest):
+    """
+    Run IB market scanner with automatic historical data fetching and conviction scoring.
+    
+    This endpoint:
+    1. Runs the market scanner to find opportunities
+    2. Fetches quotes for each result
+    3. Fetches 5-minute historical bars
+    4. Calculates technical features and conviction score
+    5. Returns results with HIGH CONVICTION badges
+    """
+    if not _ib_service:
+        raise HTTPException(status_code=500, detail="IB service not initialized")
+    
+    try:
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Step 1: Run scanner
+        logger.info(f"Running enhanced scanner: {request.scan_type}")
+        scanner_results = await _ib_service.run_scanner(
+            scan_type=request.scan_type,
+            max_results=request.max_results
+        )
+        
+        if not scanner_results:
+            return {"results": [], "count": 0, "scan_type": request.scan_type}
+        
+        # Step 2: Get quotes for all symbols
+        symbols = [r["symbol"] for r in scanner_results]
+        logger.info(f"Fetching quotes for {len(symbols)} symbols")
+        quotes = await _ib_service.get_quotes_batch(symbols)
+        quotes_map = {q["symbol"]: q for q in quotes}
+        
+        enhanced_results = []
+        feature_engine = get_feature_engine()
+        
+        for result in scanner_results:
+            symbol = result["symbol"]
+            quote = quotes_map.get(symbol, {})
+            
+            enhanced = {
+                **result,
+                "quote": quote,
+                "conviction": None,
+                "features": None,
+                "high_conviction": False
+            }
+            
+            if request.calculate_features and quote.get("price"):
+                try:
+                    # Step 3: Fetch 5-minute historical bars (last 1 day)
+                    bars = await _ib_service.get_historical_data(
+                        symbol=symbol,
+                        duration="1 D",
+                        bar_size="5 mins"
+                    )
+                    
+                    if bars and len(bars) >= 5:
+                        # Convert bars to feature engine format
+                        feature_bars = [{
+                            "open": b.get("open", 0),
+                            "high": b.get("high", 0),
+                            "low": b.get("low", 0),
+                            "close": b.get("close", 0),
+                            "volume": b.get("volume", 0),
+                            "prior_close": quote.get("prev_close", 0),
+                            "prior_high": quote.get("high", 0),  # Approximate
+                            "prior_low": quote.get("low", 0)
+                        } for b in bars]
+                        
+                        # Step 4: Calculate features
+                        features = feature_engine.calculate_all_features(
+                            bars_5m=feature_bars,
+                            bars_daily=None,
+                            session_bars_1m=None,
+                            fundamentals=None,
+                            market_data=None
+                        )
+                        
+                        enhanced["features"] = {
+                            "rsi_14": features.get("rsi_14"),
+                            "rvol": features.get("rvol_intraday", features.get("rvol_20", 1)),
+                            "vwap": features.get("vwap"),
+                            "close_over_vwap_pct": features.get("close_over_vwap_pct"),
+                            "atr_14": features.get("atr_14"),
+                            "macd_bullish": features.get("macd_bullish"),
+                            "roc_10": features.get("roc_10")
+                        }
+                        
+                        # Get conviction score
+                        enhanced["conviction"] = {
+                            "score": features.get("intraday_conviction_score", 50),
+                            "confidence": features.get("conviction_confidence", "MEDIUM"),
+                            "signals": features.get("conviction_signals", [])
+                        }
+                        
+                        enhanced["high_conviction"] = features.get("meets_high_conviction", False)
+                        
+                except Exception as feat_err:
+                    logger.warning(f"Error calculating features for {symbol}: {feat_err}")
+            
+            enhanced_results.append(enhanced)
+        
+        # Sort by conviction score (highest first)
+        enhanced_results.sort(
+            key=lambda x: x.get("conviction", {}).get("score", 0) if x.get("conviction") else 0,
+            reverse=True
+        )
+        
+        # Count high conviction
+        high_conviction_count = sum(1 for r in enhanced_results if r.get("high_conviction"))
+        
+        return {
+            "results": enhanced_results,
+            "count": len(enhanced_results),
+            "high_conviction_count": high_conviction_count,
+            "scan_type": request.scan_type
+        }
+        
+    except ConnectionError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error running enhanced scanner: {str(e)}")
+
+
 @router.post("/quotes/batch")
 async def get_batch_quotes(symbols: List[str]):
     """Get real-time quotes for multiple symbols"""
