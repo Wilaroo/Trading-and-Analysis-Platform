@@ -9,6 +9,7 @@
     "@fontsource/playfair-display": "^5.2.8",
     "axios": "^1.13.2",
     "framer-motion": "^12.28.1",
+    "lightweight-charts": "^5.1.0",
     "lucide-react": "^0.562.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
