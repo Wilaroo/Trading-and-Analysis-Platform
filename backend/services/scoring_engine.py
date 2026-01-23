@@ -710,14 +710,14 @@ class UniversalScoringEngine:
         
         # Filter and sort for support (below current price)
         supports = sorted(
-            [l for l in all_levels if l["level"] < current_price and l["level"] > 0],
+            [lvl for lvl in all_levels if lvl["level"] < current_price and lvl["level"] > 0],
             key=lambda x: x["level"],
             reverse=True
         )[:3]
         
         # Filter and sort for resistance (above current price)
         resistances = sorted(
-            [l for l in all_levels if l["level"] > current_price],
+            [lvl for lvl in all_levels if lvl["level"] > current_price],
             key=lambda x: x["level"]
         )[:3]
         
