@@ -87,6 +87,7 @@ app.include_router(catalyst_router)
 app.include_router(rules_router)
 app.include_router(ib_router)
 app.include_router(strategies_router)
+app.include_router(scoring_router)
 
 # Collections
 strategies_col = db["strategies"]
