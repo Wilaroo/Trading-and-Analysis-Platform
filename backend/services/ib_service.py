@@ -537,80 +537,81 @@ class IBWorkerThread(threading.Thread):
     def _do_get_quotes_batch(self, symbols: List[str]) -> IBResponse:
         """Get quotes for multiple symbols in smaller batches"""
         if not self.ib or not self.ib.isConnected():
+            logger.error("Not connected to IB for batch quotes")
             return IBResponse(success=False, error="Not connected to IB")
         
         try:
             from ib_insync import Stock
             
             all_quotes = []
-            batch_size = 10  # Process 10 symbols at a time to avoid overwhelming IB
+            batch_size = 5  # Reduced to 5 symbols at a time
+            symbols_to_process = symbols[:30]  # Limit to 30 total for speed
+            
+            logger.info(f"Starting batch quotes for {len(symbols_to_process)} symbols")
             
             # Process in batches
-            for i in range(0, min(len(symbols), 50), batch_size):
-                batch_symbols = symbols[i:i + batch_size]
-                logger.info(f"Fetching quotes batch {i // batch_size + 1}: {len(batch_symbols)} symbols")
+            for i in range(0, len(symbols_to_process), batch_size):
+                batch_symbols = symbols_to_process[i:i + batch_size]
+                logger.info(f"Processing batch {i // batch_size + 1}: {batch_symbols}")
                 
-                contracts = []
                 for symbol in batch_symbols:
                     try:
                         contract = Stock(symbol.upper(), "SMART", "USD")
-                        contracts.append(contract)
-                    except Exception as e:
-                        logger.error(f"Error creating contract for {symbol}: {e}")
-                        continue
-                
-                if not contracts:
-                    continue
-                
-                try:
-                    self.ib.qualifyContracts(*contracts)
-                except Exception as e:
-                    logger.error(f"Error qualifying contracts: {e}")
-                    continue
-                
-                # Request market data for batch
-                tickers = []
-                for contract in contracts:
-                    try:
+                        
+                        # Qualify contract
+                        qualified = self.ib.qualifyContracts(contract)
+                        if not qualified:
+                            logger.warning(f"Could not qualify contract for {symbol}")
+                            continue
+                        
+                        # Request snapshot data
                         ticker = self.ib.reqMktData(contract, "", True, False)
-                        tickers.append((contract.symbol, ticker))
-                    except Exception as e:
-                        logger.error(f"Error requesting data for {contract.symbol}: {e}")
-                
-                # Wait for data
-                self.ib.sleep(1)
-                
-                # Process results
-                for symbol, ticker in tickers:
-                    try:
+                        self.ib.sleep(0.5)  # Brief pause for data
+                        
                         if ticker:
-                            price = ticker.last if ticker.last and ticker.last > 0 else (ticker.close if ticker.close else 0)
-                            prev_close = ticker.close if ticker.close else 0
+                            price = 0
+                            if ticker.last and ticker.last > 0:
+                                price = ticker.last
+                            elif ticker.close and ticker.close > 0:
+                                price = ticker.close
+                            elif ticker.bid and ticker.bid > 0:
+                                price = ticker.bid
+                            
+                            prev_close = ticker.close if ticker.close and ticker.close > 0 else price
                             change = (price - prev_close) if price and prev_close else 0
                             change_pct = (change / prev_close * 100) if prev_close and prev_close > 0 else 0
                             
-                            all_quotes.append({
-                                "symbol": symbol,
+                            quote_data = {
+                                "symbol": symbol.upper(),
                                 "price": round(price, 2) if price else 0,
                                 "bid": round(ticker.bid, 2) if ticker.bid and ticker.bid > 0 else 0,
                                 "ask": round(ticker.ask, 2) if ticker.ask and ticker.ask > 0 else 0,
-                                "volume": int(ticker.volume) if ticker.volume else 0,
+                                "volume": int(ticker.volume) if ticker.volume and ticker.volume > 0 else 0,
                                 "change": round(change, 2),
                                 "change_percent": round(change_pct, 2),
                                 "high": round(ticker.high, 2) if ticker.high and ticker.high > 0 else 0,
                                 "low": round(ticker.low, 2) if ticker.low and ticker.low > 0 else 0,
                                 "open": round(ticker.open, 2) if ticker.open and ticker.open > 0 else 0,
-                                "prev_close": round(prev_close, 2),
+                                "prev_close": round(prev_close, 2) if prev_close else 0,
                                 "timestamp": datetime.now(timezone.utc).isoformat()
-                            })
+                            }
+                            all_quotes.append(quote_data)
+                            logger.debug(f"Got quote for {symbol}: ${price}")
+                        else:
+                            logger.warning(f"No ticker data for {symbol}")
+                            
                     except Exception as e:
-                        logger.error(f"Error processing ticker for {symbol}: {e}")
+                        logger.error(f"Error getting quote for {symbol}: {e}")
+                        continue
+                
+                # Small pause between batches
+                self.ib.sleep(0.3)
             
-            logger.info(f"Fetched {len(all_quotes)} quotes total")
+            logger.info(f"Batch quotes complete: {len(all_quotes)} quotes fetched")
             return IBResponse(success=True, data=all_quotes)
             
         except Exception as e:
-            logger.error(f"Error getting batch quotes: {e}")
+            logger.error(f"Error in batch quotes: {e}")
             import traceback
             traceback.print_exc()
             return IBResponse(success=False, error=str(e))
