@@ -323,7 +323,7 @@ const IBChart = ({ symbol }) => {
       <div className="flex items-center justify-between px-4 py-2 border-b border-white/10">
         <div className="flex items-center gap-3">
           <span className="font-bold text-white">{symbol}</span>
-          <span className="text-xs text-cyan-400">IB Real-time</span>
+          <span className="text-xs text-cyan-400">{hasData ? 'IB Real-time' : 'Awaiting IB'}</span>
         </div>
         <div className="flex items-center gap-2">
           {timeframes.map(tf => (
@@ -344,18 +344,19 @@ const IBChart = ({ symbol }) => {
       </div>
       
       {/* Chart Container */}
-      <div className="relative">
-        {loading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
+      <div className="relative min-h-[300px]">
+        {loading && !hasData && (
+          <div className="absolute inset-0 flex items-center justify-center bg-[#0A0A0A] z-10">
             <Loader2 className="w-6 h-6 text-cyan-400 animate-spin" />
           </div>
         )}
-        {error && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
-            <span className="text-red-400 text-sm">{error}</span>
+        {error && !hasData && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0A0A0A] z-10 p-4">
+            <BarChart3 className="w-12 h-12 text-zinc-600 mb-3" />
+            <span className="text-zinc-400 text-sm text-center">{error}</span>
           </div>
         )}
-        <div ref={chartContainerRef} className="w-full" />
+        <div ref={chartContainerRef} className="w-full" style={{ minHeight: hasData ? '300px' : '0' }} />
       </div>
     </div>
   );
