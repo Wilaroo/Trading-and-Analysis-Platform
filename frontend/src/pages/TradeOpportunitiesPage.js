@@ -1445,8 +1445,72 @@ const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
                   </div>
                 </div>
                 
-                {/* Chart Placeholder */}
-                <IBChart symbol={symbol} />
+                {/* Chart with SL/TP Controls */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-500 uppercase">Chart</span>
+                    <button
+                      onClick={() => setShowLevels(!showLevels)}
+                      className={`text-xs px-2 py-1 rounded transition-colors ${
+                        showLevels ? 'bg-cyan-400 text-black' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                      }`}
+                    >
+                      {showLevels ? 'Hide' : 'Show'} SL/TP Lines
+                    </button>
+                  </div>
+                  
+                  <IBChart 
+                    symbol={symbol} 
+                    entryPrice={showLevels ? entryPrice : null}
+                    stopLoss={showLevels ? stopLoss : null}
+                    takeProfit={showLevels ? takeProfit : null}
+                  />
+                  
+                  {/* SL/TP Input Controls */}
+                  {showLevels && (
+                    <div className="grid grid-cols-4 gap-2 p-3 bg-zinc-900 rounded-lg">
+                      <div>
+                        <label className="text-[10px] text-zinc-500 uppercase">Entry</label>
+                        <input
+                          type="number"
+                          value={entryPrice || ''}
+                          onChange={(e) => setEntryPrice(parseFloat(e.target.value))}
+                          step="0.01"
+                          className="w-full bg-zinc-800 border border-cyan-500/30 rounded px-2 py-1 text-sm font-mono text-cyan-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-zinc-500 uppercase">Stop Loss</label>
+                        <input
+                          type="number"
+                          value={stopLoss || ''}
+                          onChange={(e) => setStopLoss(parseFloat(e.target.value))}
+                          step="0.01"
+                          className="w-full bg-zinc-800 border border-red-500/30 rounded px-2 py-1 text-sm font-mono text-red-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-zinc-500 uppercase">Take Profit</label>
+                        <input
+                          type="number"
+                          value={takeProfit || ''}
+                          onChange={(e) => setTakeProfit(parseFloat(e.target.value))}
+                          step="0.01"
+                          className="w-full bg-zinc-800 border border-green-500/30 rounded px-2 py-1 text-sm font-mono text-green-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-zinc-500 uppercase">R:R Ratio</label>
+                        <div className={`w-full bg-zinc-800 rounded px-2 py-1.5 text-sm font-mono font-bold ${
+                          parseFloat(rrRatio) >= 2 ? 'text-green-400' : 
+                          parseFloat(rrRatio) >= 1 ? 'text-yellow-400' : 'text-red-400'
+                        }`}>
+                          1:{rrRatio}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
                 
                 {/* Strategy Matches */}
                 <div>
