@@ -63,6 +63,7 @@ catalyst_scoring_service = get_catalyst_scoring_service(db)
 trading_rules_engine = get_trading_rules_engine()
 ib_service = get_ib_service()
 strategy_service = get_strategy_service(db)
+scoring_engine = get_scoring_engine(db)
 
 # Seed strategies if not already done
 if not strategy_service.is_seeded():
