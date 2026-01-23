@@ -546,7 +546,6 @@ class FeatureEngineService:
         - Catalyst boost
         """
         score = 0
-        max_score = 100
         signals = []
         
         # RVOL (25 points)
