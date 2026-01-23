@@ -1185,6 +1185,12 @@ const TradeOpportunitiesPage = () => {
   // Quick Trade Modal state
   const [tradeModal, setTradeModal] = useState({ isOpen: false, opportunity: null, action: null });
   
+  // Active trades for P&L tracking
+  const [activeTrades, setActiveTrades] = useState([]);
+  
+  // Toast notifications
+  const [toast, setToast] = useState(null);
+  
   const scanIntervalRef = useRef(null);
   
   // Load strategies on mount
