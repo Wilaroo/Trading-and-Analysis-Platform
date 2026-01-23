@@ -1494,22 +1494,8 @@ async def get_symbol_news(symbol: str):
     return {"news": symbol_news, "symbol": symbol.upper()}
 
 # ----- Strategies -----
-@app.get("/api/strategies")
-async def get_all_strategies(category: Optional[str] = None):
-    """Get all trading strategies or filter by category"""
-    if category:
-        strategies = TRADING_STRATEGIES.get(category.lower(), [])
-    else:
-        strategies = ALL_STRATEGIES
-    return {"strategies": strategies, "count": len(strategies)}
-
-@app.get("/api/strategies/{strategy_id}")
-async def get_strategy(strategy_id: str):
-    """Get specific strategy details"""
-    for strategy in ALL_STRATEGIES:
-        if strategy["id"] == strategy_id.upper():
-            return strategy
-    raise HTTPException(status_code=404, detail="Strategy not found")
+# NOTE: Strategy endpoints are now handled by routers/strategies.py
+# The strategy_service is used for all strategy-related operations
 
 # ----- Scanner -----
 @app.post("/api/scanner/scan")
