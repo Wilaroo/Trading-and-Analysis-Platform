@@ -259,3 +259,80 @@ async def get_executions():
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching executions: {str(e)}")
+
+
+# ===================== Scanner Endpoints =====================
+
+class ScannerRequest(BaseModel):
+    scan_type: str = Field(default="TOP_PERC_GAIN", description="Scanner type")
+    max_results: int = Field(default=50, ge=1, le=100, description="Max results")
+
+
+@router.post("/scanner")
+async def run_market_scanner(request: ScannerRequest):
+    """
+    Run IB market scanner to find trade opportunities.
+    
+    Available scan types:
+    - TOP_PERC_GAIN: Top % gainers
+    - TOP_PERC_LOSE: Top % losers
+    - MOST_ACTIVE: Most active by volume
+    - HOT_BY_VOLUME: Hot by volume
+    - HIGH_OPEN_GAP: High opening gap (gap up)
+    - LOW_OPEN_GAP: Low opening gap (gap down)
+    - TOP_TRADE_COUNT: Most trades
+    - HIGH_VS_13W_HL: Near 13-week high
+    - LOW_VS_13W_HL: Near 13-week low
+    - HIGH_VS_52W_HL: Near 52-week high
+    - LOW_VS_52W_HL: Near 52-week low
+    """
+    if not _ib_service:
+        raise HTTPException(status_code=500, detail="IB service not initialized")
+    
+    try:
+        results = await _ib_service.run_scanner(
+            scan_type=request.scan_type,
+            max_results=request.max_results
+        )
+        return {"results": results, "count": len(results), "scan_type": request.scan_type}
+    except ConnectionError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error running scanner: {str(e)}")
+
+
+@router.post("/quotes/batch")
+async def get_batch_quotes(symbols: List[str]):
+    """Get real-time quotes for multiple symbols"""
+    if not _ib_service:
+        raise HTTPException(status_code=500, detail="IB service not initialized")
+    
+    if not symbols:
+        raise HTTPException(status_code=400, detail="No symbols provided")
+    
+    if len(symbols) > 50:
+        raise HTTPException(status_code=400, detail="Maximum 50 symbols per request")
+    
+    try:
+        quotes = await _ib_service.get_quotes_batch(symbols)
+        return {"quotes": quotes, "count": len(quotes)}
+    except ConnectionError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching quotes: {str(e)}")
+
+
+@router.get("/fundamentals/{symbol}")
+async def get_fundamentals(symbol: str):
+    """Get fundamental data for a symbol"""
+    if not _ib_service:
+        raise HTTPException(status_code=500, detail="IB service not initialized")
+    
+    try:
+        data = await _ib_service.get_fundamentals(symbol)
+        return data
+    except ConnectionError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching fundamentals: {str(e)}")
+
