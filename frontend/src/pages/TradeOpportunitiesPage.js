@@ -239,16 +239,21 @@ const OpportunityCard = ({ opportunity, onSelect, onTrade }) => {
 
 // Quick Trade Modal - For placing trades directly from scanner
 const QuickTradeModal = ({ opportunity, action, onClose, onSuccess }) => {
+  const { symbol, quote } = opportunity || {};
+  const isBuy = action === 'BUY';
+  
+  // Initialize prices from quote
+  const initialLimitPrice = quote?.price ? quote.price.toFixed(2) : '';
+  const stopOffset = isBuy ? 0.98 : 1.02;
+  const initialStopPrice = quote?.price ? (quote.price * stopOffset).toFixed(2) : '';
+  
   const [quantity, setQuantity] = useState(100);
   const [orderType, setOrderType] = useState('MKT');
-  const [limitPrice, setLimitPrice] = useState('');
-  const [stopPrice, setStopPrice] = useState('');
+  const [limitPrice, setLimitPrice] = useState(initialLimitPrice);
+  const [stopPrice, setStopPrice] = useState(initialStopPrice);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
-  
-  const { symbol, quote } = opportunity || {};
-  const isBuy = action === 'BUY';
   
   // Set default limit price to current price
   useEffect(() => {
