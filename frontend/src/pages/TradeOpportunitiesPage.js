@@ -1456,7 +1456,30 @@ const TradeOpportunitiesPage = () => {
   // Handle successful trade
   const handleTradeSuccess = (orderData) => {
     console.log('Trade successful:', orderData);
-    // Optionally refresh positions/account data
+    
+    // Add to active trades for P&L tracking
+    setActiveTrades(prev => [...prev, {
+      symbol: orderData.symbol,
+      action: orderData.action,
+      quantity: orderData.quantity,
+      entry_price: orderData.entry_price,
+      order_id: orderData.order_id,
+      timestamp: new Date().toISOString()
+    }]);
+    
+    // Show toast notification
+    setToast({
+      message: `${orderData.action} ${orderData.quantity} ${orderData.symbol} @ $${formatPrice(orderData.entry_price)}`,
+      type: 'success'
+    });
+    
+    // Play fill sound after a short delay
+    setTimeout(() => playTradeSound('fill'), 500);
+  };
+  
+  // Remove trade from active tracking
+  const removeActiveTrade = (index) => {
+    setActiveTrades(prev => prev.filter((_, i) => i !== index));
   };
   
   // Close trade modal
