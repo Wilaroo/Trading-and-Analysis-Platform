@@ -75,40 +75,63 @@ export const Sidebar = ({ activeTab, setActiveTab }) => {
       </div>
 
       <nav className="flex-1 py-4 overflow-y-auto">
-        {navItems.map((item) => (
-          <button
-            key={item.id}
-            data-testid={`nav-${item.id}`}
-            onClick={() => setActiveTab(item.id)}
-            className={`w-full flex items-center gap-3 px-4 py-3 transition-all ${
-              activeTab === item.id
-                ? 'bg-primary/10 text-primary border-r-2 border-primary'
-                : item.highlight 
-                  ? 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/10' 
-                  : 'text-zinc-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <item.icon className={`w-5 h-5 flex-shrink-0 ${item.highlight && activeTab !== item.id ? 'text-amber-400' : ''}`} />
-            <AnimatePresence>
-              {isExpanded && (
-                <motion.span
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="whitespace-nowrap flex items-center gap-2"
-                >
-                  {item.label}
-                  {item.highlight && activeTab !== item.id && (
-                    <span className="px-1.5 py-0.5 text-[10px] bg-amber-500/20 text-amber-400 rounded font-medium">NEW</span>
+        {navItems.map((item) => {
+          // Render divider
+          if (item.divider) {
+            return (
+              <div key={item.id} className="px-4 py-2 mt-2">
+                <AnimatePresence>
+                  {isExpanded && (
+                    <motion.span
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="text-[10px] uppercase tracking-wider text-zinc-600"
+                    >
+                      {item.label}
+                    </motion.span>
                   )}
-                </motion.span>
+                </AnimatePresence>
+                {!isExpanded && <div className="h-px bg-zinc-800 mt-1" />}
+              </div>
+            );
+          }
+          
+          return (
+            <button
+              key={item.id}
+              data-testid={`nav-${item.id}`}
+              onClick={() => setActiveTab(item.id)}
+              className={`w-full flex items-center gap-3 px-4 py-3 transition-all ${
+                activeTab === item.id
+                  ? 'bg-primary/10 text-primary border-r-2 border-primary'
+                  : item.highlight 
+                    ? 'text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10' 
+                    : 'text-zinc-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <item.icon className={`w-5 h-5 flex-shrink-0 ${item.highlight && activeTab !== item.id ? 'text-cyan-400' : ''}`} />
+              <AnimatePresence>
+                {isExpanded && (
+                  <motion.span
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="whitespace-nowrap flex items-center gap-2"
+                  >
+                    {item.label}
+                    {item.isNew && activeTab !== item.id && (
+                      <span className="px-1.5 py-0.5 text-[10px] bg-cyan-500/20 text-cyan-400 rounded font-medium">NEW</span>
+                    )}
+                  </motion.span>
+                )}
+              </AnimatePresence>
+              {activeTab === item.id && isExpanded && (
+                <ChevronRight className="w-4 h-4 ml-auto" />
               )}
-            </AnimatePresence>
-            {activeTab === item.id && isExpanded && (
-              <ChevronRight className="w-4 h-4 ml-auto" />
-            )}
-          </button>
-        ))}
+            </button>
+          );
+        })}
       </nav>
     </motion.aside>
   );
