@@ -35,11 +35,14 @@ class IBCommand(Enum):
     GET_ACCOUNT_SUMMARY = "get_account_summary"
     GET_POSITIONS = "get_positions"
     GET_QUOTE = "get_quote"
+    GET_QUOTES_BATCH = "get_quotes_batch"
     PLACE_ORDER = "place_order"
     CANCEL_ORDER = "cancel_order"
     GET_OPEN_ORDERS = "get_open_orders"
     GET_EXECUTIONS = "get_executions"
     GET_HISTORICAL_DATA = "get_historical_data"
+    RUN_SCANNER = "run_scanner"
+    GET_FUNDAMENTALS = "get_fundamentals"
     SHUTDOWN = "shutdown"
 
 
