@@ -122,20 +122,6 @@ async def quick_analysis(request: QuickFeatureRequest):
     Quick feature analysis with minimal data.
     Good for real-time scanning where you just have current bar info.
     """
-    engine = get_feature_engine()
-    
-    # Create a simplified bar
-    current_bar = {
-        "open": request.open_price,
-        "high": request.high,
-        "low": request.low,
-        "close": request.current_price,
-        "volume": request.volume,
-        "prior_close": request.prior_close,
-        "prior_high": request.prior_high,
-        "prior_low": request.prior_low
-    }
-    
     features = {}
     
     # Basic calculations
