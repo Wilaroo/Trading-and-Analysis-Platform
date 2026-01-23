@@ -106,6 +106,365 @@ const formatStrategyName = (strategy) => {
   return `${prefix}-${strategy.name}`;
 };
 
+// ===================== SOUND NOTIFICATIONS =====================
+const playTradeSound = (type = 'success') => {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const audioContext = new AudioContext();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    if (type === 'success') {
+      // Success sound: ascending tones
+      oscillator.frequency.setValueAtTime(523.25, audioContext.currentTime); // C5
+      oscillator.frequency.setValueAtTime(659.25, audioContext.currentTime + 0.1); // E5
+      oscillator.frequency.setValueAtTime(783.99, audioContext.currentTime + 0.2); // G5
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.4);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.4);
+    } else if (type === 'error') {
+      // Error sound: descending tone
+      oscillator.frequency.setValueAtTime(400, audioContext.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(200, audioContext.currentTime + 0.3);
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.3);
+    } else if (type === 'fill') {
+      // Fill sound: cash register style
+      oscillator.type = 'square';
+      oscillator.frequency.setValueAtTime(1200, audioContext.currentTime);
+      oscillator.frequency.setValueAtTime(1500, audioContext.currentTime + 0.05);
+      oscillator.frequency.setValueAtTime(1800, audioContext.currentTime + 0.1);
+      gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.2);
+    }
+  } catch (e) {
+    console.log('Audio not supported');
+  }
+};
+
+// ===================== IB REAL-TIME CHART COMPONENT =====================
+const IBChart = ({ symbol, onClose }) => {
+  const chartContainerRef = useRef(null);
+  const chartRef = useRef(null);
+  const candleSeriesRef = useRef(null);
+  const volumeSeriesRef = useRef(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [timeframe, setTimeframe] = useState('5 mins');
+  const [duration, setDuration] = useState('1 D');
+
+  useEffect(() => {
+    if (!chartContainerRef.current || !symbol) return;
+
+    // Create chart
+    const chart = createChart(chartContainerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: '#0A0A0A' },
+        textColor: '#9CA3AF',
+      },
+      grid: {
+        vertLines: { color: '#1F2937' },
+        horzLines: { color: '#1F2937' },
+      },
+      width: chartContainerRef.current.clientWidth,
+      height: 300,
+      timeScale: {
+        timeVisible: true,
+        secondsVisible: false,
+        borderColor: '#374151',
+      },
+      rightPriceScale: {
+        borderColor: '#374151',
+      },
+      crosshair: {
+        mode: 1,
+        vertLine: {
+          color: '#00E5FF',
+          width: 1,
+          style: 2,
+        },
+        horzLine: {
+          color: '#00E5FF',
+          width: 1,
+          style: 2,
+        },
+      },
+    });
+
+    chartRef.current = chart;
+
+    // Add candlestick series
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: '#00FF94',
+      downColor: '#FF2E2E',
+      borderUpColor: '#00FF94',
+      borderDownColor: '#FF2E2E',
+      wickUpColor: '#00FF94',
+      wickDownColor: '#FF2E2E',
+    });
+    candleSeriesRef.current = candleSeries;
+
+    // Add volume series
+    const volumeSeries = chart.addHistogramSeries({
+      color: '#26a69a',
+      priceFormat: {
+        type: 'volume',
+      },
+      priceScaleId: '',
+      scaleMargins: {
+        top: 0.8,
+        bottom: 0,
+      },
+    });
+    volumeSeriesRef.current = volumeSeries;
+
+    // Handle resize
+    const handleResize = () => {
+      if (chartContainerRef.current) {
+        chart.applyOptions({ width: chartContainerRef.current.clientWidth });
+      }
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      chart.remove();
+    };
+  }, [symbol]);
+
+  // Fetch data when symbol or timeframe changes
+  useEffect(() => {
+    if (!symbol || !candleSeriesRef.current) return;
+
+    const fetchData = async () => {
+      setLoading(true);
+      setError(null);
+      
+      try {
+        const response = await api.get(`/api/ib/historical/${symbol}?duration=${encodeURIComponent(duration)}&bar_size=${encodeURIComponent(timeframe)}`);
+        
+        if (response.data.bars && response.data.bars.length > 0) {
+          const candleData = response.data.bars.map(bar => ({
+            time: new Date(bar.date).getTime() / 1000,
+            open: bar.open,
+            high: bar.high,
+            low: bar.low,
+            close: bar.close,
+          }));
+          
+          const volumeData = response.data.bars.map(bar => ({
+            time: new Date(bar.date).getTime() / 1000,
+            value: bar.volume,
+            color: bar.close >= bar.open ? '#00FF9433' : '#FF2E2E33',
+          }));
+
+          candleSeriesRef.current.setData(candleData);
+          volumeSeriesRef.current.setData(volumeData);
+          chartRef.current?.timeScale().fitContent();
+        }
+      } catch (err) {
+        console.error('Error fetching chart data:', err);
+        setError('Failed to load chart data. Check IB connection.');
+      }
+      
+      setLoading(false);
+    };
+
+    fetchData();
+    
+    // Refresh data every 30 seconds for real-time updates
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
+  }, [symbol, timeframe, duration]);
+
+  const timeframes = [
+    { label: '1m', value: '1 min', duration: '1 D' },
+    { label: '5m', value: '5 mins', duration: '1 D' },
+    { label: '15m', value: '15 mins', duration: '2 D' },
+    { label: '1H', value: '1 hour', duration: '1 W' },
+    { label: 'D', value: '1 day', duration: '1 M' },
+  ];
+
+  return (
+    <div className="bg-[#0A0A0A] rounded-lg border border-white/10 overflow-hidden">
+      {/* Chart Header */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-white/10">
+        <div className="flex items-center gap-3">
+          <span className="font-bold text-white">{symbol}</span>
+          <span className="text-xs text-cyan-400">IB Real-time</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {timeframes.map(tf => (
+            <button
+              key={tf.value}
+              onClick={() => { setTimeframe(tf.value); setDuration(tf.duration); }}
+              className={`px-2 py-1 text-xs rounded transition-all
+                ${timeframe === tf.value 
+                  ? 'bg-cyan-400 text-black' 
+                  : 'text-zinc-400 hover:text-white hover:bg-white/5'
+                }
+              `}
+            >
+              {tf.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      
+      {/* Chart Container */}
+      <div className="relative">
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
+            <Loader2 className="w-6 h-6 text-cyan-400 animate-spin" />
+          </div>
+        )}
+        {error && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
+            <span className="text-red-400 text-sm">{error}</span>
+          </div>
+        )}
+        <div ref={chartContainerRef} className="w-full" />
+      </div>
+    </div>
+  );
+};
+
+// ===================== ACTIVE TRADES PANEL (Real-time P&L) =====================
+const ActiveTradesPanel = ({ trades, onRemove }) => {
+  const [quotes, setQuotes] = useState({});
+  
+  // Fetch real-time quotes for active trades
+  useEffect(() => {
+    if (!trades || trades.length === 0) return;
+    
+    const fetchQuotes = async () => {
+      try {
+        const symbols = trades.map(t => t.symbol);
+        const response = await api.post('/api/ib/quotes/batch', symbols);
+        const quotesMap = {};
+        response.data.quotes?.forEach(q => {
+          quotesMap[q.symbol] = q;
+        });
+        setQuotes(quotesMap);
+      } catch (err) {
+        console.error('Error fetching quotes for P&L:', err);
+      }
+    };
+    
+    fetchQuotes();
+    const interval = setInterval(fetchQuotes, 5000); // Update every 5 seconds
+    return () => clearInterval(interval);
+  }, [trades]);
+  
+  if (!trades || trades.length === 0) return null;
+  
+  return (
+    <Card className="mt-4">
+      <div className="flex items-center gap-2 mb-3">
+        <DollarSign className="w-4 h-4 text-cyan-400" />
+        <h3 className="text-sm font-medium uppercase tracking-wider">Active Trades</h3>
+      </div>
+      
+      <div className="space-y-2">
+        {trades.map((trade, idx) => {
+          const quote = quotes[trade.symbol];
+          const currentPrice = quote?.price || trade.entry_price;
+          const pnl = trade.action === 'BUY' 
+            ? (currentPrice - trade.entry_price) * trade.quantity
+            : (trade.entry_price - currentPrice) * trade.quantity;
+          const pnlPercent = ((currentPrice - trade.entry_price) / trade.entry_price) * 100;
+          const isProfit = pnl >= 0;
+          
+          return (
+            <div key={idx} className="bg-zinc-900 rounded-lg p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${
+                    trade.action === 'BUY' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                  }`}>
+                    {trade.action}
+                  </span>
+                  <span className="font-mono font-bold text-white">{trade.symbol}</span>
+                  <span className="text-xs text-zinc-500">{trade.quantity} shares</span>
+                </div>
+                <button 
+                  onClick={() => onRemove(idx)}
+                  className="text-zinc-500 hover:text-red-400 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <span className="text-zinc-500">Entry</span>
+                  <p className="font-mono text-white">${formatPrice(trade.entry_price)}</p>
+                </div>
+                <div>
+                  <span className="text-zinc-500">Current</span>
+                  <p className="font-mono text-cyan-400">${formatPrice(currentPrice)}</p>
+                </div>
+                <div>
+                  <span className="text-zinc-500">P&L</span>
+                  <p className={`font-mono font-bold ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
+                    {isProfit ? '+' : ''}{formatPrice(pnl)}
+                    <span className="text-[10px] ml-1">
+                      ({(trade.action === 'BUY' ? 1 : -1) * pnlPercent >= 0 ? '+' : ''}{((trade.action === 'BUY' ? 1 : -1) * pnlPercent).toFixed(2)}%)
+                    </span>
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+};
+
+// ===================== TOAST NOTIFICATION =====================
+const Toast = ({ message, type = 'success', onClose }) => {
+  useEffect(() => {
+    const timer = setTimeout(onClose, 5000);
+    return () => clearTimeout(timer);
+  }, [onClose]);
+  
+  const icons = {
+    success: <CheckCircle2 className="w-5 h-5 text-green-400" />,
+    error: <AlertTriangle className="w-5 h-5 text-red-400" />,
+    info: <Bell className="w-5 h-5 text-cyan-400" />
+  };
+  
+  const colors = {
+    success: 'border-green-500/30 bg-green-500/10',
+    error: 'border-red-500/30 bg-red-500/10',
+    info: 'border-cyan-500/30 bg-cyan-500/10'
+  };
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -20, x: 20 }}
+      animate={{ opacity: 1, y: 0, x: 0 }}
+      exit={{ opacity: 0, y: -20, x: 20 }}
+      className={`fixed top-20 right-4 z-50 flex items-center gap-3 px-4 py-3 rounded-lg border ${colors[type]} backdrop-blur-sm`}
+    >
+      {icons[type]}
+      <span className="text-sm text-white">{message}</span>
+      <button onClick={onClose} className="text-zinc-400 hover:text-white">
+        <X className="w-4 h-4" />
+      </button>
+    </motion.div>
+  );
+};
+
 // ===================== SUB-COMPONENTS =====================
 
 // Connection Status Indicator
