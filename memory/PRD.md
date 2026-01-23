@@ -153,7 +153,18 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 
 ## API Endpoints
 
-### Interactive Brokers ✅ NEW
+### Strategies ✅ NEW (Refactored)
+- `GET /api/strategies` - Get all strategies (optional `?category=` filter)
+- `GET /api/strategies/categories` - Get all strategy categories
+- `GET /api/strategies/search?q=` - Search strategies by name/criteria/indicators
+- `GET /api/strategies/count` - Get total strategy count
+- `GET /api/strategies/{strategy_id}` - Get specific strategy
+- `POST /api/strategies` - Create new strategy
+- `PUT /api/strategies/{strategy_id}` - Update strategy
+- `DELETE /api/strategies/{strategy_id}` - Delete strategy
+- `POST /api/strategies/batch` - Get multiple strategies by IDs
+
+### Interactive Brokers
 - `GET /api/ib/status` - Connection status
 - `POST /api/ib/connect` - Connect to IB Gateway
 - `POST /api/ib/disconnect` - Disconnect from IB
