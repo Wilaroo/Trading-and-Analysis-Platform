@@ -97,6 +97,9 @@ async def analyze_batch(request: BatchScoreRequest):
     engine = get_scoring_engine()
     
     stocks = [s.dict() for s in request.stocks]
+    # Rename float_shares to float for scoring engine
+    for s in stocks:
+        s["float"] = s.pop("float_shares", 50000000)
     market_dict = request.market_data.dict() if request.market_data else {"regime": "neutral"}
     
     results = await engine.score_batch(stocks, market_dict)
@@ -120,6 +123,9 @@ async def get_top_picks(
     engine = get_scoring_engine()
     
     stocks = [s.dict() for s in request.stocks]
+    # Rename float_shares to float for scoring engine
+    for s in stocks:
+        s["float"] = s.pop("float_shares", 50000000)
     market_dict = request.market_data.dict() if request.market_data else {"regime": "neutral"}
     
     # Score all stocks
