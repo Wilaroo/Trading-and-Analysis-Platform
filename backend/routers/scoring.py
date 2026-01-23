@@ -81,6 +81,8 @@ async def analyze_single_stock(stock: StockDataInput, market_data: Optional[Mark
     engine = get_scoring_engine()
     
     stock_dict = stock.dict()
+    # Rename float_shares to float for scoring engine
+    stock_dict["float"] = stock_dict.pop("float_shares", 50000000)
     market_dict = market_data.dict() if market_data else {"regime": "neutral"}
     
     result = engine.calculate_composite_score(stock_dict, market_dict)
