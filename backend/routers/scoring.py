@@ -19,7 +19,7 @@ class StockDataInput(BaseModel):
     vwap: float = 0
     rvol: float = 1.0
     gap_percent: float = 0
-    market_cap: float = 10_000_000_000
+    market_cap: float = 10000000000
     ema_9: float = 0
     sma_20: float = 0
     sma_50: float = 0
@@ -30,7 +30,7 @@ class StockDataInput(BaseModel):
     prev_low: float = 0
     volume: int = 0
     avg_volume: int = 0
-    float: int = 50_000_000
+    float_shares: int = 50000000
     short_interest_pct: float = 0
     shares_available_to_short: int = 0
     pe_ratio: float = 0
