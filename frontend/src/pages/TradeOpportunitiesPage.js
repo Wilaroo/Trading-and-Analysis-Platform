@@ -167,6 +167,7 @@ const IBChart = ({ symbol }) => {
     if (!chartContainerRef.current || !symbol) return;
 
     let chart = null;
+    let cleanupError = null;
     
     try {
       // Create chart
@@ -247,7 +248,14 @@ const IBChart = ({ symbol }) => {
       };
     } catch (err) {
       console.error('Error creating chart:', err);
-      setError('Failed to initialize chart');
+      cleanupError = err;
+    }
+    
+    // Handle error in cleanup to avoid setState in effect body
+    if (cleanupError) {
+      return () => {
+        setError('Failed to initialize chart');
+      };
     }
   }, [symbol]);
 
