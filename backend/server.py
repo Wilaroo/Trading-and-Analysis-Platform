@@ -60,6 +60,12 @@ trade_journal_service = get_trade_journal_service(db)
 catalyst_scoring_service = get_catalyst_scoring_service(db)
 trading_rules_engine = get_trading_rules_engine()
 ib_service = get_ib_service()
+strategy_service = get_strategy_service(db)
+
+# Seed strategies if not already done
+if not strategy_service.is_seeded():
+    seeded_count = strategy_service.seed_strategies(ALL_STRATEGIES_DATA)
+    print(f"Seeded {seeded_count} trading strategies to database")
 
 # Initialize routers with services
 init_notification_service(notification_service)
