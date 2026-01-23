@@ -65,8 +65,9 @@ async def get_market_overview():
         results = await market_context_service.analyze_batch(["SPY", "QQQ"])
         summary = market_context_service.get_context_summary(results)
         
-        spy_data = next((r for r in results if r.get("symbol") == "SPY"), {})
-        qqq_data = next((r for r in results if r.get("symbol") == "QQQ"), {})
+        # results is a dict like {"SPY": {...}, "QQQ": {...}}
+        spy_data = results.get("SPY", {})
+        qqq_data = results.get("QQQ", {})
         
         # Determine overall market regime
         spy_context = spy_data.get("market_context", "UNKNOWN")
@@ -98,11 +99,13 @@ async def get_market_overview():
                 "rvol": qqq_data.get("rvol", 0)
             },
             "vix": {
-                "price": summary.get("market_breadth", {}).get("vix", 0)
+                "price": summary.get("market_breadth", {}).get("vix", 0) if isinstance(summary, dict) else 0
             },
             "summary": summary
         }
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         # Return default values on error
         return {
             "regime": "Unknown",
