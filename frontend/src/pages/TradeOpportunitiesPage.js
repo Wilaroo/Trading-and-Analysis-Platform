@@ -32,7 +32,7 @@ import {
   Bell,
   CheckCircle2
 } from 'lucide-react';
-import { createChart, ColorType } from 'lightweight-charts';
+import * as LightweightCharts from 'lightweight-charts';
 import api from '../utils/api';
 
 // ===================== DESIGN TOKENS =====================
