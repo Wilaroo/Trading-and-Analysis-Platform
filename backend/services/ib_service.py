@@ -148,6 +148,15 @@ class IBWorkerThread(threading.Thread):
             elif request.command == IBCommand.GET_HISTORICAL_DATA:
                 return self._do_get_historical_data(request.params)
             
+            elif request.command == IBCommand.RUN_SCANNER:
+                return self._do_run_scanner(request.params)
+            
+            elif request.command == IBCommand.GET_QUOTES_BATCH:
+                return self._do_get_quotes_batch(request.params.get("symbols", []))
+            
+            elif request.command == IBCommand.GET_FUNDAMENTALS:
+                return self._do_get_fundamentals(request.params.get("symbol"))
+            
             else:
                 return IBResponse(success=False, error=f"Unknown command: {request.command}")
                 
