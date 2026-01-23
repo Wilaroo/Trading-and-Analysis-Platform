@@ -14,3 +14,4 @@ export { default as MarketContextPage } from './MarketContextPage';
 export { default as TradeJournalPage } from './TradeJournalPage';
 export { default as TradingRulesPage } from './TradingRulesPage';
 export { default as IBTradingPage } from './IBTradingPage';
+export { default as TradeOpportunitiesPage } from './TradeOpportunitiesPage';
