@@ -1996,6 +1996,17 @@ const TradeOpportunitiesPage = () => {
         <div className="col-span-12 lg:col-span-3 space-y-4 overflow-y-auto">
           <AccountPanel account={account} positions={positions} />
           
+          {/* Top Picks Panel - Scored Opportunities */}
+          <TopPicksPanel 
+            opportunities={opportunities}
+            isConnected={isConnected}
+            onTrade={handleTrade}
+            onSelectTicker={(pick) => {
+              const opp = opportunities.find(o => o.symbol === pick.symbol);
+              if (opp) setSelectedOpportunity(opp);
+            }}
+          />
+          
           {/* Active Trades Panel - Real-time P&L */}
           <ActiveTradesPanel trades={activeTrades} onRemove={removeActiveTrade} />
           
