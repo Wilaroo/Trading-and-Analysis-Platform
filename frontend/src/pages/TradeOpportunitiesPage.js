@@ -891,7 +891,7 @@ const TradeOpportunitiesPage = () => {
           
           {/* Quick Stats */}
           <Card>
-            <h3 className="text-sm font-medium uppercase tracking-wider mb-3">Today's Stats</h3>
+            <h3 className="text-sm font-medium uppercase tracking-wider mb-3">Today&apos;s Stats</h3>
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-zinc-500">Scans Run</span>
