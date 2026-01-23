@@ -237,6 +237,255 @@ const OpportunityCard = ({ opportunity, onSelect, onTrade }) => {
   );
 };
 
+// Quick Trade Modal - For placing trades directly from scanner
+const QuickTradeModal = ({ opportunity, action, onClose, onSuccess }) => {
+  const [quantity, setQuantity] = useState(100);
+  const [orderType, setOrderType] = useState('MKT');
+  const [limitPrice, setLimitPrice] = useState('');
+  const [stopPrice, setStopPrice] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
+  
+  const { symbol, quote } = opportunity || {};
+  const isBuy = action === 'BUY';
+  
+  // Set default limit price to current price
+  useEffect(() => {
+    if (quote?.price) {
+      setLimitPrice(quote.price.toFixed(2));
+      // For stops, set slightly below (buy) or above (sell) current price
+      const stopOffset = isBuy ? 0.98 : 1.02;
+      setStopPrice((quote.price * stopOffset).toFixed(2));
+    }
+  }, [quote, isBuy]);
+  
+  const handleSubmit = async () => {
+    setIsSubmitting(true);
+    setError(null);
+    setSuccess(null);
+    
+    try {
+      const orderData = {
+        symbol: symbol,
+        action: action,
+        quantity: parseInt(quantity),
+        order_type: orderType
+      };
+      
+      if (orderType === 'LMT' || orderType === 'STP_LMT') {
+        orderData.limit_price = parseFloat(limitPrice);
+      }
+      
+      if (orderType === 'STP' || orderType === 'STP_LMT') {
+        orderData.stop_price = parseFloat(stopPrice);
+      }
+      
+      console.log('Placing order:', orderData);
+      
+      const response = await api.post('/api/ib/order', orderData);
+      
+      setSuccess(`Order placed! ID: ${response.data.order_id}, Status: ${response.data.status}`);
+      
+      // Call success callback after delay
+      setTimeout(() => {
+        if (onSuccess) onSuccess(response.data);
+        onClose();
+      }, 2000);
+      
+    } catch (err) {
+      console.error('Order error:', err);
+      setError(err.response?.data?.detail || 'Failed to place order. Check IB connection.');
+    }
+    
+    setIsSubmitting(false);
+  };
+  
+  // Calculate estimated cost/proceeds
+  const price = orderType === 'MKT' ? quote?.price : parseFloat(limitPrice) || quote?.price;
+  const estimatedValue = price && quantity ? (price * quantity).toFixed(2) : '--';
+
+  if (!opportunity) return null;
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95, y: 20 }}
+          className="bg-[#0A0A0A] border border-white/10 w-full max-w-md overflow-hidden rounded-lg shadow-2xl"
+          onClick={e => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className={`p-4 ${isBuy ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-full ${isBuy ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
+                  {isBuy ? <TrendingUp className="w-5 h-5 text-green-400" /> : <TrendingDown className="w-5 h-5 text-red-400" />}
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">{isBuy ? 'Buy' : 'Short'} {symbol}</h3>
+                  <p className="text-sm text-zinc-400">Current: ${formatPrice(quote?.price)}</p>
+                </div>
+              </div>
+              <button
+                onClick={onClose}
+                className="p-2 rounded-md hover:bg-white/10 text-zinc-400 hover:text-white transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+          
+          {/* Form */}
+          <div className="p-4 space-y-4">
+            {/* Quantity */}
+            <div>
+              <label className="block text-xs text-zinc-500 uppercase mb-1">Quantity</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  className="flex-1 bg-zinc-900 border border-white/10 rounded px-3 py-2 text-white font-mono focus:border-cyan-400 focus:outline-none"
+                  min="1"
+                />
+                <div className="flex gap-1">
+                  {[10, 50, 100, 500].map(q => (
+                    <button
+                      key={q}
+                      onClick={() => setQuantity(q)}
+                      className={`px-2 py-1 text-xs rounded ${quantity === q ? 'bg-cyan-400 text-black' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            
+            {/* Order Type */}
+            <div>
+              <label className="block text-xs text-zinc-500 uppercase mb-1">Order Type</label>
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  { id: 'MKT', label: 'Market' },
+                  { id: 'LMT', label: 'Limit' },
+                  { id: 'STP', label: 'Stop' },
+                  { id: 'STP_LMT', label: 'Stop Lmt' }
+                ].map(type => (
+                  <button
+                    key={type.id}
+                    onClick={() => setOrderType(type.id)}
+                    className={`py-2 text-xs font-medium rounded transition-all
+                      ${orderType === type.id 
+                        ? 'bg-cyan-400 text-black' 
+                        : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-white'
+                      }
+                    `}
+                  >
+                    {type.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            
+            {/* Limit Price (if applicable) */}
+            {(orderType === 'LMT' || orderType === 'STP_LMT') && (
+              <div>
+                <label className="block text-xs text-zinc-500 uppercase mb-1">Limit Price</label>
+                <input
+                  type="number"
+                  value={limitPrice}
+                  onChange={(e) => setLimitPrice(e.target.value)}
+                  step="0.01"
+                  className="w-full bg-zinc-900 border border-white/10 rounded px-3 py-2 text-white font-mono focus:border-cyan-400 focus:outline-none"
+                />
+              </div>
+            )}
+            
+            {/* Stop Price (if applicable) */}
+            {(orderType === 'STP' || orderType === 'STP_LMT') && (
+              <div>
+                <label className="block text-xs text-zinc-500 uppercase mb-1">Stop Price</label>
+                <input
+                  type="number"
+                  value={stopPrice}
+                  onChange={(e) => setStopPrice(e.target.value)}
+                  step="0.01"
+                  className="w-full bg-zinc-900 border border-white/10 rounded px-3 py-2 text-white font-mono focus:border-cyan-400 focus:outline-none"
+                />
+              </div>
+            )}
+            
+            {/* Estimated Value */}
+            <div className="bg-zinc-900 rounded-lg p-3">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-zinc-400">Estimated {isBuy ? 'Cost' : 'Proceeds'}</span>
+                <span className="text-lg font-mono font-bold text-white">${estimatedValue}</span>
+              </div>
+            </div>
+            
+            {/* Error/Success Messages */}
+            {error && (
+              <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-red-400" />
+                <span className="text-sm text-red-400">{error}</span>
+              </div>
+            )}
+            
+            {success && (
+              <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3 flex items-center gap-2">
+                <Zap className="w-5 h-5 text-green-400" />
+                <span className="text-sm text-green-400">{success}</span>
+              </div>
+            )}
+          </div>
+          
+          {/* Footer */}
+          <div className="p-4 border-t border-white/10">
+            <div className="flex gap-3">
+              <button
+                onClick={onClose}
+                className="flex-1 py-2.5 text-sm font-medium text-zinc-400 border border-white/20 rounded hover:bg-white/5 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={isSubmitting || !quantity}
+                className={`flex-1 py-2.5 text-sm font-bold uppercase tracking-wider rounded transition-colors
+                  ${isBuy 
+                    ? 'bg-green-500 hover:bg-green-400 text-black' 
+                    : 'bg-red-500 hover:bg-red-400 text-white'
+                  }
+                  ${isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}
+                `}
+              >
+                {isSubmitting ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Placing...
+                  </span>
+                ) : (
+                  `${isBuy ? 'Buy' : 'Short'} ${quantity} Shares`
+                )}
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+};
+
 // Ticker Detail Modal
 const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
   const [activeTab, setActiveTab] = useState('overview');
