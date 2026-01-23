@@ -880,7 +880,7 @@ const ScannerSelector = ({ selectedScan, onSelect, isScanning }) => {
 
 // Opportunity Card
 const OpportunityCard = ({ opportunity, onSelect, onTrade }) => {
-  const { symbol, quote, strategies, catalystScore, marketContext } = opportunity;
+  const { symbol, quote, strategies, catalystScore, marketContext, conviction, highConviction, features } = opportunity;
   const isPositive = quote?.change_percent >= 0;
   
   return (
@@ -888,9 +888,26 @@ const OpportunityCard = ({ opportunity, onSelect, onTrade }) => {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
-      className="bg-[#0A0A0A] border border-white/10 rounded-lg p-4 hover:border-cyan-500/30 transition-all cursor-pointer"
+      className={`bg-[#0A0A0A] border rounded-lg p-4 hover:border-cyan-500/30 transition-all cursor-pointer ${
+        highConviction ? 'border-green-500/50 ring-1 ring-green-500/20' : 'border-white/10'
+      }`}
       onClick={() => onSelect(opportunity)}
     >
+      {/* High Conviction Badge */}
+      {highConviction && (
+        <div className="flex items-center gap-1.5 mb-2 -mt-1">
+          <span className="flex items-center gap-1 px-2 py-0.5 bg-green-500/20 border border-green-500/30 rounded-full text-[10px] font-bold uppercase text-green-400">
+            <Zap className="w-3 h-3" />
+            HIGH CONVICTION
+          </span>
+          {conviction?.confidence && (
+            <span className="text-[10px] text-zinc-500">
+              {conviction.score?.toFixed(0)} pts
+            </span>
+          )}
+        </div>
+      )}
+      
       {/* Header: Symbol + Price */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
@@ -902,6 +919,17 @@ const OpportunityCard = ({ opportunity, onSelect, onTrade }) => {
         </div>
         <span className="text-lg font-mono text-white">${formatPrice(quote?.price)}</span>
       </div>
+      
+      {/* Conviction Signals */}
+      {conviction?.signals && conviction.signals.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {conviction.signals.slice(0, 3).map((signal, idx) => (
+            <span key={idx} className="px-1.5 py-0.5 text-[10px] bg-cyan-500/10 text-cyan-400 rounded">
+              {signal}
+            </span>
+          ))}
+        </div>
+      )}
       
       {/* Strategy Matches */}
       <div className="flex flex-wrap gap-1.5 mb-3">
@@ -915,24 +943,37 @@ const OpportunityCard = ({ opportunity, onSelect, onTrade }) => {
         )}
       </div>
       
-      {/* Stats Row */}
-      <div className="grid grid-cols-3 gap-2 text-xs">
+      {/* Stats Row - Enhanced with features */}
+      <div className="grid grid-cols-4 gap-2 text-xs">
         <div>
           <span className="text-zinc-500">Volume</span>
           <p className="font-mono text-white">{formatVolume(quote?.volume)}</p>
         </div>
         <div>
-          <span className="text-zinc-500">Catalyst</span>
+          <span className="text-zinc-500">RVOL</span>
           <p className={`font-mono ${
-            catalystScore > 5 ? 'text-green-400' : 
-            catalystScore < -5 ? 'text-red-400' : 'text-zinc-400'
+            (features?.rvol || 0) >= 3 ? 'text-green-400' : 
+            (features?.rvol || 0) >= 2 ? 'text-yellow-400' : 'text-zinc-400'
           }`}>
-            {catalystScore !== null ? (catalystScore > 0 ? '+' : '') + catalystScore : '--'}
+            {features?.rvol ? features.rvol.toFixed(1) + 'x' : '--'}
           </p>
         </div>
         <div>
-          <span className="text-zinc-500">Context</span>
-          <p className="font-mono text-cyan-400 truncate">{marketContext || '--'}</p>
+          <span className="text-zinc-500">RSI</span>
+          <p className={`font-mono ${
+            (features?.rsi_14 || 50) >= 70 ? 'text-red-400' : 
+            (features?.rsi_14 || 50) <= 30 ? 'text-green-400' : 'text-zinc-400'
+          }`}>
+            {features?.rsi_14 ? features.rsi_14.toFixed(0) : '--'}
+          </p>
+        </div>
+        <div>
+          <span className="text-zinc-500">VWAP</span>
+          <p className={`font-mono ${
+            (features?.close_over_vwap_pct || 0) > 0 ? 'text-green-400' : 'text-red-400'
+          }`}>
+            {features?.close_over_vwap_pct ? (features.close_over_vwap_pct > 0 ? '+' : '') + features.close_over_vwap_pct.toFixed(1) + '%' : '--'}
+          </p>
         </div>
       </div>
       
