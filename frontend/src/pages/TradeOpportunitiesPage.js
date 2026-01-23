@@ -812,6 +812,9 @@ const TradeOpportunitiesPage = () => {
   const [error, setError] = useState(null);
   const [lastScanTime, setLastScanTime] = useState(null);
   
+  // Quick Trade Modal state
+  const [tradeModal, setTradeModal] = useState({ isOpen: false, opportunity: null, action: null });
+  
   const scanIntervalRef = useRef(null);
   
   // Load strategies on mount
