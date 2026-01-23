@@ -486,37 +486,48 @@ class IBWorkerThread(threading.Thread):
             location = params.get("location", "STK.US.MAJOR")
             max_results = params.get("max_results", 50)
             
-            # Create scanner subscription
+            logger.info(f"Running scanner: {scan_type}, location: {location}, max: {max_results}")
+            
+            # Create scanner subscription with relaxed filters
             sub = ScannerSubscription(
                 instrument=instrument,
                 locationCode=location,
                 scanCode=scan_type,
                 numberOfRows=max_results,
-                abovePrice=5.0,
+                abovePrice=1.0,  # Relaxed from 5.0
                 belowPrice=10000.0,
-                aboveVolume=100000,
-                marketCapAbove=100000000,  # $100M minimum
+                aboveVolume=50000,  # Relaxed from 100000
             )
             
             # Run the scan
             scan_results = self.ib.reqScannerData(sub)
-            self.ib.sleep(2)  # Wait for results
+            
+            logger.info(f"Scanner returned {len(scan_results) if scan_results else 0} results")
+            
+            if not scan_results:
+                logger.warning("Scanner returned no results")
+                return IBResponse(success=True, data=[])
             
             results = []
             for item in scan_results:
-                contract = item.contractDetails.contract
-                results.append({
-                    "symbol": contract.symbol,
-                    "sec_type": contract.secType,
-                    "exchange": contract.primaryExchange or contract.exchange,
-                    "currency": contract.currency,
-                    "rank": item.rank,
-                    "distance": getattr(item, 'distance', None),
-                    "benchmark": getattr(item, 'benchmark', None),
-                    "projection": getattr(item, 'projection', None),
-                    "legs_str": getattr(item, 'legsStr', None),
-                })
+                try:
+                    contract = item.contractDetails.contract
+                    results.append({
+                        "symbol": contract.symbol,
+                        "sec_type": contract.secType,
+                        "exchange": contract.primaryExchange or contract.exchange,
+                        "currency": contract.currency,
+                        "rank": item.rank,
+                        "distance": getattr(item, 'distance', None),
+                        "benchmark": getattr(item, 'benchmark', None),
+                        "projection": getattr(item, 'projection', None),
+                        "legs_str": getattr(item, 'legsStr', None),
+                    })
+                except Exception as item_err:
+                    logger.error(f"Error processing scanner item: {item_err}")
+                    continue
             
+            logger.info(f"Processed {len(results)} scanner results")
             return IBResponse(success=True, data=results)
             
         except Exception as e:
