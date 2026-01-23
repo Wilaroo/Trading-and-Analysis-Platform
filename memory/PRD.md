@@ -151,6 +151,35 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 - New API endpoints: search, categories, CRUD operations
 - Significantly reduced `server.py` file size (~450 lines removed)
 
+### Phase 10 - Feature Engineering Service ✅ NEW (Jan 2026)
+- **Comprehensive technical indicator library** for IB Gateway integration:
+  - **Price/Volume**: OHLCV, returns, gaps, dollar volume, RVOL
+  - **Moving Averages**: SMA (10/20/50/100/200), EMA (9/20/50), cross signals, slopes
+  - **Volatility**: ATR, True Range %, Historical Volatility, Range compression
+  - **Momentum**: RSI (2/14), Stochastics, MACD, ROC, Williams %R
+  - **VWAP**: Price vs VWAP, distance %, ATR bands
+  - **Structure**: 20-bar/20-day/52-week highs/lows, prior day levels, pivot points
+  - **Opening Range**: ORH/ORL, breakout detection
+  - **Relative Strength**: vs SPY, vs Sector, RS ranking
+- **High-Conviction Intraday Score** (0-100):
+  - RVOL >= 2 (25 pts)
+  - Near VWAP <= 0.5% (20 pts)
+  - Above EMA20 (15 pts)
+  - RSI 45-75 (15 pts)
+  - Opening Range break (15 pts)
+  - Near PDH/PDL (10 pts)
+  - Strong catalyst (10 bonus pts)
+- **VectorVest-style Composite Scores**:
+  - RV Score (Relative Value)
+  - RS Score (Relative Safety)
+  - RT Score (Relative Timing)
+  - VST Score (Composite)
+- **API Endpoints**:
+  - `POST /api/features/calculate` - Full feature calculation
+  - `POST /api/features/quick-analysis` - Real-time quick analysis
+  - `GET /api/features/indicators` - List all available indicators
+  - `GET /api/features/high-conviction-criteria` - View criteria
+
 ### Phase 9 - Universal Scoring Engine ✅ NEW (Jan 2026)
 - **Comprehensive stock scoring system (0-100)** with letter grades (A+ to D)
 - **Top Picks UI Panel** ✅ integrated into Trade Opportunities page:
