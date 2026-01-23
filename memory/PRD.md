@@ -153,6 +153,17 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 
 ### Phase 9 - Universal Scoring Engine ✅ NEW (Jan 2026)
 - **Comprehensive stock scoring system (0-100)** with letter grades (A+ to D)
+- **Top Picks UI Panel** ✅ integrated into Trade Opportunities page:
+  - Timeframe toggle: All, Day (Intraday), Swing, Long-term
+  - Direction filter: All, Long (↑), Short (↓)
+  - Each pick displays:
+    - Symbol, Grade, Composite Score
+    - Direction (STRONG_LONG, LONG, NEUTRAL, SHORT, STRONG_SHORT)
+    - Quick stats: RVOL, Gap%, VWAP position
+    - Success probability bar with confidence level
+    - 3 Support levels + 3 Resistance levels
+    - Quick Buy/Short buttons when connected
+  - Auto-scores opportunities when scanner runs
 - **Five scoring categories:**
   - Technical (35%): VWAP position, RVOL by market cap, Gap%, MA distance, pattern recognition
   - Fundamental (20%): VectorVest-style scoring (Value, Safety, Growth, Timing)
