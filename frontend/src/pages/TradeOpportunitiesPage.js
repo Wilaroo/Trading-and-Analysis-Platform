@@ -715,8 +715,17 @@ const TradeOpportunitiesPage = () => {
   // Auto-scan interval
   useEffect(() => {
     if (autoScan && isConnected) {
-      runScanner();
+      // Initial scan when auto-scan is enabled
+      const timer = setTimeout(() => {
+        runScanner();
+      }, 100);
       scanIntervalRef.current = setInterval(runScanner, 60000); // Every minute
+      return () => {
+        clearTimeout(timer);
+        if (scanIntervalRef.current) {
+          clearInterval(scanIntervalRef.current);
+        }
+      };
     } else {
       if (scanIntervalRef.current) {
         clearInterval(scanIntervalRef.current);
