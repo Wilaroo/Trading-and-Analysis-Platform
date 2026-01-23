@@ -2130,7 +2130,7 @@ async def get_dashboard_stats():
         "portfolio_change": portfolio["summary"]["total_gain_loss_percent"],
         "unread_alerts": alerts_data["unread_count"],
         "watchlist_count": watchlist["count"],
-        "strategies_count": len(ALL_STRATEGIES),
+        "strategies_count": strategy_service.get_strategy_count(),
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
