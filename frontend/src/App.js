@@ -182,6 +182,7 @@ function App() {
   const renderPage = () => {
     switch (activeTab) {
       case 'dashboard': return <ErrorBoundary><DashboardPage data={dashboardData} loading={loading} onRefresh={loadDashboardData} streamingQuotes={streamingQuotes} /></ErrorBoundary>;
+      case 'opportunities': return <TradeOpportunitiesPage />;
       case 'chart': return <ErrorBoundary><ChartsPage /></ErrorBoundary>;
       case 'scanner': return <ScannerPage />;
       case 'strategies': return <StrategiesPage />;
