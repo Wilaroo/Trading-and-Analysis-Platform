@@ -670,25 +670,40 @@ const TradeOpportunitiesPage = () => {
     setError(null);
     
     try {
+      console.log('Running scanner:', selectedScanType);
+      
       // Run IB scanner
       const scanResponse = await api.post('/api/ib/scanner', {
         scan_type: selectedScanType,
         max_results: 50
       });
       
+      console.log('Scanner response:', scanResponse.data);
+      
       const scanResults = scanResponse.data.results || [];
       
       if (scanResults.length === 0) {
+        console.log('No scanner results');
         setOpportunities([]);
         setLastScanTime(new Date());
         setIsScanning(false);
         return;
       }
       
+      console.log('Scanner found', scanResults.length, 'symbols');
+      
       // Get quotes for scanned symbols
       const symbols = scanResults.map(r => r.symbol);
-      const quotesResponse = await api.post('/api/ib/quotes/batch', symbols);
-      const quotes = quotesResponse.data.quotes || [];
+      let quotes = [];
+      
+      try {
+        const quotesResponse = await api.post('/api/ib/quotes/batch', symbols);
+        quotes = quotesResponse.data.quotes || [];
+        console.log('Got quotes for', quotes.length, 'symbols');
+      } catch (quoteErr) {
+        console.error('Error getting quotes:', quoteErr);
+        // Continue without quotes
+      }
       
       // Create quote lookup
       const quoteLookup = {};
@@ -696,35 +711,73 @@ const TradeOpportunitiesPage = () => {
       
       // Match strategies and create opportunities
       const opps = scanResults.map(result => {
-        const quote = quoteLookup[result.symbol] || {};
+        const quote = quoteLookup[result.symbol] || { 
+          symbol: result.symbol, 
+          price: 0, 
+          change_percent: 0,
+          volume: 0
+        };
         
-        // Simple strategy matching based on price action
-        const matchedStrategies = strategies.filter(s => {
-          // Match intraday strategies for gainers
-          if (selectedScanType === 'TOP_PERC_GAIN' && s.category === 'intraday') {
-            return s.name.toLowerCase().includes('momentum') || 
-                   s.name.toLowerCase().includes('breakout') ||
-                   s.name.toLowerCase().includes('gap');
+        // Strategy matching based on scan type
+        let matchedStrategies = [];
+        
+        if (strategies.length > 0) {
+          if (selectedScanType === 'TOP_PERC_GAIN' || selectedScanType === 'HIGH_OPEN_GAP') {
+            // Match bullish intraday strategies
+            matchedStrategies = strategies.filter(s => 
+              s.category === 'intraday' && (
+                s.name.toLowerCase().includes('momentum') || 
+                s.name.toLowerCase().includes('breakout') ||
+                s.name.toLowerCase().includes('gap') ||
+                s.name.toLowerCase().includes('opening') ||
+                s.name.toLowerCase().includes('trend')
+              )
+            );
+          } else if (selectedScanType === 'TOP_PERC_LOSE' || selectedScanType === 'LOW_OPEN_GAP') {
+            // Match bearish/fade strategies
+            matchedStrategies = strategies.filter(s => 
+              s.category === 'intraday' && (
+                s.name.toLowerCase().includes('fade') || 
+                s.name.toLowerCase().includes('reversion') ||
+                s.name.toLowerCase().includes('short')
+              )
+            );
+          } else if (selectedScanType === 'MOST_ACTIVE' || selectedScanType === 'HOT_BY_VOLUME') {
+            // Match high volume strategies
+            matchedStrategies = strategies.filter(s => 
+              s.category === 'intraday' && (
+                s.name.toLowerCase().includes('volume') ||
+                s.name.toLowerCase().includes('scalp') ||
+                s.name.toLowerCase().includes('momentum')
+              )
+            );
+          } else if (selectedScanType === 'HIGH_VS_52W_HL') {
+            // Match breakout strategies for 52W highs
+            matchedStrategies = strategies.filter(s => 
+              s.name.toLowerCase().includes('breakout') ||
+              s.name.toLowerCase().includes('trend') ||
+              s.category === 'swing'
+            );
+          } else {
+            // Default: get some intraday strategies
+            matchedStrategies = strategies.filter(s => s.category === 'intraday');
           }
-          // Match for losers (short strategies)
-          if (selectedScanType === 'TOP_PERC_LOSE' && s.category === 'intraday') {
-            return s.name.toLowerCase().includes('fade') || 
-                   s.name.toLowerCase().includes('reversion');
-          }
-          // Default match some strategies
-          return Math.random() > 0.7; // Simplified for demo
-        }).slice(0, 5);
+          
+          // Limit to top 5
+          matchedStrategies = matchedStrategies.slice(0, 5);
+        }
         
         return {
           symbol: result.symbol,
           rank: result.rank,
           quote,
           strategies: matchedStrategies,
-          catalystScore: null, // Would come from catalyst service
+          catalystScore: null,
           marketContext: marketContext?.regime || 'Unknown'
         };
       });
       
+      console.log('Created', opps.length, 'opportunities');
       setOpportunities(opps);
       setLastScanTime(new Date());
       
