@@ -66,6 +66,7 @@ trading_rules_engine = get_trading_rules_engine()
 ib_service = get_ib_service()
 strategy_service = get_strategy_service(db)
 scoring_engine = get_scoring_engine(db)
+feature_engine = get_feature_engine()
 
 # Seed strategies if not already done
 if not strategy_service.is_seeded():
