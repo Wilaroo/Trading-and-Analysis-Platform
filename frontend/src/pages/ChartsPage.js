@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LineChart, Loader2, Wifi, WifiOff, RefreshCw } from 'lucide-react';
+import { LineChart, Loader2, Wifi, WifiOff } from 'lucide-react';
 import { createChart, ColorType } from 'lightweight-charts';
 import api from '../utils/api';
 
@@ -16,68 +16,102 @@ const IBRealtimeChart = ({ symbol, isConnected }) => {
   const [duration, setDuration] = useState('1 D');
   const [lastUpdate, setLastUpdate] = useState(null);
 
+  const timeframes = [
+    { label: '1m', value: '1 min', duration: '1 D' },
+    { label: '5m', value: '5 mins', duration: '1 D' },
+    { label: '15m', value: '15 mins', duration: '2 D' },
+    { label: '30m', value: '30 mins', duration: '1 W' },
+    { label: '1H', value: '1 hour', duration: '1 W' },
+    { label: '4H', value: '4 hours', duration: '1 M' },
+    { label: 'D', value: '1 day', duration: '6 M' },
+    { label: 'W', value: '1 week', duration: '1 Y' },
+  ];
+
   // Create chart on mount
   useEffect(() => {
     if (!chartContainerRef.current || !symbol) return;
 
-    let chart = null;
-    
-    try {
-      chart = createChart(chartContainerRef.current, {
-        layout: {
-          background: { type: ColorType.Solid, color: '#0A0A0A' },
-          textColor: '#9CA3AF',
-        },
-        grid: {
-          vertLines: { color: '#1F2937' },
-          horzLines: { color: '#1F2937' },
-        },
-        width: chartContainerRef.current.clientWidth || 800,
-        height: chartContainerRef.current.clientHeight || 500,
-        timeScale: {
-          timeVisible: true,
-          secondsVisible: false,
-          borderColor: '#374151',
-        },
-        rightPriceScale: {
-          borderColor: '#374151',
-        },
-        crosshair: {
-          mode: 1,
-          vertLine: { color: '#00E5FF', width: 1, style: 2 },
-          horzLine: { color: '#00E5FF', width: 1, style: 2 },
-        },
-      });
+    // Small delay to ensure container has dimensions
+    const timer = setTimeout(() => {
+      if (!chartContainerRef.current) return;
+      
+      try {
+        const containerWidth = chartContainerRef.current.clientWidth || 800;
+        const containerHeight = chartContainerRef.current.clientHeight || 500;
+        
+        const chart = createChart(chartContainerRef.current, {
+          layout: {
+            background: { type: ColorType.Solid, color: '#0A0A0A' },
+            textColor: '#9CA3AF',
+          },
+          grid: {
+            vertLines: { color: '#1F2937' },
+            horzLines: { color: '#1F2937' },
+          },
+          width: containerWidth,
+          height: containerHeight,
+          timeScale: {
+            timeVisible: true,
+            secondsVisible: false,
+            borderColor: '#374151',
+          },
+          rightPriceScale: {
+            borderColor: '#374151',
+          },
+          crosshair: {
+            mode: 1,
+            vertLine: { color: '#00E5FF', width: 1, style: 2 },
+            horzLine: { color: '#00E5FF', width: 1, style: 2 },
+          },
+        });
 
-      chartRef.current = chart;
+        chartRef.current = chart;
 
-      const candleSeries = chart.addCandlestickSeries({
-        upColor: '#00FF94',
-        downColor: '#FF2E2E',
-        borderUpColor: '#00FF94',
-        borderDownColor: '#FF2E2E',
-        wickUpColor: '#00FF94',
-        wickDownColor: '#FF2E2E',
-      });
-      candleSeriesRef.current = candleSeries;
+        const candleSeries = chart.addCandlestickSeries({
+          upColor: '#00FF94',
+          downColor: '#FF2E2E',
+          borderUpColor: '#00FF94',
+          borderDownColor: '#FF2E2E',
+          wickUpColor: '#00FF94',
+          wickDownColor: '#FF2E2E',
+        });
+        candleSeriesRef.current = candleSeries;
 
-      const volumeSeries = chart.addHistogramSeries({
-        color: '#26a69a',
-        priceFormat: { type: 'volume' },
-        priceScaleId: '',
-        scaleMargins: { top: 0.85, bottom: 0 },
-      });
-      volumeSeriesRef.current = volumeSeries;
+        const volumeSeries = chart.addHistogramSeries({
+          color: '#26a69a',
+          priceFormat: { type: 'volume' },
+          priceScaleId: '',
+          scaleMargins: { top: 0.85, bottom: 0 },
+        });
+        volumeSeriesRef.current = volumeSeries;
 
-      const handleResize = () => {
-        if (chartContainerRef.current && chart) {
-          chart.applyOptions({ 
-            width: chartContainerRef.current.clientWidth,
-            height: chartContainerRef.current.clientHeight
-          });
-        }
-      };
-      window.addEventListener('resize', handleResize);
+        const handleResize = () => {
+          if (chartContainerRef.current && chartRef.current) {
+            chartRef.current.applyOptions({ 
+              width: chartContainerRef.current.clientWidth,
+              height: chartContainerRef.current.clientHeight
+            });
+          }
+        };
+        window.addEventListener('resize', handleResize);
+
+        return () => {
+          window.removeEventListener('resize', handleResize);
+        };
+      } catch (err) {
+        console.error('Error creating chart:', err);
+        setError('Failed to initialize chart');
+      }
+    }, 100);
+
+    return () => {
+      clearTimeout(timer);
+      if (chartRef.current) {
+        chartRef.current.remove();
+        chartRef.current = null;
+      }
+    };
+  }, [symbol]);
 
       return () => {
         window.removeEventListener('resize', handleResize);
