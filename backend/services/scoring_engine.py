@@ -539,7 +539,6 @@ class UniversalScoringEngine:
         
         # 3. Risk/Reward Assessment (25 points)
         atr = data.get("atr", 0)
-        current_price = data.get("current_price", 0)
         support_distance = data.get("support_distance", 0)
         resistance_distance = data.get("resistance_distance", 0)
         
