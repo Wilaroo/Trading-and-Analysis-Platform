@@ -27,8 +27,12 @@ import {
   Loader2,
   Info,
   TrendingUp as TrendUp,
-  Volume2
+  Volume2,
+  DollarSign,
+  Bell,
+  CheckCircle2
 } from 'lucide-react';
+import { createChart, ColorType } from 'lightweight-charts';
 import api from '../utils/api';
 
 // ===================== DESIGN TOKENS =====================
