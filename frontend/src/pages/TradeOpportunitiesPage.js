@@ -1481,7 +1481,7 @@ const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
                         <input
                           type="number"
                           value={entryPrice || ''}
-                          onChange={(e) => setEntryPrice(parseFloat(e.target.value))}
+                          onChange={(e) => setManualEntry(parseFloat(e.target.value))}
                           step="0.01"
                           className="w-full bg-zinc-800 border border-cyan-500/30 rounded px-2 py-1 text-sm font-mono text-cyan-400"
                         />
@@ -1491,7 +1491,7 @@ const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
                         <input
                           type="number"
                           value={stopLoss || ''}
-                          onChange={(e) => setStopLoss(parseFloat(e.target.value))}
+                          onChange={(e) => setManualSL(parseFloat(e.target.value))}
                           step="0.01"
                           className="w-full bg-zinc-800 border border-red-500/30 rounded px-2 py-1 text-sm font-mono text-red-400"
                         />
@@ -1501,7 +1501,7 @@ const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
                         <input
                           type="number"
                           value={takeProfit || ''}
-                          onChange={(e) => setTakeProfit(parseFloat(e.target.value))}
+                          onChange={(e) => setManualTP(parseFloat(e.target.value))}
                           step="0.01"
                           className="w-full bg-zinc-800 border border-green-500/30 rounded px-2 py-1 text-sm font-mono text-green-400"
                         />
