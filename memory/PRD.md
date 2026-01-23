@@ -151,6 +151,29 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 - New API endpoints: search, categories, CRUD operations
 - Significantly reduced `server.py` file size (~450 lines removed)
 
+### Phase 11 - Enhanced Scanner & Chart Features ✅ NEW (Jan 2026)
+- **Enhanced Scanner with Auto-Feature Calculation**:
+  - `/api/ib/scanner/enhanced` endpoint
+  - Auto-fetches 5-minute historical bars for each scanned stock
+  - Calculates technical features (RSI, RVOL, VWAP, ATR, MACD)
+  - Calculates intraday conviction score
+  - Sorts results by conviction score (highest first)
+  - Returns high_conviction_count for quick stats
+- **HIGH CONVICTION Badges**:
+  - Green glow border on high-conviction opportunity cards
+  - "⚡ HIGH CONVICTION" badge with score
+  - Conviction signals displayed (e.g., "High RVOL (3.5x)", "Near VWAP")
+  - Enhanced stats: RVOL, RSI, VWAP% columns
+- **Stop-Loss / Take-Profit on Charts**:
+  - Toggle "Show SL/TP Lines" button in Analyze modal
+  - Auto-suggested levels based on ATR (1.5x ATR stop, 3x ATR target)
+  - Editable Entry, Stop Loss, Take Profit inputs
+  - Real-time R:R Ratio calculation
+  - Price lines drawn on chart:
+    - Cyan line = Entry
+    - Red dashed line = Stop Loss
+    - Green dashed line = Take Profit
+
 ### Phase 10 - Feature Engineering Service ✅ NEW (Jan 2026)
 - **Comprehensive technical indicator library** for IB Gateway integration:
   - **Price/Volume**: OHLCV, returns, gaps, dollar volume, RVOL
