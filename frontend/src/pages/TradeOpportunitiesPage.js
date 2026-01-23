@@ -643,16 +643,34 @@ const QuickTradeModal = ({ opportunity, action, onClose, onSuccess }) => {
       
       const response = await api.post('/api/ib/order', orderData);
       
+      // Play success sound
+      playTradeSound('success');
+      
       setSuccess(`Order placed! ID: ${response.data.order_id}, Status: ${response.data.status}`);
       
-      // Call success callback after delay
+      // Get the fill price (use limit price for limit orders, or current price for market)
+      const fillPrice = response.data.avg_fill_price > 0 
+        ? response.data.avg_fill_price 
+        : (orderType === 'MKT' ? quote?.price : parseFloat(limitPrice));
+      
+      // Call success callback with trade data for P&L tracking
       setTimeout(() => {
-        if (onSuccess) onSuccess(response.data);
+        if (onSuccess) {
+          onSuccess({
+            ...response.data,
+            entry_price: fillPrice || quote?.price,
+            quantity: parseInt(quantity),
+            action: action,
+            symbol: symbol
+          });
+        }
         onClose();
-      }, 2000);
+      }, 1500);
       
     } catch (err) {
       console.error('Order error:', err);
+      // Play error sound
+      playTradeSound('error');
       setError(err.response?.data?.detail || 'Failed to place order. Check IB connection.');
     }
     
