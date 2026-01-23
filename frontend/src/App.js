@@ -24,7 +24,8 @@ import {
   MarketContextPage,
   TradeJournalPage,
   TradingRulesPage,
-  IBTradingPage
+  IBTradingPage,
+  TradeOpportunitiesPage
 } from './pages';
 
 import './App.css';
