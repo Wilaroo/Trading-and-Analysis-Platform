@@ -18,10 +18,13 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 - View account summary, positions, and open orders
 
 ### Strategy Scanner (77 Strategies)
-- Intraday and swing trading strategies
+- **Now stored in MongoDB** (refactored from hardcoded data)
+- Intraday, swing, and investment trading strategies
 - Smart recommendations based on market context
 - Strategy filtering by market conditions (Trending, Consolidation, Mean Reversion)
 - RVOL and ATR-based market context classification
+- Full CRUD operations via `/api/strategies` endpoints
+- Search strategies by name, criteria, or indicators
 
 ### Earnings Calendar
 - Upcoming earnings with implied volatility analysis
