@@ -159,18 +159,30 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
   - Gap Up/Down stocks
   - 52-week High/Low
 - **Strategy Matching** - Auto-matches scanned stocks to 77 trading strategies
-- **Ticker Detail Modal** - Click any ticker to see full analysis:
-  - Price data, volume, high/low
+- **Ticker Detail Modal with IB Real-time Chart** ✅ NEW (Jan 2026):
+  - TradingView Lightweight Charts with IB historical data
+  - Multiple timeframes (1m, 5m, 15m, 1H, Daily)
+  - Candlestick + Volume visualization
+  - Auto-refresh every 30 seconds
+  - Price data, volume, high/low stats
   - Matching strategies with criteria
   - Trading rules and warnings
   - One-click trade buttons
-- **Quick Trade from Scanner** ✅ NEW (Jan 2026) - One-click order placement:
+- **Quick Trade from Scanner** ✅ (Jan 2026) - One-click order placement:
   - Buy/Short buttons on every opportunity card
   - Quick trade modal with quantity presets (10, 50, 100, 500)
   - Order types: Market, Limit, Stop, Stop-Limit
   - Auto-populated limit/stop prices from current quote
   - Estimated cost/proceeds calculator
   - Direct order execution via IB API
+  - **Trade Confirmation Sound** - Audio feedback on order placement
+  - **Toast Notifications** - Visual feedback with order details
+- **Active Trades Panel with Real-time P&L** ✅ NEW (Jan 2026):
+  - Entry price tracking
+  - Current price (live from IB quotes)
+  - Real-time P&L calculation ($ and %)
+  - Long/Short position color coding
+  - Remove trade from tracking
 - **Strategy names displayed properly** - "INT-VWAP Bounce" instead of "INT-06"
 - **Account panel** - Shows net liquidation, buying power, P&L, positions
 - **Market Context panel** - Current regime, SPY/QQQ/VIX status
