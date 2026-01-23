@@ -1255,6 +1255,16 @@ const TradeOpportunitiesPage = () => {
           onTrade={handleTrade}
         />
       )}
+      
+      {/* Quick Trade Modal */}
+      {tradeModal.isOpen && (
+        <QuickTradeModal
+          opportunity={tradeModal.opportunity}
+          action={tradeModal.action}
+          onClose={closeTradeModal}
+          onSuccess={handleTradeSuccess}
+        />
+      )}
     </div>
   );
 };
