@@ -1565,12 +1565,43 @@ const CommandCenterPage = () => {
     <div className="space-y-4 pb-8" data-testid="command-center-page">
       {/* Header Bar */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Target className="w-7 h-7 text-cyan-400" />
-            Command Center
-          </h1>
-          <p className="text-zinc-500 text-sm">Real-time trading intelligence hub</p>
+        <div className="flex items-center gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+              <Target className="w-7 h-7 text-cyan-400" />
+              Command Center
+            </h1>
+            <p className="text-zinc-500 text-sm">Real-time trading intelligence hub</p>
+          </div>
+          
+          {/* Compact System Monitor */}
+          {systemHealth && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/50 rounded-lg border border-zinc-800">
+              <Monitor className="w-4 h-4 text-zinc-400" />
+              <div className="flex items-center gap-1.5">
+                {systemHealth.services.slice(0, 5).map((service, idx) => {
+                  const statusColor = service.status === 'healthy' ? 'bg-green-500' :
+                                     service.status === 'warning' ? 'bg-yellow-500' :
+                                     service.status === 'disconnected' ? 'bg-orange-500' :
+                                     'bg-red-500';
+                  return (
+                    <div
+                      key={idx}
+                      className={`w-2 h-2 rounded-full ${statusColor}`}
+                      title={`${service.name}: ${service.details}`}
+                    />
+                  );
+                })}
+              </div>
+              <span className={`text-xs font-medium ${
+                systemHealth.overall_status === 'healthy' ? 'text-green-400' :
+                systemHealth.overall_status === 'partial' ? 'text-yellow-400' :
+                'text-red-400'
+              }`}>
+                {systemHealth.summary.healthy}/{systemHealth.summary.total}
+              </span>
+            </div>
+          )}
         </div>
         
         <div className="flex items-center gap-3">
