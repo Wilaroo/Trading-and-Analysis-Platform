@@ -1315,6 +1315,8 @@ const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
   const [historicalData, setHistoricalData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showLevels, setShowLevels] = useState(false);
+  const [tickerNews, setTickerNews] = useState([]);
+  const [newsLoading, setNewsLoading] = useState(false);
   
   // Manual override state for SL/TP
   const [manualEntry, setManualEntry] = useState(null);
