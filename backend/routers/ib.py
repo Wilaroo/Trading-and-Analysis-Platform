@@ -1805,7 +1805,7 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                     continue
                 
                 # Match against ALL strategies
-                matched_strategies = strategies_service.match_strategies(symbol, quote, features, scores)
+                matched_strategies = simple_strategy_match(symbol, features, scores)
                 
                 # Determine timeframe based on strategy matches and features
                 timeframe = determine_timeframe_from_analysis(
