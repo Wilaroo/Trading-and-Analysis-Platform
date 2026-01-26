@@ -575,8 +575,11 @@ const CommandCenterPage = () => {
     setConnecting(true);
     try {
       await api.post('/api/ib/connect');
-      await checkConnection();
-      await fetchAccountData();
+      const connected = await checkConnection();
+      if (connected) {
+        await fetchAccountData();
+        await fetchWatchlist(connected);
+      }
     } catch (err) {
       console.error('Connection failed:', err);
     }
