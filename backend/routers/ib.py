@@ -1370,11 +1370,9 @@ async def get_breakout_alerts():
     
     try:
         from services.scoring_engine import get_scoring_engine
-        from services.strategy_service import StrategyService
         
         feature_engine = get_feature_engine()
         scoring_engine = get_scoring_engine()
-        strategies_service = StrategyService()
         
         # Run multiple scanners to find potential breakout candidates
         scanner_types = ["TOP_PERC_GAIN", "HOT_BY_VOLUME", "HIGH_VS_13W_HL"]
@@ -1382,7 +1380,7 @@ async def get_breakout_alerts():
         
         for scan_type in scanner_types:
             try:
-                results = await _ib_service.run_scanner(scan_type, limit=50)
+                results = await _ib_service.run_scanner(scan_type)
                 for r in results:
                     symbol = r.get("symbol", "")
                     if symbol and symbol not in all_candidates:
