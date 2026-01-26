@@ -369,24 +369,43 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
 
 ## Pending/Future Tasks
 
-### P1 - Backend Refactoring
-- Move remaining logic from server.py to services/routers
-- Migrate 77 hardcoded strategies to MongoDB collection
-- Portfolio and watchlist modules
+### P1 - Order Fill Notifications
+- Polling for IB order status changes
+- Real-time toast and sound notifications when trades are filled
 
-### P2 - Notifications Enhancement
-- Real-time earnings notifications
-- Toast/badge for imminent earnings
+### P1 - Short Squeeze Watchlist
+- Dedicated scanner/UI for high short interest stocks
+- Shares available to short tracking
 
-### P3 - Authentication
-- User authentication system
+### P2 - Strategy Management UI
+- Interface to add, edit, delete trading strategies
+- CRUD operations directly within the application
+
+### P2 - User Authentication
+- Login system for multiple users
 - Multi-user support
 
-### P4 - Data Sources
-- Replace mock data (Insider Trading, COT) with real APIs
+### P2 - Trade Journal Integration
+- Automate logging of trades from Quick Trade feature
+- Link trades to journal entries
+
+### P2 - Multi-Chart Layout
+- View multiple charts side-by-side
+
+### P3 - Replace Mock Data
+- Insider Trading with real API data
+- Commitment of Traders (COT) reports
+
+### P3 - Hotkeys
+- Keyboard shortcuts for trading actions
+
+### P3 - Mobile Responsive Design
+- Responsive layout for mobile devices
 
 ## Notes
 - **Mocked Data**: Insider trading and COT data use simulated values
-- **API Keys**: Finnhub API key in `/app/backend/.env`
+- **API Keys**: 
+  - Finnhub API key in `/app/backend/.env`
+  - Perplexity API key in `/app/backend/.env` (for AI newsletter)
 - **IB Gateway Required**: Must have IB Gateway running on port 4002 for paper trading
 - **No Auth**: Currently single-user mode without authentication
