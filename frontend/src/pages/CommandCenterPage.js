@@ -237,21 +237,43 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
   useEffect(() => {
     if (!chartContainerRef.current || !historicalData || historicalData.length === 0 || activeTab !== 'chart') return;
 
-    const chart = LightweightCharts.createChart(chartContainerRef.current, {
-      width: chartContainerRef.current.clientWidth,
+    // Clear any existing chart
+    if (chartRef.current) {
+      chartRef.current.remove();
+      chartRef.current = null;
+    }
+
+    const container = chartContainerRef.current;
+    const containerWidth = container.clientWidth || 700;
+    
+    const chart = LightweightCharts.createChart(container, {
+      width: containerWidth,
       height: 300,
-      layout: { background: { type: 'solid', color: '#0A0A0A' }, textColor: '#71717a' },
-      grid: { vertLines: { color: 'rgba(255,255,255,0.05)' }, horzLines: { color: 'rgba(255,255,255,0.05)' } },
-      crosshair: { mode: 1 },
+      layout: { 
+        background: { type: 'solid', color: '#0A0A0A' }, 
+        textColor: '#71717a',
+      },
+      grid: { 
+        vertLines: { color: 'rgba(255,255,255,0.05)' }, 
+        horzLines: { color: 'rgba(255,255,255,0.05)' } 
+      },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
       rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
-      timeScale: { borderColor: 'rgba(255,255,255,0.1)', timeVisible: true },
+      timeScale: { 
+        borderColor: 'rgba(255,255,255,0.1)', 
+        timeVisible: true,
+        secondsVisible: false,
+      },
     });
 
     // v5 API: use chart.addSeries with CandlestickSeries
     const candlestickSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
-      upColor: '#00FF94', downColor: '#FF2E2E',
-      borderUpColor: '#00FF94', borderDownColor: '#FF2E2E',
-      wickUpColor: '#00FF94', wickDownColor: '#FF2E2E',
+      upColor: '#00FF94', 
+      downColor: '#FF2E2E',
+      borderUpColor: '#00FF94', 
+      borderDownColor: '#FF2E2E',
+      wickUpColor: '#00FF94', 
+      wickDownColor: '#FF2E2E',
     });
 
     const chartData = historicalData.map(bar => ({
@@ -264,10 +286,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
 
     console.log('Chart data points:', chartData.length, 'First:', chartData[0], 'Last:', chartData[chartData.length - 1]);
     
-    if (chartData.length > 0) {
-      candlestickSeries.setData(chartData);
-      chart.timeScale().fitContent();
-    }
+    candlestickSeries.setData(chartData);
     
     // Add SL/TP price lines if trading summary exists and lines are enabled
     if (showTradingLines && analysis?.trading_summary) {
@@ -279,7 +298,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
           price: ts.entry,
           color: '#00E5FF',
           lineWidth: 2,
-          lineStyle: 0, // Solid
+          lineStyle: LightweightCharts.LineStyle.Solid,
           axisLabelVisible: true,
           title: 'Entry',
         });
@@ -291,7 +310,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
           price: ts.stop_loss,
           color: '#FF2E2E',
           lineWidth: 2,
-          lineStyle: 2, // Dashed
+          lineStyle: LightweightCharts.LineStyle.Dashed,
           axisLabelVisible: true,
           title: 'Stop',
         });
@@ -303,17 +322,32 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
           price: ts.target,
           color: '#00FF94',
           lineWidth: 2,
-          lineStyle: 2, // Dashed
+          lineStyle: LightweightCharts.LineStyle.Dashed,
           axisLabelVisible: true,
           title: 'Target',
         });
       }
     }
     
+    // Fit content after setting data
     chart.timeScale().fitContent();
     chartRef.current = chart;
 
-    return () => chart.remove();
+    // Handle resize
+    const handleResize = () => {
+      if (chartRef.current && container) {
+        chartRef.current.applyOptions({ width: container.clientWidth });
+      }
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (chartRef.current) {
+        chartRef.current.remove();
+        chartRef.current = null;
+      }
+    };
   }, [historicalData, activeTab, showTradingLines, analysis]);
 
   if (!ticker) return null;
