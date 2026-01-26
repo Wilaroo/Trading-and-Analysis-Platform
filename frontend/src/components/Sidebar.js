@@ -6,7 +6,8 @@ import {
   LineChart,
   Zap,
   Target,
-  ChevronRight
+  ChevronRight,
+  BookOpen
 } from 'lucide-react';
 
 const navItems = [
@@ -14,6 +15,7 @@ const navItems = [
   { id: 'trade-journal', icon: ClipboardList, label: 'Trade Journal' },
   { id: 'chart', icon: LineChart, label: 'Charts' },
   { id: 'ib-trading', icon: Zap, label: 'IB Trading' },
+  { id: 'glossary', icon: BookOpen, label: 'Glossary & Logic' },
 ];
 
 export const Sidebar = ({ activeTab, setActiveTab }) => {
