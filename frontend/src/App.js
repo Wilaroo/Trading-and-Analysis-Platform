@@ -179,6 +179,16 @@ function App() {
 
   return (
     <div className="min-h-screen bg-background bg-gradient-radial" onClick={initializeAudio}>
+      {/* Toast notifications */}
+      <Toaster 
+        position="top-right" 
+        richColors 
+        theme="dark"
+        toastOptions={{
+          style: { background: '#18181b', border: '1px solid rgba(255,255,255,0.1)' }
+        }}
+      />
+      
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
       
       {/* Price Alert Notifications */}
