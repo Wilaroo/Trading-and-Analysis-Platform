@@ -43,6 +43,8 @@ class IBCommand(Enum):
     GET_HISTORICAL_DATA = "get_historical_data"
     RUN_SCANNER = "run_scanner"
     GET_FUNDAMENTALS = "get_fundamentals"
+    GET_NEWS = "get_news"
+    GET_NEWS_ARTICLE = "get_news_article"
     SHUTDOWN = "shutdown"
 
 
