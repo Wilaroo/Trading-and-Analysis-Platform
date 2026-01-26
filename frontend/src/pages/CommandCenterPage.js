@@ -679,7 +679,7 @@ const CommandCenterPage = () => {
     } catch {
       setWatchlist([]);
     }
-  }, [isConnected]);
+  };
 
   // Initial load
   useEffect(() => {
@@ -689,14 +689,16 @@ const CommandCenterPage = () => {
         await Promise.all([
           fetchAccountData(),
           fetchMarketContext(),
-          runScanner()
+          runScanner(),
+          fetchWatchlist(connected)
         ]);
       }
       fetchAlerts();
       fetchNewsletter();
     };
     init();
-  }, [checkConnection, fetchAccountData, fetchMarketContext, runScanner, fetchAlerts, fetchNewsletter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Auto-scan interval
   useEffect(() => {
@@ -709,14 +711,8 @@ const CommandCenterPage = () => {
     }, 60000);
     
     return () => clearInterval(interval);
-  }, [autoScan, isConnected, runScanner, fetchAccountData, fetchMarketContext]);
-
-  // Refresh watchlist when connected
-  useEffect(() => {
-    if (isConnected) {
-      fetchWatchlist();
-    }
-  }, [isConnected, fetchWatchlist]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoScan, isConnected, selectedScanType]);
 
   const toggleSection = (section) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
