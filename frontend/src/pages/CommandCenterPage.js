@@ -1073,7 +1073,8 @@ const CommandCenterPage = () => {
         await fetchWatchlist(connected);
         
         // Auto-generate market intelligence on successful connection
-        autoGenerateMarketIntelligence();
+        // Temporarily disabled to debug black screen issue
+        // autoGenerateMarketIntelligence();
       }
     } catch (err) {
       console.error('Connection failed:', err);
