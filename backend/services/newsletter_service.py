@@ -244,7 +244,7 @@ Generate a complete premarket briefing with specific, actionable trade ideas. In
         })
     
     def _parse_newsletter_response(self, content: str, context_data: Dict) -> Dict:
-        """Parse the Perplexity response into structured newsletter format"""
+        """Parse the GPT response into structured newsletter format"""
         
         date = context_data.get("date", datetime.now().strftime("%A, %B %d, %Y"))
         timestamp = datetime.now(timezone.utc).isoformat()
@@ -253,27 +253,37 @@ Generate a complete premarket briefing with specific, actionable trade ideas. In
         try:
             # Clean the content - remove markdown code blocks if present
             clean_content = content.strip()
-            if clean_content.startswith("```"):
-                # Remove opening code block
-                clean_content = clean_content.split("\n", 1)[1] if "\n" in clean_content else clean_content[3:]
+            
+            # Remove ```json or ``` at start
+            if clean_content.startswith("```json"):
+                clean_content = clean_content[7:]
+            elif clean_content.startswith("```"):
+                clean_content = clean_content[3:]
+            
+            # Remove ``` at end
             if clean_content.endswith("```"):
                 clean_content = clean_content[:-3]
-            if clean_content.startswith("json"):
-                clean_content = clean_content[4:].strip()
+            
+            clean_content = clean_content.strip()
             
             parsed = json.loads(clean_content)
+            
+            # Handle different response formats from GPT
+            sentiment = parsed.get("market_sentiment") or parsed.get("sentiment", "neutral")
+            explanation = parsed.get("explanation") or parsed.get("sentiment_explanation", "")
+            overnight = parsed.get("overnight_recap") or parsed.get("summary", "")
             
             return {
                 "title": f"Premarket Briefing - {date}",
                 "date": timestamp,
                 "generated_at": timestamp,
                 "market_outlook": {
-                    "sentiment": parsed.get("market_sentiment", "neutral"),
-                    "explanation": parsed.get("sentiment_explanation", ""),
+                    "sentiment": sentiment,
+                    "explanation": explanation,
                     "key_levels": parsed.get("key_levels", "See chart analysis"),
-                    "focus": parsed.get("game_plan", "")[:200] if parsed.get("game_plan") else ""
+                    "focus": (parsed.get("game_plan", "") or "")[:200]
                 },
-                "summary": parsed.get("overnight_recap", ""),
+                "summary": overnight,
                 "top_stories": self._format_catalyst_watch(parsed.get("catalyst_watch", [])),
                 "opportunities": parsed.get("opportunities", []),
                 "risk_factors": parsed.get("risk_factors", []),
