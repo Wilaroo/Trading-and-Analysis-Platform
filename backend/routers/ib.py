@@ -1227,7 +1227,7 @@ async def get_short_squeeze_candidates():
     # Get real data from IB scanner
     try:
         # Use IB scanner for high short interest stocks
-        scanner_results = await _ib_service.run_scanner("HIGH_SHORT_INT", limit=20)
+        scanner_results = await _ib_service.run_scanner("HIGH_SHORT_INT", max_results=20)
         
         if not scanner_results:
             raise HTTPException(
@@ -1250,8 +1250,8 @@ async def get_short_squeeze_candidates():
             # Get real-time quote
             quote = await _ib_service.get_quote(symbol)
             
-            # Calculate features
-            features = feature_engine.calculate_features(symbol, quote or {}, {})
+            # Calculate features - using empty bars list since we don't have historical data here
+            features = feature_engine.calculate_all_features(bars_5m=[], bars_daily=None, session_bars_1m=None, fundamentals=None, market_data=None)
             
             candidate = {
                 "symbol": symbol,
@@ -1468,8 +1468,8 @@ async def get_breakout_alerts():
                 if not hist_data or len(hist_data) < 20:
                     continue
                 
-                # Calculate features
-                features = feature_engine.calculate_features(symbol, quote, {"bars": hist_data})
+                # Calculate features using hist_data as bars_5m (hourly bars for swing analysis)
+                features = feature_engine.calculate_all_features(bars_5m=hist_data, bars_daily=None, session_bars_1m=None, fundamentals=None, market_data=None)
                 
                 # Calculate support and resistance levels
                 highs = [bar["high"] for bar in hist_data]
@@ -1738,7 +1738,7 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
         
         for scan_type in all_scan_types:
             try:
-                results = await _ib_service.run_scanner(scan_type, limit=30)
+                results = await _ib_service.run_scanner(scan_type, max_results=30)
                 for r in results:
                     symbol = r.get("symbol", "")
                     if symbol and symbol not in all_candidates:
@@ -1793,7 +1793,7 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                 
                 # Calculate features using intraday data if available
                 hist_for_features = hist_data_intraday if hist_data_intraday and len(hist_data_intraday) > 20 else hist_data_daily
-                features = feature_engine.calculate_features(symbol, quote, {"bars": hist_for_features})
+                features = feature_engine.calculate_all_features(bars_5m=hist_for_features, bars_daily=hist_data_daily, session_bars_1m=None, fundamentals=None, market_data=None)
                 
                 # Calculate scores
                 scores = scoring_engine.calculate_scores(symbol, quote, features, {})
@@ -2206,7 +2206,7 @@ async def generate_enhanced_alert_for_symbol(symbol: str):
             raise HTTPException(status_code=404, detail=f"Insufficient historical data for {symbol}")
         
         # Calculate features and scores
-        features = feature_engine.calculate_features(symbol, quote, {"bars": hist_data})
+        features = feature_engine.calculate_all_features(bars_5m=hist_data, bars_daily=None, session_bars_1m=None, fundamentals=None, market_data=None)
         scores = scoring_engine.calculate_scores(symbol, quote, features, {})
         
         # Match strategies using simple matcher
