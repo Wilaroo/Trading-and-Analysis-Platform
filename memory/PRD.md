@@ -444,6 +444,32 @@ The application is now consolidated into a single **Command Center** that serves
 
 ## Changelog
 
+### Jan 26, 2026 - Comprehensive Smart Scanner
+**Implemented:**
+1. **Smart Scanner Panel** - Complete replacement of the basic scanner system
+   - **Scans ALL types simultaneously**: Top Gainers, Losers, Most Active, Gap Up/Down, 13-week H/L
+   - **Analyzes against ALL 77 trading rules** for each candidate
+   - **Auto-detects timeframe**: Scalp, Intraday, Swing, Position based on strategy matches and features
+   - **Score threshold slider**: Adjustable 0-100 (default 50) to filter alerts
+   - **Categorized alerts with caps**:
+     - Scalp: 10 max
+     - Intraday: 25 max
+     - Swing: 25 max
+     - Position: 25 max
+   - **Timeframe tabs**: Filter by All, Scalp, Intraday, Swing, Position
+   - **Rich alert cards** with:
+     - Direction (LONG/SHORT), Grade (A-F)
+     - Entry/Stop/Target/R:R trade plan
+     - Rules matched count (X/77)
+     - Trigger reason
+   - **Click to expand** for full analysis in modal
+   - Runs automatically every 60 seconds when Auto-Scan enabled
+   - Backend endpoint: `/api/ib/scanner/comprehensive` (POST)
+
+**Files Modified:**
+- `/app/backend/routers/ib.py` - Added comprehensive scanner endpoint with timeframe detection
+- `/app/frontend/src/pages/CommandCenterPage.js` - New Smart Scanner panel UI with slider and tabs
+
 ### Jan 26, 2026 - Enhanced Alerts & Help Tooltips
 **Implemented:**
 1. **Smart Alerts Panel (Enhanced Contextual Alerts)**
