@@ -1371,6 +1371,195 @@ async def score_stock_for_strategies(symbol: str, quote_data: Dict, fundamentals
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
+
+@app.get("/api/system/monitor")
+async def system_monitor():
+    """
+    Comprehensive system health monitor.
+    Returns status of all backend services and integrations.
+    """
+    from datetime import datetime, timezone
+    
+    services = []
+    
+    # 1. Database (MongoDB)
+    try:
+        db.command("ping")
+        services.append({
+            "name": "MongoDB",
+            "status": "healthy",
+            "icon": "database",
+            "details": f"DB: {os.environ.get('DB_NAME', 'tradecommand')}"
+        })
+    except Exception as e:
+        services.append({
+            "name": "MongoDB",
+            "status": "error",
+            "icon": "database",
+            "details": str(e)[:50]
+        })
+    
+    # 2. IB Gateway Connection
+    try:
+        ib_status = ib_service.get_connection_status()
+        services.append({
+            "name": "IB Gateway",
+            "status": "healthy" if ib_status.get("connected") else "disconnected",
+            "icon": "activity",
+            "details": f"Port {ib_status.get('port', 4002)}" + (" - Connected" if ib_status.get("connected") else " - Not connected")
+        })
+    except Exception as e:
+        services.append({
+            "name": "IB Gateway",
+            "status": "error",
+            "icon": "activity",
+            "details": str(e)[:50]
+        })
+    
+    # 3. Strategies Service
+    try:
+        strategy_count = strategy_service.get_strategy_count()
+        services.append({
+            "name": "Strategies",
+            "status": "healthy",
+            "icon": "target",
+            "details": f"{strategy_count} strategies loaded"
+        })
+    except Exception as e:
+        services.append({
+            "name": "Strategies",
+            "status": "error",
+            "icon": "target",
+            "details": str(e)[:50]
+        })
+    
+    # 4. Feature Engine
+    try:
+        fe = get_feature_engine()
+        if fe:
+            services.append({
+                "name": "Feature Engine",
+                "status": "healthy",
+                "icon": "cpu",
+                "details": "Technical indicators ready"
+            })
+        else:
+            services.append({
+                "name": "Feature Engine",
+                "status": "error",
+                "icon": "cpu",
+                "details": "Not initialized"
+            })
+    except Exception as e:
+        services.append({
+            "name": "Feature Engine",
+            "status": "error",
+            "icon": "cpu",
+            "details": str(e)[:50]
+        })
+    
+    # 5. Scoring Engine
+    try:
+        se = get_scoring_engine(db)
+        if se:
+            services.append({
+                "name": "Scoring Engine",
+                "status": "healthy",
+                "icon": "bar-chart",
+                "details": "Scoring system ready"
+            })
+        else:
+            services.append({
+                "name": "Scoring Engine",
+                "status": "error",
+                "icon": "bar-chart",
+                "details": "Not initialized"
+            })
+    except Exception as e:
+        services.append({
+            "name": "Scoring Engine",
+            "status": "error",
+            "icon": "bar-chart",
+            "details": str(e)[:50]
+        })
+    
+    # 6. Newsletter Service (LLM)
+    try:
+        llm_key = os.environ.get("EMERGENT_LLM_KEY", "")
+        if llm_key:
+            services.append({
+                "name": "AI/LLM",
+                "status": "healthy",
+                "icon": "brain",
+                "details": "Emergent LLM Key configured"
+            })
+        else:
+            services.append({
+                "name": "AI/LLM",
+                "status": "warning",
+                "icon": "brain",
+                "details": "No LLM key configured"
+            })
+    except Exception as e:
+        services.append({
+            "name": "AI/LLM",
+            "status": "error",
+            "icon": "brain",
+            "details": str(e)[:50]
+        })
+    
+    # 7. Market Data (Finnhub)
+    try:
+        finnhub_key = os.environ.get("FINNHUB_API_KEY", "")
+        if finnhub_key:
+            services.append({
+                "name": "Market Data",
+                "status": "healthy",
+                "icon": "trending-up",
+                "details": "Finnhub API configured"
+            })
+        else:
+            services.append({
+                "name": "Market Data",
+                "status": "warning",
+                "icon": "trending-up",
+                "details": "No Finnhub key"
+            })
+    except Exception as e:
+        services.append({
+            "name": "Market Data",
+            "status": "error",
+            "icon": "trending-up",
+            "details": str(e)[:50]
+        })
+    
+    # Calculate overall health
+    healthy_count = sum(1 for s in services if s["status"] == "healthy")
+    warning_count = sum(1 for s in services if s["status"] == "warning")
+    error_count = sum(1 for s in services if s["status"] == "error")
+    disconnected_count = sum(1 for s in services if s["status"] == "disconnected")
+    
+    if error_count > 0:
+        overall_status = "degraded"
+    elif warning_count > 0 or disconnected_count > 0:
+        overall_status = "partial"
+    else:
+        overall_status = "healthy"
+    
+    return {
+        "overall_status": overall_status,
+        "services": services,
+        "summary": {
+            "healthy": healthy_count,
+            "warning": warning_count,
+            "disconnected": disconnected_count,
+            "error": error_count,
+            "total": len(services)
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
 # ----- Quotes -----
 @app.get("/api/quotes/{symbol}")
 async def get_quote(symbol: str):
