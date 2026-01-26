@@ -3,10 +3,41 @@
 ## Product Overview
 TradeCommand is a comprehensive trading and analysis platform designed for active traders. It provides real-time stock data, strategy scanning, portfolio tracking, trade journaling, and earnings analysis with AI-powered catalyst scoring.
 
+## UI Architecture (v2.0) - Command Center
+
+### Command Center (Main Hub)
+The application is now consolidated into a single **Command Center** that serves as the primary trading intelligence hub. This eliminates the need to switch between multiple tabs.
+
+**Included Panels:**
+- **Quick Stats Row**: Net Liquidation, Today's P&L, Positions, Alerts, Market Regime, Opportunities count
+- **Holdings**: Current positions with P&L tracking (collapsible)
+- **Watchlist**: Quick view of watched tickers with live prices
+- **Alerts**: Recent strategy alerts with badges
+- **Scanner Controls**: Top Gainers, Top Losers, Most Active, Gap Up, Gap Down
+- **Trade Opportunities**: Scan results with HIGH CONVICTION badges, quick Buy/Short buttons
+- **Market Intelligence**: Newsletter summary with sentiment, opportunities, and game plan
+
+**Minimal Navigation (4 Tabs Only):**
+1. Command Center (main)
+2. Trade Journal
+3. Charts
+4. IB Trading
+
+**Legacy Pages (Data Integrated into Command Center):**
+- Dashboard → Merged into Command Center stats
+- Trade Opportunities → Scanner is now in Command Center
+- Newsletter → Summary shown in Market Intelligence panel
+- Watchlist → Dedicated panel in Command Center
+- Portfolio → Holdings panel shows positions
+- Alerts → Dedicated panel in Command Center
+- Market Context → Regime shown in Quick Stats
+- Fundamentals → Available in Ticker Detail Modal
+- News → Available in Ticker Detail Modal
+
 ## Core Requirements
 
 ### Real-time Market Data
-- Live stock quotes via Finnhub API
+- Live stock quotes via IB Gateway API
 - Market indices tracking (SPY, QQQ, DIA, IWM, VIX)
 - WebSocket for live price streaming
 - Audio/visual price alerts with adjustable thresholds
