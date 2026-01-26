@@ -883,8 +883,19 @@ const CommandCenterPage = () => {
     context: true,
     alerts: true,
     news: false,
-    earnings: true
+    earnings: true,
+    squeeze: false,
+    priceAlerts: false
   });
+  
+  // New P1 features state
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [shortSqueezeCandidates, setShortSqueezeCandidates] = useState([]);
+  const [priceAlerts, setPriceAlerts] = useState([]);
+  const [newAlertSymbol, setNewAlertSymbol] = useState('');
+  const [newAlertPrice, setNewAlertPrice] = useState('');
+  const [newAlertDirection, setNewAlertDirection] = useState('ABOVE');
+  const [trackedOrders, setTrackedOrders] = useState([]);
 
   const scanTypes = [
     { id: 'TOP_PERC_GAIN', label: 'Top Gainers', icon: TrendingUp },
