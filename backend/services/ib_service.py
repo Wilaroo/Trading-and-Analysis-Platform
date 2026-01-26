@@ -290,9 +290,16 @@ class IBWorkerThread(threading.Thread):
             return IBResponse(success=False, error="Not connected to IB")
         
         try:
-            from ib_insync import Stock
+            from ib_insync import Stock, Index
             
-            contract = Stock(symbol.upper(), "SMART", "USD")
+            # Handle VIX and other indices differently
+            symbol_upper = symbol.upper()
+            if symbol_upper in ["VIX", "VXX", "VIXM"]:
+                # VIX is an index on CBOE
+                contract = Index("VIX", "CBOE")
+            else:
+                contract = Stock(symbol_upper, "SMART", "USD")
+            
             self.ib.qualifyContracts(contract)
             
             ticker = self.ib.reqMktData(contract, "", True, False)
@@ -300,7 +307,7 @@ class IBWorkerThread(threading.Thread):
             
             if ticker:
                 return IBResponse(success=True, data={
-                    "symbol": symbol.upper(),
+                    "symbol": symbol_upper,
                     "price": ticker.last if ticker.last else ticker.close,
                     "bid": ticker.bid if ticker.bid else 0,
                     "ask": ticker.ask if ticker.ask else 0,
