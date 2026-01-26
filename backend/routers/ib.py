@@ -2221,10 +2221,19 @@ async def generate_enhanced_alert_for_symbol(symbol: str):
         
         # Calculate features and scores
         features = feature_engine.calculate_all_features(bars_5m=hist_data, bars_daily=None, session_bars_1m=None, fundamentals=None, market_data=None)
-        scores = scoring_engine.calculate_scores(symbol, quote, features, {})
+        
+        # Build stock_data dict for scoring engine
+        stock_data = {
+            "symbol": symbol,
+            "price": quote.get("price", 0),
+            "change_percent": quote.get("change_percent", 0),
+            "volume": quote.get("volume", 0),
+            **features
+        }
+        score_result = scoring_engine.calculate_composite_score(stock_data, {})
         
         # Match strategies using simple matcher
-        matched = simple_strategy_match(symbol, features, scores)
+        matched = simple_strategy_match(symbol, features, score_result)
         
         if not matched:
             return {
