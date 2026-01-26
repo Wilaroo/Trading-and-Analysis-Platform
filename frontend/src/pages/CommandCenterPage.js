@@ -1728,39 +1728,140 @@ const CommandCenterPage = () => {
             <div className="flex items-center gap-2">
               <Newspaper className="w-5 h-5 text-purple-400" />
               <h3 className="text-sm font-semibold uppercase tracking-wider">Market Intelligence</h3>
+              {isGeneratingIntelligence && (
+                <RefreshCw className="w-4 h-4 text-purple-400 animate-spin" />
+              )}
             </div>
-            <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.news ? 'rotate-180' : ''}`} />
+            <div className="flex items-center gap-2">
+              {isConnected && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); autoGenerateMarketIntelligence(); }}
+                  disabled={isGeneratingIntelligence}
+                  className="text-xs text-purple-400 hover:text-purple-300 disabled:opacity-50"
+                >
+                  {isGeneratingIntelligence ? 'Generating...' : 'Refresh'}
+                </button>
+              )}
+              <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.news ? 'rotate-180' : ''}`} />
+            </div>
           </button>
           
           {expandedSections.news && (
             <div className="space-y-3">
-              {newsletter ? (
+              {/* Loading State */}
+              {isGeneratingIntelligence && (
+                <div className="text-center py-6">
+                  <RefreshCw className="w-8 h-8 text-purple-400 mx-auto mb-2 animate-spin" />
+                  <p className="text-sm text-purple-400">Analyzing markets...</p>
+                  <p className="text-xs text-zinc-500 mt-1">Gathering news, stocks, and world events</p>
+                </div>
+              )}
+              
+              {/* Content */}
+              {!isGeneratingIntelligence && newsletter && !newsletter.needs_generation ? (
                 <>
-                  <div className="flex items-center gap-2 mb-2">
-                    <Badge variant={
-                      newsletter.market_outlook?.sentiment === 'bullish' ? 'success' :
-                      newsletter.market_outlook?.sentiment === 'bearish' ? 'error' : 'neutral'
-                    }>
-                      {newsletter.market_outlook?.sentiment?.toUpperCase() || 'NEUTRAL'}
-                    </Badge>
-                    <span className="text-xs text-zinc-500">
-                      {newsletter.date ? new Date(newsletter.date).toLocaleDateString() : 'Today'}
-                    </span>
-                  </div>
-                  <p className="text-sm text-zinc-300">{newsletter.summary || 'Click Generate in Newsletter page for full briefing'}</p>
-                  {newsletter.opportunities?.slice(0, 3).map((opp, idx) => (
-                    <div key={idx} className="flex items-center justify-between p-2 bg-zinc-900/50 rounded text-sm">
-                      <span className="font-bold text-cyan-400">{opp.symbol}</span>
-                      <Badge variant={opp.direction === 'LONG' ? 'success' : opp.direction === 'SHORT' ? 'error' : 'neutral'}>
-                        {opp.direction || 'WATCH'}
+                  {/* Sentiment Badge & Date */}
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Badge variant={
+                        newsletter.market_outlook?.sentiment === 'bullish' ? 'success' :
+                        newsletter.market_outlook?.sentiment === 'bearish' ? 'error' : 'neutral'
+                      }>
+                        {newsletter.market_outlook?.sentiment?.toUpperCase() || 'NEUTRAL'}
                       </Badge>
+                      <span className="text-xs text-zinc-500">
+                        {newsletter.date ? new Date(newsletter.date).toLocaleDateString() : 'Today'}
+                      </span>
                     </div>
-                  ))}
+                  </div>
+                  
+                  {/* Summary */}
+                  <p className="text-sm text-zinc-300 leading-relaxed">{newsletter.summary}</p>
+                  
+                  {/* Key Levels */}
+                  {newsletter.market_outlook?.key_levels && (
+                    <div className="p-2 bg-purple-500/10 border border-purple-500/30 rounded text-xs">
+                      <span className="text-purple-400 font-semibold">Key Levels: </span>
+                      <span className="text-zinc-300">{newsletter.market_outlook.key_levels}</span>
+                    </div>
+                  )}
+                  
+                  {/* Top Stories */}
+                  {newsletter.top_stories?.length > 0 && (
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] text-zinc-500 uppercase">Top Stories</span>
+                      {newsletter.top_stories.slice(0, 3).map((story, idx) => (
+                        <div key={idx} className="p-2 bg-zinc-900/50 rounded text-xs text-zinc-400">
+                          {story.headline || story}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {/* Opportunities */}
+                  {newsletter.opportunities?.length > 0 && (
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] text-zinc-500 uppercase">Opportunities</span>
+                      {newsletter.opportunities.slice(0, 4).map((opp, idx) => (
+                        <div 
+                          key={idx} 
+                          className="flex items-center justify-between p-2 bg-zinc-900/50 rounded text-sm cursor-pointer hover:bg-zinc-800"
+                          onClick={() => setSelectedTicker({ symbol: opp.symbol, quote: {} })}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-cyan-400">{opp.symbol}</span>
+                            {opp.entry && (
+                              <span className="text-xs text-zinc-500">Entry: ${opp.entry}</span>
+                            )}
+                          </div>
+                          <Badge variant={opp.direction === 'LONG' ? 'success' : opp.direction === 'SHORT' ? 'error' : 'neutral'}>
+                            {opp.direction || 'WATCH'}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {/* Risk Factors */}
+                  {newsletter.risk_factors?.length > 0 && (
+                    <div className="p-2 bg-red-500/10 border border-red-500/30 rounded">
+                      <span className="text-[10px] text-red-400 uppercase block mb-1">Risk Factors</span>
+                      <ul className="text-xs text-zinc-400 space-y-0.5">
+                        {newsletter.risk_factors.slice(0, 3).map((risk, idx) => (
+                          <li key={idx}>• {risk}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  
+                  {/* Game Plan */}
+                  {newsletter.game_plan && (
+                    <div className="p-2 bg-green-500/10 border border-green-500/30 rounded">
+                      <span className="text-[10px] text-green-400 uppercase block mb-1">Today's Game Plan</span>
+                      <p className="text-xs text-zinc-300">{newsletter.game_plan}</p>
+                    </div>
+                  )}
                 </>
-              ) : (
-                <p className="text-center text-zinc-500 text-sm py-4">
-                  Generate a newsletter for market intelligence
-                </p>
+              ) : !isGeneratingIntelligence && (
+                <div className="text-center py-6">
+                  <Newspaper className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                  {isConnected ? (
+                    <>
+                      <p className="text-sm text-zinc-400">Click Refresh to generate briefing</p>
+                      <button
+                        onClick={autoGenerateMarketIntelligence}
+                        className="mt-3 px-4 py-2 bg-purple-500 text-white rounded text-sm font-medium hover:bg-purple-400"
+                      >
+                        Generate Market Intelligence
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm text-zinc-400">Connect IB Gateway for auto-briefing</p>
+                      <p className="text-xs text-zinc-500 mt-1">Market intelligence will generate automatically</p>
+                    </>
+                  )}
+                </div>
               )}
             </div>
           )}
