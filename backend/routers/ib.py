@@ -1,6 +1,7 @@
 """
 Interactive Brokers API Router
 Endpoints for IB connection, account info, trading, and market data
+NO MOCK DATA - Only real verified data from IB Gateway or cached data with timestamps
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -8,6 +9,7 @@ from typing import Optional, List
 from datetime import datetime, timezone
 from services.ib_service import IBService
 from services.feature_engine import get_feature_engine
+from services.data_cache import get_data_cache
 
 router = APIRouter(prefix="/api/ib", tags=["Interactive Brokers"])
 
