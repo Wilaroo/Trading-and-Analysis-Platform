@@ -558,14 +558,16 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
                     {/* Scores Grid */}
                     <div className="grid grid-cols-5 gap-2">
                       {[
-                        { label: 'Overall', value: scores.overall, color: scores.overall >= 70 ? 'cyan' : scores.overall >= 50 ? 'yellow' : 'red' },
-                        { label: 'Technical', value: scores.technical_score, color: 'blue' },
-                        { label: 'Fundamental', value: scores.fundamental_score, color: 'purple' },
-                        { label: 'Catalyst', value: scores.catalyst_score, color: 'orange' },
-                        { label: 'Confidence', value: scores.confidence, color: 'green' },
+                        { label: 'Overall', value: scores.overall, color: scores.overall >= 70 ? 'cyan' : scores.overall >= 50 ? 'yellow' : 'red', termId: 'overall-score' },
+                        { label: 'Technical', value: scores.technical_score, color: 'blue', termId: 'technical-score' },
+                        { label: 'Fundamental', value: scores.fundamental_score, color: 'purple', termId: 'fundamental-score' },
+                        { label: 'Catalyst', value: scores.catalyst_score, color: 'orange', termId: 'catalyst-score' },
+                        { label: 'Confidence', value: scores.confidence, color: 'green', termId: 'confidence-score' },
                       ].map((score, idx) => (
                         <div key={idx} className="bg-zinc-900 rounded-lg p-3 text-center">
-                          <span className="text-[10px] text-zinc-500 uppercase block">{score.label}</span>
+                          <span className="text-[10px] text-zinc-500 uppercase block">
+                            <HelpTooltip termId={score.termId}>{score.label}</HelpTooltip>
+                          </span>
                           <p className={`text-xl font-bold font-mono text-${score.color}-400`}>
                             {score.value?.toFixed(0) || '--'}
                           </p>
