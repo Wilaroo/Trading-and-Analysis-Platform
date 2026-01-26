@@ -1792,6 +1792,120 @@ async def clear_alerts():
     return {"deleted": result.deleted_count}
 
 # ----- Earnings Calendar -----
+
+def generate_earnings_play_strategy(avg_reaction: float, iv_rank: float, expected_move: float, historical: list, beat_rate: float) -> Dict:
+    """Generate earnings play strategy based on historical patterns"""
+    
+    # Analyze historical patterns
+    positive_reactions = sum(1 for h in historical if h["stock_reaction"] > 0)
+    negative_reactions = len(historical) - positive_reactions
+    avg_positive = sum(h["stock_reaction"] for h in historical if h["stock_reaction"] > 0) / max(positive_reactions, 1)
+    avg_negative = sum(h["stock_reaction"] for h in historical if h["stock_reaction"] <= 0) / max(negative_reactions, 1)
+    max_reaction = max(h["stock_reaction"] for h in historical)
+    min_reaction = min(h["stock_reaction"] for h in historical)
+    
+    # Determine directional bias
+    if avg_reaction >= 5:
+        bias = "Strong Bullish"
+        direction = "LONG"
+    elif avg_reaction >= 2:
+        bias = "Bullish"
+        direction = "LONG"
+    elif avg_reaction >= 0:
+        bias = "Slight Bullish"
+        direction = "LONG"
+    elif avg_reaction >= -2:
+        bias = "Slight Bearish"
+        direction = "SHORT"
+    elif avg_reaction >= -5:
+        bias = "Bearish"
+        direction = "SHORT"
+    else:
+        bias = "Strong Bearish"
+        direction = "SHORT"
+    
+    # Determine primary strategy based on IV rank and historical pattern
+    strategies = []
+    
+    # High IV environment - sell premium
+    if iv_rank >= 60:
+        if abs(avg_reaction) < expected_move * 0.7:
+            # Stock typically moves less than expected - sell straddle/strangle
+            strategies.append({
+                "name": "Iron Condor" if iv_rank >= 75 else "Short Strangle",
+                "type": "premium_sell",
+                "reasoning": f"High IV ({iv_rank:.0f}%) + stock typically moves {abs(avg_reaction):.1f}% vs {expected_move:.1f}% expected",
+                "risk": "Medium" if iv_rank >= 75 else "High",
+                "confidence": min(85, 50 + iv_rank * 0.3 + (expected_move - abs(avg_reaction)) * 2)
+            })
+        if beat_rate >= 65 and avg_reaction > 0:
+            strategies.append({
+                "name": "Bull Put Spread",
+                "type": "directional_credit",
+                "reasoning": f"{beat_rate:.0f}% beat rate + avg +{avg_reaction:.1f}% post-earnings",
+                "risk": "Low-Medium",
+                "confidence": min(80, beat_rate * 0.8 + avg_reaction * 2)
+            })
+    
+    # Low IV environment - buy premium
+    if iv_rank <= 40:
+        if abs(avg_reaction) > expected_move * 1.2:
+            # Stock typically moves more than expected
+            strategies.append({
+                "name": "Long Straddle",
+                "type": "premium_buy",
+                "reasoning": f"Low IV ({iv_rank:.0f}%) + stock typically moves {abs(avg_reaction):.1f}% vs {expected_move:.1f}% expected",
+                "risk": "Medium",
+                "confidence": min(75, 40 + (abs(avg_reaction) - expected_move) * 3)
+            })
+    
+    # Directional plays based on historical bias
+    if positive_reactions >= 3 and avg_positive >= 5:
+        strategies.append({
+            "name": "Long Calls" if iv_rank < 50 else "Call Debit Spread",
+            "type": "directional_long",
+            "reasoning": f"{positive_reactions}/4 positive reactions, avg +{avg_positive:.1f}%",
+            "risk": "Medium",
+            "confidence": min(80, positive_reactions * 15 + avg_positive * 2)
+        })
+    elif negative_reactions >= 3 and avg_negative <= -5:
+        strategies.append({
+            "name": "Long Puts" if iv_rank < 50 else "Put Debit Spread",
+            "type": "directional_short",
+            "reasoning": f"{negative_reactions}/4 negative reactions, avg {avg_negative:.1f}%",
+            "risk": "Medium",
+            "confidence": min(80, negative_reactions * 15 + abs(avg_negative) * 2)
+        })
+    
+    # Stock play
+    if abs(avg_reaction) >= 3:
+        strategies.append({
+            "name": f"{'Buy' if avg_reaction > 0 else 'Short'} Stock Pre-Earnings",
+            "type": "stock",
+            "reasoning": f"Historical avg reaction: {'+' if avg_reaction > 0 else ''}{avg_reaction:.1f}%",
+            "risk": "High",
+            "confidence": min(70, 40 + abs(avg_reaction) * 3)
+        })
+    
+    # Sort by confidence
+    strategies.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+    
+    return {
+        "bias": bias,
+        "direction": direction,
+        "avg_reaction": avg_reaction,
+        "win_rate": round(positive_reactions / len(historical) * 100, 0) if historical else 50,
+        "max_gain": max_reaction,
+        "max_loss": min_reaction,
+        "strategies": strategies[:3],  # Top 3 strategies
+        "historical_pattern": {
+            "positive_count": positive_reactions,
+            "negative_count": negative_reactions,
+            "avg_positive_move": round(avg_positive, 1),
+            "avg_negative_move": round(avg_negative, 1)
+        }
+    }
+
 async def generate_earnings_data(symbol: str, earnings_date: str) -> Dict:
     """Generate simulated earnings data for a symbol"""
     random.seed(hash(symbol + earnings_date))
