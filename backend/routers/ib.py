@@ -1717,7 +1717,6 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
         
         feature_engine = get_feature_engine()
         scoring_engine = get_scoring_engine()
-        strategies_service = StrategyService()
         alert_manager = get_alert_manager()
         
         # Define all scanner types to run
