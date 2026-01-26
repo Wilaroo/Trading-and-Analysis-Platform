@@ -1019,35 +1019,44 @@ const CommandCenterPage = () => {
                   tomorrow.setDate(today.getDate() + 1);
                   const isTomorrow = earningsDate.getTime() === tomorrow.getTime();
                   
-                  // Get expected move data
-                  const expectedMove = item.implied_volatility?.expected_move_percent || item.expected_move || 0;
+                  // Get data
+                  const expectedMove = item.implied_volatility?.expected_move_percent || 0;
                   const ivRank = item.implied_volatility?.iv_rank || 0;
+                  const avgReaction = item.avg_stock_reaction_4q || item.earnings_play?.avg_reaction || 0;
+                  const earningsPlay = item.earnings_play || {};
+                  const topStrategy = earningsPlay.strategies?.[0];
                   
-                  // Expected move bar color based on size
-                  const getMoveColor = (move) => {
-                    if (move >= 10) return 'bg-red-500';
-                    if (move >= 7) return 'bg-orange-500';
-                    if (move >= 5) return 'bg-yellow-500';
-                    return 'bg-cyan-500';
+                  // Historical reaction color based on direction and magnitude
+                  const getReactionColor = (reaction) => {
+                    if (reaction <= -10) return { bg: 'bg-red-500', text: 'text-red-400', label: 'Strong Bearish' };
+                    if (reaction <= -7) return { bg: 'bg-orange-600', text: 'text-orange-400', label: 'Bearish' };
+                    if (reaction <= -5) return { bg: 'bg-yellow-600', text: 'text-yellow-400', label: 'Slight Bearish' };
+                    if (reaction < 0) return { bg: 'bg-cyan-600', text: 'text-cyan-400', label: 'Neutral Down' };
+                    if (reaction <= 3) return { bg: 'bg-blue-500', text: 'text-blue-400', label: 'Neutral' };
+                    if (reaction <= 5) return { bg: 'bg-sky-400', text: 'text-sky-300', label: 'Slight Bullish' };
+                    if (reaction <= 7) return { bg: 'bg-emerald-400', text: 'text-emerald-300', label: 'Bullish' };
+                    if (reaction <= 10) return { bg: 'bg-green-500', text: 'text-green-400', label: 'Strong Bullish' };
+                    return { bg: 'bg-lime-400', text: 'text-lime-300', label: 'Very Bullish' };
                   };
                   
-                  // Calculate bar width (max 15% move = 100% width)
-                  const barWidth = Math.min((expectedMove / 15) * 100, 100);
+                  const reactionStyle = getReactionColor(avgReaction);
+                  // Bar width: scale from -15% to +15% (30% range)
+                  const barPosition = Math.max(0, Math.min(100, ((avgReaction + 15) / 30) * 100));
                   
                   return (
                     <div 
                       key={idx} 
-                      className={`p-2.5 rounded-lg cursor-pointer transition-all hover:scale-[1.01] ${
+                      className={`p-3 rounded-lg cursor-pointer transition-all hover:scale-[1.01] ${
                         isToday ? 'bg-orange-500/15 border border-orange-500/50' : 
                         isTomorrow ? 'bg-yellow-500/10 border border-yellow-500/30' : 
                         'bg-zinc-900/50 border border-white/5 hover:border-white/20'
                       }`}
-                      onClick={() => setSelectedTicker({ symbol: item.symbol, quote: {} })}
+                      onClick={() => setSelectedTicker({ symbol: item.symbol, quote: {}, earningsPlay: earningsPlay })}
                     >
-                      {/* Top Row: Symbol, Date Badge, Time */}
-                      <div className="flex items-center justify-between mb-1.5">
+                      {/* Top Row: Symbol, Badges, Time */}
+                      <div className="flex items-center justify-between mb-1">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-white text-sm">{item.symbol}</span>
+                          <span className="font-bold text-white">{item.symbol}</span>
                           {isToday && (
                             <span className="text-[9px] px-1.5 py-0.5 bg-orange-500 text-black rounded font-bold animate-pulse">
                               TODAY
@@ -1058,51 +1067,83 @@ const CommandCenterPage = () => {
                               TOMORROW
                             </span>
                           )}
+                          {earningsPlay.direction && (
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                              earningsPlay.direction === 'LONG' ? 'bg-green-500/30 text-green-400' : 'bg-red-500/30 text-red-400'
+                            }`}>
+                              {earningsPlay.direction}
+                            </span>
+                          )}
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-zinc-400">
-                            {item.time === 'Before Open' ? '🌅' : '🌙'}
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px]">
+                            {item.time === 'Before Open' ? '☀️' : '🌙'}
                           </span>
-                          <span className="text-[10px] text-zinc-500 font-medium">
+                          <span className="text-[10px] text-zinc-500">
                             {earningsDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                           </span>
                         </div>
                       </div>
                       
                       {/* Company Name */}
-                      <p className="text-[11px] text-zinc-400 mb-2 truncate">{item.company_name}</p>
+                      <p className="text-[10px] text-zinc-500 mb-2 truncate">{item.company_name}</p>
                       
-                      {/* Expected Move Visualization */}
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between text-[10px]">
-                          <span className="text-zinc-500">Expected Move</span>
-                          <span className={`font-mono font-bold ${
-                            expectedMove >= 7 ? 'text-orange-400' : 
-                            expectedMove >= 5 ? 'text-yellow-400' : 
-                            'text-cyan-400'
-                          }`}>
-                            ±{expectedMove.toFixed(1)}%
+                      {/* Historical Reaction Visualization */}
+                      <div className="mb-2">
+                        <div className="flex items-center justify-between text-[10px] mb-1">
+                          <span className="text-zinc-500">Avg Historical Reaction</span>
+                          <span className={`font-mono font-bold ${reactionStyle.text}`}>
+                            {avgReaction >= 0 ? '+' : ''}{avgReaction.toFixed(1)}%
                           </span>
                         </div>
                         
-                        {/* Visual Bar */}
-                        <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                        {/* Gradient Bar with marker */}
+                        <div className="relative h-2 rounded-full overflow-hidden bg-gradient-to-r from-red-500 via-yellow-500 via-50% to-lime-400">
+                          {/* Center line (0%) */}
+                          <div className="absolute top-0 bottom-0 left-1/2 w-px bg-white/50 z-10" />
+                          {/* Position marker */}
                           <div 
-                            className={`h-full rounded-full transition-all ${getMoveColor(expectedMove)}`}
-                            style={{ width: `${barWidth}%` }}
+                            className="absolute top-0 bottom-0 w-1 bg-white rounded-full shadow-lg z-20 transition-all"
+                            style={{ left: `calc(${barPosition}% - 2px)` }}
                           />
                         </div>
-                        
-                        {/* IV Rank indicator */}
-                        {ivRank > 0 && (
-                          <div className="flex items-center justify-between text-[9px] text-zinc-500 mt-1">
-                            <span>IV Rank: {ivRank.toFixed(0)}%</span>
-                            <span className={ivRank >= 50 ? 'text-yellow-400' : 'text-zinc-500'}>
-                              {ivRank >= 70 ? '🔥 High IV' : ivRank >= 50 ? '⚡ Elevated' : ''}
-                            </span>
-                          </div>
+                        <div className="flex justify-between text-[8px] text-zinc-600 mt-0.5">
+                          <span>-15%</span>
+                          <span>0%</span>
+                          <span>+15%</span>
+                        </div>
+                      </div>
+                      
+                      {/* Expected Move & IV */}
+                      <div className="flex items-center gap-3 text-[9px] mb-2">
+                        <span className="text-zinc-500">
+                          Exp Move: <span className="text-zinc-300 font-mono">±{expectedMove.toFixed(1)}%</span>
+                        </span>
+                        <span className="text-zinc-500">
+                          IV Rank: <span className={ivRank >= 60 ? 'text-yellow-400' : 'text-zinc-300'}>{ivRank.toFixed(0)}%</span>
+                        </span>
+                        {earningsPlay.win_rate && (
+                          <span className="text-zinc-500">
+                            Win: <span className={earningsPlay.win_rate >= 60 ? 'text-green-400' : 'text-zinc-300'}>{earningsPlay.win_rate}%</span>
+                          </span>
                         )}
                       </div>
+                      
+                      {/* Top Strategy */}
+                      {topStrategy && (
+                        <div className={`p-2 rounded text-[10px] ${
+                          topStrategy.type?.includes('long') ? 'bg-green-500/10 border border-green-500/20' :
+                          topStrategy.type?.includes('short') ? 'bg-red-500/10 border border-red-500/20' :
+                          topStrategy.type?.includes('sell') ? 'bg-purple-500/10 border border-purple-500/20' :
+                          'bg-cyan-500/10 border border-cyan-500/20'
+                        }`}>
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="font-bold text-white">{topStrategy.name}</span>
+                            <span className="text-zinc-400">{topStrategy.confidence?.toFixed(0)}% conf</span>
+                          </div>
+                          <p className="text-zinc-400 text-[9px]">{topStrategy.reasoning}</p>
+                        </div>
+                      )}
                     </div>
                   );
                 }) : (
