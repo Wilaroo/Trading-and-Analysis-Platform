@@ -472,3 +472,37 @@ async def get_fundamentals(symbol: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching fundamentals: {str(e)}")
 
+
+# ===================== News Endpoints =====================
+
+@router.get("/news/{symbol}")
+async def get_ticker_news(symbol: str):
+    """Get news headlines for a specific ticker symbol"""
+    if not _ib_service:
+        raise HTTPException(status_code=500, detail="IB service not initialized")
+    
+    try:
+        news = await _ib_service.get_news_for_symbol(symbol.upper())
+        return {
+            "symbol": symbol.upper(),
+            "news": news,
+            "count": len(news)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching news: {str(e)}")
+
+
+@router.get("/news")
+async def get_market_news():
+    """Get general market news headlines"""
+    if not _ib_service:
+        raise HTTPException(status_code=500, detail="IB service not initialized")
+    
+    try:
+        news = await _ib_service.get_general_news()
+        return {
+            "news": news,
+            "count": len(news)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching news: {str(e)}")
