@@ -159,6 +159,12 @@ class IBWorkerThread(threading.Thread):
             elif request.command == IBCommand.GET_FUNDAMENTALS:
                 return self._do_get_fundamentals(request.params.get("symbol"))
             
+            elif request.command == IBCommand.GET_NEWS:
+                return self._do_get_news(request.params.get("symbol"))
+            
+            elif request.command == IBCommand.GET_NEWS_ARTICLE:
+                return self._do_get_news_article(request.params.get("article_id"))
+            
             else:
                 return IBResponse(success=False, error=f"Unknown command: {request.command}")
                 
