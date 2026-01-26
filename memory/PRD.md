@@ -441,3 +441,16 @@ The application is now consolidated into a single **Command Center** that serves
   - Perplexity API key in `/app/backend/.env` (for AI newsletter)
 - **IB Gateway Required**: Must have IB Gateway running on port 4002 for paper trading
 - **No Auth**: Currently single-user mode without authentication
+
+## Changelog
+
+### Jan 26, 2026 - Bug Fix: Ticker Detail Modal
+- **Issue**: The comprehensive "Ticker Detail Modal" was not populating data when clicking on tickers
+- **Root Cause**: The Alerts section items in `CommandCenterPage.js` were missing the `onClick` handler to set `selectedTicker` state
+- **Fix**: Added `onClick={() => setSelectedTicker({ symbol: alert.symbol, quote: {} })}` to alert items
+- **Also Added**: `data-testid` attributes for better testability
+- **Verified Working**:
+  - Modal opens correctly from Alerts, Earnings, Watchlist, Holdings, and Trade Opportunities sections
+  - All tabs populate correctly: Overview, Chart, Technicals, Fundamentals, Strategies, News
+  - Scores, trading analysis, company info, and matched strategies all display properly
+
