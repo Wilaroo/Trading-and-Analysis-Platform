@@ -588,7 +588,7 @@ const CommandCenterPage = () => {
   };
 
   // Fetch account data
-  const fetchAccountData = useCallback(async () => {
+  const fetchAccountData = async () => {
     try {
       const [accountRes, positionsRes] = await Promise.all([
         api.get('/api/ib/account/summary'),
@@ -599,10 +599,10 @@ const CommandCenterPage = () => {
     } catch (err) {
       console.error('Error fetching account:', err);
     }
-  }, []);
+  };
 
   // Run scanner
-  const runScanner = useCallback(async () => {
+  const runScanner = async () => {
     if (!isConnected) return;
     
     setIsScanning(true);
@@ -617,7 +617,7 @@ const CommandCenterPage = () => {
       console.error('Scanner error:', err);
     }
     setIsScanning(false);
-  }, [isConnected, selectedScanType]);
+  };
 
   // Fetch market context
   const fetchMarketContext = useCallback(async () => {
