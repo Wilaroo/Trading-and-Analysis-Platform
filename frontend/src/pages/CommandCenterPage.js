@@ -1181,7 +1181,12 @@ const CommandCenterPage = () => {
             {expandedSections.alerts && (
               <div className="space-y-2">
                 {alerts.length > 0 ? alerts.map((alert, idx) => (
-                  <div key={idx} className="p-2 bg-zinc-900/50 rounded">
+                  <div 
+                    key={idx} 
+                    className="p-2 bg-zinc-900/50 rounded hover:bg-zinc-900 cursor-pointer transition-colors"
+                    onClick={() => setSelectedTicker({ symbol: alert.symbol, quote: {} })}
+                    data-testid={`alert-item-${alert.symbol}`}
+                  >
                     <div className="flex items-center gap-2 mb-1">
                       <span className="font-bold text-cyan-400">{alert.symbol}</span>
                       <Badge variant="info">{alert.strategy_id}</Badge>
