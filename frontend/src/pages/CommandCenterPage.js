@@ -2757,7 +2757,6 @@ const CommandCenterPage = () => {
               </div>
             )}
           </Card>
-        </div>
       </div>
 
       {/* Ticker Detail Modal */}
