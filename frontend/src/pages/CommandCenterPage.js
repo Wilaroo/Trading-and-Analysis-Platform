@@ -1857,15 +1857,15 @@ const CommandCenterPage = () => {
                     </div>
                     <div className="grid grid-cols-3 gap-2 text-[9px]">
                       <div>
-                        <span className="text-zinc-500">SI%: </span>
+                        <HelpTooltip termId="short-interest"><span className="text-zinc-500">SI%: </span></HelpTooltip>
                         <span className="text-red-400 font-mono">{stock.short_interest_pct?.toFixed(1)}%</span>
                       </div>
                       <div>
-                        <span className="text-zinc-500">DTC: </span>
+                        <HelpTooltip termId="days-to-cover"><span className="text-zinc-500">DTC: </span></HelpTooltip>
                         <span className="text-yellow-400 font-mono">{stock.days_to_cover?.toFixed(1)}</span>
                       </div>
                       <div>
-                        <span className="text-zinc-500">RVOL: </span>
+                        <HelpTooltip termId="rvol"><span className="text-zinc-500">RVOL: </span></HelpTooltip>
                         <span className="text-cyan-400 font-mono">{stock.rvol?.toFixed(1)}x</span>
                       </div>
                     </div>
