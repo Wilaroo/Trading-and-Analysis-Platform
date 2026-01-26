@@ -1782,7 +1782,14 @@ const CommandCenterPage = () => {
                   {newsletter.market_outlook?.key_levels && (
                     <div className="p-2 bg-purple-500/10 border border-purple-500/30 rounded text-xs">
                       <span className="text-purple-400 font-semibold">Key Levels: </span>
-                      <span className="text-zinc-300">{newsletter.market_outlook.key_levels}</span>
+                      <span className="text-zinc-300">
+                        {typeof newsletter.market_outlook.key_levels === 'string' 
+                          ? newsletter.market_outlook.key_levels 
+                          : Object.entries(newsletter.market_outlook.key_levels || {}).map(([sym, levels]) => 
+                              `${sym}: R ${levels?.resistance || 'N/A'} / S ${levels?.support || 'N/A'}`
+                            ).join(' | ')
+                        }
+                      </span>
                     </div>
                   )}
                   
