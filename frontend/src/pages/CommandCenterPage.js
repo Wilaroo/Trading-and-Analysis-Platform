@@ -510,7 +510,44 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
                 {/* CHART TAB */}
                 {activeTab === 'chart' && (
                   <div>
-                    <div ref={chartContainerRef} className="w-full h-[250px]" />
+                    {/* Chart Controls */}
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-zinc-500">5-min Candles</span>
+                      </div>
+                      <button
+                        onClick={() => setShowTradingLines(!showTradingLines)}
+                        className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
+                          showTradingLines 
+                            ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' 
+                            : 'bg-zinc-800 text-zinc-400 border border-zinc-700'
+                        }`}
+                      >
+                        <Target className="w-3 h-3" />
+                        {showTradingLines ? 'Hide' : 'Show'} SL/TP Lines
+                      </button>
+                    </div>
+                    
+                    <div ref={chartContainerRef} className="w-full h-[300px]" />
+                    
+                    {/* Trading Levels Legend */}
+                    {showTradingLines && tradingSummary.entry && (
+                      <div className="flex items-center justify-center gap-4 mt-2 text-[10px]">
+                        <span className="flex items-center gap-1">
+                          <span className="w-3 h-0.5 bg-cyan-400 rounded"></span>
+                          Entry ${tradingSummary.entry?.toFixed(2)}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <span className="w-3 h-0.5 bg-red-400 rounded border-dashed"></span>
+                          Stop ${tradingSummary.stop_loss?.toFixed(2)}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <span className="w-3 h-0.5 bg-green-400 rounded border-dashed"></span>
+                          Target ${tradingSummary.target?.toFixed(2)}
+                        </span>
+                      </div>
+                    )}
+                    
                     {supportResistance.resistance_1 && (
                       <div className="grid grid-cols-4 gap-2 mt-3">
                         <div className="bg-red-500/10 rounded p-2 text-center">
