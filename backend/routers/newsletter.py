@@ -39,21 +39,121 @@ async def get_latest_newsletter():
     Get the most recently generated newsletter.
     Returns a placeholder if no newsletter has been generated today.
     """
-    # For now, return a prompt to generate
-    # In a full implementation, this would fetch from MongoDB
+    # Check if we have a cached newsletter from today
+    service = get_newsletter_service()
+    if hasattr(service, '_cached_newsletter') and service._cached_newsletter:
+        cached = service._cached_newsletter
+        # Check if it's from today
+        if cached.get('date'):
+            try:
+                cached_date = datetime.fromisoformat(cached['date'].replace('Z', '+00:00')).date()
+                if cached_date == datetime.now(timezone.utc).date():
+                    return cached
+            except:
+                pass
+    
+    # Return a placeholder prompting auto-generation
     return {
-        "title": "Generate Today's Briefing",
+        "title": "Market Intelligence",
         "date": datetime.now(timezone.utc).isoformat(),
         "market_outlook": {
             "sentiment": "neutral",
-            "key_levels": "Click Generate to analyze",
-            "focus": "Awaiting AI analysis"
+            "key_levels": "Awaiting market data",
+            "focus": "Connect IB Gateway to auto-generate"
         },
-        "summary": "Click the 'Generate' button to create today's premarket briefing with AI-powered market analysis, trade opportunities, and key levels.",
+        "summary": "Connect to IB Gateway to automatically generate today's market intelligence briefing.",
         "top_stories": [],
         "watchlist": [],
+        "opportunities": [],
         "needs_generation": True
     }
+
+
+@router.post("/auto-generate")
+async def auto_generate_market_intelligence():
+    """
+    Auto-generate market intelligence when IB Gateway connects.
+    This provides a comprehensive morning briefing covering:
+    - Market sentiment and overnight developments
+    - News, politics, and world events affecting markets
+    - Top movers and trade opportunities
+    - Key levels and risk factors
+    """
+    try:
+        service = get_newsletter_service()
+        
+        # Gather comprehensive market data
+        top_movers = None
+        market_context = {}
+        
+        try:
+            from services.ib_service import IBService
+            ib_service = service.ib_service
+            if ib_service:
+                status = ib_service.get_connection_status()
+                if status.get("connected"):
+                    # Get multiple scanner types for comprehensive view
+                    gainers = await ib_service.run_scanner("TOP_PERC_GAIN", limit=10)
+                    losers = await ib_service.run_scanner("TOP_PERC_LOSE", limit=10)
+                    active = await ib_service.run_scanner("MOST_ACTIVE", limit=10)
+                    
+                    # Combine all movers
+                    all_symbols = set()
+                    top_movers = []
+                    
+                    for scanner_results, category in [(gainers, 'gainer'), (losers, 'loser'), (active, 'active')]:
+                        if scanner_results:
+                            for m in scanner_results[:5]:
+                                if m.get('symbol') and m['symbol'] not in all_symbols:
+                                    all_symbols.add(m['symbol'])
+                                    m['category'] = category
+                                    top_movers.append(m)
+                    
+                    # Get quotes for all movers
+                    if top_movers:
+                        symbols = [m["symbol"] for m in top_movers]
+                        quotes = await ib_service.get_quotes_batch(symbols)
+                        quotes_map = {q["symbol"]: q for q in quotes}
+                        top_movers = [
+                            {**m, "quote": quotes_map.get(m["symbol"], {})}
+                            for m in top_movers
+                        ]
+                    
+                    # Get market context (indices)
+                    indices = ["SPY", "QQQ", "DIA", "IWM", "VIX"]
+                    index_quotes = await ib_service.get_quotes_batch(indices)
+                    market_context["indices"] = {q["symbol"]: q for q in index_quotes if q.get("price")}
+                    
+        except Exception as e:
+            print(f"Error gathering market data: {e}")
+        
+        # Generate the newsletter with comprehensive context
+        newsletter = await service.generate_premarket_newsletter(
+            top_movers=top_movers,
+            market_context=market_context
+        )
+        
+        # Cache it for today
+        service._cached_newsletter = newsletter
+        
+        return newsletter
+        
+    except Exception as e:
+        print(f"Error auto-generating newsletter: {e}")
+        return {
+            "title": "Market Intelligence",
+            "date": datetime.now(timezone.utc).isoformat(),
+            "market_outlook": {
+                "sentiment": "neutral",
+                "key_levels": "Data unavailable",
+                "focus": "Error generating briefing"
+            },
+            "summary": f"Unable to generate market intelligence: {str(e)}. Check IB Gateway connection and Perplexity API key.",
+            "top_stories": [],
+            "watchlist": [],
+            "opportunities": [],
+            "error": str(e)
+        }
 
 
 @router.post("/generate")
