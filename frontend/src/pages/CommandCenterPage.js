@@ -1170,7 +1170,13 @@ const CommandCenterPage = () => {
     try {
       toast.info('Generating market intelligence...', { duration: 3000 });
       const res = await api.post('/api/newsletter/auto-generate');
+      console.log('Market Intelligence Response:', res.data);
+      console.log('Summary:', res.data?.summary);
+      console.log('needs_generation:', res.data?.needs_generation);
       setNewsletter(res.data);
+      
+      // Auto-expand the Market Intelligence section
+      setExpandedSections(prev => ({ ...prev, news: true }));
       
       if (!res.data?.error) {
         toast.success('Market intelligence ready!', { duration: 5000 });
