@@ -168,24 +168,11 @@ function App() {
 
   const renderPage = () => {
     switch (activeTab) {
-      case 'dashboard': return <ErrorBoundary><DashboardPage data={dashboardData} loading={loading} onRefresh={loadDashboardData} streamingQuotes={streamingQuotes} /></ErrorBoundary>;
-      case 'opportunities': return <TradeOpportunitiesPage />;
+      case 'command-center': return <CommandCenterPage />;
       case 'chart': return <ErrorBoundary><ChartsPage /></ErrorBoundary>;
-      case 'scanner': return <ScannerPage />;
-      case 'strategies': return <StrategiesPage />;
-      case 'earnings': return <EarningsCalendarPage />;
-      case 'watchlist': return <WatchlistPage />;
-      case 'portfolio': return <PortfolioPage />;
-      case 'fundamentals': return <FundamentalsPage />;
-      case 'insider': return <InsiderTradingPage />;
-      case 'cot': return <COTDataPage />;
-      case 'alerts': return <AlertsPage />;
-      case 'newsletter': return <NewsletterPage />;
-      case 'market-context': return <MarketContextPage />;
       case 'trade-journal': return <TradeJournalPage />;
-      case 'trading-rules': return <TradingRulesPage />;
       case 'ib-trading': return <IBTradingPage />;
-      default: return <ErrorBoundary><DashboardPage data={dashboardData} loading={loading} onRefresh={loadDashboardData} streamingQuotes={streamingQuotes} /></ErrorBoundary>;
+      default: return <CommandCenterPage />;
     }
   };
 
