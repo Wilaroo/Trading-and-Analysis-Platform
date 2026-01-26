@@ -201,6 +201,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
   const [historicalData, setHistoricalData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
+  const [showTradingLines, setShowTradingLines] = useState(true);
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
 
@@ -231,13 +232,13 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
     fetchData();
   }, [ticker?.symbol]);
 
-  // Initialize chart
+  // Initialize chart with SL/TP lines
   useEffect(() => {
     if (!chartContainerRef.current || !historicalData || historicalData.length === 0 || activeTab !== 'chart') return;
 
     const chart = LightweightCharts.createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
-      height: 250,
+      height: 300,
       layout: { background: { type: 'solid', color: '#0A0A0A' }, textColor: '#71717a' },
       grid: { vertLines: { color: 'rgba(255,255,255,0.05)' }, horzLines: { color: 'rgba(255,255,255,0.05)' } },
       crosshair: { mode: 1 },
@@ -257,11 +258,53 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
     }));
 
     candlestickSeries.setData(chartData);
+    
+    // Add SL/TP price lines if trading summary exists and lines are enabled
+    if (showTradingLines && analysis?.trading_summary) {
+      const ts = analysis.trading_summary;
+      
+      // Entry line (cyan)
+      if (ts.entry) {
+        candlestickSeries.createPriceLine({
+          price: ts.entry,
+          color: '#00E5FF',
+          lineWidth: 2,
+          lineStyle: 0, // Solid
+          axisLabelVisible: true,
+          title: 'Entry',
+        });
+      }
+      
+      // Stop Loss line (red dashed)
+      if (ts.stop_loss) {
+        candlestickSeries.createPriceLine({
+          price: ts.stop_loss,
+          color: '#FF2E2E',
+          lineWidth: 2,
+          lineStyle: 2, // Dashed
+          axisLabelVisible: true,
+          title: 'Stop',
+        });
+      }
+      
+      // Take Profit line (green dashed)
+      if (ts.target) {
+        candlestickSeries.createPriceLine({
+          price: ts.target,
+          color: '#00FF94',
+          lineWidth: 2,
+          lineStyle: 2, // Dashed
+          axisLabelVisible: true,
+          title: 'Target',
+        });
+      }
+    }
+    
     chart.timeScale().fitContent();
     chartRef.current = chart;
 
     return () => chart.remove();
-  }, [historicalData, activeTab]);
+  }, [historicalData, activeTab, showTradingLines, analysis]);
 
   if (!ticker) return null;
 
