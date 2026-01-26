@@ -1305,3 +1305,266 @@ async def get_short_squeeze_candidates():
             }
         )
 
+
+
+# ===================== Breakout Alerts Scanner =====================
+
+# In-memory breakout alerts
+_breakout_alerts = []
+_breakout_alert_history = []
+
+
+class BreakoutAlertConfig(BaseModel):
+    """Configuration for breakout alerts"""
+    enabled: bool = Field(default=True)
+    min_score: int = Field(default=60, description="Minimum overall score")
+    min_rvol: float = Field(default=1.2, description="Minimum relative volume")
+    require_trend_alignment: bool = Field(default=True)
+
+
+@router.get("/scanner/breakouts")
+async def get_breakout_alerts():
+    """
+    Scan for breakout opportunities - stocks breaking above resistance (LONG)
+    or below support (SHORT).
+    
+    Returns TOP 10 that meet ALL criteria:
+    - Match user's 77 trading rules/strategies
+    - Meet momentum criteria (RVOL, trend, volume)
+    - Have highest composite scores
+    
+    Requires IB Gateway connection for real-time data.
+    NO MOCK DATA.
+    """
+    cache = get_data_cache()
+    
+    # Check connection
+    is_connected = False
+    if _ib_service:
+        try:
+            status = _ib_service.get_connection_status()
+            is_connected = status.get("connected", False)
+        except:
+            pass
+    
+    if not is_connected:
+        # Return any cached breakout alerts
+        if _breakout_alerts:
+            return {
+                "breakouts": _breakout_alerts,
+                "count": len(_breakout_alerts),
+                "last_updated": _breakout_alerts[0].get("detected_at") if _breakout_alerts else None,
+                "is_cached": True,
+                "is_connected": False,
+                "message": "Showing cached breakout alerts. Connect IB Gateway for real-time scanning."
+            }
+        
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "Data unavailable",
+                "message": "IB Gateway is disconnected and no cached breakout data available",
+                "is_connected": False
+            }
+        )
+    
+    try:
+        from services.scoring_engine import get_scoring_engine
+        from services.strategies import get_strategies_service
+        
+        feature_engine = get_feature_engine()
+        scoring_engine = get_scoring_engine()
+        strategies_service = get_strategies_service()
+        
+        # Run multiple scanners to find potential breakout candidates
+        scanner_types = ["TOP_PERC_GAIN", "HOT_BY_VOLUME", "HIGH_VS_13W_HL"]
+        all_candidates = {}
+        
+        for scan_type in scanner_types:
+            try:
+                results = await _ib_service.run_scanner(scan_type, limit=50)
+                for r in results:
+                    symbol = r.get("symbol", "")
+                    if symbol and symbol not in all_candidates:
+                        all_candidates[symbol] = r
+            except Exception as e:
+                print(f"Scanner {scan_type} error: {e}")
+        
+        if not all_candidates:
+            return {
+                "breakouts": [],
+                "count": 0,
+                "last_updated": datetime.now(timezone.utc).isoformat(),
+                "is_cached": False,
+                "is_connected": True,
+                "message": "No scanner results available"
+            }
+        
+        breakouts = []
+        
+        for symbol, scan_result in all_candidates.items():
+            try:
+                # Get real-time quote
+                quote = await _ib_service.get_quote(symbol)
+                if not quote or not quote.get("price"):
+                    continue
+                
+                # Get historical data for S/R calculation
+                hist_data = await _ib_service.get_historical_data(symbol, "5 D", "1 hour")
+                if not hist_data or len(hist_data) < 20:
+                    continue
+                
+                # Calculate features
+                features = feature_engine.calculate_features(symbol, quote, {"bars": hist_data})
+                
+                # Calculate support and resistance levels
+                highs = [bar["high"] for bar in hist_data]
+                lows = [bar["low"] for bar in hist_data]
+                closes = [bar["close"] for bar in hist_data]
+                
+                resistance_1 = max(highs[-20:])  # Recent high
+                resistance_2 = max(highs)  # Highest high
+                support_1 = min(lows[-20:])  # Recent low
+                support_2 = min(lows)  # Lowest low
+                
+                current_price = quote.get("price", 0)
+                prev_close = closes[-2] if len(closes) > 1 else current_price
+                
+                # Determine if breakout occurred
+                breakout_type = None
+                breakout_level = None
+                
+                # LONG breakout: price breaks above resistance
+                if current_price > resistance_1 and prev_close <= resistance_1:
+                    breakout_type = "LONG"
+                    breakout_level = resistance_1
+                # SHORT breakout: price breaks below support
+                elif current_price < support_1 and prev_close >= support_1:
+                    breakout_type = "SHORT"
+                    breakout_level = support_1
+                
+                if not breakout_type:
+                    continue
+                
+                # Calculate scores
+                scores = scoring_engine.calculate_scores(symbol, quote, features, {})
+                overall_score = scores.get("overall", 0)
+                
+                # Filter: Must have minimum score of 60
+                if overall_score < 60:
+                    continue
+                
+                # Filter: Must have RVOL >= 1.2
+                rvol = features.get("rvol", 1.0)
+                if rvol < 1.2:
+                    continue
+                
+                # Match against user's strategies
+                matched_strategies = strategies_service.match_strategies(symbol, quote, features, scores)
+                
+                # Filter: Must match at least one strategy
+                if not matched_strategies:
+                    continue
+                
+                # Filter: Trend alignment
+                trend = features.get("trend", "NEUTRAL")
+                if breakout_type == "LONG" and trend not in ["BULLISH", "NEUTRAL"]:
+                    continue
+                if breakout_type == "SHORT" and trend not in ["BEARISH", "NEUTRAL"]:
+                    continue
+                
+                # Calculate composite breakout score
+                breakout_score = overall_score
+                breakout_score += min(10, (rvol - 1) * 10)  # Bonus for high RVOL
+                breakout_score += len(matched_strategies) * 2  # Bonus for strategy matches
+                breakout_score += min(10, abs(current_price - breakout_level) / breakout_level * 100)  # Breakout strength
+                
+                # Calculate stop loss and target
+                atr = features.get("atr", current_price * 0.02)
+                if breakout_type == "LONG":
+                    stop_loss = breakout_level - (atr * 0.5)  # Stop just below breakout level
+                    target = current_price + (atr * 2)  # 2:1 R/R minimum
+                else:
+                    stop_loss = breakout_level + (atr * 0.5)  # Stop just above breakdown level
+                    target = current_price - (atr * 2)
+                
+                breakout = {
+                    "symbol": symbol,
+                    "name": scan_result.get("name", symbol),
+                    "breakout_type": breakout_type,
+                    "breakout_level": round(breakout_level, 2),
+                    "current_price": round(current_price, 2),
+                    "change_percent": quote.get("change_percent", 0),
+                    "volume": quote.get("volume", 0),
+                    "rvol": round(rvol, 2),
+                    "trend": trend,
+                    "overall_score": overall_score,
+                    "technical_score": scores.get("technical", 0),
+                    "momentum_score": scores.get("momentum", scores.get("catalyst", 0)),
+                    "breakout_score": round(min(100, breakout_score)),
+                    "stop_loss": round(stop_loss, 2),
+                    "target": round(target, 2),
+                    "risk_reward": round(abs(target - current_price) / abs(current_price - stop_loss), 2) if abs(current_price - stop_loss) > 0 else 0,
+                    "resistance_1": round(resistance_1, 2),
+                    "resistance_2": round(resistance_2, 2),
+                    "support_1": round(support_1, 2),
+                    "support_2": round(support_2, 2),
+                    "matched_strategies": [{"id": s["id"], "name": s["name"], "match_pct": s.get("match_percentage", 0)} for s in matched_strategies[:3]],
+                    "strategy_count": len(matched_strategies),
+                    "detected_at": datetime.now(timezone.utc).isoformat(),
+                    "features": {
+                        "rsi": features.get("rsi", 50),
+                        "macd": features.get("macd", 0),
+                        "vwap_dist": features.get("vwap_distance", 0),
+                        "atr": round(atr, 2)
+                    }
+                }
+                
+                breakouts.append(breakout)
+                
+            except Exception as e:
+                print(f"Error analyzing {symbol} for breakout: {e}")
+                continue
+        
+        # Sort by breakout score and take top 10
+        breakouts.sort(key=lambda x: x["breakout_score"], reverse=True)
+        top_breakouts = breakouts[:10]
+        
+        # Update global breakout alerts
+        global _breakout_alerts
+        _breakout_alerts = top_breakouts
+        
+        # Add to history
+        for b in top_breakouts:
+            if not any(h["symbol"] == b["symbol"] and h["breakout_type"] == b["breakout_type"] for h in _breakout_alert_history[-100:]):
+                _breakout_alert_history.append(b)
+        
+        return {
+            "breakouts": top_breakouts,
+            "count": len(top_breakouts),
+            "total_scanned": len(all_candidates),
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "is_cached": False,
+            "is_connected": True
+        }
+        
+    except Exception as e:
+        print(f"Error in breakout scanner: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Scanner error",
+                "message": str(e),
+                "is_connected": is_connected
+            }
+        )
+
+
+@router.get("/scanner/breakouts/history")
+async def get_breakout_history():
+    """Get recent breakout alert history"""
+    return {
+        "history": _breakout_alert_history[-50:],  # Last 50 breakouts
+        "count": len(_breakout_alert_history)
+    }
+
