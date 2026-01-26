@@ -656,7 +656,7 @@ async def get_comprehensive_analysis(symbol: str):
             if bars and len(bars) > 20:
                 from services.feature_engine import get_feature_engine
                 feature_engine = get_feature_engine()
-                features = feature_engine.calc_all_features(bars, symbol)
+                features = feature_engine.calculate_all_features(bars_5m=bars, bars_daily=None, session_bars_1m=None, fundamentals=None, market_data=None)
                 
                 close = bars[-1].get("close", base_price)
                 analysis["technicals"] = {
