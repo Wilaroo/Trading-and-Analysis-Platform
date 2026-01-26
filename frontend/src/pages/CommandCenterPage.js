@@ -2016,10 +2016,45 @@ const CommandCenterPage = () => {
                         <span className="text-[9px] px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded">
                           Score: {breakout.breakout_score}
                         </span>
+                        {/* Signal Strength Indicator */}
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                          breakout.signal_strength_label === 'VERY STRONG' ? 'bg-green-500 text-black' :
+                          breakout.signal_strength_label === 'STRONG' ? 'bg-cyan-500 text-black' :
+                          breakout.signal_strength_label === 'MODERATE' ? 'bg-yellow-500 text-black' :
+                          'bg-zinc-600 text-white'
+                        }`}>
+                          {breakout.rules_matched || breakout.strategy_count}/77
+                        </span>
                       </div>
                       <span className={`text-sm font-mono ${breakout.change_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                         {formatPercent(breakout.change_percent)}
                       </span>
+                    </div>
+                    
+                    {/* Signal Strength Bar */}
+                    <div className="mb-2">
+                      <div className="flex items-center justify-between text-[9px] mb-1">
+                        <span className="text-zinc-500">Signal Strength</span>
+                        <span className={`font-bold ${
+                          breakout.signal_strength_label === 'VERY STRONG' ? 'text-green-400' :
+                          breakout.signal_strength_label === 'STRONG' ? 'text-cyan-400' :
+                          breakout.signal_strength_label === 'MODERATE' ? 'text-yellow-400' :
+                          'text-zinc-400'
+                        }`}>
+                          {breakout.signal_strength_label || 'MODERATE'} ({breakout.signal_strength || Math.round((breakout.strategy_count / 77) * 100)}%)
+                        </span>
+                      </div>
+                      <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full rounded-full transition-all ${
+                            breakout.signal_strength_label === 'VERY STRONG' ? 'bg-green-500' :
+                            breakout.signal_strength_label === 'STRONG' ? 'bg-cyan-500' :
+                            breakout.signal_strength_label === 'MODERATE' ? 'bg-yellow-500' :
+                            'bg-zinc-500'
+                          }`}
+                          style={{ width: `${breakout.signal_strength || Math.round((breakout.strategy_count / 77) * 100)}%` }}
+                        />
+                      </div>
                     </div>
                     
                     <div className="grid grid-cols-4 gap-2 text-[9px] mb-2">
@@ -2049,13 +2084,19 @@ const CommandCenterPage = () => {
                         <span className="text-zinc-500">Stop: <span className="text-red-400">${breakout.stop_loss}</span></span>
                         <span className="text-zinc-500">Target: <span className="text-green-400">${breakout.target}</span></span>
                       </div>
-                      <span className="text-zinc-600">{breakout.strategy_count} strategies matched</span>
                     </div>
                     
                     {breakout.matched_strategies?.length > 0 && (
                       <div className="mt-2 pt-2 border-t border-white/5">
-                        <span className="text-[9px] text-zinc-500">Top Strategy: </span>
-                        <span className="text-[9px] text-purple-400">{breakout.matched_strategies[0].name}</span>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="text-[9px] text-zinc-500">Top Strategies: </span>
+                            {breakout.matched_strategies.slice(0, 3).map((s, i) => (
+                              <span key={i} className="text-[9px] text-purple-400 mr-2">{s.name}</span>
+                            ))}
+                          </div>
+                          <span className="text-[9px] text-zinc-600">{breakout.rules_matched || breakout.strategy_count} rules matched</span>
+                        </div>
                       </div>
                     )}
                   </div>
