@@ -1071,6 +1071,9 @@ const CommandCenterPage = () => {
       if (connected) {
         await fetchAccountData();
         await fetchWatchlist(connected);
+        
+        // Auto-generate market intelligence on successful connection
+        autoGenerateMarketIntelligence();
       }
     } catch (err) {
       console.error('Connection failed:', err);
