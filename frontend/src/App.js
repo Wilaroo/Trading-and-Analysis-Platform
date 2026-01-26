@@ -9,24 +9,11 @@ import api from './utils/api';
 
 // Import pages
 import {
-  DashboardPage,
   ChartsPage,
-  ScannerPage,
-  StrategiesPage,
-  WatchlistPage,
-  PortfolioPage,
-  FundamentalsPage,
-  InsiderTradingPage,
-  COTDataPage,
-  AlertsPage,
-  NewsletterPage,
-  EarningsCalendarPage,
-  MarketContextPage,
   TradeJournalPage,
-  TradingRulesPage,
   IBTradingPage,
-  TradeOpportunitiesPage
 } from './pages';
+import CommandCenterPage from './pages/CommandCenterPage';
 
 import './App.css';
 
