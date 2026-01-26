@@ -30,7 +30,15 @@ import {
   Plus,
   Trash2,
   MessageSquare,
-  Info
+  Info,
+  Database,
+  Cpu,
+  BarChart3,
+  Brain,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  Monitor
 } from 'lucide-react';
 import * as LightweightCharts from 'lightweight-charts';
 import api from '../utils/api';
