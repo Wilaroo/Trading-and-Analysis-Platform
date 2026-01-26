@@ -23,7 +23,6 @@ const tooltipDefinitions = {
   'ema-9': { term: 'EMA 9', def: 'Fast moving average for short-term trend. Price above = bullish momentum.' },
   'ema-20': { term: 'EMA 20', def: 'Medium-term trend indicator. Often acts as support/resistance.' },
   'sma-50': { term: 'SMA 50', def: '50-day Simple Moving Average. Key institutional level for trend direction.' },
-  'atr': { term: 'ATR', def: 'Average True Range. Measures volatility. Used for stop loss and position sizing.' },
   
   // Volume & Momentum
   'rvol': { term: 'RVOL', def: 'Relative Volume. 1.5x+ confirms moves. 2x+ indicates significant interest.' },
