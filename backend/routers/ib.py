@@ -997,3 +997,260 @@ async def get_comprehensive_analysis(symbol: str):
         ]
     
     return analysis
+
+
+# ===================== Order Fill Tracking =====================
+
+# In-memory store for tracking orders (would use Redis/DB in production)
+_tracked_orders = {}
+_filled_orders = []
+
+class OrderTrackRequest(BaseModel):
+    order_id: int = Field(..., description="Order ID to track")
+    symbol: str = Field(..., description="Symbol for the order")
+    action: str = Field(..., description="BUY or SELL")
+    quantity: int = Field(..., description="Order quantity")
+
+
+@router.post("/orders/track")
+async def track_order(request: OrderTrackRequest):
+    """Start tracking an order for fill notifications"""
+    _tracked_orders[request.order_id] = {
+        "order_id": request.order_id,
+        "symbol": request.symbol,
+        "action": request.action,
+        "quantity": request.quantity,
+        "status": "PENDING",
+        "tracked_at": datetime.now(timezone.utc).isoformat()
+    }
+    return {"status": "tracking", "order_id": request.order_id}
+
+
+@router.get("/orders/tracked")
+async def get_tracked_orders():
+    """Get all currently tracked orders"""
+    return {"tracked": list(_tracked_orders.values()), "count": len(_tracked_orders)}
+
+
+@router.get("/orders/fills")
+async def check_order_fills():
+    """
+    Check for filled orders - polls IB for status updates.
+    Returns newly filled orders since last check.
+    """
+    newly_filled = []
+    
+    if _ib_service:
+        try:
+            status = _ib_service.get_connection_status()
+            if status.get("connected"):
+                open_orders = await _ib_service.get_open_orders()
+                open_order_ids = {o.get("order_id") for o in open_orders}
+                
+                # Check each tracked order
+                for order_id, order_info in list(_tracked_orders.items()):
+                    if order_id not in open_order_ids and order_info["status"] == "PENDING":
+                        # Order no longer open - likely filled
+                        order_info["status"] = "FILLED"
+                        order_info["filled_at"] = datetime.now(timezone.utc).isoformat()
+                        newly_filled.append(order_info)
+                        _filled_orders.append(order_info)
+                        del _tracked_orders[order_id]
+        except Exception as e:
+            print(f"Error checking order fills: {e}")
+    
+    return {
+        "newly_filled": newly_filled,
+        "count": len(newly_filled),
+        "pending_count": len(_tracked_orders)
+    }
+
+
+@router.delete("/orders/track/{order_id}")
+async def stop_tracking_order(order_id: int):
+    """Stop tracking an order"""
+    if order_id in _tracked_orders:
+        del _tracked_orders[order_id]
+        return {"status": "removed", "order_id": order_id}
+    return {"status": "not_found", "order_id": order_id}
+
+
+# ===================== Price Alerts =====================
+
+# In-memory price alerts (would use DB in production)
+_price_alerts = {}
+_triggered_alerts = []
+
+
+class PriceAlertRequest(BaseModel):
+    symbol: str = Field(..., description="Stock symbol")
+    target_price: float = Field(..., description="Target price to trigger alert")
+    direction: str = Field(..., description="ABOVE or BELOW")
+    note: Optional[str] = Field(default=None, description="Optional note for the alert")
+
+
+@router.post("/alerts/price")
+async def create_price_alert(request: PriceAlertRequest):
+    """Create a new price alert"""
+    from datetime import datetime, timezone
+    
+    alert_id = f"{request.symbol}_{request.direction}_{request.target_price}_{datetime.now().timestamp()}"
+    
+    alert = {
+        "id": alert_id,
+        "symbol": request.symbol.upper(),
+        "target_price": request.target_price,
+        "direction": request.direction.upper(),
+        "note": request.note,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "triggered": False
+    }
+    
+    _price_alerts[alert_id] = alert
+    return {"status": "created", "alert": alert}
+
+
+@router.get("/alerts/price")
+async def get_price_alerts():
+    """Get all active price alerts"""
+    return {
+        "alerts": list(_price_alerts.values()),
+        "count": len(_price_alerts)
+    }
+
+
+@router.get("/alerts/price/check")
+async def check_price_alerts():
+    """
+    Check all price alerts against current prices.
+    Returns triggered alerts.
+    """
+    from datetime import datetime, timezone
+    
+    triggered = []
+    
+    if not _price_alerts:
+        return {"triggered": [], "count": 0}
+    
+    # Get unique symbols
+    symbols = list(set(a["symbol"] for a in _price_alerts.values()))
+    
+    # Get current prices
+    current_prices = {}
+    if _ib_service:
+        try:
+            status = _ib_service.get_connection_status()
+            if status.get("connected"):
+                quotes = await _ib_service.get_quotes_batch(symbols)
+                current_prices = {q["symbol"]: q.get("price", 0) for q in quotes}
+        except:
+            pass
+    
+    # Check each alert
+    for alert_id, alert in list(_price_alerts.items()):
+        symbol = alert["symbol"]
+        current_price = current_prices.get(symbol, 0)
+        
+        if current_price <= 0:
+            continue
+        
+        target = alert["target_price"]
+        direction = alert["direction"]
+        
+        is_triggered = False
+        if direction == "ABOVE" and current_price >= target:
+            is_triggered = True
+        elif direction == "BELOW" and current_price <= target:
+            is_triggered = True
+        
+        if is_triggered:
+            alert["triggered"] = True
+            alert["triggered_at"] = datetime.now(timezone.utc).isoformat()
+            alert["triggered_price"] = current_price
+            triggered.append(alert)
+            _triggered_alerts.append(alert)
+            del _price_alerts[alert_id]
+    
+    return {
+        "triggered": triggered,
+        "count": len(triggered),
+        "active_alerts": len(_price_alerts)
+    }
+
+
+@router.delete("/alerts/price/{alert_id}")
+async def delete_price_alert(alert_id: str):
+    """Delete a price alert"""
+    if alert_id in _price_alerts:
+        del _price_alerts[alert_id]
+        return {"status": "deleted", "alert_id": alert_id}
+    return {"status": "not_found", "alert_id": alert_id}
+
+
+@router.get("/alerts/price/history")
+async def get_triggered_alerts_history():
+    """Get history of triggered alerts"""
+    return {
+        "triggered": _triggered_alerts[-50:],  # Last 50 triggered alerts
+        "count": len(_triggered_alerts)
+    }
+
+
+# ===================== Short Squeeze Scanner =====================
+
+@router.get("/scanner/short-squeeze")
+async def get_short_squeeze_candidates():
+    """
+    Get stocks with high short interest that could be short squeeze candidates.
+    Returns mock data demonstrating the feature.
+    """
+    import random
+    from datetime import datetime, timezone
+    
+    # Mock short squeeze candidates with realistic data
+    candidates = [
+        {"symbol": "GME", "name": "GameStop Corp", "short_interest_pct": 24.5, "days_to_cover": 3.2, "shares_short": 45000000, "float_pct_short": 28.1},
+        {"symbol": "AMC", "name": "AMC Entertainment", "short_interest_pct": 18.7, "days_to_cover": 2.1, "shares_short": 98000000, "float_pct_short": 21.3},
+        {"symbol": "BBBY", "name": "Bed Bath & Beyond", "short_interest_pct": 42.3, "days_to_cover": 5.8, "shares_short": 32000000, "float_pct_short": 48.7},
+        {"symbol": "KOSS", "name": "Koss Corporation", "short_interest_pct": 35.2, "days_to_cover": 4.1, "shares_short": 2800000, "float_pct_short": 41.2},
+        {"symbol": "BYND", "name": "Beyond Meat Inc", "short_interest_pct": 31.8, "days_to_cover": 6.3, "shares_short": 19500000, "float_pct_short": 35.4},
+        {"symbol": "CVNA", "name": "Carvana Co", "short_interest_pct": 28.4, "days_to_cover": 3.9, "shares_short": 45000000, "float_pct_short": 32.1},
+        {"symbol": "UPST", "name": "Upstart Holdings", "short_interest_pct": 26.1, "days_to_cover": 4.5, "shares_short": 22000000, "float_pct_short": 29.8},
+        {"symbol": "MARA", "name": "Marathon Digital", "short_interest_pct": 22.3, "days_to_cover": 2.8, "shares_short": 38000000, "float_pct_short": 25.6},
+        {"symbol": "RIVN", "name": "Rivian Automotive", "short_interest_pct": 19.8, "days_to_cover": 3.1, "shares_short": 125000000, "float_pct_short": 22.4},
+        {"symbol": "LCID", "name": "Lucid Group Inc", "short_interest_pct": 17.5, "days_to_cover": 2.4, "shares_short": 285000000, "float_pct_short": 19.8},
+    ]
+    
+    # Add current price and change data
+    for candidate in candidates:
+        random.seed(hash(candidate["symbol"]))
+        base_price = random.uniform(5, 200)
+        change_pct = random.uniform(-8, 15)  # Short squeezes often have big moves
+        
+        candidate["price"] = round(base_price, 2)
+        candidate["change_percent"] = round(change_pct, 2)
+        candidate["volume"] = int(random.uniform(5000000, 100000000))
+        candidate["avg_volume"] = int(candidate["volume"] * random.uniform(0.6, 1.2))
+        candidate["rvol"] = round(candidate["volume"] / candidate["avg_volume"], 2)
+        
+        # Calculate squeeze score (0-100)
+        squeeze_score = 0
+        squeeze_score += min(30, candidate["short_interest_pct"])  # Up to 30 pts for SI%
+        squeeze_score += min(20, candidate["days_to_cover"] * 3)   # Up to 20 pts for days to cover
+        squeeze_score += min(20, candidate["rvol"] * 10)           # Up to 20 pts for RVOL
+        squeeze_score += min(15, max(0, change_pct))               # Up to 15 pts for positive momentum
+        squeeze_score += min(15, candidate["float_pct_short"] / 3) # Up to 15 pts for float short
+        
+        candidate["squeeze_score"] = round(min(100, squeeze_score))
+        candidate["squeeze_risk"] = "HIGH" if candidate["squeeze_score"] >= 70 else "MEDIUM" if candidate["squeeze_score"] >= 50 else "LOW"
+    
+    # Sort by squeeze score
+    candidates.sort(key=lambda x: x["squeeze_score"], reverse=True)
+    
+    return {
+        "candidates": candidates,
+        "count": len(candidates),
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+        "is_mock": True
+    }
+
