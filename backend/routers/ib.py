@@ -159,9 +159,14 @@ async def get_historical_data(
     duration: str = "1 D",
     bar_size: str = "5 mins"
 ):
-    """Get historical bar data for a symbol"""
-    import random
-    from datetime import datetime, timezone, timedelta
+    """
+    Get historical bar data for a symbol.
+    Returns real data from IB Gateway when connected.
+    Returns cached data with last_updated timestamp when disconnected.
+    NO MOCK DATA - only real verified data.
+    """
+    cache = get_data_cache()
+    symbol = symbol.upper()
     
     # Check connection status
     is_connected = False
@@ -175,63 +180,35 @@ async def get_historical_data(
     if is_connected and _ib_service:
         try:
             bars = await _ib_service.get_historical_data(symbol, duration, bar_size)
-            return {"symbol": symbol.upper(), "bars": bars, "count": len(bars)}
+            if bars and len(bars) > 0:
+                # Cache the fresh data
+                cache.cache_historical(symbol, duration, bar_size, bars)
+                return {
+                    "symbol": symbol,
+                    "bars": bars,
+                    "count": len(bars),
+                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                    "is_cached": False,
+                    "is_realtime": True
+                }
         except Exception as e:
-            print(f"Error getting historical data: {e}")
+            print(f"Error getting historical data for {symbol}: {e}")
     
-    # Generate mock historical data when not connected
-    symbol = symbol.upper()
-    base_prices = {
-        "AAPL": 185.0, "MSFT": 420.0, "GOOGL": 175.0, "AMZN": 185.0, "META": 520.0,
-        "NVDA": 875.0, "TSLA": 245.0, "JPM": 195.0, "V": 280.0, "JNJ": 155.0,
-        "SPY": 590.0, "QQQ": 510.0
-    }
-    base_price = base_prices.get(symbol, 100 + (hash(symbol) % 200))
+    # Not connected or error - try to return cached data
+    cached = cache.get_cached_historical(symbol, duration, bar_size)
+    if cached:
+        return cached
     
-    # Generate bars based on duration and bar_size
-    random.seed(hash(symbol))
-    bars = []
-    now = datetime.now(timezone.utc)
-    
-    # Determine number of bars and interval
-    if "5 min" in bar_size:
-        num_bars = 78 if "1 D" in duration else 390  # 78 5-min bars per day
-        interval_minutes = 5
-    elif "1 min" in bar_size:
-        num_bars = 390 if "1 D" in duration else 1950
-        interval_minutes = 1
-    elif "1 hour" in bar_size or "60 min" in bar_size:
-        num_bars = 7 if "1 D" in duration else 35
-        interval_minutes = 60
-    else:
-        num_bars = 78
-        interval_minutes = 5
-    
-    current_price = base_price
-    for i in range(num_bars):
-        bar_time = now - timedelta(minutes=(num_bars - i) * interval_minutes)
-        
-        # Generate realistic OHLCV
-        volatility = base_price * 0.002  # 0.2% per bar
-        open_price = current_price
-        change = random.gauss(0, volatility)
-        close_price = open_price + change
-        high_price = max(open_price, close_price) + abs(random.gauss(0, volatility * 0.5))
-        low_price = min(open_price, close_price) - abs(random.gauss(0, volatility * 0.5))
-        volume = int(random.uniform(50000, 500000))
-        
-        bars.append({
-            "date": bar_time.isoformat(),
-            "open": round(open_price, 2),
-            "high": round(high_price, 2),
-            "low": round(low_price, 2),
-            "close": round(close_price, 2),
-            "volume": volume
-        })
-        
-        current_price = close_price
-    
-    return {"symbol": symbol, "bars": bars, "count": len(bars), "is_mock": True}
+    # No cached data available
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "error": "Data unavailable",
+            "message": f"IB Gateway is disconnected and no cached data available for {symbol}",
+            "symbol": symbol,
+            "is_connected": is_connected
+        }
+    )
 
 
 # ===================== Trading Endpoints =====================
