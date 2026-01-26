@@ -444,6 +444,35 @@ The application is now consolidated into a single **Command Center** that serves
 
 ## Changelog
 
+### Jan 26, 2026 - P1 Features Implementation
+**Implemented:**
+1. **Short Squeeze Watchlist Panel**
+   - New panel on Command Center showing 10 high short interest stocks
+   - Displays: Squeeze Score (0-100), Short Interest %, Days to Cover, RVOL
+   - Color-coded risk levels (HIGH=red, MEDIUM=yellow, LOW=gray)
+   - Click to open Ticker Detail Modal
+   - Backend endpoint: `/api/ib/scanner/short-squeeze`
+
+2. **Price Alerts with Sound Notifications**
+   - Create alerts for any symbol at target price (above/below)
+   - Toast notifications when alerts trigger
+   - Sound alerts (can be toggled on/off)
+   - Backend endpoints: `/api/ib/alerts/price` (CRUD), `/api/ib/alerts/price/check`
+   - Polls every 10 seconds when connected
+
+3. **Order Fill Notifications**
+   - Backend endpoints for tracking orders: `/api/ib/orders/track`, `/api/ib/orders/fills`
+   - Sound notification when orders are filled
+   - Toast notification with order details
+
+4. **Historical Data API Enhancement**
+   - `/api/ib/historical/{symbol}` now returns mock data when IB Gateway disconnected
+   - Prevents errors when testing without live connection
+
+**Known Issues:**
+- Chart rendering in Ticker Detail Modal shows blank canvas (data loads correctly, TradingView library initializes, but candlesticks don't render)
+- Workaround: Overview tab displays all key data including price, scores, and analysis
+
 ### Jan 26, 2026 - Bug Fix: Ticker Detail Modal
 - **Issue**: The comprehensive "Ticker Detail Modal" was not populating data when clicking on tickers
 - **Root Cause**: The Alerts section items in `CommandCenterPage.js` were missing the `onClick` handler to set `selectedTicker` state
