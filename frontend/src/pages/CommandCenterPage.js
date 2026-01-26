@@ -1021,7 +1021,8 @@ const CommandCenterPage = () => {
     priceAlerts: false,
     breakouts: true,
     enhancedAlerts: true,
-    comprehensiveAlerts: true
+    comprehensiveAlerts: true,
+    systemMonitor: true
   });
   
   // New P1 features state
