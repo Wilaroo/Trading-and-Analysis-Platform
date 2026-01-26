@@ -159,12 +159,16 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // Fetch comprehensive analysis
+        // Fetch comprehensive analysis - using correct endpoint /api/ib/analyze (not /analysis)
         const [analysisRes, histRes] = await Promise.all([
-          api.get(`/api/ib/analysis/${ticker.symbol}`).catch(() => ({ data: null })),
+          api.get(`/api/ib/analyze/${ticker.symbol}`).catch((err) => {
+            console.error('Analysis API error:', err);
+            return { data: null };
+          }),
           api.get(`/api/ib/historical/${ticker.symbol}?duration=1 D&bar_size=5 mins`).catch(() => ({ data: { bars: [] } }))
         ]);
         
+        console.log('Analysis data received:', analysisRes.data);
         setAnalysis(analysisRes.data);
         setHistoricalData(histRes.data?.bars || []);
       } catch (err) {
