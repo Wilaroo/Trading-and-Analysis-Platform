@@ -1174,8 +1174,38 @@ const CommandCenterPage = () => {
     try {
       const res = await api.get('/api/ib/scanner/short-squeeze');
       setShortSqueezeCandidates(res.data?.candidates || []);
-    } catch {
+    } catch (err) {
+      console.log('Short squeeze data unavailable:', err.response?.data?.detail?.message);
       setShortSqueezeCandidates([]);
+    }
+  };
+
+  // Fetch breakout alerts - top 10 meeting all rules
+  const fetchBreakoutAlerts = async () => {
+    try {
+      const res = await api.get('/api/ib/scanner/breakouts');
+      setBreakoutAlerts(res.data?.breakouts || []);
+      
+      // Play sound for new breakouts
+      if (soundEnabled && res.data?.breakouts?.length > 0) {
+        const newBreakouts = res.data.breakouts.filter(b => {
+          const detectedAt = new Date(b.detected_at);
+          const now = new Date();
+          return (now - detectedAt) < 60000; // Within last minute
+        });
+        if (newBreakouts.length > 0) {
+          playSound('alert');
+          newBreakouts.forEach(b => {
+            toast.success(
+              `🚀 ${b.breakout_type} Breakout: ${b.symbol} broke ${b.breakout_type === 'LONG' ? 'above' : 'below'} $${b.breakout_level} (Score: ${b.breakout_score})`,
+              { duration: 10000 }
+            );
+          });
+        }
+      }
+    } catch (err) {
+      console.log('Breakout data unavailable:', err.response?.data?.detail?.message);
+      setBreakoutAlerts([]);
     }
   };
 
