@@ -1296,7 +1296,8 @@ const CommandCenterPage = () => {
           fetchAccountData(),
           fetchMarketContext(),
           runScanner(),
-          fetchWatchlist(connected)
+          fetchWatchlist(connected),
+          fetchBreakoutAlerts()
         ]);
       }
       fetchAlerts();
@@ -1318,6 +1319,7 @@ const CommandCenterPage = () => {
       fetchAccountData();
       fetchMarketContext();
       checkOrderFills();
+      fetchBreakoutAlerts();  // Scan for breakouts
       checkPriceAlerts();
     }, 60000);
     
