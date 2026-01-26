@@ -1215,6 +1215,39 @@ const CommandCenterPage = () => {
     }
   };
 
+  // Fetch enhanced alerts with full context
+  const fetchEnhancedAlerts = async () => {
+    try {
+      const res = await api.get('/api/ib/alerts/enhanced');
+      const alerts = res.data?.alerts || [];
+      setEnhancedAlerts(alerts);
+      
+      // Notify for new alerts
+      if (soundEnabled) {
+        const newAlerts = alerts.filter(a => a.is_new);
+        newAlerts.forEach(alert => {
+          playSound('alert');
+          toast.success(alert.headline, { duration: 10000 });
+        });
+      }
+    } catch (err) {
+      console.log('Enhanced alerts unavailable:', err.response?.data?.detail?.message);
+    }
+  };
+
+  // Dismiss/archive an enhanced alert
+  const dismissEnhancedAlert = async (alertId) => {
+    try {
+      await api.delete(`/api/ib/alerts/enhanced/${alertId}`);
+      setEnhancedAlerts(prev => prev.filter(a => a.id !== alertId));
+      if (selectedEnhancedAlert?.id === alertId) {
+        setSelectedEnhancedAlert(null);
+      }
+    } catch {
+      toast.error('Failed to dismiss alert');
+    }
+  };
+
   // Fetch price alerts
   const fetchPriceAlerts = async () => {
     try {
