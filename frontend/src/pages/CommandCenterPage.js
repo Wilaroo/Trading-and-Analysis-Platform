@@ -237,117 +237,121 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
   useEffect(() => {
     if (!chartContainerRef.current || !historicalData || historicalData.length === 0 || activeTab !== 'chart') return;
 
-    // Clear any existing chart
+    // Clear any existing chart first
     if (chartRef.current) {
       chartRef.current.remove();
       chartRef.current = null;
     }
 
-    const container = chartContainerRef.current;
-    const containerWidth = container.clientWidth || 700;
-    
-    const chart = LightweightCharts.createChart(container, {
-      width: containerWidth,
-      height: 300,
-      layout: { 
-        background: { type: 'solid', color: '#0A0A0A' }, 
-        textColor: '#71717a',
-      },
-      grid: { 
-        vertLines: { color: 'rgba(255,255,255,0.05)' }, 
-        horzLines: { color: 'rgba(255,255,255,0.05)' } 
-      },
-      crosshair: { mode: 1 },
-      rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
-      timeScale: { 
-        borderColor: 'rgba(255,255,255,0.1)', 
-        timeVisible: true,
-        secondsVisible: false,
-      },
-    });
-
-    // v4 API: addCandlestickSeries
-    const candlestickSeries = chart.addCandlestickSeries({
-      upColor: '#00FF94', 
-      downColor: '#FF2E2E',
-      borderUpColor: '#00FF94', 
-      borderDownColor: '#FF2E2E',
-      wickUpColor: '#00FF94', 
-      wickDownColor: '#FF2E2E',
-    });
-
-    const chartData = historicalData.map(bar => ({
-      time: Math.floor(new Date(bar.date).getTime() / 1000),
-      open: parseFloat(bar.open), 
-      high: parseFloat(bar.high), 
-      low: parseFloat(bar.low), 
-      close: parseFloat(bar.close),
-    })).sort((a, b) => a.time - b.time);
-
-    console.log('Chart data points:', chartData.length, 'First:', chartData[0], 'Last:', chartData[chartData.length - 1]);
-    
-    candlestickSeries.setData(chartData);
-    
-    // Auto-scale the price axis to fit all data
-    chart.priceScale('right').applyOptions({
-      autoScale: true,
-    });
-    
-    // Add SL/TP price lines if trading summary exists and lines are enabled
-    if (showTradingLines && analysis?.trading_summary) {
-      const ts = analysis.trading_summary;
+    // Small delay to ensure container has dimensions
+    const timer = setTimeout(() => {
+      if (!chartContainerRef.current) return;
       
-      // Entry line (cyan)
-      if (ts.entry) {
-        candlestickSeries.createPriceLine({
-          price: ts.entry,
-          color: '#00E5FF',
-          lineWidth: 2,
-          lineStyle: 0, // Solid
-          axisLabelVisible: true,
-          title: 'Entry',
-        });
-      }
+      const container = chartContainerRef.current;
+      const containerWidth = container.clientWidth || 700;
       
-      // Stop Loss line (red dashed)
-      if (ts.stop_loss) {
-        candlestickSeries.createPriceLine({
-          price: ts.stop_loss,
-          color: '#FF2E2E',
-          lineWidth: 2,
-          lineStyle: 2, // Dashed
-          axisLabelVisible: true,
-          title: 'Stop',
+      try {
+        const chart = LightweightCharts.createChart(container, {
+          width: containerWidth,
+          height: 300,
+          layout: { 
+            background: { type: 'solid', color: '#0A0A0A' }, 
+            textColor: '#71717a',
+          },
+          grid: { 
+            vertLines: { color: 'rgba(255,255,255,0.05)' }, 
+            horzLines: { color: 'rgba(255,255,255,0.05)' } 
+          },
+          crosshair: { mode: 1 },
+          rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
+          timeScale: { 
+            borderColor: 'rgba(255,255,255,0.1)', 
+            timeVisible: true,
+            secondsVisible: false,
+          },
         });
-      }
-      
-      // Take Profit line (green dashed)
-      if (ts.target) {
-        candlestickSeries.createPriceLine({
-          price: ts.target,
-          color: '#00FF94',
-          lineWidth: 2,
-          lineStyle: 2, // Dashed
-          axisLabelVisible: true,
-          title: 'Target',
-        });
-      }
-    }
-    
-    // Fit content after setting data
-    chart.timeScale().fitContent();
-    chartRef.current = chart;
 
-    // Handle resize
-    const handleResize = () => {
-      if (chartRef.current && container) {
-        chartRef.current.applyOptions({ width: container.clientWidth });
+        chartRef.current = chart;
+
+        // v4 API: addCandlestickSeries
+        const candlestickSeries = chart.addCandlestickSeries({
+          upColor: '#00FF94', 
+          downColor: '#FF2E2E',
+          borderUpColor: '#00FF94', 
+          borderDownColor: '#FF2E2E',
+          wickUpColor: '#00FF94', 
+          wickDownColor: '#FF2E2E',
+        });
+
+        const chartData = historicalData.map(bar => ({
+          time: new Date(bar.date).getTime() / 1000,
+          open: bar.open, 
+          high: bar.high, 
+          low: bar.low, 
+          close: bar.close,
+        }));
+
+        console.log('Chart data points:', chartData.length, 'First:', chartData[0], 'Last:', chartData[chartData.length - 1]);
+        
+        candlestickSeries.setData(chartData);
+        chart.timeScale().fitContent();
+        
+        // Add SL/TP price lines if trading summary exists and lines are enabled
+        if (showTradingLines && analysis?.trading_summary) {
+          const ts = analysis.trading_summary;
+          
+          // Entry line (cyan)
+          if (ts.entry) {
+            candlestickSeries.createPriceLine({
+              price: ts.entry,
+              color: '#00E5FF',
+              lineWidth: 2,
+              lineStyle: 0, // Solid
+              axisLabelVisible: true,
+              title: 'Entry',
+            });
+          }
+          
+          // Stop Loss line (red dashed)
+          if (ts.stop_loss) {
+            candlestickSeries.createPriceLine({
+              price: ts.stop_loss,
+              color: '#FF2E2E',
+              lineWidth: 2,
+              lineStyle: 2, // Dashed
+              axisLabelVisible: true,
+              title: 'Stop',
+            });
+          }
+          
+          // Take Profit line (green dashed)
+          if (ts.target) {
+            candlestickSeries.createPriceLine({
+              price: ts.target,
+              color: '#00FF94',
+              lineWidth: 2,
+              lineStyle: 2, // Dashed
+              axisLabelVisible: true,
+              title: 'Target',
+            });
+          }
+        }
+
+        // Handle resize
+        const handleResize = () => {
+          if (chartRef.current && container) {
+            chartRef.current.applyOptions({ width: container.clientWidth });
+          }
+        };
+        window.addEventListener('resize', handleResize);
+
+      } catch (err) {
+        console.error('Error creating chart:', err);
       }
-    };
-    window.addEventListener('resize', handleResize);
+    }, 100);
 
     return () => {
-      window.removeEventListener('resize', handleResize);
+      clearTimeout(timer);
       if (chartRef.current) {
         chartRef.current.remove();
         chartRef.current = null;
