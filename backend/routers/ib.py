@@ -1322,6 +1322,62 @@ class BreakoutAlertConfig(BaseModel):
     require_trend_alignment: bool = Field(default=True)
 
 
+def simple_strategy_match(symbol: str, features: dict, scores: dict) -> list:
+    """
+    Simple strategy matching based on technical features and scores.
+    Returns a list of matched strategy-like objects without needing MongoDB.
+    """
+    matched = []
+    
+    rvol = features.get("rvol", 1)
+    rsi = features.get("rsi", 50)
+    trend = features.get("trend", "NEUTRAL")
+    overall = scores.get("overall", 0)
+    technical = scores.get("technical", 0)
+    
+    # Momentum strategies
+    if rvol >= 2.0 and overall >= 60:
+        matched.append({"id": "INT-MOM-001", "name": "High Volume Momentum", "match_percentage": 85})
+    
+    # Breakout strategies
+    if rvol >= 1.5 and trend in ["BULLISH", "BEARISH"] and overall >= 55:
+        matched.append({"id": "INT-BRK-001", "name": "Volume Breakout", "match_percentage": 80})
+    
+    # RSI strategies
+    if rsi <= 30:
+        matched.append({"id": "SWG-RSI-001", "name": "RSI Oversold Bounce", "match_percentage": 75})
+    elif rsi >= 70:
+        matched.append({"id": "SWG-RSI-002", "name": "RSI Overbought Short", "match_percentage": 75})
+    
+    # Trend following
+    if trend == "BULLISH" and overall >= 50:
+        matched.append({"id": "SWG-TRD-001", "name": "Bullish Trend Continuation", "match_percentage": 70})
+    elif trend == "BEARISH" and overall >= 50:
+        matched.append({"id": "SWG-TRD-002", "name": "Bearish Trend Continuation", "match_percentage": 70})
+    
+    # High conviction
+    if overall >= 75 and rvol >= 1.8:
+        matched.append({"id": "INT-HCV-001", "name": "High Conviction Setup", "match_percentage": 90})
+    
+    # Gap strategies
+    change_pct = features.get("change_percent", 0)
+    if abs(change_pct) >= 5:
+        if change_pct > 0:
+            matched.append({"id": "INT-GAP-001", "name": "Gap Up Momentum", "match_percentage": 72})
+        else:
+            matched.append({"id": "INT-GAP-002", "name": "Gap Down Reversal", "match_percentage": 72})
+    
+    # Scalp setups
+    if rvol >= 3.0:
+        matched.append({"id": "SCP-VOL-001", "name": "Extreme Volume Scalp", "match_percentage": 85})
+    
+    # Position setups
+    if technical >= 70 and trend in ["BULLISH"]:
+        matched.append({"id": "POS-TRD-001", "name": "Strong Technical Position", "match_percentage": 68})
+    
+    return matched
+
+
 @router.get("/scanner/breakouts")
 async def get_breakout_alerts():
     """
