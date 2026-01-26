@@ -174,6 +174,7 @@ function App() {
       case 'chart': return <ErrorBoundary><ChartsPage /></ErrorBoundary>;
       case 'trade-journal': return <TradeJournalPage />;
       case 'ib-trading': return <IBTradingPage />;
+      case 'glossary': return <GlossaryPage />;
       default: return <CommandCenterPage />;
     }
   };
