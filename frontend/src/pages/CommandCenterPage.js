@@ -1758,7 +1758,7 @@ const CommandCenterPage = () => {
               )}
               
               {/* Content */}
-              {!isGeneratingIntelligence && newsletter && !newsletter.needs_generation ? (
+              {!isGeneratingIntelligence && newsletter && newsletter.summary && !newsletter.needs_generation ? (
                 <>
                   {/* Sentiment Badge & Date */}
                   <div className="flex items-center justify-between mb-2">
