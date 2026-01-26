@@ -2144,7 +2144,7 @@ async def generate_enhanced_alert_for_symbol(symbol: str):
     try:
         feature_engine = get_feature_engine()
         scoring_engine = get_scoring_engine()
-        strategies_service = get_strategies_service()
+        strategies_service = StrategyService()
         
         # Get quote and historical data
         quote = await _ib_service.get_quote(symbol)
