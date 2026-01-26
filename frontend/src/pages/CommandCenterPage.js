@@ -572,7 +572,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
                       </button>
                     </div>
                     
-                    <div ref={chartContainerRef} className="w-full h-[300px]" />
+                    <div ref={chartContainerRef} className="w-full h-[300px] border border-zinc-800 rounded" />
                     
                     {/* Trading Levels Legend */}
                     {showTradingLines && tradingSummary.entry && (
