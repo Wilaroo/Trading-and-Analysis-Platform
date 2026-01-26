@@ -146,11 +146,10 @@ const MiniChart = ({ symbol, data, width = '100%', height = 80 }) => {
 
 // ===================== TICKER DETAIL MODAL =====================
 const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
+  const [analysis, setAnalysis] = useState(null);
   const [historicalData, setHistoricalData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('chart');
-  const [news, setNews] = useState([]);
-  const [newsLoading, setNewsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
 
@@ -160,10 +159,16 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const histResponse = await api.get(`/api/ib/historical/${ticker.symbol}?duration=1 D&bar_size=5 mins`);
-        setHistoricalData(histResponse.data?.bars || []);
+        // Fetch comprehensive analysis
+        const [analysisRes, histRes] = await Promise.all([
+          api.get(`/api/ib/analysis/${ticker.symbol}`).catch(() => ({ data: null })),
+          api.get(`/api/ib/historical/${ticker.symbol}?duration=1 D&bar_size=5 mins`).catch(() => ({ data: { bars: [] } }))
+        ]);
+        
+        setAnalysis(analysisRes.data);
+        setHistoricalData(histRes.data?.bars || []);
       } catch (err) {
-        console.error('Error fetching historical data:', err);
+        console.error('Error fetching data:', err);
       }
       setLoading(false);
     };
@@ -171,59 +176,29 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
     fetchData();
   }, [ticker?.symbol]);
 
-  // Fetch news when tab changes
-  useEffect(() => {
-    if (activeTab !== 'news' || !ticker?.symbol) return;
-    
-    const fetchNews = async () => {
-      setNewsLoading(true);
-      try {
-        const res = await api.get(`/api/newsletter/news/${ticker.symbol}`);
-        setNews(res.data?.news || []);
-      } catch (err) {
-        console.error('Error fetching news:', err);
-      }
-      setNewsLoading(false);
-    };
-    
-    fetchNews();
-  }, [activeTab, ticker?.symbol]);
-
   // Initialize chart
   useEffect(() => {
     if (!chartContainerRef.current || !historicalData || historicalData.length === 0 || activeTab !== 'chart') return;
 
     const chart = LightweightCharts.createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
-      height: 300,
-      layout: {
-        background: { type: 'solid', color: '#0A0A0A' },
-        textColor: '#71717a',
-      },
-      grid: {
-        vertLines: { color: 'rgba(255,255,255,0.05)' },
-        horzLines: { color: 'rgba(255,255,255,0.05)' },
-      },
+      height: 250,
+      layout: { background: { type: 'solid', color: '#0A0A0A' }, textColor: '#71717a' },
+      grid: { vertLines: { color: 'rgba(255,255,255,0.05)' }, horzLines: { color: 'rgba(255,255,255,0.05)' } },
       crosshair: { mode: 1 },
       rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
       timeScale: { borderColor: 'rgba(255,255,255,0.1)', timeVisible: true },
     });
 
     const candlestickSeries = chart.addCandlestickSeries({
-      upColor: '#00FF94',
-      downColor: '#FF2E2E',
-      borderUpColor: '#00FF94',
-      borderDownColor: '#FF2E2E',
-      wickUpColor: '#00FF94',
-      wickDownColor: '#FF2E2E',
+      upColor: '#00FF94', downColor: '#FF2E2E',
+      borderUpColor: '#00FF94', borderDownColor: '#FF2E2E',
+      wickUpColor: '#00FF94', wickDownColor: '#FF2E2E',
     });
 
     const chartData = historicalData.map(bar => ({
       time: new Date(bar.date).getTime() / 1000,
-      open: bar.open,
-      high: bar.high,
-      low: bar.low,
-      close: bar.close,
+      open: bar.open, high: bar.high, low: bar.low, close: bar.close,
     }));
 
     candlestickSeries.setData(chartData);
@@ -235,7 +210,24 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
 
   if (!ticker) return null;
 
-  const quote = ticker.quote || ticker;
+  const quote = analysis?.quote || ticker.quote || ticker;
+  const tradingSummary = analysis?.trading_summary || {};
+  const scores = analysis?.scores || {};
+  const technicals = analysis?.technicals || {};
+  const fundamentals = analysis?.fundamentals || {};
+  const companyInfo = analysis?.company_info || {};
+  const supportResistance = analysis?.support_resistance || {};
+  const matchedStrategies = analysis?.matched_strategies || [];
+  const news = analysis?.news || [];
+
+  const tabs = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'chart', label: 'Chart' },
+    { id: 'technicals', label: 'Technicals' },
+    { id: 'fundamentals', label: 'Fundamentals' },
+    { id: 'strategies', label: 'Strategies' },
+    { id: 'news', label: 'News' },
+  ];
 
   return (
     <AnimatePresence>
@@ -243,116 +235,322 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center p-4"
         onClick={onClose}
       >
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.95 }}
-          className="bg-[#0A0A0A] border border-white/10 w-full max-w-3xl max-h-[85vh] overflow-hidden rounded-lg"
+          className="bg-[#0A0A0A] border border-white/10 w-full max-w-4xl max-h-[90vh] overflow-hidden rounded-xl"
           onClick={e => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="flex items-center justify-between p-4 border-b border-white/10">
+          <div className="flex items-center justify-between p-4 border-b border-white/10 bg-gradient-to-r from-zinc-900/50 to-transparent">
             <div className="flex items-center gap-4">
-              <span className="text-2xl font-bold text-white">{ticker.symbol}</span>
-              <span className="text-xl font-mono text-white">${formatPrice(quote?.price)}</span>
-              <span className={`flex items-center gap-1 font-mono ${
-                quote?.change_percent >= 0 ? 'text-green-400' : 'text-red-400'
-              }`}>
-                {quote?.change_percent >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                {formatPercent(quote?.change_percent)}
-              </span>
+              <div>
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl font-bold text-white">{ticker.symbol}</span>
+                  {scores.grade && (
+                    <span className={`text-sm px-2 py-0.5 rounded font-bold ${
+                      scores.grade === 'A' ? 'bg-green-500 text-black' :
+                      scores.grade === 'B' ? 'bg-cyan-500 text-black' :
+                      scores.grade === 'C' ? 'bg-yellow-500 text-black' :
+                      'bg-red-500 text-white'
+                    }`}>
+                      Grade {scores.grade}
+                    </span>
+                  )}
+                  {tradingSummary.bias && (
+                    <span className={`text-xs px-2 py-0.5 rounded ${
+                      tradingSummary.bias === 'BULLISH' ? 'bg-green-500/20 text-green-400' :
+                      tradingSummary.bias === 'BEARISH' ? 'bg-red-500/20 text-red-400' :
+                      'bg-zinc-500/20 text-zinc-400'
+                    }`}>
+                      {tradingSummary.bias_strength} {tradingSummary.bias}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-zinc-500 mt-0.5">{companyInfo.name || ticker.symbol}</p>
+              </div>
             </div>
-            <button onClick={onClose} className="p-2 rounded hover:bg-white/10 text-zinc-400">
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-4">
+              <div className="text-right">
+                <span className="text-2xl font-mono font-bold text-white">${formatPrice(quote?.price)}</span>
+                <span className={`ml-2 font-mono ${quote?.change_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {formatPercent(quote?.change_percent)}
+                </span>
+              </div>
+              <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/10 text-zinc-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
           {/* Tabs */}
-          <div className="flex border-b border-white/10">
-            {['chart', 'stats', 'news'].map(tab => (
+          <div className="flex border-b border-white/10 px-4 overflow-x-auto">
+            {tabs.map(tab => (
               <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`px-4 py-2 text-sm font-medium capitalize ${
-                  activeTab === tab ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-zinc-400 hover:text-white'
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors ${
+                  activeTab === tab.id 
+                    ? 'text-cyan-400 border-b-2 border-cyan-400' 
+                    : 'text-zinc-400 hover:text-white'
                 }`}
               >
-                {tab}
+                {tab.label}
               </button>
             ))}
           </div>
 
           {/* Content */}
-          <div className="p-4 overflow-y-auto max-h-[55vh]">
-            {activeTab === 'chart' && (
-              <div>
-                {loading ? (
-                  <div className="h-[300px] flex items-center justify-center">
-                    <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
-                  </div>
-                ) : (
-                  <div ref={chartContainerRef} className="w-full h-[300px]" />
-                )}
+          <div className="p-4 overflow-y-auto max-h-[60vh]">
+            {loading ? (
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="w-10 h-10 animate-spin text-cyan-400" />
               </div>
-            )}
-
-            {activeTab === 'stats' && (
-              <div className="grid grid-cols-3 gap-3">
-                <div className="bg-zinc-900 rounded p-3">
-                  <span className="text-xs text-zinc-500">Volume</span>
-                  <p className="text-lg font-mono text-white">{formatVolume(quote?.volume)}</p>
-                </div>
-                <div className="bg-zinc-900 rounded p-3">
-                  <span className="text-xs text-zinc-500">High</span>
-                  <p className="text-lg font-mono text-white">${formatPrice(quote?.high)}</p>
-                </div>
-                <div className="bg-zinc-900 rounded p-3">
-                  <span className="text-xs text-zinc-500">Low</span>
-                  <p className="text-lg font-mono text-white">${formatPrice(quote?.low)}</p>
-                </div>
-                <div className="bg-zinc-900 rounded p-3">
-                  <span className="text-xs text-zinc-500">Open</span>
-                  <p className="text-lg font-mono text-white">${formatPrice(quote?.open)}</p>
-                </div>
-                <div className="bg-zinc-900 rounded p-3">
-                  <span className="text-xs text-zinc-500">Prev Close</span>
-                  <p className="text-lg font-mono text-white">${formatPrice(quote?.prev_close)}</p>
-                </div>
-                <div className="bg-zinc-900 rounded p-3">
-                  <span className="text-xs text-zinc-500">RVOL</span>
-                  <p className="text-lg font-mono text-white">{ticker.features?.rvol?.toFixed(1) || '--'}x</p>
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'news' && (
-              <div className="space-y-3">
-                {newsLoading ? (
-                  <div className="flex justify-center py-8">
-                    <Loader2 className="w-6 h-6 animate-spin text-cyan-400" />
-                  </div>
-                ) : news.length > 0 ? (
-                  news.map((item, idx) => (
-                    <div key={idx} className="bg-zinc-900 rounded p-3 border-l-2 border-cyan-500/50">
-                      <p className="text-sm text-white mb-1">{item.headline}</p>
-                      <div className="flex items-center gap-2 text-xs text-zinc-500">
-                        <span>{item.source}</span>
-                        {item.timestamp && (
-                          <span>{new Date(item.timestamp).toLocaleTimeString()}</span>
+            ) : (
+              <>
+                {/* OVERVIEW TAB */}
+                {activeTab === 'overview' && (
+                  <div className="space-y-4">
+                    {/* Trading Summary Card */}
+                    {tradingSummary.summary && (
+                      <div className={`p-4 rounded-lg border ${
+                        tradingSummary.bias === 'BULLISH' ? 'border-green-500/30 bg-green-500/5' :
+                        tradingSummary.bias === 'BEARISH' ? 'border-red-500/30 bg-red-500/5' :
+                        'border-zinc-700 bg-zinc-900/50'
+                      }`}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <Target className="w-5 h-5 text-cyan-400" />
+                          <span className="font-semibold text-white">Trading Analysis</span>
+                        </div>
+                        <p className="text-sm text-zinc-300 mb-3">{tradingSummary.summary}</p>
+                        
+                        <div className="grid grid-cols-4 gap-3 text-center">
+                          <div className="bg-black/30 rounded p-2">
+                            <span className="text-[10px] text-zinc-500 uppercase">Direction</span>
+                            <p className={`text-sm font-bold ${
+                              tradingSummary.suggested_direction === 'LONG' ? 'text-green-400' :
+                              tradingSummary.suggested_direction === 'SHORT' ? 'text-red-400' :
+                              'text-yellow-400'
+                            }`}>{tradingSummary.suggested_direction || 'WAIT'}</p>
+                          </div>
+                          <div className="bg-black/30 rounded p-2">
+                            <span className="text-[10px] text-zinc-500 uppercase">Entry</span>
+                            <p className="text-sm font-mono text-white">${tradingSummary.entry?.toFixed(2) || '--'}</p>
+                          </div>
+                          <div className="bg-black/30 rounded p-2">
+                            <span className="text-[10px] text-zinc-500 uppercase">Stop</span>
+                            <p className="text-sm font-mono text-red-400">${tradingSummary.stop_loss?.toFixed(2) || '--'}</p>
+                          </div>
+                          <div className="bg-black/30 rounded p-2">
+                            <span className="text-[10px] text-zinc-500 uppercase">Target</span>
+                            <p className="text-sm font-mono text-green-400">${tradingSummary.target?.toFixed(2) || '--'}</p>
+                          </div>
+                        </div>
+                        
+                        {tradingSummary.risk_reward > 0 && (
+                          <div className="mt-2 text-xs text-zinc-500 text-center">
+                            Risk/Reward: <span className="text-cyan-400 font-mono">1:{tradingSummary.risk_reward}</span>
+                          </div>
                         )}
                       </div>
+                    )}
+
+                    {/* Scores Grid */}
+                    <div className="grid grid-cols-5 gap-2">
+                      {[
+                        { label: 'Overall', value: scores.overall, color: scores.overall >= 70 ? 'cyan' : scores.overall >= 50 ? 'yellow' : 'red' },
+                        { label: 'Technical', value: scores.technical_score, color: 'blue' },
+                        { label: 'Fundamental', value: scores.fundamental_score, color: 'purple' },
+                        { label: 'Catalyst', value: scores.catalyst_score, color: 'orange' },
+                        { label: 'Confidence', value: scores.confidence, color: 'green' },
+                      ].map((score, idx) => (
+                        <div key={idx} className="bg-zinc-900 rounded-lg p-3 text-center">
+                          <span className="text-[10px] text-zinc-500 uppercase block">{score.label}</span>
+                          <p className={`text-xl font-bold font-mono text-${score.color}-400`}>
+                            {score.value?.toFixed(0) || '--'}
+                          </p>
+                        </div>
+                      ))}
                     </div>
-                  ))
-                ) : (
-                  <div className="text-center py-8 text-zinc-500">
-                    <Newspaper className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                    <p>No recent news</p>
+
+                    {/* Company Info */}
+                    {companyInfo.name && (
+                      <div className="bg-zinc-900/50 rounded-lg p-3">
+                        <span className="text-[10px] text-zinc-500 uppercase">Company</span>
+                        <p className="text-sm text-white font-medium">{companyInfo.name}</p>
+                        <div className="flex gap-4 mt-1 text-xs text-zinc-400">
+                          <span>{companyInfo.sector}</span>
+                          <span>{companyInfo.industry}</span>
+                          {companyInfo.market_cap > 0 && (
+                            <span>MCap: ${(companyInfo.market_cap / 1e9).toFixed(1)}B</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Top Strategy Match */}
+                    {matchedStrategies.length > 0 && (
+                      <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-lg p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[10px] text-cyan-400 uppercase font-semibold">Top Strategy Match</span>
+                          <span className="text-xs text-cyan-400">{matchedStrategies[0].match_score}% match</span>
+                        </div>
+                        <p className="text-sm font-bold text-white">{matchedStrategies[0].name}</p>
+                        <p className="text-xs text-zinc-400 mt-1">{matchedStrategies[0].match_reasons?.join(' • ')}</p>
+                        {matchedStrategies[0].entry_rules && (
+                          <p className="text-[10px] text-zinc-500 mt-2">Entry: {matchedStrategies[0].entry_rules}</p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
+
+                {/* CHART TAB */}
+                {activeTab === 'chart' && (
+                  <div>
+                    <div ref={chartContainerRef} className="w-full h-[250px]" />
+                    {supportResistance.resistance_1 && (
+                      <div className="grid grid-cols-4 gap-2 mt-3">
+                        <div className="bg-red-500/10 rounded p-2 text-center">
+                          <span className="text-[10px] text-zinc-500">R1</span>
+                          <p className="text-sm font-mono text-red-400">${supportResistance.resistance_1?.toFixed(2)}</p>
+                        </div>
+                        <div className="bg-red-500/5 rounded p-2 text-center">
+                          <span className="text-[10px] text-zinc-500">R2</span>
+                          <p className="text-sm font-mono text-red-300">${supportResistance.resistance_2?.toFixed(2)}</p>
+                        </div>
+                        <div className="bg-green-500/5 rounded p-2 text-center">
+                          <span className="text-[10px] text-zinc-500">S1</span>
+                          <p className="text-sm font-mono text-green-300">${supportResistance.support_1?.toFixed(2)}</p>
+                        </div>
+                        <div className="bg-green-500/10 rounded p-2 text-center">
+                          <span className="text-[10px] text-zinc-500">S2</span>
+                          <p className="text-sm font-mono text-green-400">${supportResistance.support_2?.toFixed(2)}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* TECHNICALS TAB */}
+                {activeTab === 'technicals' && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {[
+                      { label: 'RSI (14)', value: technicals.rsi_14?.toFixed(1), suffix: '', color: technicals.rsi_14 > 70 ? 'red' : technicals.rsi_14 < 30 ? 'green' : 'zinc' },
+                      { label: 'RVOL', value: technicals.rvol?.toFixed(1), suffix: 'x', color: technicals.rvol > 2 ? 'cyan' : 'zinc' },
+                      { label: 'VWAP', value: '$' + technicals.vwap?.toFixed(2), suffix: '', color: 'purple' },
+                      { label: 'VWAP Dist', value: technicals.vwap_distance_pct?.toFixed(1), suffix: '%', color: technicals.vwap_distance_pct > 0 ? 'green' : 'red' },
+                      { label: 'EMA 9', value: '$' + technicals.ema_9?.toFixed(2), suffix: '', color: 'blue' },
+                      { label: 'EMA 20', value: '$' + technicals.ema_20?.toFixed(2), suffix: '', color: 'blue' },
+                      { label: 'SMA 50', value: '$' + technicals.sma_50?.toFixed(2), suffix: '', color: 'yellow' },
+                      { label: 'ATR (14)', value: '$' + technicals.atr_14?.toFixed(2), suffix: '', color: 'orange' },
+                      { label: 'MACD', value: technicals.macd?.toFixed(3), suffix: '', color: technicals.macd > 0 ? 'green' : 'red' },
+                      { label: 'MACD Signal', value: technicals.macd_signal?.toFixed(3), suffix: '', color: 'zinc' },
+                      { label: 'Volume Trend', value: technicals.volume_trend, suffix: '', color: technicals.volume_trend === 'Above Avg' ? 'green' : 'zinc' },
+                      { label: 'Trend', value: technicals.trend, suffix: '', color: technicals.trend === 'Bullish' ? 'green' : 'red' },
+                    ].map((item, idx) => (
+                      <div key={idx} className="bg-zinc-900 rounded-lg p-3">
+                        <span className="text-[10px] text-zinc-500 uppercase block">{item.label}</span>
+                        <p className={`text-lg font-mono text-${item.color}-400`}>
+                          {item.value || '--'}{item.suffix}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* FUNDAMENTALS TAB */}
+                {activeTab === 'fundamentals' && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {[
+                        { label: 'Market Cap', value: fundamentals.market_cap ? `$${(fundamentals.market_cap / 1e9).toFixed(1)}B` : '--' },
+                        { label: 'P/E Ratio', value: fundamentals.pe_ratio?.toFixed(1) || '--' },
+                        { label: 'EPS', value: fundamentals.eps ? `$${fundamentals.eps.toFixed(2)}` : '--' },
+                        { label: 'Dividend Yield', value: fundamentals.dividend_yield ? `${fundamentals.dividend_yield.toFixed(2)}%` : '--' },
+                        { label: 'Beta', value: fundamentals.beta?.toFixed(2) || '--' },
+                        { label: '52W High', value: fundamentals.high_52w ? `$${fundamentals.high_52w.toFixed(2)}` : '--' },
+                        { label: '52W Low', value: fundamentals.low_52w ? `$${fundamentals.low_52w.toFixed(2)}` : '--' },
+                        { label: 'Avg Volume', value: fundamentals.avg_volume ? formatVolume(fundamentals.avg_volume) : '--' },
+                      ].map((item, idx) => (
+                        <div key={idx} className="bg-zinc-900 rounded-lg p-3">
+                          <span className="text-[10px] text-zinc-500 uppercase block">{item.label}</span>
+                          <p className="text-lg font-mono text-white">{item.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {companyInfo.description && (
+                      <div className="bg-zinc-900/50 rounded-lg p-3">
+                        <span className="text-[10px] text-zinc-500 uppercase block mb-1">Description</span>
+                        <p className="text-xs text-zinc-400 leading-relaxed">{companyInfo.description}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* STRATEGIES TAB */}
+                {activeTab === 'strategies' && (
+                  <div className="space-y-3">
+                    {matchedStrategies.length > 0 ? matchedStrategies.map((strat, idx) => (
+                      <div 
+                        key={idx} 
+                        className={`p-3 rounded-lg border ${
+                          idx === 0 ? 'border-cyan-500/30 bg-cyan-500/5' : 'border-white/10 bg-zinc-900/50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs px-1.5 py-0.5 bg-zinc-800 text-zinc-400 rounded font-mono">{strat.id}</span>
+                            <span className="font-semibold text-white">{strat.name}</span>
+                          </div>
+                          <span className={`text-sm font-bold ${
+                            strat.match_score >= 70 ? 'text-green-400' :
+                            strat.match_score >= 50 ? 'text-yellow-400' :
+                            'text-zinc-400'
+                          }`}>{strat.match_score}%</span>
+                        </div>
+                        <p className="text-xs text-zinc-400">{strat.match_reasons?.join(' • ')}</p>
+                        {strat.entry_rules && (
+                          <p className="text-[10px] text-cyan-400 mt-2">Entry: {strat.entry_rules}</p>
+                        )}
+                        {strat.stop_loss && (
+                          <p className="text-[10px] text-red-400">Stop: {strat.stop_loss}</p>
+                        )}
+                      </div>
+                    )) : (
+                      <div className="text-center py-8 text-zinc-500">
+                        <Target className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                        <p>No matching strategies found</p>
+                        <p className="text-xs mt-1">Current conditions don&apos;t match your strategy criteria</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* NEWS TAB */}
+                {activeTab === 'news' && (
+                  <div className="space-y-3">
+                    {news.length > 0 ? news.map((item, idx) => (
+                      <div key={idx} className="bg-zinc-900 rounded-lg p-3 border-l-2 border-cyan-500/50">
+                        <p className="text-sm text-white mb-1">{item.headline}</p>
+                        <div className="flex items-center gap-2 text-xs text-zinc-500">
+                          <span>{item.source}</span>
+                          {item.timestamp && <span>{new Date(item.timestamp).toLocaleTimeString()}</span>}
+                        </div>
+                      </div>
+                    )) : (
+                      <div className="text-center py-8 text-zinc-500">
+                        <Newspaper className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                        <p>No recent news</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </div>
 
@@ -360,13 +558,13 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
           <div className="flex gap-3 p-4 border-t border-white/10">
             <button 
               onClick={() => onTrade(ticker, 'BUY')}
-              className="flex-1 py-2 text-sm font-bold bg-green-500 text-black rounded hover:bg-green-400"
+              className="flex-1 py-2.5 text-sm font-bold bg-green-500 text-black rounded-lg hover:bg-green-400 transition-colors"
             >
               Buy {ticker.symbol}
             </button>
             <button 
               onClick={() => onTrade(ticker, 'SELL')}
-              className="flex-1 py-2 text-sm font-bold bg-red-500 text-white rounded hover:bg-red-400"
+              className="flex-1 py-2.5 text-sm font-bold bg-red-500 text-white rounded-lg hover:bg-red-400 transition-colors"
             >
               Short {ticker.symbol}
             </button>
