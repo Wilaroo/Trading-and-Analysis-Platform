@@ -28,11 +28,14 @@ import {
   VolumeX,
   AlertTriangle,
   Plus,
-  Trash2
+  Trash2,
+  MessageSquare,
+  Info
 } from 'lucide-react';
 import * as LightweightCharts from 'lightweight-charts';
 import api from '../utils/api';
 import { toast } from 'sonner';
+import { HelpTooltip, HelpIcon } from '../components/HelpTooltip';
 
 // ===================== SOUND UTILITIES =====================
 const playSound = (type = 'alert') => {
