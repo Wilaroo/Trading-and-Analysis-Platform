@@ -92,29 +92,20 @@ class NewsletterService:
         
         return context
     
-    async def _generate_with_perplexity(self, context_data: Dict) -> str:
-        """Generate newsletter content using Perplexity API"""
+    async def _generate_with_gpt(self, context_data: Dict) -> str:
+        """Generate newsletter content using GPT via Emergent LLM"""
         
         if not self.api_key:
-            logger.warning("Perplexity API key not configured, using fallback")
+            logger.warning("Emergent LLM key not configured, using fallback")
             return self._generate_fallback_content(context_data)
         
         # Build the prompt
         prompt = self._build_newsletter_prompt(context_data)
         
         try:
-            async with aiohttp.ClientSession() as session:
-                headers = {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
-                }
-                
-                payload = {
-                    "model": PERPLEXITY_MODEL,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": """You are an experienced daytrader writing your morning premarket newsletter. 
+            from emergentintegrations.llm.chat import LlmChat, UserMessage
+            
+            system_message = """You are an experienced daytrader writing your morning premarket newsletter. 
 Your writing style is:
 - Direct and actionable - traders need to know what to watch NOW
 - Confident but measured - acknowledge uncertainty where it exists
@@ -128,28 +119,23 @@ Structure your response as JSON with these sections:
 - opportunities: Array of 3-5 stocks to watch with entry/stop/target ideas
 - catalyst_watch: Earnings, economic data, fed speakers today
 - risk_factors: What could derail the setup
-- game_plan: Your specific trading plan for today"""
-                        },
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ],
-                    "temperature": 0.7,
-                    "max_tokens": 2000
-                }
-                
-                async with session.post(PERPLEXITY_API_URL, headers=headers, json=payload, timeout=30) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"Perplexity API error {response.status}: {error_text}")
-                        return self._generate_fallback_content(context_data)
+- game_plan: Your specific trading plan for today
+
+Return ONLY valid JSON, no markdown code blocks."""
+            
+            chat = LlmChat(
+                api_key=self.api_key,
+                session_id=f"market-intel-{datetime.now(timezone.utc).strftime('%Y%m%d')}",
+                system_message=system_message
+            ).with_model("openai", "gpt-4o")
+            
+            user_message = UserMessage(text=prompt)
+            response = await chat.send_message(user_message)
+            
+            return response
                         
         except Exception as e:
-            logger.error(f"Error calling Perplexity API: {e}")
+            logger.error(f"Error calling GPT via Emergent LLM: {e}")
             return self._generate_fallback_content(context_data)
     
     def _build_newsletter_prompt(self, context_data: Dict) -> str:
