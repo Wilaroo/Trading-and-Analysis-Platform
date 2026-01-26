@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   TrendingUp,
@@ -9,9 +9,7 @@ import {
   Activity,
   Search,
   X,
-  ChevronRight,
   ChevronDown,
-  AlertTriangle,
   Play,
   Pause,
   Wifi,
@@ -24,9 +22,7 @@ import {
   Bell,
   Eye,
   Newspaper,
-  BarChart3,
-  Briefcase,
-  Calendar
+  Briefcase
 } from 'lucide-react';
 import * as LightweightCharts from 'lightweight-charts';
 import api from '../utils/api';
