@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   TrendingUp,
@@ -23,10 +23,61 @@ import {
   Eye,
   Newspaper,
   Briefcase,
-  Calendar
+  Calendar,
+  Volume2,
+  VolumeX,
+  AlertTriangle,
+  Plus,
+  Trash2
 } from 'lucide-react';
 import * as LightweightCharts from 'lightweight-charts';
 import api from '../utils/api';
+import { toast } from 'sonner';
+
+// ===================== SOUND UTILITIES =====================
+const playSound = (type = 'alert') => {
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    if (type === 'fill') {
+      // Order fill sound - pleasant ding
+      oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+      oscillator.frequency.setValueAtTime(1100, audioContext.currentTime + 0.1);
+      oscillator.type = 'sine';
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.3);
+    } else if (type === 'alert') {
+      // Price alert sound - attention-grabbing
+      oscillator.frequency.setValueAtTime(660, audioContext.currentTime);
+      oscillator.frequency.setValueAtTime(880, audioContext.currentTime + 0.15);
+      oscillator.frequency.setValueAtTime(660, audioContext.currentTime + 0.3);
+      oscillator.type = 'square';
+      gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.4);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.4);
+    } else if (type === 'squeeze') {
+      // Short squeeze alert - urgent
+      oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
+      oscillator.frequency.setValueAtTime(880, audioContext.currentTime + 0.1);
+      oscillator.frequency.setValueAtTime(1320, audioContext.currentTime + 0.2);
+      oscillator.type = 'sawtooth';
+      gainNode.gain.setValueAtTime(0.15, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.5);
+    }
+  } catch (e) {
+    console.log('Sound playback error:', e);
+  }
+};
 
 // ===================== UTILITY FUNCTIONS =====================
 const formatPrice = (price) => {
