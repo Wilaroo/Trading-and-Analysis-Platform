@@ -1886,23 +1886,33 @@ const CommandCenterPage = () => {
                   {newsletter.opportunities?.length > 0 && (
                     <div className="space-y-1.5">
                       <span className="text-[10px] text-zinc-500 uppercase">Opportunities</span>
-                      {newsletter.opportunities.slice(0, 4).map((opp, idx) => (
-                        <div 
-                          key={idx} 
-                          className="flex items-center justify-between p-2 bg-zinc-900/50 rounded text-sm cursor-pointer hover:bg-zinc-800"
-                          onClick={() => setSelectedTicker({ symbol: opp.symbol, quote: {} })}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-cyan-400">{opp.symbol}</span>
-                            {opp.entry && (
-                              <span className="text-xs text-zinc-500">Entry: ${opp.entry}</span>
-                            )}
+                      {newsletter.opportunities.slice(0, 4).map((opp, idx) => {
+                        const symbol = opp.symbol || opp.ticker || opp.stock || 'N/A';
+                        const hasSymbol = symbol && symbol !== 'N/A';
+                        return (
+                          <div 
+                            key={idx} 
+                            className={`flex items-center justify-between p-2 bg-zinc-900/50 rounded text-sm ${hasSymbol ? 'cursor-pointer hover:bg-zinc-800' : ''}`}
+                            onClick={() => hasSymbol && setSelectedTicker({ symbol, quote: {} })}
+                          >
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <span className="font-bold text-cyan-400">{symbol}</span>
+                              {opp.entry && (
+                                <span className="text-xs text-zinc-500">Entry: ${opp.entry}</span>
+                              )}
+                              {opp.target && (
+                                <span className="text-xs text-green-500">→ ${opp.target}</span>
+                              )}
+                              {opp.reasoning && !opp.entry && (
+                                <span className="text-xs text-zinc-500 truncate">{opp.reasoning.slice(0, 30)}...</span>
+                              )}
+                            </div>
+                            <Badge variant={opp.direction === 'LONG' ? 'success' : opp.direction === 'SHORT' ? 'error' : 'neutral'}>
+                              {opp.direction || 'WATCH'}
+                            </Badge>
                           </div>
-                          <Badge variant={opp.direction === 'LONG' ? 'success' : opp.direction === 'SHORT' ? 'error' : 'neutral'}>
-                            {opp.direction || 'WATCH'}
-                          </Badge>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                   
