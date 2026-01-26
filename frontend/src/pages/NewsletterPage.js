@@ -146,7 +146,7 @@ const NewsletterPage = () => {
             <Newspaper className="w-6 h-6 text-primary" />
             Premarket Briefing
           </h1>
-          <p className="text-zinc-500 text-sm">AI-powered daytrader's morning newsletter</p>
+          <p className="text-zinc-500 text-sm">AI-powered daytrader&apos;s morning newsletter</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -327,7 +327,7 @@ const NewsletterPage = () => {
             <Card hover={false} className="bg-gradient-to-r from-primary/5 to-transparent border-primary/20">
               <div className="flex items-center gap-2 mb-3">
                 <Target className="w-5 h-5 text-primary" />
-                <h3 className="font-semibold">Today's Game Plan</h3>
+                <h3 className="font-semibold">Today&apos;s Game Plan</h3>
               </div>
               <div className="text-sm text-zinc-300 whitespace-pre-wrap leading-relaxed">
                 {newsletter.game_plan}
@@ -399,7 +399,7 @@ const NewsletterPage = () => {
             <Newspaper className="w-16 h-16 text-zinc-600 mx-auto mb-4" />
             <h3 className="text-xl font-semibold mb-2">No Briefing Yet</h3>
             <p className="text-zinc-500 mb-6 max-w-md mx-auto">
-              Click "Generate Briefing" to create your personalized premarket analysis with AI-powered insights, trade opportunities, and key levels.
+              Click &quot;Generate Briefing&quot; to create your personalized premarket analysis with AI-powered insights, trade opportunities, and key levels.
             </p>
             <button
               onClick={generateNewsletter}
@@ -422,7 +422,7 @@ const NewsletterPage = () => {
         <ul className="text-sm text-zinc-400 space-y-1">
           <li>• Connect to IB Gateway for real-time market data integration</li>
           <li>• Configure PERPLEXITY_API_KEY in backend/.env for AI-powered analysis</li>
-          <li>• Newsletter uses Perplexity's Sonar model for real-time market intelligence</li>
+          <li>• Newsletter uses Perplexity&apos;s Sonar model for real-time market intelligence</li>
         </ul>
       </Card>
     </div>
