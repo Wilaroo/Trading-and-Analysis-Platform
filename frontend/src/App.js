@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Volume2, VolumeX, Settings } from 'lucide-react';
+import { Toaster } from 'sonner';
 
 // Import refactored components
 import { Sidebar, TickerTape, PriceAlertNotification, AlertSettingsPanel } from './components';
