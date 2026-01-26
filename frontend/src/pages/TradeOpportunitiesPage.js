@@ -28,6 +28,7 @@ import {
   Info,
   TrendingUp as TrendUp,
   Volume2,
+  Newspaper,
   DollarSign,
   Bell,
   CheckCircle2
