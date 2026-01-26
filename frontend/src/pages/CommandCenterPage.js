@@ -1951,6 +1951,119 @@ const CommandCenterPage = () => {
             </div>
           </Card>
 
+          {/* Breakout Alerts - Top 10 meeting all rules */}
+          <Card>
+            <button 
+              onClick={() => toggleSection('breakouts')}
+              className="w-full flex items-center justify-between mb-3"
+            >
+              <div className="flex items-center gap-2">
+                <Zap className="w-5 h-5 text-yellow-400" />
+                <h3 className="text-sm font-semibold uppercase tracking-wider">Breakout Alerts</h3>
+                <span className="text-xs text-zinc-500">({breakoutAlerts.length})</span>
+                {breakoutAlerts.length > 0 && (
+                  <span className="text-[9px] px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded animate-pulse">
+                    LIVE
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={(e) => { e.stopPropagation(); fetchBreakoutAlerts(); }}
+                  className="text-xs text-cyan-400 hover:text-cyan-300"
+                >
+                  Refresh
+                </button>
+                <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.breakouts ? 'rotate-180' : ''}`} />
+              </div>
+            </button>
+            
+            {expandedSections.breakouts && (
+              <div className="space-y-2">
+                {!isConnected && (
+                  <div className="text-center py-4 text-zinc-500 text-sm">
+                    Connect IB Gateway for real-time breakout scanning
+                  </div>
+                )}
+                
+                {isConnected && breakoutAlerts.length === 0 && (
+                  <div className="text-center py-4 text-zinc-500 text-sm">
+                    No breakouts detected matching your criteria
+                  </div>
+                )}
+                
+                {breakoutAlerts.map((breakout, idx) => (
+                  <div 
+                    key={idx}
+                    onClick={() => setSelectedTicker({ symbol: breakout.symbol, quote: { price: breakout.current_price, change_percent: breakout.change_percent } })}
+                    className={`p-3 rounded cursor-pointer transition-all hover:bg-zinc-800 border ${
+                      breakout.breakout_type === 'LONG' 
+                        ? 'bg-green-500/5 border-green-500/30' 
+                        : 'bg-red-500/5 border-red-500/30'
+                    }`}
+                    data-testid={`breakout-${breakout.symbol}`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-white">{breakout.symbol}</span>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                          breakout.breakout_type === 'LONG' 
+                            ? 'bg-green-500 text-black' 
+                            : 'bg-red-500 text-white'
+                        }`}>
+                          {breakout.breakout_type}
+                        </span>
+                        <span className="text-[9px] px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded">
+                          Score: {breakout.breakout_score}
+                        </span>
+                      </div>
+                      <span className={`text-sm font-mono ${breakout.change_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {formatPercent(breakout.change_percent)}
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-4 gap-2 text-[9px] mb-2">
+                      <div>
+                        <span className="text-zinc-500">Price: </span>
+                        <span className="text-white font-mono">${breakout.current_price}</span>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500">Broke: </span>
+                        <span className={`font-mono ${breakout.breakout_type === 'LONG' ? 'text-green-400' : 'text-red-400'}`}>
+                          ${breakout.breakout_level}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500">RVOL: </span>
+                        <span className="text-cyan-400 font-mono">{breakout.rvol}x</span>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500">R/R: </span>
+                        <span className="text-purple-400 font-mono">1:{breakout.risk_reward}</span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center justify-between text-[9px]">
+                      <div className="flex items-center gap-2">
+                        <span className="text-zinc-500">Entry: <span className="text-cyan-400">${breakout.current_price}</span></span>
+                        <span className="text-zinc-500">Stop: <span className="text-red-400">${breakout.stop_loss}</span></span>
+                        <span className="text-zinc-500">Target: <span className="text-green-400">${breakout.target}</span></span>
+                      </div>
+                      <span className="text-zinc-600">{breakout.strategy_count} strategies matched</span>
+                    </div>
+                    
+                    {breakout.matched_strategies?.length > 0 && (
+                      <div className="mt-2 pt-2 border-t border-white/5">
+                        <span className="text-[9px] text-zinc-500">Top Strategy: </span>
+                        <span className="text-[9px] text-purple-400">{breakout.matched_strategies[0].name}</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
           {/* Opportunities Grid */}
           <Card>
             <SectionHeader 
