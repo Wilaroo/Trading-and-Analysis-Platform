@@ -257,7 +257,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
         vertLines: { color: 'rgba(255,255,255,0.05)' }, 
         horzLines: { color: 'rgba(255,255,255,0.05)' } 
       },
-      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      crosshair: { mode: 1 },
       rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
       timeScale: { 
         borderColor: 'rgba(255,255,255,0.1)', 
@@ -266,8 +266,8 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
       },
     });
 
-    // v5 API: use chart.addSeries with CandlestickSeries
-    const candlestickSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+    // v4 API: addCandlestickSeries
+    const candlestickSeries = chart.addCandlestickSeries({
       upColor: '#00FF94', 
       downColor: '#FF2E2E',
       borderUpColor: '#00FF94', 
@@ -298,7 +298,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
           price: ts.entry,
           color: '#00E5FF',
           lineWidth: 2,
-          lineStyle: LightweightCharts.LineStyle.Solid,
+          lineStyle: 0, // Solid
           axisLabelVisible: true,
           title: 'Entry',
         });
@@ -310,7 +310,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
           price: ts.stop_loss,
           color: '#FF2E2E',
           lineWidth: 2,
-          lineStyle: LightweightCharts.LineStyle.Dashed,
+          lineStyle: 2, // Dashed
           axisLabelVisible: true,
           title: 'Stop',
         });
@@ -322,7 +322,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
           price: ts.target,
           color: '#00FF94',
           lineWidth: 2,
-          lineStyle: LightweightCharts.LineStyle.Dashed,
+          lineStyle: 2, // Dashed
           axisLabelVisible: true,
           title: 'Target',
         });
