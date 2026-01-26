@@ -303,7 +303,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
           
           // Entry line (cyan)
           if (ts.entry) {
-            candlestickSeries.createPriceLine({
+            lineSeries.createPriceLine({
               price: ts.entry,
               color: '#00E5FF',
               lineWidth: 2,
@@ -315,7 +315,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
           
           // Stop Loss line (red dashed)
           if (ts.stop_loss) {
-            candlestickSeries.createPriceLine({
+            lineSeries.createPriceLine({
               price: ts.stop_loss,
               color: '#FF2E2E',
               lineWidth: 2,
@@ -327,7 +327,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
           
           // Take Profit line (green dashed)
           if (ts.target) {
-            candlestickSeries.createPriceLine({
+            lineSeries.createPriceLine({
               price: ts.target,
               color: '#00FF94',
               lineWidth: 2,
