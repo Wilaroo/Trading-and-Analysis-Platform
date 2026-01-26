@@ -559,7 +559,7 @@ const CommandCenterPage = () => {
   ];
 
   // Check IB connection
-  const checkConnection = useCallback(async () => {
+  const checkConnection = async () => {
     try {
       const res = await api.get('/api/ib/status');
       setIsConnected(res.data?.connected || false);
@@ -568,7 +568,7 @@ const CommandCenterPage = () => {
       setIsConnected(false);
       return false;
     }
-  }, []);
+  };
 
   // Connect to IB
   const connectToIB = async () => {
