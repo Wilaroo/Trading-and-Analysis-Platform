@@ -1007,13 +1007,16 @@ const CommandCenterPage = () => {
     earnings: true,
     squeeze: false,
     priceAlerts: false,
-    breakouts: true
+    breakouts: true,
+    enhancedAlerts: true
   });
   
   // New P1 features state
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [shortSqueezeCandidates, setShortSqueezeCandidates] = useState([]);
   const [breakoutAlerts, setBreakoutAlerts] = useState([]);
+  const [enhancedAlerts, setEnhancedAlerts] = useState([]);
+  const [selectedEnhancedAlert, setSelectedEnhancedAlert] = useState(null);
   const [priceAlerts, setPriceAlerts] = useState([]);
   const [newAlertSymbol, setNewAlertSymbol] = useState('');
   const [newAlertPrice, setNewAlertPrice] = useState('');
