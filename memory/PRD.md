@@ -174,6 +174,38 @@ TradeCommand is a comprehensive trading and analysis platform designed for activ
     - Red dashed line = Stop Loss
     - Green dashed line = Take Profit
 
+### Phase 12 - News & Newsletter Integration ✅ NEW (Jan 2026)
+- **Premarket Newsletter Revamp**:
+  - Complete redesign of NewsletterPage.js with daytrader-style UI
+  - AI-powered newsletter generation using Perplexity API (Sonar model)
+  - Market sentiment badge (BULLISH/BEARISH/NEUTRAL)
+  - Overnight recap with international markets and futures
+  - Key support/resistance levels for SPY/QQQ
+  - Trade opportunities with Entry/Stop/Target prices
+  - Catalyst watch section for economic events and earnings
+  - Risk factors panel
+  - Today's Game Plan section
+  - Watchlist table with AI-scored picks
+- **Ticker-Specific News Integration**:
+  - News tab added to TickerDetailModal in Trade Opportunities page
+  - Real-time news fetching from IB Gateway API
+  - News headlines with source, timestamp, and sentiment
+  - Fallback display when IB is not connected
+- **Backend Services**:
+  - `/app/backend/services/newsletter_service.py` - Perplexity API integration
+  - `/app/backend/services/news_service.py` - IB news fetching
+  - `/app/backend/routers/newsletter.py` - Newsletter and news API endpoints
+- **New API Endpoints**:
+  - `GET /api/newsletter/latest` - Get latest newsletter
+  - `POST /api/newsletter/generate` - Generate new premarket briefing
+  - `GET /api/newsletter/news/{symbol}` - Get ticker-specific news
+  - `GET /api/newsletter/news` - Get general market news
+  - `GET /api/ib/news/{symbol}` - Get IB news for ticker
+  - `GET /api/ib/news` - Get general IB market news
+- **Environment Variables**:
+  - `PERPLEXITY_API_KEY` - API key for Perplexity AI
+  - `PERPLEXITY_MODEL` - Model to use (default: sonar)
+
 ### Phase 10 - Feature Engineering Service ✅ NEW (Jan 2026)
 - **Comprehensive technical indicator library** for IB Gateway integration:
   - **Price/Volume**: OHLCV, returns, gaps, dollar volume, RVOL
