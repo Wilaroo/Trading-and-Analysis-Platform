@@ -280,28 +280,21 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
 
         chartRef.current = chart;
 
-        // v4 API: addCandlestickSeries
-        const candlestickSeries = chart.addCandlestickSeries({
-          upColor: '#00FF94', 
-          downColor: '#FF2E2E',
-          borderUpColor: '#00FF94', 
-          borderDownColor: '#FF2E2E',
-          wickUpColor: '#00FF94', 
-          wickDownColor: '#FF2E2E',
+        // Try a simple line series first
+        const lineSeries = chart.addLineSeries({
+          color: '#00FF94',
+          lineWidth: 2,
         });
 
-        const chartData = historicalData.map(bar => ({
+        const lineData = historicalData.map(bar => ({
           time: Math.floor(new Date(bar.date).getTime() / 1000),
-          open: Number(bar.open), 
-          high: Number(bar.high), 
-          low: Number(bar.low), 
-          close: Number(bar.close),
+          value: Number(bar.close),
         }));
 
-        console.log('Chart data:', chartData.length, 'points');
-        console.log('Sample data:', JSON.stringify(chartData.slice(0, 3)));
+        console.log('Line data:', lineData.length, 'points');
+        console.log('Sample line data:', JSON.stringify(lineData.slice(0, 3)));
         
-        candlestickSeries.setData(chartData);
+        lineSeries.setData(lineData);
         chart.timeScale().fitContent();
         
         // Add SL/TP price lines if trading summary exists and lines are enabled
