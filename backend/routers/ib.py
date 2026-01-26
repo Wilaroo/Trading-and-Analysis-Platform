@@ -1513,8 +1513,8 @@ async def get_breakout_alerts():
                 if rvol < 1.2:
                     continue
                 
-                # Match against user's strategies
-                matched_strategies = strategies_service.match_strategies(symbol, quote, features, scores)
+                # Match against strategies using simple matcher
+                matched_strategies = simple_strategy_match(symbol, features, scores)
                 
                 # Filter: Must match at least one strategy
                 if not matched_strategies:
