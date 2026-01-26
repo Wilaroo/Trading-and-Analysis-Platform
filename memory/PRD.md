@@ -444,6 +444,38 @@ The application is now consolidated into a single **Command Center** that serves
 
 ## Changelog
 
+### Jan 26, 2026 - No Mock Data + Breakout Alerts
+**Implemented:**
+1. **Removed ALL Mock Data**
+   - Historical data, short squeeze scanner, and all other endpoints now return ONLY real IB Gateway data
+   - Created `/app/backend/services/data_cache.py` for caching real data with timestamps
+   - When IB Gateway disconnected: shows cached data with "last_updated" timestamp
+   - When no cached data: displays clear error message asking to connect IB Gateway
+   - Auto-refresh pending when connection is restored
+
+2. **Breakout Alerts Scanner** (`/api/ib/scanner/breakouts`)
+   - Scans for stocks breaking above resistance (LONG) or below support (SHORT)
+   - Returns TOP 10 that meet ALL criteria:
+     - Match user's 77 trading rules/strategies
+     - Meet momentum criteria (RVOL >= 1.2, trend alignment)
+     - Overall score >= 60
+     - At least one strategy match
+   - Includes: breakout_score, entry, stop_loss, target, risk_reward, matched_strategies
+   - Sound + toast notifications for new breakouts
+
+3. **Chart Error Handling**
+   - Chart tab now shows proper error message when data unavailable
+   - Shows "IB Gateway is disconnected and no cached data available"
+   - Graceful degradation with all other data still visible
+
+4. **Data Cache Service**
+   - Caches: historical data, quotes, account data, positions, short interest, news
+   - Each cached item includes `last_updated` timestamp
+   - `is_cached: true` flag indicates non-realtime data
+
+**Known Issues:**
+- Chart candlesticks still not rendering even with valid data (TradingView library issue)
+
 ### Jan 26, 2026 - P1 Features Implementation
 **Implemented:**
 1. **Short Squeeze Watchlist Panel**
