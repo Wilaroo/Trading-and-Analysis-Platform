@@ -15,6 +15,7 @@ import {
   IBTradingPage,
 } from './pages';
 import CommandCenterPage from './pages/CommandCenterPage';
+import GlossaryPage from './pages/GlossaryPage';
 
 import './App.css';
 
