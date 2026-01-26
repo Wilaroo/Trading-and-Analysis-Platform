@@ -1500,9 +1500,16 @@ async def get_breakout_alerts():
                 if not breakout_type:
                     continue
                 
-                # Calculate scores
-                scores = scoring_engine.calculate_scores(symbol, quote, features, {})
-                overall_score = scores.get("overall", 0)
+                # Calculate scores - build stock_data dict for scoring engine
+                stock_data = {
+                    "symbol": symbol,
+                    "price": quote.get("price", 0),
+                    "change_percent": quote.get("change_percent", 0),
+                    "volume": quote.get("volume", 0),
+                    **features
+                }
+                score_result = scoring_engine.calculate_composite_score(stock_data, {})
+                overall_score = score_result.get("composite_score", score_result.get("overall", 0))
                 
                 # Filter: Must have minimum score of 60
                 if overall_score < 60:
