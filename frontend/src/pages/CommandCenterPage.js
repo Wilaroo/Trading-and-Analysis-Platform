@@ -535,6 +535,7 @@ const CommandCenterPage = () => {
   const [alerts, setAlerts] = useState([]);
   const [newsletter, setNewsletter] = useState(null);
   const [watchlist, setWatchlist] = useState([]);
+  const [earnings, setEarnings] = useState([]);
   
   // UI State
   const [isScanning, setIsScanning] = useState(false);
@@ -547,7 +548,8 @@ const CommandCenterPage = () => {
     opportunities: true,
     context: true,
     alerts: true,
-    news: false
+    news: false,
+    earnings: true
   });
 
   const scanTypes = [
