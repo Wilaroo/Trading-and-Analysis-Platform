@@ -1361,6 +1361,25 @@ const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
     
     fetchData();
   }, [symbol]);
+  
+  // Fetch news when news tab is selected
+  useEffect(() => {
+    if (activeTab !== 'news' || !symbol) return;
+    
+    const fetchNews = async () => {
+      setNewsLoading(true);
+      try {
+        const newsResponse = await api.get(`/api/newsletter/news/${symbol}?limit=10`);
+        setTickerNews(newsResponse.data?.news || []);
+      } catch (err) {
+        console.error('Error fetching ticker news:', err);
+        setTickerNews([]);
+      }
+      setNewsLoading(false);
+    };
+    
+    fetchNews();
+  }, [activeTab, symbol]);
 
   if (!opportunity) return null;
 
