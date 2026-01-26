@@ -1509,8 +1509,13 @@ async def get_breakout_alerts():
                     "resistance_2": round(resistance_2, 2),
                     "support_1": round(support_1, 2),
                     "support_2": round(support_2, 2),
-                    "matched_strategies": [{"id": s["id"], "name": s["name"], "match_pct": s.get("match_percentage", 0)} for s in matched_strategies[:3]],
+                    "matched_strategies": [{"id": s["id"], "name": s["name"], "match_pct": s.get("match_percentage", 0)} for s in matched_strategies[:5]],
                     "strategy_count": len(matched_strategies),
+                    # Signal Strength: percentage of 77 rules matched
+                    "signal_strength": round((len(matched_strategies) / 77) * 100, 1),
+                    "signal_strength_label": "VERY STRONG" if len(matched_strategies) >= 10 else "STRONG" if len(matched_strategies) >= 7 else "MODERATE" if len(matched_strategies) >= 4 else "WEAK",
+                    "rules_matched": len(matched_strategies),
+                    "rules_total": 77,
                     "detected_at": datetime.now(timezone.utc).isoformat(),
                     "features": {
                         "rsi": features.get("rsi", 50),
