@@ -2122,7 +2122,7 @@ async def generate_enhanced_alert_for_symbol(symbol: str):
         AlertType, determine_timeframe
     )
     from services.scoring_engine import get_scoring_engine
-    from services.strategy_service import get_strategies_service
+    from services.strategy_service import StrategyService
     
     symbol = symbol.upper()
     
