@@ -338,6 +338,18 @@ Generate a complete premarket briefing with specific, actionable trade ideas. In
                 })
         return stories
     
+    def _ensure_list(self, value) -> List:
+        """Ensure value is a list"""
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            return list(value.values())
+        if isinstance(value, str):
+            return [value]
+        return [value]
+    
     def _format_watchlist_from_opportunities(self, opportunities: List[Dict]) -> List[Dict]:
         """Format opportunities as watchlist items"""
         watchlist = []
