@@ -1012,7 +1012,8 @@ const CommandCenterPage = () => {
     squeeze: false,
     priceAlerts: false,
     breakouts: true,
-    enhancedAlerts: true
+    enhancedAlerts: true,
+    comprehensiveAlerts: true
   });
   
   // New P1 features state
@@ -1026,6 +1027,20 @@ const CommandCenterPage = () => {
   const [newAlertPrice, setNewAlertPrice] = useState('');
   const [newAlertDirection, setNewAlertDirection] = useState('ABOVE');
   const [trackedOrders, setTrackedOrders] = useState([]);
+  
+  // Comprehensive scan state
+  const [minScoreThreshold, setMinScoreThreshold] = useState(50);
+  const [comprehensiveAlerts, setComprehensiveAlerts] = useState({
+    scalp: [],
+    intraday: [],
+    swing: [],
+    position: []
+  });
+  const [comprehensiveSummary, setComprehensiveSummary] = useState({
+    scalp: 0, intraday: 0, swing: 0, position: 0, total: 0
+  });
+  const [selectedTimeframeTab, setSelectedTimeframeTab] = useState('all');
+  const [isComprehensiveScanning, setIsComprehensiveScanning] = useState(false);
 
   const scanTypes = [
     { id: 'TOP_PERC_GAIN', label: 'Top Gainers', icon: TrendingUp },
