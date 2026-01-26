@@ -1147,13 +1147,37 @@ const CommandCenterPage = () => {
     }
   };
 
-  // Fetch newsletter
+  // Fetch newsletter / market intelligence
   const fetchNewsletter = async () => {
     try {
       const res = await api.get('/api/newsletter/latest');
       setNewsletter(res.data);
     } catch {
       setNewsletter(null);
+    }
+  };
+
+  // Auto-generate market intelligence on IB connection
+  const [isGeneratingIntelligence, setIsGeneratingIntelligence] = useState(false);
+  
+  const autoGenerateMarketIntelligence = async () => {
+    if (isGeneratingIntelligence) return;
+    
+    setIsGeneratingIntelligence(true);
+    try {
+      toast.info('Generating market intelligence...', { duration: 3000 });
+      const res = await api.post('/api/newsletter/auto-generate');
+      setNewsletter(res.data);
+      
+      if (!res.data?.error) {
+        toast.success('Market intelligence ready!', { duration: 5000 });
+        if (soundEnabled) playSound('alert');
+      }
+    } catch (err) {
+      console.error('Error generating market intelligence:', err);
+      toast.error('Failed to generate market intelligence');
+    } finally {
+      setIsGeneratingIntelligence(false);
     }
   };
 
