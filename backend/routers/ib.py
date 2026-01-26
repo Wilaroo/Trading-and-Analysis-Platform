@@ -1182,55 +1182,126 @@ async def get_triggered_alerts_history():
 async def get_short_squeeze_candidates():
     """
     Get stocks with high short interest that could be short squeeze candidates.
-    Returns mock data demonstrating the feature.
+    Requires IB Gateway connection for real-time data.
+    Returns cached data with timestamp when disconnected.
+    NO MOCK DATA.
     """
-    import random
-    from datetime import datetime, timezone
+    cache = get_data_cache()
     
-    # Mock short squeeze candidates with realistic data
-    candidates = [
-        {"symbol": "GME", "name": "GameStop Corp", "short_interest_pct": 24.5, "days_to_cover": 3.2, "shares_short": 45000000, "float_pct_short": 28.1},
-        {"symbol": "AMC", "name": "AMC Entertainment", "short_interest_pct": 18.7, "days_to_cover": 2.1, "shares_short": 98000000, "float_pct_short": 21.3},
-        {"symbol": "BBBY", "name": "Bed Bath & Beyond", "short_interest_pct": 42.3, "days_to_cover": 5.8, "shares_short": 32000000, "float_pct_short": 48.7},
-        {"symbol": "KOSS", "name": "Koss Corporation", "short_interest_pct": 35.2, "days_to_cover": 4.1, "shares_short": 2800000, "float_pct_short": 41.2},
-        {"symbol": "BYND", "name": "Beyond Meat Inc", "short_interest_pct": 31.8, "days_to_cover": 6.3, "shares_short": 19500000, "float_pct_short": 35.4},
-        {"symbol": "CVNA", "name": "Carvana Co", "short_interest_pct": 28.4, "days_to_cover": 3.9, "shares_short": 45000000, "float_pct_short": 32.1},
-        {"symbol": "UPST", "name": "Upstart Holdings", "short_interest_pct": 26.1, "days_to_cover": 4.5, "shares_short": 22000000, "float_pct_short": 29.8},
-        {"symbol": "MARA", "name": "Marathon Digital", "short_interest_pct": 22.3, "days_to_cover": 2.8, "shares_short": 38000000, "float_pct_short": 25.6},
-        {"symbol": "RIVN", "name": "Rivian Automotive", "short_interest_pct": 19.8, "days_to_cover": 3.1, "shares_short": 125000000, "float_pct_short": 22.4},
-        {"symbol": "LCID", "name": "Lucid Group Inc", "short_interest_pct": 17.5, "days_to_cover": 2.4, "shares_short": 285000000, "float_pct_short": 19.8},
-    ]
+    # Check connection
+    is_connected = False
+    if _ib_service:
+        try:
+            status = _ib_service.get_connection_status()
+            is_connected = status.get("connected", False)
+        except:
+            pass
     
-    # Add current price and change data
-    for candidate in candidates:
-        random.seed(hash(candidate["symbol"]))
-        base_price = random.uniform(5, 200)
-        change_pct = random.uniform(-8, 15)  # Short squeezes often have big moves
+    if not is_connected:
+        # Return cached short interest data if available
+        cached_candidates = []
+        for symbol in ["GME", "AMC", "KOSS", "BYND", "CVNA", "UPST", "MARA", "RIVN", "LCID"]:
+            cached = cache.get_cached_short_interest(symbol)
+            if cached:
+                cached_candidates.append(cached)
         
-        candidate["price"] = round(base_price, 2)
-        candidate["change_percent"] = round(change_pct, 2)
-        candidate["volume"] = int(random.uniform(5000000, 100000000))
-        candidate["avg_volume"] = int(candidate["volume"] * random.uniform(0.6, 1.2))
-        candidate["rvol"] = round(candidate["volume"] / candidate["avg_volume"], 2)
+        if cached_candidates:
+            return {
+                "candidates": sorted(cached_candidates, key=lambda x: x.get("squeeze_score", 0), reverse=True),
+                "count": len(cached_candidates),
+                "last_updated": cached_candidates[0].get("last_updated") if cached_candidates else None,
+                "is_cached": True,
+                "is_connected": False,
+                "message": "Showing cached data. Connect IB Gateway for real-time data."
+            }
         
-        # Calculate squeeze score (0-100)
-        squeeze_score = 0
-        squeeze_score += min(30, candidate["short_interest_pct"])  # Up to 30 pts for SI%
-        squeeze_score += min(20, candidate["days_to_cover"] * 3)   # Up to 20 pts for days to cover
-        squeeze_score += min(20, candidate["rvol"] * 10)           # Up to 20 pts for RVOL
-        squeeze_score += min(15, max(0, change_pct))               # Up to 15 pts for positive momentum
-        squeeze_score += min(15, candidate["float_pct_short"] / 3) # Up to 15 pts for float short
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "Data unavailable",
+                "message": "IB Gateway is disconnected and no cached short squeeze data available",
+                "is_connected": False
+            }
+        )
+    
+    # Get real data from IB scanner
+    try:
+        # Use IB scanner for high short interest stocks
+        scanner_results = await _ib_service.run_scanner("HIGH_SHORT_INT", limit=20)
         
-        candidate["squeeze_score"] = round(min(100, squeeze_score))
-        candidate["squeeze_risk"] = "HIGH" if candidate["squeeze_score"] >= 70 else "MEDIUM" if candidate["squeeze_score"] >= 50 else "LOW"
-    
-    # Sort by squeeze score
-    candidates.sort(key=lambda x: x["squeeze_score"], reverse=True)
-    
-    return {
-        "candidates": candidates,
-        "count": len(candidates),
-        "last_updated": datetime.now(timezone.utc).isoformat(),
-        "is_mock": True
-    }
+        if not scanner_results:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "No scanner results",
+                    "message": "IB scanner returned no results for short interest",
+                    "is_connected": True
+                }
+            )
+        
+        candidates = []
+        feature_engine = get_feature_engine()
+        
+        for result in scanner_results:
+            symbol = result.get("symbol", "")
+            if not symbol:
+                continue
+            
+            # Get real-time quote
+            quote = await _ib_service.get_quote(symbol)
+            
+            # Calculate features
+            features = feature_engine.calculate_features(symbol, quote or {}, {})
+            
+            candidate = {
+                "symbol": symbol,
+                "name": result.get("name", symbol),
+                "price": quote.get("price", 0) if quote else 0,
+                "change_percent": quote.get("change_percent", 0) if quote else 0,
+                "volume": quote.get("volume", 0) if quote else 0,
+                "avg_volume": features.get("avg_volume", 0),
+                "rvol": features.get("rvol", 1.0),
+                "short_interest_pct": result.get("short_interest", 0),
+                "days_to_cover": result.get("days_to_cover", 0),
+                "float_pct_short": result.get("float_short", 0),
+                "squeeze_score": 0,
+                "last_updated": datetime.now(timezone.utc).isoformat()
+            }
+            
+            # Calculate squeeze score based on real data
+            squeeze_score = 0
+            squeeze_score += min(30, candidate["short_interest_pct"])
+            squeeze_score += min(20, candidate["days_to_cover"] * 3)
+            squeeze_score += min(20, candidate["rvol"] * 10)
+            squeeze_score += min(15, max(0, candidate["change_percent"]))
+            squeeze_score += min(15, candidate["float_pct_short"] / 3)
+            
+            candidate["squeeze_score"] = round(min(100, squeeze_score))
+            candidate["squeeze_risk"] = "HIGH" if candidate["squeeze_score"] >= 70 else "MEDIUM" if candidate["squeeze_score"] >= 50 else "LOW"
+            
+            # Cache the data
+            cache.cache_short_interest(symbol, candidate)
+            candidates.append(candidate)
+        
+        # Sort by squeeze score
+        candidates.sort(key=lambda x: x["squeeze_score"], reverse=True)
+        
+        return {
+            "candidates": candidates[:10],  # Top 10
+            "count": len(candidates[:10]),
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "is_cached": False,
+            "is_connected": True
+        }
+        
+    except Exception as e:
+        print(f"Error in short squeeze scanner: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Scanner error",
+                "message": str(e),
+                "is_connected": is_connected
+            }
+        )
 
