@@ -682,6 +682,75 @@ class IBWorkerThread(threading.Thread):
         except Exception as e:
             logger.error(f"Error getting fundamentals: {e}")
             return IBResponse(success=False, error=str(e))
+    
+    def _do_get_news(self, symbol: str = None) -> IBResponse:
+        """Get news headlines - optionally filtered by symbol"""
+        if not self.ib or not self.ib.isConnected():
+            return IBResponse(success=False, error="Not connected to IB")
+        
+        try:
+            from ib_insync import Stock
+            
+            news_items = []
+            
+            if symbol:
+                # Get news for specific symbol by subscribing to market data
+                contract = Stock(symbol.upper(), "SMART", "USD")
+                self.ib.qualifyContracts(contract)
+                
+                # Request market data with news
+                ticker = self.ib.reqMktData(contract, "mdoff,258", snapshot=False, regulatorySnapshot=False)
+                self.ib.sleep(2)  # Wait for news ticks
+                
+                # Get news ticks from the ticker
+                if hasattr(ticker, 'newsTicks') and ticker.newsTicks:
+                    for tick in ticker.newsTicks:
+                        news_items.append({
+                            "id": f"{symbol}-{tick.timeStamp.timestamp() if hasattr(tick.timeStamp, 'timestamp') else tick.timeStamp}",
+                            "symbol": symbol.upper(),
+                            "headline": tick.headline if hasattr(tick, 'headline') else str(tick),
+                            "source": tick.providerCode if hasattr(tick, 'providerCode') else "IB",
+                            "timestamp": tick.timeStamp.isoformat() if hasattr(tick.timeStamp, 'isoformat') else str(tick.timeStamp),
+                            "article_id": tick.articleId if hasattr(tick, 'articleId') else None
+                        })
+                
+                # Cancel market data
+                self.ib.cancelMktData(contract)
+            else:
+                # Get general news bulletins
+                bulletins = self.ib.newsBulletins()
+                for bulletin in bulletins:
+                    news_items.append({
+                        "id": str(bulletin.msgId) if hasattr(bulletin, 'msgId') else str(len(news_items)),
+                        "headline": bulletin.message if hasattr(bulletin, 'message') else str(bulletin),
+                        "source": "IB Bulletin",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "type": bulletin.msgType if hasattr(bulletin, 'msgType') else "news"
+                    })
+            
+            return IBResponse(success=True, data=news_items)
+            
+        except Exception as e:
+            logger.error(f"Error getting news: {e}")
+            return IBResponse(success=False, error=str(e))
+    
+    def _do_get_news_article(self, article_id: str) -> IBResponse:
+        """Get full news article content"""
+        if not self.ib or not self.ib.isConnected():
+            return IBResponse(success=False, error="Not connected to IB")
+        
+        try:
+            # IB requires provider code and article ID
+            # This is a simplified implementation
+            return IBResponse(success=True, data={
+                "article_id": article_id,
+                "content": "Full article content requires IB news subscription",
+                "note": "Use the headline link to read the full article"
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting news article: {e}")
+            return IBResponse(success=False, error=str(e))
 
 
 class IBService:
