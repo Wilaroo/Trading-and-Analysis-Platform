@@ -314,10 +314,16 @@ Generate a complete premarket briefing with specific, actionable trade ideas. In
                 "raw_content": content
             }
     
-    def _format_catalyst_watch(self, catalysts: List) -> List[Dict]:
+    def _format_catalyst_watch(self, catalysts) -> List[Dict]:
         """Format catalyst items as top stories"""
         stories = []
-        for i, catalyst in enumerate(catalysts[:5]):
+        # Handle if catalysts is a dict instead of list
+        if isinstance(catalysts, dict):
+            catalysts = list(catalysts.values()) if catalysts else []
+        if not isinstance(catalysts, list):
+            catalysts = [catalysts] if catalysts else []
+            
+        for catalyst in catalysts[:5]:
             if isinstance(catalyst, str):
                 stories.append({
                     "headline": catalyst,
@@ -326,7 +332,7 @@ Generate a complete premarket briefing with specific, actionable trade ideas. In
                 })
             elif isinstance(catalyst, dict):
                 stories.append({
-                    "headline": catalyst.get("event", catalyst.get("headline", "")),
+                    "headline": catalyst.get("event", catalyst.get("headline", str(catalyst))),
                     "summary": catalyst.get("details", catalyst.get("summary", "")),
                     "impact": catalyst.get("impact", "neutral")
                 })
