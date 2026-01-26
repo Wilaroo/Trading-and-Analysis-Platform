@@ -1837,7 +1837,7 @@ const CommandCenterPage = () => {
                   {/* Game Plan */}
                   {newsletter.game_plan && (
                     <div className="p-2 bg-green-500/10 border border-green-500/30 rounded">
-                      <span className="text-[10px] text-green-400 uppercase block mb-1">Today's Game Plan</span>
+                      <span className="text-[10px] text-green-400 uppercase block mb-1">Game Plan</span>
                       <p className="text-xs text-zinc-300">{newsletter.game_plan}</p>
                     </div>
                   )}
