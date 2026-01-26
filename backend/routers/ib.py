@@ -2197,7 +2197,6 @@ async def generate_enhanced_alert_for_symbol(symbol: str):
     try:
         feature_engine = get_feature_engine()
         scoring_engine = get_scoring_engine()
-        strategies_service = StrategyService()
         
         # Get quote and historical data
         quote = await _ib_service.get_quote(symbol)
@@ -2212,8 +2211,8 @@ async def generate_enhanced_alert_for_symbol(symbol: str):
         features = feature_engine.calculate_features(symbol, quote, {"bars": hist_data})
         scores = scoring_engine.calculate_scores(symbol, quote, features, {})
         
-        # Match strategies
-        matched = strategies_service.match_strategies(symbol, quote, features, scores)
+        # Match strategies using simple matcher
+        matched = simple_strategy_match(symbol, features, scores)
         
         if not matched:
             return {
