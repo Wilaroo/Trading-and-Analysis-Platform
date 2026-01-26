@@ -1794,7 +1794,7 @@ async def clear_alerts():
 # ----- Earnings Calendar -----
 
 def generate_earnings_play_strategy(avg_reaction: float, iv_rank: float, expected_move: float, historical: list, beat_rate: float) -> Dict:
-    """Generate earnings play strategy based on historical patterns"""
+    """Generate earnings play strategy based on historical patterns and user's trading strategies"""
     
     # Analyze historical patterns
     positive_reactions = sum(1 for h in historical if h["stock_reaction"] > 0)
@@ -1824,67 +1824,89 @@ def generate_earnings_play_strategy(avg_reaction: float, iv_rank: float, expecte
         bias = "Strong Bearish"
         direction = "SHORT"
     
-    # Determine primary strategy based on IV rank and historical pattern
+    # Generate strategy suggestions based on user's trading style patterns
     strategies = []
     
-    # High IV environment - sell premium
-    if iv_rank >= 60:
-        if abs(avg_reaction) < expected_move * 0.7:
-            # Stock typically moves less than expected - sell straddle/strangle
-            strategies.append({
-                "name": "Iron Condor" if iv_rank >= 75 else "Short Strangle",
-                "type": "premium_sell",
-                "reasoning": f"High IV ({iv_rank:.0f}%) + stock typically moves {abs(avg_reaction):.1f}% vs {expected_move:.1f}% expected",
-                "risk": "Medium" if iv_rank >= 75 else "High",
-                "confidence": min(85, 50 + iv_rank * 0.3 + (expected_move - abs(avg_reaction)) * 2)
-            })
-        if beat_rate >= 65 and avg_reaction > 0:
-            strategies.append({
-                "name": "Bull Put Spread",
-                "type": "directional_credit",
-                "reasoning": f"{beat_rate:.0f}% beat rate + avg +{avg_reaction:.1f}% post-earnings",
-                "risk": "Low-Medium",
-                "confidence": min(80, beat_rate * 0.8 + avg_reaction * 2)
-            })
-    
-    # Low IV environment - buy premium
-    if iv_rank <= 40:
-        if abs(avg_reaction) > expected_move * 1.2:
-            # Stock typically moves more than expected
-            strategies.append({
-                "name": "Long Straddle",
-                "type": "premium_buy",
-                "reasoning": f"Low IV ({iv_rank:.0f}%) + stock typically moves {abs(avg_reaction):.1f}% vs {expected_move:.1f}% expected",
-                "risk": "Medium",
-                "confidence": min(75, 40 + (abs(avg_reaction) - expected_move) * 3)
-            })
-    
-    # Directional plays based on historical bias
+    # High conviction momentum plays
     if positive_reactions >= 3 and avg_positive >= 5:
         strategies.append({
-            "name": "Long Calls" if iv_rank < 50 else "Call Debit Spread",
-            "type": "directional_long",
-            "reasoning": f"{positive_reactions}/4 positive reactions, avg +{avg_positive:.1f}%",
-            "risk": "Medium",
-            "confidence": min(80, positive_reactions * 15 + avg_positive * 2)
-        })
-    elif negative_reactions >= 3 and avg_negative <= -5:
-        strategies.append({
-            "name": "Long Puts" if iv_rank < 50 else "Put Debit Spread",
-            "type": "directional_short",
-            "reasoning": f"{negative_reactions}/4 negative reactions, avg {avg_negative:.1f}%",
-            "risk": "Medium",
-            "confidence": min(80, negative_reactions * 15 + abs(avg_negative) * 2)
+            "name": "Gap & Go Long",
+            "type": "momentum_long",
+            "category": "intraday",
+            "reasoning": f"Strong historical beat pattern: {positive_reactions}/4 positive reactions, avg +{avg_positive:.1f}%",
+            "entry": "Enter on gap up confirmation above premarket high",
+            "stop": "Below VWAP or gap fill level",
+            "confidence": min(85, positive_reactions * 18 + avg_positive * 2)
         })
     
-    # Stock play
-    if abs(avg_reaction) >= 3:
+    if negative_reactions >= 3 and avg_negative <= -5:
         strategies.append({
-            "name": f"{'Buy' if avg_reaction > 0 else 'Short'} Stock Pre-Earnings",
-            "type": "stock",
-            "reasoning": f"Historical avg reaction: {'+' if avg_reaction > 0 else ''}{avg_reaction:.1f}%",
-            "risk": "High",
-            "confidence": min(70, 40 + abs(avg_reaction) * 3)
+            "name": "Gap Down Short",
+            "type": "momentum_short",
+            "category": "intraday",
+            "reasoning": f"Consistent weakness post-earnings: {negative_reactions}/4 drops, avg {avg_negative:.1f}%",
+            "entry": "Short on failed bounce attempt below VWAP",
+            "stop": "Above premarket high or R1",
+            "confidence": min(85, negative_reactions * 18 + abs(avg_negative) * 2)
+        })
+    
+    # Reversal plays based on expected move vs historical
+    if abs(avg_reaction) < expected_move * 0.6:
+        strategies.append({
+            "name": "Fade the Move",
+            "type": "reversal",
+            "category": "intraday",
+            "reasoning": f"Stock typically moves {abs(avg_reaction):.1f}% vs {expected_move:.1f}% expected - fade extreme reactions",
+            "entry": "Wait for overextension then fade toward VWAP",
+            "stop": "New high/low of day",
+            "confidence": min(75, 50 + (expected_move - abs(avg_reaction)) * 3)
+        })
+    
+    # Swing trade setups
+    if beat_rate >= 65 and avg_reaction > 2:
+        strategies.append({
+            "name": "Post-Earnings Momentum Swing",
+            "type": "swing_long",
+            "category": "swing",
+            "reasoning": f"{beat_rate:.0f}% beat rate with {avg_reaction:+.1f}% avg follow-through",
+            "entry": "Buy dip to 9 EMA on day after earnings",
+            "stop": "Below earnings day low",
+            "confidence": min(80, beat_rate * 0.8 + avg_reaction * 3)
+        })
+    
+    # High volatility plays
+    if expected_move >= 8:
+        if direction == "LONG":
+            strategies.append({
+                "name": "Breakout Long",
+                "type": "breakout",
+                "category": "intraday",
+                "reasoning": f"High expected move ({expected_move:.1f}%) with bullish historical bias",
+                "entry": "Buy break of premarket high with volume",
+                "stop": "Below VWAP",
+                "confidence": min(70, 40 + expected_move * 2 + avg_reaction * 2)
+            })
+        else:
+            strategies.append({
+                "name": "Breakdown Short",
+                "type": "breakdown",
+                "category": "intraday",
+                "reasoning": f"High expected move ({expected_move:.1f}%) with bearish historical bias",
+                "entry": "Short break of premarket low with volume",
+                "stop": "Above VWAP",
+                "confidence": min(70, 40 + expected_move * 2 + abs(avg_reaction) * 2)
+            })
+    
+    # VWAP-based plays
+    if iv_rank >= 50:
+        strategies.append({
+            "name": "VWAP Reclaim/Rejection",
+            "type": "vwap_play",
+            "category": "intraday",
+            "reasoning": f"Elevated IV ({iv_rank:.0f}%) suggests institutional activity - watch VWAP for direction",
+            "entry": "Long on VWAP reclaim with hold, Short on VWAP rejection",
+            "stop": "Opposite side of VWAP",
+            "confidence": min(70, 45 + iv_rank * 0.4)
         })
     
     # Sort by confidence
