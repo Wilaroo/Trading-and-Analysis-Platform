@@ -955,6 +955,28 @@ class IBService:
             raise ConnectionError(response.error)
         return response.data
     
+    async def get_news_for_symbol(self, symbol: str) -> List[Dict]:
+        """Get news headlines for a specific symbol"""
+        response = self._send_request(
+            IBCommand.GET_NEWS,
+            {"symbol": symbol},
+            timeout=15.0
+        )
+        if not response.success:
+            return []  # Return empty list on failure
+        return response.data or []
+    
+    async def get_general_news(self) -> List[Dict]:
+        """Get general market news"""
+        response = self._send_request(
+            IBCommand.GET_NEWS,
+            {"symbol": None},
+            timeout=15.0
+        )
+        if not response.success:
+            return []
+        return response.data or []
+    
     def shutdown(self):
         """Shutdown the worker thread"""
         if self._worker_thread and self._worker_thread.is_alive():
