@@ -2087,10 +2087,7 @@ const CommandCenterPage = () => {
               </div>
             )}
           </Card>
-        </div>
 
-        {/* Center Column - Trade Opportunities */}
-        <div className="lg:col-span-2 space-y-4">
           {/* Scanner Controls */}
           <Card>
             <div className="flex items-center justify-between mb-4">
