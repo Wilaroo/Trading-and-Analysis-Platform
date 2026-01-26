@@ -1690,19 +1690,67 @@ const CommandCenterPage = () => {
               )}
             </div>
           </Card>
+        </div>
 
-          {/* Recent Alerts */}
-          <Card>
-            <button 
-              onClick={() => toggleSection('alerts')}
-              className="w-full flex items-center justify-between mb-3"
-            >
-              <div className="flex items-center gap-2">
-                <Bell className="w-5 h-5 text-yellow-400" />
-                <h3 className="text-sm font-semibold uppercase tracking-wider">Alerts</h3>
-              </div>
-              <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.alerts ? 'rotate-180' : ''}`} />
-            </button>
+        {/* 1. Market Intelligence */}
+        <Card>
+          <button 
+            onClick={() => toggleSection('news')}
+            className="w-full flex items-center justify-between mb-3"
+          >
+            <div className="flex items-center gap-2">
+              <Newspaper className="w-5 h-5 text-purple-400" />
+              <h3 className="text-sm font-semibold uppercase tracking-wider">Market Intelligence</h3>
+            </div>
+            <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.news ? 'rotate-180' : ''}`} />
+          </button>
+          
+          {expandedSections.news && (
+            <div className="space-y-3">
+              {newsletter ? (
+                <>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Badge variant={
+                      newsletter.market_outlook?.sentiment === 'bullish' ? 'success' :
+                      newsletter.market_outlook?.sentiment === 'bearish' ? 'error' : 'neutral'
+                    }>
+                      {newsletter.market_outlook?.sentiment?.toUpperCase() || 'NEUTRAL'}
+                    </Badge>
+                    <span className="text-xs text-zinc-500">
+                      {newsletter.date ? new Date(newsletter.date).toLocaleDateString() : 'Today'}
+                    </span>
+                  </div>
+                  <p className="text-sm text-zinc-300">{newsletter.summary || 'Click Generate in Newsletter page for full briefing'}</p>
+                  {newsletter.opportunities?.slice(0, 3).map((opp, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-2 bg-zinc-900/50 rounded text-sm">
+                      <span className="font-bold text-cyan-400">{opp.symbol}</span>
+                      <Badge variant={opp.direction === 'LONG' ? 'success' : opp.direction === 'SHORT' ? 'error' : 'neutral'}>
+                        {opp.direction || 'WATCH'}
+                      </Badge>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <p className="text-center text-zinc-500 text-sm py-4">
+                  Generate a newsletter for market intelligence
+                </p>
+              )}
+            </div>
+          )}
+        </Card>
+
+        {/* Recent System Alerts (moved here for visibility) */}
+        <Card>
+          <button 
+            onClick={() => toggleSection('alerts')}
+            className="w-full flex items-center justify-between mb-3"
+          >
+            <div className="flex items-center gap-2">
+              <Bell className="w-5 h-5 text-yellow-400" />
+              <h3 className="text-sm font-semibold uppercase tracking-wider">Alerts</h3>
+            </div>
+            <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.alerts ? 'rotate-180' : ''}`} />
+          </button>
             
             {expandedSections.alerts && (
               <div className="space-y-2">
