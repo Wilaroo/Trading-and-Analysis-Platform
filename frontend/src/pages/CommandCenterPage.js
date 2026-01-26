@@ -620,7 +620,7 @@ const CommandCenterPage = () => {
   };
 
   // Fetch market context
-  const fetchMarketContext = useCallback(async () => {
+  const fetchMarketContext = async () => {
     try {
       const symbols = ['SPY', 'QQQ', 'VIX'];
       const res = await api.post('/api/ib/quotes/batch', symbols);
@@ -644,35 +644,35 @@ const CommandCenterPage = () => {
     } catch (err) {
       console.error('Market context error:', err);
     }
-  }, []);
+  };
 
   // Fetch alerts
-  const fetchAlerts = useCallback(async () => {
+  const fetchAlerts = async () => {
     try {
       const res = await api.get('/api/alerts');
       setAlerts(res.data?.alerts?.slice(0, 5) || []);
     } catch {
       setAlerts([]);
     }
-  }, []);
+  };
 
   // Fetch newsletter
-  const fetchNewsletter = useCallback(async () => {
+  const fetchNewsletter = async () => {
     try {
       const res = await api.get('/api/newsletter/latest');
       setNewsletter(res.data);
     } catch {
       setNewsletter(null);
     }
-  }, []);
+  };
 
   // Fetch watchlist
-  const fetchWatchlist = useCallback(async () => {
+  const fetchWatchlist = async (connected) => {
     try {
       const res = await api.get('/api/watchlist');
       const symbols = res.data?.symbols || ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMD'];
       
-      if (isConnected && symbols.length > 0) {
+      if (connected && symbols.length > 0) {
         const quotesRes = await api.post('/api/ib/quotes/batch', symbols.slice(0, 10));
         setWatchlist(quotesRes.data?.quotes || []);
       }
