@@ -351,6 +351,44 @@ Generate a complete premarket briefing with specific, actionable trade ideas. In
             return [value]
         return [value]
     
+    def _normalize_opportunities(self, opportunities: List) -> List[Dict]:
+        """Normalize opportunity objects to ensure consistent format with symbol field"""
+        normalized = []
+        for opp in opportunities:
+            if isinstance(opp, dict):
+                # Extract symbol from various possible field names
+                symbol = (opp.get("symbol") or 
+                         opp.get("ticker") or 
+                         opp.get("stock") or 
+                         opp.get("name", "").split()[0] if opp.get("name") else "")
+                
+                if symbol:
+                    # Clean up symbol (remove $ if present)
+                    symbol = symbol.replace("$", "").upper().strip()
+                    
+                    normalized.append({
+                        "symbol": symbol,
+                        "direction": opp.get("direction", opp.get("bias", "WATCH")).upper(),
+                        "entry": opp.get("entry", opp.get("entry_price")),
+                        "target": opp.get("target", opp.get("target_price", opp.get("price_target"))),
+                        "stop": opp.get("stop", opp.get("stop_loss", opp.get("stop_price"))),
+                        "reasoning": opp.get("reasoning", opp.get("reason", opp.get("rationale", opp.get("notes", "")))),
+                        "price": opp.get("price", opp.get("current_price")),
+                        "change_percent": opp.get("change_percent", opp.get("change"))
+                    })
+            elif isinstance(opp, str):
+                # If it's just a string, try to extract ticker symbol
+                parts = opp.split()
+                if parts:
+                    symbol = parts[0].replace("$", "").upper().strip()
+                    if symbol.isalpha() and len(symbol) <= 5:
+                        normalized.append({
+                            "symbol": symbol,
+                            "direction": "WATCH",
+                            "reasoning": opp
+                        })
+        return normalized
+    
     def _format_watchlist_from_opportunities(self, opportunities: List[Dict]) -> List[Dict]:
         """Format opportunities as watchlist items"""
         watchlist = []
