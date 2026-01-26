@@ -36,7 +36,10 @@ from routers.ib import router as ib_router, init_ib_service
 from routers.strategies import router as strategies_router, init_strategy_service
 from routers.scoring import router as scoring_router
 from routers.features import router as features_router
+from routers.newsletter import router as newsletter_router
 from services.ib_service import get_ib_service
+from services.newsletter_service import init_newsletter_service
+from services.news_service import init_news_service
 from services.strategy_service import get_strategy_service
 from services.scoring_engine import get_scoring_engine
 from services.feature_engine import get_feature_engine
@@ -81,6 +84,8 @@ init_catalyst_service(catalyst_scoring_service, stock_service)
 init_trading_rules(trading_rules_engine)
 init_ib_service(ib_service)
 init_strategy_service(strategy_service)
+newsletter_service = init_newsletter_service(ib_service)
+news_service = init_news_service(ib_service)
 
 # Include routers
 app.include_router(notifications_router)
@@ -92,6 +97,7 @@ app.include_router(ib_router)
 app.include_router(strategies_router)
 app.include_router(scoring_router)
 app.include_router(features_router)
+app.include_router(newsletter_router)
 
 # Collections
 strategies_col = db["strategies"]
