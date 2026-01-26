@@ -624,3 +624,35 @@ The application is now consolidated into a single **Command Center** that serves
   - All tabs populate correctly: Overview, Chart, Technicals, Fundamentals, Strategies, News
   - Scores, trading analysis, company info, and matched strategies all display properly
 
+
+
+### Jan 26, 2026 - Critical Backend Bug Fix (P0)
+**Fixed:**
+1. **IBService.run_scanner() Method Signature**
+   - **Error**: `IBService.run_scanner() got an unexpected keyword argument 'limit'`
+   - **Root Cause**: Scanner calls in `ib.py` were using `limit=` parameter instead of `max_results=`
+   - **Fix**: Changed `limit=20` and `limit=30` to `max_results=20` and `max_results=30` in:
+     - Line 1230 (short-squeeze scanner)
+     - Line 1741 (comprehensive scanner)
+
+2. **FeatureEngineService Method Name**
+   - **Error**: `'FeatureEngineService' object has no attribute 'calculate_features'`
+   - **Root Cause**: Multiple locations calling non-existent method `calculate_features()` instead of `calculate_all_features()`
+   - **Fix**: Updated all calls to use `calculate_all_features()` with correct parameters:
+     - Line 659 (analysis endpoint): `calc_all_features()` → `calculate_all_features(bars_5m=bars)`
+     - Line 1254 (short-squeeze scanner)
+     - Line 1472 (breakout scanner)
+     - Line 1796 (comprehensive scanner)
+     - Line 2209 (symbol analysis endpoint)
+
+**Files Modified:**
+- `/app/backend/routers/ib.py` - Fixed 7 method calls
+
+**Verified Working:**
+- All scanner endpoints now return proper 503 responses when IB Gateway disconnected (instead of 500 crashes)
+- `/api/ib/scanner/short-squeeze` - Returns appropriate error
+- `/api/ib/scanner/breakouts` - Returns appropriate error
+- `/api/ib/scanner/comprehensive` - Returns appropriate error
+- `/api/ib/analysis/AAPL` - Returns proper analysis data
+- Frontend loads without crashes
+
