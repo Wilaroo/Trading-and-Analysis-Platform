@@ -2147,6 +2147,344 @@ const CommandCenterPage = () => {
             )}
           </Card>
 
+          {/* Enhanced Contextual Alerts Panel */}
+          <Card glow={enhancedAlerts.length > 0 && enhancedAlerts.some(a => a.is_new)}>
+            <button 
+              onClick={() => toggleSection('enhancedAlerts')}
+              className="w-full flex items-center justify-between mb-3"
+            >
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-5 h-5 text-cyan-400" />
+                <h3 className="text-sm font-semibold uppercase tracking-wider">Smart Alerts</h3>
+                <span className="text-xs text-zinc-500">({enhancedAlerts.length})</span>
+                {enhancedAlerts.some(a => a.is_new) && (
+                  <span className="text-[9px] px-1.5 py-0.5 bg-cyan-500/20 text-cyan-400 rounded animate-pulse">
+                    NEW
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={(e) => { e.stopPropagation(); fetchEnhancedAlerts(); }}
+                  className="text-xs text-cyan-400 hover:text-cyan-300"
+                >
+                  Refresh
+                </button>
+                <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.enhancedAlerts ? 'rotate-180' : ''}`} />
+              </div>
+            </button>
+            
+            {expandedSections.enhancedAlerts && (
+              <div className="space-y-3">
+                {!isConnected && (
+                  <div className="text-center py-4 text-zinc-500 text-sm">
+                    Connect IB Gateway for contextual alerts
+                  </div>
+                )}
+                
+                {isConnected && enhancedAlerts.length === 0 && (
+                  <div className="text-center py-6 text-zinc-500">
+                    <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No enhanced alerts yet</p>
+                    <p className="text-xs mt-1">Alerts will appear when opportunities are detected</p>
+                  </div>
+                )}
+                
+                {/* Enhanced Alert Cards */}
+                {enhancedAlerts.slice(0, 5).map((alert, idx) => (
+                  <motion.div 
+                    key={alert.id}
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: idx * 0.05 }}
+                    onClick={() => setSelectedEnhancedAlert(alert)}
+                    className={`p-3 rounded-lg cursor-pointer transition-all border ${
+                      alert.is_new 
+                        ? 'bg-cyan-500/10 border-cyan-500/40 shadow-[0_0_15px_rgba(0,229,255,0.15)]' 
+                        : 'bg-zinc-900/50 border-white/10 hover:border-cyan-500/30'
+                    }`}
+                    data-testid={`enhanced-alert-${alert.symbol}`}
+                  >
+                    {/* Alert Header */}
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-white">{alert.symbol}</span>
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                            alert.trade_plan?.direction === 'LONG' 
+                              ? 'bg-green-500 text-black' 
+                              : 'bg-red-500 text-white'
+                          }`}>
+                            {alert.trade_plan?.direction || 'LONG'}
+                          </span>
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                            alert.grade === 'A' ? 'bg-green-500/20 text-green-400' :
+                            alert.grade === 'B' ? 'bg-cyan-500/20 text-cyan-400' :
+                            alert.grade === 'C' ? 'bg-yellow-500/20 text-yellow-400' :
+                            'bg-zinc-500/20 text-zinc-400'
+                          }`}>
+                            <HelpTooltip termId="grade">Grade {alert.grade}</HelpTooltip>
+                          </span>
+                          <span className="text-[9px] px-1.5 py-0.5 bg-purple-500/20 text-purple-400 rounded">
+                            <HelpTooltip termId={alert.timeframe?.toLowerCase() || 'intraday'}>{alert.timeframe_description}</HelpTooltip>
+                          </span>
+                        </div>
+                        <p className="text-xs text-zinc-400 mt-1 line-clamp-2">{alert.headline}</p>
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); dismissEnhancedAlert(alert.id); }}
+                        className="p-1 text-zinc-500 hover:text-red-400 transition-colors"
+                        title="Dismiss"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    
+                    {/* Timestamp & Trigger */}
+                    <div className="flex items-center gap-2 text-[9px] mb-2">
+                      <Clock className="w-3 h-3 text-zinc-500" />
+                      <span className="text-cyan-400">{alert.triggered_at_formatted}</span>
+                      <span className="text-zinc-600">•</span>
+                      <span className="text-zinc-400">{alert.trigger_reason}</span>
+                    </div>
+                    
+                    {/* Trade Plan Summary */}
+                    <div className="grid grid-cols-4 gap-2 text-[9px] p-2 bg-black/30 rounded">
+                      <div className="text-center">
+                        <span className="text-zinc-500 block"><HelpTooltip termId="entry">Entry</HelpTooltip></span>
+                        <span className="text-cyan-400 font-mono">${alert.trade_plan?.entry?.toFixed(2)}</span>
+                      </div>
+                      <div className="text-center">
+                        <span className="text-zinc-500 block"><HelpTooltip termId="stop-loss">Stop</HelpTooltip></span>
+                        <span className="text-red-400 font-mono">${alert.trade_plan?.stop_loss?.toFixed(2)}</span>
+                      </div>
+                      <div className="text-center">
+                        <span className="text-zinc-500 block"><HelpTooltip termId="target">Target</HelpTooltip></span>
+                        <span className="text-green-400 font-mono">${alert.trade_plan?.target?.toFixed(2)}</span>
+                      </div>
+                      <div className="text-center">
+                        <span className="text-zinc-500 block"><HelpTooltip termId="risk-reward">R/R</HelpTooltip></span>
+                        <span className="text-purple-400 font-mono">1:{alert.trade_plan?.risk_reward?.toFixed(1)}</span>
+                      </div>
+                    </div>
+                    
+                    {/* Signal Strength */}
+                    {alert.signal_strength > 0 && (
+                      <div className="mt-2 flex items-center justify-between text-[9px]">
+                        <span className="text-zinc-500">
+                          <HelpTooltip termId="signal-strength">Signal Strength</HelpTooltip>: 
+                          <span className={`ml-1 font-bold ${
+                            alert.signal_strength >= 13 ? 'text-green-400' :
+                            alert.signal_strength >= 9 ? 'text-cyan-400' :
+                            alert.signal_strength >= 5 ? 'text-yellow-400' :
+                            'text-zinc-400'
+                          }`}>
+                            {alert.matched_strategies_count}/77 rules
+                          </span>
+                        </span>
+                        <span className="text-zinc-600">
+                          {alert.primary_strategy?.name}
+                        </span>
+                      </div>
+                    )}
+                  </motion.div>
+                ))}
+                
+                {enhancedAlerts.length > 5 && (
+                  <p className="text-center text-zinc-500 text-xs py-2">
+                    +{enhancedAlerts.length - 5} more alerts
+                  </p>
+                )}
+              </div>
+            )}
+          </Card>
+
+          {/* Enhanced Alert Detail Modal */}
+          <AnimatePresence>
+            {selectedEnhancedAlert && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                onClick={() => setSelectedEnhancedAlert(null)}
+              >
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="bg-[#0A0A0A] border border-cyan-500/30 w-full max-w-2xl max-h-[85vh] overflow-hidden rounded-xl"
+                  onClick={e => e.stopPropagation()}
+                >
+                  {/* Modal Header */}
+                  <div className="flex items-center justify-between p-4 border-b border-white/10 bg-gradient-to-r from-cyan-900/20 to-transparent">
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl font-bold text-white">{selectedEnhancedAlert.symbol}</span>
+                      <span className={`text-sm px-2 py-0.5 rounded font-bold ${
+                        selectedEnhancedAlert.grade === 'A' ? 'bg-green-500 text-black' :
+                        selectedEnhancedAlert.grade === 'B' ? 'bg-cyan-500 text-black' :
+                        selectedEnhancedAlert.grade === 'C' ? 'bg-yellow-500 text-black' :
+                        'bg-red-500 text-white'
+                      }`}>
+                        Grade {selectedEnhancedAlert.grade}
+                      </span>
+                      <span className={`text-xs px-2 py-0.5 rounded ${
+                        selectedEnhancedAlert.trade_plan?.direction === 'LONG' 
+                          ? 'bg-green-500/20 text-green-400' 
+                          : 'bg-red-500/20 text-red-400'
+                      }`}>
+                        {selectedEnhancedAlert.trade_plan?.direction}
+                      </span>
+                    </div>
+                    <button onClick={() => setSelectedEnhancedAlert(null)} className="p-2 rounded-lg hover:bg-white/10 text-zinc-400">
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  
+                  {/* Modal Content */}
+                  <div className="p-4 overflow-y-auto max-h-[65vh] space-y-4">
+                    {/* Timestamp & Context */}
+                    <div className="flex items-center gap-3 text-sm">
+                      <div className="flex items-center gap-1.5 text-cyan-400">
+                        <Clock className="w-4 h-4" />
+                        {selectedEnhancedAlert.triggered_at_formatted}
+                      </div>
+                      <span className="text-zinc-600">•</span>
+                      <span className="text-purple-400">{selectedEnhancedAlert.timeframe_description}</span>
+                      <span className="text-zinc-600">•</span>
+                      <span className="text-zinc-400">{selectedEnhancedAlert.alert_type}</span>
+                    </div>
+                    
+                    {/* Headline */}
+                    <div className="p-3 bg-cyan-500/10 border border-cyan-500/30 rounded-lg">
+                      <p className="text-sm text-white font-medium">{selectedEnhancedAlert.headline}</p>
+                    </div>
+                    
+                    {/* Trigger Reason */}
+                    <div>
+                      <h4 className="text-xs text-zinc-500 uppercase mb-2">Why This Alert Triggered</h4>
+                      <p className="text-sm text-zinc-300">{selectedEnhancedAlert.trigger_reason}</p>
+                    </div>
+                    
+                    {/* Trade Plan */}
+                    <div className="grid grid-cols-5 gap-3">
+                      {[
+                        { label: 'Direction', value: selectedEnhancedAlert.trade_plan?.direction, color: selectedEnhancedAlert.trade_plan?.direction === 'LONG' ? 'green' : 'red' },
+                        { label: 'Entry', value: `$${selectedEnhancedAlert.trade_plan?.entry?.toFixed(2)}`, color: 'cyan' },
+                        { label: 'Stop Loss', value: `$${selectedEnhancedAlert.trade_plan?.stop_loss?.toFixed(2)}`, color: 'red' },
+                        { label: 'Target', value: `$${selectedEnhancedAlert.trade_plan?.target?.toFixed(2)}`, color: 'green' },
+                        { label: 'R/R Ratio', value: `1:${selectedEnhancedAlert.trade_plan?.risk_reward?.toFixed(1)}`, color: 'purple' },
+                      ].map((item, idx) => (
+                        <div key={idx} className="bg-zinc-900 rounded-lg p-3 text-center">
+                          <span className="text-[10px] text-zinc-500 uppercase block">{item.label}</span>
+                          <p className={`text-sm font-bold font-mono text-${item.color}-400`}>{item.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    
+                    {/* Scores */}
+                    <div>
+                      <h4 className="text-xs text-zinc-500 uppercase mb-2">Scores</h4>
+                      <div className="grid grid-cols-5 gap-2">
+                        {[
+                          { label: 'Overall', value: selectedEnhancedAlert.scores?.overall, termId: 'overall-score' },
+                          { label: 'Technical', value: selectedEnhancedAlert.scores?.technical, termId: 'technical-score' },
+                          { label: 'Fundamental', value: selectedEnhancedAlert.scores?.fundamental, termId: 'fundamental-score' },
+                          { label: 'Catalyst', value: selectedEnhancedAlert.scores?.catalyst, termId: 'catalyst-score' },
+                          { label: 'Confidence', value: selectedEnhancedAlert.scores?.confidence, termId: 'confidence-score' },
+                        ].map((score, idx) => (
+                          <div key={idx} className="bg-zinc-900/50 rounded p-2 text-center">
+                            <span className="text-[9px] text-zinc-500 uppercase block">
+                              <HelpTooltip termId={score.termId}>{score.label}</HelpTooltip>
+                            </span>
+                            <p className={`text-lg font-bold font-mono ${
+                              score.value >= 70 ? 'text-green-400' :
+                              score.value >= 50 ? 'text-cyan-400' :
+                              score.value >= 30 ? 'text-yellow-400' :
+                              'text-red-400'
+                            }`}>{score.value || '--'}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    {/* Technical Features */}
+                    <div>
+                      <h4 className="text-xs text-zinc-500 uppercase mb-2">Technical Context</h4>
+                      <div className="grid grid-cols-4 gap-2">
+                        {[
+                          { label: 'RVOL', value: `${selectedEnhancedAlert.features?.rvol?.toFixed(1)}x`, termId: 'rvol' },
+                          { label: 'RSI', value: selectedEnhancedAlert.features?.rsi?.toFixed(0), termId: 'rsi' },
+                          { label: 'VWAP Dist', value: `${selectedEnhancedAlert.features?.vwap_distance?.toFixed(1)}%`, termId: 'vwap-dist' },
+                          { label: 'Trend', value: selectedEnhancedAlert.features?.trend, termId: 'trend' },
+                        ].map((item, idx) => (
+                          <div key={idx} className="bg-zinc-900/50 rounded p-2 text-center">
+                            <span className="text-[9px] text-zinc-500 uppercase block">
+                              <HelpTooltip termId={item.termId}>{item.label}</HelpTooltip>
+                            </span>
+                            <p className="text-sm font-mono text-white">{item.value || '--'}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    {/* Strategy Match */}
+                    {selectedEnhancedAlert.primary_strategy && (
+                      <div className="p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs text-purple-400 uppercase font-semibold">Primary Strategy Match</span>
+                          <span className="text-xs text-zinc-400">
+                            <HelpTooltip termId="signal-strength">{selectedEnhancedAlert.matched_strategies_count}/77 rules</HelpTooltip>
+                          </span>
+                        </div>
+                        <p className="text-sm font-bold text-white">{selectedEnhancedAlert.primary_strategy.name}</p>
+                        <p className="text-xs text-zinc-400 mt-1">{selectedEnhancedAlert.primary_strategy.description}</p>
+                      </div>
+                    )}
+                    
+                    {/* Full Summary */}
+                    <div>
+                      <h4 className="text-xs text-zinc-500 uppercase mb-2">Full Analysis</h4>
+                      <div className="p-3 bg-zinc-900/50 rounded-lg">
+                        <pre className="text-xs text-zinc-300 whitespace-pre-wrap font-sans leading-relaxed">
+                          {selectedEnhancedAlert.summary}
+                        </pre>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Modal Footer */}
+                  <div className="flex gap-3 p-4 border-t border-white/10">
+                    <button 
+                      onClick={() => {
+                        handleTrade({ symbol: selectedEnhancedAlert.symbol, quote: { price: selectedEnhancedAlert.trade_plan?.entry } }, 'BUY');
+                        setSelectedEnhancedAlert(null);
+                      }}
+                      className="flex-1 py-2.5 text-sm font-bold bg-green-500 text-black rounded-lg hover:bg-green-400 transition-colors"
+                    >
+                      Buy {selectedEnhancedAlert.symbol}
+                    </button>
+                    <button 
+                      onClick={() => {
+                        handleTrade({ symbol: selectedEnhancedAlert.symbol, quote: { price: selectedEnhancedAlert.trade_plan?.entry } }, 'SELL');
+                        setSelectedEnhancedAlert(null);
+                      }}
+                      className="flex-1 py-2.5 text-sm font-bold bg-red-500 text-white rounded-lg hover:bg-red-400 transition-colors"
+                    >
+                      Short {selectedEnhancedAlert.symbol}
+                    </button>
+                    <button 
+                      onClick={() => setSelectedTicker({ symbol: selectedEnhancedAlert.symbol, quote: { price: selectedEnhancedAlert.features?.price } })}
+                      className="px-4 py-2.5 text-sm font-bold bg-zinc-800 text-white rounded-lg hover:bg-zinc-700 transition-colors"
+                    >
+                      Full Details
+                    </button>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {/* Opportunities Grid */}
           <Card>
             <SectionHeader 
