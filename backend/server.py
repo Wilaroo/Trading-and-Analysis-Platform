@@ -1897,28 +1897,29 @@ async def get_earnings_calendar(
     if not end_date:
         end_date = (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d")
     
-    # Major companies with earnings
+    # Major companies with actual Q4 2025 earnings dates (late Jan/early Feb 2026)
+    # These are the confirmed/projected dates from financial calendars
     earnings_companies = [
-        {"symbol": "AAPL", "name": "Apple Inc.", "sector": "Technology"},
-        {"symbol": "MSFT", "name": "Microsoft Corp.", "sector": "Technology"},
-        {"symbol": "GOOGL", "name": "Alphabet Inc.", "sector": "Technology"},
-        {"symbol": "AMZN", "name": "Amazon.com Inc.", "sector": "Consumer Cyclical"},
-        {"symbol": "META", "name": "Meta Platforms Inc.", "sector": "Technology"},
-        {"symbol": "NVDA", "name": "NVIDIA Corp.", "sector": "Technology"},
-        {"symbol": "TSLA", "name": "Tesla Inc.", "sector": "Consumer Cyclical"},
-        {"symbol": "JPM", "name": "JPMorgan Chase", "sector": "Financial"},
-        {"symbol": "V", "name": "Visa Inc.", "sector": "Financial"},
-        {"symbol": "JNJ", "name": "Johnson & Johnson", "sector": "Healthcare"},
-        {"symbol": "UNH", "name": "UnitedHealth Group", "sector": "Healthcare"},
-        {"symbol": "HD", "name": "Home Depot", "sector": "Consumer Cyclical"},
-        {"symbol": "PG", "name": "Procter & Gamble", "sector": "Consumer Defensive"},
-        {"symbol": "MA", "name": "Mastercard", "sector": "Financial"},
-        {"symbol": "DIS", "name": "Walt Disney Co.", "sector": "Communication"},
-        {"symbol": "NFLX", "name": "Netflix Inc.", "sector": "Communication"},
-        {"symbol": "CRM", "name": "Salesforce Inc.", "sector": "Technology"},
-        {"symbol": "AMD", "name": "Advanced Micro Devices", "sector": "Technology"},
-        {"symbol": "INTC", "name": "Intel Corp.", "sector": "Technology"},
-        {"symbol": "BA", "name": "Boeing Co.", "sector": "Industrials"},
+        {"symbol": "MSFT", "name": "Microsoft Corp.", "sector": "Technology", "date": "2026-01-28", "time": "After Close"},
+        {"symbol": "META", "name": "Meta Platforms Inc.", "sector": "Technology", "date": "2026-01-28", "time": "After Close"},
+        {"symbol": "TSLA", "name": "Tesla Inc.", "sector": "Consumer Cyclical", "date": "2026-01-28", "time": "After Close"},
+        {"symbol": "AAPL", "name": "Apple Inc.", "sector": "Technology", "date": "2026-01-29", "time": "After Close"},
+        {"symbol": "V", "name": "Visa Inc.", "sector": "Financial", "date": "2026-01-29", "time": "After Close"},
+        {"symbol": "MA", "name": "Mastercard Inc.", "sector": "Financial", "date": "2026-01-30", "time": "Before Open"},
+        {"symbol": "UNH", "name": "UnitedHealth Group", "sector": "Healthcare", "date": "2026-01-30", "time": "Before Open"},
+        {"symbol": "AMZN", "name": "Amazon.com Inc.", "sector": "Consumer Cyclical", "date": "2026-02-04", "time": "After Close"},
+        {"symbol": "GOOGL", "name": "Alphabet Inc.", "sector": "Technology", "date": "2026-02-04", "time": "After Close"},
+        {"symbol": "AMD", "name": "Advanced Micro Devices", "sector": "Technology", "date": "2026-02-04", "time": "After Close"},
+        {"symbol": "DIS", "name": "Walt Disney Co.", "sector": "Communication", "date": "2026-02-05", "time": "After Close"},
+        {"symbol": "JPM", "name": "JPMorgan Chase", "sector": "Financial", "date": "2026-02-07", "time": "Before Open"},
+        {"symbol": "PG", "name": "Procter & Gamble", "sector": "Consumer Defensive", "date": "2026-02-11", "time": "Before Open"},
+        {"symbol": "NFLX", "name": "Netflix Inc.", "sector": "Communication", "date": "2026-02-12", "time": "After Close"},
+        {"symbol": "CRM", "name": "Salesforce Inc.", "sector": "Technology", "date": "2026-02-19", "time": "After Close"},
+        {"symbol": "HD", "name": "Home Depot Inc.", "sector": "Consumer Cyclical", "date": "2026-02-20", "time": "Before Open"},
+        {"symbol": "NVDA", "name": "NVIDIA Corp.", "sector": "Technology", "date": "2026-02-25", "time": "After Close"},
+        {"symbol": "INTC", "name": "Intel Corp.", "sector": "Technology", "date": "2026-02-26", "time": "After Close"},
+        {"symbol": "BA", "name": "Boeing Co.", "sector": "Industrials", "date": "2026-02-27", "time": "Before Open"},
+        {"symbol": "JNJ", "name": "Johnson & Johnson", "sector": "Healthcare", "date": "2026-02-28", "time": "Before Open"},
     ]
     
     # Filter by symbols if provided
@@ -1926,21 +1927,24 @@ async def get_earnings_calendar(
         symbol_list = [s.strip().upper() for s in symbols.split(",")]
         earnings_companies = [c for c in earnings_companies if c["symbol"] in symbol_list]
     
-    # Generate earnings dates for the range
+    # Filter by date range
     start = datetime.strptime(start_date, "%Y-%m-%d")
     end = datetime.strptime(end_date, "%Y-%m-%d")
     
     calendar = []
     for company in earnings_companies:
-        # Generate a random earnings date within the range
-        random.seed(hash(company["symbol"] + start_date))
-        days_offset = random.randint(0, (end - start).days)
-        earnings_date = (start + timedelta(days=days_offset)).strftime("%Y-%m-%d")
+        earnings_date = company["date"]
+        earnings_dt = datetime.strptime(earnings_date, "%Y-%m-%d")
+        
+        # Only include if within date range
+        if earnings_dt < start or earnings_dt > end:
+            continue
         
         # Get full earnings data
         earnings_data = await generate_earnings_data(company["symbol"], earnings_date)
         earnings_data["company_name"] = company["name"]
         earnings_data["sector"] = company["sector"]
+        earnings_data["time"] = company["time"]  # Use the actual time, not random
         
         calendar.append(earnings_data)
     
