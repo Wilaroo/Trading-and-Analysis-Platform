@@ -92,7 +92,7 @@ async def generate_newsletter(request: GenerateNewsletterRequest = None):
                                 {**m, "quote": quotes_map.get(m["symbol"], {})}
                                 for m in movers
                             ]
-            except Exception as e:
+            except Exception:
                 # Continue without scanner data
                 pass
         
