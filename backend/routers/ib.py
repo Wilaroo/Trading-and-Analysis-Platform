@@ -1709,7 +1709,6 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
     
     try:
         from services.scoring_engine import get_scoring_engine
-        from services.strategy_service import StrategyService
         from services.enhanced_alerts import (
             create_enhanced_alert, get_alert_manager,
             AlertType, AlertTimeframe, determine_timeframe
