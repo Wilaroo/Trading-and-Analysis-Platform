@@ -205,7 +205,6 @@ Generate a complete premarket briefing with specific, actionable trade ideas. In
     
     def _generate_fallback_content(self, context_data: Dict) -> str:
         """Generate basic content when API is unavailable"""
-        date = context_data.get("date", datetime.now().strftime("%A, %B %d, %Y"))
         
         # Build a basic newsletter from available data
         movers = context_data.get("top_movers", [])
