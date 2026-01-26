@@ -255,11 +255,19 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
     });
 
     const chartData = historicalData.map(bar => ({
-      time: new Date(bar.date).getTime() / 1000,
-      open: bar.open, high: bar.high, low: bar.low, close: bar.close,
-    }));
+      time: Math.floor(new Date(bar.date).getTime() / 1000),
+      open: parseFloat(bar.open), 
+      high: parseFloat(bar.high), 
+      low: parseFloat(bar.low), 
+      close: parseFloat(bar.close),
+    })).sort((a, b) => a.time - b.time);
 
-    candlestickSeries.setData(chartData);
+    console.log('Chart data points:', chartData.length, 'First:', chartData[0], 'Last:', chartData[chartData.length - 1]);
+    
+    if (chartData.length > 0) {
+      candlestickSeries.setData(chartData);
+      chart.timeScale().fitContent();
+    }
     
     // Add SL/TP price lines if trading summary exists and lines are enabled
     if (showTradingLines && analysis?.trading_summary) {
