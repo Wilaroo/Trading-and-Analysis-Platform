@@ -1254,6 +1254,57 @@ const CommandCenterPage = () => {
     }
   };
 
+  // Run comprehensive scan - scans ALL types and categorizes by timeframe
+  const runComprehensiveScan = async () => {
+    if (isComprehensiveScanning) return;
+    
+    setIsComprehensiveScanning(true);
+    try {
+      const res = await api.post('/api/ib/scanner/comprehensive', {
+        min_score: minScoreThreshold
+      });
+      
+      const alerts = res.data?.alerts || { scalp: [], intraday: [], swing: [], position: [] };
+      const summary = res.data?.summary || { scalp: 0, intraday: 0, swing: 0, position: 0, total: 0 };
+      
+      setComprehensiveAlerts(alerts);
+      setComprehensiveSummary(summary);
+      
+      // Notify for high-quality alerts
+      if (soundEnabled && summary.total > 0) {
+        const allAlerts = [...alerts.scalp, ...alerts.intraday, ...alerts.swing, ...alerts.position];
+        const gradeAAlerts = allAlerts.filter(a => a.grade === 'A');
+        
+        if (gradeAAlerts.length > 0) {
+          playSound('alert');
+          toast.success(`🎯 ${gradeAAlerts.length} Grade A opportunities found!`, { duration: 8000 });
+        } else if (summary.total > 0) {
+          toast.info(`Found ${summary.total} opportunities across all timeframes`, { duration: 5000 });
+        }
+      }
+      
+      console.log(`Comprehensive scan complete: ${summary.total} alerts found`);
+    } catch (err) {
+      console.log('Comprehensive scan error:', err.response?.data?.detail?.message || err.message);
+      toast.error('Scan failed - check IB Gateway connection');
+    } finally {
+      setIsComprehensiveScanning(false);
+    }
+  };
+
+  // Get filtered comprehensive alerts based on selected timeframe tab
+  const getFilteredComprehensiveAlerts = () => {
+    if (selectedTimeframeTab === 'all') {
+      return [
+        ...comprehensiveAlerts.scalp,
+        ...comprehensiveAlerts.intraday,
+        ...comprehensiveAlerts.swing,
+        ...comprehensiveAlerts.position
+      ].sort((a, b) => b.overall_score - a.overall_score);
+    }
+    return comprehensiveAlerts[selectedTimeframeTab] || [];
+  };
+
   // Dismiss/archive an enhanced alert
   const dismissEnhancedAlert = async (alertId) => {
     try {
@@ -1264,6 +1315,19 @@ const CommandCenterPage = () => {
       }
     } catch {
       toast.error('Failed to dismiss alert');
+    }
+  };
+
+  // Dismiss comprehensive alert (from local state only)
+  const dismissComprehensiveAlert = (alertId) => {
+    setComprehensiveAlerts(prev => ({
+      scalp: prev.scalp.filter(a => a.id !== alertId),
+      intraday: prev.intraday.filter(a => a.id !== alertId),
+      swing: prev.swing.filter(a => a.id !== alertId),
+      position: prev.position.filter(a => a.id !== alertId)
+    }));
+    if (selectedEnhancedAlert?.id === alertId) {
+      setSelectedEnhancedAlert(null);
     }
   };
 
