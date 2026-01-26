@@ -1,10 +1,9 @@
 """
-Newsletter Service - Generates AI-powered premarket briefings using Perplexity API
+Newsletter Service - Generates AI-powered premarket briefings using GPT via Emergent LLM
 Provides daytrader-style morning newsletters with market context and opportunities
 """
 import logging
 import os
-import aiohttp
 import json
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone
@@ -14,10 +13,8 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Perplexity API configuration
-PERPLEXITY_API_KEY = os.environ.get("PERPLEXITY_API_KEY", "")
-PERPLEXITY_MODEL = os.environ.get("PERPLEXITY_MODEL", "sonar")
-PERPLEXITY_API_URL = "https://api.perplexity.ai/chat/completions"
+# Emergent LLM API configuration
+EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 
 
 class NewsletterService:
@@ -25,7 +22,7 @@ class NewsletterService:
     
     def __init__(self, ib_service=None):
         self.ib_service = ib_service
-        self.api_key = PERPLEXITY_API_KEY
+        self.api_key = EMERGENT_LLM_KEY
         
     def set_ib_service(self, ib_service):
         """Set the IB service for market data"""
@@ -39,7 +36,7 @@ class NewsletterService:
     ) -> Dict:
         """
         Generate a premarket newsletter written from a daytrader's perspective.
-        Uses Perplexity API for real-time market intelligence.
+        Uses GPT via Emergent LLM for market intelligence.
         """
         try:
             # Gather market context
@@ -49,8 +46,8 @@ class NewsletterService:
                 custom_watchlist=custom_watchlist
             )
             
-            # Generate newsletter content via Perplexity
-            newsletter_content = await self._generate_with_perplexity(context_data)
+            # Generate newsletter content via GPT
+            newsletter_content = await self._generate_with_gpt(context_data)
             
             # Parse and structure the response
             newsletter = self._parse_newsletter_response(newsletter_content, context_data)
