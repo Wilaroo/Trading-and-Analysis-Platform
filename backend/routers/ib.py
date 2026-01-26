@@ -1336,7 +1336,7 @@ async def get_breakout_alerts():
     Requires IB Gateway connection for real-time data.
     NO MOCK DATA.
     """
-    cache = get_data_cache()
+    global _breakout_alerts, _breakout_alert_history
     
     # Check connection
     is_connected = False
