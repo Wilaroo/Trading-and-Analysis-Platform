@@ -1007,7 +1007,7 @@ const CommandCenterPage = () => {
     opportunities: true,
     context: true,
     alerts: true,
-    news: false,
+    news: true,
     earnings: true,
     squeeze: false,
     priceAlerts: false,
