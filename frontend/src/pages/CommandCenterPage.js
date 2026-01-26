@@ -203,14 +203,17 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [showTradingLines, setShowTradingLines] = useState(true);
+  const [chartError, setChartError] = useState(null);
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
+  const candleSeriesRef = useRef(null);
 
   useEffect(() => {
     if (!ticker?.symbol) return;
     
     const fetchData = async () => {
       setLoading(true);
+      setChartError(null);
       try {
         // Fetch comprehensive analysis
         const [analysisRes, histRes] = await Promise.all([
@@ -218,14 +221,20 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
             console.error('Analysis API error:', err);
             return { data: null };
           }),
-          api.get(`/api/ib/historical/${ticker.symbol}?duration=1 D&bar_size=5 mins`).catch(() => ({ data: { bars: [] } }))
+          api.get(`/api/ib/historical/${ticker.symbol}?duration=1 D&bar_size=5 mins`).catch((err) => {
+            console.error('Historical data error:', err);
+            setChartError(err.response?.data?.detail?.message || 'Unable to load chart data');
+            return { data: { bars: [] } };
+          })
         ]);
         
         console.log('Analysis data received:', analysisRes.data);
+        console.log('Historical data received:', histRes.data?.bars?.length, 'bars');
         setAnalysis(analysisRes.data);
         setHistoricalData(histRes.data?.bars || []);
       } catch (err) {
         console.error('Error fetching data:', err);
+        setChartError('Failed to load data');
       }
       setLoading(false);
     };
@@ -233,126 +242,164 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
     fetchData();
   }, [ticker?.symbol]);
 
-  // Initialize chart with SL/TP lines
+  // Create chart when tab changes to chart
   useEffect(() => {
-    if (!chartContainerRef.current || !historicalData || historicalData.length === 0 || activeTab !== 'chart') return;
-
-    // Clear any existing chart first
+    if (activeTab !== 'chart' || !chartContainerRef.current) return;
+    
+    // Clean up existing chart
     if (chartRef.current) {
       chartRef.current.remove();
       chartRef.current = null;
+      candleSeriesRef.current = null;
     }
-
-    // Small delay to ensure container has dimensions
+    
+    // Delay to ensure container is rendered with dimensions
     const timer = setTimeout(() => {
       if (!chartContainerRef.current) return;
       
       const container = chartContainerRef.current;
-      const containerWidth = container.clientWidth || 700;
-      const containerHeight = container.clientHeight || 300;
+      const width = container.clientWidth || 700;
+      const height = container.clientHeight || 300;
+      
+      console.log('Creating chart with dimensions:', width, 'x', height);
       
       try {
-        console.log('Creating chart with dimensions:', containerWidth, containerHeight);
-        
         const chart = LightweightCharts.createChart(container, {
-          width: containerWidth,
-          height: containerHeight,
-          layout: { 
-            background: { type: 'solid', color: 'transparent' }, 
+          width,
+          height,
+          layout: {
+            background: { type: 'solid', color: '#0A0A0A' },
             textColor: '#9CA3AF',
           },
-          grid: { 
-            vertLines: { color: '#1F2937' }, 
-            horzLines: { color: '#1F2937' } 
+          grid: {
+            vertLines: { color: '#1F2937' },
+            horzLines: { color: '#1F2937' },
           },
-          crosshair: { 
+          timeScale: {
+            timeVisible: true,
+            secondsVisible: false,
+            borderColor: '#374151',
+          },
+          rightPriceScale: {
+            borderColor: '#374151',
+          },
+          crosshair: {
             mode: 1,
             vertLine: { color: '#00E5FF', width: 1, style: 2 },
             horzLine: { color: '#00E5FF', width: 1, style: 2 },
           },
-          rightPriceScale: { borderColor: '#374151' },
-          timeScale: { 
-            borderColor: '#374151', 
-            timeVisible: true,
-            secondsVisible: false,
-          },
         });
-
+        
         chartRef.current = chart;
-
-        // Try a simple line series first
-        const lineSeries = chart.addLineSeries({
-          color: '#00FF94',
-          lineWidth: 2,
+        
+        const candleSeries = chart.addCandlestickSeries({
+          upColor: '#00FF94',
+          downColor: '#FF2E2E',
+          borderUpColor: '#00FF94',
+          borderDownColor: '#FF2E2E',
+          wickUpColor: '#00FF94',
+          wickDownColor: '#FF2E2E',
         });
-
-        const lineData = historicalData.map(bar => ({
-          time: Math.floor(new Date(bar.date).getTime() / 1000),
-          value: Number(bar.close),
-        }));
-
-        console.log('Line data:', lineData.length, 'points');
-        console.log('Sample line data:', JSON.stringify(lineData.slice(0, 3)));
+        candleSeriesRef.current = candleSeries;
         
-        lineSeries.setData(lineData);
-        chart.timeScale().fitContent();
+        console.log('Chart created successfully');
         
-        // Add SL/TP price lines if trading summary exists and lines are enabled
-        if (showTradingLines && analysis?.trading_summary) {
-          const ts = analysis.trading_summary;
-          
-          // Entry line (cyan)
-          if (ts.entry) {
-            lineSeries.createPriceLine({
-              price: ts.entry,
-              color: '#00E5FF',
-              lineWidth: 2,
-              lineStyle: 0, // Solid
-              axisLabelVisible: true,
-              title: 'Entry',
+        // Handle resize
+        const handleResize = () => {
+          if (chartRef.current && container) {
+            chartRef.current.applyOptions({ 
+              width: container.clientWidth,
+              height: container.clientHeight || 300
             });
           }
-          
-          // Stop Loss line (red dashed)
-          if (ts.stop_loss) {
-            lineSeries.createPriceLine({
-              price: ts.stop_loss,
-              color: '#FF2E2E',
-              lineWidth: 2,
-              lineStyle: 2, // Dashed
-              axisLabelVisible: true,
-              title: 'Stop',
-            });
-          }
-          
-          // Take Profit line (green dashed)
-          if (ts.target) {
-            lineSeries.createPriceLine({
-              price: ts.target,
-              color: '#00FF94',
-              lineWidth: 2,
-              lineStyle: 2, // Dashed
-              axisLabelVisible: true,
-              title: 'Target',
-            });
-          }
-        }
-
-        console.log('Chart setup complete');
-
+        };
+        window.addEventListener('resize', handleResize);
+        
+        return () => window.removeEventListener('resize', handleResize);
+        
       } catch (err) {
         console.error('Error creating chart:', err);
+        setChartError('Failed to initialize chart');
       }
-    }, 200);
-
+    }, 150);
+    
     return () => {
       clearTimeout(timer);
       if (chartRef.current) {
         chartRef.current.remove();
         chartRef.current = null;
+        candleSeriesRef.current = null;
       }
     };
-  }, [historicalData, activeTab, showTradingLines, analysis]);
+  }, [activeTab]);
+
+  // Set chart data when data or chart changes
+  useEffect(() => {
+    if (!candleSeriesRef.current || !historicalData || historicalData.length === 0) return;
+    
+    console.log('Setting chart data:', historicalData.length, 'bars');
+    
+    try {
+      const chartData = historicalData.map(bar => ({
+        time: Math.floor(new Date(bar.date).getTime() / 1000),
+        open: Number(bar.open),
+        high: Number(bar.high),
+        low: Number(bar.low),
+        close: Number(bar.close),
+      })).sort((a, b) => a.time - b.time);
+      
+      console.log('Formatted chart data - First:', chartData[0], 'Last:', chartData[chartData.length - 1]);
+      
+      candleSeriesRef.current.setData(chartData);
+      
+      if (chartRef.current) {
+        chartRef.current.timeScale().fitContent();
+      }
+      
+      // Add price lines for SL/TP
+      if (showTradingLines && analysis?.trading_summary) {
+        const ts = analysis.trading_summary;
+        
+        if (ts.entry) {
+          candleSeriesRef.current.createPriceLine({
+            price: ts.entry,
+            color: '#00E5FF',
+            lineWidth: 2,
+            lineStyle: 0,
+            axisLabelVisible: true,
+            title: 'Entry',
+          });
+        }
+        
+        if (ts.stop_loss) {
+          candleSeriesRef.current.createPriceLine({
+            price: ts.stop_loss,
+            color: '#FF2E2E',
+            lineWidth: 2,
+            lineStyle: 2,
+            axisLabelVisible: true,
+            title: 'Stop',
+          });
+        }
+        
+        if (ts.target) {
+          candleSeriesRef.current.createPriceLine({
+            price: ts.target,
+            color: '#00FF94',
+            lineWidth: 2,
+            lineStyle: 2,
+            axisLabelVisible: true,
+            title: 'Target',
+          });
+        }
+      }
+      
+      console.log('Chart data set successfully');
+      
+    } catch (err) {
+      console.error('Error setting chart data:', err);
+    }
+  }, [historicalData, analysis, showTradingLines, activeTab]);
 
   if (!ticker) return null;
 
