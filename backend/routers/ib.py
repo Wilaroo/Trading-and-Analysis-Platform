@@ -5,6 +5,7 @@ Endpoints for IB connection, account info, trading, and market data
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional, List
+from datetime import datetime, timezone
 from services.ib_service import IBService
 from services.feature_engine import get_feature_engine
 
