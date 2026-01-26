@@ -263,7 +263,7 @@ const GlossaryPage = () => {
             {/* Search Results Info */}
             {searchQuery && (
               <div className="mb-4 text-sm text-zinc-400">
-                Found {filteredEntries.length} result{filteredEntries.length !== 1 ? 's' : ''} for "{searchQuery}"
+                Found {filteredEntries.length} result{filteredEntries.length !== 1 ? 's' : ''} for &ldquo;{searchQuery}&rdquo;
               </div>
             )}
 
@@ -274,7 +274,7 @@ const GlossaryPage = () => {
                   <Card>
                     <div className="text-center py-12">
                       <Search className="w-12 h-12 text-zinc-600 mx-auto mb-4" />
-                      <p className="text-zinc-400">No terms found matching "{searchQuery}"</p>
+                      <p className="text-zinc-400">No terms found matching &ldquo;{searchQuery}&rdquo;</p>
                       <p className="text-zinc-500 text-sm mt-2">Try a different search term</p>
                     </div>
                   </Card>
