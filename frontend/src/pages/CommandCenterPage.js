@@ -1621,10 +1621,10 @@ const CommandCenterPage = () => {
         </Card>
       </div>
 
-      {/* Main Content Grid */}
-      <div className="grid lg:grid-cols-3 gap-4">
-        {/* Left Column - Holdings & Watchlist */}
-        <div className="lg:col-span-1 space-y-4">
+      {/* Main Content - Panels in Order */}
+      <div className="space-y-4">
+        {/* Holdings & Watchlist Row */}
+        <div className="grid lg:grid-cols-2 gap-4">
           {/* Current Holdings */}
           <Card>
             <button 
