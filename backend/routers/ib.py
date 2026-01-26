@@ -1521,7 +1521,7 @@ async def get_breakout_alerts():
                     continue
                 
                 # Match against strategies using simple matcher
-                matched_strategies = simple_strategy_match(symbol, features, scores)
+                matched_strategies = simple_strategy_match(symbol, features, score_result)
                 
                 # Filter: Must match at least one strategy
                 if not matched_strategies:
