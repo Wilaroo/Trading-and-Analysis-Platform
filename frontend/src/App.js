@@ -83,7 +83,7 @@ if (typeof window !== 'undefined') {
 
 // ===================== MAIN APP =====================
 function App() {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState('command-center');
   const [dashboardData, setDashboardData] = useState({ stats: {}, overview: {}, alerts: [], watchlist: [] });
   const [loading, setLoading] = useState(true);
   const [streamingQuotes, setStreamingQuotes] = useState({});
