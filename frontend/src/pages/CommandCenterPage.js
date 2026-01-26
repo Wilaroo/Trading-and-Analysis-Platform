@@ -246,7 +246,8 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
       timeScale: { borderColor: 'rgba(255,255,255,0.1)', timeVisible: true },
     });
 
-    const candlestickSeries = chart.addCandlestickSeries({
+    // v5 API: use chart.addSeries with CandlestickSeries
+    const candlestickSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
       upColor: '#00FF94', downColor: '#FF2E2E',
       borderUpColor: '#00FF94', borderDownColor: '#FF2E2E',
       wickUpColor: '#00FF94', wickDownColor: '#FF2E2E',
