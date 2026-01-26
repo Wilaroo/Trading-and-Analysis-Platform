@@ -444,6 +444,34 @@ The application is now consolidated into a single **Command Center** that serves
 
 ## Changelog
 
+### Jan 26, 2026 - Signal Strength + Glossary Page
+**Implemented:**
+1. **Signal Strength Indicator** for Breakout Alerts
+   - Shows X/77 rules matched (e.g., "7/77")
+   - Visual progress bar showing percentage
+   - Labels: VERY STRONG (10+), STRONG (7-9), MODERATE (4-6), WEAK (1-3)
+   - Color-coded: Green, Cyan, Yellow, Gray
+
+2. **Glossary & Logic Page** (`/glossary`)
+   - New sidebar navigation item "Glossary & Logic"
+   - **33 terms documented** with comprehensive explanations
+   - **10 Categories**: Scores & Grades, Technical Indicators, Momentum & Volume, Support & Resistance, Trading Strategies, Risk Management, Order Types, Market Context, Earnings & Catalysts, Abbreviations
+   - **Global Search**: Search terms, definitions, or concepts
+   - **Expandable Entries**: Click to expand full definitions
+   - **Related Terms**: Links to related glossary entries
+   - **Tags**: Clickable tags for quick filtering
+
+**Key Terms Documented:**
+- Overall Score, Grade (A/B/C/D/F), Technical Score, Fundamental Score, Catalyst Score, Confidence Score, Signal Strength, Breakout Score
+- RSI, MACD, VWAP, EMA, SMA, ATR
+- RVOL, Volume Profile, Momentum
+- Support, Resistance
+- Stop Loss, Risk/Reward, Position Sizing
+- Market/Limit/Stop-Limit Orders
+- Market Regime, VIX
+- IV, Expected Move, Short Interest
+- Common Abbreviations reference
+
 ### Jan 26, 2026 - No Mock Data + Breakout Alerts
 **Implemented:**
 1. **Removed ALL Mock Data**
