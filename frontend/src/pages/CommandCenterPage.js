@@ -171,7 +171,8 @@ const MiniChart = ({ symbol, data, width = '100%', height = 80 }) => {
       handleScale: false,
     });
 
-    const lineSeries = chart.addLineSeries({
+    // v5 API: use chart.addSeries with LineSeries
+    const lineSeries = chart.addSeries(LightweightCharts.LineSeries, {
       color: data[data.length - 1]?.close >= data[0]?.close ? '#00FF94' : '#FF2E2E',
       lineWidth: 2,
       priceLineVisible: false,
