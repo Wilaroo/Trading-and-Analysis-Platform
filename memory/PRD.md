@@ -13,6 +13,7 @@ The application is now consolidated into a single **Command Center** that serves
 - **Holdings**: Current positions with P&L tracking (collapsible)
 - **Watchlist**: Quick view of watched tickers with live prices
 - **Alerts**: Recent strategy alerts with badges
+- **Earnings Calendar**: Upcoming earnings with BMO/AMC timing, dates, catalyst scores (collapsible)
 - **Scanner Controls**: Top Gainers, Top Losers, Most Active, Gap Up, Gap Down
 - **Trade Opportunities**: Scan results with HIGH CONVICTION badges, quick Buy/Short buttons
 - **Market Intelligence**: Newsletter summary with sentiment, opportunities, and game plan
