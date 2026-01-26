@@ -1003,12 +1003,14 @@ const CommandCenterPage = () => {
     news: false,
     earnings: true,
     squeeze: false,
-    priceAlerts: false
+    priceAlerts: false,
+    breakouts: true
   });
   
   // New P1 features state
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [shortSqueezeCandidates, setShortSqueezeCandidates] = useState([]);
+  const [breakoutAlerts, setBreakoutAlerts] = useState([]);
   const [priceAlerts, setPriceAlerts] = useState([]);
   const [newAlertSymbol, setNewAlertSymbol] = useState('');
   const [newAlertPrice, setNewAlertPrice] = useState('');
