@@ -1601,9 +1601,62 @@ const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
             )}
             
             {activeTab === 'news' && (
-              <div className="text-center text-zinc-500 py-8">
-                <Calendar className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                <p>News integration coming soon</p>
+              <div className="space-y-3">
+                {newsLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
+                  </div>
+                ) : tickerNews.length > 0 ? (
+                  <>
+                    <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">
+                      Recent News for {symbol}
+                    </div>
+                    {tickerNews.map((news, idx) => (
+                      <div 
+                        key={news.id || idx} 
+                        className={`bg-zinc-900 rounded-lg p-3 border-l-2 ${
+                          news.is_placeholder ? 'border-yellow-500/50' : 'border-cyan-500/50'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <Newspaper className="w-4 h-4 text-cyan-400 mt-0.5 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-white mb-1">{news.headline}</p>
+                            {news.summary && (
+                              <p className="text-xs text-zinc-400 mb-2">{news.summary}</p>
+                            )}
+                            <div className="flex items-center gap-3 text-xs text-zinc-500">
+                              <span>{news.source || 'IB News'}</span>
+                              {news.timestamp && (
+                                <span className="flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  {new Date(news.timestamp).toLocaleTimeString()}
+                                </span>
+                              )}
+                              {news.sentiment && news.sentiment !== 'neutral' && (
+                                <span className={`px-1.5 py-0.5 rounded text-xs ${
+                                  news.sentiment === 'positive' ? 'bg-green-500/20 text-green-400' :
+                                  news.sentiment === 'negative' ? 'bg-red-500/20 text-red-400' :
+                                  'bg-zinc-500/20 text-zinc-400'
+                                }`}>
+                                  {news.sentiment}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <div className="text-center py-8">
+                    <Newspaper className="w-12 h-12 mx-auto mb-3 text-zinc-600" />
+                    <p className="text-zinc-400 mb-2">No recent news for {symbol}</p>
+                    <p className="text-xs text-zinc-500">
+                      Connect to IB Gateway for real-time news
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </div>
