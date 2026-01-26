@@ -684,6 +684,26 @@ const CommandCenterPage = () => {
     }
   };
 
+  // Fetch earnings calendar
+  const fetchEarnings = async () => {
+    try {
+      const res = await api.get('/api/earnings/calendar');
+      // Get earnings for next 7 days, sorted by date
+      const upcoming = (res.data?.calendar || [])
+        .filter(e => {
+          const earningsDate = new Date(e.earnings_date);
+          const today = new Date();
+          const nextWeek = new Date();
+          nextWeek.setDate(today.getDate() + 7);
+          return earningsDate >= today && earningsDate <= nextWeek;
+        })
+        .slice(0, 10);
+      setEarnings(upcoming);
+    } catch {
+      setEarnings([]);
+    }
+  };
+
   // Initial load
   useEffect(() => {
     const init = async () => {
@@ -698,6 +718,7 @@ const CommandCenterPage = () => {
       }
       fetchAlerts();
       fetchNewsletter();
+      fetchEarnings();
     };
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
