@@ -444,6 +444,43 @@ The application is now consolidated into a single **Command Center** that serves
 
 ## Changelog
 
+### Jan 26, 2026 - Enhanced Alerts & Help Tooltips
+**Implemented:**
+1. **Smart Alerts Panel (Enhanced Contextual Alerts)**
+   - New dedicated panel in Command Center for rich, contextual trading alerts
+   - Each alert includes:
+     - Exact timestamp (formatted naturally: "Today at 2:30pm")
+     - Triggering rule/reason
+     - Trading timeframe (scalp, intraday, swing, position)
+     - Direction (LONG/SHORT) and Grade (A-F)
+     - Full trade plan (Entry, Stop, Target, R/R)
+     - Signal Strength (rules matched out of 77)
+     - Natural language summary
+   - Expandable modal with full analysis details
+   - Direct Buy/Short buttons from alert
+   - Backend service: `/app/backend/services/enhanced_alerts.py`
+   - API endpoints: `/api/ib/alerts/enhanced` (GET, DELETE, etc.)
+
+2. **Help Tooltip System Integration**
+   - HelpTooltip component integrated across the UI
+   - Dotted underline on hover for terms with definitions
+   - Tooltip shows: term name, short definition, link to glossary
+   - Integrated in:
+     - **Technicals Tab**: RSI, RVOL, VWAP, VWAP Dist, EMA 9/20, SMA 50, ATR, MACD, Volume, Trend
+     - **Overview Tab Scores**: Overall, Technical, Fundamental, Catalyst, Confidence
+     - **Short Squeeze Panel**: SI%, DTC (Days to Cover), RVOL
+     - **Enhanced Alerts Modal**: All scores and trade plan fields
+   - Component: `/app/frontend/src/components/HelpTooltip.js`
+
+3. **Chart Error Handling Verified**
+   - Chart tab properly shows error when IB Gateway disconnected
+   - Message: "IB Gateway is disconnected and no cached data available"
+   - This is expected behavior, not a bug
+
+**Files Modified:**
+- `/app/frontend/src/pages/CommandCenterPage.js` - Added Smart Alerts panel, HelpTooltip integration
+- `/app/frontend/src/components/HelpTooltip.js` - Added additional term IDs
+
 ### Jan 26, 2026 - Signal Strength + Glossary Page
 **Implemented:**
 1. **Signal Strength Indicator** for Breakout Alerts
