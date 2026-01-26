@@ -656,3 +656,35 @@ The application is now consolidated into a single **Command Center** that serves
 - `/api/ib/analysis/AAPL` - Returns proper analysis data
 - Frontend loads without crashes
 
+### Jan 26, 2026 - System Monitor Feature
+**Implemented:**
+1. **Backend Health Check Endpoint** (`/api/system/monitor`)
+   - Comprehensive health check for all backend services
+   - Returns overall status: healthy, partial, or degraded
+   - Checks 7 services:
+     - MongoDB database connection
+     - IB Gateway connection status
+     - Strategies service (77 strategies loaded)
+     - Feature Engine (technical indicators)
+     - Scoring Engine
+     - AI/LLM (Emergent LLM Key)
+     - Market Data (Finnhub API)
+   - Returns status details for each service
+   - Summary counts: healthy, warning, disconnected, error
+
+2. **System Monitor UI Panel** (Command Center)
+   - Collapsible panel at bottom of Command Center page
+   - Overall status badge: "All Systems Go" (green), "Partial" (yellow), "Issues Detected" (red)
+   - Summary bar showing counts of healthy/warning/disconnected/error services
+   - Grid layout displaying each service with:
+     - Color-coded icon (green/yellow/orange/red)
+     - Service name and status indicator
+     - Detail description
+   - Auto-refreshes every 30 seconds
+   - Manual refresh button
+   - Timestamp showing last check time
+
+**Files Modified:**
+- `/app/backend/server.py` - Added `/api/system/monitor` endpoint
+- `/app/frontend/src/pages/CommandCenterPage.js` - Added System Monitor panel with new icons and state
+
