@@ -1606,6 +1606,160 @@ const CommandCenterPage = () => {
               </div>
             )}
           </Card>
+
+          {/* Short Squeeze Watchlist */}
+          <Card>
+            <button 
+              onClick={() => toggleSection('squeeze')}
+              className="w-full flex items-center justify-between mb-3"
+            >
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-red-400" />
+                <h3 className="text-sm font-semibold uppercase tracking-wider">Short Squeeze</h3>
+                <span className="text-xs text-zinc-500">({shortSqueezeCandidates.length})</span>
+              </div>
+              <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.squeeze ? 'rotate-180' : ''}`} />
+            </button>
+            
+            {expandedSections.squeeze && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] text-zinc-500 uppercase">High Short Interest Stocks</span>
+                  <button 
+                    onClick={fetchShortSqueeze}
+                    className="text-[10px] text-cyan-400 hover:text-cyan-300"
+                  >
+                    Refresh
+                  </button>
+                </div>
+                {shortSqueezeCandidates.length > 0 ? shortSqueezeCandidates.slice(0, 6).map((stock, idx) => (
+                  <div 
+                    key={idx}
+                    className={`p-2 rounded cursor-pointer transition-all hover:bg-zinc-800 ${
+                      stock.squeeze_risk === 'HIGH' ? 'bg-red-500/10 border border-red-500/30' :
+                      stock.squeeze_risk === 'MEDIUM' ? 'bg-yellow-500/10 border border-yellow-500/20' :
+                      'bg-zinc-900/50 border border-white/5'
+                    }`}
+                    onClick={() => setSelectedTicker({ symbol: stock.symbol, quote: { price: stock.price, change_percent: stock.change_percent } })}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-white">{stock.symbol}</span>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                          stock.squeeze_risk === 'HIGH' ? 'bg-red-500 text-white' :
+                          stock.squeeze_risk === 'MEDIUM' ? 'bg-yellow-500 text-black' :
+                          'bg-zinc-600 text-white'
+                        }`}>
+                          {stock.squeeze_score}
+                        </span>
+                      </div>
+                      <span className={`text-xs font-mono ${stock.change_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {formatPercent(stock.change_percent)}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-[9px]">
+                      <div>
+                        <span className="text-zinc-500">SI%: </span>
+                        <span className="text-red-400 font-mono">{stock.short_interest_pct?.toFixed(1)}%</span>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500">DTC: </span>
+                        <span className="text-yellow-400 font-mono">{stock.days_to_cover?.toFixed(1)}</span>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500">RVOL: </span>
+                        <span className="text-cyan-400 font-mono">{stock.rvol?.toFixed(1)}x</span>
+                      </div>
+                    </div>
+                  </div>
+                )) : (
+                  <p className="text-center text-zinc-500 text-sm py-4">No squeeze candidates found</p>
+                )}
+              </div>
+            )}
+          </Card>
+
+          {/* Price Alerts */}
+          <Card>
+            <button 
+              onClick={() => toggleSection('priceAlerts')}
+              className="w-full flex items-center justify-between mb-3"
+            >
+              <div className="flex items-center gap-2">
+                <Bell className="w-5 h-5 text-purple-400" />
+                <h3 className="text-sm font-semibold uppercase tracking-wider">Price Alerts</h3>
+                <span className="text-xs text-zinc-500">({priceAlerts.length})</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setSoundEnabled(!soundEnabled); }}
+                  className={`p-1 rounded ${soundEnabled ? 'text-green-400' : 'text-zinc-500'}`}
+                >
+                  {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                </button>
+                <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.priceAlerts ? 'rotate-180' : ''}`} />
+              </div>
+            </button>
+            
+            {expandedSections.priceAlerts && (
+              <div className="space-y-3">
+                {/* Create new alert */}
+                <div className="flex items-center gap-2 p-2 bg-zinc-900/50 rounded">
+                  <input
+                    type="text"
+                    value={newAlertSymbol}
+                    onChange={(e) => setNewAlertSymbol(e.target.value.toUpperCase())}
+                    placeholder="Symbol"
+                    className="w-20 px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-xs text-white placeholder-zinc-500"
+                  />
+                  <select
+                    value={newAlertDirection}
+                    onChange={(e) => setNewAlertDirection(e.target.value)}
+                    className="px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-xs text-white"
+                  >
+                    <option value="ABOVE">Above</option>
+                    <option value="BELOW">Below</option>
+                  </select>
+                  <input
+                    type="number"
+                    value={newAlertPrice}
+                    onChange={(e) => setNewAlertPrice(e.target.value)}
+                    placeholder="Price"
+                    className="w-24 px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-xs text-white placeholder-zinc-500"
+                  />
+                  <button
+                    onClick={createPriceAlert}
+                    disabled={!newAlertSymbol || !newAlertPrice}
+                    className="p-1.5 bg-purple-500 text-white rounded hover:bg-purple-400 disabled:opacity-50"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                
+                {/* Active alerts */}
+                <div className="space-y-1.5">
+                  {priceAlerts.length > 0 ? priceAlerts.map((alert, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-2 bg-zinc-900/50 rounded group">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-purple-400">{alert.symbol}</span>
+                        <span className={`text-xs ${alert.direction === 'ABOVE' ? 'text-green-400' : 'text-red-400'}`}>
+                          {alert.direction === 'ABOVE' ? '↑' : '↓'} ${alert.target_price?.toFixed(2)}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => deletePriceAlert(alert.id)}
+                        className="p-1 text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )) : (
+                    <p className="text-center text-zinc-500 text-xs py-2">No active alerts</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </Card>
         </div>
 
         {/* Center Column - Trade Opportunities */}
