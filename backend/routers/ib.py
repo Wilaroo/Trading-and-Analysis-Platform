@@ -1572,3 +1572,201 @@ async def get_breakout_history():
         "count": len(_breakout_alert_history)
     }
 
+
+
+# ===================== Enhanced Alerts with Context =====================
+
+@router.get("/alerts/enhanced")
+async def get_enhanced_alerts(limit: int = 50):
+    """
+    Get enhanced alerts with full context including:
+    - Exact timestamp when triggered
+    - Why it triggered (detailed reason)
+    - Timeframe (Scalp/Intraday/Swing/Position)
+    - Natural language summary
+    - Trade plan with entry, stop, target
+    """
+    from services.enhanced_alerts import get_alert_manager
+    
+    manager = get_alert_manager()
+    alerts = manager.get_active_alerts(limit)
+    
+    return {
+        "alerts": alerts,
+        "count": len(alerts),
+        "last_updated": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@router.get("/alerts/enhanced/history")
+async def get_enhanced_alert_history(limit: int = 100):
+    """Get history of all enhanced alerts"""
+    from services.enhanced_alerts import get_alert_manager
+    
+    manager = get_alert_manager()
+    history = manager.get_alert_history(limit)
+    
+    return {
+        "history": history,
+        "count": len(history)
+    }
+
+
+@router.post("/alerts/enhanced/{alert_id}/viewed")
+async def mark_alert_viewed(alert_id: str):
+    """Mark an alert as viewed"""
+    from services.enhanced_alerts import get_alert_manager
+    
+    manager = get_alert_manager()
+    manager.mark_alert_viewed(alert_id)
+    
+    return {"status": "ok", "alert_id": alert_id}
+
+
+@router.delete("/alerts/enhanced/{alert_id}")
+async def archive_enhanced_alert(alert_id: str):
+    """Archive/dismiss an alert"""
+    from services.enhanced_alerts import get_alert_manager
+    
+    manager = get_alert_manager()
+    manager.archive_alert(alert_id)
+    
+    return {"status": "archived", "alert_id": alert_id}
+
+
+@router.get("/alerts/enhanced/generate/{symbol}")
+async def generate_enhanced_alert_for_symbol(symbol: str):
+    """
+    Generate an enhanced alert for a specific symbol.
+    Analyzes the symbol and creates a detailed alert if opportunity found.
+    """
+    from services.enhanced_alerts import (
+        create_enhanced_alert, get_alert_manager,
+        AlertType, determine_timeframe
+    )
+    from services.scoring_engine import get_scoring_engine
+    from services.strategy_service import get_strategies_service
+    
+    symbol = symbol.upper()
+    
+    # Check connection
+    is_connected = False
+    if _ib_service:
+        try:
+            status = _ib_service.get_connection_status()
+            is_connected = status.get("connected", False)
+        except:
+            pass
+    
+    if not is_connected:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "IB Gateway not connected", "symbol": symbol}
+        )
+    
+    try:
+        feature_engine = get_feature_engine()
+        scoring_engine = get_scoring_engine()
+        strategies_service = get_strategies_service()
+        
+        # Get quote and historical data
+        quote = await _ib_service.get_quote(symbol)
+        if not quote or not quote.get("price"):
+            raise HTTPException(status_code=404, detail=f"No quote data for {symbol}")
+        
+        hist_data = await _ib_service.get_historical_data(symbol, "5 D", "1 hour")
+        if not hist_data or len(hist_data) < 10:
+            raise HTTPException(status_code=404, detail=f"Insufficient historical data for {symbol}")
+        
+        # Calculate features and scores
+        features = feature_engine.calculate_features(symbol, quote, {"bars": hist_data})
+        scores = scoring_engine.calculate_scores(symbol, quote, features, {})
+        
+        # Match strategies
+        matched = strategies_service.match_strategies(symbol, quote, features, scores)
+        
+        if not matched:
+            return {
+                "symbol": symbol,
+                "alert_generated": False,
+                "reason": "No strategies matched current setup"
+            }
+        
+        # Determine alert type based on price action
+        highs = [bar["high"] for bar in hist_data]
+        lows = [bar["low"] for bar in hist_data]
+        closes = [bar["close"] for bar in hist_data]
+        
+        current_price = quote.get("price", 0)
+        resistance = max(highs[-20:])
+        support = min(lows[-20:])
+        prev_close = closes[-2] if len(closes) > 1 else current_price
+        
+        alert_type = AlertType.STRATEGY_MATCH  # Default
+        if current_price > resistance and prev_close <= resistance:
+            alert_type = AlertType.BREAKOUT
+            features["breakout_level"] = resistance
+        elif current_price < support and prev_close >= support:
+            alert_type = AlertType.BREAKDOWN
+            features["breakdown_level"] = support
+        
+        # Add levels to features
+        features["price"] = current_price
+        features["change_percent"] = quote.get("change_percent", 0)
+        features["resistance_1"] = resistance
+        features["support_1"] = support
+        
+        # Calculate trading summary
+        atr = features.get("atr", current_price * 0.02)
+        direction = "LONG" if alert_type != AlertType.BREAKDOWN else "SHORT"
+        
+        if direction == "LONG":
+            stop = round(current_price - (1.5 * atr), 2)
+            target = round(current_price + (3 * atr), 2)
+        else:
+            stop = round(current_price + (1.5 * atr), 2)
+            target = round(current_price - (3 * atr), 2)
+        
+        trading_summary = {
+            "direction": direction,
+            "entry": round(current_price, 2),
+            "stop_loss": stop,
+            "target": target,
+            "risk_reward": round(abs(target - current_price) / abs(current_price - stop), 2) if abs(current_price - stop) > 0 else 0,
+            "position_bias": features.get("bias", "NEUTRAL")
+        }
+        
+        # Get company name
+        company_name = quote.get("name", symbol)
+        
+        # Create enhanced alert
+        alert = create_enhanced_alert(
+            symbol=symbol,
+            company_name=company_name,
+            alert_type=alert_type,
+            strategy=matched[0],  # Primary strategy
+            features=features,
+            scores=scores,
+            trading_summary=trading_summary,
+            matched_strategies=matched
+        )
+        
+        # Add to alert manager
+        manager = get_alert_manager()
+        manager.add_alert(alert)
+        
+        return {
+            "symbol": symbol,
+            "alert_generated": True,
+            "alert": alert
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error generating enhanced alert for {symbol}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": str(e), "symbol": symbol}
+        )
+
