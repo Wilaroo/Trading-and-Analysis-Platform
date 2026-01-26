@@ -696,21 +696,23 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
                 {activeTab === 'technicals' && (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     {[
-                      { label: 'RSI (14)', value: technicals.rsi_14?.toFixed(1), suffix: '', color: technicals.rsi_14 > 70 ? 'red' : technicals.rsi_14 < 30 ? 'green' : 'zinc' },
-                      { label: 'RVOL', value: technicals.rvol?.toFixed(1), suffix: 'x', color: technicals.rvol > 2 ? 'cyan' : 'zinc' },
-                      { label: 'VWAP', value: '$' + technicals.vwap?.toFixed(2), suffix: '', color: 'purple' },
-                      { label: 'VWAP Dist', value: technicals.vwap_distance_pct?.toFixed(1), suffix: '%', color: technicals.vwap_distance_pct > 0 ? 'green' : 'red' },
-                      { label: 'EMA 9', value: '$' + technicals.ema_9?.toFixed(2), suffix: '', color: 'blue' },
-                      { label: 'EMA 20', value: '$' + technicals.ema_20?.toFixed(2), suffix: '', color: 'blue' },
-                      { label: 'SMA 50', value: '$' + technicals.sma_50?.toFixed(2), suffix: '', color: 'yellow' },
-                      { label: 'ATR (14)', value: '$' + technicals.atr_14?.toFixed(2), suffix: '', color: 'orange' },
-                      { label: 'MACD', value: technicals.macd?.toFixed(3), suffix: '', color: technicals.macd > 0 ? 'green' : 'red' },
-                      { label: 'MACD Signal', value: technicals.macd_signal?.toFixed(3), suffix: '', color: 'zinc' },
-                      { label: 'Volume Trend', value: technicals.volume_trend, suffix: '', color: technicals.volume_trend === 'Above Avg' ? 'green' : 'zinc' },
-                      { label: 'Trend', value: technicals.trend, suffix: '', color: technicals.trend === 'Bullish' ? 'green' : 'red' },
+                      { label: 'RSI (14)', value: technicals.rsi_14?.toFixed(1), suffix: '', color: technicals.rsi_14 > 70 ? 'red' : technicals.rsi_14 < 30 ? 'green' : 'zinc', termId: 'rsi' },
+                      { label: 'RVOL', value: technicals.rvol?.toFixed(1), suffix: 'x', color: technicals.rvol > 2 ? 'cyan' : 'zinc', termId: 'rvol' },
+                      { label: 'VWAP', value: '$' + technicals.vwap?.toFixed(2), suffix: '', color: 'purple', termId: 'vwap' },
+                      { label: 'VWAP Dist', value: technicals.vwap_distance_pct?.toFixed(1), suffix: '%', color: technicals.vwap_distance_pct > 0 ? 'green' : 'red', termId: 'vwap-dist' },
+                      { label: 'EMA 9', value: '$' + technicals.ema_9?.toFixed(2), suffix: '', color: 'blue', termId: 'ema-9' },
+                      { label: 'EMA 20', value: '$' + technicals.ema_20?.toFixed(2), suffix: '', color: 'blue', termId: 'ema-20' },
+                      { label: 'SMA 50', value: '$' + technicals.sma_50?.toFixed(2), suffix: '', color: 'yellow', termId: 'sma-50' },
+                      { label: 'ATR (14)', value: '$' + technicals.atr_14?.toFixed(2), suffix: '', color: 'orange', termId: 'atr' },
+                      { label: 'MACD', value: technicals.macd?.toFixed(3), suffix: '', color: technicals.macd > 0 ? 'green' : 'red', termId: 'macd' },
+                      { label: 'MACD Signal', value: technicals.macd_signal?.toFixed(3), suffix: '', color: 'zinc', termId: 'macd' },
+                      { label: 'Volume Trend', value: technicals.volume_trend, suffix: '', color: technicals.volume_trend === 'Above Avg' ? 'green' : 'zinc', termId: 'volume' },
+                      { label: 'Trend', value: technicals.trend, suffix: '', color: technicals.trend === 'Bullish' ? 'green' : 'red', termId: 'trend' },
                     ].map((item, idx) => (
                       <div key={idx} className="bg-zinc-900 rounded-lg p-3">
-                        <span className="text-[10px] text-zinc-500 uppercase block">{item.label}</span>
+                        <span className="text-[10px] text-zinc-500 uppercase block">
+                          <HelpTooltip termId={item.termId}>{item.label}</HelpTooltip>
+                        </span>
                         <p className={`text-lg font-mono text-${item.color}-400`}>
                           {item.value || '--'}{item.suffix}
                         </p>
