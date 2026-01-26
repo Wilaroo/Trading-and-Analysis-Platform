@@ -289,7 +289,8 @@ Generate a complete premarket briefing with specific, actionable trade ideas. In
                 "risk_factors": self._ensure_list(parsed.get("risk_factors", [])),
                 "game_plan": parsed.get("game_plan", "") if isinstance(parsed.get("game_plan"), str) else str(parsed.get("game_plan", "")),
                 "watchlist": self._format_watchlist_from_opportunities(parsed.get("opportunities", [])),
-                "raw_content": content
+                "raw_content": content,
+                "needs_generation": False
             }
             
         except json.JSONDecodeError as e:
