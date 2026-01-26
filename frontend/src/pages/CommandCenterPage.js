@@ -1419,7 +1419,8 @@ const CommandCenterPage = () => {
           fetchMarketContext(),
           runScanner(),
           fetchWatchlist(connected),
-          fetchBreakoutAlerts()
+          fetchBreakoutAlerts(),
+          runComprehensiveScan()  // Run comprehensive scan on load
         ]);
       }
       fetchAlerts();
@@ -1433,17 +1434,18 @@ const CommandCenterPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-scan interval + order fill + price alert polling
+  // Auto-scan interval - now runs comprehensive scan
   useEffect(() => {
     if (!autoScan || !isConnected) return;
     
     const interval = setInterval(() => {
-      runScanner();
+      // Run comprehensive scan (this replaces the individual scanners)
+      runComprehensiveScan();
+      
+      // Also fetch account data and context
       fetchAccountData();
       fetchMarketContext();
       checkOrderFills();
-      fetchBreakoutAlerts();  // Scan for breakouts
-      fetchEnhancedAlerts();  // Fetch enhanced alerts
       checkPriceAlerts();
     }, 60000);
     
