@@ -1049,6 +1049,94 @@ const CommandCenterPage = () => {
     }
   };
 
+  // Fetch short squeeze candidates
+  const fetchShortSqueeze = async () => {
+    try {
+      const res = await api.get('/api/ib/scanner/short-squeeze');
+      setShortSqueezeCandidates(res.data?.candidates || []);
+    } catch {
+      setShortSqueezeCandidates([]);
+    }
+  };
+
+  // Fetch price alerts
+  const fetchPriceAlerts = async () => {
+    try {
+      const res = await api.get('/api/ib/alerts/price');
+      setPriceAlerts(res.data?.alerts || []);
+    } catch {
+      setPriceAlerts([]);
+    }
+  };
+
+  // Create price alert
+  const createPriceAlert = async () => {
+    if (!newAlertSymbol || !newAlertPrice) return;
+    try {
+      await api.post('/api/ib/alerts/price', {
+        symbol: newAlertSymbol.toUpperCase(),
+        target_price: parseFloat(newAlertPrice),
+        direction: newAlertDirection
+      });
+      toast.success(`Alert created for ${newAlertSymbol.toUpperCase()} ${newAlertDirection} $${newAlertPrice}`);
+      setNewAlertSymbol('');
+      setNewAlertPrice('');
+      fetchPriceAlerts();
+    } catch (err) {
+      toast.error('Failed to create alert');
+    }
+  };
+
+  // Delete price alert
+  const deletePriceAlert = async (alertId) => {
+    try {
+      await api.delete(`/api/ib/alerts/price/${alertId}`);
+      fetchPriceAlerts();
+    } catch {
+      toast.error('Failed to delete alert');
+    }
+  };
+
+  // Check for triggered price alerts
+  const checkPriceAlerts = async () => {
+    if (!isConnected || priceAlerts.length === 0) return;
+    try {
+      const res = await api.get('/api/ib/alerts/price/check');
+      const triggered = res.data?.triggered || [];
+      triggered.forEach(alert => {
+        if (soundEnabled) playSound('alert');
+        toast.success(
+          `🔔 ${alert.symbol} hit $${alert.triggered_price?.toFixed(2)} (target: ${alert.direction} $${alert.target_price})`,
+          { duration: 8000 }
+        );
+      });
+      if (triggered.length > 0) {
+        fetchPriceAlerts();
+      }
+    } catch (e) {
+      console.error('Error checking price alerts:', e);
+    }
+  };
+
+  // Check for order fills
+  const checkOrderFills = async () => {
+    if (!isConnected) return;
+    try {
+      const res = await api.get('/api/ib/orders/fills');
+      const fills = res.data?.newly_filled || [];
+      fills.forEach(order => {
+        if (soundEnabled) playSound('fill');
+        toast.success(
+          `✅ Order Filled: ${order.action} ${order.quantity} ${order.symbol}`,
+          { duration: 8000 }
+        );
+      });
+      setTrackedOrders(prev => prev.filter(o => !fills.find(f => f.order_id === o.order_id)));
+    } catch (e) {
+      console.error('Error checking order fills:', e);
+    }
+  };
+
   // Initial load
   useEffect(() => {
     const init = async () => {
@@ -1064,12 +1152,14 @@ const CommandCenterPage = () => {
       fetchAlerts();
       fetchNewsletter();
       fetchEarnings();
+      fetchShortSqueeze();
+      fetchPriceAlerts();
     };
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-scan interval
+  // Auto-scan interval + order fill + price alert polling
   useEffect(() => {
     if (!autoScan || !isConnected) return;
     
@@ -1077,11 +1167,26 @@ const CommandCenterPage = () => {
       runScanner();
       fetchAccountData();
       fetchMarketContext();
+      checkOrderFills();
+      checkPriceAlerts();
     }, 60000);
     
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoScan, isConnected, selectedScanType]);
+  }, [autoScan, isConnected, selectedScanType, priceAlerts.length]);
+
+  // Fast polling for order fills and price alerts (every 10s when enabled)
+  useEffect(() => {
+    if (!isConnected) return;
+    
+    const fastPoll = setInterval(() => {
+      checkOrderFills();
+      checkPriceAlerts();
+    }, 10000);
+    
+    return () => clearInterval(fastPoll);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, soundEnabled, priceAlerts.length]);
 
   const toggleSection = (section) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
