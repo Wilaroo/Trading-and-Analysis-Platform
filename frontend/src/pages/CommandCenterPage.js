@@ -292,9 +292,15 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
         }));
 
         console.log('Chart data points:', chartData.length, 'First:', chartData[0], 'Last:', chartData[chartData.length - 1]);
+        console.log('Container dimensions:', container.clientWidth, container.clientHeight);
         
         candlestickSeries.setData(chartData);
+        
+        // Force a re-render by scrolling to the end
+        chart.timeScale().scrollToPosition(0, false);
         chart.timeScale().fitContent();
+        
+        console.log('Chart created and data set successfully');
         
         // Add SL/TP price lines if trading summary exists and lines are enabled
         if (showTradingLines && analysis?.trading_summary) {
