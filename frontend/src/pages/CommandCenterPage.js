@@ -23,8 +23,7 @@ import {
   Eye,
   Newspaper,
   Briefcase,
-  Calendar,
-  Star
+  Calendar
 } from 'lucide-react';
 import * as LightweightCharts from 'lightweight-charts';
 import api from '../utils/api';
