@@ -249,23 +249,30 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
       
       const container = chartContainerRef.current;
       const containerWidth = container.clientWidth || 700;
+      const containerHeight = container.clientHeight || 300;
       
       try {
+        console.log('Creating chart with dimensions:', containerWidth, containerHeight);
+        
         const chart = LightweightCharts.createChart(container, {
           width: containerWidth,
-          height: 300,
+          height: containerHeight,
           layout: { 
-            background: { type: 'solid', color: '#0A0A0A' }, 
-            textColor: '#71717a',
+            background: { type: 'solid', color: 'transparent' }, 
+            textColor: '#9CA3AF',
           },
           grid: { 
-            vertLines: { color: 'rgba(255,255,255,0.05)' }, 
-            horzLines: { color: 'rgba(255,255,255,0.05)' } 
+            vertLines: { color: '#1F2937' }, 
+            horzLines: { color: '#1F2937' } 
           },
-          crosshair: { mode: 1 },
-          rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
+          crosshair: { 
+            mode: 1,
+            vertLine: { color: '#00E5FF', width: 1, style: 2 },
+            horzLine: { color: '#00E5FF', width: 1, style: 2 },
+          },
+          rightPriceScale: { borderColor: '#374151' },
           timeScale: { 
-            borderColor: 'rgba(255,255,255,0.1)', 
+            borderColor: '#374151', 
             timeVisible: true,
             secondsVisible: false,
           },
@@ -285,22 +292,17 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
 
         const chartData = historicalData.map(bar => ({
           time: Math.floor(new Date(bar.date).getTime() / 1000),
-          open: bar.open, 
-          high: bar.high, 
-          low: bar.low, 
-          close: bar.close,
+          open: Number(bar.open), 
+          high: Number(bar.high), 
+          low: Number(bar.low), 
+          close: Number(bar.close),
         }));
 
-        console.log('Chart data points:', chartData.length, 'First:', chartData[0], 'Last:', chartData[chartData.length - 1]);
-        console.log('Container dimensions:', container.clientWidth, container.clientHeight);
+        console.log('Chart data:', chartData.length, 'points');
+        console.log('Sample data:', JSON.stringify(chartData.slice(0, 3)));
         
         candlestickSeries.setData(chartData);
-        
-        // Force a re-render by scrolling to the end
-        chart.timeScale().scrollToPosition(0, false);
         chart.timeScale().fitContent();
-        
-        console.log('Chart created and data set successfully');
         
         // Add SL/TP price lines if trading summary exists and lines are enabled
         if (showTradingLines && analysis?.trading_summary) {
@@ -343,18 +345,12 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
           }
         }
 
-        // Handle resize
-        const handleResize = () => {
-          if (chartRef.current && container) {
-            chartRef.current.applyOptions({ width: container.clientWidth });
-          }
-        };
-        window.addEventListener('resize', handleResize);
+        console.log('Chart setup complete');
 
       } catch (err) {
         console.error('Error creating chart:', err);
       }
-    }, 100);
+    }, 200);
 
     return () => {
       clearTimeout(timer);
