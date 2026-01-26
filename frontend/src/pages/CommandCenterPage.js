@@ -991,6 +991,89 @@ const CommandCenterPage = () => {
               </div>
             )}
           </Card>
+
+          {/* Earnings Calendar */}
+          <Card>
+            <button 
+              onClick={() => toggleSection('earnings')}
+              className="w-full flex items-center justify-between mb-3"
+            >
+              <div className="flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-orange-400" />
+                <h3 className="text-sm font-semibold uppercase tracking-wider">Earnings</h3>
+                <span className="text-xs text-zinc-500">({earnings.length})</span>
+              </div>
+              <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.earnings ? 'rotate-180' : ''}`} />
+            </button>
+            
+            {expandedSections.earnings && (
+              <div className="space-y-2">
+                {earnings.length > 0 ? earnings.map((item, idx) => {
+                  const earningsDate = new Date(item.earnings_date);
+                  const today = new Date();
+                  const isToday = earningsDate.toDateString() === today.toDateString();
+                  const tomorrow = new Date();
+                  tomorrow.setDate(today.getDate() + 1);
+                  const isTomorrow = earningsDate.toDateString() === tomorrow.toDateString();
+                  
+                  // Catalyst score color
+                  const getScoreColor = (score) => {
+                    if (score >= 5) return 'text-green-400 bg-green-500/20';
+                    if (score >= 0) return 'text-yellow-400 bg-yellow-500/20';
+                    return 'text-red-400 bg-red-500/20';
+                  };
+                  
+                  return (
+                    <div 
+                      key={idx} 
+                      className={`p-2 rounded border-l-2 ${
+                        isToday ? 'bg-orange-500/10 border-orange-500' : 
+                        isTomorrow ? 'bg-yellow-500/5 border-yellow-500/50' : 
+                        'bg-zinc-900/50 border-zinc-700'
+                      }`}
+                      onClick={() => setSelectedTicker({ symbol: item.symbol, quote: {} })}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white">{item.symbol}</span>
+                          {isToday && (
+                            <span className="text-[10px] px-1.5 py-0.5 bg-orange-500/30 text-orange-400 rounded font-medium">
+                              TODAY
+                            </span>
+                          )}
+                          {isTomorrow && (
+                            <span className="text-[10px] px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded font-medium">
+                              TOMORROW
+                            </span>
+                          )}
+                        </div>
+                        {item.catalyst_score !== undefined && (
+                          <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${getScoreColor(item.catalyst_score.score)}`}>
+                            <Star className="w-3 h-3 inline mr-0.5" />
+                            {item.catalyst_score.score >= 0 ? '+' : ''}{item.catalyst_score.score}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-zinc-400">{item.company_name?.split(' ')[0] || item.symbol}</span>
+                        <div className="flex items-center gap-2 text-zinc-500">
+                          <span>{item.time === 'Before Open' ? '🌅 BMO' : '🌙 AMC'}</span>
+                          <span>{earningsDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                        </div>
+                      </div>
+                      {item.expected_move && (
+                        <div className="mt-1 text-[10px] text-zinc-500">
+                          Expected Move: ±{item.expected_move.toFixed(1)}%
+                        </div>
+                      )}
+                    </div>
+                  );
+                }) : (
+                  <p className="text-center text-zinc-500 text-sm py-4">No upcoming earnings</p>
+                )}
+              </div>
+            )}
+          </Card>
         </div>
 
         {/* Center Column - Trade Opportunities */}
