@@ -687,16 +687,18 @@ const CommandCenterPage = () => {
   const fetchEarnings = async () => {
     try {
       const res = await api.get('/api/earnings/calendar');
-      // Get earnings for next 7 days, sorted by date
+      // Get earnings for next 30 days, sorted by date
       const upcoming = (res.data?.calendar || [])
         .filter(e => {
           const earningsDate = new Date(e.earnings_date);
           const today = new Date();
-          const nextWeek = new Date();
-          nextWeek.setDate(today.getDate() + 7);
-          return earningsDate >= today && earningsDate <= nextWeek;
+          today.setHours(0, 0, 0, 0);
+          const nextMonth = new Date();
+          nextMonth.setDate(today.getDate() + 30);
+          return earningsDate >= today && earningsDate <= nextMonth;
         })
-        .slice(0, 10);
+        .sort((a, b) => new Date(a.earnings_date) - new Date(b.earnings_date))
+        .slice(0, 12);
       setEarnings(upcoming);
     } catch {
       setEarnings([]);
