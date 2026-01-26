@@ -2232,63 +2232,115 @@ const CommandCenterPage = () => {
             )}
           </Card>
 
-          {/* Enhanced Contextual Alerts Panel */}
-          <Card glow={enhancedAlerts.length > 0 && enhancedAlerts.some(a => a.is_new)}>
+          {/* Comprehensive Scanner Panel - Main Alert System */}
+          <Card glow={comprehensiveSummary.total > 0}>
             <button 
-              onClick={() => toggleSection('enhancedAlerts')}
+              onClick={() => toggleSection('comprehensiveAlerts')}
               className="w-full flex items-center justify-between mb-3"
             >
               <div className="flex items-center gap-2">
-                <MessageSquare className="w-5 h-5 text-cyan-400" />
-                <h3 className="text-sm font-semibold uppercase tracking-wider">Smart Alerts</h3>
-                <span className="text-xs text-zinc-500">({enhancedAlerts.length})</span>
-                {enhancedAlerts.some(a => a.is_new) && (
-                  <span className="text-[9px] px-1.5 py-0.5 bg-cyan-500/20 text-cyan-400 rounded animate-pulse">
-                    NEW
+                <Target className="w-5 h-5 text-cyan-400" />
+                <h3 className="text-sm font-semibold uppercase tracking-wider">Smart Scanner</h3>
+                <span className="text-xs text-zinc-500">({comprehensiveSummary.total})</span>
+                {comprehensiveSummary.total > 0 && (
+                  <span className="text-[9px] px-1.5 py-0.5 bg-cyan-500/20 text-cyan-400 rounded">
+                    Score ≥{minScoreThreshold}
                   </span>
                 )}
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={(e) => { e.stopPropagation(); fetchEnhancedAlerts(); }}
-                  className="text-xs text-cyan-400 hover:text-cyan-300"
+                  onClick={(e) => { e.stopPropagation(); runComprehensiveScan(); }}
+                  disabled={isComprehensiveScanning}
+                  className={`text-xs px-2 py-1 rounded ${isComprehensiveScanning ? 'bg-zinc-700 text-zinc-500' : 'bg-cyan-500 text-black hover:bg-cyan-400'} transition-colors`}
                 >
-                  Refresh
+                  {isComprehensiveScanning ? 'Scanning...' : 'Scan Now'}
                 </button>
-                <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.enhancedAlerts ? 'rotate-180' : ''}`} />
+                <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.comprehensiveAlerts ? 'rotate-180' : ''}`} />
               </div>
             </button>
             
-            {expandedSections.enhancedAlerts && (
+            {expandedSections.comprehensiveAlerts && (
               <div className="space-y-3">
+                {/* Score Threshold Slider */}
+                <div className="flex items-center gap-3 p-2 bg-zinc-900/50 rounded-lg">
+                  <span className="text-xs text-zinc-400 whitespace-nowrap">Min Score:</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={minScoreThreshold}
+                    onChange={(e) => setMinScoreThreshold(parseInt(e.target.value))}
+                    className="flex-1 h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                  />
+                  <span className="text-sm font-mono text-cyan-400 w-8">{minScoreThreshold}</span>
+                </div>
+                
+                {/* Timeframe Tabs */}
+                <div className="flex gap-1 p-1 bg-zinc-900/50 rounded-lg">
+                  {[
+                    { id: 'all', label: 'All', count: comprehensiveSummary.total },
+                    { id: 'scalp', label: 'Scalp', count: comprehensiveSummary.scalp, max: 10 },
+                    { id: 'intraday', label: 'Intraday', count: comprehensiveSummary.intraday, max: 25 },
+                    { id: 'swing', label: 'Swing', count: comprehensiveSummary.swing, max: 25 },
+                    { id: 'position', label: 'Position', count: comprehensiveSummary.position, max: 25 },
+                  ].map(tab => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setSelectedTimeframeTab(tab.id)}
+                      className={`flex-1 px-2 py-1.5 text-xs rounded transition-colors ${
+                        selectedTimeframeTab === tab.id
+                          ? 'bg-cyan-500 text-black font-bold'
+                          : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                      }`}
+                    >
+                      {tab.label}
+                      <span className={`ml-1 ${selectedTimeframeTab === tab.id ? 'text-black/70' : 'text-zinc-600'}`}>
+                        {tab.count}{tab.max ? `/${tab.max}` : ''}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                
                 {!isConnected && (
                   <div className="text-center py-4 text-zinc-500 text-sm">
-                    Connect IB Gateway for contextual alerts
+                    <AlertTriangle className="w-6 h-6 mx-auto mb-2 opacity-50" />
+                    Connect IB Gateway to run comprehensive scan
                   </div>
                 )}
                 
-                {isConnected && enhancedAlerts.length === 0 && (
+                {isConnected && comprehensiveSummary.total === 0 && !isComprehensiveScanning && (
                   <div className="text-center py-6 text-zinc-500">
-                    <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm">No enhanced alerts yet</p>
-                    <p className="text-xs mt-1">Alerts will appear when opportunities are detected</p>
+                    <Target className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No opportunities above score {minScoreThreshold}</p>
+                    <p className="text-xs mt-1">Try lowering the threshold or wait for market conditions</p>
                   </div>
                 )}
                 
-                {/* Enhanced Alert Cards */}
-                {enhancedAlerts.slice(0, 5).map((alert, idx) => (
+                {isComprehensiveScanning && (
+                  <div className="text-center py-6 text-cyan-400">
+                    <RefreshCw className="w-8 h-8 mx-auto mb-2 animate-spin" />
+                    <p className="text-sm">Scanning all market sectors...</p>
+                    <p className="text-xs mt-1 text-zinc-500">Analyzing against 77 trading rules</p>
+                  </div>
+                )}
+                
+                {/* Alert Cards */}
+                {getFilteredComprehensiveAlerts().slice(0, 10).map((alert, idx) => (
                   <motion.div 
                     key={alert.id}
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.05 }}
+                    transition={{ delay: idx * 0.03 }}
                     onClick={() => setSelectedEnhancedAlert(alert)}
                     className={`p-3 rounded-lg cursor-pointer transition-all border ${
-                      alert.is_new 
-                        ? 'bg-cyan-500/10 border-cyan-500/40 shadow-[0_0_15px_rgba(0,229,255,0.15)]' 
+                      alert.grade === 'A' 
+                        ? 'bg-green-500/10 border-green-500/40 shadow-[0_0_15px_rgba(34,197,94,0.15)]' 
+                        : alert.grade === 'B'
+                        ? 'bg-cyan-500/10 border-cyan-500/40'
                         : 'bg-zinc-900/50 border-white/10 hover:border-cyan-500/30'
                     }`}
-                    data-testid={`enhanced-alert-${alert.symbol}`}
+                    data-testid={`comprehensive-alert-${alert.symbol}`}
                   >
                     {/* Alert Header */}
                     <div className="flex items-start justify-between mb-2">
@@ -2296,88 +2348,82 @@ const CommandCenterPage = () => {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-white">{alert.symbol}</span>
                           <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
-                            alert.trade_plan?.direction === 'LONG' 
+                            alert.direction === 'LONG' 
                               ? 'bg-green-500 text-black' 
                               : 'bg-red-500 text-white'
                           }`}>
-                            {alert.trade_plan?.direction || 'LONG'}
+                            {alert.direction}
+                          </span>
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                            alert.grade === 'A' ? 'bg-green-500 text-black' :
+                            alert.grade === 'B' ? 'bg-cyan-500 text-black' :
+                            alert.grade === 'C' ? 'bg-yellow-500 text-black' :
+                            'bg-zinc-500 text-white'
+                          }`}>
+                            Grade {alert.grade}
                           </span>
                           <span className={`text-[9px] px-1.5 py-0.5 rounded ${
-                            alert.grade === 'A' ? 'bg-green-500/20 text-green-400' :
-                            alert.grade === 'B' ? 'bg-cyan-500/20 text-cyan-400' :
-                            alert.grade === 'C' ? 'bg-yellow-500/20 text-yellow-400' :
-                            'bg-zinc-500/20 text-zinc-400'
+                            alert.timeframe === 'scalp' ? 'bg-red-500/20 text-red-400' :
+                            alert.timeframe === 'intraday' ? 'bg-orange-500/20 text-orange-400' :
+                            alert.timeframe === 'swing' ? 'bg-purple-500/20 text-purple-400' :
+                            'bg-blue-500/20 text-blue-400'
                           }`}>
-                            <HelpTooltip termId="grade">Grade {alert.grade}</HelpTooltip>
-                          </span>
-                          <span className="text-[9px] px-1.5 py-0.5 bg-purple-500/20 text-purple-400 rounded">
-                            <HelpTooltip termId={alert.timeframe?.toLowerCase() || 'intraday'}>{alert.timeframe_description}</HelpTooltip>
+                            {alert.timeframe_description}
                           </span>
                         </div>
-                        <p className="text-xs text-zinc-400 mt-1 line-clamp-2">{alert.headline}</p>
+                        <p className="text-xs text-zinc-400 mt-1 line-clamp-1">{alert.headline}</p>
                       </div>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); dismissEnhancedAlert(alert.id); }}
-                        className="p-1 text-zinc-500 hover:text-red-400 transition-colors"
-                        title="Dismiss"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <span className="text-lg font-bold text-cyan-400">{alert.overall_score}</span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); dismissComprehensiveAlert(alert.id); }}
+                          className="p-1 text-zinc-500 hover:text-red-400 transition-colors"
+                          title="Dismiss"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                     
-                    {/* Timestamp & Trigger */}
-                    <div className="flex items-center gap-2 text-[9px] mb-2">
-                      <Clock className="w-3 h-3 text-zinc-500" />
-                      <span className="text-cyan-400">{alert.triggered_at_formatted}</span>
-                      <span className="text-zinc-600">•</span>
-                      <span className="text-zinc-400">{alert.trigger_reason}</span>
-                    </div>
-                    
-                    {/* Trade Plan Summary */}
-                    <div className="grid grid-cols-4 gap-2 text-[9px] p-2 bg-black/30 rounded">
-                      <div className="text-center">
-                        <span className="text-zinc-500 block"><HelpTooltip termId="entry">Entry</HelpTooltip></span>
+                    {/* Quick Stats */}
+                    <div className="grid grid-cols-5 gap-1.5 text-[9px]">
+                      <div className="bg-black/30 rounded p-1.5 text-center">
+                        <span className="text-zinc-500 block">Entry</span>
                         <span className="text-cyan-400 font-mono">${alert.trade_plan?.entry?.toFixed(2)}</span>
                       </div>
-                      <div className="text-center">
-                        <span className="text-zinc-500 block"><HelpTooltip termId="stop-loss">Stop</HelpTooltip></span>
+                      <div className="bg-black/30 rounded p-1.5 text-center">
+                        <span className="text-zinc-500 block">Stop</span>
                         <span className="text-red-400 font-mono">${alert.trade_plan?.stop_loss?.toFixed(2)}</span>
                       </div>
-                      <div className="text-center">
-                        <span className="text-zinc-500 block"><HelpTooltip termId="target">Target</HelpTooltip></span>
+                      <div className="bg-black/30 rounded p-1.5 text-center">
+                        <span className="text-zinc-500 block">Target</span>
                         <span className="text-green-400 font-mono">${alert.trade_plan?.target?.toFixed(2)}</span>
                       </div>
-                      <div className="text-center">
-                        <span className="text-zinc-500 block"><HelpTooltip termId="risk-reward">R/R</HelpTooltip></span>
+                      <div className="bg-black/30 rounded p-1.5 text-center">
+                        <span className="text-zinc-500 block">R/R</span>
                         <span className="text-purple-400 font-mono">1:{alert.trade_plan?.risk_reward?.toFixed(1)}</span>
+                      </div>
+                      <div className="bg-black/30 rounded p-1.5 text-center">
+                        <span className="text-zinc-500 block">Rules</span>
+                        <span className={`font-mono ${
+                          alert.matched_strategies_count >= 10 ? 'text-green-400' :
+                          alert.matched_strategies_count >= 5 ? 'text-cyan-400' :
+                          'text-yellow-400'
+                        }`}>{alert.matched_strategies_count}/77</span>
                       </div>
                     </div>
                     
-                    {/* Signal Strength */}
-                    {alert.signal_strength > 0 && (
-                      <div className="mt-2 flex items-center justify-between text-[9px]">
-                        <span className="text-zinc-500">
-                          <HelpTooltip termId="signal-strength">Signal Strength</HelpTooltip>: 
-                          <span className={`ml-1 font-bold ${
-                            alert.signal_strength >= 13 ? 'text-green-400' :
-                            alert.signal_strength >= 9 ? 'text-cyan-400' :
-                            alert.signal_strength >= 5 ? 'text-yellow-400' :
-                            'text-zinc-400'
-                          }`}>
-                            {alert.matched_strategies_count}/77 rules
-                          </span>
-                        </span>
-                        <span className="text-zinc-600">
-                          {alert.primary_strategy?.name}
-                        </span>
-                      </div>
-                    )}
+                    {/* Trigger reason */}
+                    <div className="mt-2 text-[9px] text-zinc-500 flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      <span>{alert.trigger_reason}</span>
+                    </div>
                   </motion.div>
                 ))}
                 
-                {enhancedAlerts.length > 5 && (
+                {getFilteredComprehensiveAlerts().length > 10 && (
                   <p className="text-center text-zinc-500 text-xs py-2">
-                    +{enhancedAlerts.length - 5} more alerts
+                    +{getFilteredComprehensiveAlerts().length - 10} more alerts in this category
                   </p>
                 )}
               </div>
