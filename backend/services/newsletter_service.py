@@ -149,8 +149,12 @@ Return ONLY valid JSON, no markdown code blocks."""
             movers_list = []
             for m in context_data["top_movers"][:10]:
                 symbol = m.get("symbol", "N/A")
-                change = m.get("change_percent", m.get("quote", {}).get("change_percent", 0))
-                movers_list.append(f"{symbol}: {change:+.2f}%")
+                change = m.get("change_percent") or m.get("quote", {}).get("change_percent") or 0
+                try:
+                    change = float(change)
+                    movers_list.append(f"{symbol}: {change:+.2f}%")
+                except (ValueError, TypeError):
+                    movers_list.append(f"{symbol}")
             movers_text = f"\nTop Movers from Scanner: {', '.join(movers_list)}"
         
         # Format indices
@@ -158,16 +162,24 @@ Return ONLY valid JSON, no markdown code blocks."""
         if context_data.get("indices"):
             idx_list = []
             for sym, data in context_data["indices"].items():
-                change = data.get("change_percent", 0)
-                price = data.get("price", 0)
-                idx_list.append(f"{sym}: ${price:.2f} ({change:+.2f}%)")
+                try:
+                    change = float(data.get("change_percent", 0) or 0)
+                    price = float(data.get("price", 0) or 0)
+                    idx_list.append(f"{sym}: ${price:.2f} ({change:+.2f}%)")
+                except (ValueError, TypeError):
+                    idx_list.append(f"{sym}")
             indices_text = f"\nCurrent Index Levels: {', '.join(idx_list)}"
         
         # Format VIX
         vix_text = ""
         if context_data.get("vix"):
             vix = context_data["vix"]
-            vix_text = f"\nVIX: {vix.get('price', 'N/A')} ({vix.get('change_percent', 0):+.2f}%)"
+            try:
+                vix_price = vix.get('price', 'N/A')
+                vix_change = float(vix.get('change_percent', 0) or 0)
+                vix_text = f"\nVIX: {vix_price} ({vix_change:+.2f}%)"
+            except (ValueError, TypeError):
+                vix_text = f"\nVIX: {vix.get('price', 'N/A')}"
         
         prompt = f"""Write your premarket newsletter for {date}.
 
@@ -180,7 +192,7 @@ Search for and include:
 
 My Scanner Data:{movers_text}{indices_text}{vix_text}
 
-Watchlist: {', '.join(context_data.get('watchlist', [])) or 'No specific watchlist'}
+Watchlist: {', '.join(context_data.get('watchlist', []) or []) or 'No specific watchlist'}
 
 Generate a complete premarket briefing with specific, actionable trade ideas. Include price levels, stop losses, and targets where possible. Format your response as valid JSON."""
 
