@@ -1655,7 +1655,7 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
     
     try:
         from services.scoring_engine import get_scoring_engine
-        from services.strategies import get_strategies_service
+        from services.strategy_service import StrategyService
         from services.enhanced_alerts import (
             create_enhanced_alert, get_alert_manager,
             AlertType, AlertTimeframe, determine_timeframe
@@ -1663,7 +1663,7 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
         
         feature_engine = get_feature_engine()
         scoring_engine = get_scoring_engine()
-        strategies_service = get_strategies_service()
+        strategies_service = StrategyService()
         alert_manager = get_alert_manager()
         
         # Define all scanner types to run
