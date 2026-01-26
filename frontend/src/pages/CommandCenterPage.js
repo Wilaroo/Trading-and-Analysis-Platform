@@ -609,6 +609,11 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-zinc-500">5-min Candles</span>
+                        {analysis?.is_cached && (
+                          <span className="text-[9px] px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded">
+                            Cached: {new Date(analysis?.last_updated).toLocaleTimeString()}
+                          </span>
+                        )}
                       </div>
                       <button
                         onClick={() => setShowTradingLines(!showTradingLines)}
@@ -623,11 +628,25 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
                       </button>
                     </div>
                     
-                    <div 
-                      ref={chartContainerRef} 
-                      className="w-full border border-zinc-800 rounded bg-zinc-950" 
-                      style={{ height: '300px', minHeight: '300px', minWidth: '400px' }} 
-                    />
+                    {/* Chart Error Message */}
+                    {chartError && (
+                      <div className="flex items-center justify-center h-[300px] bg-zinc-900/50 rounded border border-zinc-800">
+                        <div className="text-center">
+                          <AlertTriangle className="w-8 h-8 text-yellow-500 mx-auto mb-2" />
+                          <p className="text-sm text-zinc-400">{chartError}</p>
+                          <p className="text-xs text-zinc-500 mt-1">Connect IB Gateway for real-time data</p>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Chart Container */}
+                    {!chartError && (
+                      <div 
+                        ref={chartContainerRef} 
+                        className="w-full border border-zinc-800 rounded" 
+                        style={{ height: '300px', minHeight: '300px', minWidth: '400px', background: '#0A0A0A' }} 
+                      />
+                    )}
                     
                     {/* Trading Levels Legend */}
                     {showTradingLines && tradingSummary.entry && (
