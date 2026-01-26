@@ -1880,7 +1880,16 @@ async def generate_earnings_data(symbol: str, earnings_date: str) -> Dict:
         
         # Average surprise
         "avg_eps_surprise_4q": round(sum(h["eps_surprise_percent"] for h in historical) / 4, 2),
-        "avg_stock_reaction_4q": round(sum(h["stock_reaction"] for h in historical) / 4, 2)
+        "avg_stock_reaction_4q": round(sum(h["stock_reaction"] for h in historical) / 4, 2),
+        
+        # Earnings Play Strategy based on historical patterns
+        "earnings_play": generate_earnings_play_strategy(
+            avg_reaction=round(sum(h["stock_reaction"] for h in historical) / 4, 2),
+            iv_rank=iv_rank,
+            expected_move=expected_move,
+            historical=historical,
+            beat_rate=round(random.uniform(50, 85), 1)
+        )
     }
 
 @app.get("/api/earnings/calendar")
