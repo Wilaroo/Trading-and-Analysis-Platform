@@ -672,19 +672,15 @@ The application is now consolidated into a single **Command Center** that serves
    - Returns status details for each service
    - Summary counts: healthy, warning, disconnected, error
 
-2. **System Monitor UI Panel** (Command Center)
-   - Collapsible panel at bottom of Command Center page
-   - Overall status badge: "All Systems Go" (green), "Partial" (yellow), "Issues Detected" (red)
-   - Summary bar showing counts of healthy/warning/disconnected/error services
-   - Grid layout displaying each service with:
-     - Color-coded icon (green/yellow/orange/red)
-     - Service name and status indicator
-     - Detail description
+2. **Compact System Monitor in Header** (Command Center)
+   - Simplified status indicator next to "Command Center" heading
+   - Shows colored dots for each service (green=healthy, orange=disconnected, red=error)
+   - Displays "X/Y" count (e.g., "6/7" = 6 healthy out of 7 total)
+   - Hover over dots to see service name and details
    - Auto-refreshes every 30 seconds
-   - Manual refresh button
-   - Timestamp showing last check time
+   - Color-coded overall status (green/yellow/red)
 
 **Files Modified:**
 - `/app/backend/server.py` - Added `/api/system/monitor` endpoint
-- `/app/frontend/src/pages/CommandCenterPage.js` - Added System Monitor panel with new icons and state
+- `/app/frontend/src/pages/CommandCenterPage.js` - Added compact System Monitor to header
 
