@@ -444,6 +444,24 @@ The application is now consolidated into a single **Command Center** that serves
 
 ## Changelog
 
+### Jan 26, 2026 - Panel Reordering
+**Implemented:**
+- Restructured Command Center layout from 3-column grid to single-column flow
+- New panel order (top to bottom):
+  1. Holdings & Watchlist (side by side)
+  2. Market Intelligence
+  3. Trade Opportunities
+  4. Smart Scanner
+  5. Breakout Alerts
+  6. Price Alerts
+  7. Earnings
+  8. Short Squeeze
+  9. System Alerts (at bottom)
+- Removed redundant Scanner Controls panel (replaced by Smart Scanner)
+
+**Files Modified:**
+- `/app/frontend/src/pages/CommandCenterPage.js` - Complete panel restructure
+
 ### Jan 26, 2026 - Comprehensive Smart Scanner
 **Implemented:**
 1. **Smart Scanner Panel** - Complete replacement of the basic scanner system
