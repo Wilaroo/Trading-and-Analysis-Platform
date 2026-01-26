@@ -684,3 +684,24 @@ The application is now consolidated into a single **Command Center** that serves
 - `/app/backend/server.py` - Added `/api/system/monitor` endpoint
 - `/app/frontend/src/pages/CommandCenterPage.js` - Added compact System Monitor to header
 
+
+
+### Jan 26, 2026 - Additional Backend Bug Fixes
+**Fixed:**
+1. **VIX Contract Type Error**
+   - **Error**: `No security definition has been found for the request, contract: Stock(symbol='VIX')`
+   - **Root Cause**: VIX is an index, not a stock - requires different contract type in IB
+   - **Fix**: Updated `get_quote` in `ib_service.py` to detect VIX and use `Index("VIX", "CBOE")` instead of `Stock`
+
+2. **UniversalScoringEngine Method Name**
+   - **Error**: `'UniversalScoringEngine' object has no attribute 'calculate_scores'`
+   - **Root Cause**: Calling non-existent method `calculate_scores()` instead of `calculate_composite_score()`
+   - **Fix**: Updated all 3 occurrences in `ib.py` to use correct method with proper `stock_data` dict:
+     - Line 1504 (breakout scanner)
+     - Line 1806 (comprehensive scanner)
+     - Line 2224 (symbol analysis endpoint)
+
+**Files Modified:**
+- `/app/backend/services/ib_service.py` - Fixed VIX contract type
+- `/app/backend/routers/ib.py` - Fixed 3 scoring engine method calls
+
