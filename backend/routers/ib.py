@@ -1802,16 +1802,23 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                 hist_for_features = hist_data_intraday if hist_data_intraday and len(hist_data_intraday) > 20 else hist_data_daily
                 features = feature_engine.calculate_all_features(bars_5m=hist_for_features, bars_daily=hist_data_daily, session_bars_1m=None, fundamentals=None, market_data=None)
                 
-                # Calculate scores
-                scores = scoring_engine.calculate_scores(symbol, quote, features, {})
-                overall_score = scores.get("overall", 0)
+                # Calculate scores - build stock_data dict for scoring engine
+                stock_data = {
+                    "symbol": symbol,
+                    "price": quote.get("price", 0),
+                    "change_percent": quote.get("change_percent", 0),
+                    "volume": quote.get("volume", 0),
+                    **features
+                }
+                score_result = scoring_engine.calculate_composite_score(stock_data, {})
+                overall_score = score_result.get("composite_score", score_result.get("overall", 0))
                 
                 # Apply minimum score filter
                 if overall_score < min_score:
                     continue
                 
                 # Match against ALL strategies
-                matched_strategies = simple_strategy_match(symbol, features, scores)
+                matched_strategies = simple_strategy_match(symbol, features, score_result)
                 
                 # Determine timeframe based on strategy matches and features
                 timeframe = determine_timeframe_from_analysis(
