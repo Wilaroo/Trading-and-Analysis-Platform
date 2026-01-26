@@ -1011,61 +1011,97 @@ const CommandCenterPage = () => {
                 {earnings.length > 0 ? earnings.map((item, idx) => {
                   const earningsDate = new Date(item.earnings_date);
                   const today = new Date();
-                  const isToday = earningsDate.toDateString() === today.toDateString();
-                  const tomorrow = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  earningsDate.setHours(0, 0, 0, 0);
+                  const isToday = earningsDate.getTime() === today.getTime();
+                  const tomorrow = new Date(today);
                   tomorrow.setDate(today.getDate() + 1);
-                  const isTomorrow = earningsDate.toDateString() === tomorrow.toDateString();
+                  const isTomorrow = earningsDate.getTime() === tomorrow.getTime();
                   
-                  // Catalyst score color
-                  const getScoreColor = (score) => {
-                    if (score >= 5) return 'text-green-400 bg-green-500/20';
-                    if (score >= 0) return 'text-yellow-400 bg-yellow-500/20';
-                    return 'text-red-400 bg-red-500/20';
+                  // Get expected move data
+                  const expectedMove = item.implied_volatility?.expected_move_percent || item.expected_move || 0;
+                  const ivRank = item.implied_volatility?.iv_rank || 0;
+                  
+                  // Expected move bar color based on size
+                  const getMoveColor = (move) => {
+                    if (move >= 10) return 'bg-red-500';
+                    if (move >= 7) return 'bg-orange-500';
+                    if (move >= 5) return 'bg-yellow-500';
+                    return 'bg-cyan-500';
                   };
+                  
+                  // Calculate bar width (max 15% move = 100% width)
+                  const barWidth = Math.min((expectedMove / 15) * 100, 100);
                   
                   return (
                     <div 
                       key={idx} 
-                      className={`p-2 rounded border-l-2 ${
-                        isToday ? 'bg-orange-500/10 border-orange-500' : 
-                        isTomorrow ? 'bg-yellow-500/5 border-yellow-500/50' : 
-                        'bg-zinc-900/50 border-zinc-700'
+                      className={`p-2.5 rounded-lg cursor-pointer transition-all hover:scale-[1.01] ${
+                        isToday ? 'bg-orange-500/15 border border-orange-500/50' : 
+                        isTomorrow ? 'bg-yellow-500/10 border border-yellow-500/30' : 
+                        'bg-zinc-900/50 border border-white/5 hover:border-white/20'
                       }`}
                       onClick={() => setSelectedTicker({ symbol: item.symbol, quote: {} })}
                     >
-                      <div className="flex items-center justify-between mb-1">
+                      {/* Top Row: Symbol, Date Badge, Time */}
+                      <div className="flex items-center justify-between mb-1.5">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-white">{item.symbol}</span>
+                          <span className="font-bold text-white text-sm">{item.symbol}</span>
                           {isToday && (
-                            <span className="text-[10px] px-1.5 py-0.5 bg-orange-500/30 text-orange-400 rounded font-medium">
+                            <span className="text-[9px] px-1.5 py-0.5 bg-orange-500 text-black rounded font-bold animate-pulse">
                               TODAY
                             </span>
                           )}
                           {isTomorrow && (
-                            <span className="text-[10px] px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded font-medium">
+                            <span className="text-[9px] px-1.5 py-0.5 bg-yellow-500/30 text-yellow-400 rounded font-medium">
                               TOMORROW
                             </span>
                           )}
                         </div>
-                        {item.catalyst_score !== undefined && (
-                          <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${getScoreColor(item.catalyst_score.score)}`}>
-                            <Star className="w-3 h-3 inline mr-0.5" />
-                            {item.catalyst_score.score >= 0 ? '+' : ''}{item.catalyst_score.score}
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-zinc-400">
+                            {item.time === 'Before Open' ? '🌅' : '🌙'}
                           </span>
+                          <span className="text-[10px] text-zinc-500 font-medium">
+                            {earningsDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      {/* Company Name */}
+                      <p className="text-[11px] text-zinc-400 mb-2 truncate">{item.company_name}</p>
+                      
+                      {/* Expected Move Visualization */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[10px]">
+                          <span className="text-zinc-500">Expected Move</span>
+                          <span className={`font-mono font-bold ${
+                            expectedMove >= 7 ? 'text-orange-400' : 
+                            expectedMove >= 5 ? 'text-yellow-400' : 
+                            'text-cyan-400'
+                          }`}>
+                            ±{expectedMove.toFixed(1)}%
+                          </span>
+                        </div>
+                        
+                        {/* Visual Bar */}
+                        <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full rounded-full transition-all ${getMoveColor(expectedMove)}`}
+                            style={{ width: `${barWidth}%` }}
+                          />
+                        </div>
+                        
+                        {/* IV Rank indicator */}
+                        {ivRank > 0 && (
+                          <div className="flex items-center justify-between text-[9px] text-zinc-500 mt-1">
+                            <span>IV Rank: {ivRank.toFixed(0)}%</span>
+                            <span className={ivRank >= 50 ? 'text-yellow-400' : 'text-zinc-500'}>
+                              {ivRank >= 70 ? '🔥 High IV' : ivRank >= 50 ? '⚡ Elevated' : ''}
+                            </span>
+                          </div>
                         )}
                       </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-zinc-400">{item.company_name?.split(' ')[0] || item.symbol}</span>
-                        <div className="flex items-center gap-2 text-zinc-500">
-                          <span>{item.time === 'Before Open' ? '🌅 BMO' : '🌙 AMC'}</span>
-                          <span>{earningsDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-                        </div>
-                      </div>
-                      {item.expected_move && (
-                        <div className="mt-1 text-[10px] text-zinc-500">
-                          Expected Move: ±{item.expected_move.toFixed(1)}%
-                        </div>
-                      )}
                     </div>
                   );
                 }) : (
