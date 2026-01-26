@@ -1739,37 +1739,533 @@ const CommandCenterPage = () => {
           )}
         </Card>
 
-        {/* Recent System Alerts (moved here for visibility) */}
-        <Card>
-          <button 
-            onClick={() => toggleSection('alerts')}
-            className="w-full flex items-center justify-between mb-3"
-          >
-            <div className="flex items-center gap-2">
-              <Bell className="w-5 h-5 text-yellow-400" />
-              <h3 className="text-sm font-semibold uppercase tracking-wider">Alerts</h3>
-            </div>
-            <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.alerts ? 'rotate-180' : ''}`} />
-          </button>
+          {/* Opportunities Grid */}
+          <Card>
+            <SectionHeader 
+              icon={Zap} 
+              title="Trade Opportunities" 
+              count={opportunities.length}
+              action={
+                opportunities.length > 0 && (
+                  <span className="text-xs text-zinc-500">
+                    {opportunities.filter(o => o.high_conviction).length} high conviction
+                  </span>
+                )
+              }
+            />
             
-            {expandedSections.alerts && (
-              <div className="space-y-2">
-                {alerts.length > 0 ? alerts.map((alert, idx) => (
-                  <div 
-                    key={idx} 
-                    className="p-2 bg-zinc-900/50 rounded hover:bg-zinc-900 cursor-pointer transition-colors"
-                    onClick={() => setSelectedTicker({ symbol: alert.symbol, quote: {} })}
-                    data-testid={`alert-item-${alert.symbol}`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-bold text-cyan-400">{alert.symbol}</span>
-                      <Badge variant="info">{alert.strategy_id}</Badge>
+            {!isConnected ? (
+              <div className="text-center py-12">
+                <WifiOff className="w-12 h-12 text-zinc-600 mx-auto mb-3" />
+                <p className="text-zinc-400">Connect to IB Gateway to scan</p>
+                <button
+                  onClick={connectToIB}
+                  className="mt-4 px-4 py-2 bg-cyan-500 text-black rounded font-medium text-sm"
+                >
+                  Connect Now
+                </button>
+              </div>
+            ) : opportunities.length === 0 ? (
+              <div className="text-center py-12">
+                <Search className="w-12 h-12 text-zinc-600 mx-auto mb-3" />
+                <p className="text-zinc-400">No opportunities found</p>
+                <p className="text-zinc-500 text-sm mt-1">Run a scan to find trade setups</p>
+              </div>
+            ) : (
+              <div className="grid md:grid-cols-2 gap-3 max-h-[500px] overflow-y-auto">
+                {opportunities.map((opp, idx) => {
+                  const quote = opp.quote || opp;
+                  const isHighConviction = opp.high_conviction || (opp.conviction?.score >= 70);
+                  
+                  return (
+                    <div
+                      key={idx}
+                      onClick={() => setSelectedTicker(opp)}
+                      className={`p-3 rounded-lg border cursor-pointer transition-all hover:border-cyan-500/50 ${
+                        isHighConviction 
+                          ? 'border-cyan-500/30 bg-cyan-500/5 shadow-[0_0_10px_rgba(0,229,255,0.1)]' 
+                          : 'border-white/10 bg-zinc-900/50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white">{opp.symbol}</span>
+                          {isHighConviction && (
+                            <Badge variant="success">HIGH CONVICTION</Badge>
+                          )}
+                        </div>
+                        <span className={`text-sm font-mono ${
+                          quote?.change_percent >= 0 ? 'text-green-400' : 'text-red-400'
+                        }`}>
+                          {formatPercent(quote?.change_percent)}
+                        </span>
+                      </div>
+                      
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-zinc-400">${formatPrice(quote?.price)}</span>
+                        <span className="text-zinc-500">Vol: {formatVolume(quote?.volume)}</span>
+                      </div>
+                      
+                      {opp.conviction && (
+                        <div className="mt-2 pt-2 border-t border-white/5">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-zinc-500">Score</span>
+                            <span className="text-cyan-400 font-mono">{opp.conviction.score}/100</span>
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleTrade(opp, 'BUY'); }}
+                          className="flex-1 py-1.5 text-xs font-bold bg-green-500/20 text-green-400 rounded hover:bg-green-500/30"
+                        >
+                          Buy
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleTrade(opp, 'SELL'); }}
+                          className="flex-1 py-1.5 text-xs font-bold bg-red-500/20 text-red-400 rounded hover:bg-red-500/30"
+                        >
+                          Short
+                        </button>
+                      </div>
                     </div>
-                    <p className="text-xs text-zinc-400">{alert.message || alert.strategy_name}</p>
-                  </div>
-                )) : (
-                  <p className="text-center text-zinc-500 text-sm py-4">No recent alerts</p>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+
+          {/* Comprehensive Scanner Panel - Main Alert System */}
+          <Card glow={comprehensiveSummary.total > 0}>
+            <button 
+              onClick={() => toggleSection('comprehensiveAlerts')}
+              className="w-full flex items-center justify-between mb-3"
+            >
+              <div className="flex items-center gap-2">
+                <Target className="w-5 h-5 text-cyan-400" />
+                <h3 className="text-sm font-semibold uppercase tracking-wider">Smart Scanner</h3>
+                <span className="text-xs text-zinc-500">({comprehensiveSummary.total})</span>
+                {comprehensiveSummary.total > 0 && (
+                  <span className="text-[9px] px-1.5 py-0.5 bg-cyan-500/20 text-cyan-400 rounded">
+                    Score ≥{minScoreThreshold}
+                  </span>
                 )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={(e) => { e.stopPropagation(); runComprehensiveScan(); }}
+                  disabled={isComprehensiveScanning}
+                  className={`text-xs px-2 py-1 rounded ${isComprehensiveScanning ? 'bg-zinc-700 text-zinc-500' : 'bg-cyan-500 text-black hover:bg-cyan-400'} transition-colors`}
+                >
+                  {isComprehensiveScanning ? 'Scanning...' : 'Scan Now'}
+                </button>
+                <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.comprehensiveAlerts ? 'rotate-180' : ''}`} />
+              </div>
+            </button>
+            
+            {expandedSections.comprehensiveAlerts && (
+              <div className="space-y-3">
+                {/* Score Threshold Slider */}
+                <div className="flex items-center gap-3 p-2 bg-zinc-900/50 rounded-lg">
+                  <span className="text-xs text-zinc-400 whitespace-nowrap">Min Score:</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={minScoreThreshold}
+                    onChange={(e) => setMinScoreThreshold(parseInt(e.target.value))}
+                    className="flex-1 h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                  />
+                  <span className="text-sm font-mono text-cyan-400 w-8">{minScoreThreshold}</span>
+                </div>
+                
+                {/* Timeframe Tabs */}
+                <div className="flex gap-1 p-1 bg-zinc-900/50 rounded-lg">
+                  {[
+                    { id: 'all', label: 'All', count: comprehensiveSummary.total },
+                    { id: 'scalp', label: 'Scalp', count: comprehensiveSummary.scalp, max: 10 },
+                    { id: 'intraday', label: 'Intraday', count: comprehensiveSummary.intraday, max: 25 },
+                    { id: 'swing', label: 'Swing', count: comprehensiveSummary.swing, max: 25 },
+                    { id: 'position', label: 'Position', count: comprehensiveSummary.position, max: 25 },
+                  ].map(tab => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setSelectedTimeframeTab(tab.id)}
+                      className={`flex-1 px-2 py-1.5 text-xs rounded transition-colors ${
+                        selectedTimeframeTab === tab.id
+                          ? 'bg-cyan-500 text-black font-bold'
+                          : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                      }`}
+                    >
+                      {tab.label}
+                      <span className={`ml-1 ${selectedTimeframeTab === tab.id ? 'text-black/70' : 'text-zinc-600'}`}>
+                        {tab.count}{tab.max ? `/${tab.max}` : ''}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                
+                {!isConnected && (
+                  <div className="text-center py-4 text-zinc-500 text-sm">
+                    <AlertTriangle className="w-6 h-6 mx-auto mb-2 opacity-50" />
+                    Connect IB Gateway to run comprehensive scan
+                  </div>
+                )}
+                
+                {isConnected && comprehensiveSummary.total === 0 && !isComprehensiveScanning && (
+                  <div className="text-center py-6 text-zinc-500">
+                    <Target className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No opportunities above score {minScoreThreshold}</p>
+                    <p className="text-xs mt-1">Try lowering the threshold or wait for market conditions</p>
+                  </div>
+                )}
+                
+                {isComprehensiveScanning && (
+                  <div className="text-center py-6 text-cyan-400">
+                    <RefreshCw className="w-8 h-8 mx-auto mb-2 animate-spin" />
+                    <p className="text-sm">Scanning all market sectors...</p>
+                    <p className="text-xs mt-1 text-zinc-500">Analyzing against 77 trading rules</p>
+                  </div>
+                )}
+                
+                {/* Alert Cards */}
+                {getFilteredComprehensiveAlerts().slice(0, 10).map((alert, idx) => (
+                  <motion.div 
+                    key={alert.id}
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: idx * 0.03 }}
+                    onClick={() => setSelectedEnhancedAlert(alert)}
+                    className={`p-3 rounded-lg cursor-pointer transition-all border ${
+                      alert.grade === 'A' 
+                        ? 'bg-green-500/10 border-green-500/40 shadow-[0_0_15px_rgba(34,197,94,0.15)]' 
+                        : alert.grade === 'B'
+                        ? 'bg-cyan-500/10 border-cyan-500/40'
+                        : 'bg-zinc-900/50 border-white/10 hover:border-cyan-500/30'
+                    }`}
+                    data-testid={`comprehensive-alert-${alert.symbol}`}
+                  >
+                    {/* Alert Header */}
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-white">{alert.symbol}</span>
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                            alert.direction === 'LONG' 
+                              ? 'bg-green-500 text-black' 
+                              : 'bg-red-500 text-white'
+                          }`}>
+                            {alert.direction}
+                          </span>
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                            alert.grade === 'A' ? 'bg-green-500 text-black' :
+                            alert.grade === 'B' ? 'bg-cyan-500 text-black' :
+                            alert.grade === 'C' ? 'bg-yellow-500 text-black' :
+                            'bg-zinc-500 text-white'
+                          }`}>
+                            Grade {alert.grade}
+                          </span>
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                            alert.timeframe === 'scalp' ? 'bg-red-500/20 text-red-400' :
+                            alert.timeframe === 'intraday' ? 'bg-orange-500/20 text-orange-400' :
+                            alert.timeframe === 'swing' ? 'bg-purple-500/20 text-purple-400' :
+                            'bg-blue-500/20 text-blue-400'
+                          }`}>
+                            {alert.timeframe_description}
+                          </span>
+                        </div>
+                        <p className="text-xs text-zinc-400 mt-1 line-clamp-1">{alert.headline}</p>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-lg font-bold text-cyan-400">{alert.overall_score}</span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); dismissComprehensiveAlert(alert.id); }}
+                          className="p-1 text-zinc-500 hover:text-red-400 transition-colors"
+                          title="Dismiss"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                    
+                    {/* Quick Stats */}
+                    <div className="grid grid-cols-5 gap-1.5 text-[9px]">
+                      <div className="bg-black/30 rounded p-1.5 text-center">
+                        <span className="text-zinc-500 block">Entry</span>
+                        <span className="text-cyan-400 font-mono">${alert.trade_plan?.entry?.toFixed(2)}</span>
+                      </div>
+                      <div className="bg-black/30 rounded p-1.5 text-center">
+                        <span className="text-zinc-500 block">Stop</span>
+                        <span className="text-red-400 font-mono">${alert.trade_plan?.stop_loss?.toFixed(2)}</span>
+                      </div>
+                      <div className="bg-black/30 rounded p-1.5 text-center">
+                        <span className="text-zinc-500 block">Target</span>
+                        <span className="text-green-400 font-mono">${alert.trade_plan?.target?.toFixed(2)}</span>
+                      </div>
+                      <div className="bg-black/30 rounded p-1.5 text-center">
+                        <span className="text-zinc-500 block">R/R</span>
+                        <span className="text-purple-400 font-mono">1:{alert.trade_plan?.risk_reward?.toFixed(1)}</span>
+                      </div>
+                      <div className="bg-black/30 rounded p-1.5 text-center">
+                        <span className="text-zinc-500 block">Rules</span>
+                        <span className={`font-mono ${
+                          alert.matched_strategies_count >= 10 ? 'text-green-400' :
+                          alert.matched_strategies_count >= 5 ? 'text-cyan-400' :
+                          'text-yellow-400'
+                        }`}>{alert.matched_strategies_count}/77</span>
+                      </div>
+                    </div>
+                    
+                    {/* Trigger reason */}
+                    <div className="mt-2 text-[9px] text-zinc-500 flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      <span>{alert.trigger_reason}</span>
+                    </div>
+                  </motion.div>
+                ))}
+                
+                {getFilteredComprehensiveAlerts().length > 10 && (
+                  <p className="text-center text-zinc-500 text-xs py-2">
+                    +{getFilteredComprehensiveAlerts().length - 10} more alerts in this category
+                  </p>
+                )}
+              </div>
+            )}
+          </Card>
+
+          {/* Breakout Alerts - Top 10 meeting all rules */}
+          <Card>
+            <button 
+              onClick={() => toggleSection('breakouts')}
+              className="w-full flex items-center justify-between mb-3"
+            >
+              <div className="flex items-center gap-2">
+                <Zap className="w-5 h-5 text-yellow-400" />
+                <h3 className="text-sm font-semibold uppercase tracking-wider">Breakout Alerts</h3>
+                <span className="text-xs text-zinc-500">({breakoutAlerts.length})</span>
+                {breakoutAlerts.length > 0 && (
+                  <span className="text-[9px] px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded animate-pulse">
+                    LIVE
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={(e) => { e.stopPropagation(); fetchBreakoutAlerts(); }}
+                  className="text-xs text-cyan-400 hover:text-cyan-300"
+                >
+                  Refresh
+                </button>
+                <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.breakouts ? 'rotate-180' : ''}`} />
+              </div>
+            </button>
+            
+            {expandedSections.breakouts && (
+              <div className="space-y-2">
+                {!isConnected && (
+                  <div className="text-center py-4 text-zinc-500 text-sm">
+                    Connect IB Gateway for real-time breakout scanning
+                  </div>
+                )}
+                
+                {isConnected && breakoutAlerts.length === 0 && (
+                  <div className="text-center py-4 text-zinc-500 text-sm">
+                    No breakouts detected matching your criteria
+                  </div>
+                )}
+                
+                {breakoutAlerts.map((breakout, idx) => (
+                  <div 
+                    key={idx}
+                    onClick={() => setSelectedTicker({ symbol: breakout.symbol, quote: { price: breakout.current_price, change_percent: breakout.change_percent } })}
+                    className={`p-3 rounded cursor-pointer transition-all hover:bg-zinc-800 border ${
+                      breakout.breakout_type === 'LONG' 
+                        ? 'bg-green-500/5 border-green-500/30' 
+                        : 'bg-red-500/5 border-red-500/30'
+                    }`}
+                    data-testid={`breakout-${breakout.symbol}`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-white">{breakout.symbol}</span>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                          breakout.breakout_type === 'LONG' 
+                            ? 'bg-green-500 text-black' 
+                            : 'bg-red-500 text-white'
+                        }`}>
+                          {breakout.breakout_type}
+                        </span>
+                        <span className="text-[9px] px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded">
+                          Score: {breakout.breakout_score}
+                        </span>
+                        {/* Signal Strength Indicator */}
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                          breakout.signal_strength_label === 'VERY STRONG' ? 'bg-green-500 text-black' :
+                          breakout.signal_strength_label === 'STRONG' ? 'bg-cyan-500 text-black' :
+                          breakout.signal_strength_label === 'MODERATE' ? 'bg-yellow-500 text-black' :
+                          'bg-zinc-600 text-white'
+                        }`}>
+                          {breakout.rules_matched || breakout.strategy_count}/77
+                        </span>
+                      </div>
+                      <span className={`text-sm font-mono ${breakout.change_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {formatPercent(breakout.change_percent)}
+                      </span>
+                    </div>
+                    
+                    {/* Signal Strength Bar */}
+                    <div className="mb-2">
+                      <div className="flex items-center justify-between text-[9px] mb-1">
+                        <span className="text-zinc-500">Signal Strength</span>
+                        <span className={`font-bold ${
+                          breakout.signal_strength_label === 'VERY STRONG' ? 'text-green-400' :
+                          breakout.signal_strength_label === 'STRONG' ? 'text-cyan-400' :
+                          breakout.signal_strength_label === 'MODERATE' ? 'text-yellow-400' :
+                          'text-zinc-400'
+                        }`}>
+                          {breakout.signal_strength_label || 'MODERATE'} ({breakout.signal_strength || Math.round((breakout.strategy_count / 77) * 100)}%)
+                        </span>
+                      </div>
+                      <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full rounded-full transition-all ${
+                            breakout.signal_strength_label === 'VERY STRONG' ? 'bg-green-500' :
+                            breakout.signal_strength_label === 'STRONG' ? 'bg-cyan-500' :
+                            breakout.signal_strength_label === 'MODERATE' ? 'bg-yellow-500' :
+                            'bg-zinc-500'
+                          }`}
+                          style={{ width: `${breakout.signal_strength || Math.round((breakout.strategy_count / 77) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-4 gap-2 text-[9px] mb-2">
+                      <div>
+                        <span className="text-zinc-500">Price: </span>
+                        <span className="text-white font-mono">${breakout.current_price}</span>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500">Broke: </span>
+                        <span className={`font-mono ${breakout.breakout_type === 'LONG' ? 'text-green-400' : 'text-red-400'}`}>
+                          ${breakout.breakout_level}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500">RVOL: </span>
+                        <span className="text-cyan-400 font-mono">{breakout.rvol}x</span>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500">R/R: </span>
+                        <span className="text-purple-400 font-mono">1:{breakout.risk_reward}</span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center justify-between text-[9px]">
+                      <div className="flex items-center gap-2">
+                        <span className="text-zinc-500">Entry: <span className="text-cyan-400">${breakout.current_price}</span></span>
+                        <span className="text-zinc-500">Stop: <span className="text-red-400">${breakout.stop_loss}</span></span>
+                        <span className="text-zinc-500">Target: <span className="text-green-400">${breakout.target}</span></span>
+                      </div>
+                    </div>
+                    
+                    {breakout.matched_strategies?.length > 0 && (
+                      <div className="mt-2 pt-2 border-t border-white/5">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="text-[9px] text-zinc-500">Top Strategies: </span>
+                            {breakout.matched_strategies.slice(0, 3).map((s, i) => (
+                              <span key={i} className="text-[9px] text-purple-400 mr-2">{s.name}</span>
+                            ))}
+                          </div>
+                          <span className="text-[9px] text-zinc-600">{breakout.rules_matched || breakout.strategy_count} rules matched</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          {/* Price Alerts */}
+          <Card>
+            <button 
+              onClick={() => toggleSection('priceAlerts')}
+              className="w-full flex items-center justify-between mb-3"
+            >
+              <div className="flex items-center gap-2">
+                <Bell className="w-5 h-5 text-purple-400" />
+                <h3 className="text-sm font-semibold uppercase tracking-wider">Price Alerts</h3>
+                <span className="text-xs text-zinc-500">({priceAlerts.length})</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setSoundEnabled(!soundEnabled); }}
+                  className={`p-1 rounded ${soundEnabled ? 'text-green-400' : 'text-zinc-500'}`}
+                >
+                  {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                </button>
+                <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.priceAlerts ? 'rotate-180' : ''}`} />
+              </div>
+            </button>
+            
+            {expandedSections.priceAlerts && (
+              <div className="space-y-3">
+                {/* Create new alert */}
+                <div className="flex items-center gap-2 p-2 bg-zinc-900/50 rounded">
+                  <input
+                    type="text"
+                    value={newAlertSymbol}
+                    onChange={(e) => setNewAlertSymbol(e.target.value.toUpperCase())}
+                    placeholder="Symbol"
+                    className="w-20 px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-xs text-white placeholder-zinc-500"
+                  />
+                  <select
+                    value={newAlertDirection}
+                    onChange={(e) => setNewAlertDirection(e.target.value)}
+                    className="px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-xs text-white"
+                  >
+                    <option value="ABOVE">Above</option>
+                    <option value="BELOW">Below</option>
+                  </select>
+                  <input
+                    type="number"
+                    value={newAlertPrice}
+                    onChange={(e) => setNewAlertPrice(e.target.value)}
+                    placeholder="Price"
+                    className="w-24 px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-xs text-white placeholder-zinc-500"
+                  />
+                  <button
+                    onClick={createPriceAlert}
+                    disabled={!newAlertSymbol || !newAlertPrice}
+                    className="p-1.5 bg-purple-500 text-white rounded hover:bg-purple-400 disabled:opacity-50"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                
+                {/* Active alerts */}
+                <div className="space-y-1.5">
+                  {priceAlerts.length > 0 ? priceAlerts.map((alert, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-2 bg-zinc-900/50 rounded group">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-purple-400">{alert.symbol}</span>
+                        <span className={`text-xs ${alert.direction === 'ABOVE' ? 'text-green-400' : 'text-red-400'}`}>
+                          {alert.direction === 'ABOVE' ? '↑' : '↓'} ${alert.target_price?.toFixed(2)}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => deletePriceAlert(alert.id)}
+                        className="p-1 text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )) : (
+                    <p className="text-center text-zinc-500 text-xs py-2">No active alerts</p>
+                  )}
+                </div>
               </div>
             )}
           </Card>
@@ -2006,470 +2502,36 @@ const CommandCenterPage = () => {
             )}
           </Card>
 
-          {/* Price Alerts */}
-          <Card>
-            <button 
-              onClick={() => toggleSection('priceAlerts')}
-              className="w-full flex items-center justify-between mb-3"
-            >
-              <div className="flex items-center gap-2">
-                <Bell className="w-5 h-5 text-purple-400" />
-                <h3 className="text-sm font-semibold uppercase tracking-wider">Price Alerts</h3>
-                <span className="text-xs text-zinc-500">({priceAlerts.length})</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={(e) => { e.stopPropagation(); setSoundEnabled(!soundEnabled); }}
-                  className={`p-1 rounded ${soundEnabled ? 'text-green-400' : 'text-zinc-500'}`}
-                >
-                  {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-                </button>
-                <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.priceAlerts ? 'rotate-180' : ''}`} />
-              </div>
-            </button>
-            
-            {expandedSections.priceAlerts && (
-              <div className="space-y-3">
-                {/* Create new alert */}
-                <div className="flex items-center gap-2 p-2 bg-zinc-900/50 rounded">
-                  <input
-                    type="text"
-                    value={newAlertSymbol}
-                    onChange={(e) => setNewAlertSymbol(e.target.value.toUpperCase())}
-                    placeholder="Symbol"
-                    className="w-20 px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-xs text-white placeholder-zinc-500"
-                  />
-                  <select
-                    value={newAlertDirection}
-                    onChange={(e) => setNewAlertDirection(e.target.value)}
-                    className="px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-xs text-white"
-                  >
-                    <option value="ABOVE">Above</option>
-                    <option value="BELOW">Below</option>
-                  </select>
-                  <input
-                    type="number"
-                    value={newAlertPrice}
-                    onChange={(e) => setNewAlertPrice(e.target.value)}
-                    placeholder="Price"
-                    className="w-24 px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-xs text-white placeholder-zinc-500"
-                  />
-                  <button
-                    onClick={createPriceAlert}
-                    disabled={!newAlertSymbol || !newAlertPrice}
-                    className="p-1.5 bg-purple-500 text-white rounded hover:bg-purple-400 disabled:opacity-50"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                
-                {/* Active alerts */}
-                <div className="space-y-1.5">
-                  {priceAlerts.length > 0 ? priceAlerts.map((alert, idx) => (
-                    <div key={idx} className="flex items-center justify-between p-2 bg-zinc-900/50 rounded group">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-purple-400">{alert.symbol}</span>
-                        <span className={`text-xs ${alert.direction === 'ABOVE' ? 'text-green-400' : 'text-red-400'}`}>
-                          {alert.direction === 'ABOVE' ? '↑' : '↓'} ${alert.target_price?.toFixed(2)}
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => deletePriceAlert(alert.id)}
-                        className="p-1 text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )) : (
-                    <p className="text-center text-zinc-500 text-xs py-2">No active alerts</p>
-                  )}
-                </div>
-              </div>
-            )}
-          </Card>
-
-          {/* Scanner Controls */}
-          <Card>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <Search className="w-5 h-5 text-cyan-400" />
-                <h3 className="text-sm font-semibold uppercase tracking-wider">Scanner</h3>
-              </div>
-              <button
-                onClick={runScanner}
-                disabled={!isConnected || isScanning}
-                className="flex items-center gap-2 px-4 py-2 bg-cyan-500 text-black rounded font-medium text-sm hover:bg-cyan-400 disabled:opacity-50"
-              >
-                {isScanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                {isScanning ? 'Scanning...' : 'Scan Now'}
-              </button>
+        {/* Recent System Alerts (moved here for visibility) */}
+        <Card>
+          <button 
+            onClick={() => toggleSection('alerts')}
+            className="w-full flex items-center justify-between mb-3"
+          >
+            <div className="flex items-center gap-2">
+              <Bell className="w-5 h-5 text-yellow-400" />
+              <h3 className="text-sm font-semibold uppercase tracking-wider">Alerts</h3>
             </div>
+            <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.alerts ? 'rotate-180' : ''}`} />
+          </button>
             
-            <div className="flex flex-wrap gap-2">
-              {scanTypes.map(scan => (
-                <button
-                  key={scan.id}
-                  onClick={() => setSelectedScanType(scan.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm transition-colors ${
-                    selectedScanType === scan.id
-                      ? 'bg-cyan-500 text-black'
-                      : 'bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700'
-                  }`}
-                >
-                  <scan.icon className="w-3.5 h-3.5" />
-                  {scan.label}
-                </button>
-              ))}
-            </div>
-          </Card>
-
-          {/* Breakout Alerts - Top 10 meeting all rules */}
-          <Card>
-            <button 
-              onClick={() => toggleSection('breakouts')}
-              className="w-full flex items-center justify-between mb-3"
-            >
-              <div className="flex items-center gap-2">
-                <Zap className="w-5 h-5 text-yellow-400" />
-                <h3 className="text-sm font-semibold uppercase tracking-wider">Breakout Alerts</h3>
-                <span className="text-xs text-zinc-500">({breakoutAlerts.length})</span>
-                {breakoutAlerts.length > 0 && (
-                  <span className="text-[9px] px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded animate-pulse">
-                    LIVE
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={(e) => { e.stopPropagation(); fetchBreakoutAlerts(); }}
-                  className="text-xs text-cyan-400 hover:text-cyan-300"
-                >
-                  Refresh
-                </button>
-                <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.breakouts ? 'rotate-180' : ''}`} />
-              </div>
-            </button>
-            
-            {expandedSections.breakouts && (
+            {expandedSections.alerts && (
               <div className="space-y-2">
-                {!isConnected && (
-                  <div className="text-center py-4 text-zinc-500 text-sm">
-                    Connect IB Gateway for real-time breakout scanning
-                  </div>
-                )}
-                
-                {isConnected && breakoutAlerts.length === 0 && (
-                  <div className="text-center py-4 text-zinc-500 text-sm">
-                    No breakouts detected matching your criteria
-                  </div>
-                )}
-                
-                {breakoutAlerts.map((breakout, idx) => (
+                {alerts.length > 0 ? alerts.map((alert, idx) => (
                   <div 
-                    key={idx}
-                    onClick={() => setSelectedTicker({ symbol: breakout.symbol, quote: { price: breakout.current_price, change_percent: breakout.change_percent } })}
-                    className={`p-3 rounded cursor-pointer transition-all hover:bg-zinc-800 border ${
-                      breakout.breakout_type === 'LONG' 
-                        ? 'bg-green-500/5 border-green-500/30' 
-                        : 'bg-red-500/5 border-red-500/30'
-                    }`}
-                    data-testid={`breakout-${breakout.symbol}`}
+                    key={idx} 
+                    className="p-2 bg-zinc-900/50 rounded hover:bg-zinc-900 cursor-pointer transition-colors"
+                    onClick={() => setSelectedTicker({ symbol: alert.symbol, quote: {} })}
+                    data-testid={`alert-item-${alert.symbol}`}
                   >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-white">{breakout.symbol}</span>
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
-                          breakout.breakout_type === 'LONG' 
-                            ? 'bg-green-500 text-black' 
-                            : 'bg-red-500 text-white'
-                        }`}>
-                          {breakout.breakout_type}
-                        </span>
-                        <span className="text-[9px] px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded">
-                          Score: {breakout.breakout_score}
-                        </span>
-                        {/* Signal Strength Indicator */}
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
-                          breakout.signal_strength_label === 'VERY STRONG' ? 'bg-green-500 text-black' :
-                          breakout.signal_strength_label === 'STRONG' ? 'bg-cyan-500 text-black' :
-                          breakout.signal_strength_label === 'MODERATE' ? 'bg-yellow-500 text-black' :
-                          'bg-zinc-600 text-white'
-                        }`}>
-                          {breakout.rules_matched || breakout.strategy_count}/77
-                        </span>
-                      </div>
-                      <span className={`text-sm font-mono ${breakout.change_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {formatPercent(breakout.change_percent)}
-                      </span>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-bold text-cyan-400">{alert.symbol}</span>
+                      <Badge variant="info">{alert.strategy_id}</Badge>
                     </div>
-                    
-                    {/* Signal Strength Bar */}
-                    <div className="mb-2">
-                      <div className="flex items-center justify-between text-[9px] mb-1">
-                        <span className="text-zinc-500">Signal Strength</span>
-                        <span className={`font-bold ${
-                          breakout.signal_strength_label === 'VERY STRONG' ? 'text-green-400' :
-                          breakout.signal_strength_label === 'STRONG' ? 'text-cyan-400' :
-                          breakout.signal_strength_label === 'MODERATE' ? 'text-yellow-400' :
-                          'text-zinc-400'
-                        }`}>
-                          {breakout.signal_strength_label || 'MODERATE'} ({breakout.signal_strength || Math.round((breakout.strategy_count / 77) * 100)}%)
-                        </span>
-                      </div>
-                      <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                        <div 
-                          className={`h-full rounded-full transition-all ${
-                            breakout.signal_strength_label === 'VERY STRONG' ? 'bg-green-500' :
-                            breakout.signal_strength_label === 'STRONG' ? 'bg-cyan-500' :
-                            breakout.signal_strength_label === 'MODERATE' ? 'bg-yellow-500' :
-                            'bg-zinc-500'
-                          }`}
-                          style={{ width: `${breakout.signal_strength || Math.round((breakout.strategy_count / 77) * 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-4 gap-2 text-[9px] mb-2">
-                      <div>
-                        <span className="text-zinc-500">Price: </span>
-                        <span className="text-white font-mono">${breakout.current_price}</span>
-                      </div>
-                      <div>
-                        <span className="text-zinc-500">Broke: </span>
-                        <span className={`font-mono ${breakout.breakout_type === 'LONG' ? 'text-green-400' : 'text-red-400'}`}>
-                          ${breakout.breakout_level}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-zinc-500">RVOL: </span>
-                        <span className="text-cyan-400 font-mono">{breakout.rvol}x</span>
-                      </div>
-                      <div>
-                        <span className="text-zinc-500">R/R: </span>
-                        <span className="text-purple-400 font-mono">1:{breakout.risk_reward}</span>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center justify-between text-[9px]">
-                      <div className="flex items-center gap-2">
-                        <span className="text-zinc-500">Entry: <span className="text-cyan-400">${breakout.current_price}</span></span>
-                        <span className="text-zinc-500">Stop: <span className="text-red-400">${breakout.stop_loss}</span></span>
-                        <span className="text-zinc-500">Target: <span className="text-green-400">${breakout.target}</span></span>
-                      </div>
-                    </div>
-                    
-                    {breakout.matched_strategies?.length > 0 && (
-                      <div className="mt-2 pt-2 border-t border-white/5">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <span className="text-[9px] text-zinc-500">Top Strategies: </span>
-                            {breakout.matched_strategies.slice(0, 3).map((s, i) => (
-                              <span key={i} className="text-[9px] text-purple-400 mr-2">{s.name}</span>
-                            ))}
-                          </div>
-                          <span className="text-[9px] text-zinc-600">{breakout.rules_matched || breakout.strategy_count} rules matched</span>
-                        </div>
-                      </div>
-                    )}
+                    <p className="text-xs text-zinc-400">{alert.message || alert.strategy_name}</p>
                   </div>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          {/* Comprehensive Scanner Panel - Main Alert System */}
-          <Card glow={comprehensiveSummary.total > 0}>
-            <button 
-              onClick={() => toggleSection('comprehensiveAlerts')}
-              className="w-full flex items-center justify-between mb-3"
-            >
-              <div className="flex items-center gap-2">
-                <Target className="w-5 h-5 text-cyan-400" />
-                <h3 className="text-sm font-semibold uppercase tracking-wider">Smart Scanner</h3>
-                <span className="text-xs text-zinc-500">({comprehensiveSummary.total})</span>
-                {comprehensiveSummary.total > 0 && (
-                  <span className="text-[9px] px-1.5 py-0.5 bg-cyan-500/20 text-cyan-400 rounded">
-                    Score ≥{minScoreThreshold}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={(e) => { e.stopPropagation(); runComprehensiveScan(); }}
-                  disabled={isComprehensiveScanning}
-                  className={`text-xs px-2 py-1 rounded ${isComprehensiveScanning ? 'bg-zinc-700 text-zinc-500' : 'bg-cyan-500 text-black hover:bg-cyan-400'} transition-colors`}
-                >
-                  {isComprehensiveScanning ? 'Scanning...' : 'Scan Now'}
-                </button>
-                <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.comprehensiveAlerts ? 'rotate-180' : ''}`} />
-              </div>
-            </button>
-            
-            {expandedSections.comprehensiveAlerts && (
-              <div className="space-y-3">
-                {/* Score Threshold Slider */}
-                <div className="flex items-center gap-3 p-2 bg-zinc-900/50 rounded-lg">
-                  <span className="text-xs text-zinc-400 whitespace-nowrap">Min Score:</span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={minScoreThreshold}
-                    onChange={(e) => setMinScoreThreshold(parseInt(e.target.value))}
-                    className="flex-1 h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                  />
-                  <span className="text-sm font-mono text-cyan-400 w-8">{minScoreThreshold}</span>
-                </div>
-                
-                {/* Timeframe Tabs */}
-                <div className="flex gap-1 p-1 bg-zinc-900/50 rounded-lg">
-                  {[
-                    { id: 'all', label: 'All', count: comprehensiveSummary.total },
-                    { id: 'scalp', label: 'Scalp', count: comprehensiveSummary.scalp, max: 10 },
-                    { id: 'intraday', label: 'Intraday', count: comprehensiveSummary.intraday, max: 25 },
-                    { id: 'swing', label: 'Swing', count: comprehensiveSummary.swing, max: 25 },
-                    { id: 'position', label: 'Position', count: comprehensiveSummary.position, max: 25 },
-                  ].map(tab => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setSelectedTimeframeTab(tab.id)}
-                      className={`flex-1 px-2 py-1.5 text-xs rounded transition-colors ${
-                        selectedTimeframeTab === tab.id
-                          ? 'bg-cyan-500 text-black font-bold'
-                          : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
-                      }`}
-                    >
-                      {tab.label}
-                      <span className={`ml-1 ${selectedTimeframeTab === tab.id ? 'text-black/70' : 'text-zinc-600'}`}>
-                        {tab.count}{tab.max ? `/${tab.max}` : ''}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                
-                {!isConnected && (
-                  <div className="text-center py-4 text-zinc-500 text-sm">
-                    <AlertTriangle className="w-6 h-6 mx-auto mb-2 opacity-50" />
-                    Connect IB Gateway to run comprehensive scan
-                  </div>
-                )}
-                
-                {isConnected && comprehensiveSummary.total === 0 && !isComprehensiveScanning && (
-                  <div className="text-center py-6 text-zinc-500">
-                    <Target className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm">No opportunities above score {minScoreThreshold}</p>
-                    <p className="text-xs mt-1">Try lowering the threshold or wait for market conditions</p>
-                  </div>
-                )}
-                
-                {isComprehensiveScanning && (
-                  <div className="text-center py-6 text-cyan-400">
-                    <RefreshCw className="w-8 h-8 mx-auto mb-2 animate-spin" />
-                    <p className="text-sm">Scanning all market sectors...</p>
-                    <p className="text-xs mt-1 text-zinc-500">Analyzing against 77 trading rules</p>
-                  </div>
-                )}
-                
-                {/* Alert Cards */}
-                {getFilteredComprehensiveAlerts().slice(0, 10).map((alert, idx) => (
-                  <motion.div 
-                    key={alert.id}
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.03 }}
-                    onClick={() => setSelectedEnhancedAlert(alert)}
-                    className={`p-3 rounded-lg cursor-pointer transition-all border ${
-                      alert.grade === 'A' 
-                        ? 'bg-green-500/10 border-green-500/40 shadow-[0_0_15px_rgba(34,197,94,0.15)]' 
-                        : alert.grade === 'B'
-                        ? 'bg-cyan-500/10 border-cyan-500/40'
-                        : 'bg-zinc-900/50 border-white/10 hover:border-cyan-500/30'
-                    }`}
-                    data-testid={`comprehensive-alert-${alert.symbol}`}
-                  >
-                    {/* Alert Header */}
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-white">{alert.symbol}</span>
-                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
-                            alert.direction === 'LONG' 
-                              ? 'bg-green-500 text-black' 
-                              : 'bg-red-500 text-white'
-                          }`}>
-                            {alert.direction}
-                          </span>
-                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
-                            alert.grade === 'A' ? 'bg-green-500 text-black' :
-                            alert.grade === 'B' ? 'bg-cyan-500 text-black' :
-                            alert.grade === 'C' ? 'bg-yellow-500 text-black' :
-                            'bg-zinc-500 text-white'
-                          }`}>
-                            Grade {alert.grade}
-                          </span>
-                          <span className={`text-[9px] px-1.5 py-0.5 rounded ${
-                            alert.timeframe === 'scalp' ? 'bg-red-500/20 text-red-400' :
-                            alert.timeframe === 'intraday' ? 'bg-orange-500/20 text-orange-400' :
-                            alert.timeframe === 'swing' ? 'bg-purple-500/20 text-purple-400' :
-                            'bg-blue-500/20 text-blue-400'
-                          }`}>
-                            {alert.timeframe_description}
-                          </span>
-                        </div>
-                        <p className="text-xs text-zinc-400 mt-1 line-clamp-1">{alert.headline}</p>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <span className="text-lg font-bold text-cyan-400">{alert.overall_score}</span>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); dismissComprehensiveAlert(alert.id); }}
-                          className="p-1 text-zinc-500 hover:text-red-400 transition-colors"
-                          title="Dismiss"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                    
-                    {/* Quick Stats */}
-                    <div className="grid grid-cols-5 gap-1.5 text-[9px]">
-                      <div className="bg-black/30 rounded p-1.5 text-center">
-                        <span className="text-zinc-500 block">Entry</span>
-                        <span className="text-cyan-400 font-mono">${alert.trade_plan?.entry?.toFixed(2)}</span>
-                      </div>
-                      <div className="bg-black/30 rounded p-1.5 text-center">
-                        <span className="text-zinc-500 block">Stop</span>
-                        <span className="text-red-400 font-mono">${alert.trade_plan?.stop_loss?.toFixed(2)}</span>
-                      </div>
-                      <div className="bg-black/30 rounded p-1.5 text-center">
-                        <span className="text-zinc-500 block">Target</span>
-                        <span className="text-green-400 font-mono">${alert.trade_plan?.target?.toFixed(2)}</span>
-                      </div>
-                      <div className="bg-black/30 rounded p-1.5 text-center">
-                        <span className="text-zinc-500 block">R/R</span>
-                        <span className="text-purple-400 font-mono">1:{alert.trade_plan?.risk_reward?.toFixed(1)}</span>
-                      </div>
-                      <div className="bg-black/30 rounded p-1.5 text-center">
-                        <span className="text-zinc-500 block">Rules</span>
-                        <span className={`font-mono ${
-                          alert.matched_strategies_count >= 10 ? 'text-green-400' :
-                          alert.matched_strategies_count >= 5 ? 'text-cyan-400' :
-                          'text-yellow-400'
-                        }`}>{alert.matched_strategies_count}/77</span>
-                      </div>
-                    </div>
-                    
-                    {/* Trigger reason */}
-                    <div className="mt-2 text-[9px] text-zinc-500 flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      <span>{alert.trigger_reason}</span>
-                    </div>
-                  </motion.div>
-                ))}
-                
-                {getFilteredComprehensiveAlerts().length > 10 && (
-                  <p className="text-center text-zinc-500 text-xs py-2">
-                    +{getFilteredComprehensiveAlerts().length - 10} more alerts in this category
-                  </p>
+                )) : (
+                  <p className="text-center text-zinc-500 text-sm py-4">No recent alerts</p>
                 )}
               </div>
             )}
@@ -2661,102 +2723,6 @@ const CommandCenterPage = () => {
             )}
           </AnimatePresence>
 
-          {/* Opportunities Grid */}
-          <Card>
-            <SectionHeader 
-              icon={Zap} 
-              title="Trade Opportunities" 
-              count={opportunities.length}
-              action={
-                opportunities.length > 0 && (
-                  <span className="text-xs text-zinc-500">
-                    {opportunities.filter(o => o.high_conviction).length} high conviction
-                  </span>
-                )
-              }
-            />
-            
-            {!isConnected ? (
-              <div className="text-center py-12">
-                <WifiOff className="w-12 h-12 text-zinc-600 mx-auto mb-3" />
-                <p className="text-zinc-400">Connect to IB Gateway to scan</p>
-                <button
-                  onClick={connectToIB}
-                  className="mt-4 px-4 py-2 bg-cyan-500 text-black rounded font-medium text-sm"
-                >
-                  Connect Now
-                </button>
-              </div>
-            ) : opportunities.length === 0 ? (
-              <div className="text-center py-12">
-                <Search className="w-12 h-12 text-zinc-600 mx-auto mb-3" />
-                <p className="text-zinc-400">No opportunities found</p>
-                <p className="text-zinc-500 text-sm mt-1">Run a scan to find trade setups</p>
-              </div>
-            ) : (
-              <div className="grid md:grid-cols-2 gap-3 max-h-[500px] overflow-y-auto">
-                {opportunities.map((opp, idx) => {
-                  const quote = opp.quote || opp;
-                  const isHighConviction = opp.high_conviction || (opp.conviction?.score >= 70);
-                  
-                  return (
-                    <div
-                      key={idx}
-                      onClick={() => setSelectedTicker(opp)}
-                      className={`p-3 rounded-lg border cursor-pointer transition-all hover:border-cyan-500/50 ${
-                        isHighConviction 
-                          ? 'border-cyan-500/30 bg-cyan-500/5 shadow-[0_0_10px_rgba(0,229,255,0.1)]' 
-                          : 'border-white/10 bg-zinc-900/50'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-white">{opp.symbol}</span>
-                          {isHighConviction && (
-                            <Badge variant="success">HIGH CONVICTION</Badge>
-                          )}
-                        </div>
-                        <span className={`text-sm font-mono ${
-                          quote?.change_percent >= 0 ? 'text-green-400' : 'text-red-400'
-                        }`}>
-                          {formatPercent(quote?.change_percent)}
-                        </span>
-                      </div>
-                      
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-zinc-400">${formatPrice(quote?.price)}</span>
-                        <span className="text-zinc-500">Vol: {formatVolume(quote?.volume)}</span>
-                      </div>
-                      
-                      {opp.conviction && (
-                        <div className="mt-2 pt-2 border-t border-white/5">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-zinc-500">Score</span>
-                            <span className="text-cyan-400 font-mono">{opp.conviction.score}/100</span>
-                          </div>
-                        </div>
-                      )}
-                      
-                      <div className="flex gap-2 mt-3">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleTrade(opp, 'BUY'); }}
-                          className="flex-1 py-1.5 text-xs font-bold bg-green-500/20 text-green-400 rounded hover:bg-green-500/30"
-                        >
-                          Buy
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleTrade(opp, 'SELL'); }}
-                          className="flex-1 py-1.5 text-xs font-bold bg-red-500/20 text-red-400 rounded hover:bg-red-500/30"
-                        >
-                          Short
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </Card>
       </div>
 
       {/* Ticker Detail Modal */}
