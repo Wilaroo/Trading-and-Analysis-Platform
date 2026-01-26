@@ -1531,7 +1531,6 @@ async def get_breakout_alerts():
         top_breakouts = breakouts[:10]
         
         # Update global breakout alerts
-        global _breakout_alerts
         _breakout_alerts = top_breakouts
         
         # Add to history
