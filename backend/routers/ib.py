@@ -1573,6 +1573,483 @@ async def get_breakout_history():
     }
 
 
+# Global storage for comprehensive scan results
+_comprehensive_alerts = {
+    "scalp": [],
+    "intraday": [],
+    "swing": [],
+    "position": []
+}
+_comprehensive_last_scan = None
+
+
+class ComprehensiveScanRequest(BaseModel):
+    min_score: int = Field(default=50, ge=0, le=100, description="Minimum score threshold (0-100)")
+    scan_types: Optional[List[str]] = Field(
+        default=None, 
+        description="Specific scan types to run. If None, runs all."
+    )
+
+
+@router.post("/scanner/comprehensive")
+async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
+    """
+    Comprehensive scanner that:
+    1. Scans ALL types (Gainers, Losers, Most Active, Gap Up/Down, Volume)
+    2. Analyzes each stock against ALL 77 trading rules
+    3. Scores and ranks using the complete scoring system
+    4. Auto-detects timeframe (Scalp, Intraday, Swing, Position)
+    5. Returns categorized alerts with full context
+    
+    Caps:
+    - Scalp: 10 max
+    - Intraday: 25 max  
+    - Swing: 25 max
+    - Position: 25 max
+    
+    Requires IB Gateway connection.
+    """
+    global _comprehensive_alerts, _comprehensive_last_scan
+    
+    if request is None:
+        request = ComprehensiveScanRequest()
+    
+    min_score = request.min_score
+    
+    # Check connection
+    is_connected = False
+    if _ib_service:
+        try:
+            status = _ib_service.get_connection_status()
+            is_connected = status.get("connected", False)
+        except:
+            pass
+    
+    if not is_connected:
+        # Return cached results if available
+        if _comprehensive_last_scan:
+            return {
+                "alerts": _comprehensive_alerts,
+                "summary": {
+                    "scalp": len(_comprehensive_alerts["scalp"]),
+                    "intraday": len(_comprehensive_alerts["intraday"]),
+                    "swing": len(_comprehensive_alerts["swing"]),
+                    "position": len(_comprehensive_alerts["position"]),
+                    "total": sum(len(v) for v in _comprehensive_alerts.values())
+                },
+                "min_score": min_score,
+                "last_scan": _comprehensive_last_scan,
+                "is_cached": True,
+                "is_connected": False,
+                "message": "Showing cached results. Connect IB Gateway for real-time scanning."
+            }
+        
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "Data unavailable",
+                "message": "IB Gateway is disconnected. Connect to run comprehensive scan.",
+                "is_connected": False
+            }
+        )
+    
+    try:
+        from services.scoring_engine import get_scoring_engine
+        from services.strategies import get_strategies_service
+        from services.enhanced_alerts import (
+            create_enhanced_alert, get_alert_manager,
+            AlertType, AlertTimeframe, determine_timeframe
+        )
+        
+        feature_engine = get_feature_engine()
+        scoring_engine = get_scoring_engine()
+        strategies_service = get_strategies_service()
+        alert_manager = get_alert_manager()
+        
+        # Define all scanner types to run
+        all_scan_types = [
+            "TOP_PERC_GAIN",      # Top gainers
+            "TOP_PERC_LOSE",      # Top losers
+            "MOST_ACTIVE",        # Most active by volume
+            "HOT_BY_VOLUME",      # Hot by volume
+            "HIGH_OPEN_GAP",      # Gap up
+            "LOW_OPEN_GAP",       # Gap down
+            "HIGH_VS_13W_HL",     # Near 13-week high
+            "LOW_VS_13W_HL",      # Near 13-week low
+        ]
+        
+        if request.scan_types:
+            all_scan_types = [s for s in all_scan_types if s in request.scan_types]
+        
+        # Collect all unique candidates from all scanners
+        all_candidates = {}
+        
+        for scan_type in all_scan_types:
+            try:
+                results = await _ib_service.run_scanner(scan_type, limit=30)
+                for r in results:
+                    symbol = r.get("symbol", "")
+                    if symbol and symbol not in all_candidates:
+                        all_candidates[symbol] = {
+                            "scan_result": r,
+                            "scan_type": scan_type
+                        }
+            except Exception as e:
+                print(f"Scanner {scan_type} error: {e}")
+                continue
+        
+        print(f"Comprehensive scan: {len(all_candidates)} unique candidates from {len(all_scan_types)} scanners")
+        
+        if not all_candidates:
+            return {
+                "alerts": {"scalp": [], "intraday": [], "swing": [], "position": []},
+                "summary": {"scalp": 0, "intraday": 0, "swing": 0, "position": 0, "total": 0},
+                "min_score": min_score,
+                "last_scan": datetime.now(timezone.utc).isoformat(),
+                "is_cached": False,
+                "is_connected": True,
+                "message": "No scanner results available"
+            }
+        
+        # Categorized results
+        categorized = {
+            "scalp": [],
+            "intraday": [],
+            "swing": [],
+            "position": []
+        }
+        
+        # Analyze each candidate
+        for symbol, data in all_candidates.items():
+            try:
+                scan_result = data["scan_result"]
+                scan_type = data["scan_type"]
+                
+                # Get real-time quote
+                quote = await _ib_service.get_quote(symbol)
+                if not quote or not quote.get("price"):
+                    continue
+                
+                current_price = quote.get("price", 0)
+                
+                # Get historical data (5 days hourly for swing, 1 day 5-min for intraday)
+                hist_data_daily = await _ib_service.get_historical_data(symbol, "5 D", "1 hour")
+                hist_data_intraday = await _ib_service.get_historical_data(symbol, "1 D", "5 mins")
+                
+                if not hist_data_daily or len(hist_data_daily) < 10:
+                    continue
+                
+                # Calculate features using intraday data if available
+                hist_for_features = hist_data_intraday if hist_data_intraday and len(hist_data_intraday) > 20 else hist_data_daily
+                features = feature_engine.calculate_features(symbol, quote, {"bars": hist_for_features})
+                
+                # Calculate scores
+                scores = scoring_engine.calculate_scores(symbol, quote, features, {})
+                overall_score = scores.get("overall", 0)
+                
+                # Apply minimum score filter
+                if overall_score < min_score:
+                    continue
+                
+                # Match against ALL strategies
+                matched_strategies = strategies_service.match_strategies(symbol, quote, features, scores)
+                
+                # Determine timeframe based on strategy matches and features
+                timeframe = determine_timeframe_from_analysis(
+                    matched_strategies, 
+                    features, 
+                    scan_type
+                )
+                
+                # Calculate support/resistance levels
+                highs = [bar["high"] for bar in hist_data_daily]
+                lows = [bar["low"] for bar in hist_data_daily]
+                closes = [bar["close"] for bar in hist_data_daily]
+                
+                resistance_1 = max(highs[-20:]) if len(highs) >= 20 else max(highs)
+                resistance_2 = max(highs)
+                support_1 = min(lows[-20:]) if len(lows) >= 20 else min(lows)
+                support_2 = min(lows)
+                
+                # Determine alert type and direction
+                alert_type = determine_alert_type(current_price, resistance_1, support_1, closes, features)
+                direction = "LONG" if alert_type in [AlertType.BREAKOUT, AlertType.PULLBACK, AlertType.MOMENTUM] and features.get("trend") != "BEARISH" else "SHORT" if alert_type == AlertType.BREAKDOWN else "LONG"
+                
+                # Calculate trade plan
+                atr = features.get("atr", current_price * 0.02)
+                if direction == "LONG":
+                    entry = current_price
+                    stop_loss = max(support_1, current_price - (atr * 1.5))
+                    target = current_price + (atr * 3)
+                else:
+                    entry = current_price
+                    stop_loss = min(resistance_1, current_price + (atr * 1.5))
+                    target = current_price - (atr * 3)
+                
+                risk = abs(entry - stop_loss)
+                reward = abs(target - entry)
+                risk_reward = round(reward / risk, 2) if risk > 0 else 0
+                
+                # Get grade
+                grade = "A" if overall_score >= 80 else "B" if overall_score >= 65 else "C" if overall_score >= 50 else "D" if overall_score >= 35 else "F"
+                
+                # Get company info
+                company_name = scan_result.get("name", symbol)
+                
+                # Determine timeframe description
+                timeframe_descriptions = {
+                    "scalp": "Scalp (minutes)",
+                    "intraday": "Intraday (same day)",
+                    "swing": "Swing (days to weeks)",
+                    "position": "Position (weeks to months)"
+                }
+                
+                # Generate headline
+                headline = generate_alert_headline(symbol, alert_type, timeframe, direction, overall_score, matched_strategies)
+                
+                # Generate trigger reason
+                trigger_reasons = []
+                if features.get("rvol", 1) >= 2:
+                    trigger_reasons.append(f"High RVOL ({features.get('rvol', 1):.1f}x)")
+                if current_price > resistance_1:
+                    trigger_reasons.append(f"Broke resistance ${resistance_1:.2f}")
+                elif current_price < support_1:
+                    trigger_reasons.append(f"Broke support ${support_1:.2f}")
+                if features.get("trend") == "BULLISH":
+                    trigger_reasons.append("Bullish trend")
+                elif features.get("trend") == "BEARISH":
+                    trigger_reasons.append("Bearish trend")
+                if matched_strategies:
+                    trigger_reasons.append(f"Matches {len(matched_strategies)} strategies")
+                
+                trigger_reason = "; ".join(trigger_reasons) if trigger_reasons else "Meets scoring criteria"
+                
+                alert = {
+                    "id": f"{symbol}_{timeframe}_{datetime.now(timezone.utc).timestamp()}",
+                    "symbol": symbol,
+                    "company_name": company_name,
+                    "alert_type": alert_type,
+                    "timeframe": timeframe,
+                    "timeframe_description": timeframe_descriptions.get(timeframe, timeframe),
+                    "direction": direction,
+                    "grade": grade,
+                    "headline": headline,
+                    "trigger_reason": trigger_reason,
+                    "triggered_at": datetime.now(timezone.utc).isoformat(),
+                    "triggered_at_formatted": "Just now",
+                    
+                    # Scores
+                    "overall_score": overall_score,
+                    "scores": {
+                        "overall": overall_score,
+                        "technical": scores.get("technical", 0),
+                        "fundamental": scores.get("fundamental", 0),
+                        "catalyst": scores.get("catalyst", 0),
+                        "confidence": scores.get("confidence", 0)
+                    },
+                    
+                    # Trade plan
+                    "trade_plan": {
+                        "direction": direction,
+                        "entry": round(entry, 2),
+                        "stop_loss": round(stop_loss, 2),
+                        "target": round(target, 2),
+                        "risk_reward": risk_reward
+                    },
+                    
+                    # Price data
+                    "current_price": round(current_price, 2),
+                    "change_percent": quote.get("change_percent", 0),
+                    "volume": quote.get("volume", 0),
+                    
+                    # Technical features
+                    "features": {
+                        "rvol": round(features.get("rvol", 1), 2),
+                        "rsi": round(features.get("rsi", 50), 1),
+                        "vwap_distance": round(features.get("vwap_distance", 0), 2),
+                        "trend": features.get("trend", "NEUTRAL"),
+                        "atr": round(atr, 2)
+                    },
+                    
+                    # Levels
+                    "levels": {
+                        "resistance_1": round(resistance_1, 2),
+                        "resistance_2": round(resistance_2, 2),
+                        "support_1": round(support_1, 2),
+                        "support_2": round(support_2, 2)
+                    },
+                    
+                    # Strategy matches
+                    "matched_strategies": [
+                        {"id": s["id"], "name": s["name"], "match_pct": s.get("match_percentage", 0)} 
+                        for s in matched_strategies[:5]
+                    ],
+                    "matched_strategies_count": len(matched_strategies),
+                    "signal_strength": round((len(matched_strategies) / 77) * 100, 1),
+                    "signal_strength_label": (
+                        "VERY STRONG" if len(matched_strategies) >= 10 else
+                        "STRONG" if len(matched_strategies) >= 7 else
+                        "MODERATE" if len(matched_strategies) >= 4 else
+                        "WEAK"
+                    ),
+                    
+                    # Metadata
+                    "scan_source": scan_type,
+                    "is_new": True
+                }
+                
+                # Add to appropriate category
+                categorized[timeframe].append(alert)
+                
+            except Exception as e:
+                print(f"Error analyzing {symbol}: {e}")
+                continue
+        
+        # Sort each category by overall score and apply caps
+        caps = {"scalp": 10, "intraday": 25, "swing": 25, "position": 25}
+        
+        for timeframe in categorized:
+            categorized[timeframe].sort(key=lambda x: x["overall_score"], reverse=True)
+            categorized[timeframe] = categorized[timeframe][:caps[timeframe]]
+        
+        # Update global cache
+        _comprehensive_alerts = categorized
+        _comprehensive_last_scan = datetime.now(timezone.utc).isoformat()
+        
+        # Also add top alerts to the enhanced alert manager
+        for timeframe, alerts in categorized.items():
+            for alert in alerts[:5]:  # Top 5 from each category
+                try:
+                    alert_manager.add_alert(alert)
+                except:
+                    pass
+        
+        return {
+            "alerts": categorized,
+            "summary": {
+                "scalp": len(categorized["scalp"]),
+                "intraday": len(categorized["intraday"]),
+                "swing": len(categorized["swing"]),
+                "position": len(categorized["position"]),
+                "total": sum(len(v) for v in categorized.values())
+            },
+            "min_score": min_score,
+            "total_scanned": len(all_candidates),
+            "last_scan": _comprehensive_last_scan,
+            "is_cached": False,
+            "is_connected": True
+        }
+        
+    except Exception as e:
+        print(f"Error in comprehensive scanner: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Scanner error",
+                "message": str(e),
+                "is_connected": is_connected
+            }
+        )
+
+
+def determine_timeframe_from_analysis(matched_strategies: list, features: dict, scan_type: str) -> str:
+    """
+    Determine the appropriate timeframe based on:
+    - Matched strategy IDs (INT- = intraday, SWG- = swing, etc.)
+    - Technical features (ATR%, RVOL patterns)
+    - Scan type that found the stock
+    """
+    # Count strategies by prefix
+    intraday_count = sum(1 for s in matched_strategies if s.get("id", "").startswith("INT-"))
+    swing_count = sum(1 for s in matched_strategies if s.get("id", "").startswith("SWG-"))
+    position_count = sum(1 for s in matched_strategies if s.get("id", "").startswith("POS-"))
+    
+    # Check for scalp indicators
+    atr_pct = features.get("atr_percentage", 2)
+    rvol = features.get("rvol", 1)
+    
+    # Scalp: Very high RVOL + tight ATR + momentum scans
+    if rvol >= 3 and atr_pct < 1.5 and scan_type in ["TOP_PERC_GAIN", "TOP_PERC_LOSE", "HOT_BY_VOLUME"]:
+        return "scalp"
+    
+    # If strategies matched, use majority
+    if intraday_count > swing_count and intraday_count > position_count:
+        if rvol >= 2.5:
+            return "scalp"
+        return "intraday"
+    elif swing_count > intraday_count and swing_count > position_count:
+        return "swing"
+    elif position_count > 0:
+        return "position"
+    
+    # Default based on scan type
+    momentum_scans = ["TOP_PERC_GAIN", "TOP_PERC_LOSE", "HOT_BY_VOLUME", "MOST_ACTIVE"]
+    if scan_type in momentum_scans:
+        if rvol >= 2.5:
+            return "scalp"
+        return "intraday"
+    elif scan_type in ["HIGH_VS_13W_HL", "LOW_VS_13W_HL"]:
+        return "swing"
+    
+    # Default to intraday
+    return "intraday"
+
+
+def determine_alert_type(current_price: float, resistance: float, support: float, closes: list, features: dict) -> str:
+    """Determine the type of alert based on price action"""
+    from services.enhanced_alerts import AlertType
+    
+    prev_close = closes[-2] if len(closes) > 1 else current_price
+    
+    # Breakout: price breaks above resistance
+    if current_price > resistance and prev_close <= resistance:
+        return AlertType.BREAKOUT
+    
+    # Breakdown: price breaks below support
+    if current_price < support and prev_close >= support:
+        return AlertType.BREAKDOWN
+    
+    # Pullback: price near support in uptrend
+    trend = features.get("trend", "NEUTRAL")
+    if trend == "BULLISH" and abs(current_price - support) / current_price < 0.02:
+        return AlertType.PULLBACK
+    
+    # Momentum: high RVOL with trend
+    rvol = features.get("rvol", 1)
+    if rvol >= 2:
+        return AlertType.MOMENTUM
+    
+    return AlertType.STRATEGY_MATCH
+
+
+def generate_alert_headline(symbol: str, alert_type: str, timeframe: str, direction: str, score: int, strategies: list) -> str:
+    """Generate a concise headline for the alert"""
+    from services.enhanced_alerts import AlertType
+    
+    timeframe_adj = {
+        "scalp": "scalp",
+        "intraday": "intraday", 
+        "swing": "swing",
+        "position": "position"
+    }.get(timeframe, "")
+    
+    grade = "A" if score >= 80 else "B" if score >= 65 else "C" if score >= 50 else "D"
+    
+    top_strategy = strategies[0]["name"] if strategies else "opportunity"
+    
+    if alert_type == AlertType.BREAKOUT:
+        return f"{symbol}: Grade {grade} {timeframe_adj} breakout - {top_strategy}"
+    elif alert_type == AlertType.BREAKDOWN:
+        return f"{symbol}: Grade {grade} {timeframe_adj} breakdown (short) - {top_strategy}"
+    elif alert_type == AlertType.PULLBACK:
+        return f"{symbol}: Grade {grade} {timeframe_adj} pullback entry - {top_strategy}"
+    elif alert_type == AlertType.MOMENTUM:
+        return f"{symbol}: Grade {grade} {timeframe_adj} momentum play - {top_strategy}"
+    else:
+        return f"{symbol}: Grade {grade} {timeframe_adj} setup - {top_strategy}"
+
 
 # ===================== Enhanced Alerts with Context =====================
 
