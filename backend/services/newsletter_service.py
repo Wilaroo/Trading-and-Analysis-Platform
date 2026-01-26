@@ -281,13 +281,13 @@ Generate a complete premarket briefing with specific, actionable trade ideas. In
                     "sentiment": sentiment,
                     "explanation": explanation,
                     "key_levels": parsed.get("key_levels", "See chart analysis"),
-                    "focus": (parsed.get("game_plan", "") or "")[:200]
+                    "focus": (parsed.get("game_plan", "") or "")[:200] if isinstance(parsed.get("game_plan"), str) else ""
                 },
                 "summary": overnight,
                 "top_stories": self._format_catalyst_watch(parsed.get("catalyst_watch", [])),
-                "opportunities": parsed.get("opportunities", []),
-                "risk_factors": parsed.get("risk_factors", []),
-                "game_plan": parsed.get("game_plan", ""),
+                "opportunities": self._ensure_list(parsed.get("opportunities", [])),
+                "risk_factors": self._ensure_list(parsed.get("risk_factors", [])),
+                "game_plan": parsed.get("game_plan", "") if isinstance(parsed.get("game_plan"), str) else str(parsed.get("game_plan", "")),
                 "watchlist": self._format_watchlist_from_opportunities(parsed.get("opportunities", [])),
                 "raw_content": content
             }
