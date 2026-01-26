@@ -1172,6 +1172,36 @@ const CommandCenterPage = () => {
   // Auto-generate market intelligence on IB connection
   const [isGeneratingIntelligence, setIsGeneratingIntelligence] = useState(false);
   
+  // System Monitor state
+  const [systemHealth, setSystemHealth] = useState(null);
+  const [isLoadingSystemHealth, setIsLoadingSystemHealth] = useState(false);
+  
+  // Fetch system health
+  const fetchSystemHealth = async () => {
+    setIsLoadingSystemHealth(true);
+    try {
+      const res = await api.get('/api/system/monitor');
+      setSystemHealth(res.data);
+    } catch (err) {
+      console.error('Error fetching system health:', err);
+      setSystemHealth({
+        overall_status: 'error',
+        services: [],
+        summary: { healthy: 0, warning: 0, disconnected: 0, error: 1, total: 1 },
+        error: 'Failed to fetch system status'
+      });
+    } finally {
+      setIsLoadingSystemHealth(false);
+    }
+  };
+  
+  // Fetch system health on mount and every 30 seconds
+  useEffect(() => {
+    fetchSystemHealth();
+    const interval = setInterval(fetchSystemHealth, 30000);
+    return () => clearInterval(interval);
+  }, []);
+  
   const autoGenerateMarketIntelligence = async () => {
     if (isGeneratingIntelligence) return;
     
