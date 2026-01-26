@@ -1727,9 +1727,9 @@ const CommandCenterPage = () => {
 
         {/* 1. Market Intelligence */}
         <Card>
-          <button 
+          <div 
             onClick={() => toggleSection('news')}
-            className="w-full flex items-center justify-between mb-3"
+            className="w-full flex items-center justify-between mb-3 cursor-pointer"
           >
             <div className="flex items-center gap-2">
               <Newspaper className="w-5 h-5 text-purple-400" />
@@ -1750,7 +1750,7 @@ const CommandCenterPage = () => {
               )}
               <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.news ? 'rotate-180' : ''}`} />
             </div>
-          </button>
+          </div>
           
           {expandedSections.news && (
             <div className="space-y-3">
