@@ -288,6 +288,11 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
     
     candlestickSeries.setData(chartData);
     
+    // Auto-scale the price axis to fit all data
+    chart.priceScale('right').applyOptions({
+      autoScale: true,
+    });
+    
     // Add SL/TP price lines if trading summary exists and lines are enabled
     if (showTradingLines && analysis?.trading_summary) {
       const ts = analysis.trading_summary;
