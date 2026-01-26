@@ -1344,6 +1344,7 @@ const CommandCenterPage = () => {
       fetchEarnings();
       fetchShortSqueeze();
       fetchPriceAlerts();
+      fetchEnhancedAlerts();
     };
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1359,6 +1360,7 @@ const CommandCenterPage = () => {
       fetchMarketContext();
       checkOrderFills();
       fetchBreakoutAlerts();  // Scan for breakouts
+      fetchEnhancedAlerts();  // Fetch enhanced alerts
       checkPriceAlerts();
     }, 60000);
     
@@ -1373,6 +1375,7 @@ const CommandCenterPage = () => {
     const fastPoll = setInterval(() => {
       checkOrderFills();
       checkPriceAlerts();
+      fetchEnhancedAlerts();
     }, 10000);
     
     return () => clearInterval(fastPoll);
