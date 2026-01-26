@@ -1371,7 +1371,7 @@ const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
     { id: 'overview', label: 'Overview', icon: BarChart3 },
     { id: 'strategies', label: 'Strategies', icon: Target },
     { id: 'rules', label: 'Rules', icon: FileText },
-    { id: 'news', label: 'News', icon: Calendar },
+    { id: 'news', label: 'News', icon: Newspaper },
   ];
 
   return (
