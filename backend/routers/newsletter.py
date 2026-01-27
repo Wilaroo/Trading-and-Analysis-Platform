@@ -165,12 +165,30 @@ async def auto_generate_market_intelligence():
                         print(f"Error getting index quotes: {e}")
                     
         except Exception as e:
-            print(f"Error gathering market data: {e}")
+            print(f"Error gathering market data from IB: {e}")
+        
+        # If no movers from IB scanner, use Alpaca with default watchlist
+        if not top_movers and alpaca_service:
+            try:
+                default_watchlist = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "AMD", "NFLX", "JPM"]
+                watchlist_quotes = await alpaca_service.get_quotes_batch(default_watchlist)
+                
+                for symbol, quote in watchlist_quotes.items():
+                    if quote.get("price"):
+                        top_movers.append({
+                            "symbol": symbol,
+                            "quote": quote,
+                            "category": "watchlist"
+                        })
+                
+                print(f"Using Alpaca watchlist data: {len(top_movers)} stocks")
+            except Exception as e:
+                print(f"Error getting Alpaca watchlist: {e}")
         
         # Generate the newsletter with whatever context we have
         # GPT will still provide valuable analysis even with minimal data
         newsletter = await service.generate_premarket_newsletter(
-            top_movers=top_movers,
+            top_movers=top_movers if top_movers else None,
             market_context=market_context
         )
         
