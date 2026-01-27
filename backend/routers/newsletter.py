@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 from services.newsletter_service import get_newsletter_service
 from services.news_service import get_news_service
+from services.alpaca_service import get_alpaca_service
 from datetime import datetime, timezone
 
 router = APIRouter(prefix="/api/newsletter", tags=["Newsletter"])
