@@ -2016,9 +2016,28 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                 if prev_close <= 0:
                     prev_close = current_price
                 
-                # Get historical data (5 days hourly for swing, 1 day 5-min for intraday)
-                hist_data_daily = await _ib_service.get_historical_data(symbol, "5 D", "1 hour")
-                hist_data_intraday = await _ib_service.get_historical_data(symbol, "1 D", "5 mins")
+                # Fetch historical data
+                # For swing/position, we only need daily data (end-of-day)
+                # For scalp/intraday, we need intraday data
+                
+                hist_data_daily = None
+                hist_data_intraday = None
+                
+                # Always fetch daily data via Alpaca (free, no IB subscription needed)
+                if _alpaca_service:
+                    try:
+                        alpaca_daily = await _alpaca_service.get_bars(symbol, "1Day", 30)
+                        if alpaca_daily and len(alpaca_daily) >= 10:
+                            hist_data_daily = alpaca_daily
+                    except Exception as e:
+                        print(f"Alpaca daily bars error for {symbol}: {e}")
+                
+                # Fallback to IB for daily if Alpaca failed
+                if not hist_data_daily and _ib_service:
+                    try:
+                        hist_data_daily = await _ib_service.get_historical_data(symbol, "30 D", "1 day")
+                    except Exception as e:
+                        print(f"IB daily bars error for {symbol}: {e}")
                 
                 if not hist_data_daily or len(hist_data_daily) < 10:
                     continue
