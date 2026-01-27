@@ -1729,14 +1729,22 @@ async def get_breakout_alerts():
                 breakout_score += len(matched_strategies) * 2  # Bonus for strategy matches
                 breakout_score += min(10, abs(current_price - breakout_level) / breakout_level * 100) if breakout_level > 0 else 0  # Breakout strength
                 
-                # Calculate stop loss and target
-                atr = features.get("atr", current_price * 0.02)
+                # Calculate stop loss and target with safety checks
+                atr = features.get("atr", 0) or features.get("atr_14", 0) or (current_price * 0.02)
+                if atr <= 0:
+                    atr = current_price * 0.02
+                    
                 if breakout_type == "LONG":
                     stop_loss = breakout_level - (atr * 0.5)  # Stop just below breakout level
                     target = current_price + (atr * 2)  # 2:1 R/R minimum
                 else:
                     stop_loss = breakout_level + (atr * 0.5)  # Stop just above breakdown level
                     target = current_price - (atr * 2)
+                
+                # Calculate risk/reward safely
+                risk = abs(current_price - stop_loss)
+                reward = abs(target - current_price)
+                risk_reward_ratio = round(reward / risk, 2) if risk > 0 else 0
                 
                 breakout = {
                     "symbol": symbol,
