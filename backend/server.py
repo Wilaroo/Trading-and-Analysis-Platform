@@ -101,6 +101,7 @@ app.include_router(scoring_router)
 app.include_router(features_router)
 app.include_router(newsletter_router)
 app.include_router(knowledge_router)
+app.include_router(learning_router)
 
 # Collections
 strategies_col = db["strategies"]
