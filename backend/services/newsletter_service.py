@@ -90,6 +90,22 @@ class NewsletterService:
             except Exception as e:
                 logger.warning(f"Could not fetch IB data for newsletter: {e}")
         
+        # Get strategy recommendations from knowledge base
+        try:
+            from services.knowledge_integration import get_knowledge_integration
+            ki = get_knowledge_integration()
+            
+            # Enhance opportunities with knowledge base insights
+            if top_movers:
+                enhanced = ki.enhance_market_intelligence(
+                    top_movers, 
+                    market_regime=market_context.get("regime", "neutral") if market_context else "neutral"
+                )
+                context["kb_insights"] = enhanced.get("top_strategy_insights", [])
+                context["kb_stats"] = enhanced.get("knowledge_base_stats", {})
+        except Exception as e:
+            logger.warning(f"Could not get knowledge base insights: {e}")
+        
         return context
     
     async def _generate_with_gpt(self, context_data: Dict) -> str:
