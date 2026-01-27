@@ -11,19 +11,22 @@ from services.ib_service import IBService
 from services.feature_engine import get_feature_engine
 from services.data_cache import get_data_cache
 from services.stock_data import get_stock_service
+from services.alpaca_service import get_alpaca_service
 
 router = APIRouter(prefix="/api/ib", tags=["Interactive Brokers"])
 
 # Service instance (will be injected)
 _ib_service: Optional[IBService] = None
 _stock_service = None
+_alpaca_service = None
 
 
 def init_ib_service(service: IBService):
     """Initialize the IB service for this router"""
-    global _ib_service, _stock_service
+    global _ib_service, _stock_service, _alpaca_service
     _ib_service = service
     _stock_service = get_stock_service()
+    _alpaca_service = get_alpaca_service()
 
 
 def _convert_ib_to_alpaca_timeframe(bar_size: str) -> str:
