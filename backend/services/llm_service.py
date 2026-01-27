@@ -179,6 +179,7 @@ class EmergentProvider(LLMProvider):
         try:
             from emergentintegrations.llm.chat import LlmChat
             import uuid
+            import asyncio
             
             session_id = str(uuid.uuid4())
             sys_msg = system_prompt or "You are a helpful trading assistant."
@@ -189,7 +190,13 @@ class EmergentProvider(LLMProvider):
                 system_message=sys_msg
             ).with_model("openai", "gpt-4o")
             
-            response = chat.send_message(prompt)
+            # Run async method synchronously
+            loop = asyncio.new_event_loop()
+            try:
+                response = loop.run_until_complete(chat.send_message(prompt))
+            finally:
+                loop.close()
+            
             return response
         except Exception as e:
             logger.error(f"Emergent generation error: {e}")
