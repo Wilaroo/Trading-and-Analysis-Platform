@@ -230,12 +230,14 @@ class AlpacaService:
             else:
                 start = end - timedelta(minutes=limit * 5 + 60)
             
+            # Use IEX feed for free tier
             request = StockBarsRequest(
                 symbol_or_symbols=symbol.upper(),
                 timeframe=tf,
                 start=start,
                 end=end,
-                limit=limit
+                limit=limit,
+                feed="iex"  # Use IEX for free tier
             )
             
             bars = _data_client.get_stock_bars(request)
