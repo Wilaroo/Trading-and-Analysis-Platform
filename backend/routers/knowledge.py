@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from services.knowledge_service import get_knowledge_service
 
-router = APIRouter(prefix="/knowledge", tags=["knowledge"])
+router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 
 
 class KnowledgeEntry(BaseModel):
