@@ -3004,6 +3004,12 @@ const CommandCenterPage = () => {
           }}
         />
       )}
+      
+      {/* Knowledge Base Modal */}
+      <KnowledgeBase 
+        isOpen={showKnowledgeBase}
+        onClose={() => setShowKnowledgeBase(false)}
+      />
     </div>
   );
 };
