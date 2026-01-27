@@ -2065,11 +2065,17 @@ const CommandCenterPage = () => {
                 {opportunities.map((opp, idx) => {
                   const quote = opp.quote || opp;
                   const isHighConviction = opp.high_conviction || (opp.conviction?.score >= 70);
+                  const qualityGrade = opp.quality?.grade || opp.qualityGrade;
+                  const qualityGradeColor = qualityGrade === 'A+' || qualityGrade === 'A' ? 'bg-green-500 text-black' :
+                                            qualityGrade === 'B+' || qualityGrade === 'B' ? 'bg-cyan-500 text-black' :
+                                            qualityGrade === 'C+' || qualityGrade === 'C' ? 'bg-yellow-500 text-black' :
+                                            'bg-red-500 text-white';
                   
                   return (
                     <div
                       key={idx}
                       onClick={() => setSelectedTicker(opp)}
+                      data-testid={`opportunity-card-${opp.symbol}`}
                       className={`p-3 rounded-lg border cursor-pointer transition-all hover:border-cyan-500/50 ${
                         isHighConviction 
                           ? 'border-cyan-500/30 bg-cyan-500/5 shadow-[0_0_10px_rgba(0,229,255,0.1)]' 
@@ -2079,6 +2085,11 @@ const CommandCenterPage = () => {
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-white">{opp.symbol}</span>
+                          {qualityGrade && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${qualityGradeColor}`} title="Earnings Quality Grade">
+                              {qualityGrade}
+                            </span>
+                          )}
                           {isHighConviction && (
                             <Badge variant="success">HIGH CONVICTION</Badge>
                           )}
@@ -2108,14 +2119,25 @@ const CommandCenterPage = () => {
                         <button
                           onClick={(e) => { e.stopPropagation(); handleTrade(opp, 'BUY'); }}
                           className="flex-1 py-1.5 text-xs font-bold bg-green-500/20 text-green-400 rounded hover:bg-green-500/30"
+                          data-testid={`buy-${opp.symbol}`}
                         >
                           Buy
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleTrade(opp, 'SELL'); }}
                           className="flex-1 py-1.5 text-xs font-bold bg-red-500/20 text-red-400 rounded hover:bg-red-500/30"
+                          data-testid={`short-${opp.symbol}`}
                         >
                           Short
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); askAIAboutStock(opp.symbol); }}
+                          className="px-2 py-1.5 text-xs font-bold bg-amber-500/20 text-amber-400 rounded hover:bg-amber-500/30 flex items-center gap-1"
+                          data-testid={`ask-ai-${opp.symbol}`}
+                          title="Ask AI about this stock"
+                        >
+                          <Bot className="w-3 h-3" />
+                          AI
                         </button>
                       </div>
                     </div>
