@@ -237,6 +237,9 @@ class DataCache:
             "data": data,
             "last_updated": datetime.now(timezone.utc).isoformat()
         }
+        # Persist periodically
+        if len(self._short_interest_cache) % 5 == 0:
+            self._persist_short_interest_cache()
     
     def get_cached_short_interest(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Get cached short interest"""
