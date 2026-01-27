@@ -273,7 +273,7 @@ const IBChart = ({ symbol, entryPrice, stopLoss, takeProfit }) => {
         
         if (response.data.bars && response.data.bars.length > 0) {
           const candleData = response.data.bars.map(bar => ({
-            time: new Date(bar.date).getTime() / 1000,
+            time: new Date(bar.time || bar.date || bar.timestamp).getTime() / 1000,
             open: bar.open,
             high: bar.high,
             low: bar.low,
@@ -281,7 +281,7 @@ const IBChart = ({ symbol, entryPrice, stopLoss, takeProfit }) => {
           }));
           
           const volumeData = response.data.bars.map(bar => ({
-            time: new Date(bar.date).getTime() / 1000,
+            time: new Date(bar.time || bar.date || bar.timestamp).getTime() / 1000,
             value: bar.volume,
             color: bar.close >= bar.open ? '#00FF9433' : '#FF2E2E33',
           }));
