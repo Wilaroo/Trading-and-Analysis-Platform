@@ -217,14 +217,46 @@ async def get_historical_data(
 ):
     """
     Get historical bar data for a symbol.
-    Returns real data from IB Gateway when connected.
-    Returns cached data with last_updated timestamp when disconnected.
-    NO MOCK DATA - only real verified data.
+    Priority: Alpaca -> IB Gateway -> Cached data
     """
     cache = get_data_cache()
     symbol = symbol.upper()
     
-    # Check connection status
+    # Try Alpaca first (free, no subscription needed)
+    if _alpaca_service:
+        try:
+            alpaca_timeframe = _convert_ib_to_alpaca_timeframe(bar_size)
+            alpaca_limit = _convert_ib_duration_to_limit(duration, bar_size)
+            
+            bars = await _alpaca_service.get_bars(symbol, alpaca_timeframe, alpaca_limit)
+            if bars and len(bars) > 0:
+                # Convert Alpaca format to match IB format
+                formatted_bars = []
+                for bar in bars:
+                    formatted_bars.append({
+                        "time": bar["timestamp"],
+                        "open": bar["open"],
+                        "high": bar["high"],
+                        "low": bar["low"],
+                        "close": bar["close"],
+                        "volume": bar["volume"]
+                    })
+                
+                # Cache the fresh data
+                cache.cache_historical(symbol, duration, bar_size, formatted_bars)
+                return {
+                    "symbol": symbol,
+                    "bars": formatted_bars,
+                    "count": len(formatted_bars),
+                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                    "is_cached": False,
+                    "is_realtime": True,
+                    "source": "alpaca"
+                }
+        except Exception as e:
+            print(f"Alpaca historical data error for {symbol}: {e}")
+    
+    # Fallback to IB Gateway
     is_connected = False
     if _ib_service:
         try:
@@ -245,10 +277,11 @@ async def get_historical_data(
                     "count": len(bars),
                     "last_updated": datetime.now(timezone.utc).isoformat(),
                     "is_cached": False,
-                    "is_realtime": True
+                    "is_realtime": True,
+                    "source": "ib"
                 }
         except Exception as e:
-            print(f"Error getting historical data for {symbol}: {e}")
+            print(f"IB historical data error for {symbol}: {e}")
     
     # Not connected or error - try to return cached data
     cached = cache.get_cached_historical(symbol, duration, bar_size)
