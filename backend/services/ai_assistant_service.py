@@ -346,23 +346,33 @@ Format your responses clearly with sections when appropriate. Use specific numbe
         # Try Emergent first
         if self.provider == LLMProvider.EMERGENT and LLMProvider.EMERGENT in self.llm_clients:
             try:
-                from emergentintegrations.llm.chat import LlmChat
+                from emergentintegrations.llm.chat import LlmChat, UserMessage
                 
+                # Build system message from context
+                system_message = self.SYSTEM_PROMPT + "\n\n" + context
+                
+                # Build initial messages from conversation history (excluding the last user message)
+                initial_msgs = []
+                for msg in full_messages[:-1]:  # Exclude last message
+                    if msg["role"] != "system":
+                        initial_msgs.append({"role": msg["role"], "content": msg["content"]})
+                
+                # Create chat instance
                 chat = LlmChat(
                     api_key=self.llm_clients[LLMProvider.EMERGENT]["key"],
-                    model="gpt-4o"
+                    session_id=f"assistant_{id(self)}",
+                    system_message=system_message,
+                    initial_messages=initial_msgs if initial_msgs else None
                 )
                 
-                # Add messages to chat
-                for msg in full_messages:
-                    if msg["role"] == "system":
-                        chat.add_message("system", msg["content"])
-                    elif msg["role"] == "user":
-                        chat.add_message("user", msg["content"])
-                    elif msg["role"] == "assistant":
-                        chat.add_message("assistant", msg["content"])
+                # Set model
+                chat = chat.with_model("openai", "gpt-4o")
                 
-                response = chat.generate()
+                # Get the last user message
+                last_msg = full_messages[-1]["content"] if full_messages else "Hello"
+                
+                # Send message and get response
+                response = chat.send_message(UserMessage(last_msg))
                 return response
                 
             except Exception as e:
