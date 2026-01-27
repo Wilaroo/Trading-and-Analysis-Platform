@@ -92,6 +92,8 @@ init_trading_rules(trading_rules_engine)
 init_ib_service(ib_service)
 init_strategy_service(strategy_service)
 init_quality_router(quality_service, ib_service)
+assistant_service = init_assistant_service(db)
+init_assistant_router(assistant_service)
 newsletter_service = init_newsletter_service(ib_service)
 news_service = init_news_service(ib_service)
 
