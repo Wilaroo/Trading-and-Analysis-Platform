@@ -7,11 +7,15 @@ Comprehensive stock scoring system combining:
 - Risk Assessment (R:R, Float, Short Interest)
 - Market Context Alignment
 - Historical Success Probability
+- Knowledge Base Integration (learned strategies)
 """
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List, Tuple
 from enum import Enum
 import math
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class TimeframeType(str, Enum):
