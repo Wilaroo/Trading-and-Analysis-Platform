@@ -36,6 +36,7 @@ def _init_clients():
     try:
         from alpaca.trading.client import TradingClient
         from alpaca.data.historical.stock import StockHistoricalDataClient
+        from alpaca.data.enums import DataFeed
         
         _trading_client = TradingClient(
             api_key=ALPACA_API_KEY,
@@ -43,12 +44,13 @@ def _init_clients():
             paper=True
         )
         
+        # Use IEX feed for free tier (SIP requires paid subscription)
         _data_client = StockHistoricalDataClient(
             api_key=ALPACA_API_KEY,
             secret_key=ALPACA_SECRET_KEY
         )
         
-        logger.info("Alpaca clients initialized successfully")
+        logger.info("Alpaca clients initialized successfully (using IEX feed for free tier)")
         return True
         
     except Exception as e:
