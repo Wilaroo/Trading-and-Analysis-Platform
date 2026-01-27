@@ -347,6 +347,7 @@ Format your responses clearly with sections when appropriate. Use specific numbe
         if self.provider == LLMProvider.EMERGENT and LLMProvider.EMERGENT in self.llm_clients:
             try:
                 from emergentintegrations.llm.chat import LlmChat, UserMessage
+                import asyncio
                 
                 # Build system message from context
                 system_message = self.SYSTEM_PROMPT + "\n\n" + context
@@ -371,8 +372,13 @@ Format your responses clearly with sections when appropriate. Use specific numbe
                 # Get the last user message
                 last_msg = full_messages[-1]["content"] if full_messages else "Hello"
                 
-                # Send message and get response
+                # Send message and get response (it's a coroutine)
                 response = chat.send_message(UserMessage(last_msg))
+                
+                # Await if it's a coroutine
+                if asyncio.iscoroutine(response):
+                    response = await response
+                
                 return response
                 
             except Exception as e:
