@@ -2096,6 +2096,19 @@ const CommandCenterPage = () => {
               )}
             </div>
             <div className="flex items-center gap-2">
+              {/* Auto-Schedule Toggle */}
+              <button
+                onClick={(e) => { e.stopPropagation(); togglePremarketSchedule(); }}
+                className={`text-xs px-2 py-1 rounded transition-colors ${
+                  premarketScheduled 
+                    ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
+                    : 'bg-zinc-800 text-zinc-400 border border-zinc-700'
+                }`}
+                title={premarketScheduled ? 'Auto-generates at 6:30 AM ET' : 'Enable daily pre-market briefing'}
+              >
+                <Clock className="w-3 h-3 inline mr-1" />
+                {premarketScheduled ? '6:30 AM' : 'Schedule'}
+              </button>
               {isConnected && (
                 <button
                   onClick={(e) => { e.stopPropagation(); autoGenerateMarketIntelligence(); }}
