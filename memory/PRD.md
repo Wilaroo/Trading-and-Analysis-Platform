@@ -705,3 +705,27 @@ The application is now consolidated into a single **Command Center** that serves
 - `/app/backend/services/ib_service.py` - Fixed VIX contract type
 - `/app/backend/routers/ib.py` - Fixed 3 scoring engine method calls
 
+
+
+### Jan 27, 2026 - MongoDB Persistence for Scanner Cache
+**Implemented:**
+1. **DataCache MongoDB Persistence**
+   - Scanner cache now persists to MongoDB collection `data_cache`
+   - Quote cache persists after batch updates
+   - Short interest data persists periodically
+   - Data loads automatically from MongoDB on server startup
+
+2. **Persistence Methods Added:**
+   - `_load_from_mongodb()` - Loads cached data on initialization
+   - `_persist_scanner_cache()` - Saves scanner results to MongoDB
+   - `_persist_quote_cache()` - Saves quotes to MongoDB
+   - `_persist_short_interest_cache()` - Saves short interest data
+
+3. **Benefits:**
+   - Scanner results survive server restarts
+   - Overnight/premarket data available even after app restart
+   - No data loss when IB Gateway disconnects
+
+**Files Modified:**
+- `/app/backend/services/data_cache.py` - Added MongoDB persistence layer
+
