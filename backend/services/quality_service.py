@@ -185,7 +185,7 @@ class QualityService:
         self._cache[cache_key] = metrics
         
         # Persist to MongoDB if available
-        if self.db:
+        if self.db is not None:
             await self._persist_metrics(metrics)
         
         return metrics
