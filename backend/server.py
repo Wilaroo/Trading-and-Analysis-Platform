@@ -566,7 +566,8 @@ async def calculate_relative_timing(symbol: str, quote_data: Dict = None) -> Dic
     # Get historical data for calculations
     try:
         import yfinance as yf
-        ticker = yf.Ticker(symbol)
+        yf_symbol = _convert_to_yf_symbol(symbol)
+        ticker = yf.Ticker(yf_symbol)
         hist = ticker.history(period="6mo")
         
         if len(hist) < 20:
