@@ -38,11 +38,13 @@ import {
   CheckCircle2,
   XCircle,
   AlertCircle,
-  Monitor
+  Monitor,
+  BookOpen
 } from 'lucide-react';
 import * as LightweightCharts from 'lightweight-charts';
 import api from '../utils/api';
 import { toast } from 'sonner';
+import KnowledgeBase from '../components/KnowledgeBase';
 import { HelpTooltip, HelpIcon } from '../components/HelpTooltip';
 
 // ===================== SOUND UTILITIES =====================
