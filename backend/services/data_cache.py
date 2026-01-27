@@ -1,33 +1,132 @@
 """
 Data Cache Service
 Stores last known good data from IB Gateway with timestamps.
+Persists to MongoDB for data that survives server restarts.
 No mock data - only real verified data is stored and served.
 """
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 import asyncio
+import os
+from pymongo import MongoClient
+import logging
+
+logger = logging.getLogger(__name__)
+
+# MongoDB connection for persistence
+_db = None
+
+def _get_db():
+    """Get MongoDB database connection"""
+    global _db
+    if _db is None:
+        mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+        db_name = os.environ.get("DB_NAME", "tradecommand")
+        client = MongoClient(mongo_url)
+        _db = client[db_name]
+    return _db
+
 
 class DataCache:
     """
     Caches real data from IB Gateway with timestamps.
     When IB is disconnected, serves cached data with last_updated timestamp.
     Automatically refreshes when connection is restored.
+    Persists important data to MongoDB for survival across restarts.
     """
     
+    # Collection name for persistent cache
+    CACHE_COLLECTION = "data_cache"
+    
     def __init__(self):
-        # Cache storage with timestamps
-        self._historical_cache: Dict[str, Dict[str, Any]] = {}  # {symbol_duration_barsize: {data, timestamp}}
-        self._quote_cache: Dict[str, Dict[str, Any]] = {}  # {symbol: {data, timestamp}}
-        self._account_cache: Dict[str, Any] = {}  # {data, timestamp}
+        # Cache storage with timestamps (in-memory)
+        self._historical_cache: Dict[str, Dict[str, Any]] = {}
+        self._quote_cache: Dict[str, Dict[str, Any]] = {}
+        self._account_cache: Dict[str, Any] = {}
         self._positions_cache: List[Dict[str, Any]] = []
         self._positions_timestamp: Optional[datetime] = None
-        self._short_interest_cache: Dict[str, Dict[str, Any]] = {}  # {symbol: {data, timestamp}}
-        self._news_cache: Dict[str, Dict[str, Any]] = {}  # {symbol: {data, timestamp}}
-        self._scanner_cache: Dict[str, Dict[str, Any]] = {}  # {scan_type: {results, timestamp}}
+        self._short_interest_cache: Dict[str, Dict[str, Any]] = {}
+        self._news_cache: Dict[str, Dict[str, Any]] = {}
+        self._scanner_cache: Dict[str, Dict[str, Any]] = {}
         
         # Connection state tracking
         self._last_connected: Optional[datetime] = None
-        self._pending_refresh: List[str] = []  # Symbols that need refresh
+        self._pending_refresh: List[str] = []
+        
+        # Load persisted data from MongoDB on initialization
+        self._load_from_mongodb()
+    
+    def _load_from_mongodb(self) -> None:
+        """Load persisted cache data from MongoDB on startup"""
+        try:
+            db = _get_db()
+            collection = db[self.CACHE_COLLECTION]
+            
+            # Load scanner cache
+            scanner_doc = collection.find_one({"_type": "scanner_cache"})
+            if scanner_doc:
+                del scanner_doc["_id"]
+                del scanner_doc["_type"]
+                self._scanner_cache = scanner_doc.get("data", {})
+                logger.info(f"Loaded {len(self._scanner_cache)} scanner cache entries from MongoDB")
+            
+            # Load quote cache
+            quote_doc = collection.find_one({"_type": "quote_cache"})
+            if quote_doc:
+                del quote_doc["_id"]
+                del quote_doc["_type"]
+                self._quote_cache = quote_doc.get("data", {})
+                logger.info(f"Loaded {len(self._quote_cache)} quote cache entries from MongoDB")
+            
+            # Load short interest cache
+            short_doc = collection.find_one({"_type": "short_interest_cache"})
+            if short_doc:
+                del short_doc["_id"]
+                del short_doc["_type"]
+                self._short_interest_cache = short_doc.get("data", {})
+                logger.info(f"Loaded {len(self._short_interest_cache)} short interest entries from MongoDB")
+                
+        except Exception as e:
+            logger.warning(f"Could not load cache from MongoDB: {e}")
+    
+    def _persist_scanner_cache(self) -> None:
+        """Save scanner cache to MongoDB"""
+        try:
+            db = _get_db()
+            collection = db[self.CACHE_COLLECTION]
+            collection.update_one(
+                {"_type": "scanner_cache"},
+                {"$set": {"_type": "scanner_cache", "data": self._scanner_cache, "updated_at": datetime.now(timezone.utc).isoformat()}},
+                upsert=True
+            )
+        except Exception as e:
+            logger.warning(f"Could not persist scanner cache: {e}")
+    
+    def _persist_quote_cache(self) -> None:
+        """Save quote cache to MongoDB"""
+        try:
+            db = _get_db()
+            collection = db[self.CACHE_COLLECTION]
+            collection.update_one(
+                {"_type": "quote_cache"},
+                {"$set": {"_type": "quote_cache", "data": self._quote_cache, "updated_at": datetime.now(timezone.utc).isoformat()}},
+                upsert=True
+            )
+        except Exception as e:
+            logger.warning(f"Could not persist quote cache: {e}")
+    
+    def _persist_short_interest_cache(self) -> None:
+        """Save short interest cache to MongoDB"""
+        try:
+            db = _get_db()
+            collection = db[self.CACHE_COLLECTION]
+            collection.update_one(
+                {"_type": "short_interest_cache"},
+                {"$set": {"_type": "short_interest_cache", "data": self._short_interest_cache, "updated_at": datetime.now(timezone.utc).isoformat()}},
+                upsert=True
+            )
+        except Exception as e:
+            logger.warning(f"Could not persist short interest cache: {e}")
         
     def _cache_key(self, symbol: str, duration: str = "", bar_size: str = "") -> str:
         """Generate cache key"""
