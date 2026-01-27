@@ -207,7 +207,7 @@ Return ONLY valid JSON, no markdown code blocks."""
                 if title and applicable:
                     insights_list.append(f"- {title} (applies to: {', '.join(applicable[:3])})")
             if insights_list:
-                kb_insights_text = f"\n\nKNOWLEDGE BASE STRATEGY INSIGHTS:\n" + "\n".join(insights_list)
+                kb_insights_text = "\n\nKNOWLEDGE BASE STRATEGY INSIGHTS:\n" + "\n".join(insights_list)
         
         # Knowledge base stats
         kb_stats_text = ""
