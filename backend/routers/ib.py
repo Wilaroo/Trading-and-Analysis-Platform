@@ -743,16 +743,30 @@ async def get_comprehensive_analysis(symbol: str):
                    "NVDA": 875.0, "TSLA": 245.0, "JPM": 195.0, "V": 280.0, "JNJ": 155.0}
     base_price = base_prices.get(symbol, 100 + random.random() * 200)
     
-    if is_connected and _ib_service:
-        # Get real data from IB
+    # Try Alpaca first for quote
+    quote_fetched = False
+    if _stock_service:
+        try:
+            quote = await _stock_service.get_quote(symbol)
+            if quote and quote.get("price", 0) > 0:
+                analysis["quote"] = quote
+                base_price = quote.get("price", base_price)
+                quote_fetched = True
+        except Exception as e:
+            print(f"Alpaca quote error: {e}")
+    
+    # Fallback to IB for quote if needed
+    if not quote_fetched and is_connected and _ib_service:
         try:
             quote = await _ib_service.get_quote(symbol)
             if quote and quote.get("price"):
                 analysis["quote"] = quote
                 base_price = quote.get("price", base_price)
         except Exception as e:
-            print(f"Error getting quote: {e}")
-        
+            print(f"IB quote error: {e}")
+    
+    # Try IB for fundamentals (Alpaca doesn't have fundamentals)
+    if is_connected and _ib_service:
         try:
             fundamentals = await _ib_service.get_fundamentals(symbol)
             if fundamentals:
@@ -766,18 +780,40 @@ async def get_comprehensive_analysis(symbol: str):
                 }
         except Exception as e:
             print(f"Error getting fundamentals: {e}")
-        
+    
+    # Try Alpaca first for historical data
+    bars = []
+    if _alpaca_service:
+        try:
+            alpaca_bars = await _alpaca_service.get_bars(symbol, "5Min", 200)
+            if alpaca_bars and len(alpaca_bars) > 20:
+                bars = [{
+                    "open": b["open"],
+                    "high": b["high"],
+                    "low": b["low"],
+                    "close": b["close"],
+                    "volume": b["volume"]
+                } for b in alpaca_bars]
+        except Exception as e:
+            print(f"Alpaca historical error: {e}")
+    
+    # Fallback to IB for historical data
+    if not bars and is_connected and _ib_service:
         try:
             hist_data = await _ib_service.get_historical_data(symbol=symbol, duration="5 D", bar_size="5 mins")
-            bars = hist_data.get("bars", [])
-            if bars and len(bars) > 20:
-                from services.feature_engine import get_feature_engine
-                feature_engine = get_feature_engine()
-                features = feature_engine.calculate_all_features(bars_5m=bars, bars_daily=None, session_bars_1m=None, fundamentals=None, market_data=None)
-                
-                close = bars[-1].get("close", base_price)
-                analysis["technicals"] = {
-                    "ema_9": features.get("ema_9", close * 0.995),
+            bars = hist_data if isinstance(hist_data, list) else hist_data.get("bars", [])
+        except Exception as e:
+            print(f"IB historical error: {e}")
+    
+    if bars and len(bars) > 20:
+        try:
+            from services.feature_engine import get_feature_engine
+            feature_engine = get_feature_engine()
+            features = feature_engine.calculate_all_features(bars_5m=bars, bars_daily=None, session_bars_1m=None, fundamentals=None, market_data=None)
+            
+            close = bars[-1].get("close", base_price)
+            analysis["technicals"] = {
+                "ema_9": features.get("ema_9", close * 0.995),
                     "ema_20": features.get("ema_20", close * 0.99),
                     "sma_50": features.get("sma_50", close * 0.97),
                     "sma_200": features.get("sma_200", close * 0.92),
