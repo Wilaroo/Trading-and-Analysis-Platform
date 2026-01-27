@@ -176,34 +176,43 @@ class EmergentProvider(LLMProvider):
         return bool(self.api_key)
     
     def generate(self, prompt: str, system_prompt: str = None, max_tokens: int = 2000, temperature: float = 0.7) -> str:
+        """Sync wrapper - runs async in thread"""
+        import concurrent.futures
+        
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(self._generate_sync, prompt, system_prompt, max_tokens, temperature)
+            return future.result(timeout=120)
+    
+    def _generate_sync(self, prompt: str, system_prompt: str, max_tokens: int, temperature: float) -> str:
+        """Actually call the API"""
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
-            import httpx
+            return loop.run_until_complete(self._generate_async(prompt, system_prompt, max_tokens, temperature))
+        finally:
+            loop.close()
+    
+    async def _generate_async(self, prompt: str, system_prompt: str, max_tokens: int, temperature: float) -> str:
+        """Async generation using Emergent LlmChat"""
+        try:
+            from emergentintegrations.llm.chat import LlmChat, UserMessage
+            import uuid
             
             sys_msg = system_prompt or "You are a helpful trading assistant."
+            session_id = f"learn-{uuid.uuid4().hex[:8]}"
             
-            # Direct API call to Emergent's proxy
-            response = httpx.post(
-                "https://emergentintegrations-proxy.onrender.com/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "gpt-4o",
-                    "messages": [
-                        {"role": "system", "content": sys_msg},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "max_tokens": max_tokens,
-                    "temperature": temperature
-                },
-                timeout=60.0
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
+            chat = LlmChat(
+                api_key=self.api_key,
+                session_id=session_id,
+                system_message=sys_msg
+            ).with_model("openai", "gpt-4o")
+            
+            user_message = UserMessage(text=prompt)
+            response = await chat.send_message(user_message)
+            return response
         except Exception as e:
-            logger.error(f"Emergent generation error: {e}")
+            logger.error(f"Emergent async generation error: {e}")
             raise
     
     def generate_json(self, prompt: str, system_prompt: str = None, max_tokens: int = 2000) -> Dict[str, Any]:
