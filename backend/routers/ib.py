@@ -1660,13 +1660,28 @@ async def get_breakout_alerts():
         
         for symbol, scan_result in all_candidates.items():
             try:
-                # Get real-time quote
-                quote = await _ib_service.get_quote(symbol)
+                # Get real-time quote - use Alpaca first
+                quote = await _stock_service.get_quote(symbol) if _stock_service else await _ib_service.get_quote(symbol)
                 if not quote or not quote.get("price"):
                     continue
                 
-                # Get historical data for S/R calculation
-                hist_data = await _ib_service.get_historical_data(symbol, "5 D", "1 hour")
+                current_price = quote.get("price", 0)
+                if current_price <= 0:
+                    continue
+                
+                # Get historical data - use Alpaca first
+                hist_data = None
+                if _alpaca_service:
+                    try:
+                        alpaca_bars = await _alpaca_service.get_bars(symbol, "1Day", 30)
+                        if alpaca_bars and len(alpaca_bars) >= 20:
+                            hist_data = alpaca_bars
+                    except:
+                        pass
+                
+                if not hist_data and _ib_service:
+                    hist_data = await _ib_service.get_historical_data(symbol, "5 D", "1 hour")
+                
                 if not hist_data or len(hist_data) < 20:
                     continue
                 
@@ -1674,10 +1689,12 @@ async def get_breakout_alerts():
                 features = feature_engine.calculate_all_features(bars_5m=hist_data, bars_daily=None, session_bars_1m=None, fundamentals=None, market_data=None)
                 
                 # Calculate support and resistance levels
-                highs = [bar["high"] for bar in hist_data]
-                lows = [bar["low"] for bar in hist_data]
-                closes = [bar["close"] for bar in hist_data]
+                highs = [bar.get("high", 0) for bar in hist_data if bar.get("high", 0) > 0]
+                lows = [bar.get("low", 0) for bar in hist_data if bar.get("low", 0) > 0]
+                closes = [bar.get("close", 0) for bar in hist_data if bar.get("close", 0) > 0]
                 
+                if not highs or not lows or not closes:
+                    continue
                 resistance_1 = max(highs[-20:])  # Recent high
                 resistance_2 = max(highs)  # Highest high
                 support_1 = min(lows[-20:])  # Recent low
