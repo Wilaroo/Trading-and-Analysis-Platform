@@ -2042,9 +2042,8 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                 if not hist_data_daily or len(hist_data_daily) < 10:
                     continue
                 
-                # Calculate features using intraday data if available
-                hist_for_features = hist_data_intraday if hist_data_intraday and len(hist_data_intraday) > 20 else hist_data_daily
-                features = feature_engine.calculate_all_features(bars_5m=hist_for_features, bars_daily=hist_data_daily, session_bars_1m=None, fundamentals=None, market_data=None)
+                # Calculate initial features from daily data to determine timeframe
+                features = feature_engine.calculate_all_features(bars_5m=hist_data_daily, bars_daily=hist_data_daily, session_bars_1m=None, fundamentals=None, market_data=None)
                 
                 # Skip if no valid features calculated
                 if not features:
