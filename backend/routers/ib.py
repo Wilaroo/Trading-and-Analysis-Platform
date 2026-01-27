@@ -1687,7 +1687,11 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
             pass
     
     if not is_connected:
-        # Return cached results if available
+        # First try in-memory cache, then DataCache for persistence
+        from services.data_cache import get_data_cache
+        data_cache = get_data_cache()
+        
+        # Try in-memory cache first
         if _comprehensive_last_scan:
             return {
                 "alerts": _comprehensive_alerts,
@@ -1702,14 +1706,27 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                 "last_scan": _comprehensive_last_scan,
                 "is_cached": True,
                 "is_connected": False,
-                "message": "Showing cached results. Connect IB Gateway for real-time scanning."
+                "message": "Showing cached results from last session. Connect IB Gateway for real-time scanning."
+            }
+        
+        # Try persistent DataCache
+        cached = data_cache.get_cached_comprehensive_scan()
+        if cached:
+            return {
+                "alerts": cached["alerts"],
+                "summary": cached["summary"],
+                "min_score": min_score,
+                "last_scan": cached["last_updated"],
+                "is_cached": True,
+                "is_connected": False,
+                "message": f"Showing cached results from {cached['last_updated'][:19]}. Connect IB Gateway for real-time scanning."
             }
         
         raise HTTPException(
             status_code=503,
             detail={
                 "error": "Data unavailable",
-                "message": "IB Gateway is disconnected. Connect to run comprehensive scan.",
+                "message": "IB Gateway is disconnected and no cached data available. Connect to run comprehensive scan.",
                 "is_connected": False
             }
         )
