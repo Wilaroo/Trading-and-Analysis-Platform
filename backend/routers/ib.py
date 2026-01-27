@@ -2009,16 +2009,26 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                 hist_for_features = hist_data_intraday if hist_data_intraday and len(hist_data_intraday) > 20 else hist_data_daily
                 features = feature_engine.calculate_all_features(bars_5m=hist_for_features, bars_daily=hist_data_daily, session_bars_1m=None, fundamentals=None, market_data=None)
                 
+                # Skip if no valid features calculated
+                if not features:
+                    continue
+                
                 # Calculate scores - build stock_data dict for scoring engine
                 stock_data = {
                     "symbol": symbol,
-                    "price": quote.get("price", 0),
+                    "price": current_price,
+                    "current_price": current_price,  # Some functions expect this key
                     "change_percent": quote.get("change_percent", 0),
                     "volume": quote.get("volume", 0),
                     **features
                 }
-                score_result = scoring_engine.calculate_composite_score(stock_data, {})
-                overall_score = score_result.get("composite_score", score_result.get("overall", 0))
+                
+                try:
+                    score_result = scoring_engine.calculate_composite_score(stock_data, {})
+                    overall_score = score_result.get("composite_score", score_result.get("overall", 0))
+                except Exception as score_err:
+                    print(f"Scoring error for {symbol}: {score_err}")
+                    continue
                 
                 # Apply minimum score filter
                 if overall_score < min_score:
