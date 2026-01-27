@@ -1045,6 +1045,10 @@ const CommandCenterPage = () => {
   // Knowledge Base state
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
   
+  // AI Assistant state
+  const [showAssistant, setShowAssistant] = useState(false);
+  const [assistantPrompt, setAssistantPrompt] = useState(null);
+  
   // New P1 features state
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [shortSqueezeCandidates, setShortSqueezeCandidates] = useState([]);
