@@ -114,16 +114,21 @@ async def get_positions():
 
 @router.get("/quote/{symbol}")
 async def get_quote(symbol: str):
-    """Get real-time quote for a symbol"""
-    if not _ib_service:
-        raise HTTPException(status_code=500, detail="IB service not initialized")
-    
+    """Get real-time quote for a symbol - uses Alpaca with IB fallback"""
     try:
-        quote = await _ib_service.get_quote(symbol)
-        if quote:
-            return quote
-        else:
-            raise HTTPException(status_code=404, detail=f"No quote available for {symbol}")
+        # Try stock_service first (Alpaca -> Finnhub -> Yahoo -> IB fallback)
+        if _stock_service:
+            quote = await _stock_service.get_quote(symbol)
+            if quote and quote.get("price", 0) > 0:
+                return quote
+        
+        # Fallback to IB for indices like VIX
+        if _ib_service:
+            quote = await _ib_service.get_quote(symbol)
+            if quote:
+                return quote
+        
+        raise HTTPException(status_code=404, detail=f"No quote available for {symbol}")
     except ConnectionError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
