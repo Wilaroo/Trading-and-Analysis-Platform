@@ -261,6 +261,96 @@ async def bulk_learn(entries: List[Dict[str, Any]]):
     }
 
 
+@router.post("/analyze/{symbol}")
+async def analyze_with_knowledge(symbol: str, stock_data: Dict[str, Any] = None):
+    """
+    Analyze a stock using the knowledge base.
+    
+    Returns applicable strategies, trade bias, and AI recommendations
+    based on learned trading knowledge.
+    
+    Args:
+        symbol: Stock ticker symbol
+        stock_data: Optional dict with rvol, gap_percent, vwap_position, rsi_14, etc.
+    """
+    from services.knowledge_integration import get_knowledge_integration
+    
+    ki = get_knowledge_integration()
+    stock_data = stock_data or {}
+    stock_data["symbol"] = symbol
+    
+    result = ki.get_knowledge_summary_for_symbol(symbol, stock_data)
+    
+    return {
+        "success": True,
+        "analysis": result
+    }
+
+
+@router.post("/enhance-opportunities")
+async def enhance_opportunities(data: Dict[str, Any]):
+    """
+    Enhance a list of trading opportunities with knowledge base insights.
+    
+    Args:
+        data: {
+            "opportunities": List of opportunity dicts with symbol, price, change_percent, etc.
+            "market_regime": "bullish" | "bearish" | "neutral"
+        }
+    """
+    from services.knowledge_integration import get_knowledge_integration
+    
+    ki = get_knowledge_integration()
+    
+    opportunities = data.get("opportunities", [])
+    market_regime = data.get("market_regime", "neutral")
+    
+    enhanced = ki.enhance_market_intelligence(opportunities, market_regime)
+    
+    return {
+        "success": True,
+        "enhanced_opportunities": enhanced["opportunities"],
+        "strategy_insights": enhanced["top_strategy_insights"],
+        "knowledge_stats": enhanced["knowledge_base_stats"]
+    }
+
+
+@router.get("/ai-recommendation/{symbol}")
+async def get_ai_recommendation(symbol: str, rvol: float = 1.0, gap_percent: float = 0, 
+                                 vwap_position: str = "UNKNOWN", rsi: float = 50):
+    """
+    Get an AI-powered trade recommendation for a symbol.
+    
+    Uses the knowledge base and LLM to generate a specific trade recommendation
+    with entry, stop, and target prices.
+    """
+    from services.knowledge_integration import get_knowledge_integration
+    
+    ki = get_knowledge_integration()
+    
+    stock_data = {
+        "symbol": symbol,
+        "rvol": rvol,
+        "gap_percent": gap_percent,
+        "vwap_position": vwap_position,
+        "rsi_14": rsi,
+        "current_price": 0  # Would need to be provided or fetched
+    }
+    
+    recommendation = ki.generate_ai_trade_recommendation(stock_data)
+    
+    if recommendation:
+        return {
+            "success": True,
+            "recommendation": recommendation
+        }
+    else:
+        return {
+            "success": False,
+            "message": "Could not generate AI recommendation. LLM may be unavailable or no applicable strategies found."
+        }
+
+
 # Import logger
 import logging
 logger = logging.getLogger(__name__)
