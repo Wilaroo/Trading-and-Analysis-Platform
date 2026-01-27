@@ -2080,6 +2080,25 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                     scan_type
                 )
                 
+                # For scalp/intraday, fetch more granular data for better analysis
+                # For swing/position, daily data is sufficient (saves API calls)
+                if timeframe in ["scalp", "intraday"]:
+                    # Try to get intraday data for better precision
+                    if _alpaca_service:
+                        try:
+                            alpaca_intraday = await _alpaca_service.get_bars(symbol, "5Min", 78)
+                            if alpaca_intraday and len(alpaca_intraday) > 20:
+                                # Recalculate features with intraday data
+                                features = feature_engine.calculate_all_features(
+                                    bars_5m=alpaca_intraday, 
+                                    bars_daily=hist_data_daily, 
+                                    session_bars_1m=None, 
+                                    fundamentals=None, 
+                                    market_data=None
+                                )
+                        except Exception as e:
+                            pass  # Keep using daily features
+                
                 # Calculate support/resistance levels with safety checks
                 highs = [bar.get("high", 0) for bar in hist_data_daily if bar.get("high", 0) > 0]
                 lows = [bar.get("low", 0) for bar in hist_data_daily if bar.get("low", 0) > 0]
