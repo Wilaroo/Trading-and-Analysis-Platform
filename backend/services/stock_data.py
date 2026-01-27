@@ -68,7 +68,8 @@ class StockDataService:
     
     async def get_quote(self, symbol: str) -> Dict:
         """Get real-time quote with provider fallback chain"""
-        symbol = symbol.upper()
+        # Sanitize symbol - remove $ prefix and clean up
+        symbol = symbol.replace("$", "").upper().strip()
         cache_key = f"quote_{symbol}"
         
         # Check cache first
