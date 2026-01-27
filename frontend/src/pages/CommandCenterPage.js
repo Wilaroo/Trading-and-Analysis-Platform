@@ -3044,6 +3044,16 @@ const CommandCenterPage = () => {
         isOpen={showKnowledgeBase}
         onClose={() => setShowKnowledgeBase(false)}
       />
+      
+      {/* AI Assistant Modal */}
+      <AIAssistant
+        isOpen={showAssistant}
+        onClose={() => {
+          setShowAssistant(false);
+          setAssistantPrompt(null);
+        }}
+        initialPrompt={assistantPrompt}
+      />
     </div>
   );
 };
