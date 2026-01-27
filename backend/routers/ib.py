@@ -1839,12 +1839,14 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                 scan_result = data["scan_result"]
                 scan_type = data["scan_type"]
                 
-                # Get real-time quote
-                quote = await _ib_service.get_quote(symbol)
+                # Get real-time quote - use stock_service which has Alpaca fallback
+                quote = await _stock_service.get_quote(symbol) if _stock_service else await _ib_service.get_quote(symbol)
                 if not quote or not quote.get("price"):
                     continue
                 
                 current_price = quote.get("price", 0)
+                if current_price <= 0:
+                    continue
                 
                 # Get historical data (5 days hourly for swing, 1 day 5-min for intraday)
                 hist_data_daily = await _ib_service.get_historical_data(symbol, "5 D", "1 hour")
