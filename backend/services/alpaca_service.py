@@ -243,8 +243,10 @@ class AlpacaService:
             bars = _data_client.get_stock_bars(request)
             
             result = []
-            if symbol.upper() in bars:
-                for bar in bars[symbol.upper()]:
+            # Access bars through .data attribute for BarSet
+            bars_data = bars.data if hasattr(bars, 'data') else bars
+            if symbol.upper() in bars_data:
+                for bar in bars_data[symbol.upper()]:
                     result.append({
                         "timestamp": bar.timestamp.isoformat(),
                         "open": float(bar.open),
