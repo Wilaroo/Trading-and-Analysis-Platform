@@ -1646,6 +1646,16 @@ const CommandCenterPage = () => {
         </div>
         
         <div className="flex items-center gap-3">
+          {/* AI Assistant Button */}
+          <button
+            onClick={() => setShowAssistant(true)}
+            className="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-cyan-500/20 text-amber-400 rounded text-sm hover:from-amber-500/30 hover:to-cyan-500/30 border border-amber-500/30"
+            title="AI Trading Assistant"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span className="hidden sm:inline">AI Assistant</span>
+          </button>
+          
           {/* Knowledge Base Button */}
           <button
             onClick={() => setShowKnowledgeBase(true)}
