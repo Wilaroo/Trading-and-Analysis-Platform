@@ -23,6 +23,7 @@ class DataCache:
         self._positions_timestamp: Optional[datetime] = None
         self._short_interest_cache: Dict[str, Dict[str, Any]] = {}  # {symbol: {data, timestamp}}
         self._news_cache: Dict[str, Dict[str, Any]] = {}  # {symbol: {data, timestamp}}
+        self._scanner_cache: Dict[str, Dict[str, Any]] = {}  # {scan_type: {results, timestamp}}
         
         # Connection state tracking
         self._last_connected: Optional[datetime] = None
