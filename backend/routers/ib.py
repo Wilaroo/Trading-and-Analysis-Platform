@@ -2360,7 +2360,7 @@ async def generate_enhanced_alert_for_symbol(symbol: str):
             alert_type=alert_type,
             strategy=matched[0],  # Primary strategy
             features=features,
-            scores=scores,
+            scores=score_result,
             trading_summary=trading_summary,
             matched_strategies=matched
         )
