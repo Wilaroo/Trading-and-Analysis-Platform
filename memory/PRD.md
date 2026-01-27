@@ -881,3 +881,27 @@ curl /api/quality/leaderboard?symbols=AAPL,MSFT,NVDA,BA
 curl /api/quality/hedge/bear-market
 ```
 
+
+### Jan 27, 2026 - Quality Factor UI Panel
+**Implemented:**
+1. **QualityPanel Component** (`/app/frontend/src/components/QualityPanel.jsx`)
+   - Quality Factor panel in Command Center
+   - Shows quality grades (A+ to F) for scanned stocks
+   - 4-factor metric bars: Accruals, ROE, CF/A, D/A
+   - Filter tabs: All, High Quality, Low Quality
+   - Leaderboard view showing top quality stocks
+   - LONG/SHORT signal indicators
+   - Info banner explaining the 4 quality factors
+
+2. **Integration with Command Center**
+   - Panel appears below Trade Opportunities
+   - Auto-fetches quality scores when opportunities are scanned
+   - Clicking a stock opens the ticker detail modal
+   - Leaderboard shows ranked list of major stocks
+
+**Files Created:**
+- `/app/frontend/src/components/QualityPanel.jsx`
+
+**Files Modified:**
+- `/app/frontend/src/pages/CommandCenterPage.js` - Imported and integrated QualityPanel
+
