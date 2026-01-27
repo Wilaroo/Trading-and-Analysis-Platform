@@ -78,11 +78,13 @@ async def auto_generate_market_intelligence():
     - News, politics, and world events affecting markets
     - Top movers and trade opportunities
     - Key levels and risk factors
+    
+    Works even when market is closed - GPT will generate analysis based on available data.
     """
     try:
         service = get_newsletter_service()
         
-        # Gather comprehensive market data
+        # Gather comprehensive market data (best effort - continues even if this fails)
         top_movers = None
         market_context = {}
         
@@ -93,9 +95,18 @@ async def auto_generate_market_intelligence():
                 status = ib_service.get_connection_status()
                 if status.get("connected"):
                     # Get multiple scanner types for comprehensive view
-                    gainers = await ib_service.run_scanner("TOP_PERC_GAIN", max_results=10)
-                    losers = await ib_service.run_scanner("TOP_PERC_LOSE", max_results=10)
-                    active = await ib_service.run_scanner("MOST_ACTIVE", max_results=10)
+                    try:
+                        gainers = await ib_service.run_scanner("TOP_PERC_GAIN", max_results=10)
+                    except:
+                        gainers = []
+                    try:
+                        losers = await ib_service.run_scanner("TOP_PERC_LOSE", max_results=10)
+                    except:
+                        losers = []
+                    try:
+                        active = await ib_service.run_scanner("MOST_ACTIVE", max_results=10)
+                    except:
+                        active = []
                     
                     # Combine all movers
                     all_symbols = set()
@@ -109,25 +120,32 @@ async def auto_generate_market_intelligence():
                                     m['category'] = category
                                     top_movers.append(m)
                     
-                    # Get quotes for all movers
+                    # Get quotes for all movers (best effort)
                     if top_movers:
-                        symbols = [m["symbol"] for m in top_movers]
-                        quotes = await ib_service.get_quotes_batch(symbols)
-                        quotes_map = {q["symbol"]: q for q in quotes}
-                        top_movers = [
-                            {**m, "quote": quotes_map.get(m["symbol"], {})}
-                            for m in top_movers
-                        ]
+                        try:
+                            symbols = [m["symbol"] for m in top_movers]
+                            quotes = await ib_service.get_quotes_batch(symbols)
+                            quotes_map = {q["symbol"]: q for q in quotes}
+                            top_movers = [
+                                {**m, "quote": quotes_map.get(m["symbol"], {})}
+                                for m in top_movers
+                            ]
+                        except Exception as e:
+                            print(f"Error getting quotes for movers: {e}")
                     
-                    # Get market context (indices)
-                    indices = ["SPY", "QQQ", "DIA", "IWM", "VIX"]
-                    index_quotes = await ib_service.get_quotes_batch(indices)
-                    market_context["indices"] = {q["symbol"]: q for q in index_quotes if q.get("price")}
+                    # Get market context (indices) - best effort
+                    try:
+                        indices = ["SPY", "QQQ", "DIA", "IWM"]
+                        index_quotes = await ib_service.get_quotes_batch(indices)
+                        market_context["indices"] = {q["symbol"]: q for q in index_quotes if q.get("price")}
+                    except Exception as e:
+                        print(f"Error getting index quotes: {e}")
                     
         except Exception as e:
             print(f"Error gathering market data: {e}")
         
-        # Generate the newsletter with comprehensive context
+        # Generate the newsletter with whatever context we have
+        # GPT will still provide valuable analysis even with minimal data
         newsletter = await service.generate_premarket_newsletter(
             top_movers=top_movers,
             market_context=market_context
