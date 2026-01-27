@@ -1412,7 +1412,21 @@ async def get_breakout_alerts():
                 "last_updated": _breakout_alerts[0].get("detected_at") if _breakout_alerts else None,
                 "is_cached": True,
                 "is_connected": False,
-                "message": "Showing cached breakout alerts. Connect IB Gateway for real-time scanning."
+                "message": "Showing cached breakout alerts from last session. Connect IB Gateway for real-time scanning."
+            }
+        
+        # Try persistent DataCache
+        from services.data_cache import get_data_cache
+        data_cache = get_data_cache()
+        cached = data_cache.get_cached_breakout_scan()
+        if cached:
+            return {
+                "breakouts": cached["results"],
+                "count": cached["count"],
+                "last_updated": cached["last_updated"],
+                "is_cached": True,
+                "is_connected": False,
+                "message": f"Showing cached results from {cached['last_updated'][:19]}. Connect IB Gateway for real-time scanning."
             }
         
         raise HTTPException(
