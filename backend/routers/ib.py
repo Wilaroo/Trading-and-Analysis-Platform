@@ -1286,6 +1286,10 @@ async def get_short_squeeze_candidates():
         # Sort by squeeze score
         candidates.sort(key=lambda x: x["squeeze_score"], reverse=True)
         
+        # Persist to DataCache for offline access
+        data_cache = get_data_cache()
+        data_cache.cache_short_squeeze_scan(candidates[:10])
+        
         return {
             "candidates": candidates[:10],  # Top 10
             "count": len(candidates[:10]),
