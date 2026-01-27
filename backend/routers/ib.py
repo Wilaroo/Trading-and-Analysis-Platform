@@ -10,17 +10,20 @@ from datetime import datetime, timezone
 from services.ib_service import IBService
 from services.feature_engine import get_feature_engine
 from services.data_cache import get_data_cache
+from services.stock_data import get_stock_service
 
 router = APIRouter(prefix="/api/ib", tags=["Interactive Brokers"])
 
 # Service instance (will be injected)
 _ib_service: Optional[IBService] = None
+_stock_service = None
 
 
 def init_ib_service(service: IBService):
     """Initialize the IB service for this router"""
-    global _ib_service
+    global _ib_service, _stock_service
     _ib_service = service
+    _stock_service = get_stock_service()
 
 
 # ===================== Pydantic Models =====================
