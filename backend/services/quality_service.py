@@ -195,81 +195,82 @@ class QualityService:
         try:
             ticker = yf.Ticker(symbol)
             
-            # Get financial statements
-            balance_sheet = ticker.balance_sheet
-            income_stmt = ticker.income_stmt
-            cash_flow = ticker.cash_flow
-            
-            if balance_sheet.empty or income_stmt.empty:
-                return None
-            
             metrics = QualityMetrics(symbol=symbol.upper())
             metrics.data_source = "yahoo_finance"
             
-            # Extract latest values (most recent column)
             try:
-                # Total Assets
-                if 'Total Assets' in balance_sheet.index:
-                    metrics.total_assets = float(balance_sheet.loc['Total Assets'].iloc[0])
+                # Try to get info (may be rate limited)
+                info = ticker.info
                 
-                # Total Debt
-                if 'Total Debt' in balance_sheet.index:
-                    metrics.total_debt = float(balance_sheet.loc['Total Debt'].iloc[0])
-                elif 'Long Term Debt' in balance_sheet.index:
-                    metrics.total_debt = float(balance_sheet.loc['Long Term Debt'].iloc[0])
-                
-                # Total Equity
-                if 'Stockholders Equity' in balance_sheet.index:
-                    metrics.total_equity = float(balance_sheet.loc['Stockholders Equity'].iloc[0])
-                elif 'Total Equity Gross Minority Interest' in balance_sheet.index:
-                    metrics.total_equity = float(balance_sheet.loc['Total Equity Gross Minority Interest'].iloc[0])
-                
-                # Net Income
-                if 'Net Income' in income_stmt.index:
-                    metrics.net_income = float(income_stmt.loc['Net Income'].iloc[0])
-                
-                # Operating Cash Flow
-                if not cash_flow.empty and 'Operating Cash Flow' in cash_flow.index:
-                    metrics.operating_cash_flow = float(cash_flow.loc['Operating Cash Flow'].iloc[0])
-                elif not cash_flow.empty and 'Cash Flow From Continuing Operating Activities' in cash_flow.index:
-                    metrics.operating_cash_flow = float(cash_flow.loc['Cash Flow From Continuing Operating Activities'].iloc[0])
-                
-                # Calculate ROE
-                if metrics.net_income and metrics.total_equity and metrics.total_equity != 0:
-                    metrics.roe = metrics.net_income / metrics.total_equity
-                
-                # Calculate D/A (Debt to Assets)
-                if metrics.total_debt and metrics.total_assets and metrics.total_assets != 0:
-                    metrics.da = metrics.total_debt / metrics.total_assets
-                
-                # Calculate CF/A (Cash Flow to Assets)
-                if metrics.operating_cash_flow and metrics.total_assets and metrics.total_assets != 0:
-                    metrics.cfa = metrics.operating_cash_flow / metrics.total_assets
-                
-                # Calculate Accruals (simplified: Net Income - Operating Cash Flow) / Total Assets
-                if metrics.net_income is not None and metrics.operating_cash_flow is not None and metrics.total_assets:
-                    metrics.accruals = (metrics.net_income - metrics.operating_cash_flow) / metrics.total_assets
-                
-                # Determine data quality
-                metrics_count = sum([
-                    metrics.roe is not None,
-                    metrics.da is not None,
-                    metrics.cfa is not None,
-                    metrics.accruals is not None
-                ])
-                
-                if metrics_count >= 4:
-                    metrics.data_quality = "high"
-                elif metrics_count >= 2:
-                    metrics.data_quality = "medium"
-                else:
-                    metrics.data_quality = "low"
-                
-                return metrics
-                
+                if info:
+                    # Extract available metrics from info
+                    metrics.roe = info.get('returnOnEquity')
+                    metrics.total_debt = info.get('totalDebt')
+                    metrics.total_assets = info.get('totalAssets') 
+                    metrics.total_equity = info.get('totalStockholderEquity') or info.get('bookValue')
+                    metrics.operating_cash_flow = info.get('operatingCashflow')
+                    metrics.net_income = info.get('netIncomeToCommon')
+                    
+                    # Calculate D/A
+                    if metrics.total_debt and metrics.total_assets and metrics.total_assets != 0:
+                        metrics.da = metrics.total_debt / metrics.total_assets
+                    
+                    # Calculate CF/A
+                    if metrics.operating_cash_flow and metrics.total_assets and metrics.total_assets != 0:
+                        metrics.cfa = metrics.operating_cash_flow / metrics.total_assets
+                    
+                    # Calculate Accruals
+                    if metrics.net_income is not None and metrics.operating_cash_flow is not None and metrics.total_assets:
+                        metrics.accruals = (metrics.net_income - metrics.operating_cash_flow) / metrics.total_assets
+                    
             except Exception as e:
-                logger.warning(f"Error extracting Yahoo Finance data for {symbol}: {e}")
-                return None
+                logger.warning(f"Yahoo Finance info fetch failed for {symbol}: {e}")
+                
+                # Fallback: Try quarterly financials
+                try:
+                    quarterly_bs = ticker.quarterly_balance_sheet
+                    quarterly_cf = ticker.quarterly_cash_flow
+                    quarterly_income = ticker.quarterly_income_stmt
+                    
+                    if not quarterly_bs.empty:
+                        # Get most recent data
+                        if 'Total Assets' in quarterly_bs.index:
+                            metrics.total_assets = float(quarterly_bs.loc['Total Assets'].iloc[0])
+                        if 'Total Debt' in quarterly_bs.index:
+                            metrics.total_debt = float(quarterly_bs.loc['Total Debt'].iloc[0])
+                        if 'Stockholders Equity' in quarterly_bs.index:
+                            metrics.total_equity = float(quarterly_bs.loc['Stockholders Equity'].iloc[0])
+                    
+                    if not quarterly_cf.empty:
+                        if 'Operating Cash Flow' in quarterly_cf.index:
+                            metrics.operating_cash_flow = float(quarterly_cf.loc['Operating Cash Flow'].iloc[0])
+                    
+                    if not quarterly_income.empty:
+                        if 'Net Income' in quarterly_income.index:
+                            metrics.net_income = float(quarterly_income.loc['Net Income'].iloc[0])
+                            
+                except Exception as e2:
+                    logger.warning(f"Yahoo Finance quarterly fallback failed for {symbol}: {e2}")
+            
+            # Calculate derived metrics
+            metrics = self._calculate_derived_metrics(metrics)
+            
+            # Determine data quality
+            metrics_count = sum([
+                metrics.roe is not None,
+                metrics.da is not None,
+                metrics.cfa is not None,
+                metrics.accruals is not None
+            ])
+            
+            if metrics_count >= 4:
+                metrics.data_quality = "high"
+            elif metrics_count >= 2:
+                metrics.data_quality = "medium"
+            else:
+                metrics.data_quality = "low"
+            
+            return metrics
                 
         except Exception as e:
             logger.warning(f"Yahoo Finance fetch failed for {symbol}: {e}")
