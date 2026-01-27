@@ -152,7 +152,7 @@ class QualityService:
                     cached_time = datetime.fromisoformat(cached.last_updated.replace('Z', '+00:00'))
                     if (datetime.now(timezone.utc) - cached_time).total_seconds() < self._cache_ttl:
                         return cached
-                except:
+                except (ValueError, AttributeError):
                     pass
         
         metrics = QualityMetrics(symbol=symbol.upper())
