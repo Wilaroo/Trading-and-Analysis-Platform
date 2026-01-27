@@ -160,6 +160,92 @@ class DataCache:
             }
         return None
     
+    # ==================== Scanner Results ====================
+    
+    def cache_scanner_results(self, scan_type: str, results: List[Dict[str, Any]]) -> None:
+        """Cache scanner results with quotes"""
+        self._scanner_cache[scan_type.upper()] = {
+            "results": results,
+            "count": len(results),
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "is_cached": False
+        }
+    
+    def get_cached_scanner_results(self, scan_type: str) -> Optional[Dict[str, Any]]:
+        """Get cached scanner results if available"""
+        cached = self._scanner_cache.get(scan_type.upper())
+        if cached:
+            return {
+                "results": cached["results"],
+                "count": cached["count"],
+                "last_updated": cached["last_updated"],
+                "is_cached": True
+            }
+        return None
+    
+    def cache_comprehensive_scan(self, alerts: Dict[str, List], summary: Dict[str, int]) -> None:
+        """Cache comprehensive scanner results"""
+        self._scanner_cache["COMPREHENSIVE"] = {
+            "alerts": alerts,
+            "summary": summary,
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "is_cached": False
+        }
+    
+    def get_cached_comprehensive_scan(self) -> Optional[Dict[str, Any]]:
+        """Get cached comprehensive scan results"""
+        cached = self._scanner_cache.get("COMPREHENSIVE")
+        if cached:
+            return {
+                "alerts": cached["alerts"],
+                "summary": cached["summary"],
+                "last_updated": cached["last_updated"],
+                "is_cached": True
+            }
+        return None
+    
+    def cache_breakout_scan(self, breakouts: List[Dict[str, Any]]) -> None:
+        """Cache breakout scanner results"""
+        self._scanner_cache["BREAKOUTS"] = {
+            "results": breakouts,
+            "count": len(breakouts),
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "is_cached": False
+        }
+    
+    def get_cached_breakout_scan(self) -> Optional[Dict[str, Any]]:
+        """Get cached breakout scan results"""
+        cached = self._scanner_cache.get("BREAKOUTS")
+        if cached:
+            return {
+                "results": cached["results"],
+                "count": cached["count"],
+                "last_updated": cached["last_updated"],
+                "is_cached": True
+            }
+        return None
+    
+    def cache_short_squeeze_scan(self, candidates: List[Dict[str, Any]]) -> None:
+        """Cache short squeeze scanner results"""
+        self._scanner_cache["SHORT_SQUEEZE"] = {
+            "results": candidates,
+            "count": len(candidates),
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "is_cached": False
+        }
+    
+    def get_cached_short_squeeze_scan(self) -> Optional[Dict[str, Any]]:
+        """Get cached short squeeze scan results"""
+        cached = self._scanner_cache.get("SHORT_SQUEEZE")
+        if cached:
+            return {
+                "results": cached["results"],
+                "count": cached["count"],
+                "last_updated": cached["last_updated"],
+                "is_cached": True
+            }
+        return None
+    
     # ==================== Connection Management ====================
     
     def on_connected(self) -> None:
