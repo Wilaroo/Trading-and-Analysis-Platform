@@ -364,7 +364,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
     
     try {
       const chartData = historicalData.map(bar => ({
-        time: Math.floor(new Date(bar.date).getTime() / 1000),
+        time: Math.floor(new Date(bar.time || bar.date || bar.timestamp).getTime() / 1000),
         open: Number(bar.open),
         high: Number(bar.high),
         low: Number(bar.low),
