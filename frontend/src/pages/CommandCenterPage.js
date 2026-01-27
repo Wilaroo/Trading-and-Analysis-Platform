@@ -1332,7 +1332,37 @@ const CommandCenterPage = () => {
         max_results: 20,
         calculate_features: true
       });
-      setOpportunities(res.data?.results || []);
+      const results = res.data?.results || [];
+      
+      // Enhance with quality scores
+      if (results.length > 0) {
+        try {
+          const symbols = results.map(r => r.symbol).filter(Boolean);
+          const qualityRes = await api.post('/api/quality/enhance-opportunities', {
+            opportunities: symbols.map(s => ({ symbol: s }))
+          });
+          
+          // Map quality data back to results
+          const qualityMap = {};
+          (qualityRes.data?.opportunities || []).forEach(opp => {
+            if (opp.symbol && opp.quality) {
+              qualityMap[opp.symbol] = opp.quality;
+            }
+          });
+          
+          // Add quality to each result
+          results.forEach(r => {
+            if (r.symbol && qualityMap[r.symbol]) {
+              r.quality = qualityMap[r.symbol];
+              r.qualityGrade = qualityMap[r.symbol].grade;
+            }
+          });
+        } catch (qualityErr) {
+          console.log('Quality enhancement failed (non-critical):', qualityErr.message);
+        }
+      }
+      
+      setOpportunities(results);
     } catch (err) {
       console.error('Scanner error:', err);
     }
