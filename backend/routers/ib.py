@@ -752,7 +752,7 @@ async def get_comprehensive_analysis(symbol: str):
             "atr_14": round(base_price * 0.022, 2),
             "rvol": round(rvol, 2),
             "vwap": round(vwap, 2),
-            "vwap_distance_pct": round(((base_price - vwap) / vwap) * 100, 2),
+            "vwap_distance_pct": round(((base_price - vwap) / vwap) * 100, 2) if vwap > 0 else 0,
             "volume_trend": "Above Avg" if rvol > 1.5 else "Below Avg" if rvol < 0.7 else "Normal",
             "trend": "Bullish" if base_price > base_price * 0.995 else "Bearish"
         }
