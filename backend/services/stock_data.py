@@ -212,12 +212,13 @@ class StockDataService:
             import yfinance as yf
             loop = asyncio.get_event_loop()
             
-            # Convert index symbols to yfinance format
-            yf_symbol = symbol
-            if symbol.upper() == "VIX":
+            # Sanitize and convert index symbols to yfinance format
+            clean_symbol = symbol.replace("$", "").upper().strip()
+            yf_symbol = clean_symbol
+            if clean_symbol == "VIX":
                 yf_symbol = "^VIX"
-            elif symbol.upper() in ["SPY", "QQQ", "DIA", "IWM"]:
-                yf_symbol = symbol.upper()  # ETFs stay the same
+            elif clean_symbol in ["SPY", "QQQ", "DIA", "IWM"]:
+                yf_symbol = clean_symbol  # ETFs stay the same
             
             def get_yahoo_data():
                 ticker = yf.Ticker(yf_symbol)
