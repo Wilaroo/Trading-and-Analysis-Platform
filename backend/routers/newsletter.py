@@ -86,9 +86,20 @@ async def auto_generate_market_intelligence():
         service = get_newsletter_service()
         
         # Gather comprehensive market data (best effort - continues even if this fails)
-        top_movers = None
+        top_movers = []
         market_context = {}
+        alpaca_service = get_alpaca_service()
         
+        # First, always get index data from Alpaca (works after hours)
+        try:
+            indices = ["SPY", "QQQ", "DIA", "IWM"]
+            if alpaca_service:
+                index_quotes = await alpaca_service.get_quotes_batch(indices)
+                market_context["indices"] = {s: q for s, q in index_quotes.items() if q.get("price")}
+        except Exception as e:
+            print(f"Error getting index quotes from Alpaca: {e}")
+        
+        # Try to get scanner results from IB (only works during market hours with connection)
         try:
             from services.ib_service import IBService
             ib_service = service.ib_service
