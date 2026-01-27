@@ -177,18 +177,16 @@ class EmergentProvider(LLMProvider):
     
     def generate(self, prompt: str, system_prompt: str = None, max_tokens: int = 2000, temperature: float = 0.7) -> str:
         try:
-            from emergentintegrations.llm.chat import chat, LlmModel
+            from emergentintegrations.llm.chat import LlmChat
             
-            messages = []
+            chat = LlmChat(api_key=self.api_key).with_model("gpt-4o")
+            
+            # Build prompt with system context
+            full_prompt = prompt
             if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.append({"role": "user", "content": prompt})
+                full_prompt = f"{system_prompt}\n\n{prompt}"
             
-            response = chat(
-                api_key=self.api_key,
-                model=LlmModel.GPT_4O,
-                messages=messages
-            )
+            response = chat.send_message(full_prompt)
             return response
         except Exception as e:
             logger.error(f"Emergent generation error: {e}")
