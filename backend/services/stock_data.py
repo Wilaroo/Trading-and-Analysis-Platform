@@ -169,8 +169,15 @@ class StockDataService:
             import yfinance as yf
             loop = asyncio.get_event_loop()
             
+            # Convert index symbols to yfinance format
+            yf_symbol = symbol
+            if symbol.upper() == "VIX":
+                yf_symbol = "^VIX"
+            elif symbol.upper() in ["SPY", "QQQ", "DIA", "IWM"]:
+                yf_symbol = symbol.upper()  # ETFs stay the same
+            
             def get_yahoo_data():
-                ticker = yf.Ticker(symbol)
+                ticker = yf.Ticker(yf_symbol)
                 hist = ticker.history(period="2d")
                 return hist
             
