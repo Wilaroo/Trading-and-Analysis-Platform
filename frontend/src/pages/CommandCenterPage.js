@@ -1907,7 +1907,11 @@ const CommandCenterPage = () => {
                           <div 
                             key={idx} 
                             className={`flex items-center justify-between p-2 bg-zinc-900/50 rounded text-sm ${hasSymbol ? 'cursor-pointer hover:bg-zinc-800' : ''}`}
-                            onClick={() => hasSymbol && setSelectedTicker({ symbol, quote: {} })}
+                            onClick={() => {
+                              if (hasSymbol && symbol.length <= 5 && /^[A-Z]+$/.test(symbol)) {
+                                setSelectedTicker({ symbol, quote: {} });
+                              }
+                            }}
                           >
                             <div className="flex items-center gap-2 flex-1 min-w-0">
                               <span className="font-bold text-cyan-400">{symbol}</span>
