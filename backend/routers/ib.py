@@ -2044,22 +2044,33 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                     scan_type
                 )
                 
-                # Calculate support/resistance levels
-                highs = [bar["high"] for bar in hist_data_daily]
-                lows = [bar["low"] for bar in hist_data_daily]
-                closes = [bar["close"] for bar in hist_data_daily]
+                # Calculate support/resistance levels with safety checks
+                highs = [bar.get("high", 0) for bar in hist_data_daily if bar.get("high", 0) > 0]
+                lows = [bar.get("low", 0) for bar in hist_data_daily if bar.get("low", 0) > 0]
+                closes = [bar.get("close", 0) for bar in hist_data_daily if bar.get("close", 0) > 0]
+                
+                # Skip if we don't have valid price data
+                if not highs or not lows or not closes:
+                    continue
                 
                 resistance_1 = max(highs[-20:]) if len(highs) >= 20 else max(highs)
                 resistance_2 = max(highs)
                 support_1 = min(lows[-20:]) if len(lows) >= 20 else min(lows)
                 support_2 = min(lows)
                 
+                # Skip if support/resistance are invalid
+                if resistance_1 <= 0 or support_1 <= 0:
+                    continue
+                
                 # Determine alert type and direction
                 alert_type = determine_alert_type(current_price, resistance_1, support_1, closes, features)
                 direction = "LONG" if alert_type in [AlertType.BREAKOUT, AlertType.PULLBACK, AlertType.MOMENTUM] and features.get("trend") != "BEARISH" else "SHORT" if alert_type == AlertType.BREAKDOWN else "LONG"
                 
-                # Calculate trade plan
-                atr = features.get("atr", current_price * 0.02)
+                # Calculate trade plan with safety
+                atr = features.get("atr", 0) or features.get("atr_14", 0) or (current_price * 0.02)
+                if atr <= 0:
+                    atr = current_price * 0.02
+                    
                 if direction == "LONG":
                     entry = current_price
                     stop_loss = max(support_1, current_price - (atr * 1.5))
