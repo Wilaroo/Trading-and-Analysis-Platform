@@ -1613,6 +1613,11 @@ async def get_breakout_alerts():
         # Update global breakout alerts
         _breakout_alerts = top_breakouts
         
+        # Persist to DataCache for offline access
+        from services.data_cache import get_data_cache
+        data_cache = get_data_cache()
+        data_cache.cache_breakout_scan(top_breakouts)
+        
         # Add to history
         for b in top_breakouts:
             if not any(h["symbol"] == b["symbol"] and h["breakout_type"] == b["breakout_type"] for h in _breakout_alert_history[-100:]):
