@@ -1960,10 +1960,10 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                     "overall_score": overall_score,
                     "scores": {
                         "overall": overall_score,
-                        "technical": scores.get("technical", 0),
-                        "fundamental": scores.get("fundamental", 0),
-                        "catalyst": scores.get("catalyst", 0),
-                        "confidence": scores.get("confidence", 0)
+                        "technical": score_result.get("categories", {}).get("technical", {}).get("score", 0),
+                        "fundamental": score_result.get("categories", {}).get("fundamental", {}).get("score", 0),
+                        "catalyst": score_result.get("categories", {}).get("catalyst", {}).get("score", 0),
+                        "confidence": score_result.get("confidence", 0)
                     },
                     
                     # Trade plan
