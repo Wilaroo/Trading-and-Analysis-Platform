@@ -100,15 +100,15 @@ Format your responses clearly with sections when appropriate. Use specific numbe
         try:
             emergent_key = os.environ.get("EMERGENT_LLM_KEY")
             if emergent_key:
-                from emergentintegrations.llm.chat import Chat
+                from emergentintegrations.llm.chat import LlmChat
                 self.llm_clients[LLMProvider.EMERGENT] = {
                     "available": True,
-                    "client": Chat,
+                    "client": LlmChat,
                     "key": emergent_key
                 }
                 logger.info("Emergent LLM client initialized")
-        except ImportError:
-            logger.warning("emergentintegrations not installed")
+        except ImportError as e:
+            logger.warning(f"emergentintegrations not installed: {e}")
         
         # OpenAI
         openai_key = os.environ.get("OPENAI_API_KEY")
