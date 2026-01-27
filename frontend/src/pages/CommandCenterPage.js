@@ -3235,6 +3235,7 @@ const CommandCenterPage = () => {
           ticker={selectedTicker}
           onClose={() => setSelectedTicker(null)}
           onTrade={handleTrade}
+          onAskAI={askAIAboutStock}
         />
       )}
 
