@@ -250,7 +250,7 @@ async def get_bear_market_hedge():
                 metrics = await _quality_service.get_quality_metrics(symbol)
                 if metrics.data_quality != "low":
                     all_metrics.append(metrics)
-            except:
+            except Exception:
                 continue
         
         # Calculate scores
