@@ -74,6 +74,7 @@ ib_service = get_ib_service()
 strategy_service = get_strategy_service(db)
 scoring_engine = get_scoring_engine(db)
 feature_engine = get_feature_engine()
+quality_service = init_quality_service(ib_service, db)
 
 # Seed strategies if not already done
 if not strategy_service.is_seeded():
