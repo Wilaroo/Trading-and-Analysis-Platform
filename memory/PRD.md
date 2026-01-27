@@ -729,3 +729,47 @@ The application is now consolidated into a single **Command Center** that serves
 **Files Modified:**
 - `/app/backend/services/data_cache.py` - Added MongoDB persistence layer
 
+
+
+### Jan 27, 2026 - Knowledge Base System
+**Implemented:**
+1. **Backend Knowledge Service** (`/app/backend/services/knowledge_service.py`)
+   - MongoDB-based storage in `knowledge_base` collection
+   - Full-text search with indexes
+   - Types: strategy, pattern, insight, rule, note, indicator, checklist
+   - Categories: entry, exit, risk_management, position_sizing, etc.
+   - CRUD operations with soft delete
+   - Usage tracking, confidence scoring
+   - Export/import for backup
+
+2. **API Endpoints** (`/app/backend/routers/knowledge.py`)
+   - `POST /api/knowledge` - Add new entry
+   - `GET /api/knowledge` - Search entries (query, type, category, tags)
+   - `GET /api/knowledge/stats` - Get statistics
+   - `GET /api/knowledge/types` - Get available types/categories
+   - `GET /api/knowledge/{id}` - Get single entry
+   - `PUT /api/knowledge/{id}` - Update entry
+   - `DELETE /api/knowledge/{id}` - Delete entry
+   - `GET /api/knowledge/export/all` - Export all entries
+   - `POST /api/knowledge/import` - Import entries
+
+3. **Frontend UI** (`/app/frontend/src/components/KnowledgeBase.jsx`)
+   - Modal accessible via "Knowledge" button in header
+   - Search with type/category filters
+   - Add/edit form with all fields
+   - Entry list with icons, tags, confidence
+   - Edit and delete actions
+   - Stats footer showing entry counts by type
+
+**Usage:**
+- Click "Knowledge" button in Command Center header
+- Add strategies, patterns, insights, rules
+- Search by text, filter by type/category
+- Tag entries for easy filtering
+- Set confidence levels (0-100%)
+
+**Files Created:**
+- `/app/backend/services/knowledge_service.py`
+- `/app/backend/routers/knowledge.py`
+- `/app/frontend/src/components/KnowledgeBase.jsx`
+
