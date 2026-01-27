@@ -196,7 +196,7 @@ const MiniChart = ({ symbol, data, width = '100%', height = 80 }) => {
     });
 
     const chartData = data.map(bar => ({
-      time: new Date(bar.date).getTime() / 1000,
+      time: new Date(bar.time || bar.date || bar.timestamp).getTime() / 1000,
       value: bar.close,
     }));
 
