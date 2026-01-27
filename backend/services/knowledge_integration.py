@@ -36,7 +36,7 @@ class KnowledgeIntegrationService:
         applicable = []
         
         # Get all strategies from knowledge base
-        all_strategies = self.knowledge.get_strategies(limit=100)
+        all_strategies = self.knowledge.get_strategies()
         
         # Define conditions based on stock_data
         rvol = stock_data.get("rvol", 1.0)
