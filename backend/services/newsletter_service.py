@@ -197,6 +197,26 @@ Return ONLY valid JSON, no markdown code blocks."""
             except (ValueError, TypeError):
                 vix_text = f"\nVIX: {vix.get('price', 'N/A')}"
         
+        # Format knowledge base strategy insights
+        kb_insights_text = ""
+        if context_data.get("kb_insights"):
+            insights_list = []
+            for insight in context_data["kb_insights"][:5]:
+                title = insight.get("title", "")
+                applicable = insight.get("applicable_to", [])
+                if title and applicable:
+                    insights_list.append(f"- {title} (applies to: {', '.join(applicable[:3])})")
+            if insights_list:
+                kb_insights_text = f"\n\nKNOWLEDGE BASE STRATEGY INSIGHTS:\n" + "\n".join(insights_list)
+        
+        # Knowledge base stats
+        kb_stats_text = ""
+        if context_data.get("kb_stats"):
+            stats = context_data["kb_stats"]
+            total = stats.get("total_entries", 0)
+            if total > 0:
+                kb_stats_text = f"\n(Analysis backed by {total} learned trading strategies/rules)"
+        
         prompt = f"""Write your premarket newsletter for {date}.
 
 Search for and include:
@@ -206,11 +226,11 @@ Search for and include:
 4. Economic calendar events today
 5. Fed speakers or important announcements
 
-My Scanner Data:{movers_text}{indices_text}{vix_text}
+My Scanner Data:{movers_text}{indices_text}{vix_text}{kb_insights_text}{kb_stats_text}
 
 Watchlist: {', '.join(context_data.get('watchlist', []) or []) or 'No specific watchlist'}
 
-Generate a complete premarket briefing with specific, actionable trade ideas. Include price levels, stop losses, and targets where possible. Format your response as valid JSON."""
+Generate a complete premarket briefing with specific, actionable trade ideas. Use the knowledge base strategy insights to inform your recommendations. Include price levels, stop losses, and targets where possible. Format your response as valid JSON."""
 
         return prompt
     
