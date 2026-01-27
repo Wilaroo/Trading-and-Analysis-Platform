@@ -905,3 +905,61 @@ curl /api/quality/hedge/bear-market
 **Files Modified:**
 - `/app/frontend/src/pages/CommandCenterPage.js` - Imported and integrated QualityPanel
 
+**Note:** Quality Panel was later removed per user request - quality integrated into scoring/assistant instead.
+
+
+### Jan 27, 2026 - AI Trading Assistant (Hybrid Architecture)
+**Implemented:**
+1. **AI Assistant Service** (`/app/backend/services/ai_assistant_service.py`)
+   - Portable LLM architecture: Emergent (default), OpenAI, Perplexity support
+   - Conversation memory with MongoDB persistence
+   - Learns frequent request patterns and suggests them
+   - Integrates with knowledge base (108+ strategies/rules)
+   - Integrates with quality service for stock analysis
+   - Trading rule enforcement in responses
+   - Pattern detection in user's trading behavior
+
+2. **AI Assistant API** (`/app/backend/routers/assistant.py`)
+   - `POST /api/assistant/chat` - Main chat endpoint
+   - `POST /api/assistant/analyze-trade` - Analyze a trade idea
+   - `GET /api/assistant/premarket-briefing` - Auto-generated morning briefing
+   - `GET /api/assistant/review-patterns` - Analyze trading patterns
+   - `GET /api/assistant/suggestions` - Frequently asked requests
+   - `GET /api/assistant/history/{session_id}` - Conversation history
+   - `GET /api/assistant/sessions` - All conversation sessions
+   - `GET /api/assistant/providers` - Available LLM providers
+   - `GET /api/assistant/status` - Service health status
+
+3. **AI Assistant UI** (`/app/frontend/src/components/AIAssistant.jsx`)
+   - Modal chat interface with message history
+   - Welcome screen with 6 quick suggestion buttons
+   - Real-time "Analyzing..." indicator
+   - Markdown rendering for AI responses
+   - Session history browser
+   - Minimize/maximize functionality
+   - Clear conversation option
+   - Quick action buttons during conversation
+
+4. **System Prompt Personality**
+   - ANALYTICAL: Explains reasoning step-by-step
+   - PROTECTIVE: Enforces trading rules, warns about violations
+   - EDUCATIONAL: Helps understand why, not just what
+   - HONEST: States uncertainty, never fabricates data
+
+**Features:**
+- Conversation memory persisted to MongoDB
+- Suggests frequently asked requests
+- Enforces trading rules in responses
+- Detects patterns in trading behavior
+- Uses quality scores in analysis
+- Searches knowledge base for relevant strategies
+
+**Files Created:**
+- `/app/backend/services/ai_assistant_service.py`
+- `/app/backend/routers/assistant.py`
+- `/app/frontend/src/components/AIAssistant.jsx`
+
+**Files Modified:**
+- `/app/backend/server.py` - Added assistant router and service
+- `/app/frontend/src/pages/CommandCenterPage.js` - Added AI Assistant button and modal
+
