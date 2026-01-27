@@ -235,7 +235,7 @@ class StockDataService:
                 change_pct = (change / prev_close) * 100 if prev_close else 0
                 
                 return {
-                    "symbol": symbol,
+                    "symbol": clean_symbol,  # Use cleaned symbol
                     "price": round(current['Close'], 2),
                     "change": round(change, 2),
                     "change_percent": round(change_pct, 2),
