@@ -1571,7 +1571,7 @@ async def get_breakout_alerts():
                 breakout_score = overall_score
                 breakout_score += min(10, (rvol - 1) * 10)  # Bonus for high RVOL
                 breakout_score += len(matched_strategies) * 2  # Bonus for strategy matches
-                breakout_score += min(10, abs(current_price - breakout_level) / breakout_level * 100)  # Breakout strength
+                breakout_score += min(10, abs(current_price - breakout_level) / breakout_level * 100) if breakout_level > 0 else 0  # Breakout strength
                 
                 # Calculate stop loss and target
                 atr = features.get("atr", current_price * 0.02)
