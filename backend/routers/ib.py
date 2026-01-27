@@ -468,11 +468,22 @@ async def run_enhanced_scanner(request: EnhancedScannerRequest):
         if not scanner_results:
             return {"results": [], "count": 0, "scan_type": request.scan_type}
         
-        # Step 2: Get quotes for all symbols
+        # Step 2: Get quotes for all symbols using Alpaca (faster, no subscription needed)
         symbols = [r["symbol"] for r in scanner_results]
-        logger.info(f"Fetching quotes for {len(symbols)} symbols")
-        quotes = await _ib_service.get_quotes_batch(symbols)
-        quotes_map = {q["symbol"]: q for q in quotes}
+        logger.info(f"Fetching quotes for {len(symbols)} symbols via Alpaca")
+        
+        quotes_map = {}
+        if _alpaca_service:
+            try:
+                alpaca_quotes = await _alpaca_service.get_quotes_batch(symbols)
+                quotes_map = alpaca_quotes
+            except Exception as e:
+                logger.warning(f"Alpaca batch quotes failed: {e}, falling back to IB")
+        
+        # Fallback to IB if Alpaca failed
+        if not quotes_map and _ib_service:
+            quotes = await _ib_service.get_quotes_batch(symbols)
+            quotes_map = {q["symbol"]: q for q in quotes}
         
         enhanced_results = []
         feature_engine = get_feature_engine()
@@ -491,12 +502,29 @@ async def run_enhanced_scanner(request: EnhancedScannerRequest):
             
             if request.calculate_features and quote.get("price"):
                 try:
-                    # Step 3: Fetch 5-minute historical bars (last 1 day)
-                    bars = await _ib_service.get_historical_data(
-                        symbol=symbol,
-                        duration="1 D",
-                        bar_size="5 mins"
-                    )
+                    # Step 3: Fetch 5-minute historical bars via Alpaca first
+                    bars = None
+                    if _alpaca_service:
+                        try:
+                            alpaca_bars = await _alpaca_service.get_bars(symbol, "5Min", 78)  # ~1 day of 5min bars
+                            if alpaca_bars:
+                                bars = [{
+                                    "open": b["open"],
+                                    "high": b["high"],
+                                    "low": b["low"],
+                                    "close": b["close"],
+                                    "volume": b["volume"]
+                                } for b in alpaca_bars]
+                        except Exception as e:
+                            logger.debug(f"Alpaca bars failed for {symbol}: {e}")
+                    
+                    # Fallback to IB
+                    if not bars and _ib_service:
+                        bars = await _ib_service.get_historical_data(
+                            symbol=symbol,
+                            duration="1 D",
+                            bar_size="5 mins"
+                        )
                     
                     if bars and len(bars) >= 5:
                         # Convert bars to feature engine format
