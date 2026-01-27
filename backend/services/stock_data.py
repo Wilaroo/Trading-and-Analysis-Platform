@@ -1,6 +1,6 @@
 """
 Stock Data Service - Unified interface for stock data from multiple providers
-Primary: Finnhub (60 calls/min free tier)
+Primary: Alpaca (free real-time), Finnhub (60 calls/min free tier)
 Fallback: Yahoo Finance, then simulated data
 """
 import os
@@ -15,7 +15,10 @@ class StockDataService:
     """Unified stock data service with multiple providers and caching"""
     
     def __init__(self):
-        # Finnhub client (primary provider - 60 calls/min)
+        # Alpaca service (primary provider - free real-time)
+        self._alpaca_service = None
+        
+        # Finnhub client (secondary provider - 60 calls/min)
         self.finnhub_key = os.environ.get("FINNHUB_API_KEY", "")
         self.finnhub_client = finnhub.Client(api_key=self.finnhub_key) if self.finnhub_key else None
         
@@ -33,6 +36,10 @@ class StockDataService:
         self._call_count = 0
         self._rate_limit_window = 60  # seconds
         self._rate_limit_max = 55  # calls per window (leaving buffer)
+    
+    def set_alpaca_service(self, alpaca_service):
+        """Set the Alpaca service for real-time data"""
+        self._alpaca_service = alpaca_service
     
     def _check_cache(self, cache: Dict, key: str, ttl: int) -> Optional[Dict]:
         """Check if cached data is still valid"""
@@ -69,7 +76,14 @@ class StockDataService:
         if cached:
             return cached
         
-        # Try Finnhub first (best rate limits)
+        # Try Alpaca first (best - free real-time)
+        if self._alpaca_service:
+            quote = await self._fetch_alpaca_quote(symbol)
+            if quote:
+                self._set_cache(self._quote_cache, cache_key, quote)
+                return quote
+        
+        # Try Finnhub second (good rate limits)
         if self.finnhub_client and await self._can_make_call():
             quote = await self._fetch_finnhub_quote(symbol)
             if quote:
@@ -90,6 +104,35 @@ class StockDataService:
         
         # Final fallback: simulated data
         return self._generate_simulated_quote(symbol)
+    
+    async def _fetch_alpaca_quote(self, symbol: str) -> Optional[Dict]:
+        """Fetch quote from Alpaca API"""
+        try:
+            quote = await self._alpaca_service.get_quote(symbol)
+            if quote and quote.get('price', 0) > 0:
+                # Convert Alpaca format to our standard format
+                price = quote['price']
+                bid = quote.get('bid', price)
+                ask = quote.get('ask', price)
+                
+                return {
+                    "symbol": symbol,
+                    "price": round(price, 2),
+                    "change": 0,  # Alpaca snapshot doesn't include change
+                    "change_percent": 0,
+                    "volume": quote.get('volume', 0),
+                    "high": round(ask, 2),  # Use ask as proxy
+                    "low": round(bid, 2),   # Use bid as proxy
+                    "open": round(price, 2),
+                    "prev_close": round(price, 2),
+                    "bid": round(bid, 2),
+                    "ask": round(ask, 2),
+                    "timestamp": quote.get('timestamp', datetime.now(timezone.utc).isoformat()),
+                    "source": "alpaca"
+                }
+        except Exception as e:
+            print(f"Alpaca quote error for {symbol}: {e}")
+        return None
     
     async def _fetch_finnhub_quote(self, symbol: str) -> Optional[Dict]:
         """Fetch quote from Finnhub API"""
