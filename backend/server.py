@@ -82,6 +82,10 @@ scoring_engine = get_scoring_engine(db)
 feature_engine = get_feature_engine()
 quality_service = init_quality_service(ib_service, db)
 
+# Initialize Alpaca service early and wire it to stock_service
+alpaca_service = init_alpaca_service()
+stock_service.set_alpaca_service(alpaca_service)
+
 # Seed strategies if not already done
 if not strategy_service.is_seeded():
     seeded_count = strategy_service.seed_strategies(ALL_STRATEGIES_DATA)
