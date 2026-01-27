@@ -419,7 +419,8 @@ async def fetch_historical_data(symbol: str, period: str = "1y") -> List[Dict]:
     """Fetch historical price data"""
     try:
         import yfinance as yf
-        ticker = yf.Ticker(symbol)
+        yf_symbol = _convert_to_yf_symbol(symbol)
+        ticker = yf.Ticker(yf_symbol)
         hist = ticker.history(period=period)
         
         data = []
