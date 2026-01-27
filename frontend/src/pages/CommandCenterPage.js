@@ -435,12 +435,15 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
   const supportResistance = analysis?.support_resistance || {};
   const matchedStrategies = analysis?.matched_strategies || [];
   const news = analysis?.news || [];
+  const quality = qualityData?.data || {};
+  const qualityMetrics = qualityData?.metrics || {};
 
   const tabs = [
     { id: 'overview', label: 'Overview' },
     { id: 'chart', label: 'Chart' },
     { id: 'technicals', label: 'Technicals' },
     { id: 'fundamentals', label: 'Fundamentals' },
+    { id: 'quality', label: 'Quality' },
     { id: 'strategies', label: 'Strategies' },
     { id: 'news', label: 'News' },
   ];
@@ -477,6 +480,16 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                       Grade {scores.grade}
                     </span>
                   )}
+                  {quality.grade && (
+                    <span className={`text-xs px-2 py-0.5 rounded font-bold ${
+                      quality.grade?.startsWith('A') ? 'bg-emerald-500 text-black' :
+                      quality.grade?.startsWith('B') ? 'bg-blue-500 text-black' :
+                      quality.grade?.startsWith('C') ? 'bg-yellow-500 text-black' :
+                      'bg-red-500 text-white'
+                    }`} title="Earnings Quality Grade">
+                      Q:{quality.grade}
+                    </span>
+                  )}
                   {tradingSummary.bias && (
                     <span className={`text-xs px-2 py-0.5 rounded ${
                       tradingSummary.bias === 'BULLISH' ? 'bg-green-500/20 text-green-400' :
@@ -497,6 +510,15 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                   {formatPercent(quote?.change_percent)}
                 </span>
               </div>
+              {onAskAI && (
+                <button 
+                  onClick={() => onAskAI(ticker.symbol)}
+                  className="p-2 rounded-lg hover:bg-amber-500/20 text-amber-400 transition-colors"
+                  title="Ask AI about this stock"
+                >
+                  <Bot className="w-5 h-5" />
+                </button>
+              )}
               <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/10 text-zinc-400">
                 <X className="w-5 h-5" />
               </button>
