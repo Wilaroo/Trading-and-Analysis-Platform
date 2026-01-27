@@ -213,9 +213,10 @@ const MiniChart = ({ symbol, data, width = '100%', height = 80 }) => {
 };
 
 // ===================== TICKER DETAIL MODAL =====================
-const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
+const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
   const [analysis, setAnalysis] = useState(null);
   const [historicalData, setHistoricalData] = useState(null);
+  const [qualityData, setQualityData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [showTradingLines, setShowTradingLines] = useState(true);
@@ -231,8 +232,8 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
       setLoading(true);
       setChartError(null);
       try {
-        // Fetch comprehensive analysis
-        const [analysisRes, histRes] = await Promise.all([
+        // Fetch comprehensive analysis including quality score
+        const [analysisRes, histRes, qualityRes] = await Promise.all([
           api.get(`/api/ib/analysis/${ticker.symbol}`).catch((err) => {
             console.error('Analysis API error:', err);
             return { data: null };
@@ -241,13 +242,19 @@ const TickerDetailModal = ({ ticker, onClose, onTrade }) => {
             console.error('Historical data error:', err);
             setChartError(err.response?.data?.detail?.message || 'Unable to load chart data');
             return { data: { bars: [] } };
+          }),
+          api.get(`/api/quality/score/${ticker.symbol}`).catch((err) => {
+            console.error('Quality score error:', err);
+            return { data: null };
           })
         ]);
         
         console.log('Analysis data received:', analysisRes.data);
         console.log('Historical data received:', histRes.data?.bars?.length, 'bars');
+        console.log('Quality data received:', qualityRes.data);
         setAnalysis(analysisRes.data);
         setHistoricalData(histRes.data?.bars || []);
+        setQualityData(qualityRes.data);
       } catch (err) {
         console.error('Error fetching data:', err);
         setChartError('Failed to load data');
