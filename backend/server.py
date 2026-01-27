@@ -286,6 +286,13 @@ async def fetch_twelvedata_quote(symbol: str) -> Optional[Dict]:
     
     return None
 
+def _convert_to_yf_symbol(symbol: str) -> str:
+    """Convert symbol to yfinance format"""
+    symbol_upper = symbol.upper()
+    if symbol_upper == "VIX":
+        return "^VIX"
+    return symbol_upper
+
 async def fetch_quote(symbol: str) -> Optional[Dict]:
     """Fetch real-time quote - uses new StockDataService with Finnhub priority"""
     return await stock_service.get_quote(symbol)
