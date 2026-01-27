@@ -1212,7 +1212,19 @@ async def get_short_squeeze_candidates():
                 "last_updated": cached_candidates[0].get("last_updated") if cached_candidates else None,
                 "is_cached": True,
                 "is_connected": False,
-                "message": "Showing cached data. Connect IB Gateway for real-time data."
+                "message": "Showing cached data from last session. Connect IB Gateway for real-time data."
+            }
+        
+        # Try persistent DataCache for short squeeze scan results
+        cached_scan = cache.get_cached_short_squeeze_scan()
+        if cached_scan:
+            return {
+                "candidates": cached_scan["results"],
+                "count": cached_scan["count"],
+                "last_updated": cached_scan["last_updated"],
+                "is_cached": True,
+                "is_connected": False,
+                "message": f"Showing cached results from {cached_scan['last_updated'][:19]}. Connect IB Gateway for real-time data."
             }
         
         raise HTTPException(
