@@ -98,6 +98,9 @@ assistant_service = init_assistant_service(db)
 init_assistant_router(assistant_service)
 newsletter_service = init_newsletter_service(ib_service)
 news_service = init_news_service(ib_service)
+scheduler_service = init_scheduler_service()
+scheduler_service.start()
+init_scheduler_router(scheduler_service, assistant_service, newsletter_service)
 
 # Include routers
 app.include_router(notifications_router)
