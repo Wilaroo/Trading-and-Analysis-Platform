@@ -121,12 +121,18 @@ async def auto_generate_market_intelligence():
                                     m['category'] = category
                                     top_movers.append(m)
                     
-                    # Get quotes for all movers (best effort)
+                    # Get quotes for all movers using Alpaca (free, works after hours)
                     if top_movers:
                         try:
                             symbols = [m["symbol"] for m in top_movers]
-                            quotes = await ib_service.get_quotes_batch(symbols)
-                            quotes_map = {q["symbol"]: q for q in quotes}
+                            alpaca_service = get_alpaca_service()
+                            if alpaca_service:
+                                alpaca_quotes = await alpaca_service.get_quotes_batch(symbols)
+                                quotes_map = {s: q for s, q in alpaca_quotes.items()}
+                            else:
+                                # Fallback to IB
+                                quotes = await ib_service.get_quotes_batch(symbols)
+                                quotes_map = {q["symbol"]: q for q in quotes}
                             top_movers = [
                                 {**m, "quote": quotes_map.get(m["symbol"], {})}
                                 for m in top_movers
@@ -134,11 +140,16 @@ async def auto_generate_market_intelligence():
                         except Exception as e:
                             print(f"Error getting quotes for movers: {e}")
                     
-                    # Get market context (indices) - best effort
+                    # Get market context (indices) using Alpaca
                     try:
                         indices = ["SPY", "QQQ", "DIA", "IWM"]
-                        index_quotes = await ib_service.get_quotes_batch(indices)
-                        market_context["indices"] = {q["symbol"]: q for q in index_quotes if q.get("price")}
+                        alpaca_service = get_alpaca_service()
+                        if alpaca_service:
+                            index_quotes = await alpaca_service.get_quotes_batch(indices)
+                            market_context["indices"] = {s: q for s, q in index_quotes.items() if q.get("price")}
+                        else:
+                            index_quotes = await ib_service.get_quotes_batch(indices)
+                            market_context["indices"] = {q["symbol"]: q for q in index_quotes if q.get("price")}
                     except Exception as e:
                         print(f"Error getting index quotes: {e}")
                     
