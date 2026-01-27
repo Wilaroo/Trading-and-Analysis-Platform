@@ -773,3 +773,60 @@ The application is now consolidated into a single **Command Center** that serves
 - `/app/backend/routers/knowledge.py`
 - `/app/frontend/src/components/KnowledgeBase.jsx`
 
+
+
+### Jan 27, 2026 - AI Learning System & Knowledge Integration (MAJOR UPDATE)
+**Implemented:**
+1. **AI Learning System**
+   - Portable LLM service (`llm_service.py`) - Works with OpenAI API key or Emergent LLM Key
+   - Document processor (`document_processor.py`) - Extracts text from PDFs using PyPDF2
+   - Knowledge service (`knowledge_service.py`) - Stores structured knowledge in MongoDB
+   - Learning router (`learning.py`) - API endpoints for learning and analysis
+
+2. **Knowledge Integration into Scoring & Market Intelligence**
+   - `knowledge_integration.py` - New service that bridges knowledge base with scoring engine
+   - Scoring engine now includes `knowledge_base` object with applicable strategies
+   - Newsletter service includes KB strategy insights in prompts
+   - Trade bias enhanced by knowledge base confidence
+
+3. **API Endpoints for Learning System**
+   - `GET /api/learn/status` - Returns KB stats and LLM status
+   - `POST /api/learn/text` - Learn strategies from text input
+   - `POST /api/learn/analyze/{symbol}` - Analyze stock with KB integration
+   - `POST /api/learn/enhance-opportunities` - Enhance opportunities with strategy insights
+   - `GET /api/learn/ai-recommendation/{symbol}` - Get AI-powered trade recommendation
+   - `POST /api/learn/bulk` - Bulk import knowledge entries
+
+4. **Knowledge Base Populated with 97 Entries**
+   - 77 strategies from "151 Trading Strategies.pdf"
+   - 11 trading rules (position sizing, R:R, daily loss limits)
+   - 4 indicators (VWAP bias, volume confirmation)
+   - 2 checklists (short squeeze criteria, overnight hold)
+   - 2 insights (news catalyst hierarchy)
+   - Covers: Options, Stocks, ETFs, Futures, FX, Global Macro, ML strategies
+
+5. **Scoring Engine Enhancement**
+   - Composite scores now include `knowledge_base` object
+   - Contains: `applicable_strategies`, `kb_trade_bias`, `kb_confidence`
+   - Score boosted when KB agrees with trade direction
+
+6. **Newsletter/Market Intelligence Enhancement**
+   - Prompts now include KB strategy insights
+   - Shows which strategies apply to which opportunities
+   - Backed by learned trading knowledge
+
+**Files Created:**
+- `/app/backend/services/llm_service.py`
+- `/app/backend/services/document_processor.py`
+- `/app/backend/services/knowledge_integration.py`
+- `/app/backend/routers/learning.py`
+
+**Files Modified:**
+- `/app/backend/services/scoring_engine.py` - Added KB integration
+- `/app/backend/services/newsletter_service.py` - Added KB insights to prompts
+
+**Testing:**
+- 19/19 backend tests passed
+- Frontend Knowledge button and modal working
+- All API endpoints verified working
+
