@@ -394,12 +394,14 @@ class DataCache:
             "short_interest_entries": len(self._short_interest_cache),
             "news_entries": len(self._news_cache),
             "scanner_entries": len(self._scanner_cache),
+            "scanner_types_cached": list(self._scanner_cache.keys()),
             "last_connected": self._last_connected.isoformat() if self._last_connected else None,
-            "pending_refresh_count": len(self._pending_refresh)
+            "pending_refresh_count": len(self._pending_refresh),
+            "persistence": "MongoDB"
         }
     
     def clear_cache(self) -> None:
-        """Clear all cached data"""
+        """Clear all cached data (both in-memory and MongoDB)"""
         self._historical_cache.clear()
         self._quote_cache.clear()
         self._account_cache.clear()
@@ -409,6 +411,15 @@ class DataCache:
         self._news_cache.clear()
         self._scanner_cache.clear()
         self._pending_refresh.clear()
+        
+        # Clear MongoDB cache
+        try:
+            db = _get_db()
+            collection = db[self.CACHE_COLLECTION]
+            collection.delete_many({})
+            logger.info("Cleared MongoDB cache")
+        except Exception as e:
+            logger.warning(f"Could not clear MongoDB cache: {e}")
 
 
 # Singleton instance
