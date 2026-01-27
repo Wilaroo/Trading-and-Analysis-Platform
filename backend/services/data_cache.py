@@ -278,6 +278,7 @@ class DataCache:
             "last_updated": datetime.now(timezone.utc).isoformat(),
             "is_cached": False
         }
+        self._persist_scanner_cache()
     
     def get_cached_scanner_results(self, scan_type: str) -> Optional[Dict[str, Any]]:
         """Get cached scanner results if available"""
@@ -299,6 +300,7 @@ class DataCache:
             "last_updated": datetime.now(timezone.utc).isoformat(),
             "is_cached": False
         }
+        self._persist_scanner_cache()
     
     def get_cached_comprehensive_scan(self) -> Optional[Dict[str, Any]]:
         """Get cached comprehensive scan results"""
