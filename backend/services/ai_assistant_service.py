@@ -346,9 +346,9 @@ Format your responses clearly with sections when appropriate. Use specific numbe
         # Try Emergent first
         if self.provider == LLMProvider.EMERGENT and LLMProvider.EMERGENT in self.llm_clients:
             try:
-                from emergentintegrations.llm.chat import Chat
+                from emergentintegrations.llm.chat import LlmChat
                 
-                chat = Chat(
+                chat = LlmChat(
                     api_key=self.llm_clients[LLMProvider.EMERGENT]["key"],
                     model="gpt-4o"
                 )
