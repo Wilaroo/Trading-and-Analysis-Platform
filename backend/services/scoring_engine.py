@@ -886,6 +886,28 @@ class UniversalScoringEngine:
             catalyst["score"]
         )
         
+        # Get knowledge base integration if available
+        kb_strategies = []
+        kb_trade_bias = None
+        kb_confidence = None
+        try:
+            from services.knowledge_integration import get_knowledge_integration
+            ki = get_knowledge_integration()
+            kb_recommendations = ki.get_strategy_recommendations(stock_data, market_data)
+            kb_strategies = kb_recommendations.get("recommendations", [])[:5]
+            kb_trade_bias = kb_recommendations.get("trade_bias")
+            kb_confidence = kb_recommendations.get("confidence")
+            
+            # Boost composite score if knowledge base strongly agrees with direction
+            if kb_strategies and kb_confidence:
+                if (kb_trade_bias == "LONG" and "LONG" in direction.value) or \
+                   (kb_trade_bias == "SHORT" and "SHORT" in direction.value):
+                    # Knowledge base agrees - boost confidence
+                    kb_boost = min(5, kb_confidence / 20)  # Up to 5 point boost
+                    composite = min(100, composite + kb_boost)
+        except Exception as e:
+            logger.warning(f"Could not get knowledge base recommendations: {e}")
+        
         return {
             "symbol": stock_data.get("symbol", "UNKNOWN"),
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -909,6 +931,11 @@ class UniversalScoringEngine:
                 "vwap_position": technical["components"]["vwap"]["position"],
                 "float_ok": risk["components"]["float"]["meets_requirement"],
                 "squeeze_watch": risk["components"]["short_interest"]["squeeze_potential"]
+            },
+            "knowledge_base": {
+                "applicable_strategies": kb_strategies,
+                "kb_trade_bias": kb_trade_bias,
+                "kb_confidence": kb_confidence
             }
         }
     
