@@ -103,6 +103,8 @@ news_service = init_news_service(ib_service)
 scheduler_service = init_scheduler_service()
 scheduler_service.start()
 init_scheduler_router(scheduler_service, assistant_service, newsletter_service)
+alpaca_service = init_alpaca_service()
+init_alpaca_router(alpaca_service)
 
 # Include routers
 app.include_router(notifications_router)
@@ -118,6 +120,7 @@ app.include_router(newsletter_router)
 app.include_router(knowledge_router)
 app.include_router(learning_router)
 app.include_router(quality_router)
+app.include_router(alpaca_router)
 app.include_router(assistant_router)
 app.include_router(scheduler_router)
 
