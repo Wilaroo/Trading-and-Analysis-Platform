@@ -369,8 +369,72 @@ class UniversalScoringEngine:
         }
         total_score += rt_score
         
-        # Calculate VST Rating (composite)
-        normalized_score = round(total_score, 1)
+        # 5. Earnings Quality Score (bonus 0-20 points) - Quantpedia 4-factor model
+        quality_data = data.get("quality_metrics", {})
+        quality_bonus = 0
+        quality_details = {}
+        
+        if quality_data:
+            # ROE component (0-5 bonus)
+            roe = quality_data.get("roe")
+            if roe is not None:
+                if roe > 0.20:
+                    quality_bonus += 5
+                elif roe > 0.15:
+                    quality_bonus += 4
+                elif roe > 0.10:
+                    quality_bonus += 3
+                elif roe > 0.05:
+                    quality_bonus += 2
+                quality_details["roe"] = roe
+            
+            # Low Debt (D/A) component (0-5 bonus)
+            da = quality_data.get("da")
+            if da is not None:
+                if da < 0.30:
+                    quality_bonus += 5
+                elif da < 0.40:
+                    quality_bonus += 4
+                elif da < 0.50:
+                    quality_bonus += 3
+                elif da < 0.60:
+                    quality_bonus += 2
+                quality_details["debt_to_assets"] = da
+            
+            # Cash Flow to Assets (0-5 bonus)
+            cfa = quality_data.get("cfa")
+            if cfa is not None:
+                if cfa > 0.15:
+                    quality_bonus += 5
+                elif cfa > 0.10:
+                    quality_bonus += 4
+                elif cfa > 0.05:
+                    quality_bonus += 3
+                elif cfa > 0:
+                    quality_bonus += 2
+                quality_details["cf_to_assets"] = cfa
+            
+            # Low Accruals (0-5 bonus) - Lower is better
+            accruals = quality_data.get("accruals")
+            if accruals is not None:
+                if accruals < -0.05:
+                    quality_bonus += 5
+                elif accruals < 0:
+                    quality_bonus += 4
+                elif accruals < 0.05:
+                    quality_bonus += 3
+                elif accruals < 0.10:
+                    quality_bonus += 2
+                quality_details["accruals"] = accruals
+        
+        scores["earnings_quality"] = {
+            "bonus": quality_bonus,
+            "details": quality_details,
+            "has_data": bool(quality_data)
+        }
+        
+        # Calculate VST Rating (composite) - now includes quality bonus
+        normalized_score = round(min(100, total_score + quality_bonus), 1)
         
         if normalized_score >= 85:
             vst_rating = "A+"
@@ -389,6 +453,7 @@ class UniversalScoringEngine:
             "category": "fundamental",
             "score": normalized_score,
             "vst_rating": vst_rating,
+            "quality_bonus": quality_bonus,
             "components": scores
         }
     
