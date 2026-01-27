@@ -38,6 +38,7 @@ from routers.scoring import router as scoring_router
 from routers.features import router as features_router
 from routers.newsletter import router as newsletter_router
 from routers.knowledge import router as knowledge_router
+from routers.learning import router as learning_router
 from services.ib_service import get_ib_service
 from services.newsletter_service import init_newsletter_service
 from services.news_service import init_news_service
