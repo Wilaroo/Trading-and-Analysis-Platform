@@ -814,35 +814,35 @@ async def get_comprehensive_analysis(symbol: str):
             close = bars[-1].get("close", base_price)
             analysis["technicals"] = {
                 "ema_9": features.get("ema_9", close * 0.995),
-                    "ema_20": features.get("ema_20", close * 0.99),
-                    "sma_50": features.get("sma_50", close * 0.97),
-                    "sma_200": features.get("sma_200", close * 0.92),
-                    "rsi_14": features.get("rsi_14", 50 + random.uniform(-20, 20)),
-                    "macd": features.get("macd", random.uniform(-2, 2)),
-                    "macd_signal": features.get("macd_signal", random.uniform(-1.5, 1.5)),
-                    "macd_histogram": features.get("macd_hist", random.uniform(-0.5, 0.5)),
-                    "atr_14": features.get("atr_14", close * 0.02),
-                    "rvol": features.get("rvol_20", 1 + random.random()),
-                    "vwap": features.get("vwap", close * (1 + random.uniform(-0.02, 0.02))),
-                    "vwap_distance_pct": features.get("vwap_distance_pct", random.uniform(-2, 2)),
-                    "volume_trend": "Above Avg" if features.get("rvol_20", 1) > 1.5 else "Normal",
-                    "trend": "Bullish" if close > features.get("ema_20", close) else "Bearish"
-                }
-                
-                highs = [b.get("high", 0) for b in bars[-50:]]
-                lows = [b.get("low", 0) for b in bars[-50:]]
-                
-                analysis["support_resistance"] = {
-                    "resistance_1": round(max(highs), 2) if highs else round(close * 1.03, 2),
-                    "resistance_2": round(sorted(highs, reverse=True)[5], 2) if len(highs) > 5 else round(close * 1.05, 2),
-                    "support_1": round(min(lows), 2) if lows else round(close * 0.97, 2),
-                    "support_2": round(sorted(lows)[5], 2) if len(lows) > 5 else round(close * 0.95, 2),
-                    "pivot": round((max(highs) + min(lows) + close) / 3, 2) if highs and lows else round(close, 2),
-                    "day_high": round(bars[-1].get("high", close * 1.01), 2),
-                    "day_low": round(bars[-1].get("low", close * 0.99), 2)
-                }
+                "ema_20": features.get("ema_20", close * 0.99),
+                "sma_50": features.get("sma_50", close * 0.97),
+                "sma_200": features.get("sma_200", close * 0.92),
+                "rsi_14": features.get("rsi_14", 50 + random.uniform(-20, 20)),
+                "macd": features.get("macd", random.uniform(-2, 2)),
+                "macd_signal": features.get("macd_signal", random.uniform(-1.5, 1.5)),
+                "macd_histogram": features.get("macd_hist", random.uniform(-0.5, 0.5)),
+                "atr_14": features.get("atr_14", close * 0.02),
+                "rvol": features.get("rvol_20", 1 + random.random()),
+                "vwap": features.get("vwap", close * (1 + random.uniform(-0.02, 0.02))),
+                "vwap_distance_pct": features.get("vwap_distance_pct", random.uniform(-2, 2)),
+                "volume_trend": "Above Avg" if features.get("rvol_20", 1) > 1.5 else "Normal",
+                "trend": "Bullish" if close > features.get("ema_20", close) else "Bearish"
+            }
+            
+            highs = [b.get("high", 0) for b in bars[-50:]]
+            lows = [b.get("low", 0) for b in bars[-50:]]
+            
+            analysis["support_resistance"] = {
+                "resistance_1": round(max(highs), 2) if highs else round(close * 1.03, 2),
+                "resistance_2": round(sorted(highs, reverse=True)[5], 2) if len(highs) > 5 else round(close * 1.05, 2),
+                "support_1": round(min(lows), 2) if lows else round(close * 0.97, 2),
+                "support_2": round(sorted(lows)[5], 2) if len(lows) > 5 else round(close * 0.95, 2),
+                "pivot": round((max(highs) + min(lows) + close) / 3, 2) if highs and lows else round(close, 2),
+                "day_high": round(bars[-1].get("high", close * 1.01), 2),
+                "day_low": round(bars[-1].get("low", close * 0.99), 2)
+            }
         except Exception as e:
-            print(f"Error getting historical data: {e}")
+            print(f"Error processing historical data: {e}")
         
         # Get news
         try:
