@@ -1762,7 +1762,7 @@ async def get_breakout_alerts():
                     "breakout_score": round(min(100, breakout_score)),
                     "stop_loss": round(stop_loss, 2),
                     "target": round(target, 2),
-                    "risk_reward": round(abs(target - current_price) / abs(current_price - stop_loss), 2) if abs(current_price - stop_loss) > 0 else 0,
+                    "risk_reward": risk_reward_ratio,
                     "resistance_1": round(resistance_1, 2),
                     "resistance_2": round(resistance_2, 2),
                     "support_1": round(support_1, 2),
