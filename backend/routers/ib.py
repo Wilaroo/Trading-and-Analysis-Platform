@@ -2148,7 +2148,7 @@ def determine_alert_type(current_price: float, resistance: float, support: float
     
     # Pullback: price near support in uptrend
     trend = features.get("trend", "NEUTRAL")
-    if trend == "BULLISH" and abs(current_price - support) / current_price < 0.02:
+    if trend == "BULLISH" and current_price > 0 and abs(current_price - support) / current_price < 0.02:
         return AlertType.PULLBACK
     
     # Momentum: high RVOL with trend
