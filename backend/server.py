@@ -40,6 +40,7 @@ from routers.newsletter import router as newsletter_router
 from routers.knowledge import router as knowledge_router
 from routers.learning import router as learning_router
 from routers.quality import router as quality_router, init_quality_router
+from routers.assistant import router as assistant_router, init_assistant_router
 from services.ib_service import get_ib_service
 from services.newsletter_service import init_newsletter_service
 from services.news_service import init_news_service
@@ -47,6 +48,7 @@ from services.strategy_service import get_strategy_service
 from services.scoring_engine import get_scoring_engine
 from services.feature_engine import get_feature_engine
 from services.quality_service import init_quality_service
+from services.ai_assistant_service import init_assistant_service
 from data.strategies_data import ALL_STRATEGIES_DATA
 
 app = FastAPI(title="TradeCommand API")
