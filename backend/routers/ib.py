@@ -1287,9 +1287,17 @@ async def check_price_alerts():
     # Get unique symbols
     symbols = list(set(a["symbol"] for a in _price_alerts.values()))
     
-    # Get current prices
+    # Get current prices - use Alpaca first
     current_prices = {}
-    if _ib_service:
+    if _alpaca_service:
+        try:
+            alpaca_quotes = await _alpaca_service.get_quotes_batch(symbols)
+            current_prices = {s: q.get("price", 0) for s, q in alpaca_quotes.items()}
+        except:
+            pass
+    
+    # Fallback to IB if needed
+    if not current_prices and _ib_service:
         try:
             status = _ib_service.get_connection_status()
             if status.get("connected"):
