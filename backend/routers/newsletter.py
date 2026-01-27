@@ -93,9 +93,9 @@ async def auto_generate_market_intelligence():
                 status = ib_service.get_connection_status()
                 if status.get("connected"):
                     # Get multiple scanner types for comprehensive view
-                    gainers = await ib_service.run_scanner("TOP_PERC_GAIN", limit=10)
-                    losers = await ib_service.run_scanner("TOP_PERC_LOSE", limit=10)
-                    active = await ib_service.run_scanner("MOST_ACTIVE", limit=10)
+                    gainers = await ib_service.run_scanner("TOP_PERC_GAIN", max_results=10)
+                    losers = await ib_service.run_scanner("TOP_PERC_LOSE", max_results=10)
+                    active = await ib_service.run_scanner("MOST_ACTIVE", max_results=10)
                     
                     # Combine all movers
                     all_symbols = set()
