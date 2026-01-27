@@ -963,3 +963,57 @@ curl /api/quality/hedge/bear-market
 - `/app/backend/server.py` - Added assistant router and service
 - `/app/frontend/src/pages/CommandCenterPage.js` - Added AI Assistant button and modal
 
+
+
+
+### Jan 27, 2026 - Quality Integration & Pre-Market Scheduler (Session Update)
+**Implemented:**
+1. **Quality Badges on Trade Opportunity Cards**
+   - Each opportunity card now shows quality grade badge (A+, A, B, C, etc.)
+   - Color-coded: Green (A+/A), Cyan (B+/B), Yellow (C+/C), Red (D/F)
+   - Scanner auto-fetches quality scores using `/api/quality/enhance-opportunities`
+
+2. **Ask AI Button on Individual Stocks**
+   - Every opportunity card has "AI" button that opens AI Assistant
+   - Pre-fills prompt with stock-specific analysis request
+   - Ticker Detail Modal header also has Ask AI button
+
+3. **Pre-Market Briefing Auto-Generation (Scheduled)**
+   - New scheduler service (`/app/backend/services/scheduler_service.py`)
+   - Schedule pre-market briefing generation at 6:30 AM ET daily
+   - Toggle button in Market Intelligence section ("Schedule" / "6:30 AM")
+   - API endpoints: `POST /api/scheduler/premarket/schedule`, `DELETE /api/scheduler/premarket/stop`
+
+4. **Quality Tab in Ticker Detail Modal**
+   - New "Quality" tab showing 4-factor Earnings Quality scores
+   - Visual progress bars for each factor (Accruals, ROE, CF/A, D/A)
+   - Shows quality grade, percentile rank, signal (LONG/SHORT/NEUTRAL)
+   - Raw metrics display (actual values)
+   - Info banner explaining the quality factor methodology
+   - Header shows Q:grade badge (e.g., Q:A)
+
+5. **Cleanup**
+   - Deleted unused `/app/frontend/src/components/QualityPanel.jsx`
+
+**Files Created:**
+- `/app/backend/services/scheduler_service.py` - Scheduler service for automated tasks
+- `/app/backend/routers/scheduler.py` - Scheduler API endpoints
+
+**Files Modified:**
+- `/app/backend/server.py` - Added scheduler service and router
+- `/app/frontend/src/pages/CommandCenterPage.js`:
+  - Trade Opportunity cards: quality badges + AI button
+  - TickerDetailModal: Quality tab, Ask AI button in header
+  - Market Intelligence: Schedule toggle button
+  - Scanner: auto-enhances with quality scores
+
+**API Endpoints:**
+- `GET /api/scheduler/status` - Scheduler health status
+- `POST /api/scheduler/premarket/schedule` - Enable auto pre-market generation
+- `DELETE /api/scheduler/premarket/stop` - Disable auto pre-market generation
+- `POST /api/scheduler/premarket/generate-now` - Manual trigger
+- `GET /api/scheduler/premarket/latest` - Get cached briefing
+
+**Testing:**
+- 23/23 backend tests passed (iteration_8.json)
+- All frontend features verified working
