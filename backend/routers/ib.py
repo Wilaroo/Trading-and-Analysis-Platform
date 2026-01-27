@@ -598,10 +598,7 @@ async def run_enhanced_scanner(request: EnhancedScannerRequest):
 
 @router.post("/quotes/batch")
 async def get_batch_quotes(symbols: List[str]):
-    """Get real-time quotes for multiple symbols"""
-    if not _ib_service:
-        raise HTTPException(status_code=500, detail="IB service not initialized")
-    
+    """Get real-time quotes for multiple symbols - uses Alpaca with IB fallback"""
     if not symbols:
         raise HTTPException(status_code=400, detail="No symbols provided")
     
@@ -609,7 +606,29 @@ async def get_batch_quotes(symbols: List[str]):
         raise HTTPException(status_code=400, detail="Maximum 50 symbols per request")
     
     try:
-        quotes = await _ib_service.get_quotes_batch(symbols)
+        quotes = []
+        
+        # Try Alpaca first (free, no subscription needed)
+        if _alpaca_service:
+            try:
+                alpaca_quotes = await _alpaca_service.get_quotes_batch(symbols)
+                if alpaca_quotes:
+                    quotes = list(alpaca_quotes.values())
+            except Exception as e:
+                print(f"Alpaca batch quotes error: {e}")
+        
+        # If Alpaca didn't return all quotes, try IB for remaining
+        if len(quotes) < len(symbols) and _ib_service:
+            got_symbols = {q.get("symbol") for q in quotes}
+            missing = [s for s in symbols if s.upper() not in got_symbols]
+            
+            if missing:
+                try:
+                    ib_quotes = await _ib_service.get_quotes_batch(missing)
+                    quotes.extend(ib_quotes)
+                except Exception as e:
+                    print(f"IB batch quotes error (fallback): {e}")
+        
         return {"quotes": quotes, "count": len(quotes)}
     except ConnectionError as e:
         raise HTTPException(status_code=503, detail=str(e))
