@@ -408,7 +408,7 @@ class QualityService:
     
     async def _persist_metrics(self, metrics: QualityMetrics):
         """Persist metrics to MongoDB"""
-        if not self.db:
+        if self.db is None:
             return
         
         try:
