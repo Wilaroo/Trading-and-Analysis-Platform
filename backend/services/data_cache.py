@@ -278,6 +278,7 @@ class DataCache:
             "positions_count": len(self._positions_cache) if self._positions_cache else 0,
             "short_interest_entries": len(self._short_interest_cache),
             "news_entries": len(self._news_cache),
+            "scanner_entries": len(self._scanner_cache),
             "last_connected": self._last_connected.isoformat() if self._last_connected else None,
             "pending_refresh_count": len(self._pending_refresh)
         }
@@ -291,6 +292,7 @@ class DataCache:
         self._positions_timestamp = None
         self._short_interest_cache.clear()
         self._news_cache.clear()
+        self._scanner_cache.clear()
         self._pending_refresh.clear()
 
 
