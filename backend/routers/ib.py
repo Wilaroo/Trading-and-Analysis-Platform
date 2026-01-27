@@ -1999,6 +1999,18 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
         _comprehensive_alerts = categorized
         _comprehensive_last_scan = datetime.now(timezone.utc).isoformat()
         
+        # Persist to DataCache for offline access
+        from services.data_cache import get_data_cache
+        data_cache = get_data_cache()
+        summary = {
+            "scalp": len(categorized["scalp"]),
+            "intraday": len(categorized["intraday"]),
+            "swing": len(categorized["swing"]),
+            "position": len(categorized["position"]),
+            "total": sum(len(v) for v in categorized.values())
+        }
+        data_cache.cache_comprehensive_scan(categorized, summary)
+        
         # Also add top alerts to the enhanced alert manager
         for timeframe, alerts in categorized.items():
             for alert in alerts[:5]:  # Top 5 from each category
