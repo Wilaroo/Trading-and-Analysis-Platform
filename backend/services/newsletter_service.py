@@ -23,10 +23,54 @@ class NewsletterService:
     def __init__(self, ib_service=None):
         self.ib_service = ib_service
         self.api_key = EMERGENT_LLM_KEY
+        self._stock_service = None
+        self._alpaca_service = None
         
     def set_ib_service(self, ib_service):
         """Set the IB service for market data"""
         self.ib_service = ib_service
+    
+    def set_stock_service(self, stock_service):
+        """Set the stock service for Alpaca data"""
+        self._stock_service = stock_service
+    
+    def set_alpaca_service(self, alpaca_service):
+        """Set the Alpaca service directly"""
+        self._alpaca_service = alpaca_service
+    
+    async def _get_quote(self, symbol: str) -> Optional[Dict]:
+        """Get quote with Alpaca priority"""
+        # Try stock_service first (has Alpaca)
+        if self._stock_service:
+            try:
+                quote = await self._stock_service.get_quote(symbol)
+                if quote and quote.get("price", 0) > 0:
+                    return quote
+            except:
+                pass
+        
+        # Fallback to IB
+        if self.ib_service:
+            return await self.ib_service.get_quote(symbol)
+        
+        return None
+    
+    async def _get_quotes_batch(self, symbols: List[str]) -> List[Dict]:
+        """Get batch quotes with Alpaca priority"""
+        # Try Alpaca first
+        if self._alpaca_service:
+            try:
+                alpaca_quotes = await self._alpaca_service.get_quotes_batch(symbols)
+                if alpaca_quotes:
+                    return list(alpaca_quotes.values())
+            except:
+                pass
+        
+        # Fallback to IB
+        if self.ib_service:
+            return await self.ib_service.get_quotes_batch(symbols)
+        
+        return []
     
     async def generate_premarket_newsletter(
         self,
