@@ -2012,6 +2012,10 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                 if current_price <= 0:
                     continue
                 
+                prev_close = quote.get("prev_close", current_price)
+                if prev_close <= 0:
+                    prev_close = current_price
+                
                 # Get historical data (5 days hourly for swing, 1 day 5-min for intraday)
                 hist_data_daily = await _ib_service.get_historical_data(symbol, "5 D", "1 hour")
                 hist_data_intraday = await _ib_service.get_historical_data(symbol, "1 D", "5 mins")
