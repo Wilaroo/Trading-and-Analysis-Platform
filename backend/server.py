@@ -89,6 +89,7 @@ init_catalyst_service(catalyst_scoring_service, stock_service)
 init_trading_rules(trading_rules_engine)
 init_ib_service(ib_service)
 init_strategy_service(strategy_service)
+init_quality_router(quality_service, ib_service)
 newsletter_service = init_newsletter_service(ib_service)
 news_service = init_news_service(ib_service)
 
