@@ -26,6 +26,51 @@ def init_ib_service(service: IBService):
     _stock_service = get_stock_service()
 
 
+def _convert_ib_to_alpaca_timeframe(bar_size: str) -> str:
+    """Convert IB bar size to Alpaca timeframe"""
+    bar_size_lower = bar_size.lower().strip()
+    mapping = {
+        "1 min": "1Min",
+        "5 mins": "5Min",
+        "15 mins": "15Min",
+        "1 hour": "1Hour",
+        "1 day": "1Day",
+        "1 secs": "1Min",  # Fallback
+        "5 secs": "1Min",  # Fallback
+        "30 mins": "15Min",  # Approximate
+        "2 hours": "1Hour",  # Approximate
+        "4 hours": "1Hour",  # Approximate
+    }
+    return mapping.get(bar_size_lower, "1Day")
+
+
+def _convert_ib_duration_to_limit(duration: str, bar_size: str) -> int:
+    """Convert IB duration to number of bars for Alpaca"""
+    duration_lower = duration.lower().strip()
+    
+    # Parse duration
+    if "d" in duration_lower:
+        days = int(duration_lower.replace("d", "").strip())
+    elif "w" in duration_lower:
+        days = int(duration_lower.replace("w", "").strip()) * 7
+    elif "m" in duration_lower and "min" not in duration_lower:
+        days = int(duration_lower.replace("m", "").strip()) * 30
+    elif "y" in duration_lower:
+        days = int(duration_lower.replace("y", "").strip()) * 365
+    else:
+        days = 1
+    
+    # Calculate bars based on timeframe
+    bar_size_lower = bar_size.lower().strip()
+    if "min" in bar_size_lower:
+        mins = int(bar_size_lower.split()[0]) if bar_size_lower.split()[0].isdigit() else 5
+        return min(1000, days * 390 // mins)  # 390 trading mins per day
+    elif "hour" in bar_size_lower:
+        return min(1000, days * 7)  # ~7 trading hours per day
+    else:
+        return min(1000, days)
+
+
 # ===================== Pydantic Models =====================
 
 class OrderRequest(BaseModel):
