@@ -1254,6 +1254,23 @@ const CommandCenterPage = () => {
     }
   };
 
+  // Open AI Assistant with optional prompt
+  const openAssistantWithPrompt = useCallback((prompt = null) => {
+    setAssistantPrompt(prompt);
+    setShowAssistant(true);
+  }, []);
+
+  // Ask AI about a specific stock
+  const askAIAboutStock = useCallback((symbol, action = 'analyze') => {
+    const prompts = {
+      analyze: `Analyze ${symbol} for me. What's the quality score, any matching strategies, and should I consider trading it?`,
+      buy: `Should I buy ${symbol}? Check my rules and strategies.`,
+      sell: `Should I sell ${symbol}? What does the data say?`,
+      quality: `What's the earnings quality score on ${symbol}?`
+    };
+    openAssistantWithPrompt(prompts[action] || prompts.analyze);
+  }, [openAssistantWithPrompt]);
+
   // Fetch watchlist
   const fetchWatchlist = async (connected) => {
     try {
