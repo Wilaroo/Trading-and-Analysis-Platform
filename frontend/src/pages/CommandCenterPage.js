@@ -808,6 +808,167 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                   </div>
                 )}
 
+                {/* QUALITY TAB - Earnings Quality Factor */}
+                {activeTab === 'quality' && (
+                  <div className="space-y-4">
+                    {quality.grade ? (
+                      <>
+                        {/* Quality Grade Header */}
+                        <div className={`p-4 rounded-lg border ${
+                          quality.is_high_quality ? 'border-green-500/30 bg-green-500/5' :
+                          quality.is_low_quality ? 'border-red-500/30 bg-red-500/5' :
+                          'border-zinc-700 bg-zinc-900/50'
+                        }`}>
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-3">
+                              <span className={`text-3xl font-bold px-4 py-2 rounded-lg ${
+                                quality.grade?.startsWith('A') ? 'bg-green-500 text-black' :
+                                quality.grade?.startsWith('B') ? 'bg-cyan-500 text-black' :
+                                quality.grade?.startsWith('C') ? 'bg-yellow-500 text-black' :
+                                'bg-red-500 text-white'
+                              }`}>
+                                {quality.grade}
+                              </span>
+                              <div>
+                                <p className="text-white font-semibold">Earnings Quality Grade</p>
+                                <p className="text-xs text-zinc-400">
+                                  {quality.is_high_quality ? 'High Quality Stock - Top 30%' :
+                                   quality.is_low_quality ? 'Low Quality Stock - Bottom 30%' :
+                                   'Average Quality'}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-2xl font-mono font-bold text-white">{quality.percentile_rank?.toFixed(0)}</p>
+                              <p className="text-xs text-zinc-500">Percentile</p>
+                            </div>
+                          </div>
+                          
+                          {/* Quality Signal */}
+                          <div className="flex items-center gap-2 mt-3">
+                            <span className="text-xs text-zinc-500">Signal:</span>
+                            <span className={`text-sm font-bold px-2 py-0.5 rounded ${
+                              quality.quality_signal === 'LONG' ? 'bg-green-500/20 text-green-400' :
+                              quality.quality_signal === 'SHORT' ? 'bg-red-500/20 text-red-400' :
+                              'bg-zinc-500/20 text-zinc-400'
+                            }`}>
+                              {quality.quality_signal}
+                            </span>
+                            <span className="text-xs text-zinc-500">
+                              Strength: {quality.signal_strength?.toFixed(0)}%
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* 4 Factor Scores */}
+                        <div className="grid grid-cols-2 gap-3">
+                          {[
+                            { 
+                              label: 'Accruals', 
+                              score: quality.component_scores?.accruals,
+                              description: 'Cash vs Reported Earnings',
+                              tooltip: 'Lower accruals = higher quality. Measures earnings backed by real cash flow.',
+                              good: 'Lower is better'
+                            },
+                            { 
+                              label: 'ROE', 
+                              score: quality.component_scores?.roe,
+                              description: 'Return on Equity',
+                              tooltip: 'Higher ROE = more efficient use of shareholder capital.',
+                              good: 'Higher is better'
+                            },
+                            { 
+                              label: 'CF/A', 
+                              score: quality.component_scores?.cfa,
+                              description: 'Cash Flow to Assets',
+                              tooltip: 'Higher CF/A = better asset productivity and cash generation.',
+                              good: 'Higher is better'
+                            },
+                            { 
+                              label: 'D/A', 
+                              score: quality.component_scores?.da,
+                              description: 'Debt to Assets',
+                              tooltip: 'Lower D/A = less leverage risk and stronger balance sheet.',
+                              good: 'Lower is better'
+                            },
+                          ].map((factor, idx) => (
+                            <div key={idx} className="bg-zinc-900 rounded-lg p-3" title={factor.tooltip}>
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-sm font-medium text-white">{factor.label}</span>
+                                <span className={`text-lg font-bold font-mono ${
+                                  factor.score >= 70 ? 'text-green-400' :
+                                  factor.score >= 40 ? 'text-yellow-400' :
+                                  'text-red-400'
+                                }`}>{factor.score?.toFixed(0) || '--'}</span>
+                              </div>
+                              <p className="text-[10px] text-zinc-500">{factor.description}</p>
+                              <div className="mt-2 h-1.5 bg-zinc-700 rounded-full overflow-hidden">
+                                <div 
+                                  className={`h-full rounded-full ${
+                                    factor.score >= 70 ? 'bg-green-500' :
+                                    factor.score >= 40 ? 'bg-yellow-500' :
+                                    'bg-red-500'
+                                  }`}
+                                  style={{ width: `${factor.score || 0}%` }}
+                                />
+                              </div>
+                              <p className="text-[9px] text-zinc-600 mt-1">{factor.good}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Raw Metrics (if available) */}
+                        {qualityMetrics?.metrics && (
+                          <div className="bg-zinc-900/50 rounded-lg p-3">
+                            <span className="text-[10px] text-zinc-500 uppercase block mb-2">Raw Metrics</span>
+                            <div className="grid grid-cols-4 gap-2 text-center">
+                              <div>
+                                <p className="text-xs text-zinc-400">Accruals</p>
+                                <p className="text-sm font-mono text-white">
+                                  {qualityMetrics.metrics.accruals !== null ? (qualityMetrics.metrics.accruals * 100).toFixed(1) + '%' : '--'}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-zinc-400">ROE</p>
+                                <p className="text-sm font-mono text-white">
+                                  {qualityMetrics.metrics.roe !== null ? (qualityMetrics.metrics.roe * 100).toFixed(1) + '%' : '--'}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-zinc-400">CF/A</p>
+                                <p className="text-sm font-mono text-white">
+                                  {qualityMetrics.metrics.cfa !== null ? (qualityMetrics.metrics.cfa * 100).toFixed(1) + '%' : '--'}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-zinc-400">D/A</p>
+                                <p className="text-sm font-mono text-white">
+                                  {qualityMetrics.metrics.da !== null ? (qualityMetrics.metrics.da * 100).toFixed(1) + '%' : '--'}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Info Banner */}
+                        <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-3">
+                          <p className="text-xs text-cyan-300">
+                            <strong>Earnings Quality Factor</strong> ranks stocks based on 4 fundamental metrics. 
+                            High-quality stocks (top 30%) tend to outperform in bear markets. 
+                            Low-quality stocks (bottom 30%) often underperform or are short candidates.
+                          </p>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-center py-12 text-zinc-500">
+                        <Activity className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                        <p>Quality data unavailable</p>
+                        <p className="text-xs mt-1">Quality scoring requires fundamental data</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* STRATEGIES TAB */}
                 {activeTab === 'strategies' && (
                   <div className="space-y-3">
