@@ -117,22 +117,24 @@ class NewsletterService:
             "watchlist": custom_watchlist or []
         }
         
-        # Try to get additional data from IB if connected
-        if self.ib_service:
-            try:
-                status = self.ib_service.get_connection_status()
-                if status.get("connected"):
-                    # Get index quotes
-                    indices = ["SPY", "QQQ", "DIA", "IWM"]
-                    index_quotes = await self.ib_service.get_quotes_batch(indices)
-                    context["indices"] = {q["symbol"]: q for q in index_quotes if q.get("price")}
-                    
-                    # Get VIX
-                    vix_quote = await self.ib_service.get_quote("VIX")
-                    if vix_quote:
-                        context["vix"] = vix_quote
-            except Exception as e:
-                logger.warning(f"Could not fetch IB data for newsletter: {e}")
+        # Get index quotes using Alpaca priority
+        try:
+            indices = ["SPY", "QQQ", "DIA", "IWM"]
+            index_quotes = await self._get_quotes_batch(indices)
+            context["indices"] = {q["symbol"]: q for q in index_quotes if q.get("price")}
+            
+            # Get VIX - requires IB since it's an index (Alpaca doesn't have indices)
+            if self.ib_service:
+                try:
+                    status = self.ib_service.get_connection_status()
+                    if status.get("connected"):
+                        vix_quote = await self.ib_service.get_quote("VIX")
+                        if vix_quote:
+                            context["vix"] = vix_quote
+                except:
+                    pass
+        except Exception as e:
+            logger.warning(f"Could not fetch market data for newsletter: {e}")
         
         # Get strategy recommendations from knowledge base
         try:
