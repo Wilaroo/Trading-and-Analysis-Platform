@@ -330,10 +330,11 @@ def generate_simulated_quote(symbol: str) -> Dict:
 async def fetch_fundamentals(symbol: str) -> Dict:
     """Fetch fundamental data from Yahoo Finance"""
     symbol = symbol.upper()
+    yf_symbol = _convert_to_yf_symbol(symbol)
     
     try:
         import yfinance as yf
-        ticker = yf.Ticker(symbol)
+        ticker = yf.Ticker(yf_symbol)
         info = ticker.info
         
         return {
