@@ -830,3 +830,54 @@ The application is now consolidated into a single **Command Center** that serves
 - Frontend Knowledge button and modal working
 - All API endpoints verified working
 
+
+
+### Jan 27, 2026 - Earnings Quality Factor Integration (Quantpedia Strategy)
+**Implemented:**
+1. **Quality Service** (`/app/backend/services/quality_service.py`)
+   - 4-factor quality scoring: Accruals, ROE, CF/A, D/A
+   - Data sources: Known data (fallback), Yahoo Finance, FMP API, IB
+   - Composite scoring (0-400 scale) with percentile rankings
+   - Quality classifications: High/Low quality, Letter grades (A+ to F)
+   - Trading signals: LONG for high quality, SHORT for low quality
+   - Bear market hedge portfolio generation
+
+2. **Quality API Endpoints** (`/app/backend/routers/quality.py`)
+   - `GET /api/quality/metrics/{symbol}` - Raw quality metrics
+   - `GET /api/quality/score/{symbol}` - Composite quality score
+   - `POST /api/quality/scan` - Scan symbols for quality stocks
+   - `GET /api/quality/scanner/high-quality` - Find high quality stocks
+   - `GET /api/quality/hedge/bear-market` - Bear market hedge portfolio
+   - `GET /api/quality/leaderboard` - Ranked list by quality
+
+3. **Scoring Engine Enhancement**
+   - Added "Earnings Quality" component to fundamental scoring
+   - Up to 20 bonus points for high-quality stocks
+   - Scores ROE, D/A, CF/A, and Accruals individually
+
+4. **Knowledge Base Updated**
+   - 9 new entries for Earnings Quality Factor strategy
+   - Includes trading rules, indicators, and bear market hedge strategy
+   - Total knowledge base: 108 entries (82 strategies, 13 rules, 8 indicators)
+
+**Files Created:**
+- `/app/backend/services/quality_service.py`
+- `/app/backend/routers/quality.py`
+
+**Files Modified:**
+- `/app/backend/server.py` - Added quality router and service
+- `/app/backend/services/scoring_engine.py` - Added earnings quality bonus scoring
+- `/app/backend/requirements.txt` - Added yfinance dependency
+
+**API Usage Examples:**
+```bash
+# Get quality score for AAPL
+curl /api/quality/score/AAPL
+
+# Get quality leaderboard
+curl /api/quality/leaderboard?symbols=AAPL,MSFT,NVDA,BA
+
+# Get bear market hedge portfolio
+curl /api/quality/hedge/bear-market
+```
+
