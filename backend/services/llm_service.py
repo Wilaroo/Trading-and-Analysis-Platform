@@ -166,7 +166,7 @@ class EmergentProvider(LLMProvider):
     
     def __init__(self):
         self.api_key = os.environ.get("EMERGENT_LLM_KEY")
-        self.model = "gpt-4o"  # Emergent uses OpenAI under the hood
+        self.model = "gpt-4o"
     
     @property
     def name(self) -> str:
@@ -178,15 +178,18 @@ class EmergentProvider(LLMProvider):
     def generate(self, prompt: str, system_prompt: str = None, max_tokens: int = 2000, temperature: float = 0.7) -> str:
         try:
             from emergentintegrations.llm.chat import LlmChat
+            import uuid
             
-            chat = LlmChat(api_key=self.api_key).with_model("gpt-4o")
+            session_id = str(uuid.uuid4())
+            sys_msg = system_prompt or "You are a helpful trading assistant."
             
-            # Build prompt with system context
-            full_prompt = prompt
-            if system_prompt:
-                full_prompt = f"{system_prompt}\n\n{prompt}"
+            chat = LlmChat(
+                api_key=self.api_key,
+                session_id=session_id,
+                system_message=sys_msg
+            ).with_model("gpt-4o")
             
-            response = chat.send_message(full_prompt)
+            response = chat.send_message(prompt)
             return response
         except Exception as e:
             logger.error(f"Emergent generation error: {e}")
@@ -194,7 +197,7 @@ class EmergentProvider(LLMProvider):
     
     def generate_json(self, prompt: str, system_prompt: str = None, max_tokens: int = 2000) -> Dict[str, Any]:
         json_prompt = f"{prompt}\n\nRespond with valid JSON only, no other text or markdown."
-        response = self.generate(json_prompt, system_prompt, max_tokens, temperature=0.3)
+        response = self.generate(json_prompt, system_prompt, max_tokens)
         try:
             # Clean up response
             cleaned = response.strip()
