@@ -39,7 +39,9 @@ import {
   XCircle,
   AlertCircle,
   Monitor,
-  BookOpen
+  BookOpen,
+  Sparkles,
+  Bot
 } from 'lucide-react';
 import * as LightweightCharts from 'lightweight-charts';
 import api from '../utils/api';
