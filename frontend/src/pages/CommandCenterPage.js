@@ -1041,6 +1041,9 @@ const CommandCenterPage = () => {
     systemMonitor: true
   });
   
+  // Knowledge Base state
+  const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
+  
   // New P1 features state
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [shortSqueezeCandidates, setShortSqueezeCandidates] = useState([]);
