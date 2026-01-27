@@ -45,7 +45,7 @@ import * as LightweightCharts from 'lightweight-charts';
 import api from '../utils/api';
 import { toast } from 'sonner';
 import KnowledgeBase from '../components/KnowledgeBase';
-import QualityPanel from '../components/QualityPanel';
+import AIAssistant from '../components/AIAssistant';
 import { HelpTooltip, HelpIcon } from '../components/HelpTooltip';
 
 // ===================== SOUND UTILITIES =====================
