@@ -187,7 +187,7 @@ class EmergentProvider(LLMProvider):
                 api_key=self.api_key,
                 session_id=session_id,
                 system_message=sys_msg
-            ).with_model("gpt-4o")
+            ).with_model("openai", "gpt-4o")
             
             response = chat.send_message(prompt)
             return response
