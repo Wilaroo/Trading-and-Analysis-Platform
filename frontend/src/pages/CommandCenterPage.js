@@ -1393,6 +1393,9 @@ const CommandCenterPage = () => {
   const [systemHealth, setSystemHealth] = useState(null);
   const [isLoadingSystemHealth, setIsLoadingSystemHealth] = useState(false);
   
+  // Pre-market scheduler state
+  const [premarketScheduled, setPremarketScheduled] = useState(false);
+  
   // Fetch system health
   const fetchSystemHealth = async () => {
     setIsLoadingSystemHealth(true);
@@ -1412,12 +1415,42 @@ const CommandCenterPage = () => {
     }
   };
   
+  // Check scheduler status on mount
+  useEffect(() => {
+    const checkSchedulerStatus = async () => {
+      try {
+        const res = await api.get('/api/scheduler/status');
+        setPremarketScheduled(res.data?.scheduler?.tasks?.includes('premarket') || false);
+      } catch {
+        // Ignore errors
+      }
+    };
+    checkSchedulerStatus();
+  }, []);
+  
   // Fetch system health on mount and every 30 seconds
   useEffect(() => {
     fetchSystemHealth();
     const interval = setInterval(fetchSystemHealth, 30000);
     return () => clearInterval(interval);
   }, []);
+  
+  // Toggle pre-market schedule
+  const togglePremarketSchedule = async () => {
+    try {
+      if (premarketScheduled) {
+        await api.delete('/api/scheduler/premarket/stop');
+        setPremarketScheduled(false);
+        toast.info('Pre-market auto-generation disabled');
+      } else {
+        await api.post('/api/scheduler/premarket/schedule', { hour: 6, minute: 30 });
+        setPremarketScheduled(true);
+        toast.success('Pre-market briefing scheduled for 6:30 AM ET daily');
+      }
+    } catch (err) {
+      toast.error('Failed to update schedule');
+    }
+  };
   
   const autoGenerateMarketIntelligence = async () => {
     if (isGeneratingIntelligence) return;
