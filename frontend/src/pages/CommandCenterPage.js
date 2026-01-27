@@ -2092,6 +2092,12 @@ const CommandCenterPage = () => {
             )}
           </Card>
 
+          {/* Quality Factor Panel */}
+          <QualityPanel 
+            opportunities={opportunities}
+            onTickerSelect={setSelectedTicker}
+          />
+
           {/* Comprehensive Scanner Panel - Main Alert System */}
           <Card glow={comprehensiveSummary.total > 0}>
             <button 
