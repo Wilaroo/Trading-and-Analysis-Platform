@@ -2761,7 +2761,10 @@ const CommandCenterPage = () => {
 
           {/* Enhanced Alert Detail Modal */}
           <AnimatePresence>
-            {selectedEnhancedAlert && selectedEnhancedAlert.symbol && (
+            {selectedEnhancedAlert && 
+             selectedEnhancedAlert.symbol && 
+             selectedEnhancedAlert.grade &&
+             selectedEnhancedAlert.trade_plan && (
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
