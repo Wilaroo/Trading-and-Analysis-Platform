@@ -322,6 +322,7 @@ class DataCache:
             "last_updated": datetime.now(timezone.utc).isoformat(),
             "is_cached": False
         }
+        self._persist_scanner_cache()
     
     def get_cached_breakout_scan(self) -> Optional[Dict[str, Any]]:
         """Get cached breakout scan results"""
@@ -343,6 +344,7 @@ class DataCache:
             "last_updated": datetime.now(timezone.utc).isoformat(),
             "is_cached": False
         }
+        self._persist_scanner_cache()
     
     def get_cached_short_squeeze_scan(self) -> Optional[Dict[str, Any]]:
         """Get cached short squeeze scan results"""
