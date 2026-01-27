@@ -74,12 +74,18 @@ class AlpacaService:
         """
         Get real-time quote for a symbol.
         Returns latest quote data including bid, ask, and last price.
+        Note: Alpaca only supports stocks, not indices like VIX.
         """
         if not self._ensure_initialized():
             return None
+        
+        # Alpaca doesn't support indices - skip them
+        symbol_upper = symbol.upper()
+        if symbol_upper in ["VIX", "^VIX", "$VIX"]:
+            return None  # Let fallback handle VIX
             
         # Check cache first
-        cache_key = symbol.upper()
+        cache_key = symbol_upper
         if cache_key in self._quote_cache:
             cached = self._quote_cache[cache_key]
             cache_age = (datetime.now(timezone.utc) - cached.get('_cached_at', datetime.min.replace(tzinfo=timezone.utc))).total_seconds()
