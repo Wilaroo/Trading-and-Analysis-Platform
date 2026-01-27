@@ -437,7 +437,7 @@ const KnowledgeBase = ({ isOpen, onClose }) => {
             {Object.entries(stats.by_type || {}).filter(([_, count]) => count > 0).map(([type, count]) => (
               <span key={type} className="flex items-center gap-1">
                 {getTypeIcon(type)}
-                {count} {type}s
+                {count} {type === 'strategy' ? (count === 1 ? 'strategy' : 'strategies') : `${type}${count !== 1 ? 's' : ''}`}
               </span>
             ))}
           </div>
