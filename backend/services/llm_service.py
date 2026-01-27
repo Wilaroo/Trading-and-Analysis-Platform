@@ -177,34 +177,38 @@ class EmergentProvider(LLMProvider):
     
     def generate(self, prompt: str, system_prompt: str = None, max_tokens: int = 2000, temperature: float = 0.7) -> str:
         try:
-            from emergentintegrations.llm.chat import LlmChat
-            import uuid
-            import asyncio
+            import httpx
             
-            session_id = str(uuid.uuid4())
             sys_msg = system_prompt or "You are a helpful trading assistant."
             
-            chat = LlmChat(
-                api_key=self.api_key,
-                session_id=session_id,
-                system_message=sys_msg
-            ).with_model("openai", "gpt-4o")
-            
-            # Run async method synchronously
-            loop = asyncio.new_event_loop()
-            try:
-                response = loop.run_until_complete(chat.send_message(prompt))
-            finally:
-                loop.close()
-            
-            return response
+            # Direct API call to Emergent's proxy
+            response = httpx.post(
+                "https://emergentintegrations-proxy.onrender.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "gpt-4o",
+                    "messages": [
+                        {"role": "system", "content": sys_msg},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "max_tokens": max_tokens,
+                    "temperature": temperature
+                },
+                timeout=60.0
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
         except Exception as e:
             logger.error(f"Emergent generation error: {e}")
             raise
     
     def generate_json(self, prompt: str, system_prompt: str = None, max_tokens: int = 2000) -> Dict[str, Any]:
         json_prompt = f"{prompt}\n\nRespond with valid JSON only, no other text or markdown."
-        response = self.generate(json_prompt, system_prompt, max_tokens)
+        response = self.generate(json_prompt, system_prompt, max_tokens, temperature=0.3)
         try:
             # Clean up response
             cleaned = response.strip()
