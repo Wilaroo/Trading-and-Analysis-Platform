@@ -128,7 +128,8 @@ class KnowledgeService:
         
         result = self.collection.insert_one(entry)
         entry["id"] = str(result.inserted_id)
-        del entry["_id"] if "_id" in entry else None
+        if "_id" in entry:
+            del entry["_id"]
         
         logger.info(f"Added knowledge entry: {title} ({type})")
         return entry
