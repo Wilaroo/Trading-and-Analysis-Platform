@@ -167,6 +167,9 @@ class DataCache:
             "last_updated": datetime.now(timezone.utc).isoformat(),
             "is_cached": False
         }
+        # Persist every 10 quotes to avoid too many writes
+        if len(self._quote_cache) % 10 == 0:
+            self._persist_quote_cache()
     
     def get_cached_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Get cached quote if available"""
@@ -182,7 +185,13 @@ class DataCache:
         """Cache multiple quotes"""
         for quote in quotes:
             if "symbol" in quote:
-                self.cache_quote(quote["symbol"], quote)
+                self._quote_cache[quote["symbol"].upper()] = {
+                    "data": quote,
+                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                    "is_cached": False
+                }
+        # Persist after batch update
+        self._persist_quote_cache()
     
     # ==================== Account Data ====================
     
