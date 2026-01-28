@@ -112,9 +112,12 @@ class IBWorkerThread(threading.Thread):
                         # ib.sleep() processes IB's event loop and keeps connection alive
                         self.ib.sleep(0.1)
                         # Verify connection is still alive
-                        if not self.ib.isConnected():
-                            logger.warning("IB connection dropped, marking as disconnected")
+                        actual_connected = self.ib.isConnected()
+                        if not actual_connected:
+                            logger.warning(f"IB heartbeat: ib.isConnected()={actual_connected}, marking as disconnected")
                             self.is_connected = False
+                        else:
+                            logger.debug(f"IB heartbeat OK: connected={actual_connected}")
                         last_heartbeat = time.time()
                     except Exception as e:
                         logger.warning(f"Heartbeat error: {e}")
