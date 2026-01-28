@@ -807,6 +807,147 @@ class UniversalScoringEngine:
             ]
         }
     
+    # ==================== ADVANCED MARKET INDICATORS SCORING ====================
+    
+    def score_advanced_indicators(self, data: Dict, market_data: Dict = None) -> Dict:
+        """
+        Score based on advanced market indicators:
+        1. VOLD/Market Regime alignment (is it a trend day?)
+        2. ATR Over-Extension (is the stock extended?)
+        3. Volume Threshold (is volume significant?)
+        
+        These directly impact trade quality and probability.
+        """
+        scores = {}
+        total_score = 0
+        warnings = []
+        bonuses = []
+        
+        # 1. VOLD/Trend Day Alignment (0-30 points)
+        vold_score = 15  # Default neutral
+        is_trend_day = market_data.get("is_trend_day", False) if market_data else False
+        market_direction = market_data.get("market_direction", "NEUTRAL") if market_data else "NEUTRAL"
+        stock_trend = data.get("trend", "NEUTRAL")
+        
+        if is_trend_day:
+            # On trend days, alignment with market direction is critical
+            if "BULLISH" in market_direction and stock_trend == "BULLISH":
+                vold_score = 30
+                bonuses.append("TREND DAY: Stock aligned with bullish market direction")
+            elif "BEARISH" in market_direction and stock_trend == "BEARISH":
+                vold_score = 30
+                bonuses.append("TREND DAY: Stock aligned with bearish market direction")
+            elif "BULLISH" in market_direction and stock_trend == "BEARISH":
+                vold_score = 5
+                warnings.append("TREND DAY WARNING: Stock bearish but market is bullish")
+            elif "BEARISH" in market_direction and stock_trend == "BULLISH":
+                vold_score = 5
+                warnings.append("TREND DAY WARNING: Stock bullish but market is bearish")
+            else:
+                vold_score = 15
+        else:
+            # On range days, mean reversion setups preferred
+            rvol = data.get("rvol", 1)
+            rsi = data.get("rsi", 50)
+            
+            if (rsi < 30 or rsi > 70) and rvol >= 1.5:
+                vold_score = 25
+                bonuses.append("RANGE DAY: Extreme RSI + high volume = mean reversion setup")
+            else:
+                vold_score = 15
+        
+        scores["vold_alignment"] = {
+            "score": vold_score,
+            "is_trend_day": is_trend_day,
+            "market_direction": market_direction,
+            "stock_trend": stock_trend
+        }
+        total_score += vold_score
+        
+        # 2. ATR Over-Extension Check (0-35 points)
+        atr_score = 20  # Default neutral
+        is_over_extended = data.get("is_over_extended", False)
+        extension_direction = data.get("extension_direction", "NORMAL")
+        extension_pct = data.get("extension_pct", 0)
+        
+        if is_over_extended:
+            if extension_direction == "OVER_EXTENDED_UP":
+                if stock_trend == "BULLISH":
+                    atr_score = 10
+                    warnings.append(f"OVER-EXTENDED UP: {extension_pct}% above band - risky for new longs")
+                else:
+                    atr_score = 25  # Good for shorts
+                    bonuses.append("OVER-EXTENDED UP: Good short setup opportunity")
+            elif extension_direction == "OVER_EXTENDED_DOWN":
+                if stock_trend == "BEARISH":
+                    atr_score = 10
+                    warnings.append(f"OVER-EXTENDED DOWN: {extension_pct}% below band - risky for new shorts")
+                else:
+                    atr_score = 25  # Good for longs
+                    bonuses.append("OVER-EXTENDED DOWN: Good long bounce opportunity")
+        else:
+            # Not over-extended, normal trading zone
+            atr_score = 20
+        
+        scores["atr_extension"] = {
+            "score": atr_score,
+            "is_over_extended": is_over_extended,
+            "extension_direction": extension_direction,
+            "extension_pct": extension_pct
+        }
+        total_score += atr_score
+        
+        # 3. Volume Significance (0-35 points)
+        volume_score = 15  # Default neutral
+        volume_status = data.get("volume_status", "NORMAL")
+        rvol = data.get("rvol", 1)
+        z_score = data.get("volume_z_score", 0)
+        
+        if volume_status == "SIGNIFICANT" or rvol >= 2.5:
+            volume_score = 35
+            bonuses.append(f"SIGNIFICANT VOLUME: {rvol:.1f}x RVOL indicates catalyst/institutional activity")
+        elif rvol >= 1.5:
+            volume_score = 25
+            bonuses.append("IN PLAY: Above average volume supports the setup")
+        elif volume_status == "LOW" or rvol < 0.8:
+            volume_score = 10
+            warnings.append("LOW VOLUME: Below average volume - reduced conviction")
+        else:
+            volume_score = 15
+        
+        scores["volume_significance"] = {
+            "score": volume_score,
+            "volume_status": volume_status,
+            "rvol": rvol,
+            "z_score": z_score
+        }
+        total_score += volume_score
+        
+        # Calculate weighted total (out of 100)
+        max_score = 100
+        final_score = round((total_score / max_score) * 100, 1)
+        
+        return {
+            "score": final_score,
+            "components": scores,
+            "warnings": warnings,
+            "bonuses": bonuses,
+            "interpretation": self._interpret_advanced_score(final_score, warnings, bonuses)
+        }
+    
+    def _interpret_advanced_score(self, score: float, warnings: List, bonuses: List) -> str:
+        """Interpret the advanced indicators score"""
+        if score >= 80 and not warnings:
+            return "EXCELLENT: All advanced indicators align favorably"
+        elif score >= 70:
+            return "GOOD: Most indicators support the trade"
+        elif score >= 50:
+            return "NEUTRAL: Mixed signals from advanced indicators"
+        elif score >= 30:
+            return "CAUTION: Multiple warning signals present"
+        else:
+            return "AVOID: Strong warning signals from advanced indicators"
+    
     # ==================== SUCCESS PROBABILITY ====================
     
     def calculate_success_probability(self, composite_score: float, direction: str,
