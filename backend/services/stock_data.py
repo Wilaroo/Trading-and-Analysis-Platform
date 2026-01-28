@@ -357,6 +357,102 @@ class StockDataService:
             print(f"Finnhub earnings calendar error: {e}")
         
         return []
+    
+    async def get_service_status(self) -> Dict:
+        """Get status of all data services - useful for health checks"""
+        status = {
+            "alpaca": {"available": False, "status": "not_configured"},
+            "finnhub": {"available": False, "status": "not_configured"},
+            "twelvedata": {"available": False, "status": "not_configured"},
+            "yfinance": {"available": False, "status": "not_configured"},
+            "cache": {
+                "quote_cache_size": len(self._quote_cache),
+                "fundamentals_cache_size": len(self._fundamentals_cache)
+            }
+        }
+        
+        # Check Alpaca
+        if self._alpaca_service:
+            try:
+                alpaca_status = self._alpaca_service.get_status()
+                status["alpaca"] = {
+                    "available": alpaca_status.get("initialized", False),
+                    "status": "connected" if alpaca_status.get("initialized") else "not_initialized",
+                    "data_feed": alpaca_status.get("data_feed", "unknown")
+                }
+            except Exception as e:
+                status["alpaca"] = {"available": False, "status": f"error: {str(e)}"}
+        
+        # Check Finnhub
+        if self.finnhub_client and self.finnhub_key:
+            try:
+                # Quick test - get market status (lightweight call)
+                market_status = self.finnhub_client.market_status(exchange='US')
+                status["finnhub"] = {
+                    "available": True,
+                    "status": "connected",
+                    "market_open": market_status.get("isOpen", False) if market_status else False
+                }
+            except Exception as e:
+                status["finnhub"] = {"available": False, "status": f"error: {str(e)}"}
+        
+        # Check TwelveData (just check if key is configured)
+        if self.twelvedata_key and self.twelvedata_key != "demo":
+            status["twelvedata"] = {"available": True, "status": "configured"}
+        elif self.twelvedata_key == "demo":
+            status["twelvedata"] = {"available": True, "status": "demo_mode"}
+        
+        # yfinance is always available (no API key needed)
+        status["yfinance"] = {"available": True, "status": "available"}
+        
+        return status
+    
+    async def health_check(self) -> Dict:
+        """Perform health check on all services - tests actual connectivity"""
+        results = {
+            "healthy": True,
+            "services": {},
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Test Alpaca with a real quote request
+        try:
+            if self._alpaca_service:
+                quote = await self._alpaca_service.get_quote("AAPL")
+                results["services"]["alpaca"] = {
+                    "healthy": quote is not None and quote.get("price", 0) > 0,
+                    "latency_ms": None  # Could add timing
+                }
+            else:
+                results["services"]["alpaca"] = {"healthy": False, "reason": "not_configured"}
+        except Exception as e:
+            results["services"]["alpaca"] = {"healthy": False, "reason": str(e)}
+            results["healthy"] = False
+        
+        # Test Finnhub
+        try:
+            if self.finnhub_client:
+                quote = self.finnhub_client.quote("AAPL")
+                results["services"]["finnhub"] = {
+                    "healthy": quote is not None and quote.get("c", 0) > 0
+                }
+            else:
+                results["services"]["finnhub"] = {"healthy": False, "reason": "not_configured"}
+        except Exception as e:
+            results["services"]["finnhub"] = {"healthy": False, "reason": str(e)}
+        
+        # yfinance test
+        try:
+            import yfinance as yf
+            ticker = yf.Ticker("AAPL")
+            info = ticker.fast_info
+            results["services"]["yfinance"] = {
+                "healthy": hasattr(info, 'last_price') and info.last_price > 0
+            }
+        except Exception as e:
+            results["services"]["yfinance"] = {"healthy": False, "reason": str(e)}
+        
+        return results
 
 
 # Singleton instance
