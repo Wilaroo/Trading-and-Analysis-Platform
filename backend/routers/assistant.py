@@ -243,6 +243,231 @@ async def get_assistant_status():
             "trade_analysis": True,
             "premarket_briefing": True,
             "pattern_review": True,
-            "conversation_memory": True
+            "conversation_memory": True,
+            # New coaching features
+            "rule_check": True,
+            "position_sizing": True,
+            "coaching_alerts": True,
+            "trade_review": True,
+            "daily_summary": True,
+            "setup_analysis": True
         }
     }
+
+
+# ===================== COACHING ENDPOINTS =====================
+
+class RuleCheckRequest(BaseModel):
+    symbol: str = Field(..., description="Stock symbol")
+    action: str = Field(..., description="BUY or SELL")
+    entry_price: Optional[float] = Field(default=None, description="Planned entry price")
+    position_size: Optional[float] = Field(default=None, description="Number of shares")
+    stop_loss: Optional[float] = Field(default=None, description="Stop loss price")
+
+
+class PositionSizingRequest(BaseModel):
+    symbol: str = Field(..., description="Stock symbol")
+    entry_price: float = Field(..., description="Entry price")
+    stop_loss: float = Field(..., description="Stop loss price")
+    account_size: Optional[float] = Field(default=None, description="Account size for % calculation")
+
+
+class CoachingAlertRequest(BaseModel):
+    alert_type: str = Field(..., description="Type: market_open, regime_change, losing_streak, overtrading, position_risk, rule_reminder")
+    data: Optional[dict] = Field(default=None, description="Context data for the alert")
+
+
+class TradeReviewRequest(BaseModel):
+    symbol: str
+    action: str
+    entry_price: float
+    exit_price: float
+    entry_time: Optional[str] = None
+    exit_time: Optional[str] = None
+    shares: Optional[int] = None
+    pnl: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class SetupAnalysisRequest(BaseModel):
+    symbol: str = Field(..., description="Stock symbol")
+    setup_type: Optional[str] = Field(default=None, description="Type: gap_up, breakout, pullback, reversal, etc.")
+    chart_notes: Optional[str] = Field(default=None, description="Your observations about the chart")
+
+
+@router.post("/coach/check-rules")
+async def check_rule_violations(request: RuleCheckRequest):
+    """
+    Check a trade idea against your trading rules BEFORE taking the trade.
+    
+    Returns:
+    - Rule violations (critical issues)
+    - Warnings (concerns to consider)
+    - Passed checks (rules you're following)
+    - Position sizing recommendation
+    - Overall verdict: PROCEED, CAUTION, or DO NOT TRADE
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    result = await _assistant_service.check_rule_violations(
+        symbol=request.symbol,
+        action=request.action,
+        entry_price=request.entry_price,
+        position_size=request.position_size,
+        stop_loss=request.stop_loss
+    )
+    
+    return result
+
+
+@router.post("/coach/position-size")
+async def get_position_sizing(request: PositionSizingRequest):
+    """
+    Get AI-powered position sizing recommendation based on:
+    - Your trading rules
+    - Current market regime
+    - Stock volatility (ATR)
+    - Risk management best practices
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    result = await _assistant_service.get_position_sizing_guidance(
+        symbol=request.symbol,
+        entry_price=request.entry_price,
+        stop_loss=request.stop_loss,
+        account_size=request.account_size
+    )
+    
+    return result
+
+
+@router.post("/coach/alert")
+async def get_coaching_alert(request: CoachingAlertRequest):
+    """
+    Get proactive coaching alerts for various situations:
+    
+    Alert types:
+    - market_open: Morning coaching tips
+    - market_regime_change: Strategy adjustment guidance (include previous_regime, current_regime in data)
+    - losing_streak: Support after losses (include consecutive_losses in data)
+    - overtrading: Trading frequency warning (include trade_count in data)
+    - position_risk: Position size warning (include symbol, shares, exposure in data)
+    - rule_reminder: Random rule reminder
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    result = await _assistant_service.get_coaching_alert(
+        context_type=request.alert_type,
+        data=request.data
+    )
+    
+    return result
+
+
+@router.post("/coach/review-trade")
+async def review_completed_trade(request: TradeReviewRequest):
+    """
+    Get AI coaching review of a completed trade.
+    
+    The coach will analyze:
+    - Strategy alignment
+    - Rule compliance
+    - Execution quality
+    - Lessons learned
+    - Pattern alerts
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    trade_data = {
+        "symbol": request.symbol,
+        "action": request.action,
+        "entry_price": request.entry_price,
+        "exit_price": request.exit_price,
+        "entry_time": request.entry_time,
+        "exit_time": request.exit_time,
+        "shares": request.shares,
+        "pnl": request.pnl,
+        "notes": request.notes
+    }
+    
+    result = await _assistant_service.get_trade_review(trade_data)
+    
+    return result
+
+
+@router.get("/coach/daily-summary")
+async def get_daily_coaching_summary():
+    """
+    Get end-of-day coaching summary with:
+    - Today's performance review
+    - Rule compliance assessment
+    - Pattern observations
+    - Tomorrow's focus areas
+    - Key coaching message
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    result = await _assistant_service.get_daily_coaching_summary()
+    
+    return result
+
+
+@router.post("/coach/analyze-setup")
+async def analyze_trade_setup(request: SetupAnalysisRequest):
+    """
+    Get coaching analysis of a trade setup before entry.
+    
+    Includes:
+    - Setup quality rating
+    - Strategy match from knowledge base
+    - Market regime fit
+    - Entry criteria to watch
+    - Risk management guidance
+    - Warning flags
+    - Trade/Wait/Pass verdict
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    result = await _assistant_service.analyze_setup(
+        symbol=request.symbol,
+        setup_type=request.setup_type,
+        chart_notes=request.chart_notes
+    )
+    
+    return result
+
+
+@router.get("/coach/morning-briefing")
+async def get_morning_coaching():
+    """
+    Quick morning coaching briefing with:
+    - Current market regime
+    - Best strategies for today
+    - Key rule reminder
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    result = await _assistant_service.get_coaching_alert("market_open", {})
+    
+    return result
+
+
+@router.get("/coach/rule-reminder")
+async def get_random_rule_reminder():
+    """
+    Get a random trading rule reminder from your knowledge base.
+    Good for periodic reminders during trading.
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    result = await _assistant_service.get_coaching_alert("rule_reminder", {})
+    
+    return result
