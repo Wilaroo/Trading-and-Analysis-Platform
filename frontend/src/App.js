@@ -94,11 +94,54 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [streamingQuotes, setStreamingQuotes] = useState({});
   const [showAlertSettings, setShowAlertSettings] = useState(false);
+  
+  // Global IB Connection State - shared across all pages
+  const [ibConnected, setIbConnected] = useState(false);
+  const [ibConnectionChecked, setIbConnectionChecked] = useState(false);
 
   // Save activeTab to localStorage when it changes
   useEffect(() => {
     localStorage.setItem('tradecommand_activeTab', activeTab);
   }, [activeTab]);
+  
+  // Check IB connection status on app load and periodically
+  const checkIbConnection = useCallback(async () => {
+    try {
+      const res = await api.get('/api/ib/status');
+      const connected = res.data?.connected || false;
+      setIbConnected(connected);
+      setIbConnectionChecked(true);
+      return connected;
+    } catch (err) {
+      console.error('IB status check failed:', err);
+      setIbConnected(false);
+      setIbConnectionChecked(true);
+      return false;
+    }
+  }, []);
+  
+  // Connect to IB - called from any page
+  const connectToIb = useCallback(async () => {
+    try {
+      await api.post('/api/ib/connect');
+      const connected = await checkIbConnection();
+      return connected;
+    } catch (err) {
+      console.error('IB connect failed:', err);
+      return false;
+    }
+  }, [checkIbConnection]);
+  
+  // Check connection on app load
+  useEffect(() => {
+    checkIbConnection();
+  }, [checkIbConnection]);
+  
+  // Periodic connection check every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(checkIbConnection, 30000);
+    return () => clearInterval(interval);
+  }, [checkIbConnection]);
 
   // WebSocket handler for real-time updates
   const handleWebSocketMessage = useCallback((message) => {
