@@ -34,13 +34,24 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
   useEffect(() => {
     if (!chartContainerRef.current || !symbol) return;
 
+    // Reset chart ready state
+    setChartReady(false);
+    const currentVersion = ++chartVersionRef.current;
+    console.log(`[Chart] Creating chart v${currentVersion} for ${symbol}`);
+
     // Small delay to ensure container has dimensions
     const timer = setTimeout(() => {
+      // Check if this is still the current version
+      if (chartVersionRef.current !== currentVersion) {
+        console.log(`[Chart] v${currentVersion} superseded, skipping creation`);
+        return;
+      }
       if (!chartContainerRef.current) return;
       
       try {
         const containerWidth = chartContainerRef.current.clientWidth || 800;
         const containerHeight = chartContainerRef.current.clientHeight || 500;
+        console.log(`[Chart] v${currentVersion} creating with dimensions: ${containerWidth}x${containerHeight}`);
         
         const chart = LightweightCharts.createChart(chartContainerRef.current, {
           layout: {
