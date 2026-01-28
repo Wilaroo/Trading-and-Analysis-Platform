@@ -2140,13 +2140,31 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
         }
         
         # Analyze each candidate
+        # IMPORTANT: During heavy scanning, use Alpaca for quotes to avoid overwhelming IB
+        use_alpaca_for_quotes = True  # Always prefer Alpaca for quotes during scan
+        
         for symbol, data in all_candidates.items():
             try:
                 scan_result = data["scan_result"]
                 scan_type = data["scan_type"]
                 
-                # Get real-time quote - use stock_service which has Alpaca fallback
-                quote = await _stock_service.get_quote(symbol) if _stock_service else await _ib_service.get_quote(symbol)
+                # Get real-time quote - prefer Alpaca to avoid overwhelming IB during scan
+                quote = None
+                if use_alpaca_for_quotes and _alpaca_service:
+                    try:
+                        quote = await _alpaca_service.get_quote(symbol)
+                    except Exception as e:
+                        pass  # Fall through to IB
+                
+                # Only use IB for quotes if Alpaca failed AND we're not already busy
+                if not quote and _ib_service and not is_ib_connected:
+                    pass  # Skip IB quotes if not connected
+                elif not quote and _ib_service:
+                    try:
+                        quote = await _ib_service.get_quote(symbol)
+                    except Exception as e:
+                        pass
+                
                 if not quote or not quote.get("price"):
                     continue
                 
