@@ -1650,6 +1650,13 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
       setComprehensiveAlerts(alerts);
       setComprehensiveSummary(summary);
       
+      // Check if response indicates cached results due to busy state
+      if (res.data?.is_busy) {
+        toast.info(`Scan in progress (${res.data.busy_operation || 'scanning'}). Showing cached results.`, { duration: 5000 });
+        setIsComprehensiveScanning(false); // Allow user to retry
+        return;
+      }
+      
       // Notify for high-quality alerts
       if (soundEnabled && summary.total > 0) {
         const allAlerts = [...alerts.scalp, ...alerts.intraday, ...alerts.swing, ...alerts.position];
@@ -1665,10 +1672,15 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
       
       console.log(`Comprehensive scan complete: ${summary.total} alerts found`);
     } catch (err) {
-      const errorMsg = err.response?.data?.detail?.message || err.message;
+      const detail = err.response?.data?.detail;
+      const errorMsg = detail?.message || err.message;
       console.log('Comprehensive scan error:', errorMsg);
-      // Only show error toast if we're supposed to be connected
-      if (isConnected) {
+      
+      // Handle busy state error gracefully
+      if (detail?.is_busy) {
+        toast.info(`Scan in progress (${detail.busy_operation || 'scanning'}). Please wait...`, { duration: 5000 });
+      } else if (isConnected) {
+        // Only show error toast if we're supposed to be connected
         if (err.code === 'ECONNABORTED') {
           toast.error('Scan timed out - server may be processing large results');
         } else {
