@@ -1078,3 +1078,53 @@ curl /api/market-context/indicators/vold
 curl /api/market-context/indicators/regime
 # Returns: regime classification, favored/avoid setups, position sizing guidance
 ```
+
+### Jan 28, 2026 - AI Coach/Learning Enhancements
+**Implemented:**
+
+1. **AI Coach Service Enhancements** (Backend)
+   - `check_rule_violations()`: Check trade ideas against user's rules BEFORE trading
+   - `get_position_sizing_guidance()`: AI-powered position size recommendations
+   - `get_coaching_alert()`: Proactive coaching for various situations
+     - `market_open`: Morning coaching tips
+     - `market_regime_change`: Strategy adjustments
+     - `losing_streak`: Support after consecutive losses
+     - `overtrading`: Trading frequency warnings
+     - `position_risk`: Position size alerts
+     - `rule_reminder`: Random rule reminders
+   - `get_trade_review()`: AI review of completed trades
+   - `get_daily_coaching_summary()`: End-of-day performance review
+   - `analyze_setup()`: Setup analysis with coaching guidance
+
+2. **New API Endpoints** (`/api/assistant/coach/*`)
+   - `POST /coach/check-rules`: Pre-trade rule violation check
+   - `POST /coach/position-size`: Position sizing calculator
+   - `POST /coach/alert`: Proactive coaching alerts
+   - `POST /coach/review-trade`: Post-trade review
+   - `GET /coach/daily-summary`: End-of-day coaching
+   - `POST /coach/analyze-setup`: Setup analysis
+   - `GET /coach/morning-briefing`: Quick morning tips
+   - `GET /coach/rule-reminder`: Random rule reminder
+
+3. **AI Coach Panel UI** (Frontend)
+   - New `AICoachPanel.jsx` component
+   - Accessible via "Coach" button in Command Center header
+   - Three tabs: Quick Actions, Rule Check, Position Size
+   - Quick Actions: Morning Brief, Rule Reminder, Daily Summary, Check Setup
+   - Rule Check Form: Symbol, Action, Entry Price, Stop Loss
+   - Position Sizing Form: Symbol, Entry, Stop, Account Size
+   - Coaching response display with markdown rendering
+   - Coach Tips section with best practices
+
+**Files Created:**
+- `/app/frontend/src/components/AICoachPanel.jsx`
+
+**Files Modified:**
+- `/app/backend/services/ai_assistant_service.py`: Added coaching methods
+- `/app/backend/routers/assistant.py`: Added coaching endpoints
+- `/app/frontend/src/pages/CommandCenterPage.js`: Added Coach button and panel
+
+**Testing:**
+- Backend endpoints verified via curl
+- Frontend UI verified via screenshots
+- Rule Check form validated
