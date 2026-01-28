@@ -246,7 +246,10 @@ function App() {
       connectToIb,
       checkIbConnection,
       ibBusy,
-      ibBusyOperation
+      ibBusyOperation,
+      // WebSocket status for quotes streaming
+      wsConnected: isConnected,
+      wsLastUpdate: lastUpdate
     };
     
     switch (activeTab) {
