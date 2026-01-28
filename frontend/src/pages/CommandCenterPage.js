@@ -2053,19 +2053,6 @@ const CommandCenterPage = ({
               </button>
             )}
           </div>
-          
-          {/* Auto Scan Toggle */}
-          {isConnected && (
-            <button
-              onClick={() => setAutoScan(!autoScan)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
-                autoScan ? 'bg-cyan-500/20 text-cyan-400' : 'bg-zinc-800 text-zinc-400'
-              }`}
-            >
-              {autoScan ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-              Auto-Scan
-            </button>
-          )}
         </div>
       </div>
 
