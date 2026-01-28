@@ -130,7 +130,7 @@ class IBWorkerThread(threading.Thread):
                             logger.debug(f"IB keep-alive OK: server_time={server_time}, connected={actual_connected}")
                             reconnect_attempts = 0  # Reset reconnect counter on successful keep-alive
                         elif not actual_connected:
-                            logger.warning(f"IB keep-alive: connection lost, attempting reconnect...")
+                            logger.warning("IB keep-alive: connection lost, attempting reconnect...")
                             self.is_connected = False
                             
                             # Attempt auto-reconnect
