@@ -155,6 +155,12 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
       try {
         const response = await api.get(`/api/ib/historical/${symbol}?duration=${encodeURIComponent(duration)}&bar_size=${encodeURIComponent(timeframe)}`);
         
+        // Check if chart is still valid (hasn't been recreated)
+        if (chartVersionRef.current !== currentVersion) {
+          console.log(`[Chart] Data arrived for v${currentVersion} but chart is now v${chartVersionRef.current}, discarding`);
+          return;
+        }
+        
         if (response.data.bars && response.data.bars.length > 0) {
           const candleData = response.data.bars.map(bar => ({
             time: new Date(bar.time || bar.date || bar.timestamp).getTime() / 1000,
@@ -170,42 +176,34 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
             color: bar.close >= bar.open ? '#00FF9433' : '#FF2E2E33',
           }));
 
-          console.log('[Chart] Setting data:', candleData.length, 'bars');
-          console.log('[Chart] First bar:', candleData[0]);
-          console.log('[Chart] Last bar:', candleData[candleData.length - 1]);
-          console.log('[Chart] candleSeries exists:', !!candleSeriesRef.current);
-          console.log('[Chart] chartRef exists:', !!chartRef.current);
+          console.log(`[Chart v${currentVersion}] Setting data:`, candleData.length, 'bars');
+          console.log(`[Chart v${currentVersion}] First bar:`, candleData[0]);
+          console.log(`[Chart v${currentVersion}] Last bar:`, candleData[candleData.length - 1]);
+          console.log(`[Chart v${currentVersion}] candleSeries exists:`, !!candleSeriesRef.current);
+          console.log(`[Chart v${currentVersion}] chartRef exists:`, !!chartRef.current);
           
-          if (candleSeriesRef.current) {
+          if (candleSeriesRef.current && chartRef.current) {
             try {
               // Sort data by time ascending (required by lightweight-charts)
               candleData.sort((a, b) => a.time - b.time);
+              volumeData.sort((a, b) => a.time - b.time);
               
               candleSeriesRef.current.setData(candleData);
-              console.log('[Chart] Candle data set successfully, series data count:', candleSeriesRef.current.data?.()?.length || 'N/A');
+              console.log(`[Chart v${currentVersion}] Candle data set successfully`);
               
-              // Check price range to verify data is valid
-              try {
-                const priceRange = candleSeriesRef.current.priceRange?.() || 'N/A';
-                console.log('[Chart] Price range:', priceRange);
-              } catch (e) {
-                console.log('[Chart] Could not get price range');
+              if (volumeSeriesRef.current) {
+                volumeSeriesRef.current.setData(volumeData);
               }
+              
+              // Fit content after setting data
+              chartRef.current.timeScale().fitContent();
+              
             } catch (setDataErr) {
-              console.error('[Chart] Error setting candle data:', setDataErr);
+              console.error(`[Chart v${currentVersion}] Error setting candle data:`, setDataErr);
             }
           } else {
-            console.warn('[Chart] candleSeriesRef not ready, retrying in 500ms...');
-            setTimeout(() => {
-              if (candleSeriesRef.current) {
-                candleSeriesRef.current.setData(candleData);
-                if (volumeSeriesRef.current) volumeSeriesRef.current.setData(volumeData);
-                if (chartRef.current) chartRef.current.timeScale().fitContent();
-                console.log('[Chart] Delayed data set successful');
-              }
-            }, 500);
+            console.warn(`[Chart v${currentVersion}] Series or chart not ready`);
           }
-          if (volumeSeriesRef.current) volumeSeriesRef.current.setData(volumeData);
           
           // Force resize and fit content after data is set
           if (chartRef.current) {
