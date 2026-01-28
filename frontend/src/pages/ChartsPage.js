@@ -112,6 +112,13 @@ const IBRealtimeChart = ({ symbol, isConnected }) => {
   // Fetch data
   useEffect(() => {
     if (!symbol) return;
+    
+    // Don't try to fetch if not connected
+    if (!isConnected) {
+      setLoading(false);
+      setError('Connect to IB Gateway for real-time charts');
+      return;
+    }
 
     const fetchData = async () => {
       setLoading(true);
@@ -143,12 +150,16 @@ const IBRealtimeChart = ({ symbol, isConnected }) => {
           setLastUpdate(new Date());
         } else {
           setHasData(false);
-          setError('No data available. Connect to IB Gateway.');
+          setError('No data available for this symbol');
         }
       } catch (err) {
         console.error('Error fetching chart data:', err);
         setHasData(false);
-        setError('Connect to IB Gateway for real-time charts');
+        if (err.response?.status === 503) {
+          setError('IB Gateway disconnected. Connect from Command Center.');
+        } else {
+          setError('Failed to load chart data');
+        }
       }
       
       setLoading(false);
