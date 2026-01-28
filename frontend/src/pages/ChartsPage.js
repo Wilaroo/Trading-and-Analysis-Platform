@@ -147,8 +147,19 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
           
           if (candleSeriesRef.current) {
             try {
+              // Sort data by time ascending (required by lightweight-charts)
+              candleData.sort((a, b) => a.time - b.time);
+              
               candleSeriesRef.current.setData(candleData);
               console.log('[Chart] Candle data set successfully, series data count:', candleSeriesRef.current.data?.()?.length || 'N/A');
+              
+              // Check price range to verify data is valid
+              try {
+                const priceRange = candleSeriesRef.current.priceRange?.() || 'N/A';
+                console.log('[Chart] Price range:', priceRange);
+              } catch (e) {
+                console.log('[Chart] Could not get price range');
+              }
             } catch (setDataErr) {
               console.error('[Chart] Error setting candle data:', setDataErr);
             }
