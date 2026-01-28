@@ -1247,9 +1247,6 @@ const CommandCenterPage = ({
   const [showAssistant, setShowAssistant] = useState(false);
   const [assistantPrompt, setAssistantPrompt] = useState(null);
   
-  // AI Coach Panel state
-  const [showCoachPanel, setShowCoachPanel] = useState(false);
-  
   // New P1 features state
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [shortSqueezeCandidates, setShortSqueezeCandidates] = useState([]);
