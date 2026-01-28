@@ -143,6 +143,9 @@ class IBWorkerThread(threading.Thread):
             elif request.command == IBCommand.DISCONNECT:
                 return self._do_disconnect()
             
+            elif request.command == IBCommand.GET_STATUS:
+                return self._do_get_status()
+            
             elif request.command == IBCommand.GET_ACCOUNT_SUMMARY:
                 return self._do_get_account_summary()
             
