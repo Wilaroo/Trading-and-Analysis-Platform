@@ -250,12 +250,12 @@ function App() {
     };
     
     switch (activeTab) {
-      case 'command-center': return <CommandCenterPage {...ibProps} />;
+      case 'command-center': return <CommandCenterPage {...ibProps} isActiveTab={true} />;
       case 'chart': return <ErrorBoundary><ChartsPage {...ibProps} /></ErrorBoundary>;
       case 'trade-journal': return <TradeJournalPage />;
       case 'ib-trading': return <IBTradingPage {...ibProps} />;
       case 'glossary': return <GlossaryPage />;
-      default: return <CommandCenterPage {...ibProps} />;
+      default: return <CommandCenterPage {...ibProps} isActiveTab={activeTab === 'command-center'} />;
     }
   };
 
