@@ -47,6 +47,7 @@ import * as LightweightCharts from 'lightweight-charts';
 import api, { apiLongRunning } from '../utils/api';
 import { toast } from 'sonner';
 import AIAssistant from '../components/AIAssistant';
+import AICoachPanel from '../components/AICoachPanel';
 import { HelpTooltip, HelpIcon } from '../components/HelpTooltip';
 
 // ===================== SOUND UTILITIES =====================
