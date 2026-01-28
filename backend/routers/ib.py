@@ -2363,8 +2363,19 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                     "current_price": current_price,  # Some functions expect this key
                     "change_percent": quote.get("change_percent", 0),
                     "volume": quote.get("volume", 0),
+                    # Add fundamentals from yfinance
+                    "float_shares": fundamentals.get("float_shares"),
+                    "market_cap": fundamentals.get("market_cap"),
+                    "avg_volume": fundamentals.get("avg_volume"),
+                    "sector": fundamentals.get("sector"),
+                    "industry": fundamentals.get("industry"),
                     **features
                 }
+                
+                # Calculate RVOL for display
+                avg_vol = fundamentals.get("avg_volume")
+                if avg_vol and avg_vol > 0:
+                    stock_data["rvol"] = round(quote.get("volume", 0) / avg_vol, 2)
                 
                 try:
                     score_result = scoring_engine.calculate_composite_score(stock_data, {})
