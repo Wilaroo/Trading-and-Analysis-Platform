@@ -1631,7 +1631,11 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
 
   // Run comprehensive scan - scans ALL types and categorizes by timeframe
   const runComprehensiveScan = async () => {
-    if (isComprehensiveScanning) return;
+    // Don't run if already scanning or not connected
+    if (isComprehensiveScanning || !isConnected) {
+      console.log('Skipping comprehensive scan:', { isComprehensiveScanning, isConnected });
+      return;
+    }
     
     setIsComprehensiveScanning(true);
     try {
