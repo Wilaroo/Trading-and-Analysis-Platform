@@ -274,7 +274,7 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
-    setActiveMode('chat');
+    setShowTradeCheck(false);
 
     try {
       const res = await api.post('/api/assistant/chat', {
