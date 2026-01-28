@@ -35,7 +35,7 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
     if (!chartContainerRef.current || !symbol) return;
 
     // Reset chart ready state
-    setChartReady(false);
+    chartReadyRef.current = false;
     const currentVersion = ++chartVersionRef.current;
     console.log(`[Chart] Creating chart v${currentVersion} for ${symbol}`);
 
