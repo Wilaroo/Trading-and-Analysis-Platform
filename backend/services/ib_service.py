@@ -87,10 +87,10 @@ class IBWorkerThread(threading.Thread):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         
-        logger.info("IB Worker Thread started")
+        logger.info(f"IB Worker Thread started (thread id: {threading.get_ident()})")
         
         last_heartbeat = time.time()
-        heartbeat_interval = 10  # seconds
+        heartbeat_interval = 5  # seconds - check more frequently
         
         while self._running:
             try:
