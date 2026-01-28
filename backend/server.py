@@ -1548,26 +1548,41 @@ async def system_monitor():
             "details": str(e)[:50]
         })
     
-    # 7. Market Data (Finnhub)
+    # 7. Data Services (Alpaca, Finnhub, yfinance)
     try:
-        finnhub_key = os.environ.get("FINNHUB_API_KEY", "")
-        if finnhub_key:
-            services.append({
-                "name": "Market Data",
-                "status": "healthy",
-                "icon": "trending-up",
-                "details": "Finnhub API configured"
-            })
-        else:
-            services.append({
-                "name": "Market Data",
-                "status": "warning",
-                "icon": "trending-up",
-                "details": "No Finnhub key"
-            })
+        stock_svc = get_stock_service()
+        data_status = await stock_svc.get_service_status()
+        
+        # Alpaca
+        alpaca_info = data_status.get("alpaca", {})
+        services.append({
+            "name": "Alpaca",
+            "status": "healthy" if alpaca_info.get("available") else "warning",
+            "icon": "trending-up",
+            "details": alpaca_info.get("status", "unknown")
+        })
+        
+        # Finnhub
+        finnhub_info = data_status.get("finnhub", {})
+        services.append({
+            "name": "Finnhub",
+            "status": "healthy" if finnhub_info.get("available") else "warning",
+            "icon": "bar-chart-2",
+            "details": finnhub_info.get("status", "not_configured")
+        })
+        
+        # yfinance (fallback)
+        yf_info = data_status.get("yfinance", {})
+        services.append({
+            "name": "Yahoo Finance",
+            "status": "healthy" if yf_info.get("available") else "warning",
+            "icon": "globe",
+            "details": yf_info.get("status", "available")
+        })
+        
     except Exception as e:
         services.append({
-            "name": "Market Data",
+            "name": "Data Services",
             "status": "error",
             "icon": "trending-up",
             "details": str(e)[:50]
