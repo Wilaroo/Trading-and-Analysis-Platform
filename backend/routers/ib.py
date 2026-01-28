@@ -2265,8 +2265,8 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                         ticker = yf.Ticker(symbol)
                         info = ticker.info
                         float_shares = info.get('floatShares', None)
-                        if float_shares and float_shares > MAX_FLOAT:
-                            skipped_reasons["high_float"] = skipped_reasons.get("high_float", 0) + 1
+                        if float_shares and float_shares < MIN_FLOAT:
+                            skipped_reasons["low_float"] = skipped_reasons.get("low_float", 0) + 1
                             continue
                         fundamentals_cache[symbol] = {
                             "float_shares": float_shares,
