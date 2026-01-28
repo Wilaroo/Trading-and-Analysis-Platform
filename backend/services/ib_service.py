@@ -802,7 +802,16 @@ class IBService:
         """Get current connection status"""
         is_connected = False
         if self._worker_thread and self._worker_thread.is_alive():
+            # Check both the flag AND the actual IB connection state
             is_connected = self._worker_thread.is_connected
+            # Also verify the actual ib_insync connection if available
+            if self._worker_thread.ib is not None:
+                try:
+                    is_connected = self._worker_thread.ib.isConnected()
+                    # Update the flag to stay in sync
+                    self._worker_thread.is_connected = is_connected
+                except Exception:
+                    pass
         
         return {
             "connected": is_connected,
