@@ -223,10 +223,10 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
 
   // Focus input when opened
   useEffect(() => {
-    if (isOpen && inputRef.current && activeMode === 'chat') {
+    if (isOpen && inputRef.current && !showTradeCheck) {
       inputRef.current.focus();
     }
-  }, [isOpen, activeMode]);
+  }, [isOpen, showTradeCheck]);
 
   // Initialize session and fetch status
   useEffect(() => {
