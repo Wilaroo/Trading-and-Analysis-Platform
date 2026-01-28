@@ -11,7 +11,7 @@ export const api = axios.create({
 // Create a separate instance for long-running operations (Market Intelligence, Scans, etc.)
 export const apiLongRunning = axios.create({
   baseURL: API_URL,
-  timeout: 120000  // 2 minutes for heavy operations
+  timeout: 300000  // 5 minutes for comprehensive scans (they can take a while)
 });
 
 // WebSocket URL - detect protocol and construct WS URL
