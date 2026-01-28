@@ -868,6 +868,311 @@ class UniversalScoringEngine:
             }
         }
     
+    # ==================== SMB TRADE EVALUATION CHECKLIST ====================
+    
+    def evaluate_smb_checklist(self, data: Dict, market_data: Dict = None) -> Dict:
+        """
+        SMB Trade Evaluation Checklist - Applies to ALL timeframes
+        (Scalp, Intraday, Swing, Position)
+        
+        Evaluates 11 key variables for trade quality:
+        1. Catalyst - Major catalyst (level or news)?
+        2. Trend - Clear trend direction?
+        3. Relative Strength/Weakness - RS/RW vs sector?
+        4. Moving Averages - MAs support thesis?
+        5. Support/Resistance - Clear S/R levels?
+        6. Risk Reward - Skewed R:R ratio?
+        7. Volume Analysis - Volume supports thesis?
+        8. Multi-Timeframe Alignment - Levels align across TFs?
+        9. Market/Sector Sentiment - Sentiment supports trade?
+        10. Exit Strategy - Clear exit plan (calculable)?
+        11. Proven Success - Setup matches known patterns?
+        
+        Returns: Dict with checklist results and overall quality score
+        """
+        if market_data is None:
+            market_data = {}
+        
+        checklist = {}
+        passed_count = 0
+        total_checks = 11
+        
+        # 1. CATALYST CHECK
+        has_catalyst = False
+        catalyst_details = []
+        
+        # Check for earnings catalyst
+        if data.get("earnings_surprise_pct") and abs(data.get("earnings_surprise_pct", 0)) > 5:
+            has_catalyst = True
+            catalyst_details.append(f"Earnings surprise: {data.get('earnings_surprise_pct')}%")
+        
+        # Check for gap (indicates news/catalyst)
+        gap_pct = data.get("gap_percent", 0)
+        if abs(gap_pct) >= 3:
+            has_catalyst = True
+            catalyst_details.append(f"Gap: {gap_pct:+.1f}%")
+        
+        # Check for volume spike (indicates catalyst)
+        rvol = data.get("rvol", 1)
+        if rvol >= 2.5:
+            has_catalyst = True
+            catalyst_details.append(f"Volume spike: {rvol:.1f}x RVOL")
+        
+        checklist["catalyst"] = {
+            "passed": has_catalyst,
+            "details": catalyst_details if catalyst_details else ["No major catalyst detected"]
+        }
+        if has_catalyst:
+            passed_count += 1
+        
+        # 2. TREND CHECK
+        trend = data.get("trend", "NEUTRAL")
+        has_clear_trend = trend in ["BULLISH", "BEARISH"]
+        
+        # Also check EMA alignment for trend confirmation
+        ema_9 = data.get("ema_9", 0)
+        sma_20 = data.get("sma_20", 0)
+        sma_50 = data.get("sma_50", 0)
+        current_price = data.get("current_price", 0)
+        
+        if current_price > 0 and ema_9 > 0 and sma_20 > 0:
+            if current_price > ema_9 > sma_20:
+                has_clear_trend = True
+                trend = "BULLISH"
+            elif current_price < ema_9 < sma_20:
+                has_clear_trend = True
+                trend = "BEARISH"
+        
+        checklist["trend"] = {
+            "passed": has_clear_trend,
+            "direction": trend,
+            "details": f"{'Clear' if has_clear_trend else 'Choppy/unclear'} {trend.lower()} trend"
+        }
+        if has_clear_trend:
+            passed_count += 1
+        
+        # 3. RELATIVE STRENGTH/WEAKNESS CHECK
+        sector_rank = data.get("sector_rank", 50)  # 1-100, lower is stronger
+        change_percent = data.get("change_percent", 0)
+        
+        has_rs_rw = False
+        rs_details = []
+        
+        if sector_rank <= 20:
+            has_rs_rw = True
+            rs_details.append(f"Strong RS - Sector rank #{sector_rank}")
+        elif sector_rank >= 80:
+            has_rs_rw = True
+            rs_details.append(f"Weak RW - Sector rank #{sector_rank}")
+        
+        # Check if stock is outperforming/underperforming
+        if abs(change_percent) > 3:
+            has_rs_rw = True
+            rs_details.append(f"Moving {change_percent:+.1f}% today")
+        
+        checklist["relative_strength"] = {
+            "passed": has_rs_rw,
+            "sector_rank": sector_rank,
+            "details": rs_details if rs_details else ["Neutral relative performance"]
+        }
+        if has_rs_rw:
+            passed_count += 1
+        
+        # 4. MOVING AVERAGES SUPPORT CHECK
+        ma_support = False
+        ma_details = []
+        
+        if current_price > 0:
+            # Check price vs key MAs
+            above_9 = ema_9 > 0 and current_price > ema_9
+            above_20 = sma_20 > 0 and current_price > sma_20
+            above_50 = sma_50 > 0 and current_price > sma_50
+            
+            if trend == "BULLISH" and above_9 and above_20:
+                ma_support = True
+                ma_details.append("Price above 9 EMA and 20 SMA (bullish)")
+            elif trend == "BEARISH" and not above_9 and not above_20:
+                ma_support = True
+                ma_details.append("Price below 9 EMA and 20 SMA (bearish)")
+            elif above_50:
+                ma_details.append("Price above 50 SMA (long-term support)")
+        
+        checklist["moving_averages"] = {
+            "passed": ma_support,
+            "details": ma_details if ma_details else ["MAs not aligned with thesis"]
+        }
+        if ma_support:
+            passed_count += 1
+        
+        # 5. SUPPORT/RESISTANCE CHECK
+        support_1 = data.get("support_1", 0)
+        resistance_1 = data.get("resistance_1", 0)
+        
+        has_clear_levels = support_1 > 0 and resistance_1 > 0
+        levels_details = []
+        
+        if has_clear_levels:
+            levels_details.append(f"Support: ${support_1:.2f}")
+            levels_details.append(f"Resistance: ${resistance_1:.2f}")
+        
+        checklist["support_resistance"] = {
+            "passed": has_clear_levels,
+            "support": support_1,
+            "resistance": resistance_1,
+            "details": levels_details if levels_details else ["No clear S/R levels identified"]
+        }
+        if has_clear_levels:
+            passed_count += 1
+        
+        # 6. RISK/REWARD CHECK
+        rr_ratio = 0
+        has_skewed_rr = False
+        
+        if support_1 > 0 and resistance_1 > 0 and current_price > 0:
+            risk = abs(current_price - support_1)
+            reward = abs(resistance_1 - current_price)
+            if risk > 0:
+                rr_ratio = reward / risk
+                has_skewed_rr = rr_ratio >= 2.0  # At least 2:1 R:R
+        
+        checklist["risk_reward"] = {
+            "passed": has_skewed_rr,
+            "ratio": round(rr_ratio, 2),
+            "details": f"R:R ratio: {rr_ratio:.1f}:1 {'(favorable)' if has_skewed_rr else '(unfavorable)'}"
+        }
+        if has_skewed_rr:
+            passed_count += 1
+        
+        # 7. VOLUME ANALYSIS CHECK
+        volume_supports = False
+        volume_details = []
+        
+        if rvol >= 1.5:  # Minimum "In Play" threshold
+            volume_supports = True
+            volume_details.append(f"RVOL: {rvol:.1f}x (In Play)")
+        
+        avg_volume = data.get("avg_volume", 0)
+        if avg_volume >= 500000:
+            volume_details.append(f"Avg volume: {avg_volume:,.0f} (liquid)")
+        
+        checklist["volume_analysis"] = {
+            "passed": volume_supports,
+            "rvol": rvol,
+            "avg_volume": avg_volume,
+            "details": volume_details if volume_details else ["Volume below threshold"]
+        }
+        if volume_supports:
+            passed_count += 1
+        
+        # 8. MULTI-TIMEFRAME ALIGNMENT CHECK
+        # This checks if key levels align across daily/intraday
+        mtf_aligned = False
+        mtf_details = []
+        
+        vwap = data.get("vwap", 0)
+        prev_close = data.get("prev_close", 0)
+        
+        # Check if VWAP is near a key MA (confluence)
+        if vwap > 0 and sma_20 > 0:
+            vwap_sma_dist = abs(vwap - sma_20) / sma_20 * 100
+            if vwap_sma_dist < 1.5:  # Within 1.5%
+                mtf_aligned = True
+                mtf_details.append("VWAP aligned with 20 SMA")
+        
+        # Check if price is at a daily level
+        if prev_close > 0 and current_price > 0:
+            prev_close_dist = abs(current_price - prev_close) / prev_close * 100
+            if prev_close_dist < 1:
+                mtf_aligned = True
+                mtf_details.append("Price near previous close")
+        
+        checklist["mtf_alignment"] = {
+            "passed": mtf_aligned,
+            "details": mtf_details if mtf_details else ["No clear multi-TF confluence"]
+        }
+        if mtf_aligned:
+            passed_count += 1
+        
+        # 9. MARKET/SECTOR SENTIMENT CHECK
+        market_regime = market_data.get("regime", "neutral")
+        sentiment_supports = False
+        sentiment_details = []
+        
+        if trend == "BULLISH" and market_regime in ["bullish", "neutral"]:
+            sentiment_supports = True
+            sentiment_details.append(f"Market {market_regime}, trade direction LONG aligns")
+        elif trend == "BEARISH" and market_regime in ["bearish", "neutral"]:
+            sentiment_supports = True
+            sentiment_details.append(f"Market {market_regime}, trade direction SHORT aligns")
+        
+        checklist["sentiment"] = {
+            "passed": sentiment_supports,
+            "market_regime": market_regime,
+            "details": sentiment_details if sentiment_details else ["Sentiment not aligned"]
+        }
+        if sentiment_supports:
+            passed_count += 1
+        
+        # 10. EXIT STRATEGY CHECK (calculable based on levels)
+        has_exit_strategy = has_clear_levels and has_skewed_rr
+        exit_details = []
+        
+        if has_exit_strategy:
+            if trend == "BULLISH":
+                exit_details.append(f"Target: ${resistance_1:.2f}")
+                exit_details.append(f"Stop: ${support_1:.2f}")
+            else:
+                exit_details.append(f"Target: ${support_1:.2f}")
+                exit_details.append(f"Stop: ${resistance_1:.2f}")
+        
+        checklist["exit_strategy"] = {
+            "passed": has_exit_strategy,
+            "details": exit_details if exit_details else ["Cannot calculate exit strategy without clear levels"]
+        }
+        if has_exit_strategy:
+            passed_count += 1
+        
+        # 11. PROVEN SUCCESS CHECK (matches known patterns/strategies)
+        matched_strategies = data.get("matched_strategies", [])
+        has_proven_setup = len(matched_strategies) > 0
+        
+        checklist["proven_success"] = {
+            "passed": has_proven_setup,
+            "matched_count": len(matched_strategies),
+            "strategies": [s.get("name", s.get("id", "Unknown")) for s in matched_strategies[:3]],
+            "details": f"Matches {len(matched_strategies)} known setups" if matched_strategies else "No known pattern match"
+        }
+        if has_proven_setup:
+            passed_count += 1
+        
+        # Calculate overall quality score
+        quality_score = round((passed_count / total_checks) * 100, 1)
+        
+        # Determine trade grade based on checklist
+        if passed_count >= 9:
+            checklist_grade = "A+"
+        elif passed_count >= 8:
+            checklist_grade = "A"
+        elif passed_count >= 7:
+            checklist_grade = "B+"
+        elif passed_count >= 6:
+            checklist_grade = "B"
+        elif passed_count >= 5:
+            checklist_grade = "C"
+        else:
+            checklist_grade = "D"
+        
+        return {
+            "checklist": checklist,
+            "summary": {
+                "passed": passed_count,
+                "total": total_checks,
+                "quality_score": quality_score,
+                "grade": checklist_grade,
+                "is_actionable": passed_count >= 6  # 6+ checks = actionable trade
+            }
+        }
+    
     # ==================== COMPOSITE SCORING ====================
     
     def calculate_composite_score(self, stock_data: Dict, market_data: Dict = None) -> Dict:
