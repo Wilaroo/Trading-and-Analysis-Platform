@@ -2139,11 +2139,17 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
             "position": []
         }
         
+        # Limit candidates to analyze to reduce scan time
+        # Sort by rank if available, otherwise just take first N
+        MAX_CANDIDATES_TO_ANALYZE = 50
+        candidates_list = list(all_candidates.items())[:MAX_CANDIDATES_TO_ANALYZE]
+        print(f"Analyzing {len(candidates_list)} candidates (limited from {len(all_candidates)})")
+        
         # Analyze each candidate
         # IMPORTANT: During heavy scanning, use Alpaca for quotes to avoid overwhelming IB
         use_alpaca_for_quotes = True  # Always prefer Alpaca for quotes during scan
         
-        for symbol, data in all_candidates.items():
+        for symbol, data in candidates_list:
             try:
                 scan_result = data["scan_result"]
                 scan_type = data["scan_type"]
