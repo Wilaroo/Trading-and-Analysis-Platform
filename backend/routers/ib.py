@@ -1990,6 +1990,10 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
         )
     
     # Proceed with scanning - will use IB scanners if connected, otherwise Alpaca only
+    # Set busy flag to indicate heavy operation
+    if _ib_service:
+        _ib_service.set_busy(True, "comprehensive_scan")
+    
     try:
         from services.scoring_engine import get_scoring_engine
         from services.enhanced_alerts import (
