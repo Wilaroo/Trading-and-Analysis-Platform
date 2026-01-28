@@ -408,7 +408,7 @@ const AICoachPanel = ({ isOpen, onClose }) => {
         {activeTab === 'rules' && (
           <div>
             <p className="text-sm text-zinc-400 mb-4">
-              Enter your trade idea and I'll check it against your trading rules before you execute.
+              Enter your trade idea and I&apos;ll check it against your trading rules before you execute.
             </p>
             <RuleCheckForm onCheck={handleRuleCheck} loading={loading.rules} />
           </div>
