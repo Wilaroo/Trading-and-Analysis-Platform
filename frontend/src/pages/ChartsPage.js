@@ -91,7 +91,8 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
           priceScaleId: 'right',
         });
         candleSeriesRef.current = candleSeries;
-        console.log('[Chart] Chart created and series initialized');
+        console.log(`[Chart] Chart v${currentVersion} created and series initialized`);
+        setChartReady(true);  // Signal that chart is ready for data
         
         // Ensure price scale auto-fits to visible data
         chart.priceScale('right').applyOptions({
