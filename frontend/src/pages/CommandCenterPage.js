@@ -1871,7 +1871,7 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
         checkOrderFills();
         checkPriceAlerts();
       }
-    }, 60000);
+    }, 120000);  // 2 minutes between auto-scans
     
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
