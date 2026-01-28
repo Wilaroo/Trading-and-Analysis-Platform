@@ -1846,38 +1846,51 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connectionChecked, isConnected]);
 
-  // Auto-scan interval - now runs comprehensive scan
+  // Auto-scan interval - only runs when Command Center is the active tab
   useEffect(() => {
-    if (!autoScan || !isConnected) return;
+    if (!autoScan || !isConnected || !isActiveTab) {
+      if (!isActiveTab && autoScan) {
+        console.log('Auto-scan paused: Command Center is not the active tab');
+      }
+      return;
+    }
     
     const interval = setInterval(() => {
-      // Run comprehensive scan (this replaces the individual scanners)
-      runComprehensiveScan();
-      
-      // Also fetch account data and context
-      fetchAccountData();
-      fetchMarketContext();
-      checkOrderFills();
-      checkPriceAlerts();
+      // Only run scan if still on Command Center tab
+      if (isActiveTab) {
+        // Run comprehensive scan (this replaces the individual scanners)
+        runComprehensiveScan();
+        
+        // Also fetch account data and context
+        fetchAccountData();
+        fetchMarketContext();
+        checkOrderFills();
+        checkPriceAlerts();
+      }
     }, 60000);
     
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoScan, isConnected, selectedScanType, priceAlerts.length]);
+  }, [autoScan, isConnected, selectedScanType, priceAlerts.length, isActiveTab]);
 
   // Fast polling for order fills and price alerts (every 10s when enabled)
+  // This runs regardless of active tab to catch important alerts
   useEffect(() => {
     if (!isConnected) return;
     
     const fastPoll = setInterval(() => {
+      // Price alerts and order fills are important - run even when not on Command Center
+      // But skip heavy operations like enhanced alerts when not active
       checkOrderFills();
       checkPriceAlerts();
-      fetchEnhancedAlerts();
+      if (isActiveTab) {
+        fetchEnhancedAlerts();
+      }
     }, 10000);
     
     return () => clearInterval(fastPoll);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, soundEnabled, priceAlerts.length]);
+  }, [isConnected, soundEnabled, priceAlerts.length, isActiveTab]);
 
   const toggleSection = (section) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
