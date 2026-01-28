@@ -202,14 +202,30 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
           <span className="text-xl font-bold text-white">{symbol}</span>
           <div className="flex items-center gap-2">
             {isConnected ? (
-              <span className="flex items-center gap-1.5 text-xs text-green-400">
-                <Wifi className="w-3 h-3" />
-                IB Real-time
-              </span>
+              isBusy ? (
+                <span className="flex items-center gap-1.5 text-xs text-amber-400">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  IB Busy ({busyOperation || 'scanning'})
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 text-xs text-green-400">
+                  <Wifi className="w-3 h-3" />
+                  IB Connected
+                </span>
+              )
             ) : (
               <span className="flex items-center gap-1.5 text-xs text-yellow-400">
                 <WifiOff className="w-3 h-3" />
                 Disconnected
+              </span>
+            )}
+            {dataSource && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                dataSource === 'alpaca' ? 'bg-blue-500/20 text-blue-400' :
+                dataSource === 'ib' ? 'bg-green-500/20 text-green-400' :
+                'bg-zinc-500/20 text-zinc-400'
+              }`}>
+                {dataSource === 'alpaca' ? 'Alpaca' : dataSource === 'ib' ? 'IB' : 'Cached'}
               </span>
             )}
           </div>
