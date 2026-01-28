@@ -622,6 +622,7 @@ const IBTradingPage = ({ ibConnected, ibConnectionChecked, connectToIb, checkIbC
       {/* Connection Status */}
       <ConnectionStatus 
         status={connectionStatus}
+        isConnected={isConnected}
         onConnect={handleConnect}
         onDisconnect={handleDisconnect}
         loading={loading.connection}
