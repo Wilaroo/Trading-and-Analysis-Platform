@@ -494,7 +494,7 @@ class StockDataService:
             results["services"]["yfinance"] = {
                 "healthy": len(hist) > 0 or True  # yfinance is always considered available as fallback
             }
-        except Exception as e:
+        except Exception:
             # yfinance might fail sometimes but it's a fallback, so mark as available
             results["services"]["yfinance"] = {"healthy": True, "note": "fallback_available"}
         
