@@ -176,10 +176,10 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
 
     fetchData();
     
-    // Auto-refresh: Use longer interval when IB is busy to reduce load
-    const refreshInterval = isBusy ? 30000 : 10000;
+    // Auto-refresh: Use longer interval when IB is busy, or when disconnected (rely on Alpaca)
+    const refreshInterval = isBusy ? 30000 : isConnected ? 10000 : 60000;
     const interval = setInterval(() => {
-      if (isConnected) fetchData();
+      fetchData();
     }, refreshInterval);
     
     return () => clearInterval(interval);
