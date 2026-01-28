@@ -1331,14 +1331,24 @@ class UniversalScoringEngine:
         risk = self.score_risk(stock_data)
         context = self.score_context(stock_data, market_data)
         
-        # Weighted composite score
+        # NEW: Calculate advanced indicators score (VOLD, ATR Extension, Volume)
+        advanced_indicators = self.score_advanced_indicators(stock_data, market_data)
+        
+        # Weighted composite score (adjusted weights to include advanced indicators)
         composite = (
-            technical["score"] * self.CATEGORY_WEIGHTS["technical"] +
-            fundamental["score"] * self.CATEGORY_WEIGHTS["fundamental"] +
-            catalyst["score"] * self.CATEGORY_WEIGHTS["catalyst"] +
-            risk["score"] * self.CATEGORY_WEIGHTS["risk"] +
-            context["score"] * self.CATEGORY_WEIGHTS["context"]
+            technical["score"] * self.CATEGORY_WEIGHTS["technical"] * 0.9 +
+            fundamental["score"] * self.CATEGORY_WEIGHTS["fundamental"] * 0.9 +
+            catalyst["score"] * self.CATEGORY_WEIGHTS["catalyst"] * 0.9 +
+            risk["score"] * self.CATEGORY_WEIGHTS["risk"] * 0.9 +
+            context["score"] * self.CATEGORY_WEIGHTS["context"] * 0.9 +
+            advanced_indicators["score"] * 0.10  # 10% weight for advanced indicators
         )
+        
+        # Apply bonuses/penalties from advanced indicators
+        if advanced_indicators.get("warnings"):
+            composite = max(0, composite - len(advanced_indicators["warnings"]) * 2)
+        if advanced_indicators.get("bonuses"):
+            composite = min(100, composite + len(advanced_indicators["bonuses"]) * 2)
         
         # Calculate direction bias from all signals
         total_direction = (
