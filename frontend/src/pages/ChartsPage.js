@@ -10,6 +10,7 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
   const candleSeriesRef = useRef(null);
   const volumeSeriesRef = useRef(null);
   const chartVersionRef = useRef(0);  // Track chart version to prevent stale updates
+  const chartReadyRef = useRef(false);  // Track when chart is ready (use ref, not state)
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [hasData, setHasData] = useState(false);
@@ -17,7 +18,6 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
   const [duration, setDuration] = useState('1 D');
   const [lastUpdate, setLastUpdate] = useState(null);
   const [dataSource, setDataSource] = useState(null);
-  const [chartReady, setChartReady] = useState(false);  // Track when chart is ready
 
   const timeframes = [
     { label: '1m', value: '1 min', dur: '1 D' },
