@@ -1975,9 +1975,25 @@ const CommandCenterPage = ({
             onClick={() => setShowAssistant(true)}
             className="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-cyan-500/20 text-amber-400 rounded text-sm hover:from-amber-500/30 hover:to-cyan-500/30 border border-amber-500/30"
             title="AI Trading Assistant"
+            data-testid="ai-assistant-btn"
           >
             <Sparkles className="w-4 h-4" />
             <span className="hidden sm:inline">AI Assistant</span>
+          </button>
+          
+          {/* AI Coach Button */}
+          <button
+            onClick={() => setShowCoachPanel(!showCoachPanel)}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm border transition-colors ${
+              showCoachPanel 
+                ? 'bg-purple-500/30 text-purple-300 border-purple-500/50' 
+                : 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 text-purple-400 hover:from-purple-500/30 hover:to-pink-500/30 border-purple-500/30'
+            }`}
+            title="AI Trading Coach - Rule checking & position sizing"
+            data-testid="ai-coach-btn"
+          >
+            <Brain className="w-4 h-4" />
+            <span className="hidden sm:inline">Coach</span>
           </button>
           
           {/* Dual Connection Status Indicator - WebSocket vs IB Gateway */}
