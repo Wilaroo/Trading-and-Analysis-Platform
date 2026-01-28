@@ -139,7 +139,23 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
             color: bar.close >= bar.open ? '#00FF9433' : '#FF2E2E33',
           }));
 
-          if (candleSeriesRef.current) candleSeriesRef.current.setData(candleData);
+          console.log('[Chart] Setting data:', candleData.length, 'bars, candleSeries exists:', !!candleSeriesRef.current);
+          
+          if (candleSeriesRef.current) {
+            candleSeriesRef.current.setData(candleData);
+            console.log('[Chart] Candle data set successfully');
+          } else {
+            console.warn('[Chart] candleSeriesRef not ready, retrying in 500ms...');
+            // Retry after a short delay if series not ready
+            setTimeout(() => {
+              if (candleSeriesRef.current) {
+                candleSeriesRef.current.setData(candleData);
+                if (volumeSeriesRef.current) volumeSeriesRef.current.setData(volumeData);
+                if (chartRef.current) chartRef.current.timeScale().fitContent();
+                console.log('[Chart] Delayed data set successful');
+              }
+            }, 500);
+          }
           if (volumeSeriesRef.current) volumeSeriesRef.current.setData(volumeData);
           if (chartRef.current) chartRef.current.timeScale().fitContent();
           
