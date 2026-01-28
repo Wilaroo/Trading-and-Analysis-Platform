@@ -206,7 +206,7 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
   const [showHistory, setShowHistory] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [status, setStatus] = useState(null);
-  const [activeMode, setActiveMode] = useState('chat'); // 'chat', 'rules', 'sizing'
+  const [showTradeCheck, setShowTradeCheck] = useState(false);
   const [coachLoading, setCoachLoading] = useState({});
   
   const messagesEndRef = useRef(null);
