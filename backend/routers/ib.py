@@ -2529,9 +2529,16 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                     "change_percent": quote.get("change_percent", 0),
                     "volume": quote.get("volume", 0),
                     
+                    # Fundamentals (from yfinance)
+                    "float_shares": fundamentals.get("float_shares"),
+                    "float_millions": round(fundamentals.get("float_shares", 0) / 1000000, 1) if fundamentals.get("float_shares") else None,
+                    "market_cap": fundamentals.get("market_cap"),
+                    "sector": fundamentals.get("sector"),
+                    "industry": fundamentals.get("industry"),
+                    
                     # Technical features
                     "features": {
-                        "rvol": round(features.get("rvol", 1), 2),
+                        "rvol": stock_data.get("rvol", round(features.get("rvol", 1), 2)),
                         "rsi": round(features.get("rsi", 50), 1),
                         "vwap_distance": round(features.get("vwap_distance", 0), 2),
                         "trend": features.get("trend", "NEUTRAL"),
