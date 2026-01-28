@@ -120,7 +120,10 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
     }
 
     const fetchData = async () => {
-      setLoading(true);
+      // Don't show loading spinner if we already have data (background refresh)
+      if (!hasData) {
+        setLoading(true);
+      }
       setError(null);
       
       try {
@@ -147,18 +150,29 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
           
           setHasData(true);
           setLastUpdate(new Date());
+          setDataSource(response.data.source || (response.data.is_cached ? 'cached' : 'unknown'));
           setError(null);
         } else {
-          setHasData(false);
-          setError('No data available for this symbol');
+          if (!hasData) {
+            setHasData(false);
+            setError('No data available for this symbol');
+          }
         }
       } catch (err) {
         console.error('Error fetching chart data:', err);
-        setHasData(false);
-        if (err.response?.status === 503) {
-          setError('IB Gateway disconnected. Connect from Command Center.');
-        } else {
-          setError('Failed to load chart data');
+        // Only show error if we don't have existing data
+        if (!hasData) {
+          setHasData(false);
+          if (err.response?.status === 503) {
+            const detail = err.response?.data?.detail;
+            if (detail?.ib_busy) {
+              setError(`IB Gateway is busy (${detail.busy_operation}). Waiting for completion...`);
+            } else {
+              setError('IB Gateway disconnected. Connect from Command Center.');
+            }
+          } else {
+            setError('Failed to load chart data');
+          }
         }
       }
       
@@ -167,13 +181,14 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
 
     fetchData();
     
-    // Auto-refresh every 10 seconds when connected
+    // Auto-refresh: Use longer interval when IB is busy to reduce load
+    const refreshInterval = isBusy ? 30000 : 10000;
     const interval = setInterval(() => {
       if (isConnected) fetchData();
-    }, 10000);
+    }, refreshInterval);
     
     return () => clearInterval(interval);
-  }, [symbol, timeframe, duration, isConnected]);
+  }, [symbol, timeframe, duration, isConnected, isBusy, hasData]);
 
   // Handle disconnected state
   const displayError = !isConnected ? 'Connect to IB Gateway for real-time charts' : error;
