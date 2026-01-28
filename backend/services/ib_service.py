@@ -32,6 +32,7 @@ class IBCommand(Enum):
     """Commands that can be sent to the IB thread"""
     CONNECT = "connect"
     DISCONNECT = "disconnect"
+    GET_STATUS = "get_status"
     GET_ACCOUNT_SUMMARY = "get_account_summary"
     GET_POSITIONS = "get_positions"
     GET_QUOTE = "get_quote"
