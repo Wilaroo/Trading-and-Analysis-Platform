@@ -1770,14 +1770,16 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
   };
 
   // Initial load - staggered to avoid overwhelming the backend
+  // Runs when connection status is confirmed
   useEffect(() => {
+    if (!connectionChecked) return; // Wait until we know connection status
+    
     const init = async () => {
-      const connected = await checkConnection();
-      if (connected) {
+      if (isConnected) {
         // First batch: essential data
         await Promise.all([
           fetchAccountData(),
-          fetchWatchlist(connected),
+          fetchWatchlist(isConnected),
         ]);
         
         // Second batch: market data (slight delay to avoid overwhelming IB)
@@ -1802,7 +1804,7 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
     };
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [connectionChecked, isConnected]);
 
   // Auto-scan interval - now runs comprehensive scan
   useEffect(() => {
