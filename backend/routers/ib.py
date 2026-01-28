@@ -225,12 +225,23 @@ async def get_historical_data(
 ):
     """
     Get historical bar data for a symbol.
-    Priority: Alpaca -> IB Gateway -> Cached data
+    Priority: Alpaca -> IB Gateway (if not busy) -> Cached data
+    
+    When IB is busy (e.g., running comprehensive scan), we use cached data
+    or Alpaca to avoid overloading the IB connection.
     """
     cache = get_data_cache()
     symbol = symbol.upper()
     
-    # Try Alpaca first (free, no subscription needed)
+    # Check if IB is busy with a heavy operation
+    ib_is_busy = False
+    busy_operation = None
+    if _ib_service:
+        ib_is_busy, busy_operation = _ib_service.is_busy()
+        if ib_is_busy:
+            print(f"[IB Historical] IB is busy with '{busy_operation}', prioritizing Alpaca/cache for {symbol}")
+    
+    # Try Alpaca first (free, no subscription needed, and doesn't conflict with IB)
     if _alpaca_service:
         try:
             alpaca_timeframe = _convert_ib_to_alpaca_timeframe(bar_size)
@@ -264,7 +275,7 @@ async def get_historical_data(
         except Exception as e:
             print(f"Alpaca historical data error for {symbol}: {e}")
     
-    # Fallback to IB Gateway
+    # Check IB Gateway connection status
     is_connected = False
     if _ib_service:
         try:
@@ -273,7 +284,8 @@ async def get_historical_data(
         except:
             pass
     
-    if is_connected and _ib_service:
+    # Only use IB if connected AND not busy with a heavy operation
+    if is_connected and _ib_service and not ib_is_busy:
         try:
             bars = await _ib_service.get_historical_data(symbol, duration, bar_size)
             if bars and len(bars) > 0:
@@ -291,19 +303,28 @@ async def get_historical_data(
         except Exception as e:
             print(f"IB historical data error for {symbol}: {e}")
     
-    # Not connected or error - try to return cached data
+    # Return cached data if IB is busy or failed
     cached = cache.get_cached_historical(symbol, duration, bar_size)
     if cached:
+        if ib_is_busy:
+            cached["ib_busy"] = True
+            cached["busy_operation"] = busy_operation
         return cached
     
     # No cached data available
+    error_msg = f"IB Gateway is disconnected and no cached data available for {symbol}"
+    if ib_is_busy:
+        error_msg = f"IB Gateway is busy with '{busy_operation}' and no cached data available for {symbol}. Try again shortly."
+    
     raise HTTPException(
         status_code=503,
         detail={
             "error": "Data unavailable",
-            "message": f"IB Gateway is disconnected and no cached data available for {symbol}",
+            "message": error_msg,
             "symbol": symbol,
-            "is_connected": is_connected
+            "is_connected": is_connected,
+            "ib_busy": ib_is_busy,
+            "busy_operation": busy_operation
         }
     )
 
