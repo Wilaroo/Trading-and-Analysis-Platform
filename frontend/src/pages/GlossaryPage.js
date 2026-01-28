@@ -810,6 +810,7 @@ const GlossaryPage = () => {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 };
