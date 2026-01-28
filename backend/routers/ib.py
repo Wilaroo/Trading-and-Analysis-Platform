@@ -1923,17 +1923,20 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
     
     min_score = request.min_score
     
-    # Check connection
-    is_connected = False
+    # Check IB connection
+    is_ib_connected = False
     if _ib_service:
         try:
             status = _ib_service.get_connection_status()
-            is_connected = status.get("connected", False)
-        except:
+            is_ib_connected = status.get("connected", False)
+        except Exception:
             pass
     
-    if not is_connected:
-        # First try in-memory cache, then DataCache for persistence
+    # Check Alpaca availability
+    alpaca_available = _alpaca_service is not None
+    
+    # If neither IB nor Alpaca available, try caches
+    if not is_ib_connected and not alpaca_available:
         from services.data_cache import get_data_cache
         data_cache = get_data_cache()
         
@@ -1972,11 +1975,12 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
             status_code=503,
             detail={
                 "error": "Data unavailable",
-                "message": "IB Gateway is disconnected and no cached data available. Connect to run comprehensive scan.",
+                "message": "Neither IB Gateway nor Alpaca available and no cached data. Configure Alpaca API keys or connect IB Gateway.",
                 "is_connected": False
             }
         )
     
+    # Proceed with scanning - will use IB scanners if connected, otherwise Alpaca only
     try:
         from services.scoring_engine import get_scoring_engine
         from services.enhanced_alerts import (
