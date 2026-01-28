@@ -583,6 +583,9 @@ class IBWorkerThread(threading.Thread):
             
             logger.info(f"Running scanner: {scan_type}, location: {location}, max: {max_results}")
             
+            # Process event loop before heavy operation to keep connection alive
+            self.ib.sleep(0.1)
+            
             # Create scanner subscription with relaxed filters
             sub = ScannerSubscription(
                 instrument=instrument,
@@ -596,6 +599,9 @@ class IBWorkerThread(threading.Thread):
             
             # Run the scan
             scan_results = self.ib.reqScannerData(sub)
+            
+            # Process event loop after scan to keep connection alive
+            self.ib.sleep(0.1)
             
             logger.info(f"Scanner returned {len(scan_results) if scan_results else 0} results")
             
