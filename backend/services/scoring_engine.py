@@ -1469,9 +1469,14 @@ class UniversalScoringEngine:
                 "vwap_position": technical["components"]["vwap"]["position"],
                 "float_ok": risk["components"]["float"]["meets_requirement"],
                 "squeeze_watch": risk["components"]["short_interest"]["squeeze_potential"],
-                "checklist_grade": smb_checklist["summary"]["grade"],  # NEW
-                "checklist_passed": f"{checklist_passed}/11"  # NEW
+                "checklist_grade": smb_checklist["summary"]["grade"],
+                "checklist_passed": f"{checklist_passed}/11",
+                # Advanced indicators summary
+                "is_trend_day": advanced_indicators["components"].get("vold_alignment", {}).get("is_trend_day", False),
+                "is_over_extended": advanced_indicators["components"].get("atr_extension", {}).get("is_over_extended", False),
+                "volume_significant": advanced_indicators["components"].get("volume_significance", {}).get("volume_status") == "SIGNIFICANT"
             },
+            "advanced_indicators": advanced_indicators,  # NEW: Full advanced indicators analysis
             "knowledge_base": {
                 "applicable_strategies": kb_strategies,
                 "kb_trade_bias": kb_trade_bias,
