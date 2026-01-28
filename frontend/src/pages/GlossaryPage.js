@@ -512,38 +512,72 @@ const GlossaryPage = () => {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <BookOpen className="w-6 h-6 text-cyan-400" />
-              <h1 className="text-xl font-bold">Trading Glossary & Logic</h1>
+              <h1 className="text-xl font-bold">Trading Glossary & Knowledge</h1>
             </div>
             <span className="text-sm text-zinc-500">
-              {glossaryData.entries.length} terms documented
+              {activeTab === 'glossary' ? `${glossaryData.entries.length} terms` : 'Your trading knowledge'}
             </span>
           </div>
           
-          {/* Search Bar */}
-          <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search terms, definitions, or concepts..."
-              className="w-full pl-12 pr-10 py-3 bg-zinc-900 border border-zinc-800 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
-              data-testid="glossary-search"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            )}
+          {/* Tabs */}
+          <div className="flex gap-2 mb-4">
+            <button
+              onClick={() => setActiveTab('glossary')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === 'glossary'
+                  ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                  : 'bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800'
+              }`}
+            >
+              <BookOpen className="w-4 h-4" />
+              Glossary
+            </button>
+            <button
+              onClick={() => setActiveTab('knowledge')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === 'knowledge'
+                  ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                  : 'bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800'
+              }`}
+            >
+              <Brain className="w-4 h-4" />
+              Knowledge Base
+            </button>
           </div>
+          
+          {/* Search Bar - only show for glossary tab */}
+          {activeTab === 'glossary' && (
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search terms, definitions, or concepts..."
+                className="w-full pl-12 pr-10 py-3 bg-zinc-900 border border-zinc-800 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                data-testid="glossary-search"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      {/* Tab Content */}
+      {activeTab === 'knowledge' ? (
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <KnowledgeBaseSection />
+        </div>
+      ) : (
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           
           {/* Categories Sidebar */}
           <div className="lg:col-span-1">
