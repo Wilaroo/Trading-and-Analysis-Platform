@@ -1298,6 +1298,20 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
     setConnecting(false);
   };
 
+  // Disconnect from IB
+  const handleDisconnectFromIB = async () => {
+    setConnecting(true);
+    try {
+      await api.post('/api/ib/disconnect');
+      await checkIbConnection();
+      toast.info('Disconnected from IB Gateway');
+    } catch (err) {
+      console.error('handleDisconnectFromIB: Disconnect failed:', err);
+      toast.error('Failed to disconnect');
+    }
+    setConnecting(false);
+  };
+
   // Fetch account data
   const fetchAccountData = async () => {
     try {
