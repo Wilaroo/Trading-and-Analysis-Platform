@@ -1959,6 +1959,40 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
     
     min_score = request.min_score
     
+    # Check if a scan is already running to prevent concurrent scans
+    if _ib_service:
+        is_busy, busy_op = _ib_service.is_busy()
+        if is_busy:
+            # Return cached results if available while scan is running
+            if _comprehensive_last_scan:
+                return {
+                    "alerts": _comprehensive_alerts,
+                    "summary": {
+                        "scalp": len(_comprehensive_alerts["scalp"]),
+                        "intraday": len(_comprehensive_alerts["intraday"]),
+                        "swing": len(_comprehensive_alerts["swing"]),
+                        "position": len(_comprehensive_alerts["position"]),
+                        "total": sum(len(v) for v in _comprehensive_alerts.values())
+                    },
+                    "min_score": min_score,
+                    "last_scan": _comprehensive_last_scan,
+                    "is_cached": True,
+                    "is_connected": True,
+                    "is_busy": True,
+                    "busy_operation": busy_op,
+                    "message": f"Scan already in progress ({busy_op}). Showing cached results."
+                }
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": "Scan in progress",
+                        "message": f"A comprehensive scan is already running ({busy_op}). Please wait and try again.",
+                        "is_busy": True,
+                        "busy_operation": busy_op
+                    }
+                )
+    
     # Check IB connection
     is_ib_connected = False
     if _ib_service:
