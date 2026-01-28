@@ -1,7 +1,14 @@
 """
-AI Assistant Service
+AI Assistant & Trading Coach Service
 Portable LLM-powered trading assistant that uses learned knowledge
-to provide analysis, suggestions, and trading guidance.
+to provide analysis, suggestions, trading guidance, and proactive coaching.
+
+Features:
+- Trade Analysis: Evaluate trades against learned strategies
+- Rule Enforcement: Warn about trading rule violations
+- Pattern Detection: Analyze trading behavior patterns
+- Proactive Coaching: Real-time guidance based on market context
+- Position Sizing: Risk-adjusted sizing recommendations
 
 Supports multiple LLM providers:
 - Emergent (default)
@@ -16,6 +23,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from dataclasses import dataclass, field
 import json
+import re
 
 logger = logging.getLogger(__name__)
 
