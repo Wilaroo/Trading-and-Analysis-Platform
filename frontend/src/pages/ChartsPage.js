@@ -267,7 +267,7 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
       </div>
       
       {/* Chart Container */}
-      <div className="flex-1 relative" style={{ minHeight: '400px' }}>
+      <div className="flex-1 relative" style={{ minHeight: '400px', height: '100%' }}>
         {showLoading && !hasData && (
           <div className="absolute inset-0 flex items-center justify-center bg-[#0A0A0A] z-10">
             <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
@@ -282,7 +282,7 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
             )}
           </div>
         )}
-        <div ref={chartContainerRef} className="absolute inset-0" />
+        <div ref={chartContainerRef} className="absolute inset-0" style={{ width: '100%', height: '100%' }} />
       </div>
     </div>
   );
