@@ -221,13 +221,21 @@ function App() {
   }, [initializeAudio]);
 
   const renderPage = () => {
+    // IB connection props to pass to pages that need it
+    const ibProps = {
+      ibConnected,
+      ibConnectionChecked,
+      connectToIb,
+      checkIbConnection
+    };
+    
     switch (activeTab) {
-      case 'command-center': return <CommandCenterPage />;
+      case 'command-center': return <CommandCenterPage {...ibProps} />;
       case 'chart': return <ErrorBoundary><ChartsPage /></ErrorBoundary>;
       case 'trade-journal': return <TradeJournalPage />;
-      case 'ib-trading': return <IBTradingPage />;
+      case 'ib-trading': return <IBTradingPage {...ibProps} />;
       case 'glossary': return <GlossaryPage />;
-      default: return <CommandCenterPage />;
+      default: return <CommandCenterPage {...ibProps} />;
     }
   };
 
