@@ -1279,9 +1279,12 @@ const CommandCenterPage = () => {
   const checkConnection = async () => {
     try {
       const res = await api.get('/api/ib/status');
-      setIsConnected(res.data?.connected || false);
-      return res.data?.connected;
-    } catch {
+      const connected = res.data?.connected || false;
+      console.log('checkConnection result:', res.data, 'setting isConnected to:', connected);
+      setIsConnected(connected);
+      return connected;
+    } catch (err) {
+      console.error('checkConnection error:', err);
       setIsConnected(false);
       return false;
     }
