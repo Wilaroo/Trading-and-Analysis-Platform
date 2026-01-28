@@ -2366,7 +2366,7 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                 except:
                     pass
         
-        return {
+        result = {
             "alerts": categorized,
             "summary": {
                 "scalp": len(categorized["scalp"]),
@@ -2382,6 +2382,8 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
             "is_connected": True
         }
         
+        return result
+        
     except Exception as e:
         print(f"Error in comprehensive scanner: {e}")
         import traceback
@@ -2391,9 +2393,13 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
             detail={
                 "error": "Scanner error",
                 "message": str(e),
-                "is_connected": is_connected
+                "is_connected": is_ib_connected
             }
         )
+    finally:
+        # Clear busy flag when done
+        if _ib_service:
+            _ib_service.set_busy(False)
 
 
 def determine_timeframe_from_analysis(matched_strategies: list, features: dict, scan_type: str) -> str:
