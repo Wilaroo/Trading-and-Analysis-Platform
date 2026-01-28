@@ -105,17 +105,28 @@ function App() {
   }, [activeTab]);
   
   // Check IB connection status on app load and periodically
+  // Global IB busy state
+  const [ibBusy, setIbBusy] = useState(false);
+  const [ibBusyOperation, setIbBusyOperation] = useState(null);
+
   const checkIbConnection = useCallback(async () => {
     try {
       const res = await api.get('/api/ib/status');
       const connected = res.data?.connected || false;
+      const busy = res.data?.is_busy || false;
+      const busyOp = res.data?.busy_operation || null;
+      
       setIbConnected(connected);
       setIbConnectionChecked(true);
+      setIbBusy(busy);
+      setIbBusyOperation(busyOp);
+      
       return connected;
     } catch (err) {
       console.error('IB status check failed:', err);
       setIbConnected(false);
       setIbConnectionChecked(true);
+      setIbBusy(false);
       return false;
     }
   }, []);
