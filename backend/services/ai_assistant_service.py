@@ -538,6 +538,419 @@ Be honest and constructive."""
 
         return await self.chat(prompt, session_id)
     
+    # ===================== COACHING FEATURES =====================
+    
+    async def check_rule_violations(self, symbol: str, action: str, entry_price: float = None, 
+                                    position_size: float = None, stop_loss: float = None) -> Dict:
+        """
+        Proactively check a trade idea against user's trading rules.
+        Returns violations, warnings, and recommendations.
+        """
+        violations = []
+        warnings = []
+        passed_rules = []
+        
+        # Get user's trading rules
+        try:
+            rules = self.knowledge_service.get_by_type("rule")
+        except Exception:
+            rules = []
+        
+        # Build context about the trade
+        trade_context = {
+            "symbol": symbol.upper(),
+            "action": action.upper(),
+            "entry_price": entry_price,
+            "position_size": position_size,
+            "stop_loss": stop_loss
+        }
+        
+        # Get market context for better analysis
+        market_context = await self._get_market_context()
+        
+        # Rule checking prompt
+        rules_text = "\n".join([f"- {r.get('title', '')}: {r.get('content', '')}" for r in rules[:15]]) if rules else "No trading rules defined yet."
+        
+        prompt = f"""TRADE RULE CHECK REQUEST
+
+Trade Details:
+- Symbol: {symbol.upper()}
+- Action: {action.upper()}
+- Entry Price: {entry_price if entry_price else 'Not specified'}
+- Position Size: {position_size if position_size else 'Not specified'}  
+- Stop Loss: {stop_loss if stop_loss else 'Not specified'}
+
+Market Context:
+{json.dumps(market_context, indent=2) if market_context else 'Market data unavailable'}
+
+User's Trading Rules:
+{rules_text}
+
+Please analyze this trade and provide:
+1. RULE VIOLATIONS: List any rules this trade would violate (CRITICAL)
+2. WARNINGS: Concerns that don't break rules but need attention
+3. PASSED CHECKS: Rules this trade correctly follows
+4. POSITION SIZING: Recommend proper size based on rules and market regime
+5. STOP LOSS RECOMMENDATION: If not provided or improper
+6. OVERALL VERDICT: PROCEED, CAUTION, or DO NOT TRADE
+
+Be specific and reference actual rules when applicable."""
+
+        response = await self.chat(prompt, f"rule_check_{symbol}_{datetime.now().strftime('%H%M%S')}")
+        
+        return {
+            "trade": trade_context,
+            "market_context": market_context,
+            "rules_checked": len(rules),
+            "analysis": response.get("response", ""),
+            "session_id": response.get("session_id"),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    
+    async def _get_market_context(self) -> Dict:
+        """Get current market context for coaching decisions"""
+        try:
+            # Try to get market indicators
+            from services.market_indicators import get_market_indicators_service
+            indicators_service = get_market_indicators_service()
+            
+            # Get VOLD ratio
+            vold = await indicators_service.get_vold_ratio()
+            regime = await indicators_service.get_market_regime()
+            
+            return {
+                "vold": vold,
+                "regime": regime.get("regime", {}).get("name", "Unknown") if regime else "Unknown",
+                "regime_characteristics": regime.get("regime", {}).get("characteristics", []) if regime else [],
+                "favored_setups": regime.get("favored_setups", []) if regime else [],
+                "avoid_setups": regime.get("avoid_setups", []) if regime else [],
+                "position_sizing_guidance": regime.get("position_sizing", {}).get("guidance", "") if regime else ""
+            }
+        except Exception as e:
+            logger.warning(f"Could not get market context: {e}")
+            return {}
+    
+    async def get_position_sizing_guidance(self, symbol: str, entry_price: float, 
+                                           stop_loss: float, account_size: float = None) -> Dict:
+        """
+        Get AI-powered position sizing recommendations based on:
+        - User's trading rules
+        - Current market regime
+        - Risk per trade limits
+        - Stock volatility (ATR)
+        """
+        market_context = await self._get_market_context()
+        
+        # Get ATR extension data if available
+        atr_data = {}
+        try:
+            from services.market_indicators import get_market_indicators_service
+            indicators_service = get_market_indicators_service()
+            atr_data = await indicators_service.analyze_stock_extension(symbol)
+        except Exception as e:
+            logger.debug(f"Could not get ATR data for {symbol}: {e}")
+        
+        # Get user's risk rules
+        try:
+            rules = self.knowledge_service.get_by_type("rule")
+            risk_rules = [r for r in rules if any(word in r.get('content', '').lower() 
+                         for word in ['risk', 'position', 'size', 'max', 'loss', '%'])]
+        except Exception:
+            risk_rules = []
+        
+        risk_rules_text = "\n".join([f"- {r.get('title', '')}: {r.get('content', '')}" for r in risk_rules[:10]]) if risk_rules else "No specific risk rules defined."
+        
+        prompt = f"""POSITION SIZING REQUEST
+
+Trade Setup:
+- Symbol: {symbol.upper()}
+- Entry Price: ${entry_price:.2f}
+- Stop Loss: ${stop_loss:.2f}
+- Risk Per Share: ${abs(entry_price - stop_loss):.2f}
+- Account Size: {'$' + f'{account_size:,.0f}' if account_size else 'Not specified'}
+
+Market Regime: {market_context.get('regime', 'Unknown')}
+Regime Position Sizing Guidance: {market_context.get('position_sizing_guidance', 'Not available')}
+
+ATR Data:
+{json.dumps(atr_data, indent=2) if atr_data else 'ATR data unavailable'}
+
+User's Risk Management Rules:
+{risk_rules_text}
+
+Please provide:
+1. RECOMMENDED SHARES: Based on risk rules and market regime
+2. DOLLAR RISK: Total dollar amount at risk
+3. RISK PERCENTAGE: As % of account (if account size known)
+4. SCALING STRATEGY: Should this be a full position or scaled entry?
+5. ADJUSTMENT FACTORS: Any reasons to reduce size (volatility, regime, extension)
+6. FINAL RECOMMENDATION: Exact share count with reasoning"""
+
+        response = await self.chat(prompt, f"sizing_{symbol}_{datetime.now().strftime('%H%M%S')}")
+        
+        return {
+            "symbol": symbol.upper(),
+            "entry": entry_price,
+            "stop": stop_loss,
+            "risk_per_share": abs(entry_price - stop_loss),
+            "market_regime": market_context.get("regime", "Unknown"),
+            "atr_data": atr_data,
+            "analysis": response.get("response", ""),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    
+    async def get_coaching_alert(self, context_type: str, data: Dict = None) -> Dict:
+        """
+        Generate proactive coaching alerts based on context.
+        
+        Context types:
+        - market_open: Morning coaching tips
+        - market_regime_change: Regime shifted, adjust strategy
+        - losing_streak: Multiple losses detected
+        - overtrading: Too many trades
+        - position_risk: Position too large
+        - rule_reminder: Periodic rule reminders
+        """
+        data = data or {}
+        
+        coaching_prompts = {
+            "market_open": """It's market open time. Based on my learned knowledge, provide a quick 3-point coaching reminder:
+1. What's the current market regime and how should I trade it?
+2. Which of my strategies are best suited for today?
+3. One key rule I should keep in mind.
+Keep it concise and actionable.""",
+            
+            "market_regime_change": f"""ALERT: Market regime appears to have changed.
+Previous: {data.get('previous_regime', 'Unknown')}
+Current: {data.get('current_regime', 'Unknown')}
+
+What does this mean for my trading today? What adjustments should I make? Which strategies should I focus on or avoid?""",
+            
+            "losing_streak": f"""COACHING ALERT: I've had {data.get('consecutive_losses', 0)} consecutive losing trades.
+
+Based on my trading rules and patterns, help me:
+1. Should I stop trading for the day?
+2. What might I be doing wrong?
+3. What rule should I remind myself of?
+4. Mental reset recommendations.""",
+            
+            "overtrading": f"""COACHING ALERT: I've made {data.get('trade_count', 0)} trades today.
+
+Am I overtrading? Based on my rules:
+1. What's my typical daily trade limit?
+2. Am I being patient enough?
+3. Quality vs quantity reminder.""",
+            
+            "position_risk": f"""POSITION RISK CHECK: 
+Current position: {data.get('symbol', 'Unknown')} 
+Size: {data.get('shares', 0)} shares
+Total exposure: ${data.get('exposure', 0):,.2f}
+
+Is this position too large based on my rules? What's the max I should have?""",
+            
+            "rule_reminder": """Give me a random but important reminder from my trading rules. Something I might forget in the heat of trading. Make it punchy and memorable."""
+        }
+        
+        prompt = coaching_prompts.get(context_type, f"Provide coaching guidance for: {context_type}")
+        
+        response = await self.chat(prompt, f"coach_{context_type}_{datetime.now().strftime('%H%M%S')}")
+        
+        return {
+            "alert_type": context_type,
+            "context_data": data,
+            "coaching": response.get("response", ""),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    
+    async def get_trade_review(self, trade_data: Dict) -> Dict:
+        """
+        AI review of a completed trade for learning.
+        
+        trade_data should include:
+        - symbol, action (buy/sell), entry_price, exit_price
+        - entry_time, exit_time
+        - pnl, shares
+        - notes (optional)
+        """
+        prompt = f"""TRADE REVIEW REQUEST
+
+Trade Details:
+- Symbol: {trade_data.get('symbol', 'Unknown')}
+- Action: {trade_data.get('action', 'Unknown')}
+- Entry: ${trade_data.get('entry_price', 0):.2f} at {trade_data.get('entry_time', 'Unknown')}
+- Exit: ${trade_data.get('exit_price', 0):.2f} at {trade_data.get('exit_time', 'Unknown')}
+- Shares: {trade_data.get('shares', 0)}
+- P&L: ${trade_data.get('pnl', 0):.2f}
+- User Notes: {trade_data.get('notes', 'None provided')}
+
+Please review this trade:
+1. STRATEGY MATCH: Which of my learned strategies did this trade follow (or should have followed)?
+2. RULE COMPLIANCE: Did I follow my trading rules?
+3. EXECUTION QUALITY: How was my entry and exit timing?
+4. WHAT WENT WELL: Positive aspects of this trade
+5. IMPROVEMENT AREAS: What could I have done better?
+6. LESSON LEARNED: One key takeaway from this trade
+7. PATTERN ALERT: Does this trade show any concerning patterns in my trading?
+
+Be specific and reference my actual rules/strategies when applicable."""
+
+        response = await self.chat(prompt, f"review_{trade_data.get('symbol', 'trade')}_{datetime.now().strftime('%H%M%S')}")
+        
+        return {
+            "trade": trade_data,
+            "review": response.get("response", ""),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    
+    async def get_daily_coaching_summary(self, session_id: str = "default") -> Dict:
+        """
+        Generate end-of-day coaching summary with:
+        - Today's trades review
+        - Rule compliance score
+        - Pattern observations
+        - Tomorrow's focus areas
+        """
+        # Get today's trades if available
+        trades_summary = ""
+        if self.db is not None:
+            try:
+                today = datetime.now(timezone.utc).date()
+                trades = list(self.db["trades"].find({
+                    "entry_date": {"$gte": today.isoformat()}
+                }))
+                
+                if trades:
+                    wins = len([t for t in trades if t.get("pnl", 0) > 0])
+                    losses = len([t for t in trades if t.get("pnl", 0) < 0])
+                    total_pnl = sum(t.get("pnl", 0) for t in trades)
+                    trades_summary = f"""
+Today's Trading Summary:
+- Total Trades: {len(trades)}
+- Wins: {wins}, Losses: {losses}
+- Win Rate: {(wins/len(trades)*100):.1f}%
+- Total P&L: ${total_pnl:,.2f}
+- Symbols traded: {', '.join(set(t.get('symbol', '') for t in trades))}
+"""
+            except Exception as e:
+                logger.warning(f"Error getting trades: {e}")
+        
+        prompt = f"""END OF DAY COACHING SUMMARY
+{trades_summary if trades_summary else 'No trade data available for today.'}
+
+Please provide my end-of-day coaching summary:
+
+1. OVERALL ASSESSMENT: How did I do today? (Even without specific trades, assess based on our conversations)
+
+2. RULE COMPLIANCE: Based on our discussions, how well did I stick to my trading rules?
+
+3. MENTAL STATE: Any signs of overtrading, revenge trading, or emotional decisions?
+
+4. PATTERN OBSERVATIONS: What patterns have you noticed in my trading behavior?
+
+5. TOMORROW'S FOCUS: 
+   - What's the current market regime?
+   - Which strategies should I focus on?
+   - Which rules do I need to remember?
+   - What mistakes should I avoid?
+
+6. ONE KEY COACHING MESSAGE: The most important thing I should remember.
+
+Be direct and constructive. I want honest feedback to improve."""
+
+        response = await self.chat(prompt, f"daily_summary_{datetime.now().strftime('%Y%m%d')}")
+        
+        return {
+            "date": datetime.now(timezone.utc).date().isoformat(),
+            "trades_summary": trades_summary,
+            "coaching": response.get("response", ""),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    
+    async def analyze_setup(self, symbol: str, setup_type: str = None, 
+                           chart_notes: str = None) -> Dict:
+        """
+        Analyze a specific trade setup with coaching guidance.
+        
+        setup_type examples: "gap_up", "breakout", "pullback", "reversal", etc.
+        chart_notes: User's observations about the chart
+        """
+        # Get stock data
+        stock_context = ""
+        try:
+            quality = await self.quality_service.get_quality_metrics(symbol)
+            q_score = self.quality_service.calculate_quality_score(quality)
+            stock_context = f"""
+Stock Quality Data:
+- Quality Grade: {q_score.grade} ({q_score.composite_score}/400)
+- Signal: {q_score.quality_signal}
+"""
+        except Exception as e:
+            logger.debug(f"Could not get quality data: {e}")
+        
+        # Get relevant strategies for this setup type
+        relevant_strategies = []
+        try:
+            if setup_type:
+                relevant_strategies = self.knowledge_service.search(setup_type, limit=5)
+        except Exception:
+            pass
+        
+        strategies_text = ""
+        if relevant_strategies:
+            strategies_text = "\nRelevant Strategies from Knowledge Base:\n"
+            strategies_text += "\n".join([f"- {s.get('title', '')}: {s.get('content', '')[:200]}" for s in relevant_strategies])
+        
+        market_context = await self._get_market_context()
+        
+        prompt = f"""SETUP ANALYSIS REQUEST
+
+Symbol: {symbol.upper()}
+Setup Type: {setup_type or 'Not specified'}
+User's Chart Notes: {chart_notes or 'None provided'}
+
+{stock_context}
+
+Market Context:
+- Regime: {market_context.get('regime', 'Unknown')}
+- Favored Setups: {', '.join(market_context.get('favored_setups', [])[:3]) or 'Unknown'}
+- Setups to Avoid: {', '.join(market_context.get('avoid_setups', [])[:3]) or 'Unknown'}
+{strategies_text}
+
+Please analyze this setup:
+
+1. SETUP QUALITY: Is this a high-quality setup? Rate 1-10.
+
+2. STRATEGY MATCH: Does this match any of my learned strategies? Which one?
+
+3. MARKET FIT: Does this setup fit the current market regime?
+
+4. ENTRY CRITERIA: What should I look for to confirm entry?
+
+5. RISK MANAGEMENT:
+   - Where should stop loss be?
+   - What's a reasonable target?
+   - Position size guidance
+
+6. WARNING FLAGS: Any red flags or concerns?
+
+7. VERDICT: TRADE, WAIT FOR CONFIRMATION, or PASS
+
+Be specific with price levels when possible."""
+
+        response = await self.chat(prompt, f"setup_{symbol}_{datetime.now().strftime('%H%M%S')}")
+        
+        return {
+            "symbol": symbol.upper(),
+            "setup_type": setup_type,
+            "chart_notes": chart_notes,
+            "market_regime": market_context.get("regime", "Unknown"),
+            "quality_grade": stock_context,
+            "analysis": response.get("response", ""),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    
+    # ===================== END COACHING FEATURES =====================
+    
     def get_conversation_history(self, session_id: str) -> List[Dict]:
         """Get conversation history for a session"""
         conv = self.conversations.get(session_id)
