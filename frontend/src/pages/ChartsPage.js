@@ -185,9 +185,10 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
     return () => clearInterval(interval);
   }, [symbol, timeframe, duration, isConnected, isBusy, hasData]);
 
-  // Handle disconnected state
-  const displayError = !isConnected ? 'Connect to IB Gateway for real-time charts' : error;
-  const showLoading = loading && isConnected;
+  // Handle error display - only show connection error if we have no data
+  // If we have data from Alpaca, don't show connection error
+  const displayError = (!hasData && !isConnected) ? 'Loading from Alpaca...' : error;
+  const showLoading = loading && !hasData;
 
   return (
     <div className="h-full flex flex-col bg-[#0A0A0A] rounded-lg border border-white/10 overflow-hidden">
