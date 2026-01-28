@@ -1939,13 +1939,28 @@ const CommandCenterPage = () => {
           
           {/* Connection Status */}
           <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm ${
+            !connectionChecked ? 'bg-zinc-500/10 text-zinc-400' :
             isConnected ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
           }`}>
-            {isConnected ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
-            {isConnected ? 'Connected' : 'Disconnected'}
+            {!connectionChecked ? (
+              <>
+                <div className="w-4 h-4 border-2 border-zinc-400 border-t-transparent rounded-full animate-spin" />
+                Checking...
+              </>
+            ) : isConnected ? (
+              <>
+                <Wifi className="w-4 h-4" />
+                Connected
+              </>
+            ) : (
+              <>
+                <WifiOff className="w-4 h-4" />
+                Disconnected
+              </>
+            )}
           </div>
           
-          {!isConnected && (
+          {connectionChecked && !isConnected && (
             <button
               onClick={connectToIB}
               disabled={connecting}
