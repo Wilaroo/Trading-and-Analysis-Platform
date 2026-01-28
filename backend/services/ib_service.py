@@ -850,6 +850,8 @@ class IBService:
         self._request_queue = queue.Queue()
         self._worker_thread: Optional[IBWorkerThread] = None
         self._lock = threading.Lock()
+        self._busy = False  # Flag to indicate heavy operation in progress
+        self._busy_operation = None  # Name of the busy operation
         
     def _ensure_worker_running(self):
         """Ensure the worker thread is running"""
@@ -858,6 +860,15 @@ class IBService:
                 self._worker_thread = IBWorkerThread(self._request_queue)
                 self._worker_thread.start()
                 time.sleep(0.5)  # Give the thread time to start
+    
+    def is_busy(self) -> tuple:
+        """Check if a heavy operation is in progress"""
+        return self._busy, self._busy_operation
+    
+    def set_busy(self, busy: bool, operation: str = None):
+        """Set the busy flag"""
+        self._busy = busy
+        self._busy_operation = operation if busy else None
     
     def _send_request(self, command: IBCommand, params: Dict = None, timeout: float = 30.0) -> IBResponse:
         """Send a request to the worker thread and wait for response"""
