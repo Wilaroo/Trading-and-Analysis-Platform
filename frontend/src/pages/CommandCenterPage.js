@@ -1198,7 +1198,7 @@ const QuickTradeModal = ({ ticker, action, onClose, onSuccess }) => {
 };
 
 // ===================== MAIN COMMAND CENTER =====================
-const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, checkIbConnection }) => {
+const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, checkIbConnection, isActiveTab = true }) => {
   // Use props from App for connection state (shared across all pages)
   const isConnected = ibConnected;
   const connectionChecked = ibConnectionChecked;
