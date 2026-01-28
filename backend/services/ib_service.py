@@ -852,6 +852,9 @@ class IBService:
         self._lock = threading.Lock()
         self._busy = False  # Flag to indicate heavy operation in progress
         self._busy_operation = None  # Name of the busy operation
+        self._busy_lock = threading.Lock()  # Thread-safe access to busy flag
+        self._instance_id = id(self)  # For debugging singleton integrity
+        logger.info(f"IBService instance created: id={self._instance_id}")
         
     def _ensure_worker_running(self):
         """Ensure the worker thread is running"""
