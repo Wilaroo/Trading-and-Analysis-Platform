@@ -842,18 +842,25 @@ class IBService:
         is_connected = False
         
         # Check if worker thread exists and is alive
-        if self._worker_thread and self._worker_thread.is_alive():
+        thread_alive = self._worker_thread and self._worker_thread.is_alive()
+        logger.info(f"get_connection_status: worker_thread exists={self._worker_thread is not None}, alive={thread_alive}")
+        
+        if thread_alive:
             # Send a status check command to the worker thread (thread-safe)
             try:
                 response = self._send_request(IBCommand.GET_STATUS, timeout=5.0)
+                logger.info(f"get_connection_status: response.success={response.success}, data={response.data}")
                 if response.success and response.data:
                     is_connected = response.data.get("connected", False)
                 else:
                     # Fallback to the flag if command fails
                     is_connected = self._worker_thread.is_connected
+                    logger.info(f"get_connection_status: using fallback flag={is_connected}")
             except Exception as e:
                 logger.warning(f"Error getting IB status: {e}")
                 is_connected = self._worker_thread.is_connected
+        else:
+            logger.info("get_connection_status: worker thread not alive, returning disconnected")
         
         return {
             "connected": is_connected,
