@@ -1621,7 +1621,8 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
     
     setIsComprehensiveScanning(true);
     try {
-      const res = await api.post('/api/ib/scanner/comprehensive', {
+      // Use long-running API for comprehensive scan (2 minute timeout)
+      const res = await apiLongRunning.post('/api/ib/scanner/comprehensive', {
         min_score: minScoreThreshold
       });
       
