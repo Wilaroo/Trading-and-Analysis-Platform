@@ -2482,9 +2482,12 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
             }
         )
     finally:
-        # Clear busy flag when done
+        # Clear busy flag when done with a small delay to let IB connection stabilize
         if _ib_service:
+            import asyncio
+            await asyncio.sleep(1)  # Give IB connection time to stabilize
             _ib_service.set_busy(False)
+            print("Comprehensive scan complete, busy flag cleared")
 
 
 def determine_timeframe_from_analysis(matched_strategies: list, features: dict, scan_type: str) -> str:
