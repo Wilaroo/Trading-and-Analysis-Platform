@@ -1017,3 +1017,64 @@ curl /api/quality/hedge/bear-market
 **Testing:**
 - 23/23 backend tests passed (iteration_8.json)
 - All frontend features verified working
+
+
+
+### Jan 28, 2026 - P0-P2 Trading Features Implementation
+**Implemented:**
+
+1. **P0: Custom Trading Indicators (COMPLETE)**
+   - `market_indicators.py` - Full implementation of:
+     - **VOLD Ratio**: Market breadth indicator using SPY/QQQ/IWM volume direction
+     - **5 ATR Over-Extension Bands**: Identifies stocks in over-extended territory
+     - **Volume Threshold Study**: Standard deviation-based significant volume detection
+     - **Market Regime Classification**: 4-regime model (Aggressive Trending, Passive Trending, Volatile Range, Quiet Consolidation)
+   - API endpoints in `market_context.py`:
+     - `GET /api/market-context/indicators/vold` - VOLD ratio and trend day detection
+     - `GET /api/market-context/indicators/regime` - Full market regime analysis
+     - `GET /api/market-context/indicators/extension/{symbol}` - Stock ATR extension analysis
+     - `GET /api/market-context/indicators/volume-threshold/{symbol}` - Volume significance
+   - Scoring engine integration:
+     - `score_advanced_indicators()` method adds VOLD alignment, ATR extension, and volume significance scoring
+     - 10% weight for advanced indicators in composite score
+     - Warnings and bonuses based on indicator signals
+
+2. **P1: Visual WebSocket vs IB Gateway Status Indicator (COMPLETE)**
+   - Dual connection status display in Command Center header:
+     - **WebSocket (Quotes)**: Blue indicator with pulsing dot when streaming active, orange with spinner when reconnecting
+     - **IB Gateway**: Green when connected, red when disconnected
+   - Clear visual distinction helps user understand:
+     - WebSocket reconnection = quotes temporarily unavailable (auto-reconnects)
+     - IB Gateway disconnect = trading/scanning unavailable (requires manual connect)
+   - Tooltips explain each connection type's purpose
+   - Props added to CommandCenterPage: `wsConnected`, `wsLastUpdate`
+
+3. **P2: IB Connection Stability Verification (FEATURES IN PLACE)**
+   - Thread-safe busy lock (`_busy_lock`) prevents race conditions
+   - 10-second scan cooldown prevents rapid consecutive scans
+   - Pre-scan stability check returns cached results during cooldown
+   - Status endpoint returns `is_busy` and `busy_operation` for UI feedback
+   - Auto-reconnect logic in worker thread heartbeat
+   - **Note**: User testing required to verify stability under load
+
+**Files Modified:**
+- `/app/frontend/src/App.js` - Added `wsConnected`, `wsLastUpdate` to ibProps
+- `/app/frontend/src/pages/CommandCenterPage.js` - New dual connection status UI
+
+**Already Implemented (Previous Session):**
+- `/app/backend/services/market_indicators.py` - Full VOLD, ATR, Volume, Regime logic
+- `/app/backend/routers/market_context.py` - Indicator endpoints
+- `/app/backend/services/scoring_engine.py` - Advanced indicators integration
+- `/app/backend/services/ib_service.py` - Thread-safe busy lock, heartbeat
+- `/app/backend/routers/ib.py` - Scan cooldown, stability checks
+
+**API Verification:**
+```bash
+# VOLD Ratio endpoint working
+curl /api/market-context/indicators/vold
+# Returns: nyse/nasdaq vold_ratio, is_trend_day, market_bias
+
+# Market Regime endpoint working  
+curl /api/market-context/indicators/regime
+# Returns: regime classification, favored/avoid setups, position sizing guidance
+```
