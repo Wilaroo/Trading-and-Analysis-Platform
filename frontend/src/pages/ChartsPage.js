@@ -4,7 +4,7 @@ import * as LightweightCharts from 'lightweight-charts';
 import api from '../utils/api';
 
 // ===================== IB REAL-TIME CHART =====================
-const IBRealtimeChart = ({ symbol, isConnected }) => {
+const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
@@ -15,6 +15,7 @@ const IBRealtimeChart = ({ symbol, isConnected }) => {
   const [timeframe, setTimeframe] = useState('5 mins');
   const [duration, setDuration] = useState('1 D');
   const [lastUpdate, setLastUpdate] = useState(null);
+  const [dataSource, setDataSource] = useState(null);
 
   const timeframes = [
     { label: '1m', value: '1 min', dur: '1 D' },
