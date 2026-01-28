@@ -21,20 +21,28 @@ import {
   Search,
   RefreshCw,
   Minimize2,
-  Maximize2
+  Maximize2,
+  Brain,
+  Calculator,
+  CheckCircle2,
+  Target,
+  MessageCircle
 } from 'lucide-react';
 import api from '../utils/api';
 import { toast } from 'sonner';
 import ReactMarkdown from 'react-markdown';
 
-// Icon mapping for suggestions
-const suggestionIcons = {
-  'sunrise': Sunrise,
-  'search': Search,
-  'help-circle': HelpCircle,
-  'award': Award,
-  'book': BookOpen,
-  'list': List
+// Markdown components defined outside render
+const markdownComponents = {
+  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+  li: ({ children }) => <li className="text-zinc-200">{children}</li>,
+  strong: ({ children }) => <strong className="text-cyan-400 font-semibold">{children}</strong>,
+  h1: ({ children }) => <h1 className="text-lg font-bold text-white mb-2">{children}</h1>,
+  h2: ({ children }) => <h2 className="text-base font-bold text-white mb-2">{children}</h2>,
+  h3: ({ children }) => <h3 className="text-sm font-bold text-white mb-1">{children}</h3>,
+  code: ({ children }) => <code className="bg-black/30 px-1 rounded text-amber-400">{children}</code>,
 };
 
 // Format timestamp
@@ -67,19 +75,7 @@ const ChatMessage = ({ message, isUser }) => {
             <p className="text-sm whitespace-pre-wrap">{message.content}</p>
           ) : (
             <div className="text-sm prose prose-invert prose-sm max-w-none">
-              <ReactMarkdown
-                components={{
-                  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                  ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
-                  ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
-                  li: ({ children }) => <li className="text-zinc-200">{children}</li>,
-                  strong: ({ children }) => <strong className="text-cyan-400 font-semibold">{children}</strong>,
-                  h1: ({ children }) => <h1 className="text-lg font-bold text-white mb-2">{children}</h1>,
-                  h2: ({ children }) => <h2 className="text-base font-bold text-white mb-2">{children}</h2>,
-                  h3: ({ children }) => <h3 className="text-sm font-bold text-white mb-1">{children}</h3>,
-                  code: ({ children }) => <code className="bg-black/30 px-1 rounded text-amber-400">{children}</code>,
-                }}
-              >
+              <ReactMarkdown components={markdownComponents}>
                 {message.content}
               </ReactMarkdown>
             </div>
@@ -95,18 +91,160 @@ const ChatMessage = ({ message, isUser }) => {
   );
 };
 
-// Suggestion chip component
-const SuggestionChip = ({ suggestion, onClick }) => {
-  const IconComponent = suggestionIcons[suggestion.icon] || HelpCircle;
-  
+// Quick Action Button
+const QuickAction = ({ icon: Icon, label, onClick, loading, color = 'zinc' }) => {
+  const colorClasses = {
+    zinc: 'bg-zinc-800/50 border-white/10 text-zinc-300 hover:border-cyan-500/30 hover:bg-zinc-800',
+    cyan: 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20',
+    amber: 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20',
+    emerald: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20',
+    purple: 'bg-purple-500/10 border-purple-500/30 text-purple-400 hover:bg-purple-500/20',
+  };
+
   return (
     <button
-      onClick={() => onClick(suggestion.text)}
-      className="flex items-center gap-2 px-3 py-2 bg-zinc-800/50 border border-white/10 rounded-lg hover:border-cyan-500/30 hover:bg-zinc-800 transition-all text-left group"
+      onClick={onClick}
+      disabled={loading}
+      className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs transition-all disabled:opacity-50 ${colorClasses[color]}`}
     >
-      <IconComponent className="w-4 h-4 text-zinc-400 group-hover:text-cyan-400" />
-      <span className="text-xs text-zinc-300 group-hover:text-white">{suggestion.text}</span>
+      {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Icon className="w-3.5 h-3.5" />}
+      <span>{label}</span>
     </button>
+  );
+};
+
+// Rule Check Form (inline)
+const RuleCheckForm = ({ onSubmit, loading }) => {
+  const [symbol, setSymbol] = useState('');
+  const [action, setAction] = useState('BUY');
+  const [entryPrice, setEntryPrice] = useState('');
+  const [stopLoss, setStopLoss] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!symbol.trim()) {
+      toast.error('Enter a symbol');
+      return;
+    }
+    onSubmit({
+      symbol: symbol.toUpperCase(),
+      action,
+      entry_price: entryPrice ? parseFloat(entryPrice) : null,
+      stop_loss: stopLoss ? parseFloat(stopLoss) : null
+    });
+    // Clear form after submit
+    setSymbol('');
+    setEntryPrice('');
+    setStopLoss('');
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-2">
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={symbol}
+          onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+          placeholder="Symbol"
+          className="flex-1 px-2.5 py-1.5 bg-zinc-800/50 border border-white/10 rounded text-white text-xs placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
+          data-testid="rule-check-symbol"
+        />
+        <select
+          value={action}
+          onChange={(e) => setAction(e.target.value)}
+          className="px-2.5 py-1.5 bg-zinc-800/50 border border-white/10 rounded text-white text-xs focus:outline-none focus:border-cyan-500/50"
+        >
+          <option value="BUY">BUY</option>
+          <option value="SELL">SELL</option>
+        </select>
+      </div>
+      <div className="flex gap-2">
+        <input
+          type="number"
+          value={entryPrice}
+          onChange={(e) => setEntryPrice(e.target.value)}
+          placeholder="Entry $"
+          step="0.01"
+          className="flex-1 px-2.5 py-1.5 bg-zinc-800/50 border border-white/10 rounded text-white text-xs placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
+        />
+        <input
+          type="number"
+          value={stopLoss}
+          onChange={(e) => setStopLoss(e.target.value)}
+          placeholder="Stop $"
+          step="0.01"
+          className="flex-1 px-2.5 py-1.5 bg-zinc-800/50 border border-white/10 rounded text-white text-xs placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
+        />
+        <button
+          type="submit"
+          disabled={loading || !symbol.trim()}
+          className="px-3 py-1.5 bg-cyan-500 hover:bg-cyan-600 disabled:bg-zinc-700 text-white rounded text-xs font-medium transition-colors flex items-center gap-1.5"
+          data-testid="rule-check-submit"
+        >
+          {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+          Check
+        </button>
+      </div>
+    </form>
+  );
+};
+
+// Position Size Form (inline)
+const PositionSizeForm = ({ onSubmit, loading }) => {
+  const [symbol, setSymbol] = useState('');
+  const [entryPrice, setEntryPrice] = useState('');
+  const [stopLoss, setStopLoss] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!symbol.trim() || !entryPrice || !stopLoss) {
+      toast.error('Fill in symbol, entry, and stop');
+      return;
+    }
+    onSubmit({
+      symbol: symbol.toUpperCase(),
+      entry_price: parseFloat(entryPrice),
+      stop_loss: parseFloat(stopLoss)
+    });
+    setSymbol('');
+    setEntryPrice('');
+    setStopLoss('');
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="flex gap-2">
+      <input
+        type="text"
+        value={symbol}
+        onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+        placeholder="Symbol"
+        className="w-16 px-2.5 py-1.5 bg-zinc-800/50 border border-white/10 rounded text-white text-xs placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
+      />
+      <input
+        type="number"
+        value={entryPrice}
+        onChange={(e) => setEntryPrice(e.target.value)}
+        placeholder="Entry $"
+        step="0.01"
+        className="w-20 px-2.5 py-1.5 bg-zinc-800/50 border border-white/10 rounded text-white text-xs placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
+      />
+      <input
+        type="number"
+        value={stopLoss}
+        onChange={(e) => setStopLoss(e.target.value)}
+        placeholder="Stop $"
+        step="0.01"
+        className="w-20 px-2.5 py-1.5 bg-zinc-800/50 border border-white/10 rounded text-white text-xs placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
+      />
+      <button
+        type="submit"
+        disabled={loading || !symbol.trim() || !entryPrice || !stopLoss}
+        className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 disabled:bg-zinc-700 text-white rounded text-xs font-medium transition-colors flex items-center gap-1.5"
+      >
+        {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Calculator className="w-3 h-3" />}
+        Size
+      </button>
+    </form>
   );
 };
 
@@ -116,11 +254,12 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState(null);
-  const [suggestions, setSuggestions] = useState([]);
   const [isMinimized, setIsMinimized] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [status, setStatus] = useState(null);
+  const [activeMode, setActiveMode] = useState('chat'); // 'chat', 'rules', 'sizing'
+  const [coachLoading, setCoachLoading] = useState({});
   
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -136,40 +275,23 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
 
   // Focus input when opened
   useEffect(() => {
-    if (isOpen && inputRef.current) {
+    if (isOpen && inputRef.current && activeMode === 'chat') {
       inputRef.current.focus();
     }
-  }, [isOpen]);
+  }, [isOpen, activeMode]);
 
-  // Initialize session and fetch suggestions
+  // Initialize session and fetch status
   useEffect(() => {
     if (isOpen) {
-      // Generate new session ID if none exists
       if (!sessionId) {
         setSessionId(`session_${Date.now()}`);
       }
-      
-      // Fetch suggestions
-      fetchSuggestions();
-      
-      // Fetch status
       fetchStatus();
-      
-      // Handle initial prompt
       if (initialPrompt) {
         setInput(initialPrompt);
       }
     }
   }, [isOpen, sessionId, initialPrompt]);
-
-  const fetchSuggestions = async () => {
-    try {
-      const res = await api.get('/api/assistant/suggestions');
-      setSuggestions(res.data?.suggestions || []);
-    } catch (err) {
-      console.error('Error fetching suggestions:', err);
-    }
-  };
 
   const fetchStatus = async () => {
     try {
@@ -206,7 +328,6 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
     const text = messageText || input.trim();
     if (!text || isLoading) return;
 
-    // Add user message immediately
     const userMessage = {
       role: 'user',
       content: text,
@@ -215,6 +336,7 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
+    setActiveMode('chat');
 
     try {
       const res = await api.post('/api/assistant/chat', {
@@ -230,7 +352,6 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
         };
         setMessages(prev => [...prev, assistantMessage]);
         
-        // Update session ID if returned
         if (res.data.session_id && !sessionId) {
           setSessionId(res.data.session_id);
         }
@@ -239,9 +360,6 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
       }
     } catch (err) {
       toast.error('Failed to send message');
-      console.error('Chat error:', err);
-      
-      // Add error message
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: 'Sorry, I encountered an error. Please try again.',
@@ -272,10 +390,86 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
     }
   };
 
-  const handleSuggestionClick = (text) => {
-    setInput(text);
-    inputRef.current?.focus();
-  };
+  // Coaching quick actions
+  const handleCoachAction = useCallback(async (actionType) => {
+    setCoachLoading(prev => ({ ...prev, [actionType]: true }));
+    try {
+      let res;
+      let title;
+      
+      switch (actionType) {
+        case 'morning':
+          res = await api.get('/api/assistant/coach/morning-briefing');
+          title = '☀️ Morning Coaching';
+          break;
+        case 'reminder':
+          res = await api.get('/api/assistant/coach/rule-reminder');
+          title = '📋 Rule Reminder';
+          break;
+        case 'summary':
+          res = await api.get('/api/assistant/coach/daily-summary');
+          title = '📊 Daily Summary';
+          break;
+        default:
+          return;
+      }
+      
+      if (res.data?.coaching) {
+        // Add as assistant message
+        setMessages(prev => [
+          ...prev,
+          { role: 'user', content: title, timestamp: new Date().toISOString() },
+          { role: 'assistant', content: res.data.coaching, timestamp: new Date().toISOString() }
+        ]);
+      }
+    } catch (err) {
+      toast.error(`Failed to get ${actionType}`);
+    } finally {
+      setCoachLoading(prev => ({ ...prev, [actionType]: false }));
+    }
+  }, []);
+
+  // Rule check handler
+  const handleRuleCheck = useCallback(async (data) => {
+    setCoachLoading(prev => ({ ...prev, rules: true }));
+    try {
+      const res = await api.post('/api/assistant/coach/check-rules', data);
+      if (res.data?.analysis) {
+        const userMsg = `🔍 Check rules: ${data.symbol} ${data.action}${data.entry_price ? ` @ $${data.entry_price}` : ''}${data.stop_loss ? ` (stop: $${data.stop_loss})` : ''}`;
+        setMessages(prev => [
+          ...prev,
+          { role: 'user', content: userMsg, timestamp: new Date().toISOString() },
+          { role: 'assistant', content: res.data.analysis, timestamp: new Date().toISOString() }
+        ]);
+      }
+    } catch (err) {
+      toast.error('Failed to check rules');
+    } finally {
+      setCoachLoading(prev => ({ ...prev, rules: false }));
+      setActiveMode('chat');
+    }
+  }, []);
+
+  // Position sizing handler
+  const handlePositionSize = useCallback(async (data) => {
+    setCoachLoading(prev => ({ ...prev, sizing: true }));
+    try {
+      const res = await api.post('/api/assistant/coach/position-size', data);
+      if (res.data?.analysis) {
+        const userMsg = `📐 Position size: ${data.symbol} entry $${data.entry_price} stop $${data.stop_loss}`;
+        setMessages(prev => [
+          ...prev,
+          { role: 'user', content: userMsg, timestamp: new Date().toISOString() },
+          { role: 'assistant', content: res.data.analysis, timestamp: new Date().toISOString() }
+        ]);
+      }
+    } catch (err) {
+      toast.error('Failed to calculate size');
+    } finally {
+      setCoachLoading(prev => ({ ...prev, sizing: false }));
+      setActiveMode('chat');
+    }
+  }, []);
 
   if (!isOpen) return null;
 
@@ -301,7 +495,7 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-2xl h-[80vh] mx-4 bg-[#0A0A0A] border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="w-full max-w-2xl h-[85vh] mx-4 bg-[#0A0A0A] border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-white/10 bg-gradient-to-r from-amber-500/5 to-cyan-500/5">
           <div className="flex items-center gap-3">
@@ -310,7 +504,7 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
             </div>
             <div>
               <h2 className="font-bold text-white flex items-center gap-2">
-                Trading Assistant
+                AI Trading Assistant
                 <Sparkles className="w-4 h-4 text-amber-400" />
               </h2>
               <p className="text-xs text-zinc-500">
@@ -319,9 +513,7 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
                 ) : (
                   <span className="text-red-400">● Offline</span>
                 )}
-                {status?.current_provider && (
-                  <span className="ml-2 text-zinc-500">via {status.current_provider}</span>
-                )}
+                <span className="ml-2">Chat + Coaching</span>
               </p>
             </div>
           </div>
@@ -335,14 +527,14 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
               className={`p-2 rounded-lg transition-colors ${
                 showHistory ? 'bg-cyan-500/20 text-cyan-400' : 'text-zinc-400 hover:text-white hover:bg-white/5'
               }`}
-              title="Conversation history"
+              title="History"
             >
               <Clock className="w-5 h-5" />
             </button>
             <button
               onClick={clearConversation}
               className="p-2 text-zinc-400 hover:text-red-400 hover:bg-white/5 rounded-lg transition-colors"
-              title="Clear conversation"
+              title="Clear"
             >
               <Trash2 className="w-5 h-5" />
             </button>
@@ -364,28 +556,90 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
 
         {/* Session History Dropdown */}
         {showHistory && sessions.length > 0 && (
-          <div className="border-b border-white/10 bg-zinc-900/50 p-3 max-h-40 overflow-y-auto">
+          <div className="border-b border-white/10 bg-zinc-900/50 p-3 max-h-32 overflow-y-auto">
             <p className="text-xs text-zinc-500 mb-2">Recent Conversations</p>
             <div className="space-y-1">
               {sessions.map((session) => (
                 <button
                   key={session.session_id}
                   onClick={() => loadSession(session.session_id)}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                  className={`w-full text-left px-3 py-1.5 rounded text-xs transition-colors ${
                     session.session_id === sessionId
                       ? 'bg-cyan-500/20 text-cyan-400'
                       : 'hover:bg-white/5 text-zinc-300'
                   }`}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="truncate">{session.session_id}</span>
-                    <span className="text-xs text-zinc-500">{session.message_count} msgs</span>
-                  </div>
+                  <span className="truncate">{session.session_id}</span>
+                  <span className="text-zinc-500 ml-2">({session.message_count})</span>
                 </button>
               ))}
             </div>
           </div>
         )}
+
+        {/* Quick Actions Bar */}
+        <div className="p-3 border-b border-white/10 bg-zinc-900/30">
+          <div className="flex items-center gap-2 flex-wrap">
+            <QuickAction
+              icon={Sunrise}
+              label="Morning Brief"
+              onClick={() => handleCoachAction('morning')}
+              loading={coachLoading.morning}
+              color="amber"
+            />
+            <QuickAction
+              icon={BookOpen}
+              label="Rule Reminder"
+              onClick={() => handleCoachAction('reminder')}
+              loading={coachLoading.reminder}
+              color="cyan"
+            />
+            <QuickAction
+              icon={TrendingUp}
+              label="Daily Summary"
+              onClick={() => handleCoachAction('summary')}
+              loading={coachLoading.summary}
+              color="purple"
+            />
+            <div className="h-5 w-px bg-white/10 mx-1" />
+            <button
+              onClick={() => setActiveMode(activeMode === 'rules' ? 'chat' : 'rules')}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs transition-all ${
+                activeMode === 'rules' 
+                  ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400' 
+                  : 'bg-zinc-800/50 border-white/10 text-zinc-300 hover:border-cyan-500/30'
+              }`}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Rule Check
+            </button>
+            <button
+              onClick={() => setActiveMode(activeMode === 'sizing' ? 'chat' : 'sizing')}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs transition-all ${
+                activeMode === 'sizing' 
+                  ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' 
+                  : 'bg-zinc-800/50 border-white/10 text-zinc-300 hover:border-emerald-500/30'
+              }`}
+            >
+              <Calculator className="w-3.5 h-3.5" />
+              Position Size
+            </button>
+          </div>
+          
+          {/* Inline Forms */}
+          {activeMode === 'rules' && (
+            <div className="mt-3 p-3 bg-cyan-500/5 border border-cyan-500/20 rounded-lg">
+              <p className="text-xs text-zinc-400 mb-2">Check trade against your rules before executing:</p>
+              <RuleCheckForm onSubmit={handleRuleCheck} loading={coachLoading.rules} />
+            </div>
+          )}
+          {activeMode === 'sizing' && (
+            <div className="mt-3 p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-lg">
+              <p className="text-xs text-zinc-400 mb-2">Calculate position size based on risk rules:</p>
+              <PositionSizeForm onSubmit={handlePositionSize} loading={coachLoading.sizing} />
+            </div>
+          )}
+        </div>
 
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -395,20 +649,38 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
                 <Bot className="w-8 h-8 text-amber-400" />
               </div>
               <h3 className="text-lg font-semibold text-white mb-2">How can I help you trade smarter?</h3>
-              <p className="text-sm text-zinc-500 mb-6 max-w-md">
-                I have access to your {status?.knowledge_count || 108}+ learned strategies and rules. 
-                I'll help analyze trades, enforce your rules, and spot patterns in your behavior.
+              <p className="text-sm text-zinc-500 mb-4 max-w-md">
+                I have access to your learned strategies and rules. Ask me anything, or use the quick actions above.
               </p>
-              
-              {/* Suggestions */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-md">
-                {suggestions.slice(0, 6).map((suggestion, idx) => (
-                  <SuggestionChip
-                    key={idx}
-                    suggestion={suggestion}
-                    onClick={handleSuggestionClick}
-                  />
-                ))}
+              <div className="grid grid-cols-2 gap-2 text-left max-w-sm">
+                <button
+                  onClick={() => sendMessage("Analyze AAPL for me")}
+                  className="flex items-center gap-2 px-3 py-2 bg-zinc-800/50 border border-white/10 rounded-lg hover:border-cyan-500/30 text-xs text-zinc-300"
+                >
+                  <Search className="w-3.5 h-3.5 text-zinc-400" />
+                  Analyze AAPL
+                </button>
+                <button
+                  onClick={() => sendMessage("What are my trading rules for gaps?")}
+                  className="flex items-center gap-2 px-3 py-2 bg-zinc-800/50 border border-white/10 rounded-lg hover:border-cyan-500/30 text-xs text-zinc-300"
+                >
+                  <List className="w-3.5 h-3.5 text-zinc-400" />
+                  My gap rules
+                </button>
+                <button
+                  onClick={() => sendMessage("Should I buy NVDA?")}
+                  className="flex items-center gap-2 px-3 py-2 bg-zinc-800/50 border border-white/10 rounded-lg hover:border-cyan-500/30 text-xs text-zinc-300"
+                >
+                  <HelpCircle className="w-3.5 h-3.5 text-zinc-400" />
+                  Should I buy?
+                </button>
+                <button
+                  onClick={() => sendMessage("Review my recent trades")}
+                  className="flex items-center gap-2 px-3 py-2 bg-zinc-800/50 border border-white/10 rounded-lg hover:border-cyan-500/30 text-xs text-zinc-300"
+                >
+                  <BookOpen className="w-3.5 h-3.5 text-zinc-400" />
+                  Review trades
+                </button>
               </div>
             </div>
           ) : (
@@ -429,7 +701,7 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
                   <div className="bg-zinc-800/50 border border-white/10 rounded-xl p-3">
                     <div className="flex items-center gap-2">
                       <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
-                      <span className="text-sm text-zinc-400">Analyzing...</span>
+                      <span className="text-sm text-zinc-400">Thinking...</span>
                     </div>
                   </div>
                 </div>
@@ -439,27 +711,6 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
             </>
           )}
         </div>
-
-        {/* Quick Actions (when conversation active) */}
-        {messages.length > 0 && (
-          <div className="px-4 py-2 border-t border-white/5 flex gap-2 overflow-x-auto">
-            {[
-              { text: "Analyze my last trade", icon: TrendingUp },
-              { text: "Check my rules", icon: List },
-              { text: "Any warnings?", icon: AlertTriangle },
-            ].map((action, idx) => (
-              <button
-                key={idx}
-                onClick={() => sendMessage(action.text)}
-                disabled={isLoading}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-zinc-800/50 border border-white/10 rounded-full hover:border-cyan-500/30 whitespace-nowrap transition-colors disabled:opacity-50"
-              >
-                <action.icon className="w-3 h-3 text-zinc-400" />
-                <span className="text-zinc-300">{action.text}</span>
-              </button>
-            ))}
-          </div>
-        )}
 
         {/* Input Area */}
         <div className="p-4 border-t border-white/10 bg-zinc-900/30">
@@ -489,7 +740,7 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
             </div>
           </div>
           <p className="text-[10px] text-zinc-600 mt-2 text-center">
-            Press Enter to send • Shift+Enter for new line
+            Enter to send • Shift+Enter for new line
           </p>
         </div>
       </div>
