@@ -2187,12 +2187,11 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
         # Apply quick filters BEFORE expensive analysis to speed up scanning
         # Based on SMB "In Play" criteria and best practices
         
-        # Filter thresholds
+        # Filter thresholds - "In Play" criteria based on SMB best practices
         MIN_PRICE = 5.0              # Skip penny stocks (less than $5)
         MIN_VOLUME = 500000          # Minimum daily volume (500k shares for liquidity)
         MAX_FLOAT = 25000000         # Skip stocks with float > 25 million (less volatility)
         MIN_RVOL = 1.5               # Minimum relative volume to be "In Play"
-        MIN_CHANGE_PERCENT = 2.0     # Minimum % move to be interesting
         
         filtered_candidates = {}
         skipped_reasons = {"low_price": 0, "low_volume": 0, "invalid_symbol": 0, "high_float": 0, "low_rvol": 0}
