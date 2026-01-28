@@ -1926,38 +1926,46 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
             <span className="hidden sm:inline">Knowledge</span>
           </button>
           
-          {/* Connection Status */}
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm ${
-            !connectionChecked ? 'bg-zinc-500/10 text-zinc-400' :
-            isConnected ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
-          }`}>
-            {!connectionChecked ? (
-              <>
-                <div className="w-4 h-4 border-2 border-zinc-400 border-t-transparent rounded-full animate-spin" />
-                Checking...
-              </>
-            ) : isConnected ? (
-              <>
-                <Wifi className="w-4 h-4" />
-                Connected
-              </>
-            ) : (
-              <>
-                <WifiOff className="w-4 h-4" />
-                Disconnected
-              </>
+          {/* Connection Status - Always visible with toggle functionality */}
+          <div className="flex items-center gap-2">
+            {/* IB Gateway Status */}
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm ${
+              !connectionChecked ? 'bg-zinc-500/10 text-zinc-400' :
+              isConnected ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
+            }`}>
+              {!connectionChecked ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-zinc-400 border-t-transparent rounded-full animate-spin" />
+                  <span className="hidden sm:inline">Checking...</span>
+                </>
+              ) : isConnected ? (
+                <>
+                  <Wifi className="w-4 h-4" />
+                  <span className="hidden sm:inline">IB Connected</span>
+                </>
+              ) : (
+                <>
+                  <WifiOff className="w-4 h-4" />
+                  <span className="hidden sm:inline">IB Disconnected</span>
+                </>
+              )}
+            </div>
+            
+            {/* Connect/Disconnect Toggle Button */}
+            {connectionChecked && (
+              <button
+                onClick={isConnected ? handleDisconnectFromIB : handleConnectToIB}
+                disabled={connecting}
+                className={`px-4 py-2 rounded font-medium text-sm transition-colors ${
+                  isConnected 
+                    ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30' 
+                    : 'bg-cyan-500 text-black hover:bg-cyan-400'
+                } disabled:opacity-50`}
+              >
+                {connecting ? 'Processing...' : isConnected ? 'Disconnect' : 'Connect'}
+              </button>
             )}
           </div>
-          
-          {connectionChecked && !isConnected && (
-            <button
-              onClick={handleConnectToIB}
-              disabled={connecting}
-              className="px-4 py-2 bg-cyan-500 text-black rounded font-medium text-sm hover:bg-cyan-400 disabled:opacity-50"
-            >
-              {connecting ? 'Connecting...' : 'Connect to IB'}
-            </button>
-          )}
           
           {/* Auto Scan Toggle */}
           {isConnected && (
