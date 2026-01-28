@@ -75,8 +75,18 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
           borderDownColor: '#FF2E2E',
           wickUpColor: '#00FF94',
           wickDownColor: '#FF2E2E',
+          priceScaleId: 'right',
         });
         candleSeriesRef.current = candleSeries;
+        
+        // Ensure price scale auto-fits to visible data
+        chart.priceScale('right').applyOptions({
+          autoScale: true,
+          scaleMargins: {
+            top: 0.1,
+            bottom: 0.2,  // Leave room for volume at bottom
+          },
+        });
 
         const volumeSeries = chart.addHistogramSeries({
           color: '#26a69a',
