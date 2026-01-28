@@ -98,7 +98,13 @@ async def get_connection_status():
         raise HTTPException(status_code=500, detail="IB service not initialized")
     
     status = _ib_service.get_connection_status()
-    print(f"[IB STATUS] Returning: connected={status.get('connected')}")
+    
+    # Add busy status
+    is_busy, busy_operation = _ib_service.is_busy()
+    status["is_busy"] = is_busy
+    status["busy_operation"] = busy_operation
+    
+    print(f"[IB STATUS] Returning: connected={status.get('connected')}, busy={is_busy}")
     return status
 
 
