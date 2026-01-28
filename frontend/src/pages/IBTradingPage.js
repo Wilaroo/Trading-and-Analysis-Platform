@@ -444,6 +444,8 @@ const IBTradingPage = () => {
     setError(null);
     try {
       await api.post('/api/ib/connect');
+      // Small delay to allow IB connection to stabilize
+      await new Promise(resolve => setTimeout(resolve, 500));
       await fetchConnectionStatus();
       // Fetch data after connecting
       await Promise.all([fetchAccountData(), fetchPositions(), fetchOpenOrders()]);
