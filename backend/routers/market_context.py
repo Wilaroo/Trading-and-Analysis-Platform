@@ -303,3 +303,164 @@ async def get_context_strategy_matrix():
         "description": "Shows recommended strategy counts and top strategies for each market context"
     }
 
+
+
+# ==================== ADVANCED MARKET INDICATORS ====================
+
+# Market indicators service instance
+_market_indicators_service = None
+
+def init_market_indicators_service(alpaca_service=None, ib_service=None):
+    """Initialize the market indicators service"""
+    global _market_indicators_service
+    from services.market_indicators import get_market_indicators_service
+    _market_indicators_service = get_market_indicators_service(alpaca_service, ib_service)
+    return _market_indicators_service
+
+
+@router.get("/indicators/vold")
+async def get_vold_ratio():
+    """
+    Get VOLD (Volume Advance/Decline) Ratio for trend day detection.
+    
+    VOLD measures whether market volume is skewed toward advancing or declining stocks.
+    - VOLD >= 2.618: Strong trend day (bullish)
+    - VOLD <= -2.618: Strong trend day (bearish)
+    - Between: Range/chop day
+    
+    Use this to determine if momentum strategies or mean reversion strategies are favored.
+    """
+    global _market_indicators_service
+    
+    if not _market_indicators_service:
+        from services.market_indicators import get_market_indicators_service
+        _market_indicators_service = get_market_indicators_service()
+    
+    try:
+        vold_data = await _market_indicators_service.calculate_vold_ratio()
+        return vold_data
+    except Exception as e:
+        return {
+            "error": str(e),
+            "overall": {"is_trend_day": False, "market_bias": "NEUTRAL"}
+        }
+
+
+@router.get("/indicators/regime")
+async def get_market_regime():
+    """
+    Get full market regime classification.
+    
+    Classifies market into one of 4 regimes:
+    - AGGRESSIVE_TRENDING: High strength + high momentum
+    - PASSIVE_TRENDING: High strength + low momentum
+    - VOLATILE_RANGE: Low strength + high volatility
+    - QUIET_CONSOLIDATION: Low strength + low volatility
+    
+    Returns favored setups, avoid setups, and position sizing guidance.
+    """
+    global _market_indicators_service
+    
+    if not _market_indicators_service:
+        from services.market_indicators import get_market_indicators_service
+        _market_indicators_service = get_market_indicators_service()
+    
+    try:
+        analysis = await _market_indicators_service.get_full_market_analysis()
+        return analysis
+    except Exception as e:
+        return {
+            "error": str(e),
+            "regime": {"regime": "UNKNOWN"},
+            "trading_guidance": {"is_trend_day": False}
+        }
+
+
+@router.get("/indicators/extension/{symbol}")
+async def get_stock_extension(symbol: str):
+    """
+    Get 5 ATR over-extension analysis for a specific stock.
+    
+    Calculates bands from 5-day high/low extended by 5 ATRs.
+    - Price above high_band: Over-extended to upside (caution on longs)
+    - Price below low_band: Over-extended to downside (caution on shorts)
+    
+    Also includes volume threshold analysis.
+    """
+    global _market_indicators_service
+    
+    if not _market_indicators_service:
+        from services.market_indicators import get_market_indicators_service
+        _market_indicators_service = get_market_indicators_service()
+    
+    try:
+        # Get daily bars for the symbol
+        from services.stock_data import get_stock_data_service
+        stock_service = get_stock_data_service()
+        
+        daily_bars = await stock_service.get_historical_bars(symbol.upper(), "1D", 50)
+        
+        if not daily_bars:
+            return {"error": f"No data available for {symbol}"}
+        
+        # Convert to expected format
+        bars = [
+            {
+                "open": bar.get("open", bar.get("o", 0)),
+                "high": bar.get("high", bar.get("h", 0)),
+                "low": bar.get("low", bar.get("l", 0)),
+                "close": bar.get("close", bar.get("c", 0)),
+                "volume": bar.get("volume", bar.get("v", 0))
+            }
+            for bar in daily_bars
+        ]
+        
+        result = _market_indicators_service.analyze_stock_extension(
+            symbol.upper(), bars
+        )
+        return result
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e), "symbol": symbol}
+
+
+@router.get("/indicators/volume-threshold/{symbol}")
+async def get_volume_threshold(symbol: str):
+    """
+    Get volume threshold analysis for a specific stock.
+    
+    Uses standard deviation to determine if current volume is significant.
+    - SIGNIFICANT: Volume >= Average + 2*StdDev
+    - LOW: Volume < Average
+    - NORMAL: Volume between average and threshold
+    
+    This helps identify potential catalyst or institutional activity.
+    """
+    global _market_indicators_service
+    
+    if not _market_indicators_service:
+        from services.market_indicators import get_market_indicators_service
+        _market_indicators_service = get_market_indicators_service()
+    
+    try:
+        from services.stock_data import get_stock_data_service
+        stock_service = get_stock_data_service()
+        
+        # Get intraday bars for volume analysis
+        intraday_bars = await stock_service.get_historical_bars(symbol.upper(), "5Min", 100)
+        
+        if not intraday_bars:
+            return {"error": f"No data available for {symbol}"}
+        
+        volume_history = [bar.get("volume", bar.get("v", 0)) for bar in intraday_bars]
+        current_volume = volume_history[-1] if volume_history else 0
+        
+        result = _market_indicators_service.calculate_volume_threshold(
+            volume_history[:-1], current_volume
+        )
+        result["symbol"] = symbol.upper()
+        return result
+    except Exception as e:
+        return {"error": str(e), "symbol": symbol}
+
