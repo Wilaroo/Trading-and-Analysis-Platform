@@ -286,9 +286,9 @@ const ChartsPage = ({ ibConnected, ibConnectionChecked, connectToIb, ibBusy, ibB
             </>
           ) : (
             <>
-              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`} />
+              <div className={`w-2 h-2 rounded-full ${isConnected ? (isBusy ? 'bg-amber-400 animate-pulse' : 'bg-green-400 animate-pulse') : 'bg-red-400'}`} />
               <span className="text-xs text-zinc-400">
-                {isConnected ? 'IB Connected' : 'Disconnected'}
+                {isConnected ? (isBusy ? 'IB Busy (Scanning)' : 'IB Connected') : 'Disconnected'}
               </span>
               {!isConnected && (
                 <button
