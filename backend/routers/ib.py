@@ -2190,11 +2190,11 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
         # Filter thresholds - "In Play" criteria based on SMB best practices
         MIN_PRICE = 5.0              # Skip penny stocks (less than $5)
         MIN_VOLUME = 500000          # Minimum daily volume (500k shares for liquidity)
-        MAX_FLOAT = 25000000         # Skip stocks with float > 25 million (less volatility)
+        MIN_FLOAT = 25000000         # Skip micro-float stocks (less than 25M float)
         MIN_RVOL = 1.5               # Minimum relative volume to be "In Play"
         
         filtered_candidates = {}
-        skipped_reasons = {"low_price": 0, "low_volume": 0, "invalid_symbol": 0, "high_float": 0, "low_rvol": 0}
+        skipped_reasons = {"low_price": 0, "low_volume": 0, "invalid_symbol": 0, "low_float": 0, "low_rvol": 0}
         
         for symbol, data in all_candidates.items():
             scan_result = data.get("scan_result", {})
