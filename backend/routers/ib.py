@@ -2083,6 +2083,7 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
         
         # Only run IB scanners if IB is connected
         if is_ib_connected and _ib_service:
+            import asyncio
             for scan_type in all_scan_types:
                 try:
                     results = await _ib_service.run_scanner(scan_type, max_results=30)
@@ -2093,6 +2094,8 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                                 "scan_result": r,
                                 "scan_type": scan_type
                             }
+                    # Small delay between scanners to allow IB heartbeat to process
+                    await asyncio.sleep(0.5)
                 except Exception as e:
                     print(f"Scanner {scan_type} error: {e}")
                     continue
