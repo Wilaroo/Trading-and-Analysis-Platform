@@ -836,19 +836,22 @@ class IBService:
             return IBResponse(success=False, error="Timeout waiting for IB response")
     
     def get_connection_status(self) -> Dict:
-        """Get current connection status"""
+        """Get current connection status by querying the worker thread"""
         is_connected = False
+        
+        # Check if worker thread exists and is alive
         if self._worker_thread and self._worker_thread.is_alive():
-            # Check both the flag AND the actual IB connection state
-            is_connected = self._worker_thread.is_connected
-            # Also verify the actual ib_insync connection if available
-            if self._worker_thread.ib is not None:
-                try:
-                    is_connected = self._worker_thread.ib.isConnected()
-                    # Update the flag to stay in sync
-                    self._worker_thread.is_connected = is_connected
-                except Exception:
-                    pass
+            # Send a status check command to the worker thread (thread-safe)
+            try:
+                response = self._send_request(IBCommand.GET_STATUS, timeout=5.0)
+                if response.success and response.data:
+                    is_connected = response.data.get("connected", False)
+                else:
+                    # Fallback to the flag if command fails
+                    is_connected = self._worker_thread.is_connected
+            except Exception as e:
+                logger.warning(f"Error getting IB status: {e}")
+                is_connected = self._worker_thread.is_connected
         
         return {
             "connected": is_connected,
