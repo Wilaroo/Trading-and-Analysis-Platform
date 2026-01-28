@@ -1478,8 +1478,9 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
     
     setIsGeneratingIntelligence(true);
     try {
-      toast.info('Generating market intelligence...', { duration: 3000 });
-      const res = await api.post('/api/newsletter/auto-generate');
+      toast.info('Generating market intelligence... This may take up to 2 minutes.', { duration: 5000 });
+      // Use long-running API for Market Intelligence (2 minute timeout)
+      const res = await apiLongRunning.post('/api/newsletter/auto-generate');
       console.log('Market Intelligence Response:', res.data);
       console.log('Summary:', res.data?.summary);
       console.log('needs_generation:', res.data?.needs_generation);
