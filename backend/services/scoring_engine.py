@@ -1282,6 +1282,18 @@ class UniversalScoringEngine:
         except Exception as e:
             logger.warning(f"Could not get knowledge base recommendations: {e}")
         
+        # Evaluate SMB checklist (applies to ALL timeframes)
+        smb_checklist = self.evaluate_smb_checklist(stock_data, market_data)
+        
+        # Boost/penalize score based on SMB checklist
+        checklist_passed = smb_checklist["summary"]["passed"]
+        if checklist_passed >= 8:
+            composite = min(100, composite + 5)  # Strong boost for A/A+ checklist
+        elif checklist_passed >= 6:
+            composite = min(100, composite + 2)  # Small boost for B grade
+        elif checklist_passed <= 3:
+            composite = max(0, composite - 5)  # Penalty for D grade
+        
         return {
             "symbol": stock_data.get("symbol", "UNKNOWN"),
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1292,6 +1304,7 @@ class UniversalScoringEngine:
             "primary_timeframe": primary_timeframe.value,
             "success_probability": success_prob,
             "key_levels": key_levels,
+            "smb_checklist": smb_checklist,  # NEW: SMB Trade Evaluation
             "category_scores": {
                 "technical": technical,
                 "fundamental": fundamental,
@@ -1304,7 +1317,9 @@ class UniversalScoringEngine:
                 "gap_pct": stock_data.get("gap_percent", 0),
                 "vwap_position": technical["components"]["vwap"]["position"],
                 "float_ok": risk["components"]["float"]["meets_requirement"],
-                "squeeze_watch": risk["components"]["short_interest"]["squeeze_potential"]
+                "squeeze_watch": risk["components"]["short_interest"]["squeeze_potential"],
+                "checklist_grade": smb_checklist["summary"]["grade"],  # NEW
+                "checklist_passed": f"{checklist_passed}/11"  # NEW
             },
             "knowledge_base": {
                 "applicable_strategies": kb_strategies,
