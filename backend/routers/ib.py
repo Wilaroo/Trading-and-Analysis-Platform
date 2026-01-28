@@ -2183,39 +2183,90 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
             "position": []
         }
         
-        # Limit candidates to analyze to reduce scan time
-        # Sort by rank if available, otherwise just take first N
-        MAX_CANDIDATES_TO_ANALYZE = 50
-        candidates_list = list(all_candidates.items())[:MAX_CANDIDATES_TO_ANALYZE]
-        print(f"Analyzing {len(candidates_list)} candidates (limited from {len(all_candidates)})")
+        # ===================== EARLY FILTERING =====================
+        # Apply quick filters BEFORE expensive analysis to speed up scanning
+        # These filters use data already available from scanner results
         
-        # Analyze each candidate
-        # IMPORTANT: During heavy scanning, use Alpaca for quotes to avoid overwhelming IB
-        use_alpaca_for_quotes = True  # Always prefer Alpaca for quotes during scan
+        MIN_PRICE = 5.0          # Skip penny stocks (less than $5)
+        MIN_VOLUME = 500000      # Minimum daily volume (500k shares for liquidity)
         
+        filtered_candidates = {}
+        skipped_reasons = {"low_price": 0, "low_volume": 0, "invalid_symbol": 0}
+        
+        for symbol, data in all_candidates.items():
+            scan_result = data.get("scan_result", {})
+            
+            # Skip invalid symbols (warrants, units, etc.)
+            if not symbol or len(symbol) > 5 or any(c in symbol for c in ['.', '-', '+']):
+                skipped_reasons["invalid_symbol"] += 1
+                continue
+            
+            # Note: IB scanner results don't always have price/volume
+            # We'll do a second filter after getting quotes
+            filtered_candidates[symbol] = data
+        
+        print(f"Pre-filter: {len(all_candidates)} -> {len(filtered_candidates)} candidates")
+        print(f"Skipped: {skipped_reasons}")
+        
+        # Limit candidates to analyze (increased to 100 for wider coverage)
+        MAX_CANDIDATES_TO_ANALYZE = 100
+        candidates_list = list(filtered_candidates.items())[:MAX_CANDIDATES_TO_ANALYZE]
+        print(f"Analyzing {len(candidates_list)} candidates (limited from {len(filtered_candidates)})")
+        
+        # ===================== QUOTE FETCHING WITH EARLY EXIT =====================
+        # Batch fetch quotes first, then filter by price/volume before expensive analysis
+        
+        quotes_cache = {}
+        valid_candidates = []
+        
+        print("Fetching quotes for early filtering...")
         for symbol, data in candidates_list:
+            try:
+                # Get quote - prefer Alpaca for speed
+                quote = None
+                if _alpaca_service:
+                    try:
+                        quote = await _alpaca_service.get_quote(symbol)
+                    except:
+                        pass
+                
+                if not quote or not quote.get("price"):
+                    continue
+                
+                price = quote.get("price", 0)
+                volume = quote.get("volume", 0)
+                
+                # Apply minimum filters
+                if price < MIN_PRICE:
+                    skipped_reasons["low_price"] = skipped_reasons.get("low_price", 0) + 1
+                    continue
+                
+                if volume < MIN_VOLUME:
+                    skipped_reasons["low_volume"] = skipped_reasons.get("low_volume", 0) + 1
+                    continue
+                
+                # Passed filters - add to valid candidates
+                quotes_cache[symbol] = quote
+                valid_candidates.append((symbol, data))
+                
+            except Exception as e:
+                continue
+        
+        print(f"After quote filtering: {len(valid_candidates)} valid candidates")
+        print(f"Skipped for price < ${MIN_PRICE}: {skipped_reasons.get('low_price', 0)}")
+        print(f"Skipped for volume < {MIN_VOLUME:,}: {skipped_reasons.get('low_volume', 0)}")
+        
+        # ===================== DETAILED ANALYSIS =====================
+        # Now analyze only the candidates that passed all filters
+        
+        for symbol, data in valid_candidates:
             try:
                 scan_result = data["scan_result"]
                 scan_type = data["scan_type"]
                 
-                # Get real-time quote - prefer Alpaca to avoid overwhelming IB during scan
-                quote = None
-                if use_alpaca_for_quotes and _alpaca_service:
-                    try:
-                        quote = await _alpaca_service.get_quote(symbol)
-                    except Exception as e:
-                        pass  # Fall through to IB
-                
-                # Only use IB for quotes if Alpaca failed AND we're not already busy
-                if not quote and _ib_service and not is_ib_connected:
-                    pass  # Skip IB quotes if not connected
-                elif not quote and _ib_service:
-                    try:
-                        quote = await _ib_service.get_quote(symbol)
-                    except Exception as e:
-                        pass
-                
-                if not quote or not quote.get("price"):
+                # Use cached quote
+                quote = quotes_cache.get(symbol)
+                if not quote:
                     continue
                 
                 current_price = quote.get("price", 0)
