@@ -377,45 +377,49 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
     }
   }, []);
 
-  // Rule check handler
-  const handleRuleCheck = useCallback(async (data) => {
-    setCoachLoading(prev => ({ ...prev, rules: true }));
+  // Combined trade check handler - checks rules AND calculates position size
+  const handleCheckMyTrade = useCallback(async (data) => {
+    setCoachLoading(prev => ({ ...prev, check: true }));
+    setShowTradeCheck(false);
+    
+    const userMsg = `🎯 Check My Trade: ${data.action} ${data.symbol} @ $${data.entry_price} (stop: $${data.stop_loss})`;
+    setMessages(prev => [
+      ...prev,
+      { role: 'user', content: userMsg, timestamp: new Date().toISOString() }
+    ]);
+    
     try {
-      const res = await api.post('/api/assistant/coach/check-rules', data);
-      if (res.data?.analysis) {
-        const userMsg = `🔍 Check rules: ${data.symbol} ${data.action}${data.entry_price ? ` @ $${data.entry_price}` : ''}${data.stop_loss ? ` (stop: $${data.stop_loss})` : ''}`;
+      // Call both endpoints in parallel
+      const [rulesRes, sizingRes] = await Promise.all([
+        api.post('/api/assistant/coach/check-rules', data),
+        api.post('/api/assistant/coach/position-size', data)
+      ]);
+      
+      // Combine the responses
+      let combinedResponse = '';
+      
+      if (rulesRes.data?.analysis) {
+        combinedResponse += '## 📋 Rule Check\n\n' + rulesRes.data.analysis;
+      }
+      
+      if (sizingRes.data?.analysis) {
+        combinedResponse += '\n\n---\n\n## 📐 Position Sizing\n\n' + sizingRes.data.analysis;
+      }
+      
+      if (combinedResponse) {
         setMessages(prev => [
           ...prev,
-          { role: 'user', content: userMsg, timestamp: new Date().toISOString() },
-          { role: 'assistant', content: res.data.analysis, timestamp: new Date().toISOString() }
+          { role: 'assistant', content: combinedResponse, timestamp: new Date().toISOString() }
         ]);
       }
     } catch (err) {
-      toast.error('Failed to check rules');
+      toast.error('Failed to check trade');
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', content: 'Sorry, I encountered an error checking your trade. Please try again.', timestamp: new Date().toISOString() }
+      ]);
     } finally {
-      setCoachLoading(prev => ({ ...prev, rules: false }));
-      setActiveMode('chat');
-    }
-  }, []);
-
-  // Position sizing handler
-  const handlePositionSize = useCallback(async (data) => {
-    setCoachLoading(prev => ({ ...prev, sizing: true }));
-    try {
-      const res = await api.post('/api/assistant/coach/position-size', data);
-      if (res.data?.analysis) {
-        const userMsg = `📐 Position size: ${data.symbol} entry $${data.entry_price} stop $${data.stop_loss}`;
-        setMessages(prev => [
-          ...prev,
-          { role: 'user', content: userMsg, timestamp: new Date().toISOString() },
-          { role: 'assistant', content: res.data.analysis, timestamp: new Date().toISOString() }
-        ]);
-      }
-    } catch (err) {
-      toast.error('Failed to calculate size');
-    } finally {
-      setCoachLoading(prev => ({ ...prev, sizing: false }));
-      setActiveMode('chat');
+      setCoachLoading(prev => ({ ...prev, check: false }));
     }
   }, []);
 
