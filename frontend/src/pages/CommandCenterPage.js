@@ -1947,7 +1947,7 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
           
           {connectionChecked && !isConnected && (
             <button
-              onClick={connectToIB}
+              onClick={handleConnectToIB}
               disabled={connecting}
               className="px-4 py-2 bg-cyan-500 text-black rounded font-medium text-sm hover:bg-cyan-400 disabled:opacity-50"
             >
@@ -2330,7 +2330,7 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
                 <WifiOff className="w-12 h-12 text-zinc-600 mx-auto mb-3" />
                 <p className="text-zinc-400">Connect to IB Gateway to scan</p>
                 <button
-                  onClick={connectToIB}
+                  onClick={handleConnectToIB}
                   className="mt-4 px-4 py-2 bg-cyan-500 text-black rounded font-medium text-sm"
                 >
                   Connect Now
