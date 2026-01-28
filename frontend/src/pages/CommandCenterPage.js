@@ -3397,12 +3397,6 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
         />
       )}
       
-      {/* Knowledge Base Modal */}
-      <KnowledgeBase 
-        isOpen={showKnowledgeBase}
-        onClose={() => setShowKnowledgeBase(false)}
-      />
-      
       {/* AI Assistant Modal */}
       <AIAssistant
         isOpen={showAssistant}
