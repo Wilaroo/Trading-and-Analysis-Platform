@@ -113,8 +113,8 @@ const QuickAction = ({ icon: Icon, label, onClick, loading, color = 'zinc' }) =>
   );
 };
 
-// Rule Check Form (inline)
-const RuleCheckForm = ({ onSubmit, loading }) => {
+// Check My Trade Form - combines rule check and position sizing
+const CheckMyTradeForm = ({ onSubmit, loading }) => {
   const [symbol, setSymbol] = useState('');
   const [action, setAction] = useState('BUY');
   const [entryPrice, setEntryPrice] = useState('');
@@ -126,11 +126,15 @@ const RuleCheckForm = ({ onSubmit, loading }) => {
       toast.error('Enter a symbol');
       return;
     }
+    if (!entryPrice || !stopLoss) {
+      toast.error('Enter entry and stop prices for full analysis');
+      return;
+    }
     onSubmit({
       symbol: symbol.toUpperCase(),
       action,
-      entry_price: entryPrice ? parseFloat(entryPrice) : null,
-      stop_loss: stopLoss ? parseFloat(stopLoss) : null
+      entry_price: parseFloat(entryPrice),
+      stop_loss: parseFloat(stopLoss)
     });
     // Clear form after submit
     setSymbol('');
@@ -147,7 +151,7 @@ const RuleCheckForm = ({ onSubmit, loading }) => {
           onChange={(e) => setSymbol(e.target.value.toUpperCase())}
           placeholder="Symbol"
           className="flex-1 px-2.5 py-1.5 bg-zinc-800/50 border border-white/10 rounded text-white text-xs placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
-          data-testid="rule-check-symbol"
+          data-testid="check-trade-symbol"
         />
         <select
           value={action}
@@ -166,6 +170,7 @@ const RuleCheckForm = ({ onSubmit, loading }) => {
           placeholder="Entry $"
           step="0.01"
           className="flex-1 px-2.5 py-1.5 bg-zinc-800/50 border border-white/10 rounded text-white text-xs placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
+          data-testid="check-trade-entry"
         />
         <input
           type="number"
@@ -174,14 +179,15 @@ const RuleCheckForm = ({ onSubmit, loading }) => {
           placeholder="Stop $"
           step="0.01"
           className="flex-1 px-2.5 py-1.5 bg-zinc-800/50 border border-white/10 rounded text-white text-xs placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
+          data-testid="check-trade-stop"
         />
         <button
           type="submit"
-          disabled={loading || !symbol.trim()}
-          className="px-3 py-1.5 bg-cyan-500 hover:bg-cyan-600 disabled:bg-zinc-700 text-white rounded text-xs font-medium transition-colors flex items-center gap-1.5"
-          data-testid="rule-check-submit"
+          disabled={loading || !symbol.trim() || !entryPrice || !stopLoss}
+          className="px-4 py-1.5 bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-600 hover:to-emerald-600 disabled:from-zinc-700 disabled:to-zinc-700 text-white rounded text-xs font-medium transition-all flex items-center gap-1.5"
+          data-testid="check-trade-submit"
         >
-          {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+          {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Target className="w-3 h-3" />}
           Check
         </button>
       </div>
@@ -189,64 +195,6 @@ const RuleCheckForm = ({ onSubmit, loading }) => {
   );
 };
 
-// Position Size Form (inline)
-const PositionSizeForm = ({ onSubmit, loading }) => {
-  const [symbol, setSymbol] = useState('');
-  const [entryPrice, setEntryPrice] = useState('');
-  const [stopLoss, setStopLoss] = useState('');
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (!symbol.trim() || !entryPrice || !stopLoss) {
-      toast.error('Fill in symbol, entry, and stop');
-      return;
-    }
-    onSubmit({
-      symbol: symbol.toUpperCase(),
-      entry_price: parseFloat(entryPrice),
-      stop_loss: parseFloat(stopLoss)
-    });
-    setSymbol('');
-    setEntryPrice('');
-    setStopLoss('');
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="flex gap-2">
-      <input
-        type="text"
-        value={symbol}
-        onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-        placeholder="Symbol"
-        className="w-16 px-2.5 py-1.5 bg-zinc-800/50 border border-white/10 rounded text-white text-xs placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
-      />
-      <input
-        type="number"
-        value={entryPrice}
-        onChange={(e) => setEntryPrice(e.target.value)}
-        placeholder="Entry $"
-        step="0.01"
-        className="w-20 px-2.5 py-1.5 bg-zinc-800/50 border border-white/10 rounded text-white text-xs placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
-      />
-      <input
-        type="number"
-        value={stopLoss}
-        onChange={(e) => setStopLoss(e.target.value)}
-        placeholder="Stop $"
-        step="0.01"
-        className="w-20 px-2.5 py-1.5 bg-zinc-800/50 border border-white/10 rounded text-white text-xs placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
-      />
-      <button
-        type="submit"
-        disabled={loading || !symbol.trim() || !entryPrice || !stopLoss}
-        className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 disabled:bg-zinc-700 text-white rounded text-xs font-medium transition-colors flex items-center gap-1.5"
-      >
-        {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Calculator className="w-3 h-3" />}
-        Size
-      </button>
-    </form>
-  );
-};
 
 // Main AI Assistant Component
 const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
