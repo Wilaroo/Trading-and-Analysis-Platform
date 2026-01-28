@@ -545,10 +545,6 @@ Be honest and constructive."""
         Proactively check a trade idea against user's trading rules.
         Returns violations, warnings, and recommendations.
         """
-        violations = []
-        warnings = []
-        passed_rules = []
-        
         # Get user's trading rules
         try:
             rules = self.knowledge_service.get_by_type("rule")
