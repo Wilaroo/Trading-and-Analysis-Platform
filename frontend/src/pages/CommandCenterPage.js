@@ -1967,16 +1967,6 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
             <span className="hidden sm:inline">AI Assistant</span>
           </button>
           
-          {/* Knowledge Base Button */}
-          <button
-            onClick={() => setShowKnowledgeBase(true)}
-            className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/20 text-purple-400 rounded text-sm hover:bg-purple-500/30"
-            title="Knowledge Base"
-          >
-            <BookOpen className="w-4 h-4" />
-            <span className="hidden sm:inline">Knowledge</span>
-          </button>
-          
           {/* Connection Status - Always visible with toggle functionality */}
           <div className="flex items-center gap-2">
             {/* IB Gateway Status */}
