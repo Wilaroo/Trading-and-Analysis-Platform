@@ -1224,7 +1224,6 @@ const CommandCenterPage = ({
   
   // UI State
   const [isScanning, setIsScanning] = useState(false);
-  const [autoScan, setAutoScan] = useState(false);
   const [selectedScanType, setSelectedScanType] = useState('TOP_PERC_GAIN');
   const [selectedTicker, setSelectedTicker] = useState(null);
   const [tradeModal, setTradeModal] = useState({ isOpen: false, ticker: null, action: null });
