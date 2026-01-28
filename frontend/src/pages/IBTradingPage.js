@@ -8,8 +8,9 @@ import {
 import api from '../utils/api';
 
 // ===================== IB CONNECTION STATUS =====================
-const ConnectionStatus = ({ status, onConnect, onDisconnect, loading }) => {
-  const isConnected = status?.connected;
+const ConnectionStatus = ({ status, isConnected: isConnectedProp, onConnect, onDisconnect, loading }) => {
+  // Use prop if provided, otherwise fall back to status.connected
+  const isConnected = isConnectedProp !== undefined ? isConnectedProp : status?.connected;
   
   return (
     <div className="bg-paper border border-white/10 rounded-xl p-6">
