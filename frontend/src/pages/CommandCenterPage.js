@@ -1810,7 +1810,7 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
   };
 
   // Initial load - staggered to avoid overwhelming the backend
-  // Runs when connection status is confirmed
+  // Runs when connection status is confirmed and Command Center is active
   useEffect(() => {
     if (!connectionChecked) return; // Wait until we know connection status
     
@@ -1830,13 +1830,17 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
           ]);
         }, 500);
         
-        // Third batch: heavy operations (scanners) - delayed more
-        setTimeout(async () => {
-          await runComprehensiveScan();
-        }, 1500);
+        // Third batch: heavy operations (scanners) - only if Command Center is active
+        if (isActiveTab) {
+          setTimeout(async () => {
+            await runComprehensiveScan();
+          }, 1500);
+        } else {
+          console.log('Skipping initial scan - Command Center is not the active tab');
+        }
       }
       
-      // Non-IB data can load in parallel
+      // Non-IB data can load in parallel (these are lightweight)
       fetchAlerts();
       fetchNewsletter();
       fetchEarnings();
@@ -1844,7 +1848,7 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
     };
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionChecked, isConnected]);
+  }, [connectionChecked, isConnected, isActiveTab]);
 
   // Auto-scan interval - only runs when Command Center is the active tab
   useEffect(() => {
