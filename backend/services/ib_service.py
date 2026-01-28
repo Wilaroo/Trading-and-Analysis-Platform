@@ -90,7 +90,11 @@ class IBWorkerThread(threading.Thread):
         logger.info(f"IB Worker Thread started (thread id: {threading.get_ident()})")
         
         last_heartbeat = time.time()
-        heartbeat_interval = 5  # seconds - check more frequently
+        last_keepalive = time.time()
+        heartbeat_interval = 3  # seconds - process event loop frequently
+        keepalive_interval = 30  # seconds - request account info to keep connection active
+        reconnect_attempts = 0
+        max_reconnect_attempts = 3
         
         while self._running:
             try:
@@ -106,22 +110,54 @@ class IBWorkerThread(threading.Thread):
                 except queue.Empty:
                     pass
                 
-                # Periodic heartbeat to keep IB connection alive
+                # Periodic heartbeat to process IB's event loop (every 3 seconds)
                 if self.ib and self.is_connected and time.time() - last_heartbeat > heartbeat_interval:
                     try:
-                        # ib.sleep() processes IB's event loop and keeps connection alive
+                        # ib.sleep() processes IB's event loop - critical for keeping connection alive
                         self.ib.sleep(0.1)
-                        # Verify connection is still alive
-                        actual_connected = self.ib.isConnected()
-                        if not actual_connected:
-                            logger.warning(f"IB heartbeat: ib.isConnected()={actual_connected}, marking as disconnected")
-                            self.is_connected = False
-                        else:
-                            logger.debug(f"IB heartbeat OK: connected={actual_connected}")
                         last_heartbeat = time.time()
                     except Exception as e:
-                        logger.warning(f"Heartbeat error: {e}")
-                        self.is_connected = False
+                        logger.warning(f"Heartbeat sleep error: {e}")
+                
+                # Periodic keep-alive request (every 30 seconds) - actually request data to prove connection works
+                if self.ib and self.is_connected and time.time() - last_keepalive > keepalive_interval:
+                    try:
+                        # Request current time from IB server - lightweight keep-alive
+                        server_time = self.ib.reqCurrentTime()
+                        actual_connected = self.ib.isConnected()
+                        
+                        if actual_connected and server_time:
+                            logger.debug(f"IB keep-alive OK: server_time={server_time}, connected={actual_connected}")
+                            reconnect_attempts = 0  # Reset reconnect counter on successful keep-alive
+                        elif not actual_connected:
+                            logger.warning(f"IB keep-alive: connection lost, attempting reconnect...")
+                            self.is_connected = False
+                            
+                            # Attempt auto-reconnect
+                            if reconnect_attempts < max_reconnect_attempts:
+                                reconnect_attempts += 1
+                                logger.info(f"Auto-reconnect attempt {reconnect_attempts}/{max_reconnect_attempts}")
+                                try:
+                                    self.ib.disconnect()
+                                    time.sleep(1)
+                                    self.ib.connect(
+                                        host=IB_HOST,
+                                        port=IB_PORT,
+                                        clientId=IB_CLIENT_ID,
+                                        timeout=15
+                                    )
+                                    if self.ib.isConnected():
+                                        self.is_connected = True
+                                        logger.info("Auto-reconnect successful!")
+                                        reconnect_attempts = 0
+                                except Exception as reconnect_err:
+                                    logger.error(f"Auto-reconnect failed: {reconnect_err}")
+                        
+                        last_keepalive = time.time()
+                    except Exception as e:
+                        logger.warning(f"Keep-alive error: {e}")
+                        # Don't immediately mark as disconnected - let the next keep-alive verify
+                        last_keepalive = time.time()
                     
             except Exception as e:
                 logger.error(f"Error in IB worker thread: {e}")
