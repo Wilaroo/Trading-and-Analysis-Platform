@@ -2053,7 +2053,20 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
     # Proceed with scanning - will use IB scanners if connected, otherwise Alpaca only
     # Set busy flag to indicate heavy operation
     if _ib_service:
+        # Verify connection is still alive before starting heavy operation
+        if is_ib_connected:
+            try:
+                # Quick connection check
+                status = _ib_service.get_connection_status()
+                if not status.get("connected", False):
+                    print("IB connection lost before scan start, will use Alpaca only")
+                    is_ib_connected = False
+            except Exception as e:
+                print(f"Error checking IB connection: {e}, will use Alpaca only")
+                is_ib_connected = False
+        
         _ib_service.set_busy(True, "comprehensive_scan")
+        print(f"Starting comprehensive scan (IB connected: {is_ib_connected})")
     
     try:
         from services.scoring_engine import get_scoring_engine
