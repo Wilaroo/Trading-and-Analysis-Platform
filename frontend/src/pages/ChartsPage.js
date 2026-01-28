@@ -179,8 +179,9 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
           }));
 
           console.log(`[Chart v${currentVersion}] Setting data:`, candleData.length, 'bars');
-          console.log(`[Chart v${currentVersion}] First bar:`, candleData[0]);
-          console.log(`[Chart v${currentVersion}] Last bar:`, candleData[candleData.length - 1]);
+          console.log(`[Chart v${currentVersion}] Raw API response first bar:`, response.data.bars[0]);
+          console.log(`[Chart v${currentVersion}] Converted first bar:`, candleData[0]);
+          console.log(`[Chart v${currentVersion}] Converted last bar:`, candleData[candleData.length - 1]);
           console.log(`[Chart v${currentVersion}] candleSeries exists:`, !!candleSeriesRef.current);
           console.log(`[Chart v${currentVersion}] chartRef exists:`, !!chartRef.current);
           
