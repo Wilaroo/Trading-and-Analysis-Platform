@@ -1293,21 +1293,21 @@ const CommandCenterPage = () => {
   // Connect to IB
   const connectToIB = async () => {
     setConnecting(true);
+    console.log('connectToIB: Starting connection...');
     try {
-      await api.post('/api/ib/connect');
+      const connectRes = await api.post('/api/ib/connect');
+      console.log('connectToIB: Connect response:', connectRes.data);
       const connected = await checkConnection();
+      console.log('connectToIB: After checkConnection, connected=', connected);
       if (connected) {
         await fetchAccountData();
         await fetchWatchlist(connected);
-        
-        // Auto-generate market intelligence on successful connection
-        // Temporarily disabled to debug black screen issue
-        // autoGenerateMarketIntelligence();
       }
     } catch (err) {
-      console.error('Connection failed:', err);
+      console.error('connectToIB: Connection failed:', err);
     }
     setConnecting(false);
+    console.log('connectToIB: Finished, isConnected state will be:', isConnected);
   };
 
   // Fetch account data
