@@ -224,15 +224,15 @@ const IBRealtimeChart = ({ symbol, isConnected }) => {
       
       {/* Chart Container */}
       <div className="flex-1 relative" style={{ minHeight: '400px' }}>
-        {loading && !hasData && (
+        {showLoading && !hasData && (
           <div className="absolute inset-0 flex items-center justify-center bg-[#0A0A0A] z-10">
             <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
           </div>
         )}
-        {error && !hasData && (
+        {displayError && !hasData && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0A0A0A] z-10 p-4">
             <LineChart className="w-16 h-16 text-zinc-700 mb-4" />
-            <span className="text-zinc-400 text-sm text-center mb-2">{error}</span>
+            <span className="text-zinc-400 text-sm text-center mb-2">{displayError}</span>
             {!isConnected && (
               <span className="text-zinc-500 text-xs">Connect to IB from Command Center to view charts</span>
             )}
