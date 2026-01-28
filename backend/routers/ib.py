@@ -2248,6 +2248,7 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                 
                 price = quote.get("price", 0)
                 volume = quote.get("volume", 0)
+                change_percent = abs(quote.get("change_percent", 0))
                 
                 # Apply minimum filters
                 if price < MIN_PRICE:
@@ -2258,7 +2259,36 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                     skipped_reasons["low_volume"] = skipped_reasons.get("low_volume", 0) + 1
                     continue
                 
-                # Passed filters - add to valid candidates
+                # Check float using yfinance (if available)
+                float_shares = None
+                if has_yfinance:
+                    try:
+                        ticker = yf.Ticker(symbol)
+                        info = ticker.info
+                        float_shares = info.get('floatShares', None)
+                        if float_shares and float_shares > MAX_FLOAT:
+                            skipped_reasons["high_float"] = skipped_reasons.get("high_float", 0) + 1
+                            continue
+                        fundamentals_cache[symbol] = {
+                            "float_shares": float_shares,
+                            "market_cap": info.get('marketCap'),
+                            "avg_volume": info.get('averageVolume'),
+                            "sector": info.get('sector'),
+                            "industry": info.get('industry')
+                        }
+                    except Exception:
+                        pass  # Continue without float data
+                
+                # Calculate RVOL if we have average volume
+                rvol = None
+                avg_vol = fundamentals_cache.get(symbol, {}).get('avg_volume')
+                if avg_vol and avg_vol > 0:
+                    rvol = volume / avg_vol
+                    if rvol < MIN_RVOL:
+                        skipped_reasons["low_rvol"] = skipped_reasons.get("low_rvol", 0) + 1
+                        continue
+                
+                # Passed all filters - add to valid candidates
                 quotes_cache[symbol] = quote
                 valid_candidates.append((symbol, data))
                 
@@ -2268,17 +2298,20 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
         print(f"After quote filtering: {len(valid_candidates)} valid candidates")
         print(f"Skipped for price < ${MIN_PRICE}: {skipped_reasons.get('low_price', 0)}")
         print(f"Skipped for volume < {MIN_VOLUME:,}: {skipped_reasons.get('low_volume', 0)}")
+        print(f"Skipped for float > {MAX_FLOAT:,}: {skipped_reasons.get('high_float', 0)}")
+        print(f"Skipped for RVOL < {MIN_RVOL}x: {skipped_reasons.get('low_rvol', 0)}")
         
         # ===================== DETAILED ANALYSIS =====================
-        # Now analyze only the candidates that passed all filters
+        # Now analyze only the candidates that passed all "In Play" filters
         
         for symbol, data in valid_candidates:
             try:
                 scan_result = data["scan_result"]
                 scan_type = data["scan_type"]
                 
-                # Use cached quote
+                # Use cached quote and fundamentals
                 quote = quotes_cache.get(symbol)
+                fundamentals = fundamentals_cache.get(symbol, {})
                 if not quote:
                     continue
                 
