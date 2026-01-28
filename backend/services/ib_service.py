@@ -88,20 +88,36 @@ class IBWorkerThread(threading.Thread):
         
         logger.info("IB Worker Thread started")
         
+        last_heartbeat = time.time()
+        heartbeat_interval = 10  # seconds
+        
         while self._running:
             try:
                 # Wait for a request with timeout to allow checking _running flag
                 try:
                     request: IBRequest = self.request_queue.get(timeout=0.5)
+                    # Process the request
+                    response = self._process_request(request)
+                    
+                    # Send response back if response queue provided
+                    if request.response_queue:
+                        request.response_queue.put(response)
                 except queue.Empty:
-                    continue
+                    pass
                 
-                # Process the request
-                response = self._process_request(request)
-                
-                # Send response back if response queue provided
-                if request.response_queue:
-                    request.response_queue.put(response)
+                # Periodic heartbeat to keep IB connection alive
+                if self.ib and self.is_connected and time.time() - last_heartbeat > heartbeat_interval:
+                    try:
+                        # ib.sleep() processes IB's event loop and keeps connection alive
+                        self.ib.sleep(0.1)
+                        # Verify connection is still alive
+                        if not self.ib.isConnected():
+                            logger.warning("IB connection dropped, marking as disconnected")
+                            self.is_connected = False
+                        last_heartbeat = time.time()
+                    except Exception as e:
+                        logger.warning(f"Heartbeat error: {e}")
+                        self.is_connected = False
                     
             except Exception as e:
                 logger.error(f"Error in IB worker thread: {e}")
