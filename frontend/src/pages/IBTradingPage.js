@@ -8,7 +8,7 @@ import {
 import api from '../utils/api';
 
 // ===================== IB CONNECTION STATUS =====================
-const ConnectionStatus = ({ status, isConnected: isConnectedProp, onConnect, onDisconnect, loading }) => {
+const ConnectionStatus = ({ status, isConnected: isConnectedProp }) => {
   // Use prop if provided, otherwise fall back to status.connected
   const isConnected = isConnectedProp !== undefined ? isConnectedProp : status?.connected;
   
@@ -45,38 +45,14 @@ const ConnectionStatus = ({ status, isConnected: isConnectedProp, onConnect, onD
         </div>
       </div>
       
-      <div className="flex gap-3">
-        {!isConnected ? (
-          <button
-            onClick={onConnect}
-            disabled={loading}
-            data-testid="ib-connect-btn"
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors disabled:opacity-50"
-          >
-            {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-            Connect to IB Gateway
-          </button>
-        ) : (
-          <button
-            onClick={onDisconnect}
-            disabled={loading}
-            data-testid="ib-disconnect-btn"
-            className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors disabled:opacity-50"
-          >
-            {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Square className="w-4 h-4" />}
-            Disconnect
-          </button>
-        )}
-      </div>
-      
       {!isConnected && (
-        <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+        <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
           <div className="flex items-start gap-2 text-amber-400 text-sm">
             <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
             <div>
-              <strong>Make sure IB Gateway is running</strong>
+              <strong>IB Gateway not connected</strong>
               <p className="text-amber-400/70 text-xs mt-1">
-                Open IB Gateway, login to your paper account (DUN615665), and ensure API connections are enabled on port 4002.
+                Connect to IB Gateway from the Command Center tab to enable trading features.
               </p>
             </div>
           </div>
