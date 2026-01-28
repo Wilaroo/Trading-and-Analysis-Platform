@@ -191,6 +191,18 @@ const PositionSizingForm = ({ onCalculate, loading }) => {
   );
 };
 
+// Markdown components defined outside render to avoid recreating on each render
+const markdownComponents = {
+  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+  li: ({ children }) => <li className="text-zinc-300">{children}</li>,
+  strong: ({ children }) => <strong className="text-cyan-400 font-semibold">{children}</strong>,
+  h1: ({ children }) => <h1 className="text-lg font-bold text-white mb-2">{children}</h1>,
+  h2: ({ children }) => <h2 className="text-base font-bold text-white mb-2">{children}</h2>,
+  h3: ({ children }) => <h3 className="text-sm font-bold text-white mb-1">{children}</h3>,
+};
+
 // Coaching Response Display
 const CoachingResponse = ({ title, response, onClose }) => {
   if (!response) return null;
@@ -209,24 +221,14 @@ const CoachingResponse = ({ title, response, onClose }) => {
         )}
       </div>
       <div className="prose prose-invert prose-sm max-w-none text-zinc-300">
-        <ReactMarkdown
-          components={{
-            p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-            ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
-            ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
-            li: ({ children }) => <li className="text-zinc-300">{children}</li>,
-            strong: ({ children }) => <strong className="text-cyan-400 font-semibold">{children}</strong>,
-            h1: ({ children }) => <h1 className="text-lg font-bold text-white mb-2">{children}</h1>,
-            h2: ({ children }) => <h2 className="text-base font-bold text-white mb-2">{children}</h2>,
-            h3: ({ children }) => <h3 className="text-sm font-bold text-white mb-1">{children}</h3>,
-          }}
-        >
+        <ReactMarkdown components={markdownComponents}>
           {response}
         </ReactMarkdown>
       </div>
     </div>
   );
 };
+
 
 // Main AI Coach Panel Component
 const AICoachPanel = ({ isOpen, onClose }) => {
