@@ -1,32 +1,22 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  MessageSquare,
   Send,
   X,
   Loader2,
   Bot,
   User,
   Sparkles,
-  ChevronDown,
-  ChevronUp,
   Trash2,
   Clock,
   TrendingUp,
-  AlertTriangle,
   BookOpen,
   Sunrise,
   HelpCircle,
-  Award,
   List,
   Search,
-  RefreshCw,
   Minimize2,
   Maximize2,
-  Brain,
-  Calculator,
-  CheckCircle2,
-  Target,
-  MessageCircle
+  Target
 } from 'lucide-react';
 import api from '../utils/api';
 import { toast } from 'sonner';
