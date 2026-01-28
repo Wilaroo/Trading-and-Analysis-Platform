@@ -97,7 +97,9 @@ async def get_connection_status():
     if not _ib_service:
         raise HTTPException(status_code=500, detail="IB service not initialized")
     
-    return _ib_service.get_connection_status()
+    status = _ib_service.get_connection_status()
+    print(f"[IB STATUS] Returning: connected={status.get('connected')}")
+    return status
 
 
 @router.post("/connect")
