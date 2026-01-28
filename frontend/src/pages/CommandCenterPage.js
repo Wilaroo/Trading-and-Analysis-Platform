@@ -1283,10 +1283,12 @@ const CommandCenterPage = () => {
       const connected = res.data?.connected || false;
       console.log('checkConnection result:', res.data, 'setting isConnected to:', connected);
       setIsConnected(connected);
+      setConnectionChecked(true);
       return connected;
     } catch (err) {
       console.error('checkConnection error:', err);
       setIsConnected(false);
+      setConnectionChecked(true);
       return false;
     }
   };
