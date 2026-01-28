@@ -146,8 +146,12 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
           console.log('[Chart] chartRef exists:', !!chartRef.current);
           
           if (candleSeriesRef.current) {
-            candleSeriesRef.current.setData(candleData);
-            console.log('[Chart] Candle data set successfully');
+            try {
+              candleSeriesRef.current.setData(candleData);
+              console.log('[Chart] Candle data set successfully, series data count:', candleSeriesRef.current.data?.()?.length || 'N/A');
+            } catch (setDataErr) {
+              console.error('[Chart] Error setting candle data:', setDataErr);
+            }
           } else {
             console.warn('[Chart] candleSeriesRef not ready, retrying in 500ms...');
             setTimeout(() => {
