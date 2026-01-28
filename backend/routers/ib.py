@@ -607,22 +607,29 @@ async def get_batch_quotes(symbols: List[str]):
     if len(symbols) > 50:
         raise HTTPException(status_code=400, detail="Maximum 50 symbols per request")
     
+    # Filter out invalid symbols to reduce errors
+    invalid_symbols = {'VIX', 'DJI', 'IXIC', 'GSPC', 'RUT', 'NDX', 'SPX'}
+    filtered_symbols = [s for s in symbols if s.upper() not in invalid_symbols and ' ' not in s]
+    
+    if not filtered_symbols:
+        return {"quotes": [], "count": 0}
+    
     try:
         quotes = []
         
         # Try Alpaca first (free, no subscription needed)
         if _alpaca_service:
             try:
-                alpaca_quotes = await _alpaca_service.get_quotes_batch(symbols)
+                alpaca_quotes = await _alpaca_service.get_quotes_batch(filtered_symbols)
                 if alpaca_quotes:
                     quotes = list(alpaca_quotes.values())
             except Exception as e:
                 print(f"Alpaca batch quotes error: {e}")
         
         # If Alpaca didn't return all quotes, try IB for remaining
-        if len(quotes) < len(symbols) and _ib_service:
+        if len(quotes) < len(filtered_symbols) and _ib_service:
             got_symbols = {q.get("symbol") for q in quotes}
-            missing = [s for s in symbols if s.upper() not in got_symbols]
+            missing = [s for s in filtered_symbols if s.upper() not in got_symbols]
             
             if missing:
                 try:
