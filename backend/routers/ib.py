@@ -2066,16 +2066,13 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
         scoring_engine = get_scoring_engine()
         alert_manager = get_alert_manager()
         
-        # Define all scanner types to run
+        # Define scanner types to run - prioritized for trading opportunities
+        # Reduced from 8 to 4 most relevant scanners to reduce IB Gateway load
         all_scan_types = [
-            "TOP_PERC_GAIN",      # Top gainers
-            "TOP_PERC_LOSE",      # Top losers
-            "MOST_ACTIVE",        # Most active by volume
-            "HOT_BY_VOLUME",      # Hot by volume
-            "HIGH_OPEN_GAP",      # Gap up
-            "LOW_OPEN_GAP",       # Gap down
-            "HIGH_VS_13W_HL",     # Near 13-week high
-            "LOW_VS_13W_HL",      # Near 13-week low
+            "TOP_PERC_GAIN",      # Top gainers - most common trade setup
+            "TOP_PERC_LOSE",      # Top losers - reversal opportunities
+            "MOST_ACTIVE",        # Most active by volume - liquidity
+            "HIGH_OPEN_GAP",      # Gap up - momentum plays
         ]
         
         if request.scan_types:
