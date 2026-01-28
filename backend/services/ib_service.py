@@ -234,6 +234,23 @@ class IBWorkerThread(threading.Thread):
         except Exception as e:
             return IBResponse(success=False, error=str(e))
     
+    def _do_get_status(self) -> IBResponse:
+        """Get connection status from within the worker thread"""
+        try:
+            connected = False
+            if self.ib is not None:
+                connected = self.ib.isConnected()
+                self.is_connected = connected  # Keep flag in sync
+            else:
+                connected = False
+                self.is_connected = False
+            
+            return IBResponse(success=True, data={"connected": connected})
+        except Exception as e:
+            logger.error(f"Error checking IB status: {e}")
+            self.is_connected = False
+            return IBResponse(success=False, error=str(e))
+    
     def _do_get_account_summary(self) -> IBResponse:
         """Get account summary"""
         if not self.ib or not self.ib.isConnected():
