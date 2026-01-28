@@ -201,6 +201,8 @@ class IBWorkerThread(threading.Thread):
             from ib_insync import IB, util
             
             if self.ib and self.ib.isConnected():
+                logger.info("Already connected to IB, returning success")
+                self.is_connected = True  # Ensure flag is set
                 return IBResponse(success=True, data={"message": "Already connected"})
             
             if self.ib is None:
@@ -217,7 +219,7 @@ class IBWorkerThread(threading.Thread):
             )
             
             self.is_connected = True
-            logger.info(f"Successfully connected to IB Gateway. Account: {IB_ACCOUNT_ID}")
+            logger.info(f"Successfully connected to IB Gateway. Account: {IB_ACCOUNT_ID}, is_connected flag set to True")
             
             return IBResponse(success=True, data={"message": "Connected successfully"})
             
