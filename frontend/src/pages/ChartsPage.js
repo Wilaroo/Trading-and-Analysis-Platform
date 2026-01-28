@@ -77,6 +77,17 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
           wickDownColor: '#FF2E2E',
           priceScaleId: 'right',
         });
+        // Test with hardcoded data first to verify chart is working
+        const testData = [
+          { time: 1679875200, open: 100, high: 105, low: 98, close: 103 },
+          { time: 1679961600, open: 103, high: 108, low: 101, close: 106 },
+          { time: 1680048000, open: 106, high: 110, low: 104, close: 108 },
+          { time: 1680134400, open: 108, high: 112, low: 105, close: 110 },
+          { time: 1680220800, open: 110, high: 115, low: 108, close: 113 },
+        ];
+        candleSeries.setData(testData);
+        console.log('[Chart] Test data set to verify chart works');
+        
         candleSeriesRef.current = candleSeries;
         
         // Ensure price scale auto-fits to visible data
