@@ -1615,6 +1615,20 @@ async def system_monitor():
     }
 
 
+@app.get("/api/data-services/status")
+async def get_data_services_status():
+    """Get detailed status of all market data services (Alpaca, Finnhub, yfinance, etc.)"""
+    stock_svc = get_stock_service()
+    return await stock_svc.get_service_status()
+
+
+@app.get("/api/data-services/health")
+async def check_data_services_health():
+    """Perform health check on all data services - tests actual connectivity"""
+    stock_svc = get_stock_service()
+    return await stock_svc.health_check()
+
+
 # ----- Quotes -----
 @app.get("/api/quotes/{symbol}")
 async def get_quote(symbol: str):
