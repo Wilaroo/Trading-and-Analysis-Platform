@@ -555,26 +555,16 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
             />
             <div className="h-5 w-px bg-white/10 mx-1" />
             <button
-              onClick={() => setActiveMode(activeMode === 'rules' ? 'chat' : 'rules')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs transition-all ${
-                activeMode === 'rules' 
-                  ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400' 
+              onClick={() => setShowTradeCheck(!showTradeCheck)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition-all ${
+                showTradeCheck 
+                  ? 'bg-gradient-to-r from-cyan-500/20 to-emerald-500/20 border-cyan-500/50 text-cyan-400' 
                   : 'bg-zinc-800/50 border-white/10 text-zinc-300 hover:border-cyan-500/30'
               }`}
+              data-testid="check-my-trade-btn"
             >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              Rule Check
-            </button>
-            <button
-              onClick={() => setActiveMode(activeMode === 'sizing' ? 'chat' : 'sizing')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs transition-all ${
-                activeMode === 'sizing' 
-                  ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' 
-                  : 'bg-zinc-800/50 border-white/10 text-zinc-300 hover:border-emerald-500/30'
-              }`}
-            >
-              <Calculator className="w-3.5 h-3.5" />
-              Position Size
+              <Target className="w-3.5 h-3.5" />
+              Check My Trade
             </button>
           </div>
           
