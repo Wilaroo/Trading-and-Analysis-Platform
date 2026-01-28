@@ -3452,12 +3452,6 @@ const CommandCenterPage = ({
         }}
         initialPrompt={assistantPrompt}
       />
-      
-      {/* AI Coach Panel */}
-      <AICoachPanel
-        isOpen={showCoachPanel}
-        onClose={() => setShowCoachPanel(false)}
-      />
     </div>
   );
 };
