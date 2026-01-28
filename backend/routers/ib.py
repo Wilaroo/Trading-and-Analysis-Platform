@@ -2297,7 +2297,7 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
         print(f"After quote filtering: {len(valid_candidates)} valid candidates")
         print(f"Skipped for price < ${MIN_PRICE}: {skipped_reasons.get('low_price', 0)}")
         print(f"Skipped for volume < {MIN_VOLUME:,}: {skipped_reasons.get('low_volume', 0)}")
-        print(f"Skipped for float > {MAX_FLOAT:,}: {skipped_reasons.get('high_float', 0)}")
+        print(f"Skipped for float < {MIN_FLOAT:,}: {skipped_reasons.get('low_float', 0)}")
         print(f"Skipped for RVOL < {MIN_RVOL}x: {skipped_reasons.get('low_rvol', 0)}")
         
         # ===================== DETAILED ANALYSIS =====================
