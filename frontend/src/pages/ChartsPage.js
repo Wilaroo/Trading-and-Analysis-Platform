@@ -174,6 +174,11 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
               const h = chartContainerRef.current.clientHeight;
               console.log('[Chart] Forcing resize to:', w, 'x', h);
               chartRef.current.applyOptions({ width: w, height: h });
+              // Check visible time range
+              const timeRange = chartRef.current.timeScale().getVisibleRange();
+              console.log('[Chart] Visible time range:', timeRange);
+              // Force scroll to show the data
+              chartRef.current.timeScale().scrollToPosition(0, false);
             }
           }
           
