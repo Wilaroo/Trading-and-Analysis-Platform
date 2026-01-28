@@ -313,13 +313,12 @@ Format your responses clearly with sections when appropriate. Use specific numbe
             logger.warning(f"Error fetching rules: {e}")
         
         # 3. Extract stock symbols from message and get data
-        import re
         symbols = re.findall(r'\b([A-Z]{1,5})\b', user_message.upper())
         common_words = {'I', 'A', 'THE', 'AND', 'OR', 'FOR', 'TO', 'IS', 'IT', 'IN', 'ON', 'AT', 'BY', 'BE', 'AS', 'AN', 'ARE', 'WAS', 'IF', 'MY', 'ME', 'DO', 'SO', 'UP', 'AM', 'CAN', 'HOW', 'WHAT', 'BUY', 'SELL', 'LONG', 'SHORT'}
         symbols = [s for s in symbols if s not in common_words and len(s) >= 2]
         
         if symbols:
-            context_parts.append(f"\nSTOCK DATA FOR MENTIONED SYMBOLS:")
+            context_parts.append("\nSTOCK DATA FOR MENTIONED SYMBOLS:")
             for symbol in symbols[:3]:
                 try:
                     # Get quality score
@@ -330,14 +329,14 @@ Format your responses clearly with sections when appropriate. Use specific numbe
                     context_parts.append(f"  Signal: {q_score.quality_signal}")
                     if quality.roe:
                         context_parts.append(f"  ROE: {quality.roe:.1%}, D/A: {quality.da:.1%}" if quality.da else f"  ROE: {quality.roe:.1%}")
-                except Exception as e:
-                    logger.warning(f"Error getting data for {symbol}: {e}")
+                except Exception as ex:
+                    logger.warning(f"Error getting data for {symbol}: {ex}")
         
         # 4. Knowledge base stats
         try:
             stats = self.knowledge_service.get_stats()
             context_parts.append(f"\nKNOWLEDGE BASE: {stats.get('total_entries', 0)} entries ({stats.get('by_type', {}).get('strategy', 0)} strategies, {stats.get('by_type', {}).get('rule', 0)} rules)")
-        except Exception as e:
+        except Exception:
             pass
         
         return "\n".join(context_parts)
