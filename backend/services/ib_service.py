@@ -541,6 +541,9 @@ class IBWorkerThread(threading.Thread):
             duration = params.get("duration", "1 D")
             bar_size = params.get("bar_size", "5 mins")
             
+            # Process event loop before heavy operation
+            self.ib.sleep(0.1)
+            
             contract = Stock(symbol.upper(), "SMART", "USD")
             self.ib.qualifyContracts(contract)
             
@@ -552,6 +555,9 @@ class IBWorkerThread(threading.Thread):
                 whatToShow="TRADES",
                 useRTH=True
             )
+            
+            # Process event loop after data retrieval
+            self.ib.sleep(0.1)
             
             return IBResponse(success=True, data=[
                 {
