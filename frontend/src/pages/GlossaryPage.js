@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search,
@@ -17,9 +17,37 @@ import {
   Hash,
   BookOpen,
   ExternalLink,
-  ArrowLeft
+  ArrowLeft,
+  Brain,
+  Plus,
+  Tag,
+  Lightbulb,
+  CheckSquare,
+  Edit2,
+  Trash2,
+  Save,
+  Loader2
 } from 'lucide-react';
 import glossaryData from '../data/glossaryData';
+import api from '../utils/api';
+import { toast } from 'sonner';
+
+// Knowledge Base Types
+const KB_TYPES = [
+  { value: 'strategy', label: 'Strategy', icon: Target, color: 'text-purple-400' },
+  { value: 'pattern', label: 'Pattern', icon: TrendingUp, color: 'text-blue-400' },
+  { value: 'insight', label: 'Insight', icon: Lightbulb, color: 'text-yellow-400' },
+  { value: 'rule', label: 'Rule', icon: CheckSquare, color: 'text-green-400' },
+  { value: 'note', label: 'Note', icon: FileText, color: 'text-zinc-400' },
+  { value: 'indicator', label: 'Indicator', icon: TrendingUp, color: 'text-cyan-400' },
+  { value: 'checklist', label: 'Checklist', icon: CheckSquare, color: 'text-orange-400' },
+];
+
+const KB_CATEGORIES = [
+  'entry', 'exit', 'risk_management', 'position_sizing',
+  'market_condition', 'technical', 'fundamental', 'sentiment',
+  'premarket', 'intraday', 'swing', 'general'
+];
 
 // Icon mapping for categories
 const categoryIcons = {
@@ -42,7 +70,379 @@ const Card = ({ children, className = '' }) => (
   </div>
 );
 
+// ===================== KNOWLEDGE BASE SECTION =====================
+const KnowledgeBaseSection = () => {
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterType, setFilterType] = useState('');
+  const [filterCategory, setFilterCategory] = useState('');
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [editingEntry, setEditingEntry] = useState(null);
+  const [stats, setStats] = useState(null);
+  
+  const [formData, setFormData] = useState({
+    title: '',
+    content: '',
+    type: 'note',
+    category: 'general',
+    tags: '',
+    confidence: 80,
+    source: 'user'
+  });
+
+  const fetchEntries = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (searchQuery) params.append('q', searchQuery);
+      if (filterType) params.append('type', filterType);
+      if (filterCategory) params.append('category', filterCategory);
+      
+      const res = await api.get(`/api/knowledge?${params.toString()}`);
+      setEntries(res.data.results || []);
+    } catch (err) {
+      console.error('Error fetching knowledge:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [searchQuery, filterType, filterCategory]);
+
+  const fetchStats = async () => {
+    try {
+      const res = await api.get('/api/knowledge/stats');
+      setStats(res.data);
+    } catch (err) {
+      console.error('Error fetching stats:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchEntries();
+    fetchStats();
+  }, [fetchEntries]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!formData.title.trim() || !formData.content.trim()) {
+      toast.error('Title and content are required');
+      return;
+    }
+
+    try {
+      const payload = {
+        ...formData,
+        tags: formData.tags.split(',').map(t => t.trim()).filter(Boolean),
+        confidence: parseInt(formData.confidence)
+      };
+
+      if (editingEntry) {
+        await api.put(`/api/knowledge/${editingEntry.id}`, payload);
+        toast.success('Entry updated');
+      } else {
+        await api.post('/api/knowledge', payload);
+        toast.success('Entry added');
+      }
+      
+      resetForm();
+      fetchEntries();
+      fetchStats();
+    } catch (err) {
+      toast.error('Failed to save entry');
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Delete this entry?')) return;
+    
+    try {
+      await api.delete(`/api/knowledge/${id}`);
+      toast.success('Entry deleted');
+      fetchEntries();
+      fetchStats();
+    } catch (err) {
+      toast.error('Failed to delete entry');
+    }
+  };
+
+  const resetForm = () => {
+    setFormData({
+      title: '',
+      content: '',
+      type: 'note',
+      category: 'general',
+      tags: '',
+      confidence: 80,
+      source: 'user'
+    });
+    setShowAddForm(false);
+    setEditingEntry(null);
+  };
+
+  const startEdit = (entry) => {
+    setEditingEntry(entry);
+    setFormData({
+      title: entry.title,
+      content: entry.content,
+      type: entry.type,
+      category: entry.category,
+      tags: entry.tags?.join(', ') || '',
+      confidence: entry.confidence || 80,
+      source: entry.source || 'user'
+    });
+    setShowAddForm(true);
+  };
+
+  const getTypeInfo = (type) => KB_TYPES.find(t => t.value === type) || KB_TYPES[4];
+
+  return (
+    <div className="space-y-6">
+      {/* Stats Bar */}
+      {stats && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card>
+            <div className="text-2xl font-bold text-cyan-400">{stats.total_entries || 0}</div>
+            <div className="text-xs text-zinc-500">Total Entries</div>
+          </Card>
+          <Card>
+            <div className="text-2xl font-bold text-purple-400">{stats.by_type?.strategy || 0}</div>
+            <div className="text-xs text-zinc-500">Strategies</div>
+          </Card>
+          <Card>
+            <div className="text-2xl font-bold text-green-400">{stats.by_type?.rule || 0}</div>
+            <div className="text-xs text-zinc-500">Rules</div>
+          </Card>
+          <Card>
+            <div className="text-2xl font-bold text-blue-400">{stats.by_type?.pattern || 0}</div>
+            <div className="text-xs text-zinc-500">Patterns</div>
+          </Card>
+        </div>
+      )}
+
+      {/* Search & Filters */}
+      <div className="flex flex-col md:flex-row gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search knowledge base..."
+            className="w-full pl-10 pr-4 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
+          />
+        </div>
+        
+        <select
+          value={filterType}
+          onChange={(e) => setFilterType(e.target.value)}
+          className="px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500/50"
+        >
+          <option value="">All Types</option>
+          {KB_TYPES.map(t => (
+            <option key={t.value} value={t.value}>{t.label}</option>
+          ))}
+        </select>
+        
+        <select
+          value={filterCategory}
+          onChange={(e) => setFilterCategory(e.target.value)}
+          className="px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500/50"
+        >
+          <option value="">All Categories</option>
+          {KB_CATEGORIES.map(c => (
+            <option key={c} value={c}>{c.replace('_', ' ').toUpperCase()}</option>
+          ))}
+        </select>
+        
+        <button
+          onClick={() => setShowAddForm(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-lg text-sm font-medium transition-colors"
+        >
+          <Plus className="w-4 h-4" />
+          Add Entry
+        </button>
+      </div>
+
+      {/* Add/Edit Form */}
+      <AnimatePresence>
+        {showAddForm && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+          >
+            <Card>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold">
+                    {editingEntry ? 'Edit Entry' : 'Add New Entry'}
+                  </h3>
+                  <button type="button" onClick={resetForm} className="text-zinc-500 hover:text-white">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <input
+                    type="text"
+                    value={formData.title}
+                    onChange={(e) => setFormData({...formData, title: e.target.value})}
+                    placeholder="Title"
+                    className="px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
+                  />
+                  
+                  <div className="flex gap-2">
+                    <select
+                      value={formData.type}
+                      onChange={(e) => setFormData({...formData, type: e.target.value})}
+                      className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white focus:outline-none focus:border-cyan-500/50"
+                    >
+                      {KB_TYPES.map(t => (
+                        <option key={t.value} value={t.value}>{t.label}</option>
+                      ))}
+                    </select>
+                    
+                    <select
+                      value={formData.category}
+                      onChange={(e) => setFormData({...formData, category: e.target.value})}
+                      className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white focus:outline-none focus:border-cyan-500/50"
+                    >
+                      {KB_CATEGORIES.map(c => (
+                        <option key={c} value={c}>{c.replace('_', ' ')}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                
+                <textarea
+                  value={formData.content}
+                  onChange={(e) => setFormData({...formData, content: e.target.value})}
+                  placeholder="Content (supports markdown)"
+                  rows={4}
+                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50 resize-none"
+                />
+                
+                <div className="flex gap-4">
+                  <input
+                    type="text"
+                    value={formData.tags}
+                    onChange={(e) => setFormData({...formData, tags: e.target.value})}
+                    placeholder="Tags (comma separated)"
+                    className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
+                  />
+                  
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-zinc-500">Confidence:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={formData.confidence}
+                      onChange={(e) => setFormData({...formData, confidence: e.target.value})}
+                      className="w-20 px-2 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-center focus:outline-none focus:border-cyan-500/50"
+                    />
+                  </div>
+                </div>
+                
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-sm transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    <Save className="w-4 h-4" />
+                    {editingEntry ? 'Update' : 'Save'}
+                  </button>
+                </div>
+              </form>
+            </Card>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Entries List */}
+      {loading ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+        </div>
+      ) : entries.length === 0 ? (
+        <Card className="text-center py-12">
+          <Brain className="w-12 h-12 text-zinc-700 mx-auto mb-4" />
+          <p className="text-zinc-500">No entries found</p>
+          <p className="text-sm text-zinc-600 mt-1">Add your trading knowledge, strategies, and rules</p>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {entries.map(entry => {
+            const typeInfo = getTypeInfo(entry.type);
+            const TypeIcon = typeInfo.icon;
+            
+            return (
+              <Card key={entry.id} className="hover:border-white/10 transition-colors">
+                <div className="flex items-start gap-4">
+                  <div className={`p-2 rounded-lg bg-zinc-800 ${typeInfo.color}`}>
+                    <TypeIcon className="w-5 h-5" />
+                  </div>
+                  
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h4 className="font-semibold text-white">{entry.title}</h4>
+                      <span className={`text-xs px-2 py-0.5 rounded-full bg-zinc-800 ${typeInfo.color}`}>
+                        {typeInfo.label}
+                      </span>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">
+                        {entry.category?.replace('_', ' ')}
+                      </span>
+                    </div>
+                    
+                    <p className="text-sm text-zinc-400 line-clamp-2">{entry.content}</p>
+                    
+                    {entry.tags?.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {entry.tags.map((tag, i) => (
+                          <span key={i} className="text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-500">
+                            #{tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-500">{entry.confidence}%</span>
+                    <button
+                      onClick={() => startEdit(entry)}
+                      className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-white transition-colors"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(entry.id)}
+                      className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-red-400 transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ===================== GLOSSARY PAGE =====================
 const GlossaryPage = () => {
+  const [activeTab, setActiveTab] = useState('glossary');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedEntry, setSelectedEntry] = useState(null);
