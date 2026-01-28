@@ -85,11 +85,20 @@ if (typeof window !== 'undefined') {
 
 // ===================== MAIN APP =====================
 function App() {
-  const [activeTab, setActiveTab] = useState('command-center');
+  // Persist activeTab in localStorage so it survives page refresh
+  const [activeTab, setActiveTab] = useState(() => {
+    const saved = localStorage.getItem('tradecommand_activeTab');
+    return saved || 'command-center';
+  });
   const [dashboardData, setDashboardData] = useState({ stats: {}, overview: {}, alerts: [], watchlist: [] });
   const [loading, setLoading] = useState(true);
   const [streamingQuotes, setStreamingQuotes] = useState({});
   const [showAlertSettings, setShowAlertSettings] = useState(false);
+
+  // Save activeTab to localStorage when it changes
+  useEffect(() => {
+    localStorage.setItem('tradecommand_activeTab', activeTab);
+  }, [activeTab]);
 
   // WebSocket handler for real-time updates
   const handleWebSocketMessage = useCallback((message) => {
