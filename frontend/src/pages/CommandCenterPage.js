@@ -1781,26 +1781,36 @@ const CommandCenterPage = () => {
     }
   };
 
-  // Initial load
+  // Initial load - staggered to avoid overwhelming the backend
   useEffect(() => {
     const init = async () => {
       const connected = await checkConnection();
       if (connected) {
+        // First batch: essential data
         await Promise.all([
           fetchAccountData(),
-          fetchMarketContext(),
-          runScanner(),
           fetchWatchlist(connected),
-          fetchBreakoutAlerts(),
-          runComprehensiveScan()  // Run comprehensive scan on load
         ]);
+        
+        // Second batch: market data (slight delay to avoid overwhelming IB)
+        setTimeout(async () => {
+          await Promise.all([
+            fetchMarketContext(),
+            fetchBreakoutAlerts(),
+          ]);
+        }, 500);
+        
+        // Third batch: heavy operations (scanners) - delayed more
+        setTimeout(async () => {
+          await runComprehensiveScan();
+        }, 1500);
       }
+      
+      // Non-IB data can load in parallel
       fetchAlerts();
       fetchNewsletter();
       fetchEarnings();
-      fetchShortSqueeze();
       fetchPriceAlerts();
-      fetchEnhancedAlerts();
     };
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
