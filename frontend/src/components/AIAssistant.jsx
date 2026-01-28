@@ -568,17 +568,11 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
             </button>
           </div>
           
-          {/* Inline Forms */}
-          {activeMode === 'rules' && (
-            <div className="mt-3 p-3 bg-cyan-500/5 border border-cyan-500/20 rounded-lg">
-              <p className="text-xs text-zinc-400 mb-2">Check trade against your rules before executing:</p>
-              <RuleCheckForm onSubmit={handleRuleCheck} loading={coachLoading.rules} />
-            </div>
-          )}
-          {activeMode === 'sizing' && (
-            <div className="mt-3 p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-lg">
-              <p className="text-xs text-zinc-400 mb-2">Calculate position size based on risk rules:</p>
-              <PositionSizeForm onSubmit={handlePositionSize} loading={coachLoading.sizing} />
+          {/* Check My Trade Form */}
+          {showTradeCheck && (
+            <div className="mt-3 p-3 bg-gradient-to-r from-cyan-500/5 to-emerald-500/5 border border-cyan-500/20 rounded-lg">
+              <p className="text-xs text-zinc-400 mb-2">Check rules + get position size before executing:</p>
+              <CheckMyTradeForm onSubmit={handleCheckMyTrade} loading={coachLoading.check} />
             </div>
           )}
         </div>
