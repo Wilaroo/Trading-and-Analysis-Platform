@@ -138,14 +138,16 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
   // Fetch data - wait for chart to be ready
   useEffect(() => {
     if (!symbol) return;
-    if (!chartReady) {
-      console.log('[Chart] Waiting for chart to be ready before fetching data');
-      return;
-    }
     
     const currentVersion = chartVersionRef.current;
 
     const fetchData = async () => {
+      // Wait for chart to be ready before fetching
+      if (!chartReadyRef.current || !candleSeriesRef.current) {
+        console.log(`[Chart v${currentVersion}] Chart not ready yet, waiting 200ms...`);
+        setTimeout(fetchData, 200);
+        return;
+      }
       // Don't show loading spinner if we already have data (background refresh)
       if (!hasData) {
         setLoading(true);
