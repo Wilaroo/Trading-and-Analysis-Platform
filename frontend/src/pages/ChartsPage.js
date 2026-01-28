@@ -262,7 +262,7 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
     }, refreshInterval);
     
     return () => clearInterval(interval);
-  }, [symbol, timeframe, duration, isConnected, isBusy, hasData]);
+  }, [symbol, timeframe, duration, isConnected, isBusy, hasData, chartReady]);
 
   // Handle error display - only show connection error if we have no data
   // If we have data from Alpaca, don't show connection error
