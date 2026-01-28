@@ -412,7 +412,9 @@ const OpenOrders = ({ orders, loading, onCancel }) => {
 };
 
 // ===================== MAIN IB TRADING PAGE =====================
-const IBTradingPage = () => {
+const IBTradingPage = ({ ibConnected, ibConnectionChecked, connectToIb, checkIbConnection }) => {
+  // Use shared connection state from App
+  const isConnected = ibConnected;
   const [connectionStatus, setConnectionStatus] = useState(null);
   const [accountSummary, setAccountSummary] = useState(null);
   const [positions, setPositions] = useState([]);
@@ -426,9 +428,7 @@ const IBTradingPage = () => {
   });
   const [error, setError] = useState(null);
   
-  const isConnected = connectionStatus?.connected;
-  
-  // Fetch connection status
+  // Fetch connection status for display (host, port, etc.)
   const fetchConnectionStatus = useCallback(async () => {
     try {
       const res = await api.get('/api/ib/status');
@@ -438,14 +438,12 @@ const IBTradingPage = () => {
     }
   }, []);
   
-  // Connect to IB
+  // Connect to IB using shared function
   const handleConnect = async () => {
     setLoading(prev => ({...prev, connection: true}));
     setError(null);
     try {
-      await api.post('/api/ib/connect');
-      // Small delay to allow IB connection to stabilize
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await connectToIb();
       await fetchConnectionStatus();
       // Fetch data after connecting
       await Promise.all([fetchAccountData(), fetchPositions(), fetchOpenOrders()]);
@@ -461,6 +459,7 @@ const IBTradingPage = () => {
     setLoading(prev => ({...prev, connection: true}));
     try {
       await api.post('/api/ib/disconnect');
+      await checkIbConnection(); // Update shared state
       await fetchConnectionStatus();
       setAccountSummary(null);
       setPositions([]);
