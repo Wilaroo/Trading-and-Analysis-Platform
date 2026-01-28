@@ -2526,6 +2526,7 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
             import asyncio
             await asyncio.sleep(1)  # Give IB connection time to stabilize
             _ib_service.set_busy(False)
+            _last_scan_completed_at = datetime.now(timezone.utc).isoformat()
             print("Comprehensive scan complete, busy flag cleared")
 
 
