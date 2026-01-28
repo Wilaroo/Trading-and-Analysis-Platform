@@ -245,12 +245,13 @@ const IBRealtimeChart = ({ symbol, isConnected }) => {
 };
 
 // ===================== CHARTS PAGE =====================
-const ChartsPage = ({ ibConnected, ibConnectionChecked, connectToIb }) => {
+const ChartsPage = ({ ibConnected, ibConnectionChecked, connectToIb, ibBusy, ibBusyOperation }) => {
   const [symbol, setSymbol] = useState('AAPL');
   const [inputSymbol, setInputSymbol] = useState('AAPL');
   // Use shared connection state from App
   const isConnected = ibConnected;
   const connectionChecked = ibConnectionChecked;
+  const isBusy = ibBusy;
   const popularSymbols = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'SPY', 'QQQ', 'IWM'];
 
   const handleConnect = async () => {
