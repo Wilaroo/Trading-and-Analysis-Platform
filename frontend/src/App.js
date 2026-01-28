@@ -231,7 +231,7 @@ function App() {
     
     switch (activeTab) {
       case 'command-center': return <CommandCenterPage {...ibProps} />;
-      case 'chart': return <ErrorBoundary><ChartsPage /></ErrorBoundary>;
+      case 'chart': return <ErrorBoundary><ChartsPage {...ibProps} /></ErrorBoundary>;
       case 'trade-journal': return <TradeJournalPage />;
       case 'ib-trading': return <IBTradingPage {...ibProps} />;
       case 'glossary': return <GlossaryPage />;
