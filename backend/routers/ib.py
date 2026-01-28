@@ -1924,6 +1924,7 @@ _comprehensive_alerts = {
     "position": []
 }
 _comprehensive_last_scan = None
+_last_scan_completed_at = None  # Track when last scan completed for cooldown
 
 
 class ComprehensiveScanRequest(BaseModel):
@@ -1952,12 +1953,37 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
     
     Requires IB Gateway connection.
     """
-    global _comprehensive_alerts, _comprehensive_last_scan
+    global _comprehensive_alerts, _comprehensive_last_scan, _last_scan_completed_at
     
     if request is None:
         request = ComprehensiveScanRequest()
     
     min_score = request.min_score
+    
+    # Cooldown check - prevent rapid successive scans (minimum 10 seconds between scans)
+    SCAN_COOLDOWN_SECONDS = 10
+    if _last_scan_completed_at:
+        time_since_last = (datetime.now(timezone.utc) - datetime.fromisoformat(_last_scan_completed_at.replace('Z', '+00:00'))).total_seconds()
+        if time_since_last < SCAN_COOLDOWN_SECONDS:
+            remaining = SCAN_COOLDOWN_SECONDS - time_since_last
+            print(f"Scan cooldown: {remaining:.1f}s remaining, returning cached results")
+            if _comprehensive_last_scan:
+                return {
+                    "alerts": _comprehensive_alerts,
+                    "summary": {
+                        "scalp": len(_comprehensive_alerts["scalp"]),
+                        "intraday": len(_comprehensive_alerts["intraday"]),
+                        "swing": len(_comprehensive_alerts["swing"]),
+                        "position": len(_comprehensive_alerts["position"]),
+                        "total": sum(len(v) for v in _comprehensive_alerts.values())
+                    },
+                    "min_score": min_score,
+                    "last_scan": _comprehensive_last_scan,
+                    "is_cached": True,
+                    "is_connected": True,
+                    "cooldown_remaining": remaining,
+                    "message": f"Please wait {remaining:.0f}s before scanning again. Showing recent results."
+                }
     
     # Check if a scan is already running to prevent concurrent scans
     if _ib_service:
