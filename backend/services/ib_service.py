@@ -241,9 +241,11 @@ class IBWorkerThread(threading.Thread):
             if self.ib is not None:
                 connected = self.ib.isConnected()
                 self.is_connected = connected  # Keep flag in sync
+                logger.debug(f"IB status check: ib.isConnected()={connected}, flag={self.is_connected}")
             else:
                 connected = False
                 self.is_connected = False
+                logger.debug("IB status check: ib object is None")
             
             return IBResponse(success=True, data={"connected": connected})
         except Exception as e:
