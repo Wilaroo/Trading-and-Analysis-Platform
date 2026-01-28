@@ -1276,41 +1276,26 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
     { id: 'LOW_OPEN_GAP', label: 'Gap Down', icon: ArrowDownRight },
   ];
 
-  // Check IB connection
+  // Check IB connection - use shared function from App
   const checkConnection = async () => {
-    try {
-      const res = await api.get('/api/ib/status');
-      const connected = res.data?.connected || false;
-      console.log('checkConnection result:', res.data, 'setting isConnected to:', connected);
-      setIsConnected(connected);
-      setConnectionChecked(true);
-      return connected;
-    } catch (err) {
-      console.error('checkConnection error:', err);
-      setIsConnected(false);
-      setConnectionChecked(true);
-      return false;
-    }
+    return await checkIbConnection();
   };
 
-  // Connect to IB
-  const connectToIB = async () => {
+  // Connect to IB - use shared function from App
+  const handleConnectToIB = async () => {
     setConnecting(true);
-    console.log('connectToIB: Starting connection...');
+    console.log('handleConnectToIB: Starting connection...');
     try {
-      const connectRes = await api.post('/api/ib/connect');
-      console.log('connectToIB: Connect response:', connectRes.data);
-      const connected = await checkConnection();
-      console.log('connectToIB: After checkConnection, connected=', connected);
+      const connected = await connectToIb();
+      console.log('handleConnectToIB: Connected =', connected);
       if (connected) {
         await fetchAccountData();
         await fetchWatchlist(connected);
       }
     } catch (err) {
-      console.error('connectToIB: Connection failed:', err);
+      console.error('handleConnectToIB: Connection failed:', err);
     }
     setConnecting(false);
-    console.log('connectToIB: Finished, isConnected state will be:', isConnected);
   };
 
   // Fetch account data
