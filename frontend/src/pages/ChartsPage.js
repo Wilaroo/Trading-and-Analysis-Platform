@@ -229,32 +229,16 @@ const IBRealtimeChart = ({ symbol, isConnected }) => {
 };
 
 // ===================== CHARTS PAGE =====================
-const ChartsPage = () => {
+const ChartsPage = ({ ibConnected, ibConnectionChecked, connectToIb }) => {
   const [symbol, setSymbol] = useState('AAPL');
   const [inputSymbol, setInputSymbol] = useState('AAPL');
-  const [isConnected, setIsConnected] = useState(false);
+  // Use shared connection state from App
+  const isConnected = ibConnected;
   const popularSymbols = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'SPY', 'QQQ', 'IWM'];
-
-  // Check IB connection status
-  useEffect(() => {
-    const checkConnection = async () => {
-      try {
-        const response = await api.get('/api/ib/status');
-        setIsConnected(response.data.connected);
-      } catch (err) {
-        setIsConnected(false);
-      }
-    };
-    
-    checkConnection();
-    const interval = setInterval(checkConnection, 5000);
-    return () => clearInterval(interval);
-  }, []);
 
   const handleConnect = async () => {
     try {
-      await api.post('/api/ib/connect');
-      setIsConnected(true);
+      await connectToIb();
     } catch (err) {
       console.error('Failed to connect:', err);
     }
@@ -277,17 +261,26 @@ const ChartsPage = () => {
         
         {/* Connection Status */}
         <div className="flex items-center gap-3">
-          <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`} />
-          <span className="text-xs text-zinc-400">
-            {isConnected ? 'IB Connected' : 'Disconnected'}
-          </span>
-          {!isConnected && (
-            <button
-              onClick={handleConnect}
-              className="text-xs px-3 py-1.5 bg-cyan-400 text-black font-medium rounded hover:bg-cyan-300 transition-colors"
-            >
-              Connect
-            </button>
+          {!ibConnectionChecked ? (
+            <>
+              <div className="w-2 h-2 rounded-full bg-zinc-400 animate-pulse" />
+              <span className="text-xs text-zinc-400">Checking...</span>
+            </>
+          ) : (
+            <>
+              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`} />
+              <span className="text-xs text-zinc-400">
+                {isConnected ? 'IB Connected' : 'Disconnected'}
+              </span>
+              {!isConnected && (
+                <button
+                  onClick={handleConnect}
+                  className="text-xs px-3 py-1.5 bg-cyan-400 text-black font-medium rounded hover:bg-cyan-300 transition-colors"
+                >
+                  Connect
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
