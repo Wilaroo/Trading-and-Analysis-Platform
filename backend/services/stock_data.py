@@ -70,6 +70,11 @@ class StockDataService:
         """Get real-time quote with provider fallback chain"""
         # Sanitize symbol - remove $ prefix and clean up
         symbol = symbol.replace("$", "").upper().strip()
+        
+        # Skip invalid/problematic symbols
+        if not self._is_valid_symbol(symbol):
+            return self._generate_empty_quote(symbol, "Invalid or unsupported symbol")
+        
         cache_key = f"quote_{symbol}"
         
         # Check cache first
@@ -105,6 +110,46 @@ class StockDataService:
         
         # Final fallback: simulated data
         return self._generate_simulated_quote(symbol)
+    
+    def _is_valid_symbol(self, symbol: str) -> bool:
+        """Check if a symbol is valid and tradeable"""
+        if not symbol or len(symbol) > 10:
+            return False
+        
+        # Skip symbols with spaces (usually warrants or units like "IRS WS")
+        if ' ' in symbol:
+            return False
+        
+        # Skip indices (VIX, etc.) - they're not directly tradeable
+        indices = {'VIX', 'DJI', 'IXIC', 'GSPC', 'RUT', 'NDX', 'SPX'}
+        if symbol in indices:
+            return False
+        
+        # Skip preferred stocks with specific suffixes that cause issues
+        problematic_suffixes = ['PRB', 'PRA', 'PRC', 'PRD', 'PRE', 'WS', 'WT', 'UN', 'RT']
+        for suffix in problematic_suffixes:
+            if symbol.endswith(f' {suffix}') or symbol.endswith(f'-{suffix}'):
+                return False
+        
+        return True
+    
+    def _generate_empty_quote(self, symbol: str, reason: str = "") -> Dict:
+        """Generate an empty quote for invalid symbols"""
+        return {
+            "symbol": symbol,
+            "price": 0,
+            "change": 0,
+            "change_percent": 0,
+            "volume": 0,
+            "bid": 0,
+            "ask": 0,
+            "high": 0,
+            "low": 0,
+            "open": 0,
+            "previous_close": 0,
+            "source": "invalid",
+            "error": reason
+        }
     
     async def _fetch_alpaca_quote(self, symbol: str) -> Optional[Dict]:
         """Fetch quote from Alpaca API"""
