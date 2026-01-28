@@ -2185,13 +2185,17 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
         
         # ===================== EARLY FILTERING =====================
         # Apply quick filters BEFORE expensive analysis to speed up scanning
-        # These filters use data already available from scanner results
+        # Based on SMB "In Play" criteria and best practices
         
-        MIN_PRICE = 5.0          # Skip penny stocks (less than $5)
-        MIN_VOLUME = 500000      # Minimum daily volume (500k shares for liquidity)
+        # Filter thresholds
+        MIN_PRICE = 5.0              # Skip penny stocks (less than $5)
+        MIN_VOLUME = 500000          # Minimum daily volume (500k shares for liquidity)
+        MAX_FLOAT = 25000000         # Skip stocks with float > 25 million (less volatility)
+        MIN_RVOL = 1.5               # Minimum relative volume to be "In Play"
+        MIN_CHANGE_PERCENT = 2.0     # Minimum % move to be interesting
         
         filtered_candidates = {}
-        skipped_reasons = {"low_price": 0, "low_volume": 0, "invalid_symbol": 0}
+        skipped_reasons = {"low_price": 0, "low_volume": 0, "invalid_symbol": 0, "high_float": 0, "low_rvol": 0}
         
         for symbol, data in all_candidates.items():
             scan_result = data.get("scan_result", {})
@@ -2213,13 +2217,22 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
         candidates_list = list(filtered_candidates.items())[:MAX_CANDIDATES_TO_ANALYZE]
         print(f"Analyzing {len(candidates_list)} candidates (limited from {len(filtered_candidates)})")
         
-        # ===================== QUOTE FETCHING WITH EARLY EXIT =====================
-        # Batch fetch quotes first, then filter by price/volume before expensive analysis
+        # ===================== QUOTE & FLOAT FETCHING WITH EARLY EXIT =====================
+        # Batch fetch quotes and fundamentals, then filter before expensive analysis
         
         quotes_cache = {}
+        fundamentals_cache = {}
         valid_candidates = []
         
-        print("Fetching quotes for early filtering...")
+        # Try to get yfinance for float data
+        try:
+            import yfinance as yf
+            has_yfinance = True
+        except ImportError:
+            has_yfinance = False
+            print("yfinance not available - skipping float filter")
+        
+        print("Fetching quotes and fundamentals for early filtering...")
         for symbol, data in candidates_list:
             try:
                 # Get quote - prefer Alpaca for speed
