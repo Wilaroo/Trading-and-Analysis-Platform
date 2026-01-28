@@ -2020,7 +2020,23 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                 print(f"Scanner {scan_type} error: {e}")
                 continue
         
-        print(f"Comprehensive scan: {len(all_candidates)} unique candidates from {len(all_scan_types)} scanners")
+        print(f"Comprehensive scan: {len(all_candidates)} unique candidates from {len(all_scan_types)} IB scanners")
+        
+        # If IB scanners returned no results, fallback to Alpaca most active stocks
+        if not all_candidates and _alpaca_service:
+            print("IB scanners returned no results, falling back to Alpaca most active stocks")
+            try:
+                alpaca_stocks = await _alpaca_service.get_most_active_stocks(40)
+                for stock in alpaca_stocks:
+                    symbol = stock.get("symbol", "")
+                    if symbol and symbol not in all_candidates:
+                        all_candidates[symbol] = {
+                            "scan_result": stock,
+                            "scan_type": stock.get("scan_type", "ALPACA_ACTIVE")
+                        }
+                print(f"Added {len(all_candidates)} candidates from Alpaca fallback")
+            except Exception as e:
+                print(f"Alpaca fallback also failed: {e}")
         
         if not all_candidates:
             return {
@@ -2030,7 +2046,7 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                 "last_scan": datetime.now(timezone.utc).isoformat(),
                 "is_cached": False,
                 "is_connected": True,
-                "message": "No scanner results available"
+                "message": "No scanner results available from IB or Alpaca"
             }
         
         # Categorized results
