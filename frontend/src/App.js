@@ -244,7 +244,9 @@ function App() {
       ibConnected,
       ibConnectionChecked,
       connectToIb,
-      checkIbConnection
+      checkIbConnection,
+      ibBusy,
+      ibBusyOperation
     };
     
     switch (activeTab) {
