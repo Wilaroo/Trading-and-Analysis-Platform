@@ -138,10 +138,17 @@ function App() {
   }, [checkIbConnection]);
   
   // Periodic connection check every 30 seconds
+  // If disconnected, the backend will attempt auto-reconnect
   useEffect(() => {
-    const interval = setInterval(checkIbConnection, 30000);
+    const interval = setInterval(async () => {
+      const connected = await checkIbConnection();
+      // Log connection status for debugging
+      if (!connected && ibConnectionChecked) {
+        console.log('IB connection check: disconnected - backend will attempt auto-reconnect');
+      }
+    }, 30000);
     return () => clearInterval(interval);
-  }, [checkIbConnection]);
+  }, [checkIbConnection, ibConnectionChecked]);
 
   // WebSocket handler for real-time updates
   const handleWebSocketMessage = useCallback((message) => {
