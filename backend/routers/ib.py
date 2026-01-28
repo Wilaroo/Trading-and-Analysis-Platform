@@ -2227,7 +2227,7 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                 if _alpaca_service:
                     try:
                         quote = await _alpaca_service.get_quote(symbol)
-                    except:
+                    except Exception:
                         pass
                 
                 if not quote or not quote.get("price"):
