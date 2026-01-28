@@ -1661,8 +1661,16 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
       
       console.log(`Comprehensive scan complete: ${summary.total} alerts found`);
     } catch (err) {
-      console.log('Comprehensive scan error:', err.response?.data?.detail?.message || err.message);
-      toast.error('Scan failed - check IB Gateway connection');
+      const errorMsg = err.response?.data?.detail?.message || err.message;
+      console.log('Comprehensive scan error:', errorMsg);
+      // Only show error toast if we're supposed to be connected
+      if (isConnected) {
+        if (err.code === 'ECONNABORTED') {
+          toast.error('Scan timed out - server may be processing large results');
+        } else {
+          toast.error('Scan failed - check IB Gateway connection');
+        }
+      }
     } finally {
       setIsComprehensiveScanning(false);
     }
