@@ -1854,33 +1854,6 @@ const CommandCenterPage = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connectionChecked, isConnected, isActiveTab]);
 
-  // Auto-scan interval - only runs when Command Center is the active tab
-  useEffect(() => {
-    if (!autoScan || !isConnected || !isActiveTab) {
-      if (!isActiveTab && autoScan) {
-        console.log('Auto-scan paused: Command Center is not the active tab');
-      }
-      return;
-    }
-    
-    const interval = setInterval(() => {
-      // Only run scan if still on Command Center tab
-      if (isActiveTab) {
-        // Run comprehensive scan (this replaces the individual scanners)
-        runComprehensiveScan();
-        
-        // Also fetch account data and context
-        fetchAccountData();
-        fetchMarketContext();
-        checkOrderFills();
-        checkPriceAlerts();
-      }
-    }, 120000);  // 2 minutes between auto-scans
-    
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoScan, isConnected, selectedScanType, priceAlerts.length, isActiveTab]);
-
   // Fast polling for order fills and price alerts (every 10s when enabled)
   // This runs regardless of active tab to catch important alerts
   useEffect(() => {
