@@ -113,10 +113,8 @@ const IBRealtimeChart = ({ symbol, isConnected }) => {
   useEffect(() => {
     if (!symbol) return;
     
-    // Don't try to fetch if not connected
+    // Don't try to fetch if not connected - handle in a separate effect
     if (!isConnected) {
-      setLoading(false);
-      setError('Connect to IB Gateway for real-time charts');
       return;
     }
 
@@ -148,6 +146,7 @@ const IBRealtimeChart = ({ symbol, isConnected }) => {
           
           setHasData(true);
           setLastUpdate(new Date());
+          setError(null);
         } else {
           setHasData(false);
           setError('No data available for this symbol');
@@ -174,6 +173,10 @@ const IBRealtimeChart = ({ symbol, isConnected }) => {
     
     return () => clearInterval(interval);
   }, [symbol, timeframe, duration, isConnected]);
+
+  // Handle disconnected state
+  const displayError = !isConnected ? 'Connect to IB Gateway for real-time charts' : error;
+  const showLoading = loading && isConnected;
 
   return (
     <div className="h-full flex flex-col bg-[#0A0A0A] rounded-lg border border-white/10 overflow-hidden">
