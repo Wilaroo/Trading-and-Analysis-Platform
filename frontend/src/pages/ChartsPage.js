@@ -356,8 +356,21 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
 
 // ===================== CHARTS PAGE =====================
 const ChartsPage = ({ ibConnected, ibConnectionChecked, connectToIb, ibBusy, ibBusyOperation }) => {
-  const [symbol, setSymbol] = useState('AAPL');
-  const [inputSymbol, setInputSymbol] = useState('AAPL');
+  // Persist symbol in localStorage so it survives tab switching
+  const [symbol, setSymbol] = useState(() => {
+    const saved = localStorage.getItem('tradecommand_chart_symbol');
+    return saved || 'AAPL';
+  });
+  const [inputSymbol, setInputSymbol] = useState(() => {
+    const saved = localStorage.getItem('tradecommand_chart_symbol');
+    return saved || 'AAPL';
+  });
+  
+  // Save symbol to localStorage when it changes
+  useEffect(() => {
+    localStorage.setItem('tradecommand_chart_symbol', symbol);
+  }, [symbol]);
+  
   // Use shared connection state from App
   const isConnected = ibConnected;
   const connectionChecked = ibConnectionChecked;
