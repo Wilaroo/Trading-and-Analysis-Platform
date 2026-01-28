@@ -865,13 +865,30 @@ class IBService:
                 time.sleep(0.5)  # Give the thread time to start
     
     def is_busy(self) -> tuple:
-        """Check if a heavy operation is in progress"""
-        return self._busy, self._busy_operation
+        """Check if a heavy operation is in progress (thread-safe)"""
+        with self._busy_lock:
+            return self._busy, self._busy_operation
     
     def set_busy(self, busy: bool, operation: str = None):
-        """Set the busy flag"""
-        self._busy = busy
-        self._busy_operation = operation if busy else None
+        """Set the busy flag (thread-safe)"""
+        with self._busy_lock:
+            self._busy = busy
+            self._busy_operation = operation if busy else None
+            logger.info(f"IBService busy flag set: busy={busy}, operation={operation}, instance={self._instance_id}")
+    
+    def wait_if_busy(self, timeout: float = 30.0) -> bool:
+        """
+        Wait for the service to become available if currently busy.
+        Returns True if service is available, False if timeout.
+        Used by lower-priority operations to wait for heavy operations to complete.
+        """
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            with self._busy_lock:
+                if not self._busy:
+                    return True
+            time.sleep(0.5)
+        return False
     
     def _send_request(self, command: IBCommand, params: Dict = None, timeout: float = 30.0) -> IBResponse:
         """Send a request to the worker thread and wait for response"""
