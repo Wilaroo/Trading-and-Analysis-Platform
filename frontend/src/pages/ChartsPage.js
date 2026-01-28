@@ -113,11 +113,6 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
   // Fetch data
   useEffect(() => {
     if (!symbol) return;
-    
-    // Don't try to fetch if not connected - handle in a separate effect
-    if (!isConnected) {
-      return;
-    }
 
     const fetchData = async () => {
       // Don't show loading spinner if we already have data (background refresh)
