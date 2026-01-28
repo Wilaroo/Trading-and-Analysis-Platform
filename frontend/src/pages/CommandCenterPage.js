@@ -1976,27 +1976,63 @@ const CommandCenterPage = ({
             <span className="hidden sm:inline">AI Assistant</span>
           </button>
           
-          {/* Connection Status - Always visible with toggle functionality */}
+          {/* Dual Connection Status Indicator - WebSocket vs IB Gateway */}
           <div className="flex items-center gap-2">
-            {/* IB Gateway Status */}
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm ${
-              !connectionChecked ? 'bg-zinc-500/10 text-zinc-400' :
-              isConnected ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
-            }`}>
-              {!connectionChecked ? (
+            {/* WebSocket Status - For real-time quotes streaming */}
+            <div 
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border ${
+                wsConnected 
+                  ? 'bg-blue-500/10 text-blue-400 border-blue-500/30' 
+                  : 'bg-orange-500/10 text-orange-400 border-orange-500/30 animate-pulse'
+              }`}
+              title={wsConnected 
+                ? `Quotes streaming active${wsLastUpdate ? ` (Last: ${new Date(wsLastUpdate).toLocaleTimeString()})` : ''}`
+                : 'Quotes streaming reconnecting...'
+              }
+            >
+              {wsConnected ? (
                 <>
-                  <div className="w-4 h-4 border-2 border-zinc-400 border-t-transparent rounded-full animate-spin" />
-                  <span className="hidden sm:inline">Checking...</span>
-                </>
-              ) : isConnected ? (
-                <>
-                  <Wifi className="w-4 h-4" />
-                  <span className="hidden sm:inline">IB Connected</span>
+                  <Activity className="w-3 h-3" />
+                  <span className="hidden md:inline">Quotes</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
                 </>
               ) : (
                 <>
-                  <WifiOff className="w-4 h-4" />
-                  <span className="hidden sm:inline">IB Disconnected</span>
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                  <span className="hidden md:inline">Reconnecting</span>
+                </>
+              )}
+            </div>
+            
+            {/* IB Gateway Status - For trading & scanners */}
+            <div 
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border ${
+                !connectionChecked ? 'bg-zinc-500/10 text-zinc-400 border-zinc-500/30' :
+                isConnected ? 'bg-green-500/10 text-green-400 border-green-500/30' : 
+                'bg-red-500/10 text-red-400 border-red-500/30'
+              }`}
+              title={
+                !connectionChecked ? 'Checking IB Gateway connection...' :
+                isConnected ? 'IB Gateway connected - Trading & scanners available' : 
+                'IB Gateway disconnected - Connect to enable trading'
+              }
+            >
+              {!connectionChecked ? (
+                <>
+                  <div className="w-3 h-3 border border-zinc-400 border-t-transparent rounded-full animate-spin" />
+                  <span className="hidden md:inline">Checking</span>
+                </>
+              ) : isConnected ? (
+                <>
+                  <Database className="w-3 h-3" />
+                  <span className="hidden md:inline">IB Gateway</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+                </>
+              ) : (
+                <>
+                  <WifiOff className="w-3 h-3" />
+                  <span className="hidden md:inline">IB Gateway</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
                 </>
               )}
             </div>
@@ -2006,13 +2042,13 @@ const CommandCenterPage = ({
               <button
                 onClick={isConnected ? handleDisconnectFromIB : handleConnectToIB}
                 disabled={connecting}
-                className={`px-4 py-2 rounded font-medium text-sm transition-colors ${
+                className={`px-3 py-1.5 rounded font-medium text-xs transition-colors ${
                   isConnected 
                     ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30' 
                     : 'bg-cyan-500 text-black hover:bg-cyan-400'
                 } disabled:opacity-50`}
               >
-                {connecting ? 'Processing...' : isConnected ? 'Disconnect' : 'Connect'}
+                {connecting ? '...' : isConnected ? 'Disconnect' : 'Connect'}
               </button>
             )}
           </div>
