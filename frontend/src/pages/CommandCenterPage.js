@@ -1234,9 +1234,6 @@ const CommandCenterPage = ({ ibConnected, ibConnectionChecked, connectToIb, chec
     systemMonitor: true
   });
   
-  // Knowledge Base state
-  const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
-  
   // AI Assistant state
   const [showAssistant, setShowAssistant] = useState(false);
   const [assistantPrompt, setAssistantPrompt] = useState(null);
