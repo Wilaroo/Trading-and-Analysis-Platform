@@ -139,14 +139,17 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
             color: bar.close >= bar.open ? '#00FF9433' : '#FF2E2E33',
           }));
 
-          console.log('[Chart] Setting data:', candleData.length, 'bars, candleSeries exists:', !!candleSeriesRef.current);
+          console.log('[Chart] Setting data:', candleData.length, 'bars');
+          console.log('[Chart] First bar:', candleData[0]);
+          console.log('[Chart] Last bar:', candleData[candleData.length - 1]);
+          console.log('[Chart] candleSeries exists:', !!candleSeriesRef.current);
+          console.log('[Chart] chartRef exists:', !!chartRef.current);
           
           if (candleSeriesRef.current) {
             candleSeriesRef.current.setData(candleData);
             console.log('[Chart] Candle data set successfully');
           } else {
             console.warn('[Chart] candleSeriesRef not ready, retrying in 500ms...');
-            // Retry after a short delay if series not ready
             setTimeout(() => {
               if (candleSeriesRef.current) {
                 candleSeriesRef.current.setData(candleData);
@@ -157,7 +160,18 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation }) => {
             }, 500);
           }
           if (volumeSeriesRef.current) volumeSeriesRef.current.setData(volumeData);
-          if (chartRef.current) chartRef.current.timeScale().fitContent();
+          
+          // Force resize and fit content after data is set
+          if (chartRef.current) {
+            chartRef.current.timeScale().fitContent();
+            // Also force a resize in case container dimensions changed
+            if (chartContainerRef.current) {
+              const w = chartContainerRef.current.clientWidth;
+              const h = chartContainerRef.current.clientHeight;
+              console.log('[Chart] Forcing resize to:', w, 'x', h);
+              chartRef.current.applyOptions({ width: w, height: h });
+            }
+          }
           
           setHasData(true);
           setLastUpdate(new Date());
