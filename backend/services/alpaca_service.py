@@ -309,6 +309,57 @@ class AlpacaService:
     def clear_cache(self):
         """Clear the quote cache"""
         self._quote_cache.clear()
+    
+    async def get_most_active_stocks(self, limit: int = 30) -> List[Dict[str, Any]]:
+        """
+        Get most active stocks by volume from Alpaca.
+        Uses Alpaca's most active screener endpoint.
+        Falls back to a default watchlist of popular stocks if screener unavailable.
+        """
+        if not self._ensure_initialized():
+            return self._get_default_watchlist()
+        
+        try:
+            from alpaca.data.requests import MostActivesRequest
+            from alpaca.data.enums import MostActivesBy
+            
+            # Get most active by volume
+            request = MostActivesRequest(
+                top=limit,
+                by=MostActivesBy.VOLUME
+            )
+            
+            most_actives = _data_client.get_stock_most_actives(request)
+            
+            result = []
+            for stock in most_actives.most_actives:
+                result.append({
+                    "symbol": stock.symbol,
+                    "name": stock.symbol,  # Alpaca doesn't return company name
+                    "volume": int(stock.volume) if stock.volume else 0,
+                    "trade_count": int(stock.trade_count) if stock.trade_count else 0,
+                    "scan_type": "MOST_ACTIVE"
+                })
+            
+            logger.info(f"Alpaca most actives returned {len(result)} stocks")
+            return result if result else self._get_default_watchlist()
+            
+        except Exception as e:
+            logger.warning(f"Alpaca most actives error: {e}, using default watchlist")
+            return self._get_default_watchlist()
+    
+    def _get_default_watchlist(self) -> List[Dict[str, Any]]:
+        """Return a default watchlist of popular, highly-traded stocks"""
+        default_symbols = [
+            "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "AMD",
+            "SPY", "QQQ", "NFLX", "DIS", "BA", "JPM", "V", "MA", "UNH",
+            "PFE", "MRNA", "XOM", "CVX", "COST", "WMT", "HD", "LOW",
+            "CRM", "ORCL", "INTC", "MU", "QCOM"
+        ]
+        return [
+            {"symbol": s, "name": s, "volume": 0, "scan_type": "DEFAULT_WATCHLIST"}
+            for s in default_symbols
+        ]
 
 
 # Singleton instance
