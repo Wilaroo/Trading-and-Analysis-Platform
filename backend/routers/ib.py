@@ -2105,13 +2105,17 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
         scoring_engine = get_scoring_engine()
         alert_manager = get_alert_manager()
         
-        # Define scanner types to run - prioritized for trading opportunities
-        # Reduced from 8 to 4 most relevant scanners to reduce IB Gateway load
+        # Define scanner types to run - comprehensive coverage of market movers
+        # 8 scanner types to cast a wide net across different opportunity types
         all_scan_types = [
-            "TOP_PERC_GAIN",      # Top gainers - most common trade setup
-            "TOP_PERC_LOSE",      # Top losers - reversal opportunities
-            "MOST_ACTIVE",        # Most active by volume - liquidity
-            "HIGH_OPEN_GAP",      # Gap up - momentum plays
+            "TOP_PERC_GAIN",      # Top gainers - momentum longs
+            "TOP_PERC_LOSE",      # Top losers - reversal/short opportunities
+            "MOST_ACTIVE",        # Most active by volume - liquidity plays
+            "HOT_BY_VOLUME",      # Volume surge - unusual activity
+            "HIGH_OPEN_GAP",      # Gap up - morning momentum
+            "LOW_OPEN_GAP",       # Gap down - short/reversal setups
+            "HIGH_VS_13W_HL",     # Near 13-week high - breakout candidates
+            "LOW_VS_13W_HL",      # Near 13-week low - bounce candidates
         ]
         
         if request.scan_types:
@@ -2125,7 +2129,8 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
             import asyncio
             for scan_type in all_scan_types:
                 try:
-                    results = await _ib_service.run_scanner(scan_type, max_results=30)
+                    # Increased to 50 results per scanner for wider coverage
+                    results = await _ib_service.run_scanner(scan_type, max_results=50)
                     for r in results:
                         symbol = r.get("symbol", "")
                         if symbol and symbol not in all_candidates:
