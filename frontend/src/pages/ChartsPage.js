@@ -381,7 +381,12 @@ const ChartsPage = ({ ibConnected, ibConnectionChecked, connectToIb, ibBusy, ibB
 
       {/* Chart Container */}
       <div className="bg-paper rounded-lg border border-white/10 overflow-hidden" style={{ height: 'calc(100vh - 320px)', minHeight: '500px' }}>
-        <IBRealtimeChart symbol={symbol} isConnected={isConnected} />
+        <IBRealtimeChart 
+          symbol={symbol} 
+          isConnected={isConnected} 
+          isBusy={isBusy}
+          busyOperation={ibBusyOperation}
+        />
       </div>
     </div>
   );
