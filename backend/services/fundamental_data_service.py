@@ -199,11 +199,12 @@ class FundamentalDataService:
             return None
     
     def _to_decimal(self, value: Optional[float]) -> Optional[float]:
-        """Convert percentage to decimal if needed (some metrics are %, some are decimals)"""
+        """Convert percentage to decimal if needed (Finnhub returns some metrics as %, some as decimals)"""
         if value is None:
             return None
-        # If value looks like a percentage (>1), convert to decimal
-        # ROE of 15% should be 0.15
+        # Finnhub returns ROE, margins, etc. as percentages (e.g., 15.5 for 15.5%)
+        # We want them as decimals (0.155) for consistent display
+        # If value is > 1 OR < -1, it's likely a percentage
         if abs(value) > 1:
             return value / 100
         return value
