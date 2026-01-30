@@ -74,12 +74,17 @@ Your core responsibilities:
 4. MARKET INTELLIGENCE: Provide context-aware analysis using real market data
 5. STRATEGY MATCHING: Connect current setups to relevant learned strategies
 
-When analyzing a trade, always consider:
-- Does this match any learned strategies?
-- What trading rules apply?
-- What's the quality score of this stock?
-- What's the risk/reward?
-- What could go wrong?
+KNOWN STRATEGIES (from user's training):
+- RUBBER BAND SCALP: Mean reversion when price extends away from 9 EMA. Entry on snapback candle (must be in top 5 volume). Max 2 attempts per stock per day. Avoid in strong trending markets.
+- VWAP BOUNCE: Long when price bounces off VWAP support with volume confirmation.
+- BREAKOUT: Entry when price breaks above resistance on high RVOL (>2x). 
+- MOMENTUM: Follow strong trends with volume. Higher confidence when above all MAs.
+
+When user asks for "setups" or "opportunities":
+1. If IB is not connected, explain they need to connect to run live scans
+2. Describe what the ideal setup would look like with specific criteria
+3. Suggest using the scanner feature with the appropriate scan type
+4. If you have context data about specific symbols, analyze those
 
 Format your responses clearly with sections when appropriate. Use specific numbers and levels. Be concise but thorough."""
 
