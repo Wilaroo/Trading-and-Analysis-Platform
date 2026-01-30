@@ -1,7 +1,7 @@
 {
   "files": {
-    "main.css": "/static/css/main.98ac3c8e.css",
-    "main.js": "/static/js/main.75a659d6.js",
+    "main.css": "/static/css/main.d634e043.css",
+    "main.js": "/static/js/main.99648f4d.js",
     "static/media/jetbrains-mono-latin-400-normal.woff": "/static/media/jetbrains-mono-latin-400-normal.1fef352a4021940e309a.woff",
     "static/media/playfair-display-latin-400-normal.woff": "/static/media/playfair-display-latin-400-normal.bee8cc9108d1713a64fe.woff",
     "static/media/playfair-display-latin-400-normal.woff2": "/static/media/playfair-display-latin-400-normal.b029bd8deea1857dca78.woff2",
@@ -71,11 +71,11 @@
     "static/media/manrope-cyrillic-ext-800-normal.woff2": "/static/media/manrope-cyrillic-ext-800-normal.fa6c2a853a401d0b7323.woff2",
     "static/media/jetbrains-mono-cyrillic-ext-400-normal.woff2": "/static/media/jetbrains-mono-cyrillic-ext-400-normal.7347c7bfed47f1ef0b25.woff2",
     "index.html": "/index.html",
-    "main.98ac3c8e.css.map": "/static/css/main.98ac3c8e.css.map",
-    "main.75a659d6.js.map": "/static/js/main.75a659d6.js.map"
+    "main.d634e043.css.map": "/static/css/main.d634e043.css.map",
+    "main.99648f4d.js.map": "/static/js/main.99648f4d.js.map"
   },
   "entrypoints": [
-    "static/css/main.98ac3c8e.css",
-    "static/js/main.75a659d6.js"
+    "static/css/main.d634e043.css",
+    "static/js/main.99648f4d.js"
   ]
 }
