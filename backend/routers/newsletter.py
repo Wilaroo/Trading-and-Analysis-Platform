@@ -342,3 +342,65 @@ async def get_ticker_news(
             status_code=500,
             detail=f"Failed to fetch news for {symbol}: {str(e)}"
         )
+
+
+
+# ===================== Earnings Endpoints =====================
+
+@router.get("/earnings/{symbol}")
+async def get_earnings_analysis(symbol: str):
+    """
+    Get comprehensive earnings analysis for a symbol including:
+    - Earnings history (last 8 quarters)
+    - Beat/miss trends
+    - Next earnings date
+    - EPS and revenue growth metrics
+    - Earnings quality summary
+    """
+    try:
+        service = get_earnings_service()
+        analysis = await service.get_earnings_analysis(symbol.upper())
+        
+        return analysis
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch earnings for {symbol}: {str(e)}"
+        )
+
+
+@router.get("/earnings/{symbol}/calendar")
+async def get_earnings_calendar(symbol: str):
+    """
+    Get earnings calendar for a symbol (historical and upcoming).
+    """
+    try:
+        service = get_earnings_service()
+        calendar = await service.get_earnings_calendar(symbol.upper())
+        
+        return calendar
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch earnings calendar for {symbol}: {str(e)}"
+        )
+
+
+@router.get("/earnings/{symbol}/metrics")
+async def get_earnings_metrics(symbol: str):
+    """
+    Get EPS and earnings-related metrics for a symbol.
+    """
+    try:
+        service = get_earnings_service()
+        metrics = await service.get_earnings_metrics(symbol.upper())
+        
+        return metrics
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch earnings metrics for {symbol}: {str(e)}"
+        )
