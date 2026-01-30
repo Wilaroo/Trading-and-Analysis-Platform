@@ -469,7 +469,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
     { id: 'chart', label: 'Chart' },
     { id: 'technicals', label: 'Technicals' },
     { id: 'fundamentals', label: 'Fundamentals' },
-    { id: 'quality', label: 'Quality' },
+    { id: 'earnings', label: 'Earnings' },
     { id: 'strategies', label: 'Strategies' },
     { id: 'news', label: 'News' },
   ];
