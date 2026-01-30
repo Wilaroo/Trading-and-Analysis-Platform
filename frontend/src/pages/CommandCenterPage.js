@@ -579,14 +579,35 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                 <AlertTriangle className="w-12 h-12 text-yellow-500 mb-4" />
                 <p className="text-lg font-semibold text-white mb-2">Unable to Load Data</p>
                 <p className="text-sm text-zinc-400 mb-4">
-                  {chartError || 'Could not fetch analysis data for this symbol. Please ensure IB Gateway is connected.'}
+                  {chartError || 'Could not fetch analysis data. This may happen if IB Gateway is busy with a scan. Try again in a moment.'}
                 </p>
-                <button 
-                  onClick={onClose}
-                  className="px-4 py-2 bg-zinc-800 text-white rounded hover:bg-zinc-700"
-                >
-                  Close
-                </button>
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => {
+                      // Retry fetching
+                      setLoading(true);
+                      setChartError(null);
+                      setTimeout(() => {
+                        api.get(`/api/ib/analysis/${ticker?.symbol}`).then(res => {
+                          setAnalysis(res.data);
+                          setLoading(false);
+                        }).catch(() => {
+                          setChartError('Still unable to load. IB may be busy.');
+                          setLoading(false);
+                        });
+                      }, 500);
+                    }}
+                    className="px-4 py-2 bg-cyan-600 text-white rounded hover:bg-cyan-500"
+                  >
+                    Retry
+                  </button>
+                  <button 
+                    onClick={onClose}
+                    className="px-4 py-2 bg-zinc-800 text-white rounded hover:bg-zinc-700"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             ) : (
               <>
