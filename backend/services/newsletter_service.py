@@ -287,7 +287,35 @@ Return ONLY valid JSON, no markdown code blocks."""
             if total > 0:
                 kb_stats_text = f"\n(Analysis backed by {total} learned trading strategies/rules)"
         
+        # Format real-time market news
+        news_text = ""
+        if context_data.get("market_news"):
+            news = context_data["market_news"]
+            headlines = news.get("headlines", [])
+            themes = news.get("themes", [])
+            sentiment = news.get("overall_sentiment", "unknown")
+            
+            if headlines:
+                news_text = f"\n\nREAL-TIME MARKET NEWS:\nOverall Sentiment: {sentiment.upper()}"
+                if themes:
+                    news_text += f"\nKey Themes: {', '.join(themes[:5])}"
+                news_text += "\nTop Headlines:"
+                for i, headline in enumerate(headlines[:8], 1):
+                    news_text += f"\n  {i}. {headline}"
+        
+        # Format ticker-specific news
+        ticker_news_text = ""
+        if context_data.get("ticker_news"):
+            ticker_news = context_data["ticker_news"]
+            if ticker_news:
+                ticker_news_text = "\n\nTICKER-SPECIFIC NEWS:"
+                for symbol, news_data in list(ticker_news.items())[:5]:
+                    if news_data and news_data.get("headlines"):
+                        ticker_news_text += f"\n{symbol}: {news_data['headlines'][0][:80]}..."
+        
         prompt = f"""Write your premarket newsletter for {date}.
+
+REAL-TIME DATA TO USE:{news_text}
 
 Search for and include:
 1. Overnight futures movement and any gaps
@@ -296,9 +324,11 @@ Search for and include:
 4. Economic calendar events today
 5. Fed speakers or important announcements
 
-My Scanner Data:{movers_text}{indices_text}{vix_text}{kb_insights_text}{kb_stats_text}
+My Scanner Data:{movers_text}{indices_text}{vix_text}{ticker_news_text}{kb_insights_text}{kb_stats_text}
 
 Watchlist: {', '.join(context_data.get('watchlist', []) or []) or 'No specific watchlist'}
+
+IMPORTANT: Use the REAL-TIME MARKET NEWS above to provide accurate, current market analysis. Reference specific headlines when discussing market themes.
 
 Generate a complete premarket briefing with specific, actionable trade ideas. Use the knowledge base strategy insights to inform your recommendations. Include price levels, stop losses, and targets where possible. Format your response as valid JSON."""
 
