@@ -1279,6 +1279,64 @@ curl /api/market-context/indicators/regime
 - Earnings tab shows: Rating badge, beat rate, key points, performance stats, history table, growth metrics
 
 
+### Jan 30, 2026 - Real Trade History Integration (IB Flex + AI Coaching)
+**Implemented:**
+
+1. **IB Flex Web Service Integration**
+   - Created `/app/backend/services/ib_flex_service.py` for pulling verified trade data
+   - Uses user's existing TraderSync Flex Query (Query ID: 944620)
+   - Fetches all trades, parses XML, calculates performance metrics
+   - Supports: trades, P&L, win rate, profit factor, symbol analysis
+
+2. **Trade History API Endpoints** (`/app/backend/routers/trade_history.py`)
+   - `GET /api/trade-history/status` - Check if configured
+   - `POST /api/trade-history/sync` - Sync trades from IB
+   - `GET /api/trade-history/performance` - Get performance metrics
+   - `GET /api/trade-history/trades` - Get trade list with filtering
+   - `GET /api/trade-history/analysis/{symbol}` - Symbol-specific analysis
+
+3. **AI Assistant Integration**
+   - Trade history context injected when user asks about performance
+   - Keywords trigger data: "performance", "win rate", "trades", "how am I doing"
+   - Symbol-specific history when asking about traded tickers
+   - AI analyzes real data and provides actionable recommendations
+
+4. **Frontend "My Performance" Button**
+   - New quick action in AI Assistant
+   - One-click comprehensive performance analysis
+   - Shows win rate, profit factor, strengths, weaknesses, recommendations
+
+**Performance Metrics Calculated:**
+- Win rate, profit factor, expectancy
+- Average win/loss, largest win/loss
+- Total P&L, commissions
+- Best/worst performing symbols
+- Trade count by symbol
+
+**User's Verified Stats (18,114 trades):**
+- Win Rate: 59.4%
+- Profit Factor: 0.95
+- Total P&L: -$79,843.13
+- Average Win: $175.01 vs Average Loss: $269.24
+- Best symbols: APP (+$3,946), UNH (+$2,735), CORT (+$2,626)
+- Worst symbols: TQQQ (-$12,226), MSTZ (-$8,603), CRCL (-$8,249)
+
+**Files Created:**
+- `/app/backend/services/ib_flex_service.py` - IB Flex Web Service client
+- `/app/backend/routers/trade_history.py` - Trade history API endpoints
+
+**Files Modified:**
+- `/app/backend/server.py` - Added trade_history_router
+- `/app/backend/services/ai_assistant_service.py` - Added trade history context
+- `/app/backend/routers/assistant.py` - Added performance analysis endpoint
+- `/app/frontend/src/components/AIAssistant.jsx` - Added "My Performance" button
+- `/app/backend/.env` - Added IB_FLEX_TOKEN and IB_FLEX_QUERY_ID
+
+**Environment Variables Added:**
+- `IB_FLEX_TOKEN` - IB Flex Web Service authentication token
+- `IB_FLEX_QUERY_ID` - TraderSync Activity Flex Query ID (944620)
+
+
 ### Jan 30, 2026 - Ticker Search Bar & AI Strategy Recommendations
 **Implemented:**
 
