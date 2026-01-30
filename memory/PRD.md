@@ -1128,3 +1128,72 @@ curl /api/market-context/indicators/regime
 - Backend endpoints verified via curl
 - Frontend UI verified via screenshots
 - Rule Check form validated
+
+
+### Jan 30, 2026 - News Integration into Market Intelligence & AI Learning
+**Implemented:**
+
+1. **Enhanced News Service** (`/app/backend/services/news_service.py`)
+   - Switched from Alpaca (unreliable) to **Finnhub API** for real-time news
+   - `get_market_news()`: General market headlines
+   - `get_ticker_news(symbol)`: Stock-specific news
+   - `get_market_summary()`: Structured summary with headlines, themes, sentiment
+   - Automatic sentiment analysis (bullish/bearish/neutral)
+   - Theme detection: Fed, earnings, inflation, AI/tech, energy, China/trade, etc.
+
+2. **AI Assistant News Integration** (`/app/backend/services/ai_assistant_service.py`)
+   - News-aware context building - detects when user asks about "market", "news", "today"
+   - Fetches real-time headlines and themes
+   - Includes ticker-specific news when mentioning symbols
+   - "Market News" quick action button in AI Assistant UI
+
+3. **Scoring Engine News Integration** (`/app/backend/services/scoring_engine.py`)
+   - `get_news_sentiment_for_symbol()`: Fetch and analyze news impact
+   - Returns impact score (-10 to +10), sentiment, headlines
+   - Integrates with catalyst scoring
+
+4. **Knowledge Integration + Market Intelligence** (`/app/backend/services/knowledge_integration.py`)
+   - `enhance_market_intelligence()` now includes real-time news
+   - Enhanced opportunities include ticker-specific news
+   - Market news summary included in response
+
+5. **Newsletter Service** (`/app/backend/services/newsletter_service.py`)
+   - Newsletter generation now includes real-time headlines
+   - GPT prompt includes actual news for accurate briefings
+   - Ticker-specific news for each opportunity
+
+**API Endpoints:**
+- `GET /api/newsletter/news/summary` - Market news summary
+- `GET /api/newsletter/news` - Raw market headlines
+- `GET /api/newsletter/news/{symbol}` - Ticker-specific news
+
+**Response Structure:**
+```json
+{
+  "market_news": {
+    "headlines": ["Jim Cramer's top 10...", "Wholesale prices rise..."],
+    "themes": ["Federal Reserve", "Inflation Data", "AI / Technology"],
+    "overall_sentiment": "bullish",
+    "sentiment_breakdown": {"bullish": 7, "bearish": 2, "neutral": 11}
+  },
+  "enhanced_opportunities": [
+    {
+      "symbol": "AAPL",
+      "news": {
+        "headlines": ["Stock Market Today...", "Intel Foundry Talks..."],
+        "sentiment": "neutral"
+      }
+    }
+  ]
+}
+```
+
+**Files Modified:**
+- `/app/backend/services/news_service.py` - Switched to Finnhub
+- `/app/backend/services/ai_assistant_service.py` - News context building
+- `/app/backend/services/scoring_engine.py` - News sentiment method
+- `/app/backend/services/knowledge_integration.py` - Async news integration
+- `/app/backend/services/newsletter_service.py` - News in GPT prompt
+- `/app/backend/routers/newsletter.py` - Fixed route ordering
+- `/app/backend/routers/learning.py` - Async enhance-opportunities
+- `/app/frontend/src/components/AIAssistant.jsx` - Market News button
