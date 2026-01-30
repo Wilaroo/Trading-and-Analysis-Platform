@@ -924,14 +924,19 @@ Limitations: {'; '.join(metric_data['limitations'][:3])}
         
         # 2f-b. If asking about fundamentals AND a specific ticker, fetch REAL-TIME data
         if wants_fundamental_info:
-            # Extract potential stock symbols from the message
-            potential_symbols = re.findall(r'\b([A-Z]{1,5})\b', user_message.upper())
-            excluded_words = {'I', 'A', 'THE', 'AND', 'OR', 'FOR', 'TO', 'IS', 'IT', 'IN', 'ON', 'AT', 'BY', 
-                            'BE', 'AS', 'AN', 'ARE', 'WAS', 'IF', 'MY', 'ME', 'DO', 'SO', 'UP', 'AM', 'PE', 
-                            'PB', 'ROE', 'ROA', 'EPS', 'PEG', 'FCF', 'TTM', 'YOY', 'WHAT', 'HOW', 'WHY',
-                            'OF', 'VS', 'WHICH', 'VALUE', 'BETTER', 'GOOD', 'BAD', 'THAN', 'ABOUT', 'CAN',
-                            'TELL', 'SHOW', 'GET', 'GIVE', 'LOOK', 'FROM', 'THAT', 'THIS', 'COMPARE', 'ANALYSIS'}
-            symbols_for_fundamentals = [s for s in potential_symbols if s not in excluded_words and len(s) >= 2]
+            # Extract potential stock symbols - use strict approach
+            explicit_fund_tickers = re.findall(r'\$([A-Z]{1,5})\b', user_message.upper())
+            
+            # Known tickers to look for
+            known_fund_tickers = {'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'META', 'NVDA', 'TSLA', 'AMD', 
+                                 'SPY', 'QQQ', 'NFLX', 'DIS', 'BA', 'JPM', 'V', 'MA', 'PYPL', 'SQ', 'COIN',
+                                 'SHOP', 'PLTR', 'SOFI', 'INTC', 'MU', 'QCOM', 'CRM', 'ORCL', 'ADBE',
+                                 'XOM', 'CVX', 'WMT', 'TGT', 'COST', 'HD', 'LOW', 'NKE', 'SBUX', 'MCD'}
+            
+            found_fund_tickers = [word for word in user_message.upper().split() 
+                                  if word.strip('.,?!()') in known_fund_tickers]
+            
+            symbols_for_fundamentals = list(set(explicit_fund_tickers + found_fund_tickers))
             
             # Fetch real-time fundamentals for mentioned stocks
             if symbols_for_fundamentals:
