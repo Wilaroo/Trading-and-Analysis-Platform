@@ -100,6 +100,7 @@ Format your responses clearly with sections when appropriate. Use specific numbe
         self._scoring_engine = None
         self._trade_journal = None
         self._news_service = None
+        self._trade_history_service = None
         
     def _init_llm_clients(self):
         """Initialize available LLM clients"""
