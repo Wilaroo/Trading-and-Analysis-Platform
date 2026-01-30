@@ -91,13 +91,22 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
 - `GET /api/scanner/alerts` - Get imminent trigger alerts
 - `GET /api/scanner/summary` - Dashboard summary
 
-### Advanced Alert System (NEW)
+### Advanced Alert System
 - `POST /api/alerts/scan` - Full scan organized by timeframe
 - `GET /api/alerts/scalp` - Scalp alerts: "Setting up now" / "On watch today"
 - `GET /api/alerts/swing` - Swing alerts: "Setting up today" / "This week"
 - `GET /api/alerts/summary` - Quick dashboard summary
 - `POST /api/alerts/check-in-play/{symbol}` - Check if stock is "in play"
 - `GET /api/alerts/scoring-weights` - View timeframe-based scoring weights
+
+### Live Scanner (Background Scanning) - NEW
+- `GET /api/live-scanner/stream` - SSE endpoint for real-time alert streaming
+- `GET /api/live-scanner/status` - Scanner running status and stats
+- `GET /api/live-scanner/alerts` - Get current live alerts
+- `POST /api/live-scanner/start` - Start background scanner
+- `POST /api/live-scanner/stop` - Stop background scanner
+- `GET /api/live-scanner/watchlist` - Get/set watchlist symbols
+- `GET /api/live-scanner/config` - Get/update scan configuration
 
 ### Market Data
 - `GET /api/market/news` - Market news
