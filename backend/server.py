@@ -2669,9 +2669,13 @@ async def stream_quotes():
 
 @app.on_event("startup")
 async def startup_event():
-    """Start background streaming task"""
+    """Start background streaming task and background scanner"""
     asyncio.create_task(stream_quotes())
     print("WebSocket streaming started")
+    
+    # Start background scanner for live alerts
+    await background_scanner.start()
+    print("Background scanner started - Live alerts active")
 
 @app.websocket("/ws/quotes")
 async def websocket_quotes(websocket: WebSocket):
