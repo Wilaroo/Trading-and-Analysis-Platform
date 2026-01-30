@@ -525,6 +525,13 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
         <div className="p-3 border-b border-white/10 bg-zinc-900/30">
           <div className="flex items-center gap-2 flex-wrap">
             <QuickAction
+              icon={BarChart3}
+              label="My Performance"
+              onClick={() => sendMessage("Analyze my trading performance. What's my win rate, profit factor, and what are my strengths and weaknesses? Give me actionable recommendations.")}
+              loading={isLoading}
+              color="emerald"
+            />
+            <QuickAction
               icon={Newspaper}
               label="Market News"
               onClick={() => sendMessage("What's happening in the market today? Give me the key headlines and themes.")}
