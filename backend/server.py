@@ -55,6 +55,7 @@ from services.quality_service import init_quality_service
 from services.ai_assistant_service import init_assistant_service
 from services.scheduler_service import init_scheduler_service
 from services.alpaca_service import init_alpaca_service
+from services.predictive_scanner import get_predictive_scanner
 from data.strategies_data import ALL_STRATEGIES_DATA
 
 app = FastAPI(title="TradeCommand API")
