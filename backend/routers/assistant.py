@@ -1221,3 +1221,217 @@ async def get_fundamental_analysis_knowledge():
     except Exception as e:
         logger.error(f"Error getting fundamental knowledge: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===================== REAL-TIME FUNDAMENTAL DATA ENDPOINTS =====================
+
+@router.get("/realtime/fundamentals/{symbol}")
+async def get_realtime_fundamentals(symbol: str):
+    """
+    Fetch REAL-TIME fundamental data for a stock from Finnhub.
+    
+    Returns comprehensive fundamental metrics including:
+    - Valuation: P/E, P/B, P/S, PEG, EV/EBITDA
+    - Profitability: ROE, ROA, margins
+    - Growth: EPS growth, revenue growth
+    - Financial Health: D/E ratio, current ratio, interest coverage
+    - Per Share: EPS, book value, dividend yield
+    - Market Data: market cap, beta, 52-week range
+    
+    This uses LIVE data from Finnhub API.
+    """
+    try:
+        from services.fundamental_data_service import get_fundamental_data_service
+        
+        service = get_fundamental_data_service()
+        data = await service.get_fundamentals(symbol)
+        
+        if not data:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No fundamental data available for {symbol}. Check if the symbol is valid."
+            )
+        
+        # Convert dataclass to dict for response
+        return {
+            "success": True,
+            "symbol": data.symbol,
+            "valuation": {
+                "pe_ratio": data.pe_ratio,
+                "forward_pe": data.forward_pe,
+                "pb_ratio": data.pb_ratio,
+                "ps_ratio": data.ps_ratio,
+                "peg_ratio": data.peg_ratio,
+                "ev_to_ebitda": data.ev_to_ebitda,
+                "price_to_fcf": data.price_to_fcf
+            },
+            "profitability": {
+                "roe": f"{data.roe:.2%}" if data.roe else None,
+                "roa": f"{data.roa:.2%}" if data.roa else None,
+                "roic": f"{data.roic:.2%}" if data.roic else None,
+                "gross_margin": f"{data.gross_margin:.2%}" if data.gross_margin else None,
+                "operating_margin": f"{data.operating_margin:.2%}" if data.operating_margin else None,
+                "net_margin": f"{data.net_margin:.2%}" if data.net_margin else None
+            },
+            "growth": {
+                "eps_growth_yoy": f"{data.eps_growth_yoy:.2%}" if data.eps_growth_yoy else None,
+                "eps_growth_3y": f"{data.eps_growth_3y:.2%}" if data.eps_growth_3y else None,
+                "eps_growth_5y": f"{data.eps_growth_5y:.2%}" if data.eps_growth_5y else None,
+                "revenue_growth_yoy": f"{data.revenue_growth_yoy:.2%}" if data.revenue_growth_yoy else None,
+                "revenue_growth_3y": f"{data.revenue_growth_3y:.2%}" if data.revenue_growth_3y else None
+            },
+            "financial_health": {
+                "debt_to_equity": data.debt_to_equity,
+                "current_ratio": data.current_ratio,
+                "quick_ratio": data.quick_ratio,
+                "interest_coverage": data.interest_coverage
+            },
+            "per_share": {
+                "eps_ttm": data.eps_ttm,
+                "book_value_per_share": data.book_value_per_share,
+                "revenue_per_share": data.revenue_per_share,
+                "fcf_per_share": data.fcf_per_share,
+                "dividend_yield": f"{data.dividend_yield:.2%}" if data.dividend_yield else None,
+                "dividend_per_share": data.dividend_per_share,
+                "payout_ratio": f"{data.payout_ratio:.0%}" if data.payout_ratio else None
+            },
+            "market_data": {
+                "market_cap_millions": data.market_cap,
+                "enterprise_value_millions": data.enterprise_value,
+                "beta": data.beta,
+                "52_week_high": data.high_52_week,
+                "52_week_low": data.low_52_week
+            },
+            "timestamp": data.timestamp,
+            "source": data.source
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching real-time fundamentals: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/realtime/analyze/{symbol}")
+async def analyze_stock_realtime(symbol: str, include_technicals: bool = True):
+    """
+    Get comprehensive REAL-TIME stock analysis combining fundamentals and technicals.
+    
+    This is the most powerful analysis endpoint - it fetches:
+    1. Live fundamental data from Finnhub (P/E, ROE, D/E, margins, growth, etc.)
+    2. Technical analysis from the scoring engine (if available)
+    3. Company profile information
+    4. Combined scoring with weighted fundamentals + technicals
+    
+    Returns:
+    - Fundamental score (0-100) with signals and warnings
+    - Technical score and trading bias
+    - Combined score and overall verdict
+    - All underlying metrics
+    """
+    try:
+        from services.fundamental_data_service import get_fundamental_data_service
+        
+        service = get_fundamental_data_service()
+        analysis = await service.get_full_stock_analysis(symbol, include_technicals)
+        
+        return {
+            "success": True,
+            **analysis
+        }
+        
+    except Exception as e:
+        logger.error(f"Error analyzing stock: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/realtime/company/{symbol}")
+async def get_company_profile(symbol: str):
+    """
+    Get company profile information including sector, industry, and basic info.
+    """
+    try:
+        from services.fundamental_data_service import get_fundamental_data_service
+        
+        service = get_fundamental_data_service()
+        profile = await service.get_company_profile(symbol)
+        
+        if not profile:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No company profile found for {symbol}"
+            )
+        
+        return {
+            "success": True,
+            **profile
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching company profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/realtime/compare")
+async def compare_stocks_fundamentals(symbols: List[str]):
+    """
+    Compare fundamental metrics across multiple stocks.
+    Useful for finding the best value among similar companies.
+    
+    Request body: ["AAPL", "MSFT", "GOOGL"]
+    """
+    if len(symbols) > 10:
+        raise HTTPException(status_code=400, detail="Maximum 10 symbols allowed")
+    
+    if len(symbols) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 symbols required for comparison")
+    
+    try:
+        from services.fundamental_data_service import get_fundamental_data_service
+        
+        service = get_fundamental_data_service()
+        
+        comparisons = []
+        for symbol in symbols:
+            analysis = await service.analyze_fundamentals(symbol)
+            if analysis.get("available"):
+                comparisons.append({
+                    "symbol": symbol.upper(),
+                    "value_score": analysis.get("value_score"),
+                    "assessment": analysis.get("assessment"),
+                    "pe_ratio": analysis.get("metrics", {}).get("valuation", {}).get("pe_ratio"),
+                    "peg_ratio": analysis.get("metrics", {}).get("valuation", {}).get("peg_ratio"),
+                    "roe": analysis.get("metrics", {}).get("profitability", {}).get("roe"),
+                    "debt_to_equity": analysis.get("metrics", {}).get("financial_health", {}).get("debt_to_equity"),
+                    "signals_count": len(analysis.get("signals", [])),
+                    "warnings_count": len(analysis.get("warnings", []))
+                })
+            else:
+                comparisons.append({
+                    "symbol": symbol.upper(),
+                    "error": "Data unavailable"
+                })
+        
+        # Rank by value score
+        ranked = sorted(
+            [c for c in comparisons if "value_score" in c],
+            key=lambda x: x["value_score"],
+            reverse=True
+        )
+        
+        return {
+            "success": True,
+            "comparisons": comparisons,
+            "ranking": [c["symbol"] for c in ranked],
+            "best_value": ranked[0]["symbol"] if ranked else None,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error comparing stocks: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
