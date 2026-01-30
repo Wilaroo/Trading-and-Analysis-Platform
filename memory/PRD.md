@@ -1315,3 +1315,35 @@ curl /api/market-context/indicators/regime
   - Added `handleTickerSearch()` function
   - Added search bar JSX in header
   - Added AI Trading Recommendation section to TickerDetailModal Overview tab
+
+
+### Jan 30, 2026 - Recent Searches Feature
+**Implemented:**
+
+1. **Recent Searches Dropdown**
+   - Stores last 5 searched tickers in localStorage for persistence
+   - Dropdown appears when search input is focused and empty
+   - Shows "Recent Searches" header with clock icon
+   - Each recent search item is clickable to instantly search that ticker
+   - "Clear" button to remove all recent searches
+   - Recent searches persist across page refreshes/sessions
+
+2. **State Management**
+   - `recentSearches` state initialized from localStorage
+   - `showRecentSearches` state for dropdown visibility
+   - `addToRecentSearches()` helper function - deduplicates and limits to 5
+   - `clearRecentSearches()` function - clears state and localStorage
+
+**UI Features:**
+- Clock icon indicating recency
+- Search icon for each item
+- Arrow indicator for click-to-search
+- Clear button with trash icon
+- Smooth hover transitions
+- Z-index 50 to appear above other content
+
+**Files Modified:**
+- `/app/frontend/src/pages/CommandCenterPage.js`:
+  - Added recent searches state with localStorage persistence
+  - Added dropdown UI below search input
+  - Enhanced handleTickerSearch to save searches
