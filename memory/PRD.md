@@ -1347,3 +1347,43 @@ curl /api/market-context/indicators/regime
   - Added recent searches state with localStorage persistence
   - Added dropdown UI below search input
   - Enhanced handleTickerSearch to save searches
+
+
+### Jan 30, 2026 - Code Refactoring & Keyboard Shortcuts
+**Implemented:**
+
+1. **Component Extraction** - Improved code organization
+   - Extracted `TickerDetailModal` (606 lines) to `/app/frontend/src/components/TickerDetailModal.jsx`
+   - Extracted `QuickTradeModal` (151 lines) to `/app/frontend/src/components/QuickTradeModal.jsx`
+   - **Result:** `CommandCenterPage.js` reduced from ~3790 lines to ~2535 lines (33% reduction)
+
+2. **Utility Functions Consolidation**
+   - Created `/app/frontend/src/utils/tradingUtils.js` with shared functions:
+     - `playSound()` - Audio alerts for trading events
+     - `formatPrice()`, `formatPercent()`, `formatVolume()`, `formatCurrency()`, `formatMarketCap()`
+     - `getScoreColor()`, `getGradeColor()`, `getBiasColor()`
+
+3. **Keyboard Shortcuts**
+   - Created `/app/frontend/src/hooks/useKeyboardShortcuts.js` - Reusable keyboard shortcut hook
+   - Implemented shortcuts:
+     - `Ctrl+K` (Cmd+K on Mac) - Focus ticker search bar
+     - `Ctrl+Shift+A` - Toggle AI Assistant
+     - `Escape` - Close modals (Ticker Detail, Trade, AI Assistant)
+     - `Ctrl+M` - Toggle sound on/off
+   - Shortcuts are context-aware (disabled in input fields except Escape)
+
+**Files Created:**
+- `/app/frontend/src/components/TickerDetailModal.jsx`
+- `/app/frontend/src/components/QuickTradeModal.jsx`
+- `/app/frontend/src/utils/tradingUtils.js`
+- `/app/frontend/src/hooks/useKeyboardShortcuts.js`
+
+**Files Modified:**
+- `/app/frontend/src/pages/CommandCenterPage.js` - Imports extracted components, uses keyboard shortcuts hook
+
+**Benefits:**
+- Faster IDE load times and navigation
+- Easier testing of individual components
+- Better maintainability for future changes
+- Improved developer experience with keyboard shortcuts
+- Code reuse through shared utility functions
