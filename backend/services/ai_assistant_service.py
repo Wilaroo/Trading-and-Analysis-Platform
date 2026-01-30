@@ -373,7 +373,7 @@ Format your responses clearly with sections when appropriate. Use specific numbe
                         try:
                             ticker_news = await self.news_service.get_ticker_news(symbol, max_items=3)
                             if ticker_news and not ticker_news[0].get("is_placeholder"):
-                                context_parts.append(f"  Recent News:")
+                                context_parts.append("  Recent News:")
                                 for news_item in ticker_news[:3]:
                                     context_parts.append(f"    - {news_item.get('headline', '')[:100]}")
                         except Exception:
