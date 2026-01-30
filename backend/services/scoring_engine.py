@@ -68,9 +68,61 @@ class UniversalScoringEngine:
     
     def __init__(self, db=None):
         self.db = db
+        self._news_service = None
         if db is not None:
             self.scores_collection = db["ticker_scores"]
             self.historical_collection = db["score_history"]
+    
+    @property
+    def news_service(self):
+        """Lazy load news service"""
+        if self._news_service is None:
+            from services.news_service import get_news_service
+            self._news_service = get_news_service()
+        return self._news_service
+    
+    async def get_news_sentiment_for_symbol(self, symbol: str) -> Dict:
+        """
+        Fetch recent news for a symbol and analyze sentiment.
+        Returns news impact score and summary.
+        """
+        try:
+            news_items = await self.news_service.get_ticker_news(symbol, max_items=5)
+            
+            if not news_items or news_items[0].get("is_placeholder"):
+                return {"available": False, "impact": 0, "sentiment": "neutral", "headlines": []}
+            
+            # Analyze sentiment from headlines
+            sentiments = [item.get("sentiment", "neutral") for item in news_items]
+            bullish = sentiments.count("bullish")
+            bearish = sentiments.count("bearish")
+            
+            # Calculate news impact score (-10 to +10)
+            if bullish > bearish * 2:
+                impact = min(10, 3 + bullish * 2)
+                sentiment = "bullish"
+            elif bearish > bullish * 2:
+                impact = max(-10, -3 - bearish * 2)
+                sentiment = "bearish"
+            else:
+                impact = (bullish - bearish) * 1.5
+                sentiment = "neutral" if abs(impact) < 2 else ("bullish" if impact > 0 else "bearish")
+            
+            # Extract headlines for display
+            headlines = [item.get("headline", "")[:100] for item in news_items[:3]]
+            
+            return {
+                "available": True,
+                "impact": round(impact, 1),
+                "sentiment": sentiment,
+                "headlines": headlines,
+                "bullish_count": bullish,
+                "bearish_count": bearish,
+                "total_articles": len(news_items)
+            }
+        except Exception as e:
+            logger.warning(f"Error fetching news for {symbol}: {e}")
+            return {"available": False, "impact": 0, "sentiment": "neutral", "headlines": []}
     
     # ==================== MARKET CAP CLASSIFICATION ====================
     
