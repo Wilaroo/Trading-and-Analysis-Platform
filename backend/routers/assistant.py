@@ -525,3 +525,154 @@ Be direct and analytical. Use the actual numbers. If there are serious issues, h
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/coach/find-setups/{strategy}")
+async def find_strategy_setups(strategy: str, limit: int = 5):
+    """
+    Find stocks currently matching a specific strategy setup.
+    Uses real-time data from scanner and scoring engine.
+    
+    Args:
+        strategy: Strategy name (e.g., 'rubberband', 'breakout', 'momentum')
+        limit: Max number of results
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    try:
+        from services.scoring_engine import get_scoring_engine
+        from services.ib_service import get_ib_service
+        
+        scoring_engine = get_scoring_engine()
+        ib_service = get_ib_service()
+        
+        strategy_lower = strategy.lower().replace(" ", "_").replace("-", "_")
+        
+        # Define strategy criteria
+        strategy_criteria = {
+            "rubber_band": {
+                "description": "Mean reversion plays - price extended away from 9 EMA",
+                "conditions": ["mean_reversion_signal", "extended_below_ema"],
+                "min_score": 60
+            },
+            "rubberband": {
+                "description": "Mean reversion plays - price extended away from 9 EMA",
+                "conditions": ["mean_reversion_signal", "extended_below_ema"],
+                "min_score": 60
+            },
+            "breakout": {
+                "description": "Price breaking above resistance with volume",
+                "conditions": ["breakout_signal", "high_rvol"],
+                "min_score": 65
+            },
+            "momentum": {
+                "description": "Strong trending stocks with volume confirmation",
+                "conditions": ["trend_strength", "high_rvol"],
+                "min_score": 70
+            },
+            "vwap_bounce": {
+                "description": "Price bouncing off VWAP level",
+                "conditions": ["near_vwap", "volume_surge"],
+                "min_score": 60
+            }
+        }
+        
+        criteria = strategy_criteria.get(strategy_lower)
+        if not criteria:
+            return {
+                "strategy": strategy,
+                "available_strategies": list(strategy_criteria.keys()),
+                "error": f"Strategy '{strategy}' not found. Try: {', '.join(strategy_criteria.keys())}"
+            }
+        
+        # Get list of active stocks to scan (from watchlist or recent scans)
+        # For now, use a list of commonly traded stocks
+        symbols_to_check = ["AAPL", "TSLA", "NVDA", "META", "MSFT", "AMD", "GOOGL", "AMZN", "SPY", "QQQ",
+                          "NFLX", "BA", "DIS", "JPM", "V", "MA", "PYPL", "SQ", "COIN", "SHOP"]
+        
+        matching_setups = []
+        
+        for symbol in symbols_to_check:
+            try:
+                # Get analysis from scoring engine
+                analysis = await scoring_engine.analyze_ticker(symbol)
+                if not analysis:
+                    continue
+                
+                scores = analysis.get("scores", {})
+                trading_summary = analysis.get("trading_summary", {})
+                technicals = analysis.get("technicals", {})
+                
+                overall_score = scores.get("overall", 0)
+                
+                # Check if it matches strategy criteria
+                matches_criteria = False
+                match_reasons = []
+                
+                if strategy_lower in ["rubber_band", "rubberband"]:
+                    # Check for mean reversion signal
+                    vwap_dist = technicals.get("vwap_distance_pct", 0)
+                    ema_dist = technicals.get("distance_from_9ema_pct", 0)
+                    
+                    # Extended below key levels = potential rubber band long
+                    if vwap_dist < -2 or ema_dist < -3:
+                        matches_criteria = True
+                        match_reasons.append(f"Extended {abs(vwap_dist):.1f}% below VWAP")
+                        match_reasons.append(f"Price below 9 EMA by {abs(ema_dist):.1f}%")
+                    # Extended above = potential rubber band short
+                    elif vwap_dist > 3 or ema_dist > 4:
+                        matches_criteria = True
+                        match_reasons.append(f"Extended {vwap_dist:.1f}% above VWAP")
+                        match_reasons.append("Potential SHORT mean reversion")
+                
+                elif strategy_lower == "breakout":
+                    bias = trading_summary.get("bias", "")
+                    if bias == "BULLISH" and overall_score >= 65:
+                        matches_criteria = True
+                        match_reasons.append(f"Bullish bias with {overall_score} score")
+                
+                elif strategy_lower == "momentum":
+                    rvol = technicals.get("rvol", 0)
+                    if rvol > 2 and overall_score >= 70:
+                        matches_criteria = True
+                        match_reasons.append(f"High RVOL: {rvol:.1f}x")
+                
+                if matches_criteria and overall_score >= criteria.get("min_score", 50):
+                    matching_setups.append({
+                        "symbol": symbol,
+                        "score": overall_score,
+                        "grade": scores.get("grade", "N/A"),
+                        "direction": trading_summary.get("suggested_direction", "WAIT"),
+                        "bias": trading_summary.get("bias", "NEUTRAL"),
+                        "entry": trading_summary.get("entry"),
+                        "stop": trading_summary.get("stop_loss"),
+                        "target": trading_summary.get("target"),
+                        "match_reasons": match_reasons,
+                        "technicals": {
+                            "vwap_dist": technicals.get("vwap_distance_pct"),
+                            "rvol": technicals.get("rvol"),
+                            "rsi": technicals.get("rsi_14")
+                        }
+                    })
+                    
+            except Exception as e:
+                logger.warning(f"Error analyzing {symbol}: {e}")
+                continue
+        
+        # Sort by score and limit
+        matching_setups.sort(key=lambda x: x["score"], reverse=True)
+        top_setups = matching_setups[:limit]
+        
+        return {
+            "strategy": strategy,
+            "description": criteria["description"],
+            "total_scanned": len(symbols_to_check),
+            "matches_found": len(matching_setups),
+            "top_setups": top_setups,
+            "message": f"Found {len(top_setups)} {strategy} setups" if top_setups else f"No {strategy} setups found in current market conditions"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error finding setups: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
