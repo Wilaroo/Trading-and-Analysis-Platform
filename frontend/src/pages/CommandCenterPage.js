@@ -862,162 +862,269 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                   </div>
                 )}
 
-                {/* QUALITY TAB - Earnings Quality Factor */}
-                {activeTab === 'quality' && (
+                {/* EARNINGS TAB */}
+                {activeTab === 'earnings' && (
                   <div className="space-y-4">
-                    {quality.grade ? (
+                    {earningsData?.available ? (
                       <>
-                        {/* Quality Grade Header */}
+                        {/* Earnings Summary Header */}
                         <div className={`p-4 rounded-lg border ${
-                          quality.is_high_quality ? 'border-green-500/30 bg-green-500/5' :
-                          quality.is_low_quality ? 'border-red-500/30 bg-red-500/5' :
+                          earningsData.summary?.overall_rating === 'strong' ? 'border-green-500/30 bg-green-500/5' :
+                          earningsData.summary?.overall_rating === 'good' ? 'border-cyan-500/30 bg-cyan-500/5' :
+                          earningsData.summary?.overall_rating === 'weak' ? 'border-red-500/30 bg-red-500/5' :
                           'border-zinc-700 bg-zinc-900/50'
                         }`}>
                           <div className="flex items-center justify-between mb-3">
                             <div className="flex items-center gap-3">
-                              <span className={`text-3xl font-bold px-4 py-2 rounded-lg ${
-                                quality.grade?.startsWith('A') ? 'bg-green-500 text-black' :
-                                quality.grade?.startsWith('B') ? 'bg-cyan-500 text-black' :
-                                quality.grade?.startsWith('C') ? 'bg-yellow-500 text-black' :
-                                'bg-red-500 text-white'
+                              <span className={`text-2xl font-bold px-4 py-2 rounded-lg ${
+                                earningsData.summary?.overall_rating === 'strong' ? 'bg-green-500 text-black' :
+                                earningsData.summary?.overall_rating === 'good' ? 'bg-cyan-500 text-black' :
+                                earningsData.summary?.overall_rating === 'weak' ? 'bg-red-500 text-white' :
+                                'bg-zinc-700 text-white'
                               }`}>
-                                {quality.grade}
+                                {earningsData.summary?.overall_rating?.toUpperCase() || 'NEUTRAL'}
                               </span>
                               <div>
-                                <p className="text-white font-semibold">Earnings Quality Grade</p>
+                                <p className="text-white font-semibold">Earnings Performance</p>
                                 <p className="text-xs text-zinc-400">
-                                  {quality.is_high_quality ? 'High Quality Stock - Top 30%' :
-                                   quality.is_low_quality ? 'Low Quality Stock - Bottom 30%' :
-                                   'Average Quality'}
+                                  {earningsData.trends?.total_quarters || 0} quarters analyzed
                                 </p>
                               </div>
                             </div>
-                            <div className="text-right">
-                              <p className="text-2xl font-mono font-bold text-white">{quality.percentile_rank?.toFixed(0)}</p>
-                              <p className="text-xs text-zinc-500">Percentile</p>
-                            </div>
+                            {earningsData.trends && (
+                              <div className="text-right">
+                                <p className="text-2xl font-mono font-bold text-white">{earningsData.trends.eps_beat_rate?.toFixed(0)}%</p>
+                                <p className="text-xs text-zinc-500">EPS Beat Rate</p>
+                              </div>
+                            )}
                           </div>
                           
-                          {/* Quality Signal */}
-                          <div className="flex items-center gap-2 mt-3">
-                            <span className="text-xs text-zinc-500">Signal:</span>
-                            <span className={`text-sm font-bold px-2 py-0.5 rounded ${
-                              quality.quality_signal === 'LONG' ? 'bg-green-500/20 text-green-400' :
-                              quality.quality_signal === 'SHORT' ? 'bg-red-500/20 text-red-400' :
-                              'bg-zinc-500/20 text-zinc-400'
-                            }`}>
-                              {quality.quality_signal}
-                            </span>
-                            <span className="text-xs text-zinc-500">
-                              Strength: {quality.signal_strength?.toFixed(0)}%
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* 4 Factor Scores */}
-                        <div className="grid grid-cols-2 gap-3">
-                          {[
-                            { 
-                              label: 'Accruals', 
-                              score: quality.component_scores?.accruals,
-                              description: 'Cash vs Reported Earnings',
-                              tooltip: 'Lower accruals = higher quality. Measures earnings backed by real cash flow.',
-                              good: 'Lower is better'
-                            },
-                            { 
-                              label: 'ROE', 
-                              score: quality.component_scores?.roe,
-                              description: 'Return on Equity',
-                              tooltip: 'Higher ROE = more efficient use of shareholder capital.',
-                              good: 'Higher is better'
-                            },
-                            { 
-                              label: 'CF/A', 
-                              score: quality.component_scores?.cfa,
-                              description: 'Cash Flow to Assets',
-                              tooltip: 'Higher CF/A = better asset productivity and cash generation.',
-                              good: 'Higher is better'
-                            },
-                            { 
-                              label: 'D/A', 
-                              score: quality.component_scores?.da,
-                              description: 'Debt to Assets',
-                              tooltip: 'Lower D/A = less leverage risk and stronger balance sheet.',
-                              good: 'Lower is better'
-                            },
-                          ].map((factor, idx) => (
-                            <div key={idx} className="bg-zinc-900 rounded-lg p-3" title={factor.tooltip}>
-                              <div className="flex items-center justify-between mb-2">
-                                <span className="text-sm font-medium text-white">{factor.label}</span>
-                                <span className={`text-lg font-bold font-mono ${
-                                  factor.score >= 70 ? 'text-green-400' :
-                                  factor.score >= 40 ? 'text-yellow-400' :
-                                  'text-red-400'
-                                }`}>{factor.score?.toFixed(0) || '--'}</span>
-                              </div>
-                              <p className="text-[10px] text-zinc-500">{factor.description}</p>
-                              <div className="mt-2 h-1.5 bg-zinc-700 rounded-full overflow-hidden">
-                                <div 
-                                  className={`h-full rounded-full ${
-                                    factor.score >= 70 ? 'bg-green-500' :
-                                    factor.score >= 40 ? 'bg-yellow-500' :
-                                    'bg-red-500'
-                                  }`}
-                                  style={{ width: `${factor.score || 0}%` }}
-                                />
-                              </div>
-                              <p className="text-[9px] text-zinc-600 mt-1">{factor.good}</p>
+                          {/* Key Points */}
+                          {earningsData.summary?.key_points?.length > 0 && (
+                            <div className="mt-3 space-y-1">
+                              {earningsData.summary.key_points.map((point, idx) => (
+                                <div key={idx} className="flex items-start gap-2 text-sm">
+                                  <span className="text-green-400">✓</span>
+                                  <span className="text-zinc-300">{point}</span>
+                                </div>
+                              ))}
                             </div>
-                          ))}
+                          )}
+                          
+                          {/* Risks */}
+                          {earningsData.summary?.risks?.length > 0 && (
+                            <div className="mt-3 space-y-1">
+                              {earningsData.summary.risks.map((risk, idx) => (
+                                <div key={idx} className="flex items-start gap-2 text-sm">
+                                  <span className="text-red-400">⚠</span>
+                                  <span className="text-zinc-300">{risk}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          
+                          {/* Opportunities */}
+                          {earningsData.summary?.opportunities?.length > 0 && (
+                            <div className="mt-3 space-y-1">
+                              {earningsData.summary.opportunities.map((opp, idx) => (
+                                <div key={idx} className="flex items-start gap-2 text-sm">
+                                  <span className="text-cyan-400">★</span>
+                                  <span className="text-zinc-300">{opp}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
 
-                        {/* Raw Metrics (if available) */}
-                        {qualityMetrics?.metrics && (
-                          <div className="bg-zinc-900/50 rounded-lg p-3">
-                            <span className="text-[10px] text-zinc-500 uppercase block mb-2">Raw Metrics</span>
-                            <div className="grid grid-cols-4 gap-2 text-center">
-                              <div>
-                                <p className="text-xs text-zinc-400">Accruals</p>
-                                <p className="text-sm font-mono text-white">
-                                  {qualityMetrics.metrics.accruals !== null ? (qualityMetrics.metrics.accruals * 100).toFixed(1) + '%' : '--'}
-                                </p>
+                        {/* Beat/Miss Stats */}
+                        {earningsData.trends && (
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="bg-zinc-900 rounded-lg p-3">
+                              <p className="text-xs text-zinc-500 uppercase mb-2">EPS Performance</p>
+                              <div className="flex items-center justify-between">
+                                <div className="text-center">
+                                  <p className="text-lg font-bold text-green-400">{earningsData.trends.eps_beats}</p>
+                                  <p className="text-[10px] text-zinc-500">Beats</p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-lg font-bold text-red-400">{earningsData.trends.eps_misses}</p>
+                                  <p className="text-[10px] text-zinc-500">Misses</p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-lg font-bold text-cyan-400">{earningsData.trends.eps_beat_rate?.toFixed(0)}%</p>
+                                  <p className="text-[10px] text-zinc-500">Beat Rate</p>
+                                </div>
                               </div>
-                              <div>
-                                <p className="text-xs text-zinc-400">ROE</p>
-                                <p className="text-sm font-mono text-white">
-                                  {qualityMetrics.metrics.roe !== null ? (qualityMetrics.metrics.roe * 100).toFixed(1) + '%' : '--'}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-zinc-400">CF/A</p>
-                                <p className="text-sm font-mono text-white">
-                                  {qualityMetrics.metrics.cfa !== null ? (qualityMetrics.metrics.cfa * 100).toFixed(1) + '%' : '--'}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-zinc-400">D/A</p>
-                                <p className="text-sm font-mono text-white">
-                                  {qualityMetrics.metrics.da !== null ? (qualityMetrics.metrics.da * 100).toFixed(1) + '%' : '--'}
-                                </p>
+                            </div>
+                            <div className="bg-zinc-900 rounded-lg p-3">
+                              <p className="text-xs text-zinc-500 uppercase mb-2">Revenue Performance</p>
+                              <div className="flex items-center justify-between">
+                                <div className="text-center">
+                                  <p className="text-lg font-bold text-green-400">{earningsData.trends.rev_beats}</p>
+                                  <p className="text-[10px] text-zinc-500">Beats</p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-lg font-bold text-red-400">{earningsData.trends.rev_misses}</p>
+                                  <p className="text-[10px] text-zinc-500">Misses</p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-lg font-bold text-cyan-400">{earningsData.trends.rev_beat_rate?.toFixed(0)}%</p>
+                                  <p className="text-[10px] text-zinc-500">Beat Rate</p>
+                                </div>
                               </div>
                             </div>
                           </div>
                         )}
 
-                        {/* Info Banner */}
-                        <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-3">
-                          <p className="text-xs text-cyan-300">
-                            <strong>Earnings Quality Factor</strong> ranks stocks based on 4 fundamental metrics. 
-                            High-quality stocks (top 30%) tend to outperform in bear markets. 
-                            Low-quality stocks (bottom 30%) often underperform or are short candidates.
-                          </p>
-                        </div>
+                        {/* Next Earnings Alert */}
+                        {earningsData.next_earnings && (
+                          <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Calendar className="w-4 h-4 text-amber-400" />
+                              <span className="text-sm font-semibold text-amber-400">Upcoming Earnings</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-white font-mono">{earningsData.next_earnings.date}</p>
+                                <p className="text-xs text-zinc-400">
+                                  {earningsData.next_earnings.hour === 'bmo' ? 'Before Market Open' : 
+                                   earningsData.next_earnings.hour === 'amc' ? 'After Market Close' : 
+                                   earningsData.next_earnings.hour?.toUpperCase() || 'Time TBD'}
+                                </p>
+                              </div>
+                              {earningsData.next_earnings.eps_estimate !== null && (
+                                <div className="text-right">
+                                  <p className="text-xs text-zinc-500">EPS Estimate</p>
+                                  <p className="text-lg font-mono text-white">${earningsData.next_earnings.eps_estimate?.toFixed(2)}</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Earnings History Table */}
+                        {earningsData.earnings_history?.length > 0 && (
+                          <div className="bg-zinc-900/50 rounded-lg overflow-hidden">
+                            <div className="p-3 border-b border-zinc-800">
+                              <p className="text-sm font-semibold text-white">Earnings History</p>
+                            </div>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-xs">
+                                <thead className="bg-zinc-800/50">
+                                  <tr>
+                                    <th className="px-3 py-2 text-left text-zinc-400">Date</th>
+                                    <th className="px-3 py-2 text-right text-zinc-400">EPS Est</th>
+                                    <th className="px-3 py-2 text-right text-zinc-400">EPS Act</th>
+                                    <th className="px-3 py-2 text-right text-zinc-400">Surprise</th>
+                                    <th className="px-3 py-2 text-center text-zinc-400">Result</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-zinc-800">
+                                  {earningsData.earnings_history.filter(e => e.is_reported).slice(0, 8).map((earning, idx) => (
+                                    <tr key={idx} className="hover:bg-zinc-800/30">
+                                      <td className="px-3 py-2 text-white font-mono">{earning.date}</td>
+                                      <td className="px-3 py-2 text-right text-zinc-400">
+                                        {earning.eps_estimate !== null ? `$${earning.eps_estimate.toFixed(2)}` : '--'}
+                                      </td>
+                                      <td className="px-3 py-2 text-right text-white font-mono">
+                                        {earning.eps_actual !== null ? `$${earning.eps_actual.toFixed(2)}` : '--'}
+                                      </td>
+                                      <td className={`px-3 py-2 text-right font-mono ${
+                                        earning.eps_surprise_pct > 0 ? 'text-green-400' : 
+                                        earning.eps_surprise_pct < 0 ? 'text-red-400' : 'text-zinc-400'
+                                      }`}>
+                                        {earning.eps_surprise_pct !== null ? `${earning.eps_surprise_pct > 0 ? '+' : ''}${earning.eps_surprise_pct.toFixed(1)}%` : '--'}
+                                      </td>
+                                      <td className="px-3 py-2 text-center">
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                          earning.eps_result === 'BEAT' ? 'bg-green-500/20 text-green-400' :
+                                          earning.eps_result === 'MISS' ? 'bg-red-500/20 text-red-400' :
+                                          'bg-zinc-500/20 text-zinc-400'
+                                        }`}>
+                                          {earning.eps_result || '--'}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Growth Metrics */}
+                        {earningsData.metrics && (
+                          <div className="bg-zinc-900/50 rounded-lg p-3">
+                            <p className="text-xs text-zinc-500 uppercase mb-3">Growth Metrics</p>
+                            <div className="grid grid-cols-3 gap-3">
+                              <div className="text-center">
+                                <p className="text-[10px] text-zinc-500">EPS Growth (YoY)</p>
+                                <p className={`text-sm font-mono font-bold ${
+                                  earningsData.metrics.eps_growth_ttm_yoy > 0 ? 'text-green-400' : 
+                                  earningsData.metrics.eps_growth_ttm_yoy < 0 ? 'text-red-400' : 'text-white'
+                                }`}>
+                                  {earningsData.metrics.eps_growth_ttm_yoy !== null ? 
+                                    `${earningsData.metrics.eps_growth_ttm_yoy > 0 ? '+' : ''}${earningsData.metrics.eps_growth_ttm_yoy.toFixed(1)}%` : '--'}
+                                </p>
+                              </div>
+                              <div className="text-center">
+                                <p className="text-[10px] text-zinc-500">Revenue Growth (YoY)</p>
+                                <p className={`text-sm font-mono font-bold ${
+                                  earningsData.metrics.revenue_growth_quarterly_yoy > 0 ? 'text-green-400' : 
+                                  earningsData.metrics.revenue_growth_quarterly_yoy < 0 ? 'text-red-400' : 'text-white'
+                                }`}>
+                                  {earningsData.metrics.revenue_growth_quarterly_yoy !== null ? 
+                                    `${earningsData.metrics.revenue_growth_quarterly_yoy > 0 ? '+' : ''}${earningsData.metrics.revenue_growth_quarterly_yoy.toFixed(1)}%` : '--'}
+                                </p>
+                              </div>
+                              <div className="text-center">
+                                <p className="text-[10px] text-zinc-500">Growth Trend</p>
+                                <p className={`text-sm font-bold ${
+                                  earningsData.growth_trend === 'accelerating' ? 'text-green-400' :
+                                  earningsData.growth_trend === 'growing' ? 'text-cyan-400' :
+                                  earningsData.growth_trend === 'slowing' ? 'text-yellow-400' :
+                                  earningsData.growth_trend === 'decelerating' ? 'text-red-400' : 'text-zinc-400'
+                                }`}>
+                                  {earningsData.growth_trend?.toUpperCase() || 'NEUTRAL'}
+                                </p>
+                              </div>
+                            </div>
+                            
+                            {/* Valuation Metrics */}
+                            <div className="grid grid-cols-4 gap-2 mt-3 pt-3 border-t border-zinc-800">
+                              <div className="text-center">
+                                <p className="text-[10px] text-zinc-500">P/E</p>
+                                <p className="text-sm font-mono text-white">
+                                  {earningsData.metrics.pe_ratio !== null ? earningsData.metrics.pe_ratio.toFixed(1) : '--'}
+                                </p>
+                              </div>
+                              <div className="text-center">
+                                <p className="text-[10px] text-zinc-500">Fwd P/E</p>
+                                <p className="text-sm font-mono text-white">
+                                  {earningsData.metrics.forward_pe !== null ? earningsData.metrics.forward_pe.toFixed(1) : '--'}
+                                </p>
+                              </div>
+                              <div className="text-center">
+                                <p className="text-[10px] text-zinc-500">PEG</p>
+                                <p className="text-sm font-mono text-white">
+                                  {earningsData.metrics.peg_ratio !== null ? earningsData.metrics.peg_ratio.toFixed(2) : '--'}
+                                </p>
+                              </div>
+                              <div className="text-center">
+                                <p className="text-[10px] text-zinc-500">EPS TTM</p>
+                                <p className="text-sm font-mono text-white">
+                                  {earningsData.metrics.eps_ttm !== null ? `$${earningsData.metrics.eps_ttm.toFixed(2)}` : '--'}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </>
                     ) : (
                       <div className="text-center py-12 text-zinc-500">
-                        <Activity className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                        <p>Quality data unavailable</p>
-                        <p className="text-xs mt-1">Quality scoring requires fundamental data</p>
+                        <Calendar className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                        <p>Earnings data unavailable</p>
+                        <p className="text-xs mt-1">{earningsData?.error || 'Unable to fetch earnings data'}</p>
                       </div>
                     )}
                   </div>
