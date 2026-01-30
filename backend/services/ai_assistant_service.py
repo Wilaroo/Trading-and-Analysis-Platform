@@ -253,6 +253,72 @@ Total P&L on {symbol_upper}: ${total_pnl:,.2f}
             logger.error(f"Error getting trade history context: {e}")
             return f"Error fetching trade history: {str(e)}"
     
+    @property
+    def trading_rules_engine(self):
+        if self._trading_rules_engine is None:
+            from services.trading_rules import TradingRulesEngine
+            self._trading_rules_engine = TradingRulesEngine()
+        return self._trading_rules_engine
+    
+    def get_strategy_context(self, strategy_name: str = None) -> str:
+        """Get detailed context about trading strategies from the rules engine"""
+        try:
+            engine = self.trading_rules_engine
+            context_parts = []
+            
+            # If specific strategy requested, find it
+            if strategy_name:
+                strategy_lower = strategy_name.lower().replace(" ", "_").replace("-", "_")
+                
+                # Check avoidance rules for the strategy
+                avoidance = engine.avoidance_rules.get(strategy_lower, [])
+                if avoidance:
+                    context_parts.append(f"\n{strategy_name.upper()} - WHEN TO AVOID:")
+                    for rule in avoidance:
+                        context_parts.append(f"  - {rule}")
+                
+                # Check volume rules
+                for rule_name, rule_data in engine.volume_rules.items():
+                    if strategy_name.lower() in str(rule_data.get("applies_to", [])).lower():
+                        context_parts.append(f"\n{strategy_name.upper()} - VOLUME RULES:")
+                        context_parts.append(f"  - {rule_data.get('description', '')}")
+                        context_parts.append(f"  - Pattern: {rule_data.get('pattern', '')}")
+            
+            # Get market regime strategies
+            context_parts.append("\n=== TRADING STRATEGIES BY MARKET CONDITION ===")
+            for regime, data in engine.market_context_rules.get("regime_identification", {}).items():
+                strategies = data.get("preferred_strategies", [])
+                if strategy_name and strategy_name.lower() in str(strategies).lower():
+                    context_parts.append(f"\n{regime.upper().replace('_', ' ')}:")
+                    context_parts.append(f"  Description: {data.get('description', '')}")
+                    context_parts.append(f"  Indicators: {', '.join(data.get('indicators', []))}")
+                    context_parts.append(f"  Preferred Strategies: {', '.join(strategies)}")
+                    context_parts.append(f"  Avoid: {', '.join(data.get('avoid', []))}")
+                elif not strategy_name:
+                    context_parts.append(f"\n{regime.upper().replace('_', ' ')}: {', '.join(strategies)}")
+            
+            # Rubber Band specific rules (since user asked about it)
+            if not strategy_name or "rubber" in strategy_name.lower():
+                context_parts.append("\n=== RUBBER BAND SCALP STRATEGY ===")
+                context_parts.append("Description: Mean reversion play when price stretches away from key MAs")
+                context_parts.append("Best Market Condition: Range fade / mean reversion markets")
+                context_parts.append("Entry Criteria:")
+                context_parts.append("  - Price extended below 9 EMA (for longs)")
+                context_parts.append("  - Snapback candle should be in top 5 volume bars of day")
+                context_parts.append("  - Look for stocks with clean trending days that pull back")
+                context_parts.append("Avoid When:")
+                context_parts.append("  - In cleanly trending markets (momentum too strong)")
+                context_parts.append("  - After 2 failed attempts (two strikes rule)")
+                context_parts.append("  - Snapback candle not in top 5 volume")
+                context_parts.append("Position Sizing: Normal")
+                context_parts.append("Risk Management: Max 2 attempts per day on same stock")
+            
+            return "\n".join(context_parts) if context_parts else "No strategy information found"
+            
+        except Exception as e:
+            logger.error(f"Error getting strategy context: {e}")
+            return f"Error loading strategies: {str(e)}"
+    
     def _get_or_create_conversation(self, session_id: str, user_id: str = "default") -> ConversationContext:
         """Get existing conversation or create new one"""
         if session_id not in self.conversations:
