@@ -1197,3 +1197,83 @@ curl /api/market-context/indicators/regime
 - `/app/backend/routers/newsletter.py` - Fixed route ordering
 - `/app/backend/routers/learning.py` - Async enhance-opportunities
 - `/app/frontend/src/components/AIAssistant.jsx` - Market News button
+
+
+### Jan 30, 2026 - Earnings Tab Implementation
+**Implemented:**
+
+1. **Earnings Data Service** (`/app/backend/services/earnings_service.py`)
+   - Created new service for fetching comprehensive earnings data from Finnhub
+   - `get_earnings_data(symbol)`: Returns full earnings analysis
+   - Includes: earnings history, EPS estimates/actuals, revenue data
+   - Beat/miss tracking with percentage surprise calculations
+   - Growth metrics: EPS growth, revenue growth, PE ratio, margins
+   - Summary generation with overall rating (strong/good/weak)
+   - Key points, risks, and opportunities auto-generated
+
+2. **Ticker Detail Modal - Earnings Tab** (`/app/frontend/src/pages/CommandCenterPage.js`)
+   - Replaced "Quality" tab with comprehensive "Earnings" tab
+   - Overall earnings rating badge (STRONG/GOOD/WEAK/NEUTRAL)
+   - EPS Beat Rate displayed prominently (e.g., "100%")
+   - Key points with checkmarks (e.g., "Excellent track record: 100% EPS beat rate")
+   - Risks and opportunities sections with visual indicators
+   - EPS Performance stats: Beats, Misses, Beat Rate
+   - Revenue Performance stats: Beats, Misses, Beat Rate
+   - Earnings History table with columns: Date, EPS Est, EPS Act, Surprise, Result
+   - Growth Metrics section: EPS Growth YoY, Revenue Growth YoY, Growth Trend
+   - Graceful handling when data is unavailable
+
+**API Endpoint:**
+- `GET /api/newsletter/earnings/{symbol}` - Fetch earnings data from Finnhub
+
+**Response Structure:**
+```json
+{
+  "symbol": "META",
+  "available": true,
+  "earnings_history": [
+    {
+      "date": "2026-01-28",
+      "quarter": 4,
+      "year": 2025,
+      "eps_estimate": 8.39,
+      "eps_actual": 8.88,
+      "eps_surprise_pct": 5.78,
+      "eps_result": "BEAT",
+      "revenue_actual": 59893000000,
+      "revenue_result": "BEAT"
+    }
+  ],
+  "trends": {
+    "total_quarters": 1,
+    "eps_beats": 1,
+    "eps_misses": 0,
+    "eps_beat_rate": 100.0,
+    "rev_beat_rate": 100.0
+  },
+  "metrics": {
+    "eps_ttm": 23.49,
+    "pe_ratio": 30.785,
+    "forward_pe": 24.75,
+    "revenue_growth_quarterly_yoy": 23.78
+  },
+  "summary": {
+    "overall_rating": "strong",
+    "key_points": ["Excellent track record: 100% EPS beat rate", "Beat EPS last quarter by 5.8%"],
+    "risks": [],
+    "opportunities": []
+  }
+}
+```
+
+**Files Created:**
+- `/app/backend/services/earnings_service.py` - Finnhub earnings data service
+
+**Files Modified:**
+- `/app/backend/routers/newsletter.py` - Added `/earnings/{symbol}` endpoint
+- `/app/frontend/src/pages/CommandCenterPage.js` - Earnings tab UI in TickerDetailModal
+
+**Verification:**
+- Backend API tested via curl - returns comprehensive earnings data
+- Frontend tab tested via screenshot - displays all data correctly
+- Earnings tab shows: Rating badge, beat rate, key points, performance stats, history table, growth metrics
