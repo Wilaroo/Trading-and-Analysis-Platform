@@ -231,19 +231,28 @@ class KnowledgeIntegrationService:
             "short_score": short_score
         }
     
-    def enhance_market_intelligence(self, opportunities: List[Dict], market_regime: str = "neutral") -> Dict:
+    async def enhance_market_intelligence(self, opportunities: List[Dict], market_regime: str = "neutral", include_news: bool = True) -> Dict:
         """
-        Enhance market intelligence with learned knowledge.
+        Enhance market intelligence with learned knowledge and real-time news.
         
         Args:
             opportunities: List of stock opportunities from scanner
             market_regime: Current market regime (bullish, bearish, neutral)
+            include_news: Whether to fetch and include market news
         
         Returns:
-            Enhanced intelligence with strategy recommendations
+            Enhanced intelligence with strategy recommendations and news context
         """
         enhanced_opportunities = []
         strategy_insights = []
+        
+        # Get market news context
+        news_context = None
+        if include_news:
+            try:
+                news_context = await self.get_market_news_context()
+            except Exception as e:
+                logger.warning(f"Error fetching market news: {e}")
         
         for opp in opportunities[:10]:
             symbol = opp.get("symbol", "")
@@ -261,11 +270,25 @@ class KnowledgeIntegrationService:
             # Get strategy recommendations
             recommendations = self.get_strategy_recommendations(stock_data, {"regime": market_regime})
             
+            # Get ticker-specific news if available
+            ticker_news = None
+            if include_news:
+                try:
+                    news_items = await self.news_service.get_ticker_news(symbol, max_items=3)
+                    if news_items and not news_items[0].get("is_placeholder"):
+                        ticker_news = {
+                            "headlines": [n.get("headline", "")[:100] for n in news_items[:3]],
+                            "sentiment": news_items[0].get("sentiment", "neutral")
+                        }
+                except Exception:
+                    pass
+            
             enhanced_opp = {
                 **opp,
                 "learned_strategies": recommendations["recommendations"][:3],
                 "kb_trade_bias": recommendations["trade_bias"],
-                "kb_confidence": recommendations["confidence"]
+                "kb_confidence": recommendations["confidence"],
+                "news": ticker_news
             }
             enhanced_opportunities.append(enhanced_opp)
             
@@ -286,12 +309,23 @@ class KnowledgeIntegrationService:
         # Sort insights by how many stocks they apply to
         strategy_insights.sort(key=lambda x: len(x["applicable_to"]), reverse=True)
         
-        return {
+        result = {
             "opportunities": enhanced_opportunities,
             "top_strategy_insights": strategy_insights[:5],
             "market_regime": market_regime,
             "knowledge_base_stats": self.knowledge.get_stats()
         }
+        
+        # Add market news context if available
+        if news_context and news_context.get("available"):
+            result["market_news"] = {
+                "headlines": news_context.get("headlines", [])[:8],
+                "themes": news_context.get("themes", []),
+                "overall_sentiment": news_context.get("overall_sentiment", "unknown"),
+                "sentiment_breakdown": news_context.get("sentiment_breakdown", {})
+            }
+        
+        return result
     
     def generate_ai_trade_recommendation(self, stock_data: Dict) -> Optional[Dict]:
         """
