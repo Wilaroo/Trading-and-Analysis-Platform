@@ -107,6 +107,19 @@ class RealTimeTechnicalService:
         """
         symbol = symbol.upper()
         
+        # Validate symbol - skip obviously invalid ones
+        if len(symbol) > 5 or len(symbol) < 1:
+            return None
+        if not symbol.isalpha():
+            return None
+        # Skip common words that aren't stocks
+        invalid_symbols = {'SCALP', 'SETUP', 'TRADE', 'STOCK', 'ALERT', 'WATCH', 'TODAY', 
+                          'SWING', 'RIGHT', 'ABOUT', 'WHICH', 'WHERE', 'WOULD', 'COULD',
+                          'MIGHT', 'THINK', 'PRICE', 'LEVEL', 'TREND', 'CHART', 'WAYS',
+                          'DATA', 'PLAY', 'WHAT', 'WHEN', 'HELP', 'FIND', 'LOOK', 'TELL'}
+        if symbol in invalid_symbols:
+            return None
+        
         # Check cache
         if not force_refresh and symbol in self._cache:
             cached = self._cache[symbol]
