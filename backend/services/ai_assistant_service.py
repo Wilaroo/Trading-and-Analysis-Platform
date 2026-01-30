@@ -477,6 +477,64 @@ TRADING RULES:
             logger.error(f"Error getting strategy context: {e}")
             return "Strategy knowledge embedded in system training"
     
+    def get_trading_intelligence_context(
+        self,
+        strategy: str = None,
+        pattern: str = None,
+        score_setup: bool = False,
+        setup_params: Dict = None
+    ) -> str:
+        """Get comprehensive trading intelligence context for AI"""
+        try:
+            ti = self.trading_intelligence
+            context_parts = []
+            
+            # Get comprehensive context
+            if strategy or pattern:
+                context_parts.append(ti.get_comprehensive_context_for_ai(
+                    strategy=strategy,
+                    pattern=pattern,
+                    market_analysis=True
+                ))
+            
+            # Score a specific setup if requested
+            if score_setup and setup_params:
+                score_result = ti.score_trade_setup(**setup_params)
+                context_parts.append(f"""
+=== SETUP SCORE ANALYSIS ===
+Symbol: {score_result['symbol']}
+Strategy: {score_result['strategy']}
+Direction: {score_result['direction']}
+
+TOTAL SCORE: {score_result['total_score']}/100
+GRADE: {score_result['grade']}
+RECOMMENDATION: {score_result['position_recommendation']}
+
+Score Breakdown:
+- Volume: {score_result['score_breakdown']['volume_score']}/15
+- Time: {score_result['score_breakdown']['time_score']}/15
+- Regime: {score_result['score_breakdown']['regime_score']}/20
+- Pattern: {score_result['score_breakdown']['pattern_score']}/15
+- Catalyst: {score_result['score_breakdown']['catalyst_score']}/15
+- Technical: {score_result['score_breakdown']['technical_score']}/10
+- R:R: {score_result['score_breakdown']['risk_reward_score']}/10
+- Synergy Bonus: {score_result['score_breakdown']['synergy_bonus']}
+
+Reasoning:
+{chr(10).join('• ' + r for r in score_result['reasoning'])}
+
+Warnings:
+{chr(10).join('⚠️ ' + w for w in score_result['warnings']) if score_result['warnings'] else '✅ No warnings'}
+
+DECISION: {score_result['trade_or_skip']}
+""")
+            
+            return "\n".join(context_parts) if context_parts else ""
+            
+        except Exception as e:
+            logger.warning(f"Error getting trading intelligence context: {e}")
+            return ""
+    
     def _get_or_create_conversation(self, session_id: str, user_id: str = "default") -> ConversationContext:
         """Get existing conversation or create new one"""
         if session_id not in self.conversations:
