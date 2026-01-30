@@ -1441,16 +1441,6 @@ const CommandCenterPage = ({
           }}
         />
       )}
-      
-      {/* AI Assistant Modal */}
-      <AIAssistant
-        isOpen={showAssistant}
-        onClose={() => {
-          setShowAssistant(false);
-          setAssistantPrompt(null);
-        }}
-        initialPrompt={assistantPrompt}
-      />
     </div>
   );
 };
