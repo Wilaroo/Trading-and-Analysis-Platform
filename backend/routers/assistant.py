@@ -471,3 +471,57 @@ async def get_random_rule_reminder():
     result = await _assistant_service.get_coaching_alert("rule_reminder", {})
     
     return result
+
+
+@router.get("/coach/performance-analysis")
+async def analyze_trading_performance(symbol: Optional[str] = None):
+    """
+    Get AI analysis of your real trading performance from IB.
+    Includes insights on patterns, strengths, weaknesses, and recommendations.
+    
+    Args:
+        symbol: Optional - analyze performance for a specific symbol
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    try:
+        # Get trade history context
+        trade_context = await _assistant_service.get_trade_history_context(symbol)
+        
+        if "not available" in trade_context.lower() or "not configured" in trade_context.lower():
+            return {
+                "available": False,
+                "message": "Trade history not available. Please configure IB Flex Web Service."
+            }
+        
+        # Ask AI to analyze
+        analysis_prompt = f"""Based on the following verified trading performance data from Interactive Brokers, provide a comprehensive analysis:
+
+{trade_context}
+
+Please analyze:
+1. **Overall Performance Assessment**: Is the trader profitable? What's the trajectory?
+2. **Win Rate & Profit Factor Analysis**: Compare to industry standards (good = 50%+ win rate, 1.5+ profit factor)
+3. **Position Sizing Analysis**: Is average win vs average loss ratio healthy?
+4. **Symbol Performance Patterns**: Which types of trades work best?
+5. **Key Weaknesses Identified**: What patterns are hurting performance?
+6. **Top 3 Actionable Recommendations**: Specific changes to improve results
+
+Be direct and analytical. Use the actual numbers. If there are serious issues, highlight them clearly."""
+
+        # Use the assistant's chat functionality
+        response = await _assistant_service.chat(
+            user_message=analysis_prompt,
+            session_id="performance_analysis"
+        )
+        
+        return {
+            "available": True,
+            "symbol_filter": symbol,
+            "analysis": response.get("message", "Analysis unavailable"),
+            "raw_metrics": trade_context
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
