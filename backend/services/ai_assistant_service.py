@@ -733,6 +733,35 @@ DECISION: {score_result['trade_or_skip']}
             chart_pattern_context = self.get_chart_pattern_context(pattern_name, bias)
             context_parts.append(chart_pattern_context)
         
+        # 2c. Check if user is asking about SCORING, EVALUATING, or VALIDATING a trade
+        evaluation_keywords = ['score', 'scoring', 'evaluate', 'grade', 'rate', 'quality', 'should i', 
+                              'valid', 'validate', 'good trade', 'bad trade', 'a+ setup', 'setup quality',
+                              'take this trade', 'enter', 'buy this', 'short this', 'trade idea']
+        wants_evaluation = any(keyword in user_message.lower() for keyword in evaluation_keywords)
+        
+        if wants_evaluation and (wants_strategy_info or wants_chart_patterns or symbols):
+            # Get comprehensive trading intelligence context
+            try:
+                strategy_for_context = None
+                if wants_strategy_info:
+                    for kw in ['rubberband', 'rubber band', 'spencer', 'hitchhiker', 'vwap', 'off sides', 'backside', 'gap']:
+                        if kw in user_message.lower():
+                            strategy_for_context = kw.replace('rubberband', 'rubber band')
+                            break
+                
+                pattern_for_context = None
+                if wants_chart_patterns:
+                    pattern_for_context = pattern_name
+                
+                intelligence_context = self.get_trading_intelligence_context(
+                    strategy=strategy_for_context,
+                    pattern=pattern_for_context
+                )
+                if intelligence_context:
+                    context_parts.append(intelligence_context)
+            except Exception as e:
+                logger.warning(f"Error getting trading intelligence context: {e}")
+        
         # 3. Get relevant strategies from knowledge base
         try:
             relevant = self.knowledge_service.search(user_message, limit=5)
