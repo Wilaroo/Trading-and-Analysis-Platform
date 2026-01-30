@@ -1,6 +1,7 @@
 /**
  * LiveAlertsPanel - Real-time trade alerts via SSE
  * Connects to the background scanner and displays live trading opportunities
+ * Enhanced with customizable scan intervals and watchlist editing
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -20,10 +21,18 @@ import {
   Play,
   Pause,
   ChevronRight,
+  ChevronDown,
   Info,
-  Volume2,
   Settings,
-  Zap
+  Zap,
+  Plus,
+  Trash2,
+  Save,
+  RefreshCw,
+  List,
+  Timer,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
@@ -65,6 +74,20 @@ const DIRECTION_CONFIG = {
   long: { icon: TrendingUp, color: 'text-emerald-400', label: 'LONG' },
   short: { icon: TrendingDown, color: 'text-red-400', label: 'SHORT' }
 };
+
+// Preset scan intervals
+const SCAN_INTERVAL_PRESETS = [
+  { value: 30, label: '30s', description: 'Aggressive - Active trading' },
+  { value: 60, label: '1m', description: 'Standard - Balanced' },
+  { value: 120, label: '2m', description: 'Moderate - Less frequent' },
+  { value: 300, label: '5m', description: 'Conservative - Low activity' },
+];
+
+// Default watchlist symbols
+const DEFAULT_SYMBOLS = [
+  'NVDA', 'TSLA', 'AMD', 'META', 'AAPL', 'MSFT', 'GOOGL', 'AMZN',
+  'SPY', 'QQQ', 'NFLX', 'COIN', 'SQ', 'SHOP', 'BA'
+];
 
 // Single Alert Card
 const AlertCard = ({ alert, onDismiss, onSelect }) => {
@@ -154,7 +177,7 @@ const AlertCard = ({ alert, onDismiss, onSelect }) => {
 };
 
 // Scanner Status Badge
-const ScannerStatusBadge = ({ status, lastScan }) => {
+const ScannerStatusBadge = ({ status }) => {
   const isRunning = status?.running;
   
   return (
@@ -174,6 +197,243 @@ const ScannerStatusBadge = ({ status, lastScan }) => {
   );
 };
 
+// Settings Panel Component
+const SettingsPanel = ({ 
+  isOpen, 
+  onClose, 
+  status, 
+  watchlist, 
+  onWatchlistUpdate, 
+  onIntervalUpdate,
+  onSetupsUpdate 
+}) => {
+  const [newSymbol, setNewSymbol] = useState('');
+  const [localWatchlist, setLocalWatchlist] = useState(watchlist || []);
+  const [selectedInterval, setSelectedInterval] = useState(status?.scan_interval || 60);
+  const [enabledSetups, setEnabledSetups] = useState(new Set(status?.enabled_setups || []));
+  const [saving, setSaving] = useState(false);
+  
+  const allSetups = ['rubber_band', 'breakout', 'vwap_bounce', 'squeeze'];
+  
+  useEffect(() => {
+    setLocalWatchlist(watchlist || []);
+  }, [watchlist]);
+  
+  useEffect(() => {
+    if (status) {
+      setSelectedInterval(status.scan_interval || 60);
+      setEnabledSetups(new Set(status.enabled_setups || []));
+    }
+  }, [status]);
+  
+  const addSymbol = () => {
+    const symbol = newSymbol.trim().toUpperCase();
+    if (symbol && !localWatchlist.includes(symbol)) {
+      setLocalWatchlist([...localWatchlist, symbol]);
+      setNewSymbol('');
+    }
+  };
+  
+  const removeSymbol = (symbol) => {
+    setLocalWatchlist(localWatchlist.filter(s => s !== symbol));
+  };
+  
+  const toggleSetup = (setup) => {
+    const newSetups = new Set(enabledSetups);
+    if (newSetups.has(setup)) {
+      newSetups.delete(setup);
+    } else {
+      newSetups.add(setup);
+    }
+    setEnabledSetups(newSetups);
+  };
+  
+  const saveChanges = async () => {
+    setSaving(true);
+    try {
+      // Update watchlist
+      await onWatchlistUpdate(localWatchlist);
+      
+      // Update interval and setups
+      await onIntervalUpdate(selectedInterval, Array.from(enabledSetups));
+      
+      onClose();
+    } catch (err) {
+      console.error('Failed to save settings:', err);
+    }
+    setSaving(false);
+  };
+  
+  const resetToDefaults = () => {
+    setLocalWatchlist(DEFAULT_SYMBOLS);
+    setSelectedInterval(60);
+    setEnabledSetups(new Set(allSetups));
+  };
+  
+  if (!isOpen) return null;
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      className="absolute top-full left-0 right-0 mt-2 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl z-50 overflow-hidden"
+      data-testid="scanner-settings-panel"
+    >
+      <div className="p-4 border-b border-zinc-700 flex items-center justify-between">
+        <h4 className="font-semibold text-white flex items-center gap-2">
+          <Settings className="w-4 h-4 text-cyan-400" />
+          Scanner Settings
+        </h4>
+        <button onClick={onClose} className="p-1 hover:bg-zinc-700 rounded">
+          <X className="w-4 h-4 text-zinc-400" />
+        </button>
+      </div>
+      
+      <div className="p-4 space-y-5 max-h-[400px] overflow-y-auto">
+        {/* Scan Interval */}
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium text-zinc-300 mb-2">
+            <Timer className="w-4 h-4 text-cyan-400" />
+            Scan Interval
+          </label>
+          <div className="grid grid-cols-4 gap-2">
+            {SCAN_INTERVAL_PRESETS.map(preset => (
+              <button
+                key={preset.value}
+                onClick={() => setSelectedInterval(preset.value)}
+                className={`p-2 rounded-lg border text-center transition-all ${
+                  selectedInterval === preset.value
+                    ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400'
+                    : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600'
+                }`}
+                title={preset.description}
+                data-testid={`interval-${preset.value}`}
+              >
+                <div className="text-sm font-medium">{preset.label}</div>
+                <div className="text-[10px] text-zinc-500 mt-0.5">{preset.description.split(' - ')[0]}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+        
+        {/* Setup Types */}
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium text-zinc-300 mb-2">
+            <Target className="w-4 h-4 text-cyan-400" />
+            Setup Types
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            {allSetups.map(setup => (
+              <button
+                key={setup}
+                onClick={() => toggleSetup(setup)}
+                className={`flex items-center gap-2 p-2 rounded-lg border transition-all ${
+                  enabledSetups.has(setup)
+                    ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'
+                    : 'bg-zinc-800 border-zinc-700 text-zinc-500 hover:border-zinc-600'
+                }`}
+                data-testid={`setup-toggle-${setup}`}
+              >
+                {enabledSetups.has(setup) ? (
+                  <Eye className="w-4 h-4" />
+                ) : (
+                  <EyeOff className="w-4 h-4" />
+                )}
+                <span className="text-sm capitalize">{setup.replace(/_/g, ' ')}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        
+        {/* Watchlist */}
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium text-zinc-300 mb-2">
+            <List className="w-4 h-4 text-cyan-400" />
+            Watchlist ({localWatchlist.length} symbols)
+          </label>
+          
+          {/* Add Symbol Input */}
+          <div className="flex gap-2 mb-3">
+            <input
+              type="text"
+              value={newSymbol}
+              onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+              onKeyDown={(e) => e.key === 'Enter' && addSymbol()}
+              placeholder="Add symbol..."
+              className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-cyan-500"
+              data-testid="add-symbol-input"
+            />
+            <button
+              onClick={addSymbol}
+              disabled={!newSymbol.trim()}
+              className="px-3 py-2 bg-cyan-500/20 text-cyan-400 rounded-lg hover:bg-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+              data-testid="add-symbol-btn"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          </div>
+          
+          {/* Symbol Tags */}
+          <div className="flex flex-wrap gap-2 max-h-[120px] overflow-y-auto p-2 bg-zinc-800/50 rounded-lg">
+            {localWatchlist.map(symbol => (
+              <div
+                key={symbol}
+                className="flex items-center gap-1 px-2 py-1 bg-zinc-700 rounded text-sm text-white group"
+              >
+                <span className="font-mono">{symbol}</span>
+                <button
+                  onClick={() => removeSymbol(symbol)}
+                  className="p-0.5 rounded hover:bg-red-500/20 text-zinc-400 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                  data-testid={`remove-${symbol}`}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+            {localWatchlist.length === 0 && (
+              <span className="text-zinc-500 text-sm">No symbols in watchlist</span>
+            )}
+          </div>
+        </div>
+      </div>
+      
+      {/* Footer Actions */}
+      <div className="p-4 border-t border-zinc-700 flex items-center justify-between">
+        <button
+          onClick={resetToDefaults}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-zinc-400 hover:text-white transition-colors"
+          data-testid="reset-defaults-btn"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+          Reset to Defaults
+        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm text-zinc-400 hover:text-white transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={saveChanges}
+            disabled={saving}
+            className="flex items-center gap-2 px-4 py-2 bg-cyan-500 text-black rounded-lg text-sm font-medium hover:bg-cyan-400 disabled:opacity-50"
+            data-testid="save-settings-btn"
+          >
+            {saving ? (
+              <RefreshCw className="w-4 h-4 animate-spin" />
+            ) : (
+              <Save className="w-4 h-4" />
+            )}
+            Save Changes
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
 // Main Component
 const LiveAlertsPanel = ({ 
   isExpanded = false, 
@@ -183,9 +443,10 @@ const LiveAlertsPanel = ({
 }) => {
   const [alerts, setAlerts] = useState([]);
   const [status, setStatus] = useState(null);
+  const [watchlist, setWatchlist] = useState([]);
   const [connected, setConnected] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [autoScroll, setAutoScroll] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
   const eventSourceRef = useRef(null);
   const alertsContainerRef = useRef(null);
   
@@ -229,7 +490,7 @@ const LiveAlertsPanel = ({
           });
           
           // Auto-scroll to top
-          if (autoScroll && alertsContainerRef.current) {
+          if (alertsContainerRef.current) {
             alertsContainerRef.current.scrollTop = 0;
           }
         } else if (data.type === 'heartbeat') {
@@ -240,8 +501,8 @@ const LiveAlertsPanel = ({
       }
     };
     
-    eventSource.onerror = (err) => {
-      console.error('Live alerts SSE error:', err);
+    eventSource.onerror = () => {
+      console.error('Live alerts SSE error');
       setConnected(false);
       
       // Reconnect after 5 seconds
@@ -255,7 +516,7 @@ const LiveAlertsPanel = ({
     return () => {
       eventSource.close();
     };
-  }, [notificationsEnabled, autoScroll]);
+  }, [notificationsEnabled]);
   
   // Fetch scanner status
   const fetchStatus = useCallback(async () => {
@@ -265,6 +526,17 @@ const LiveAlertsPanel = ({
       setStatus(data);
     } catch (err) {
       console.error('Failed to fetch scanner status:', err);
+    }
+  }, []);
+  
+  // Fetch watchlist
+  const fetchWatchlist = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/live-scanner/watchlist`);
+      const data = await res.json();
+      setWatchlist(data.watchlist || []);
+    } catch (err) {
+      console.error('Failed to fetch watchlist:', err);
     }
   }, []);
   
@@ -280,6 +552,40 @@ const LiveAlertsPanel = ({
       console.error('Failed to fetch alerts:', err);
     }
   }, []);
+  
+  // Update watchlist
+  const updateWatchlist = useCallback(async (symbols) => {
+    try {
+      await fetch(`${API_URL}/api/live-scanner/watchlist`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbols })
+      });
+      setWatchlist(symbols);
+      fetchStatus(); // Refresh status
+    } catch (err) {
+      console.error('Failed to update watchlist:', err);
+      throw err;
+    }
+  }, [fetchStatus]);
+  
+  // Update scan interval and setups
+  const updateConfig = useCallback(async (interval, setups) => {
+    try {
+      await fetch(`${API_URL}/api/live-scanner/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          scan_interval: interval,
+          enabled_setups: setups
+        })
+      });
+      fetchStatus(); // Refresh status
+    } catch (err) {
+      console.error('Failed to update config:', err);
+      throw err;
+    }
+  }, [fetchStatus]);
   
   // Dismiss alert
   const dismissAlert = useCallback(async (alertId) => {
@@ -335,6 +641,7 @@ const LiveAlertsPanel = ({
   useEffect(() => {
     fetchStatus();
     fetchAlerts();
+    fetchWatchlist();
     const cleanup = connectToStream();
     
     // Periodic status refresh
@@ -347,12 +654,18 @@ const LiveAlertsPanel = ({
         eventSourceRef.current.close();
       }
     };
-  }, [fetchStatus, fetchAlerts, connectToStream]);
+  }, [fetchStatus, fetchAlerts, fetchWatchlist, connectToStream]);
   
   // Group alerts by priority
   const criticalAlerts = alerts.filter(a => a.priority === 'critical');
   const highAlerts = alerts.filter(a => a.priority === 'high');
   const otherAlerts = alerts.filter(a => !['critical', 'high'].includes(a.priority));
+  
+  // Format interval for display
+  const formatInterval = (seconds) => {
+    if (seconds < 60) return `${seconds}s`;
+    return `${Math.floor(seconds / 60)}m`;
+  };
   
   if (!isExpanded) {
     // Collapsed view - just show badge
@@ -385,7 +698,7 @@ const LiveAlertsPanel = ({
       initial={{ opacity: 0, height: 0 }}
       animate={{ opacity: 1, height: 'auto' }}
       exit={{ opacity: 0, height: 0 }}
-      className={`bg-zinc-900/95 backdrop-blur-sm border border-zinc-700/50 rounded-xl overflow-hidden ${className}`}
+      className={`bg-zinc-900/95 backdrop-blur-sm border border-zinc-700/50 rounded-xl overflow-visible relative ${className}`}
       data-testid="live-alerts-panel"
     >
       {/* Header */}
@@ -399,6 +712,20 @@ const LiveAlertsPanel = ({
         </div>
         
         <div className="flex items-center gap-2">
+          {/* Settings button */}
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className={`p-2 rounded-lg transition-colors ${
+              showSettings 
+                ? 'bg-cyan-500/20 text-cyan-400' 
+                : 'bg-zinc-700 text-zinc-400 hover:text-white'
+            }`}
+            title="Scanner Settings"
+            data-testid="scanner-settings-btn"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
+          
           {/* Toggle scanner */}
           <button
             onClick={toggleScanner}
@@ -437,6 +764,20 @@ const LiveAlertsPanel = ({
           </button>
         </div>
       </div>
+      
+      {/* Settings Panel */}
+      <AnimatePresence>
+        {showSettings && (
+          <SettingsPanel
+            isOpen={showSettings}
+            onClose={() => setShowSettings(false)}
+            status={status}
+            watchlist={watchlist}
+            onWatchlistUpdate={updateWatchlist}
+            onIntervalUpdate={updateConfig}
+          />
+        )}
+      </AnimatePresence>
       
       {/* Alerts List */}
       <div 
@@ -517,12 +858,22 @@ const LiveAlertsPanel = ({
       {/* Footer - quick stats */}
       <div className="px-4 py-2 border-t border-zinc-700/50 bg-zinc-800/30 text-xs text-zinc-500 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <span>Watchlist: {status?.watchlist_size || 0} symbols</span>
-          <span>Interval: {status?.scan_interval || 60}s</span>
+          <span className="flex items-center gap-1">
+            <List className="w-3 h-3" />
+            {status?.watchlist_size || watchlist.length} symbols
+          </span>
+          <span className="flex items-center gap-1">
+            <Timer className="w-3 h-3" />
+            {formatInterval(status?.scan_interval || 60)}
+          </span>
+          <span className="flex items-center gap-1">
+            <Target className="w-3 h-3" />
+            {status?.enabled_setups?.length || 0} setups
+          </span>
         </div>
         <div className="flex items-center gap-1">
-          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-          <span>Connected</span>
+          <CheckCircle2 className={`w-3 h-3 ${connected ? 'text-emerald-400' : 'text-zinc-500'}`} />
+          <span>{connected ? 'Connected' : 'Reconnecting...'}</span>
         </div>
       </div>
     </motion.div>
