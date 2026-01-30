@@ -117,6 +117,23 @@ class NewsletterService:
             "watchlist": custom_watchlist or []
         }
         
+        # Get real-time market news
+        try:
+            from services.news_service import get_news_service
+            news_service = get_news_service()
+            news_summary = await news_service.get_market_summary()
+            
+            if news_summary.get("available"):
+                context["market_news"] = {
+                    "headlines": news_summary.get("headlines", [])[:10],
+                    "themes": news_summary.get("themes", []),
+                    "overall_sentiment": news_summary.get("overall_sentiment", "unknown"),
+                    "sentiment_breakdown": news_summary.get("sentiment_breakdown", {})
+                }
+                logger.info(f"Loaded {len(news_summary.get('headlines', []))} market news headlines")
+        except Exception as e:
+            logger.warning(f"Could not fetch market news: {e}")
+        
         # Get index quotes using Alpaca priority
         try:
             indices = ["SPY", "QQQ", "DIA", "IWM"]
@@ -141,14 +158,21 @@ class NewsletterService:
             from services.knowledge_integration import get_knowledge_integration
             ki = get_knowledge_integration()
             
-            # Enhance opportunities with knowledge base insights
+            # Enhance opportunities with knowledge base insights and news
             if top_movers:
-                enhanced = ki.enhance_market_intelligence(
+                enhanced = await ki.enhance_market_intelligence(
                     top_movers, 
-                    market_regime=market_context.get("regime", "neutral") if market_context else "neutral"
+                    market_regime=market_context.get("regime", "neutral") if market_context else "neutral",
+                    include_news=True
                 )
                 context["kb_insights"] = enhanced.get("top_strategy_insights", [])
                 context["kb_stats"] = enhanced.get("knowledge_base_stats", {})
+                
+                # Add ticker-specific news from enhanced opportunities
+                if enhanced.get("opportunities"):
+                    for opp in enhanced["opportunities"]:
+                        if opp.get("news"):
+                            context.setdefault("ticker_news", {})[opp["symbol"]] = opp["news"]
         except Exception as e:
             logger.warning(f"Could not get knowledge base insights: {e}")
         
