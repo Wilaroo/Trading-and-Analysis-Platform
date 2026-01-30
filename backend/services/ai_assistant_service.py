@@ -470,7 +470,24 @@ Total P&L on {symbol_upper}: ${total_pnl:,.2f}
                 logger.warning(f"Error fetching news: {e}")
                 context_parts.append("MARKET NEWS: Error fetching news data")
         
-        # 2. Get relevant strategies from knowledge base
+        # 2. Check if user is asking about strategies
+        strategy_keywords = ['strategy', 'strategies', 'setup', 'setups', 'scalp', 'rubberband', 'rubber band', 
+                            'breakout', 'momentum', 'vwap', 'bounce', 'fade', 'gap', 'squeeze', 'hitchhiker',
+                            'spencer', 'range break', 'tidal wave', 'second chance', 'off sides', 'backside']
+        wants_strategy_info = any(keyword in user_message.lower() for keyword in strategy_keywords)
+        
+        if wants_strategy_info:
+            # Extract specific strategy name if mentioned
+            strategy_name = None
+            for kw in ['rubberband', 'rubber band', 'spencer', 'hitchhiker', 'vwap', 'breakout', 'momentum', 'gap']:
+                if kw in user_message.lower():
+                    strategy_name = kw.replace('rubberband', 'rubber band')
+                    break
+            
+            strategy_context = self.get_strategy_context(strategy_name)
+            context_parts.append(strategy_context)
+        
+        # 3. Get relevant strategies from knowledge base
         try:
             relevant = self.knowledge_service.search(user_message, limit=5)
             if relevant:
