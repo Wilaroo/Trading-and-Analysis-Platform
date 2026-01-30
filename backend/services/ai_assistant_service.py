@@ -1006,6 +1006,28 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                 except Exception as e2:
                     logger.warning(f"Error getting scanner context: {e2}")
         
+        # 2f-d. Get REAL-TIME TECHNICAL DATA for mentioned symbols
+        # Extract symbols from message
+        potential_ticker_symbols = re.findall(r'\b([A-Z]{1,5})\b', user_message.upper())
+        excluded_ticker_words = {'I', 'A', 'THE', 'AND', 'OR', 'FOR', 'TO', 'IS', 'IT', 'IN', 'ON', 'AT', 'BY', 
+                                'BE', 'AS', 'AN', 'ARE', 'WAS', 'IF', 'MY', 'ME', 'DO', 'SO', 'UP', 'AM', 'CAN',
+                                'HOW', 'WHAT', 'WHY', 'BUY', 'SELL', 'LONG', 'SHORT', 'NEWS', 'TODAY', 'MARKET',
+                                'RSI', 'MACD', 'EMA', 'SMA', 'ATR', 'VWAP', 'PE', 'PB', 'ROE', 'EPS', 'FCF',
+                                'OF', 'VS', 'WHICH', 'VALUE', 'BETTER', 'GOOD', 'BAD', 'THAN', 'ABOUT',
+                                'TELL', 'SHOW', 'GET', 'GIVE', 'LOOK', 'FROM', 'THAT', 'THIS', 'COMPARE'}
+        symbols_for_technicals = [s for s in potential_ticker_symbols if s not in excluded_ticker_words and len(s) >= 2]
+        
+        # Get real-time technicals for mentioned stocks (limit to 3)
+        if symbols_for_technicals:
+            try:
+                for symbol in symbols_for_technicals[:3]:
+                    snapshot = await self.technical_service.get_technical_snapshot(symbol)
+                    if snapshot:
+                        tech_context = self.technical_service.get_snapshot_for_ai(snapshot)
+                        context_parts.append(tech_context)
+            except Exception as e:
+                logger.warning(f"Error getting real-time technicals: {e}")
+        
         # 2g. Check if user is asking about SCORING, EVALUATING, or VALIDATING a trade
         evaluation_keywords = ['score', 'scoring', 'evaluate', 'grade', 'rate', 'quality', 'should i', 
                               'valid', 'validate', 'good trade', 'bad trade', 'a+ setup', 'setup quality',
