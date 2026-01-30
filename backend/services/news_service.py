@@ -1,9 +1,10 @@
 """
-News Service - Fetches news from Alpaca API and other sources
+News Service - Fetches news from Finnhub and other sources
 Provides real-time market news and ticker-specific headlines
 """
 import logging
 import os
+import requests
 from typing import List, Dict, Optional
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
@@ -14,28 +15,16 @@ logger = logging.getLogger(__name__)
 
 
 class NewsService:
-    """Service for fetching news from Alpaca and other sources"""
+    """Service for fetching news from Finnhub and other sources"""
     
     def __init__(self, ib_service=None):
         self.ib_service = ib_service
-        self._news_client = None
-        self._init_alpaca_news()
+        self._finnhub_key = os.environ.get("FINNHUB_API_KEY")
         
-    def _init_alpaca_news(self):
-        """Initialize Alpaca news client"""
-        try:
-            api_key = os.environ.get("ALPACA_API_KEY")
-            secret_key = os.environ.get("ALPACA_SECRET_KEY")
-            
-            if api_key and secret_key:
-                from alpaca.data.historical.news import NewsClient
-                self._news_client = NewsClient(api_key=api_key, secret_key=secret_key)
-                logger.info("Alpaca NewsClient initialized")
-            else:
-                logger.warning("Alpaca credentials not found for news")
-        except Exception as e:
-            logger.warning(f"Failed to initialize Alpaca news client: {e}")
-            self._news_client = None
+        if self._finnhub_key:
+            logger.info("Finnhub API key loaded for news")
+        else:
+            logger.warning("No Finnhub API key found for news")
         
     def set_ib_service(self, ib_service):
         """Set the IB service for news fetching"""
@@ -43,41 +32,51 @@ class NewsService:
     
     async def get_ticker_news(self, symbol: str, max_items: int = 10) -> List[Dict]:
         """
-        Fetch news for a specific ticker symbol using Alpaca.
+        Fetch news for a specific ticker symbol using Finnhub.
         """
-        # Try Alpaca first
-        if self._news_client:
+        if self._finnhub_key:
             try:
-                from alpaca.data.requests import NewsRequest
+                # Finnhub company news endpoint
+                url = f"https://finnhub.io/api/v1/company-news"
                 
-                request = NewsRequest(
-                    symbols=[symbol.upper()],
-                    start=datetime.now(timezone.utc) - timedelta(days=3),
-                    end=datetime.now(timezone.utc),
-                    limit=max_items
-                )
+                # Get news from last 7 days
+                today = datetime.now(timezone.utc).date()
+                week_ago = today - timedelta(days=7)
                 
-                news_items = self._news_client.get_news(request)
+                params = {
+                    "symbol": symbol.upper(),
+                    "from": week_ago.isoformat(),
+                    "to": today.isoformat(),
+                    "token": self._finnhub_key
+                }
                 
-                if news_items and hasattr(news_items, 'news'):
-                    formatted_news = []
-                    for item in news_items.news[:max_items]:
-                        formatted_news.append({
-                            "id": str(item.id) if hasattr(item, 'id') else None,
-                            "symbol": symbol.upper(),
-                            "headline": item.headline if hasattr(item, 'headline') else "",
-                            "summary": item.summary if hasattr(item, 'summary') else "",
-                            "source": item.source if hasattr(item, 'source') else "Alpaca",
-                            "timestamp": item.created_at.isoformat() if hasattr(item, 'created_at') else datetime.now(timezone.utc).isoformat(),
-                            "url": item.url if hasattr(item, 'url') else None,
-                            "sentiment": self._analyze_sentiment(item.headline if hasattr(item, 'headline') else ""),
-                            "is_placeholder": False
-                        })
+                resp = requests.get(url, params=params, timeout=10)
+                
+                if resp.status_code == 200:
+                    news_items = resp.json()
                     
-                    if formatted_news:
-                        return formatted_news
+                    if news_items:
+                        formatted_news = []
+                        for item in news_items[:max_items]:
+                            formatted_news.append({
+                                "id": str(item.get("id", "")),
+                                "symbol": symbol.upper(),
+                                "headline": item.get("headline", ""),
+                                "summary": item.get("summary", ""),
+                                "source": item.get("source", "Finnhub"),
+                                "timestamp": datetime.fromtimestamp(item.get("datetime", 0), tz=timezone.utc).isoformat() if item.get("datetime") else datetime.now(timezone.utc).isoformat(),
+                                "url": item.get("url"),
+                                "image": item.get("image"),
+                                "sentiment": self._analyze_sentiment(item.get("headline", "")),
+                                "is_placeholder": False
+                            })
+                        
+                        if formatted_news:
+                            return formatted_news
+                else:
+                    logger.warning(f"Finnhub news request failed: {resp.status_code}")
             except Exception as e:
-                logger.warning(f"Failed to get Alpaca news for {symbol}: {e}")
+                logger.warning(f"Failed to get Finnhub news for {symbol}: {e}")
         
         # Fallback to IB if available
         if self.ib_service:
@@ -93,50 +92,50 @@ class NewsService:
     
     async def get_market_news(self, max_items: int = 20) -> List[Dict]:
         """
-        Fetch general market news headlines using Alpaca.
-        Covers major indices and market-moving news.
+        Fetch general market news headlines using Finnhub.
         """
-        if self._news_client:
+        if self._finnhub_key:
             try:
-                from alpaca.data.requests import NewsRequest
+                # Finnhub general market news
+                url = f"https://finnhub.io/api/v1/news"
+                params = {
+                    "category": "general",
+                    "token": self._finnhub_key
+                }
                 
-                # Get general market news by not specifying symbols
-                # or by using major ETFs/indices
-                request = NewsRequest(
-                    symbols=["SPY", "QQQ", "IWM", "DIA"],  # Major market ETFs
-                    start=datetime.now(timezone.utc) - timedelta(days=1),
-                    end=datetime.now(timezone.utc),
-                    limit=max_items,
-                    include_content=False
-                )
+                resp = requests.get(url, params=params, timeout=10)
                 
-                news_items = self._news_client.get_news(request)
-                
-                if news_items and hasattr(news_items, 'news'):
-                    formatted_news = []
-                    seen_headlines = set()
+                if resp.status_code == 200:
+                    news_items = resp.json()
                     
-                    for item in news_items.news:
-                        headline = item.headline if hasattr(item, 'headline') else ""
-                        # Deduplicate
-                        if headline and headline not in seen_headlines:
-                            seen_headlines.add(headline)
-                            formatted_news.append({
-                                "id": str(item.id) if hasattr(item, 'id') else None,
-                                "headline": headline,
-                                "summary": item.summary if hasattr(item, 'summary') else "",
-                                "source": item.source if hasattr(item, 'source') else "Alpaca",
-                                "timestamp": item.created_at.isoformat() if hasattr(item, 'created_at') else datetime.now(timezone.utc).isoformat(),
-                                "url": item.url if hasattr(item, 'url') else None,
-                                "symbols": list(item.symbols) if hasattr(item, 'symbols') else [],
-                                "sentiment": self._analyze_sentiment(headline),
-                                "is_placeholder": False
-                            })
-                    
-                    if formatted_news:
-                        return formatted_news[:max_items]
+                    if news_items:
+                        formatted_news = []
+                        seen_headlines = set()
+                        
+                        for item in news_items:
+                            headline = item.get("headline", "")
+                            # Deduplicate
+                            if headline and headline not in seen_headlines:
+                                seen_headlines.add(headline)
+                                formatted_news.append({
+                                    "id": str(item.get("id", "")),
+                                    "headline": headline,
+                                    "summary": item.get("summary", ""),
+                                    "source": item.get("source", "Finnhub"),
+                                    "timestamp": datetime.fromtimestamp(item.get("datetime", 0), tz=timezone.utc).isoformat() if item.get("datetime") else datetime.now(timezone.utc).isoformat(),
+                                    "url": item.get("url"),
+                                    "image": item.get("image"),
+                                    "category": item.get("category", "general"),
+                                    "sentiment": self._analyze_sentiment(headline),
+                                    "is_placeholder": False
+                                })
+                        
+                        if formatted_news:
+                            return formatted_news[:max_items]
+                else:
+                    logger.warning(f"Finnhub market news request failed: {resp.status_code}")
             except Exception as e:
-                logger.warning(f"Failed to get Alpaca market news: {e}")
+                logger.warning(f"Failed to get Finnhub market news: {e}")
         
         # Fallback to IB if available
         if self.ib_service:
@@ -154,12 +153,12 @@ class NewsService:
         Get a summary of today's market news for the AI assistant.
         Returns structured data with key headlines and themes.
         """
-        news = await self.get_market_news(max_items=15)
+        news = await self.get_market_news(max_items=20)
         
         if not news or (len(news) == 1 and news[0].get("is_placeholder")):
             return {
                 "available": False,
-                "message": "Market news unavailable. Check Alpaca API connection.",
+                "message": "Market news unavailable. Check Finnhub API connection.",
                 "headlines": [],
                 "themes": []
             }
@@ -167,25 +166,50 @@ class NewsService:
         # Extract key information
         headlines = [item.get("headline", "") for item in news if not item.get("is_placeholder")]
         
-        # Simple theme extraction
+        # Theme extraction with expanded keywords
         themes = []
         theme_keywords = {
             "Fed": "Federal Reserve / Interest Rates",
+            "interest rate": "Federal Reserve / Interest Rates",
+            "Powell": "Federal Reserve / Interest Rates",
             "earnings": "Earnings Reports",
+            "revenue": "Earnings Reports",
+            "profit": "Earnings Reports",
             "inflation": "Inflation Data",
+            "CPI": "Inflation Data",
+            "PPI": "Inflation Data",
             "jobs": "Employment Data",
+            "unemployment": "Employment Data",
+            "payroll": "Employment Data",
             "AI": "AI / Technology",
+            "artificial intelligence": "AI / Technology",
+            "tech": "AI / Technology",
             "oil": "Energy / Oil",
+            "energy": "Energy / Oil",
             "China": "China / Trade",
+            "tariff": "China / Trade",
+            "trade": "China / Trade",
             "recession": "Economic Outlook",
+            "GDP": "Economic Outlook",
+            "economy": "Economic Outlook",
             "rally": "Market Rally",
+            "surge": "Market Rally",
+            "record high": "Market Rally",
             "selloff": "Market Selloff",
-            "volatility": "Volatility"
+            "drop": "Market Selloff",
+            "plunge": "Market Selloff",
+            "volatility": "Volatility",
+            "VIX": "Volatility",
+            "crypto": "Crypto / Bitcoin",
+            "bitcoin": "Crypto / Bitcoin",
+            "Trump": "Politics / Policy",
+            "Biden": "Politics / Policy",
+            "Congress": "Politics / Policy"
         }
         
         combined_text = " ".join(headlines).lower()
         for keyword, theme in theme_keywords.items():
-            if keyword.lower() in combined_text:
+            if keyword.lower() in combined_text and theme not in themes:
                 themes.append(theme)
         
         # Sentiment summary
@@ -200,19 +224,22 @@ class NewsService:
         else:
             overall_sentiment = "mixed"
         
+        # Get unique sources
+        sources = list(set(item.get("source", "") for item in news if item.get("source")))
+        
         return {
             "available": True,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "headline_count": len(headlines),
-            "headlines": headlines[:10],
-            "themes": list(set(themes))[:5],
+            "headlines": headlines[:12],
+            "themes": themes[:6],
             "overall_sentiment": overall_sentiment,
             "sentiment_breakdown": {
                 "bullish": bullish,
                 "bearish": bearish,
                 "neutral": len(sentiments) - bullish - bearish
             },
-            "sources": list(set(item.get("source", "") for item in news if item.get("source")))
+            "sources": sources[:5]
         }
     
     def _analyze_sentiment(self, text: str) -> str:
@@ -223,9 +250,11 @@ class NewsService:
         text_lower = text.lower()
         
         bullish_words = ["surge", "rally", "jump", "gain", "rise", "soar", "boom", "bullish", 
-                        "upgrade", "beat", "record", "high", "growth", "strong", "positive"]
+                        "upgrade", "beat", "record", "high", "growth", "strong", "positive",
+                        "optimistic", "outperform", "buy", "breakout", "all-time high"]
         bearish_words = ["drop", "fall", "plunge", "crash", "decline", "sink", "bearish",
-                        "downgrade", "miss", "low", "weak", "negative", "concern", "fear", "sell"]
+                        "downgrade", "miss", "low", "weak", "negative", "concern", "fear",
+                        "sell", "selloff", "warning", "risk", "recession", "layoff"]
         
         bullish_count = sum(1 for word in bullish_words if word in text_lower)
         bearish_count = sum(1 for word in bearish_words if word in text_lower)
@@ -245,7 +274,7 @@ class NewsService:
                 "id": f"{symbol}-news-placeholder",
                 "symbol": symbol,
                 "headline": f"No recent news available for {symbol}",
-                "summary": "Check Alpaca API connection or try a different symbol.",
+                "summary": "Check API connection or try a different symbol.",
                 "source": "System",
                 "timestamp": now.isoformat(),
                 "url": None,
@@ -262,7 +291,7 @@ class NewsService:
             {
                 "id": "market-news-placeholder",
                 "headline": "Market news unavailable",
-                "summary": "Check Alpaca API connection for live market news.",
+                "summary": "Check Finnhub API connection for live market news.",
                 "source": "System",
                 "timestamp": now.isoformat(),
                 "sentiment": "neutral",
