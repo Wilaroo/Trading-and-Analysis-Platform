@@ -524,6 +524,13 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
         <div className="p-3 border-b border-white/10 bg-zinc-900/30">
           <div className="flex items-center gap-2 flex-wrap">
             <QuickAction
+              icon={Newspaper}
+              label="Market News"
+              onClick={() => sendMessage("What's happening in the market today? Give me the key headlines and themes.")}
+              loading={isLoading}
+              color="cyan"
+            />
+            <QuickAction
               icon={Sunrise}
               label="Morning Brief"
               onClick={() => handleCoachAction('morning')}
