@@ -236,6 +236,9 @@ const CommandCenterPage = ({
   });
   const [selectedTimeframeTab, setSelectedTimeframeTab] = useState('all');
   const [isComprehensiveScanning, setIsComprehensiveScanning] = useState(false);
+  
+  // Live Alerts Panel state
+  const [liveAlertsExpanded, setLiveAlertsExpanded] = useState(true);
 
   // Keyboard shortcuts
   useKeyboardShortcuts({
