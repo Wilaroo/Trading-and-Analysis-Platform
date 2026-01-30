@@ -454,7 +454,23 @@ Total P&L on {symbol_upper}: ${total_pnl:,.2f}
                 except Exception as ex:
                     logger.warning(f"Error getting data for {symbol}: {ex}")
         
-        # 5. Knowledge base stats
+        # 5. Get trade history context for performance analysis
+        trade_history_keywords = ['history', 'performance', 'trades', 'win rate', 'my trading', 'how am i doing', 'analyze my', 'review', 'p&l', 'pnl', 'metrics']
+        wants_trade_history = any(keyword in user_message.lower() for keyword in trade_history_keywords)
+        
+        # Also check if asking about a specific symbol they may have traded
+        symbol_history_request = symbols and any(keyword in user_message.lower() for keyword in ['traded', 'history', 'performance', 'did i', 'have i'])
+        
+        if wants_trade_history or symbol_history_request:
+            try:
+                primary_symbol = symbols[0] if symbols else None
+                trade_history_context = await self.get_trade_history_context(primary_symbol)
+                if trade_history_context and "not available" not in trade_history_context.lower():
+                    context_parts.append(f"\n{trade_history_context}")
+            except Exception as e:
+                logger.warning(f"Error fetching trade history: {e}")
+        
+        # 6. Knowledge base stats
         try:
             stats = self.knowledge_service.get_stats()
             context_parts.append(f"\nKNOWLEDGE BASE: {stats.get('total_entries', 0)} entries ({stats.get('by_type', {}).get('strategy', 0)} strategies, {stats.get('by_type', {}).get('rule', 0)} rules)")
