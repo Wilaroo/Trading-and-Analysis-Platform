@@ -1338,10 +1338,10 @@ const CommandCenterPage = ({
               opportunities={opportunities}
               earnings={earnings}
               portfolio={positions}
-              scanResults={scanResults}
+              scanResults={opportunities}
               marketIndices={marketContext?.indices || []}
               isConnected={isConnected}
-              onRefresh={() => runScan(activeScanType)}
+              onRefresh={() => runScanner()}
             />
           </div>
         </div>
@@ -1361,16 +1361,15 @@ const CommandCenterPage = ({
               <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.news ? 'rotate-180' : ''}`} />
             </div>
             
-            {expandedSections.news && marketIntelligence && (
+            {expandedSections.news && newsletter && (
               <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                {marketIntelligence.themes?.slice(0, 3).map((theme, idx) => (
+                {newsletter.top_stories?.slice(0, 3).map((story, idx) => (
                   <div key={idx} className="p-2 bg-zinc-900/50 rounded">
-                    <span className="text-xs text-purple-400 font-medium">{theme.title}</span>
-                    <p className="text-[10px] text-zinc-400 mt-1">{theme.summary}</p>
+                    <p className="text-xs text-zinc-300">{story.headline || story}</p>
                   </div>
                 ))}
-                {!marketIntelligence.themes?.length && (
-                  <p className="text-xs text-zinc-500 text-center py-2">Generate market intel</p>
+                {!newsletter.top_stories?.length && (
+                  <p className="text-xs text-zinc-500 text-center py-2">No market intel available</p>
                 )}
               </div>
             )}
