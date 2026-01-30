@@ -1240,7 +1240,7 @@ const CommandCenterPage = ({
           <Card>
             <SectionHeader icon={Target} title="Scanner" action={
               <button
-                onClick={() => !isConnected ? toast.error('Connect to IB Gateway first') : runScan(activeScanType)}
+                onClick={() => !isConnected ? toast.error('Connect to IB Gateway first') : runScanner()}
                 disabled={isScanning || !isConnected}
                 className="flex items-center gap-1.5 text-xs text-cyan-400 hover:text-cyan-300 disabled:text-zinc-600"
               >
@@ -1254,9 +1254,9 @@ const CommandCenterPage = ({
               {scanTypes.slice(0, 6).map(scan => (
                 <button
                   key={scan.id}
-                  onClick={() => setActiveScanType(scan.id)}
+                  onClick={() => setSelectedScanType(scan.id)}
                   className={`px-2 py-1 text-[10px] rounded-full transition-colors ${
-                    activeScanType === scan.id
+                    selectedScanType === scan.id
                       ? 'bg-cyan-500 text-black font-medium'
                       : 'bg-zinc-800 text-zinc-400 hover:text-white'
                   }`}
@@ -1268,7 +1268,7 @@ const CommandCenterPage = ({
 
             {/* Scan Results */}
             <div className="space-y-1 max-h-[300px] overflow-y-auto">
-              {scanResults.length > 0 ? scanResults.slice(0, 10).map((result, idx) => (
+              {opportunities.length > 0 ? opportunities.slice(0, 10).map((result, idx) => (
                 <div 
                   key={idx}
                   onClick={() => setSelectedTicker({ symbol: result.symbol, quote: result })}
