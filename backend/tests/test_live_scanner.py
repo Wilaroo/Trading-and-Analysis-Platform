@@ -119,7 +119,7 @@ class TestLiveScannerControl:
 
 
 class TestLiveScannerWatchlist:
-    """Tests for GET/POST /api/live-scanner/watchlist"""
+    """Tests for GET/POST /api/live-scanner/watchlist - Watchlist management"""
     
     def test_get_watchlist_returns_200(self):
         """GET /api/live-scanner/watchlist returns 200"""
@@ -162,7 +162,66 @@ class TestLiveScannerWatchlist:
             assert symbol.upper() in get_data["watchlist"]
             
         # Reset to default watchlist
-        default_symbols = ["NVDA", "TSLA", "AMD", "META", "AAPL", "MSFT", "GOOGL", "AMZN", "SPY", "QQQ"]
+        default_symbols = ["NVDA", "TSLA", "AMD", "META", "AAPL", "MSFT", "GOOGL", "AMZN", "SPY", "QQQ", "NFLX", "COIN", "SQ", "SHOP", "BA"]
+        requests.post(f"{BASE_URL}/api/live-scanner/watchlist", json={"symbols": default_symbols})
+        
+    def test_add_symbol_to_watchlist(self):
+        """POST /api/live-scanner/watchlist can add new symbols"""
+        # Get current watchlist
+        get_response = requests.get(f"{BASE_URL}/api/live-scanner/watchlist")
+        current_watchlist = get_response.json()["watchlist"]
+        
+        # Add a new symbol
+        new_watchlist = current_watchlist + ["TEST_PLTR"]
+        response = requests.post(
+            f"{BASE_URL}/api/live-scanner/watchlist",
+            json={"symbols": new_watchlist}
+        )
+        assert response.status_code == 200
+        
+        # Verify symbol was added
+        get_response = requests.get(f"{BASE_URL}/api/live-scanner/watchlist")
+        assert "TEST_PLTR" in get_response.json()["watchlist"]
+        
+        # Reset to default
+        default_symbols = ["NVDA", "TSLA", "AMD", "META", "AAPL", "MSFT", "GOOGL", "AMZN", "SPY", "QQQ", "NFLX", "COIN", "SQ", "SHOP", "BA"]
+        requests.post(f"{BASE_URL}/api/live-scanner/watchlist", json={"symbols": default_symbols})
+        
+    def test_remove_symbol_from_watchlist(self):
+        """POST /api/live-scanner/watchlist can remove symbols"""
+        # Set a smaller watchlist (removing some symbols)
+        reduced_watchlist = ["NVDA", "TSLA", "AAPL", "MSFT", "SPY"]
+        response = requests.post(
+            f"{BASE_URL}/api/live-scanner/watchlist",
+            json={"symbols": reduced_watchlist}
+        )
+        assert response.status_code == 200
+        
+        # Verify watchlist size
+        get_response = requests.get(f"{BASE_URL}/api/live-scanner/watchlist")
+        assert len(get_response.json()["watchlist"]) == 5
+        
+        # Reset to default
+        default_symbols = ["NVDA", "TSLA", "AMD", "META", "AAPL", "MSFT", "GOOGL", "AMZN", "SPY", "QQQ", "NFLX", "COIN", "SQ", "SHOP", "BA"]
+        requests.post(f"{BASE_URL}/api/live-scanner/watchlist", json={"symbols": default_symbols})
+        
+    def test_watchlist_symbols_uppercase(self):
+        """Watchlist symbols are converted to uppercase"""
+        response = requests.post(
+            f"{BASE_URL}/api/live-scanner/watchlist",
+            json={"symbols": ["aapl", "msft", "googl"]}
+        )
+        assert response.status_code == 200
+        
+        # Verify symbols are uppercase
+        get_response = requests.get(f"{BASE_URL}/api/live-scanner/watchlist")
+        watchlist = get_response.json()["watchlist"]
+        assert "AAPL" in watchlist
+        assert "MSFT" in watchlist
+        assert "GOOGL" in watchlist
+        
+        # Reset to default
+        default_symbols = ["NVDA", "TSLA", "AMD", "META", "AAPL", "MSFT", "GOOGL", "AMZN", "SPY", "QQQ", "NFLX", "COIN", "SQ", "SHOP", "BA"]
         requests.post(f"{BASE_URL}/api/live-scanner/watchlist", json={"symbols": default_symbols})
 
 
