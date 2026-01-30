@@ -16,7 +16,8 @@ import {
   Search,
   Minimize2,
   Maximize2,
-  Target
+  Target,
+  Newspaper
 } from 'lucide-react';
 import api from '../utils/api';
 import { toast } from 'sonner';
