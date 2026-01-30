@@ -172,6 +172,13 @@ Format your responses clearly with sections when appropriate. Use specific numbe
             self._scoring_engine = get_scoring_engine(self.db)
         return self._scoring_engine
     
+    @property
+    def news_service(self):
+        if self._news_service is None:
+            from services.news_service import get_news_service
+            self._news_service = get_news_service()
+        return self._news_service
+    
     def _get_or_create_conversation(self, session_id: str, user_id: str = "default") -> ConversationContext:
         """Get existing conversation or create new one"""
         if session_id not in self.conversations:
