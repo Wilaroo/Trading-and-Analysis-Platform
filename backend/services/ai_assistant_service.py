@@ -853,7 +853,12 @@ DAILY LOSS LIMIT: {risk_guide['daily_loss_limit']['guideline']}
                               'take this trade', 'enter', 'buy this', 'short this', 'trade idea']
         wants_evaluation = any(keyword in user_message.lower() for keyword in evaluation_keywords)
         
-        if wants_evaluation and (wants_strategy_info or wants_chart_patterns or symbols):
+        # Extract symbols early for evaluation check
+        early_symbols = re.findall(r'\b([A-Z]{1,5})\b', user_message.upper())
+        common_words = {'I', 'A', 'THE', 'AND', 'OR', 'FOR', 'TO', 'IS', 'IT', 'IN', 'ON', 'AT', 'BY', 'BE', 'AS', 'AN', 'ARE', 'WAS', 'IF', 'MY', 'ME', 'DO', 'SO', 'UP', 'AM', 'CAN', 'HOW', 'WHAT', 'BUY', 'SELL', 'LONG', 'SHORT', 'NEWS', 'TODAY', 'MARKET', 'RSI', 'MACD', 'EMA', 'SMA', 'ATR', 'VWAP'}
+        early_symbols = [s for s in early_symbols if s not in common_words and len(s) >= 2]
+        
+        if wants_evaluation and (wants_strategy_info or wants_chart_patterns or early_symbols):
             # Get comprehensive trading intelligence context
             try:
                 strategy_for_context = None
