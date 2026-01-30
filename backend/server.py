@@ -129,6 +129,7 @@ app.include_router(quality_router)
 app.include_router(alpaca_router)
 app.include_router(assistant_router)
 app.include_router(scheduler_router)
+app.include_router(trade_history_router)
 
 # Collections
 strategies_col = db["strategies"]
