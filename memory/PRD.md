@@ -1375,6 +1375,35 @@ curl /api/market-context/indicators/regime
 - `/app/frontend/src/pages/CommandCenterPage.js` - Restructured to 3-column layout with AICommandPanel as center
 
 
+### Jan 30, 2026 - AI Strategy Knowledge Enhancement
+**Implemented:**
+
+1. **Trading Strategy Context in AI**
+   - AI now has embedded knowledge of Rubber Band Scalp, VWAP Bounce, Breakout, Momentum strategies
+   - `get_strategy_context()` method pulls strategy rules from TradingRulesEngine
+   - Automatic strategy detection when user mentions strategy keywords
+
+2. **Strategy-Aware Responses**
+   - AI explains strategy criteria when asked about setups
+   - Acknowledges when IB connection is needed for live scanning
+   - Provides specific entry criteria, volume rules, and market conditions
+
+3. **Find Setups Endpoint**
+   - `GET /api/assistant/coach/find-setups/{strategy}` - Scans for strategy-specific setups
+   - Supports: rubberband, breakout, momentum, vwap_bounce
+   - Analyzes stocks against strategy-specific criteria
+
+**Known Strategies Embedded:**
+- **RUBBER BAND SCALP**: Mean reversion when price extends from 9 EMA, snapback candle in top 5 volume, max 2 attempts
+- **VWAP BOUNCE**: Long on VWAP support bounce with volume
+- **BREAKOUT**: High RVOL break above resistance
+- **MOMENTUM**: Strong trend following with volume confirmation
+
+**Files Modified:**
+- `/app/backend/services/ai_assistant_service.py` - Added strategy context methods and enhanced system prompt
+- `/app/backend/routers/assistant.py` - Added find-setups endpoint
+
+
 ### Jan 30, 2026 - Ticker Search Bar & AI Strategy Recommendations
 **Implemented:**
 
