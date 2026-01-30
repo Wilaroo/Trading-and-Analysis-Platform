@@ -1000,3 +1000,224 @@ async def predict_trade_outcome(
     except Exception as e:
         logger.error(f"Error predicting outcome: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===================== FUNDAMENTAL ANALYSIS ENDPOINTS =====================
+
+class FundamentalAnalysisRequest(BaseModel):
+    """Request model for fundamental stock analysis"""
+    symbol: str = Field(..., description="Stock symbol")
+    pe_ratio: Optional[float] = Field(default=None, description="Price-to-Earnings ratio")
+    pb_ratio: Optional[float] = Field(default=None, description="Price-to-Book ratio")
+    peg_ratio: Optional[float] = Field(default=None, description="PEG ratio")
+    roe: Optional[float] = Field(default=None, description="Return on Equity (decimal, e.g., 0.15 for 15%)")
+    debt_to_equity: Optional[float] = Field(default=None, description="Debt-to-Equity ratio")
+    free_cash_flow_positive: Optional[bool] = Field(default=None, description="Whether FCF is positive")
+    current_ratio: Optional[float] = Field(default=None, description="Current ratio")
+    dividend_yield: Optional[float] = Field(default=None, description="Dividend yield (decimal)")
+    eps_growth: Optional[float] = Field(default=None, description="EPS growth rate (decimal)")
+
+
+@router.post("/analyze-fundamentals")
+async def analyze_stock_fundamentals(request: FundamentalAnalysisRequest):
+    """
+    Analyze a stock's fundamental metrics and get an investment assessment.
+    
+    Provide any known fundamental metrics and receive:
+    - Value score (0-100)
+    - Bullish/Bearish signals
+    - Warning flags
+    - Overall assessment
+    - Comparison benchmarks
+    
+    You can provide partial data - the analysis will use whatever metrics are available.
+    
+    Example metrics to provide:
+    - pe_ratio: 15.5 (lower generally better, compare to industry)
+    - pb_ratio: 2.1 (below 1 = below book value)
+    - peg_ratio: 0.8 (below 1 = undervalued vs growth)
+    - roe: 0.18 (18% - above 15% is good)
+    - debt_to_equity: 0.5 (below 1 is conservative)
+    - free_cash_flow_positive: true
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    try:
+        from services.investopedia_knowledge import get_investopedia_knowledge
+        
+        investopedia = get_investopedia_knowledge()
+        
+        # Run the fundamental analysis
+        analysis = investopedia.analyze_stock_fundamentals(
+            pe=request.pe_ratio,
+            pb=request.pb_ratio,
+            de=request.debt_to_equity,
+            roe=request.roe,
+            peg=request.peg_ratio,
+            fcf_positive=request.free_cash_flow_positive
+        )
+        
+        # Add benchmark context
+        benchmarks = {
+            "pe_ratio": {"good": "15-20", "excellent": "<15", "concerning": ">25"},
+            "pb_ratio": {"good": "1-3", "value_opportunity": "<1", "concerning": ">3"},
+            "peg_ratio": {"undervalued": "<1", "fair": "1", "overvalued": ">1"},
+            "roe": {"excellent": ">20%", "good": "15-20%", "below_average": "<10%"},
+            "debt_to_equity": {"conservative": "<0.5", "moderate": "0.5-1", "leveraged": ">2"},
+            "current_ratio": {"strong": ">2", "healthy": "1.5-2", "tight": "<1"}
+        }
+        
+        # Generate recommendation
+        score = analysis["value_score"]
+        if score >= 75:
+            recommendation = "FUNDAMENTALLY ATTRACTIVE - Consider for long-term investment"
+        elif score >= 60:
+            recommendation = "DECENT FUNDAMENTALS - May be worth further research"
+        elif score >= 45:
+            recommendation = "MIXED FUNDAMENTALS - Proceed with caution"
+        else:
+            recommendation = "FUNDAMENTAL CONCERNS - High risk for value investors"
+        
+        return {
+            "success": True,
+            "symbol": request.symbol.upper(),
+            "value_score": analysis["value_score"],
+            "overall_assessment": analysis["overall_assessment"],
+            "recommendation": recommendation,
+            "bullish_signals": analysis["signals"],
+            "warning_flags": analysis["warnings"],
+            "metrics_provided": {
+                "pe_ratio": request.pe_ratio,
+                "pb_ratio": request.pb_ratio,
+                "peg_ratio": request.peg_ratio,
+                "roe": f"{request.roe:.1%}" if request.roe else None,
+                "debt_to_equity": request.debt_to_equity,
+                "free_cash_flow_positive": request.free_cash_flow_positive,
+                "current_ratio": request.current_ratio,
+                "dividend_yield": f"{request.dividend_yield:.2%}" if request.dividend_yield else None
+            },
+            "benchmarks": benchmarks
+        }
+        
+    except Exception as e:
+        logger.error(f"Error analyzing fundamentals: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/fundamentals/metric/{metric_name}")
+async def get_fundamental_metric_info(metric_name: str):
+    """
+    Get detailed information about a specific fundamental metric.
+    
+    Available metrics:
+    - pe_ratio (Price-to-Earnings)
+    - pb_ratio (Price-to-Book)
+    - peg_ratio (PEG Ratio)
+    - eps (Earnings Per Share)
+    - roe (Return on Equity)
+    - debt_to_equity (Debt-to-Equity)
+    - free_cash_flow (Free Cash Flow)
+    - current_ratio
+    - interest_coverage
+    - dividend_yield
+    - price_to_sales
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    try:
+        from services.investopedia_knowledge import get_investopedia_knowledge
+        
+        investopedia = get_investopedia_knowledge()
+        metric_data = investopedia.get_fundamental_metric(metric_name)
+        
+        if not metric_data:
+            available = investopedia.get_all_fundamental_metrics()
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Metric '{metric_name}' not found. Available: {', '.join(available)}"
+            )
+        
+        return {
+            "success": True,
+            "metric": metric_data
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting metric info: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/fundamentals/all-metrics")
+async def get_all_fundamental_metrics():
+    """
+    Get list of all available fundamental analysis metrics.
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    try:
+        from services.investopedia_knowledge import get_investopedia_knowledge
+        
+        investopedia = get_investopedia_knowledge()
+        metrics = investopedia.get_all_fundamental_metrics()
+        
+        # Categorize metrics
+        categorized = {
+            "valuation": [],
+            "profitability": [],
+            "solvency": [],
+            "liquidity": []
+        }
+        
+        for metric_name in metrics:
+            metric = investopedia.get_fundamental_metric(metric_name)
+            if metric:
+                category = metric.get("category", "other")
+                if category in categorized:
+                    categorized[category].append({
+                        "id": metric_name,
+                        "name": metric["name"],
+                        "description": metric["description"][:100] + "..." if len(metric["description"]) > 100 else metric["description"]
+                    })
+        
+        return {
+            "success": True,
+            "total_metrics": len(metrics),
+            "metrics_by_category": categorized
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting metrics list: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/fundamentals/knowledge")
+async def get_fundamental_analysis_knowledge():
+    """
+    Get comprehensive fundamental analysis knowledge for education/reference.
+    Includes all valuation metrics, profitability measures, solvency ratios,
+    and how to combine technical and fundamental analysis.
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    try:
+        from services.investopedia_knowledge import get_investopedia_knowledge
+        
+        investopedia = get_investopedia_knowledge()
+        knowledge = investopedia.get_fundamental_analysis_context_for_ai()
+        
+        return {
+            "success": True,
+            "knowledge": knowledge,
+            "source": "Investopedia",
+            "last_updated": "December 2025"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting fundamental knowledge: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
