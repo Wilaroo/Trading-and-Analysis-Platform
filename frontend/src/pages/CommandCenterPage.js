@@ -714,6 +714,81 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                         )}
                       </div>
                     )}
+
+                    {/* AI Strategy Recommendation Box */}
+                    <div className="bg-gradient-to-r from-amber-500/10 to-cyan-500/10 border border-amber-500/20 rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="w-5 h-5 text-amber-400" />
+                          <span className="text-sm font-semibold text-white">AI Trading Recommendation</span>
+                        </div>
+                        <button
+                          onClick={() => onAskAI(ticker.symbol)}
+                          className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/20 text-amber-400 rounded text-xs hover:bg-amber-500/30 border border-amber-500/30"
+                        >
+                          <Bot className="w-3 h-3" />
+                          Ask AI for Deep Analysis
+                        </button>
+                      </div>
+                      
+                      {/* Quick AI Summary */}
+                      <div className="space-y-2">
+                        {/* Trade Recommendation */}
+                        <div className="flex items-start gap-2">
+                          <span className={`text-xs px-2 py-0.5 rounded font-bold ${
+                            tradingSummary.bias === 'BULLISH' ? 'bg-green-500 text-black' :
+                            tradingSummary.bias === 'BEARISH' ? 'bg-red-500 text-white' :
+                            'bg-zinc-600 text-white'
+                          }`}>
+                            {tradingSummary.bias || 'NEUTRAL'}
+                          </span>
+                          <p className="text-xs text-zinc-300 flex-1">
+                            {tradingSummary.bias === 'BULLISH' && scores.overall >= 60 
+                              ? `${ticker.symbol} shows strong bullish momentum. Consider LONG positions with tight risk management.`
+                              : tradingSummary.bias === 'BEARISH' && scores.overall >= 60
+                              ? `${ticker.symbol} shows bearish weakness. Consider SHORT positions or avoid longs.`
+                              : `${ticker.symbol} is showing mixed signals. Wait for clearer direction before entering.`
+                            }
+                          </p>
+                        </div>
+                        
+                        {/* Key Points */}
+                        <div className="grid grid-cols-2 gap-2 mt-2">
+                          <div className="bg-black/30 rounded p-2">
+                            <span className="text-[10px] text-zinc-500 block">Best Strategy</span>
+                            <p className="text-xs text-white font-medium">
+                              {matchedStrategies[0]?.name || 'No match found'}
+                            </p>
+                          </div>
+                          <div className="bg-black/30 rounded p-2">
+                            <span className="text-[10px] text-zinc-500 block">Timeframe</span>
+                            <p className="text-xs text-white font-medium">
+                              {matchedStrategies[0]?.timeframe || 'Intraday'}
+                            </p>
+                          </div>
+                        </div>
+                        
+                        {/* Risk Warning */}
+                        {scores.overall < 50 && (
+                          <div className="flex items-center gap-2 mt-2 p-2 bg-red-500/10 border border-red-500/20 rounded">
+                            <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+                            <p className="text-[10px] text-red-300">
+                              Low score ({scores.overall}/100) - Higher risk setup. Consider smaller position size or skip.
+                            </p>
+                          </div>
+                        )}
+                        
+                        {/* High Conviction Indicator */}
+                        {scores.overall >= 70 && tradingSummary.bias && (
+                          <div className="flex items-center gap-2 mt-2 p-2 bg-green-500/10 border border-green-500/20 rounded">
+                            <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
+                            <p className="text-[10px] text-green-300">
+                              High conviction setup! Score: {scores.overall}/100 with clear {tradingSummary.bias.toLowerCase()} bias.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 )}
 
