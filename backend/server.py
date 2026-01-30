@@ -120,6 +120,10 @@ init_alpaca_router(alpaca_service)
 predictive_scanner = get_predictive_scanner()
 init_scanner_router(predictive_scanner)
 
+# Initialize advanced alert system
+alert_system = get_alert_system()
+init_alerts_router(alert_system)
+
 # Include routers
 app.include_router(notifications_router)
 app.include_router(market_context_router)
