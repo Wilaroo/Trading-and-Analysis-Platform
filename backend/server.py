@@ -43,6 +43,7 @@ from routers.quality import router as quality_router, init_quality_router
 from routers.assistant import router as assistant_router, init_assistant_router
 from routers.scheduler import router as scheduler_router, init_scheduler_router
 from routers.alpaca import router as alpaca_router, init_alpaca_router
+from routers.trade_history import router as trade_history_router
 from services.ib_service import get_ib_service
 from services.newsletter_service import init_newsletter_service
 from services.news_service import init_news_service
