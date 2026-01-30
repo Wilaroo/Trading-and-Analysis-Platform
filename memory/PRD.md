@@ -59,12 +59,17 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
 - ✅ Created stock fundamental scoring system with signals/warnings
 
 ## Key API Endpoints
-- `POST /api/assistant/chat` - AI conversation
+- `POST /api/assistant/chat` - AI conversation (now with real-time fundamentals)
 - `POST /api/assistant/score-setup` - Trade setup scoring
-- `POST /api/assistant/analyze-fundamentals` - **NEW** Stock fundamental analysis with value scoring
-- `GET /api/assistant/fundamentals/metric/{name}` - **NEW** Get detailed metric info
-- `GET /api/assistant/fundamentals/all-metrics` - **NEW** List all fundamental metrics
-- `GET /api/assistant/fundamentals/knowledge` - **NEW** Get full fundamental knowledge
+- `POST /api/assistant/analyze-fundamentals` - Stock fundamental analysis with value scoring
+- `GET /api/assistant/fundamentals/metric/{name}` - Get detailed metric info
+- `GET /api/assistant/fundamentals/all-metrics` - List all fundamental metrics
+- `GET /api/assistant/fundamentals/knowledge` - Get full fundamental knowledge
+- **NEW REAL-TIME ENDPOINTS:**
+- `GET /api/assistant/realtime/fundamentals/{symbol}` - **Live** fundamental data from Finnhub
+- `GET /api/assistant/realtime/analyze/{symbol}` - Full analysis (fundamentals + technicals)
+- `GET /api/assistant/realtime/company/{symbol}` - Company profile
+- `POST /api/assistant/realtime/compare` - Compare multiple stocks' fundamentals
 - `GET /api/market/news` - Market news
 - `GET /api/ib/flex-trades` - IB trade history
 
