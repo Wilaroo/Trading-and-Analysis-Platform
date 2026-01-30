@@ -126,6 +126,11 @@ init_scanner_router(predictive_scanner)
 alert_system = get_alert_system()
 init_alerts_router(alert_system)
 
+# Initialize background scanner for live alerts
+from services.background_scanner import get_background_scanner
+background_scanner = get_background_scanner()
+init_live_scanner_router(background_scanner)
+
 # Include routers
 app.include_router(notifications_router)
 app.include_router(market_context_router)
