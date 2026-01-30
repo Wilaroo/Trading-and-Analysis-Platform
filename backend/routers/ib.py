@@ -807,7 +807,7 @@ async def get_comprehensive_analysis(symbol: str):
                    "NVDA": 875.0, "TSLA": 245.0, "JPM": 195.0, "V": 280.0, "JNJ": 155.0}
     base_price = base_prices.get(symbol, 100 + random.random() * 200)
     
-    # Try Alpaca first for quote
+    # Try Alpaca first for quote (always available, not affected by IB busy state)
     quote_fetched = False
     if _stock_service:
         try:
@@ -819,8 +819,8 @@ async def get_comprehensive_analysis(symbol: str):
         except Exception as e:
             print(f"Alpaca quote error: {e}")
     
-    # Fallback to IB for quote if needed
-    if not quote_fetched and is_connected and _ib_service:
+    # Fallback to IB for quote if needed AND IB is not busy
+    if not quote_fetched and is_connected and _ib_service and not ib_is_busy:
         try:
             quote = await _ib_service.get_quote(symbol)
             if quote and quote.get("price"):
@@ -829,8 +829,8 @@ async def get_comprehensive_analysis(symbol: str):
         except Exception as e:
             print(f"IB quote error: {e}")
     
-    # Try IB for fundamentals (Alpaca doesn't have fundamentals)
-    if is_connected and _ib_service:
+    # Try IB for fundamentals only if not busy (Alpaca doesn't have fundamentals)
+    if is_connected and _ib_service and not ib_is_busy:
         try:
             fundamentals = await _ib_service.get_fundamentals(symbol)
             if fundamentals:
