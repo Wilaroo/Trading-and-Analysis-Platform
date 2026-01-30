@@ -329,13 +329,61 @@ Total P&L on {symbol_upper}: ${total_pnl:,.2f}
             self._chart_pattern_service = get_chart_pattern_service()
         return self._chart_pattern_service
     
-    def get_chart_pattern_context(self, pattern_name: str = None, bias: str = None) -> str:
-        """Get chart pattern knowledge for AI context"""
+    @property
+    def detailed_pattern_service(self):
+        """Lazy load detailed pattern analysis service"""
+        if not hasattr(self, '_detailed_pattern_service') or self._detailed_pattern_service is None:
+            from services.chart_patterns_detailed import get_detailed_pattern_service
+            self._detailed_pattern_service = get_detailed_pattern_service()
+        return self._detailed_pattern_service
+    
+    def get_chart_pattern_context(self, pattern_name: str = None, bias: str = None, detailed: bool = False) -> str:
+        """Get chart pattern knowledge for AI context
+        
+        Args:
+            pattern_name: Specific pattern to look up
+            bias: Filter by bullish/bearish/neutral
+            detailed: If True, return comprehensive analysis with psychology, stats, trade plan
+        """
         try:
             service = self.chart_pattern_service
+            detailed_service = self.detailed_pattern_service
             
             if pattern_name:
-                # Search for specific pattern
+                # First check if we have detailed analysis
+                pattern_id = pattern_name.lower().replace(' ', '_').replace('&', 'and')
+                # Try common pattern ID mappings
+                pattern_mappings = {
+                    'bull flag': 'bull_flag',
+                    'bear flag': 'bear_flag',
+                    'head and shoulders': 'head_shoulders',
+                    'head & shoulders': 'head_shoulders',
+                    'inverse head': 'inverse_head_shoulders',
+                    'inverse head and shoulders': 'inverse_head_shoulders',
+                    'double top': 'double_top',
+                    'double bottom': 'double_bottom',
+                    'ascending triangle': 'ascending_triangle',
+                    'cup and handle': 'cup_and_handle',
+                    'cup & handle': 'cup_and_handle',
+                    'falling wedge': 'falling_wedge',
+                    'rising wedge': 'rising_wedge',
+                    'symmetrical triangle': 'symmetrical_triangle',
+                    'wyckoff': 'wyckoff_accumulation',
+                    'wyckoff accumulation': 'wyckoff_accumulation',
+                }
+                
+                matched_id = None
+                for key, val in pattern_mappings.items():
+                    if key in pattern_name.lower():
+                        matched_id = val
+                        break
+                
+                if matched_id:
+                    detailed_analysis = detailed_service.get_formatted_for_ai(matched_id)
+                    if detailed_analysis and "No detailed analysis" not in detailed_analysis:
+                        return detailed_analysis
+                
+                # Fall back to basic pattern info
                 patterns = service.search_patterns(pattern_name)
                 if patterns:
                     p = patterns[0]
