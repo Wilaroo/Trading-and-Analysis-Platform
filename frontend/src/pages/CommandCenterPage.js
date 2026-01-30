@@ -2232,14 +2232,17 @@ const CommandCenterPage = ({
           )}
         </div>
         
-        {/* Ticker Search Bar */}
-        <form onSubmit={handleTickerSearch} className="flex-1 max-w-md mx-4">
+        {/* Ticker Search Bar with Recent Searches */}
+        <form onSubmit={handleTickerSearch} className="flex-1 max-w-md mx-4 relative">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
             <input
+              ref={searchInputRef}
               type="text"
               value={tickerSearchQuery}
               onChange={(e) => setTickerSearchQuery(e.target.value.toUpperCase())}
+              onFocus={() => setShowRecentSearches(true)}
+              onBlur={() => setTimeout(() => setShowRecentSearches(false), 200)}
               placeholder="Search any ticker (e.g., AAPL, TSLA)..."
               className="w-full pl-10 pr-4 py-2 bg-zinc-900/80 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 text-sm"
               data-testid="ticker-search-input"
@@ -2262,6 +2265,48 @@ const CommandCenterPage = ({
               {isSearching ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Go'}
             </button>
           </div>
+          
+          {/* Recent Searches Dropdown */}
+          {showRecentSearches && recentSearches.length > 0 && !tickerSearchQuery && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+                <span className="text-xs text-zinc-500 flex items-center gap-1.5">
+                  <Clock className="w-3 h-3" />
+                  Recent Searches
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    clearRecentSearches();
+                  }}
+                  className="text-xs text-zinc-500 hover:text-red-400 flex items-center gap-1"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  Clear
+                </button>
+              </div>
+              <div className="py-1">
+                {recentSearches.map((symbol, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleTickerSearch(null, symbol);
+                    }}
+                    className="w-full px-3 py-2 text-left text-sm text-white hover:bg-cyan-500/10 flex items-center gap-2 transition-colors"
+                    data-testid={`recent-search-${symbol}`}
+                  >
+                    <Search className="w-3 h-3 text-zinc-500" />
+                    <span className="font-mono font-medium">{symbol}</span>
+                    <ArrowUpRight className="w-3 h-3 text-zinc-600 ml-auto" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </form>
         
         <div className="flex items-center gap-3">
