@@ -272,31 +272,22 @@ async def generate_newsletter(request: GenerateNewsletterRequest = None):
 
 # ===================== News Endpoints =====================
 
-@router.get("/news/{symbol}")
-async def get_ticker_news(
-    symbol: str,
-    limit: int = Query(default=10, ge=1, le=50, description="Max news items")
-):
+@router.get("/news/summary")
+async def get_market_news_summary():
     """
-    Get news articles for a specific ticker symbol.
-    
-    Fetches news from IB API when connected, otherwise returns placeholder.
+    Get a summary of today's market news.
+    Returns key headlines, themes, and sentiment for the AI assistant.
     """
     try:
         service = get_news_service()
-        news = await service.get_ticker_news(symbol.upper(), max_items=limit)
+        summary = await service.get_market_summary()
         
-        return {
-            "symbol": symbol.upper(),
-            "news": news,
-            "count": len(news),
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
+        return summary
         
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch news for {symbol}: {str(e)}"
+            detail=f"Failed to get market summary: {str(e)}"
         )
 
 
@@ -324,20 +315,29 @@ async def get_market_news(
         )
 
 
-@router.get("/news/summary")
-async def get_market_news_summary():
+@router.get("/news/{symbol}")
+async def get_ticker_news(
+    symbol: str,
+    limit: int = Query(default=10, ge=1, le=50, description="Max news items")
+):
     """
-    Get a summary of today's market news.
-    Returns key headlines, themes, and sentiment for the AI assistant.
+    Get news articles for a specific ticker symbol.
+    
+    Fetches news from Finnhub API.
     """
     try:
         service = get_news_service()
-        summary = await service.get_market_summary()
+        news = await service.get_ticker_news(symbol.upper(), max_items=limit)
         
-        return summary
+        return {
+            "symbol": symbol.upper(),
+            "news": news,
+            "count": len(news),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
         
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get market summary: {str(e)}"
+            detail=f"Failed to fetch news for {symbol}: {str(e)}"
         )
