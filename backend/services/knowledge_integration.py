@@ -2,6 +2,7 @@
 Knowledge Integration Service
 Integrates learned knowledge from the knowledge base into scoring and market intelligence.
 Queries the knowledge base and enhances stock analysis with learned strategies.
+Also integrates real-time news for comprehensive market analysis.
 """
 import logging
 from typing import Optional, Dict, List, Any
@@ -14,12 +15,32 @@ logger = logging.getLogger(__name__)
 class KnowledgeIntegrationService:
     """
     Service that bridges the knowledge base with the scoring engine
-    and market intelligence generation.
+    and market intelligence generation. Includes news integration.
     """
     
     def __init__(self):
         self.knowledge = get_knowledge_service()
         self.llm = get_llm_service()
+        self._news_service = None
+    
+    @property
+    def news_service(self):
+        """Lazy load news service"""
+        if self._news_service is None:
+            from services.news_service import get_news_service
+            self._news_service = get_news_service()
+        return self._news_service
+    
+    async def get_market_news_context(self) -> Dict:
+        """
+        Get current market news context for intelligence generation.
+        """
+        try:
+            summary = await self.news_service.get_market_summary()
+            return summary
+        except Exception as e:
+            logger.warning(f"Error getting market news: {e}")
+            return {"available": False}
     
     def get_applicable_strategies(self, stock_data: Dict) -> List[Dict]:
         """
