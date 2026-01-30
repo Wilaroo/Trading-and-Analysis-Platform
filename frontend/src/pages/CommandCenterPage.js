@@ -46,7 +46,7 @@ import {
 import * as LightweightCharts from 'lightweight-charts';
 import api, { apiLongRunning } from '../utils/api';
 import { toast } from 'sonner';
-import AIAssistant from '../components/AIAssistant';
+import AICommandPanel from '../components/AICommandPanel';
 import TickerDetailModal from '../components/TickerDetailModal';
 import QuickTradeModal from '../components/QuickTradeModal';
 import { HelpTooltip, HelpIcon } from '../components/HelpTooltip';
