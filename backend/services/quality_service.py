@@ -143,8 +143,23 @@ class QualityService:
         Get quality metrics for a symbol.
         Tries multiple data sources in order of preference.
         """
+        # Validate symbol first - skip obviously invalid ones
+        symbol = symbol.upper()
+        if len(symbol) > 5 or len(symbol) < 1:
+            return QualityMetrics(symbol=symbol, data_quality="low", data_source="invalid_symbol")
+        if not symbol.isalpha():
+            return QualityMetrics(symbol=symbol, data_quality="low", data_source="invalid_symbol")
+        # Skip common words that aren't stocks
+        invalid_symbols = {'SCALP', 'SETUP', 'TRADE', 'STOCK', 'ALERT', 'WATCH', 'TODAY', 
+                          'SWING', 'RIGHT', 'ABOUT', 'WHICH', 'WHERE', 'WOULD', 'COULD',
+                          'MIGHT', 'THINK', 'PRICE', 'LEVEL', 'TREND', 'CHART', 'WAYS',
+                          'DATA', 'PLAY', 'WHAT', 'WHEN', 'HELP', 'FIND', 'LOOK', 'TELL',
+                          'ALL', 'NOW', 'YOU', 'FOR', 'THE', 'AND', 'ARE', 'CAN', 'HOW'}
+        if symbol in invalid_symbols:
+            return QualityMetrics(symbol=symbol, data_quality="low", data_source="invalid_symbol")
+        
         # Check cache first
-        cache_key = symbol.upper()
+        cache_key = symbol
         if not force_refresh and cache_key in self._cache:
             cached = self._cache[cache_key]
             if cached.last_updated:
@@ -155,7 +170,7 @@ class QualityService:
                 except (ValueError, AttributeError):
                     pass
         
-        metrics = QualityMetrics(symbol=symbol.upper())
+        metrics = QualityMetrics(symbol=symbol)
         
         # Try data sources in order
         # 0. Check for known quality data (fallback for rate-limited scenarios)
