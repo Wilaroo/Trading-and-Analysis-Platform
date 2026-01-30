@@ -230,19 +230,40 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
     const fetchData = async () => {
       setLoading(true);
       setChartError(null);
+      
+      // Helper to retry on failure
+      const fetchWithRetry = async (fetcher, retries = 2, delay = 1000) => {
+        for (let i = 0; i <= retries; i++) {
+          try {
+            const result = await fetcher();
+            return result;
+          } catch (err) {
+            if (i === retries) throw err;
+            console.log(`Retrying... attempt ${i + 2}`);
+            await new Promise(r => setTimeout(r, delay));
+          }
+        }
+      };
+      
       try {
         // Fetch comprehensive analysis including quality score
         const [analysisRes, histRes, qualityRes] = await Promise.all([
-          api.get(`/api/ib/analysis/${ticker.symbol}`).catch((err) => {
+          fetchWithRetry(() => api.get(`/api/ib/analysis/${ticker.symbol}`)).catch((err) => {
             console.error('Analysis API error:', err);
             return { data: null };
           }),
-          api.get(`/api/ib/historical/${ticker.symbol}?duration=1 D&bar_size=5 mins`).catch((err) => {
+          fetchWithRetry(() => api.get(`/api/ib/historical/${ticker.symbol}?duration=1 D&bar_size=5 mins`)).catch((err) => {
             console.error('Historical data error:', err);
-            setChartError(err.response?.data?.detail?.message || 'Unable to load chart data');
+            const errorMsg = err.response?.data?.detail?.message || err.response?.data?.detail || 'Unable to load chart data';
+            // Check if IB is busy
+            if (err.response?.data?.ib_busy || errorMsg.includes('busy')) {
+              setChartError('IB Gateway is busy with a scan. Using cached/Alpaca data.');
+            } else {
+              setChartError(errorMsg);
+            }
             return { data: { bars: [] } };
           }),
-          api.get(`/api/quality/score/${ticker.symbol}`).catch((err) => {
+          fetchWithRetry(() => api.get(`/api/quality/score/${ticker.symbol}`)).catch((err) => {
             console.error('Quality score error:', err);
             return { data: null };
           })
@@ -251,12 +272,18 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
         console.log('Analysis data received:', analysisRes.data);
         console.log('Historical data received:', histRes.data?.bars?.length, 'bars');
         console.log('Quality data received:', qualityRes.data);
+        
+        // Check if IB was busy - show info message but still display data
+        if (analysisRes.data?.ib_busy) {
+          console.log('IB was busy, data came from Alpaca');
+        }
+        
         setAnalysis(analysisRes.data);
         setHistoricalData(histRes.data?.bars || []);
         setQualityData(qualityRes.data);
       } catch (err) {
         console.error('Error fetching data:', err);
-        setChartError('Failed to load data');
+        setChartError('Failed to load data. Please try again.');
       }
       setLoading(false);
     };
