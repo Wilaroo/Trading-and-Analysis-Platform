@@ -148,6 +148,7 @@ Format responses with clear sections. Cite specific rules from the playbook."""
         self.db = db
         self.provider = LLMProvider.EMERGENT
         self.conversations: Dict[str, ConversationContext] = {}
+        self._trading_intelligence = None
         
         # Track frequently asked requests
         self.request_patterns: Dict[str, int] = {}
