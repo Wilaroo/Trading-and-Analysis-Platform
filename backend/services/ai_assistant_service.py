@@ -912,7 +912,9 @@ Limitations: {'; '.join(metric_data['limitations'][:3])}
             potential_symbols = re.findall(r'\b([A-Z]{1,5})\b', user_message.upper())
             excluded_words = {'I', 'A', 'THE', 'AND', 'OR', 'FOR', 'TO', 'IS', 'IT', 'IN', 'ON', 'AT', 'BY', 
                             'BE', 'AS', 'AN', 'ARE', 'WAS', 'IF', 'MY', 'ME', 'DO', 'SO', 'UP', 'AM', 'PE', 
-                            'PB', 'ROE', 'ROA', 'EPS', 'PEG', 'FCF', 'TTM', 'YOY', 'WHAT', 'HOW', 'WHY'}
+                            'PB', 'ROE', 'ROA', 'EPS', 'PEG', 'FCF', 'TTM', 'YOY', 'WHAT', 'HOW', 'WHY',
+                            'OF', 'VS', 'WHICH', 'VALUE', 'BETTER', 'GOOD', 'BAD', 'THAN', 'ABOUT', 'CAN',
+                            'TELL', 'SHOW', 'GET', 'GIVE', 'LOOK', 'FROM', 'THAT', 'THIS', 'COMPARE', 'ANALYSIS'}
             symbols_for_fundamentals = [s for s in potential_symbols if s not in excluded_words and len(s) >= 2]
             
             # Fetch real-time fundamentals for mentioned stocks
