@@ -2128,14 +2128,35 @@ const CommandCenterPage = ({
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
+  // Add to recent searches helper
+  const addToRecentSearches = (symbol) => {
+    setRecentSearches(prev => {
+      // Remove if already exists, then add to front
+      const filtered = prev.filter(s => s !== symbol);
+      const updated = [symbol, ...filtered].slice(0, 5); // Keep only 5 most recent
+      localStorage.setItem('recentTickerSearches', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  // Clear recent searches
+  const clearRecentSearches = () => {
+    setRecentSearches([]);
+    localStorage.removeItem('recentTickerSearches');
+  };
+
   // Ticker Search Handler
-  const handleTickerSearch = async (e) => {
-    e.preventDefault();
-    const symbol = tickerSearchQuery.trim().toUpperCase();
+  const handleTickerSearch = async (e, symbolOverride = null) => {
+    if (e) e.preventDefault();
+    const symbol = (symbolOverride || tickerSearchQuery).trim().toUpperCase();
     if (!symbol) return;
     
     setIsSearching(true);
+    setShowRecentSearches(false);
     try {
+      // Add to recent searches
+      addToRecentSearches(symbol);
+      
       // Open the ticker detail modal with the searched symbol
       setSelectedTicker({ 
         symbol, 
