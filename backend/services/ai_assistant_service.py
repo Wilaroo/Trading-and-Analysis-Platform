@@ -906,6 +906,60 @@ Limitations: {'; '.join(metric_data['limitations'][:3])}
             except Exception as e:
                 logger.warning(f"Error getting fundamental analysis knowledge: {e}")
         
+        # 2f-b. If asking about fundamentals AND a specific ticker, fetch REAL-TIME data
+        if wants_fundamental_info:
+            # Extract potential stock symbols from the message
+            potential_symbols = re.findall(r'\b([A-Z]{1,5})\b', user_message.upper())
+            excluded_words = {'I', 'A', 'THE', 'AND', 'OR', 'FOR', 'TO', 'IS', 'IT', 'IN', 'ON', 'AT', 'BY', 
+                            'BE', 'AS', 'AN', 'ARE', 'WAS', 'IF', 'MY', 'ME', 'DO', 'SO', 'UP', 'AM', 'PE', 
+                            'PB', 'ROE', 'ROA', 'EPS', 'PEG', 'FCF', 'TTM', 'YOY', 'WHAT', 'HOW', 'WHY'}
+            symbols_for_fundamentals = [s for s in potential_symbols if s not in excluded_words and len(s) >= 2]
+            
+            # Fetch real-time fundamentals for mentioned stocks
+            if symbols_for_fundamentals:
+                try:
+                    from services.fundamental_data_service import get_fundamental_data_service
+                    fundamental_service = get_fundamental_data_service()
+                    
+                    for symbol in symbols_for_fundamentals[:2]:  # Limit to 2 stocks to avoid slowdown
+                        analysis = await fundamental_service.analyze_fundamentals(symbol)
+                        if analysis.get("available"):
+                            metrics = analysis.get("metrics", {})
+                            valuation = metrics.get("valuation", {})
+                            profitability = metrics.get("profitability", {})
+                            growth = metrics.get("growth", {})
+                            health = metrics.get("financial_health", {})
+                            
+                            context_parts.append(f"""
+=== REAL-TIME FUNDAMENTAL DATA FOR {symbol} (from Finnhub) ===
+Value Score: {analysis.get('value_score')}/100
+Assessment: {analysis.get('assessment')}
+
+VALUATION:
+- P/E Ratio: {valuation.get('pe_ratio')}
+- Forward P/E: {valuation.get('forward_pe')}
+- P/B Ratio: {valuation.get('pb_ratio')}
+- PEG Ratio: {valuation.get('peg_ratio')}
+
+PROFITABILITY:
+- ROE: {profitability.get('roe')}
+- Net Margin: {profitability.get('net_margin')}
+- Operating Margin: {profitability.get('operating_margin')}
+
+GROWTH:
+- EPS Growth (YoY): {growth.get('eps_growth_yoy')}
+- Revenue Growth (YoY): {growth.get('revenue_growth_yoy')}
+
+FINANCIAL HEALTH:
+- Debt/Equity: {health.get('debt_to_equity')}
+- Current Ratio: {health.get('current_ratio')}
+
+Bullish Signals: {'; '.join(analysis.get('signals', [])[:3])}
+Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
+""")
+                except Exception as e:
+                    logger.warning(f"Error fetching real-time fundamentals: {e}")
+        
         # 2g. Check if user is asking about SCORING, EVALUATING, or VALIDATING a trade
         evaluation_keywords = ['score', 'scoring', 'evaluate', 'grade', 'rate', 'quality', 'should i', 
                               'valid', 'validate', 'good trade', 'bad trade', 'a+ setup', 'setup quality',
