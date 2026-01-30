@@ -61,6 +61,10 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
 ## Key API Endpoints
 - `POST /api/assistant/chat` - AI conversation
 - `POST /api/assistant/score-setup` - Trade setup scoring
+- `POST /api/assistant/analyze-fundamentals` - **NEW** Stock fundamental analysis with value scoring
+- `GET /api/assistant/fundamentals/metric/{name}` - **NEW** Get detailed metric info
+- `GET /api/assistant/fundamentals/all-metrics` - **NEW** List all fundamental metrics
+- `GET /api/assistant/fundamentals/knowledge` - **NEW** Get full fundamental knowledge
 - `GET /api/market/news` - Market news
 - `GET /api/ib/flex-trades` - IB trade history
 
