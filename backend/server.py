@@ -114,6 +114,10 @@ scheduler_service.start()
 init_scheduler_router(scheduler_service, assistant_service, newsletter_service)
 init_alpaca_router(alpaca_service)
 
+# Initialize predictive scanner
+predictive_scanner = get_predictive_scanner()
+init_scanner_router(predictive_scanner)
+
 # Include routers
 app.include_router(notifications_router)
 app.include_router(market_context_router)
