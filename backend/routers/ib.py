@@ -734,6 +734,8 @@ async def get_comprehensive_analysis(symbol: str):
     - Company info
     - Matched strategies
     - Trading opportunities summary
+    
+    Note: Uses Alpaca as primary data source when IB is busy or unavailable.
     """
     from datetime import datetime, timezone
     from pymongo import MongoClient
@@ -742,12 +744,17 @@ async def get_comprehensive_analysis(symbol: str):
     
     symbol = symbol.upper()
     is_connected = False
+    ib_is_busy = False
+    busy_operation = None
     
-    # Check if IB is connected
+    # Check if IB is connected and if it's busy
     if _ib_service:
         try:
             status = _ib_service.get_connection_status()
             is_connected = status.get("connected", False)
+            ib_is_busy, busy_operation = _ib_service.is_busy()
+            if ib_is_busy:
+                print(f"[Analysis] IB busy with '{busy_operation}', using Alpaca for {symbol}")
         except:
             pass
     
@@ -755,6 +762,8 @@ async def get_comprehensive_analysis(symbol: str):
         "symbol": symbol,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "is_connected": is_connected,
+        "ib_busy": ib_is_busy,
+        "busy_operation": busy_operation,
         "quote": {},
         "company_info": {},
         "fundamentals": {},
