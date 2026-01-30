@@ -34,13 +34,15 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
 │   │   ├── assistant.py          # AI endpoints
 │   │   ├── scanner.py            # Predictive scanner endpoints
 │   │   ├── alerts.py             # Advanced alert system endpoints
-│   │   └── technicals.py         # Real-time technical analysis
+│   │   ├── technicals.py         # Real-time technical analysis
+│   │   └── live_scanner.py       # SSE endpoint for background scanning (NEW)
 │   ├── services/
 │   │   ├── ai_assistant_service.py     # Main AI orchestrator
 │   │   ├── ai_market_intelligence.py   # Comprehensive AI context aggregator
 │   │   ├── realtime_technical_service.py # Live technical indicators from Alpaca
 │   │   ├── alert_system.py             # Timeframe-organized alerts
 │   │   ├── predictive_scanner.py       # Setup detection and probability
+│   │   ├── background_scanner.py       # Async background scanning service (NEW)
 │   │   ├── trading_intelligence.py     # Unified scoring engine
 │   │   ├── fundamental_data_service.py # Live fundamentals from Finnhub
 │   │   ├── strategy_knowledge.py       # Proprietary strategies
@@ -51,7 +53,9 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
 └── frontend/
     └── src/
         ├── pages/CommandCenterPage.js
-        └── components/AICommandPanel.jsx
+        └── components/
+            ├── AICommandPanel.jsx
+            └── LiveAlertsPanel.jsx      # Real-time alerts panel (NEW)
 ```
 
 ## What's Been Implemented
