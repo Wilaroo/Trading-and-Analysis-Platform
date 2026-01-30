@@ -1553,32 +1553,72 @@ Trading above VWAP - bulls in control. Look for pullback entry or breakout conti
     # ==================== DATA HELPERS ====================
     
     async def _get_enhanced_market_data(self, symbol: str) -> Optional[Dict]:
-        """Get comprehensive market data for scanning"""
+        """Get comprehensive market data for scanning using REAL technical data"""
         try:
-            quote = await self.alpaca_service.get_quote(symbol)
+            # Get real technical snapshot from Alpaca bar data
+            from services.realtime_technical_service import get_technical_service
+            tech_service = get_technical_service()
+            snapshot = await tech_service.get_technical_snapshot(symbol)
+            
+            if snapshot:
+                # We have real data!
+                price = snapshot.current_price
+                
+                # Get fundamentals
+                fundamentals = None
+                fundamental_score = 50
+                try:
+                    fundamentals = await self.fundamental_service.get_fundamentals(symbol)
+                    if fundamentals:
+                        if fundamentals.roe and fundamentals.roe > 0.15:
+                            fundamental_score += 15
+                        if fundamentals.pe_ratio and 10 < fundamentals.pe_ratio < 25:
+                            fundamental_score += 10
+                        if fundamentals.debt_to_equity and fundamentals.debt_to_equity < 1:
+                            fundamental_score += 10
+                except:
+                    pass
+                
+                return {
+                    "symbol": symbol,
+                    "price": price,
+                    "bid": price * 0.999,
+                    "ask": price * 1.001,
+                    "spread_pct": 0.1,
+                    "volume": snapshot.volume,
+                    "rvol": snapshot.rvol,
+                    "gap_pct": snapshot.gap_pct,
+                    "atr": snapshot.atr,
+                    "atr_pct": snapshot.atr_percent,
+                    "vwap": snapshot.vwap,
+                    "ema_9": snapshot.ema_9,
+                    "ema_20": snapshot.ema_20,
+                    "rsi": snapshot.rsi_14,
+                    "above_vwap": snapshot.above_vwap,
+                    "price_change_pct": ((price - snapshot.prev_close) / snapshot.prev_close * 100) if snapshot.prev_close > 0 else 0,
+                    "resistance": snapshot.resistance,
+                    "support": snapshot.support,
+                    "high": snapshot.high_of_day,
+                    "low": snapshot.low_of_day,
+                    "has_catalyst": snapshot.gap_pct > 3 or snapshot.rvol > 3,  # Gap or high volume = likely catalyst
+                    "short_interest": 8.0,  # Would need separate data source
+                    "days_to_cover": 2.0,
+                    "float_shares": 100_000_000,
+                    "fundamental_score": fundamental_score,
+                    "fundamentals": fundamentals,
+                    "trend": snapshot.trend,
+                    "rsi_trend": snapshot.rsi_trend,
+                    "data_quality": snapshot.data_quality,
+                    "technical_snapshot": snapshot,
+                }
+            
+            # Fallback to basic quote if no bar data
+            quote = await self.alpaca_service.get_quote(symbol.upper())
             if not quote or quote.get("price", 0) <= 0:
                 return None
             
             price = quote.get("price", 0)
-            
-            # Get fundamentals
-            fundamentals = None
-            fundamental_score = 50
-            try:
-                fundamentals = await self.fundamental_service.get_fundamentals(symbol)
-                if fundamentals:
-                    # Quick fundamental score
-                    if fundamentals.roe and fundamentals.roe > 0.15:
-                        fundamental_score += 15
-                    if fundamentals.pe_ratio and 10 < fundamentals.pe_ratio < 25:
-                        fundamental_score += 10
-                    if fundamentals.debt_to_equity and fundamentals.debt_to_equity < 1:
-                        fundamental_score += 10
-            except:
-                pass
-            
-            # Estimate technicals (would be more accurate with real bar data)
-            atr = price * 0.025  # 2.5% estimate
+            atr = price * 0.025
             
             return {
                 "symbol": symbol,
@@ -1587,26 +1627,27 @@ Trading above VWAP - bulls in control. Look for pullback entry or breakout conti
                 "ask": quote.get("ask", price * 1.001),
                 "spread_pct": ((quote.get("ask", price) - quote.get("bid", price)) / price) * 100,
                 "volume": quote.get("volume", 0),
-                "rvol": 1.8,  # Estimate - would come from real data
-                "gap_pct": 2.0,  # Estimate
+                "rvol": 1.5,
+                "gap_pct": 1.0,
                 "atr": atr,
-                "atr_pct": (atr / price) * 100,
+                "atr_pct": 2.5,
                 "vwap": price * 0.998,
                 "ema_9": price * 0.99,
                 "ema_20": price * 0.985,
-                "rsi": 52,  # Estimate
+                "rsi": 50,
                 "above_vwap": True,
-                "price_change_pct": 1.5,  # Estimate
+                "price_change_pct": 1.0,
                 "resistance": price * 1.025,
                 "support": price * 0.975,
                 "high": price * 1.015,
                 "low": price * 0.985,
                 "has_catalyst": False,
-                "short_interest": 8.0,  # Estimate
+                "short_interest": 8.0,
                 "days_to_cover": 2.0,
                 "float_shares": 100_000_000,
-                "fundamental_score": fundamental_score,
-                "fundamentals": fundamentals,
+                "fundamental_score": 50,
+                "fundamentals": None,
+                "data_quality": "estimated",
             }
         except Exception as e:
             logger.warning(f"Error getting market data for {symbol}: {e}")
