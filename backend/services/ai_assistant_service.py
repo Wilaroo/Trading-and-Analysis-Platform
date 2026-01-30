@@ -180,6 +180,78 @@ Format your responses clearly with sections when appropriate. Use specific numbe
             self._news_service = get_news_service()
         return self._news_service
     
+    @property
+    def trade_history_service(self):
+        if self._trade_history_service is None:
+            from services.ib_flex_service import ib_flex_service
+            self._trade_history_service = ib_flex_service
+        return self._trade_history_service
+    
+    async def get_trade_history_context(self, symbol: str = None) -> str:
+        """Get trade history context for AI analysis"""
+        try:
+            if not self.trade_history_service.is_configured:
+                return "Trade history not available (IB Flex not configured)"
+            
+            trades = await self.trade_history_service.fetch_trades()
+            if not trades:
+                return "No trade history found"
+            
+            metrics = self.trade_history_service.calculate_performance_metrics(trades)
+            
+            # Build context string
+            context = f"""
+=== REAL TRADE HISTORY (Verified from Interactive Brokers) ===
+Total Closed Trades: {metrics.get('total_trades', 0)}
+Win Rate: {metrics.get('win_rate', 0)}%
+Total P&L: ${metrics.get('total_pnl', 0):,.2f}
+Profit Factor: {metrics.get('profit_factor', 'N/A')}
+Average Win: ${metrics.get('average_win', 0):,.2f}
+Average Loss: ${metrics.get('average_loss', 0):,.2f}
+Expectancy: ${metrics.get('expectancy', 0):,.2f}
+Total Commissions: ${metrics.get('total_commissions', 0):,.2f}
+
+Best Performing Symbols:
+"""
+            for s in metrics.get('best_symbols', [])[:5]:
+                context += f"  - {s['symbol']}: ${s['pnl']:,.2f} ({s['trades']} trades, {s['wins']} wins)\n"
+            
+            context += "\nWorst Performing Symbols:\n"
+            for s in metrics.get('worst_symbols', [])[:5]:
+                context += f"  - {s['symbol']}: ${s['pnl']:,.2f} ({s['trades']} trades)\n"
+            
+            # If specific symbol requested, add that analysis
+            if symbol:
+                symbol_upper = symbol.upper()
+                symbol_trades = [t for t in trades if 
+                               symbol_upper in (t.get("symbol", "").upper() or "") or
+                               symbol_upper in (t.get("underlying_symbol", "").upper() or "")]
+                
+                if symbol_trades:
+                    pnl_trades = [t for t in symbol_trades if t.get("realized_pnl")]
+                    total_pnl = sum(t["realized_pnl"] for t in pnl_trades)
+                    wins = len([t for t in pnl_trades if t["realized_pnl"] > 0])
+                    losses = len([t for t in pnl_trades if t["realized_pnl"] < 0])
+                    
+                    context += f"""
+=== YOUR HISTORY WITH {symbol_upper} ===
+Total Trades: {len(symbol_trades)}
+Closed Trades: {len(pnl_trades)}
+Wins: {wins}, Losses: {losses}
+Win Rate: {(wins/len(pnl_trades)*100):.1f}% (vs overall {metrics.get('win_rate', 0)}%)
+Total P&L on {symbol_upper}: ${total_pnl:,.2f}
+"""
+                    # Recent trades
+                    context += f"\nRecent {symbol_upper} trades:\n"
+                    for t in symbol_trades[:5]:
+                        context += f"  - {t['transaction_type']} {t['quantity']} @ ${t['price']:.2f}, P&L: ${t.get('realized_pnl', 0):.2f}\n"
+            
+            return context
+            
+        except Exception as e:
+            logger.error(f"Error getting trade history context: {e}")
+            return f"Error fetching trade history: {str(e)}"
+    
     def _get_or_create_conversation(self, session_id: str, user_id: str = "default") -> ConversationContext:
         """Get existing conversation or create new one"""
         if session_id not in self.conversations:
