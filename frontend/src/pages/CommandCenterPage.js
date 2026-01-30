@@ -1236,6 +1236,15 @@ const CommandCenterPage = ({
         </Card>
       </div>
 
+      {/* Live Alerts Panel - Real-time trade alerts via SSE */}
+      <LiveAlertsPanel
+        isExpanded={liveAlertsExpanded}
+        onToggleExpand={() => setLiveAlertsExpanded(!liveAlertsExpanded)}
+        onAlertSelect={(alert) => {
+          setSelectedTicker({ symbol: alert.symbol, quote: { price: alert.current_price } });
+        }}
+      />
+
       {/* Main Content - New Central Layout */}
       <div className="grid lg:grid-cols-12 gap-4">
         {/* Left Column - Scanner & Controls */}
