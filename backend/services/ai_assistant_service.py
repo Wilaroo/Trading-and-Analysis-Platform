@@ -321,6 +321,58 @@ Total P&L on {symbol_upper}: ${total_pnl:,.2f}
             self._trading_rules_engine = TradingRulesEngine()
         return self._trading_rules_engine
     
+    @property
+    def chart_pattern_service(self):
+        """Lazy load chart pattern service"""
+        if not hasattr(self, '_chart_pattern_service') or self._chart_pattern_service is None:
+            from services.chart_patterns import get_chart_pattern_service
+            self._chart_pattern_service = get_chart_pattern_service()
+        return self._chart_pattern_service
+    
+    def get_chart_pattern_context(self, pattern_name: str = None, bias: str = None) -> str:
+        """Get chart pattern knowledge for AI context"""
+        try:
+            service = self.chart_pattern_service
+            
+            if pattern_name:
+                # Search for specific pattern
+                patterns = service.search_patterns(pattern_name)
+                if patterns:
+                    p = patterns[0]
+                    return f"""
+CHART PATTERN: {p['name']}
+Bias: {p['bias'].upper()} | Type: {p['pattern_type'].upper()}
+Characteristics: {p['characteristics']}
+Description: {p['description']}
+
+TRADING RULES:
+- Entry: {p['entry']}
+- Stop: {p['stop']}
+- Target: {p['target']}
+- Reliability: {p['reliability']}
+- Invalidation: {p['invalidation']}
+"""
+                return f"Pattern '{pattern_name}' not found in knowledge base."
+            
+            elif bias:
+                # Get patterns by bias
+                patterns = service.get_patterns_by_bias(bias)
+                result = f"=== {bias.upper()} CHART PATTERNS ===\n"
+                for p in patterns[:10]:
+                    result += f"\n**{p['name']}** ({p['pattern_type']})\n"
+                    result += f"  Entry: {p['entry']}\n"
+                    result += f"  Stop: {p['stop']}\n"
+                    result += f"  Target: {p['target']}\n"
+                return result
+            
+            else:
+                # Return summary of all patterns
+                return service.get_knowledge_for_ai()
+                
+        except Exception as e:
+            logger.warning(f"Error getting chart pattern context: {e}")
+            return "Chart pattern knowledge available in system prompt."
+    
     def get_strategy_context(self, strategy_name: str = None) -> str:
         """Get detailed context about trading strategies from the complete knowledge base"""
         try:
