@@ -1232,11 +1232,65 @@ const CommandCenterPage = ({
         </Card>
       </div>
 
-      {/* Main Content - Panels in Order */}
-      <div className="space-y-4">
-        {/* Holdings & Watchlist Row */}
-        <div className="grid lg:grid-cols-2 gap-4">
-          {/* Current Holdings */}
+      {/* Main Content - New Central Layout */}
+      <div className="grid lg:grid-cols-12 gap-4">
+        {/* Left Column - Scanner & Controls */}
+        <div className="lg:col-span-3 space-y-4">
+          {/* Scanner Panel */}
+          <Card>
+            <SectionHeader icon={Target} title="Scanner" action={
+              <button
+                onClick={() => !isConnected ? toast.error('Connect to IB Gateway first') : runScan(activeScanType)}
+                disabled={isScanning || !isConnected}
+                className="flex items-center gap-1.5 text-xs text-cyan-400 hover:text-cyan-300 disabled:text-zinc-600"
+              >
+                {isScanning ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                {isScanning ? 'Scanning...' : 'Scan'}
+              </button>
+            } />
+            
+            {/* Scan Types */}
+            <div className="flex flex-wrap gap-1 mb-3">
+              {scanTypes.slice(0, 6).map(scan => (
+                <button
+                  key={scan.id}
+                  onClick={() => setActiveScanType(scan.id)}
+                  className={`px-2 py-1 text-[10px] rounded-full transition-colors ${
+                    activeScanType === scan.id
+                      ? 'bg-cyan-500 text-black font-medium'
+                      : 'bg-zinc-800 text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  {scan.name}
+                </button>
+              ))}
+            </div>
+
+            {/* Scan Results */}
+            <div className="space-y-1 max-h-[300px] overflow-y-auto">
+              {scanResults.length > 0 ? scanResults.slice(0, 10).map((result, idx) => (
+                <div 
+                  key={idx}
+                  onClick={() => setSelectedTicker({ symbol: result.symbol, quote: result })}
+                  className="flex items-center justify-between p-2 bg-zinc-900/50 rounded hover:bg-zinc-800/50 cursor-pointer"
+                >
+                  <div>
+                    <span className="text-sm font-bold text-white">{result.symbol}</span>
+                    <span className={`text-xs ml-2 ${result.change_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {formatPercent(result.change_percent)}
+                    </span>
+                  </div>
+                  <span className="text-xs text-zinc-500">${formatPrice(result.price)}</span>
+                </div>
+              )) : (
+                <p className="text-center text-zinc-500 text-xs py-4">
+                  {isConnected ? 'Run a scan to find opportunities' : 'Connect to IB to scan'}
+                </p>
+              )}
+            </div>
+          </Card>
+
+          {/* Holdings Panel */}
           <Card>
             <button 
               onClick={() => toggleSection('holdings')}
@@ -1251,7 +1305,7 @@ const CommandCenterPage = ({
             </button>
             
             {expandedSections.holdings && (
-              <div className="space-y-2">
+              <div className="space-y-1 max-h-[200px] overflow-y-auto">
                 {positions.length > 0 ? positions.map((pos, idx) => (
                   <div 
                     key={idx} 
@@ -1259,26 +1313,41 @@ const CommandCenterPage = ({
                     onClick={() => setSelectedTicker({ symbol: pos.symbol, quote: { price: pos.avg_cost } })}
                   >
                     <div>
-                      <span className="font-bold text-white">{pos.symbol}</span>
-                      <span className="text-xs text-zinc-500 ml-2">{pos.quantity} shares</span>
+                      <span className="font-bold text-white text-sm">{pos.symbol}</span>
+                      <span className="text-xs text-zinc-500 ml-1">{pos.quantity}</span>
                     </div>
-                    <div className="text-right">
-                      <p className="text-sm font-mono text-white">${formatPrice(pos.avg_cost)}</p>
-                      <p className={`text-xs ${(pos.unrealized_pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {formatCurrency(pos.unrealized_pnl || 0)}
-                      </p>
-                    </div>
+                    <span className={`text-xs ${(pos.unrealized_pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {formatCurrency(pos.unrealized_pnl || 0)}
+                    </span>
                   </div>
                 )) : (
-                  <p className="text-center text-zinc-500 text-sm py-4">No open positions</p>
+                  <p className="text-center text-zinc-500 text-xs py-2">No positions</p>
                 )}
               </div>
             )}
           </Card>
+        </div>
 
-          {/* Watchlist */}
-          <Card>
-            <SectionHeader icon={Eye} title="Watchlist" count={watchlist.length} />
+        {/* CENTER - AI Command Panel */}
+        <div className="lg:col-span-6">
+          <div className="h-[calc(100vh-220px)] min-h-[600px]">
+            <AICommandPanel
+              onTickerSelect={(ticker) => setSelectedTicker(ticker)}
+              watchlist={watchlist}
+              alerts={[...enhancedAlerts, ...alerts]}
+              opportunities={opportunities}
+              earnings={earnings}
+              portfolio={positions}
+              scanResults={scanResults}
+              marketIndices={marketContext?.indices || []}
+              isConnected={isConnected}
+              onRefresh={() => runScan(activeScanType)}
+            />
+          </div>
+        </div>
+
+        {/* Right Column - Alerts & Opportunities */}
+        <div className="lg:col-span-3 space-y-4">
             <div className="space-y-2">
               {watchlist.length > 0 ? watchlist.slice(0, 8).map((item, idx) => (
                 <div 
