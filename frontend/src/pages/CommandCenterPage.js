@@ -234,6 +234,38 @@ const CommandCenterPage = ({
   const [selectedTimeframeTab, setSelectedTimeframeTab] = useState('all');
   const [isComprehensiveScanning, setIsComprehensiveScanning] = useState(false);
 
+  // Keyboard shortcuts
+  useKeyboardShortcuts({
+    'ctrl+k': () => {
+      // Focus search bar
+      if (searchInputRef.current) {
+        searchInputRef.current.focus();
+        setShowRecentSearches(true);
+      }
+    },
+    'ctrl+shift+a': () => {
+      // Toggle AI Assistant
+      setShowAssistant(prev => !prev);
+    },
+    'escape': () => {
+      // Close modals
+      if (selectedTicker) {
+        setSelectedTicker(null);
+      } else if (tradeModal.isOpen) {
+        setTradeModal({ isOpen: false, ticker: null, action: null });
+      } else if (showAssistant) {
+        setShowAssistant(false);
+      } else if (showRecentSearches) {
+        setShowRecentSearches(false);
+      }
+    },
+    'ctrl+m': () => {
+      // Toggle sound
+      setSoundEnabled(prev => !prev);
+      toast.info(soundEnabled ? 'Sound disabled' : 'Sound enabled');
+    },
+  }, isActiveTab);
+
   const scanTypes = [
     { id: 'TOP_PERC_GAIN', label: 'Top Gainers', icon: TrendingUp },
     { id: 'TOP_PERC_LOSE', label: 'Top Losers', icon: TrendingDown },
