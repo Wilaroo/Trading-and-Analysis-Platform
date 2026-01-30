@@ -1,12 +1,13 @@
 """
 Newsletter API Router
-Endpoints for premarket newsletter generation and ticker-specific news
+Endpoints for premarket newsletter generation, news, and earnings data
 """
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from services.newsletter_service import get_newsletter_service
 from services.news_service import get_news_service
+from services.earnings_service import get_earnings_service
 from services.alpaca_service import get_alpaca_service
 from datetime import datetime, timezone
 
