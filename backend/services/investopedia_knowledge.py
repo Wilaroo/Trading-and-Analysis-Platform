@@ -1,7 +1,7 @@
 """
-Investopedia Technical Analysis Knowledge Base
+Investopedia Trading & Investment Knowledge Base
 Comprehensive trading knowledge scraped from Investopedia
-Integrates: Technical Analysis, Indicators, Candlestick Patterns, Risk Management
+Integrates: Technical Analysis, Indicators, Candlestick Patterns, Risk Management, Fundamental Analysis
 For use by AI Assistant in trade analysis and education
 """
 from typing import Dict, List, Optional
