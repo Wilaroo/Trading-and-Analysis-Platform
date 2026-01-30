@@ -2677,6 +2677,13 @@ async def startup_event():
     await background_scanner.start()
     print("Background scanner started - Live alerts active")
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean shutdown of background services"""
+    await background_scanner.stop()
+    print("Background scanner stopped")
+
+
 @app.websocket("/ws/quotes")
 async def websocket_quotes(websocket: WebSocket):
     """WebSocket endpoint for real-time quote streaming"""
