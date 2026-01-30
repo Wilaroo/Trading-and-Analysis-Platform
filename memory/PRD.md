@@ -31,14 +31,21 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
 /app/
 ├── backend/
 │   ├── routers/
-│   │   └── assistant.py          # AI endpoints including /score-setup
+│   │   ├── assistant.py          # AI endpoints
+│   │   ├── scanner.py            # Predictive scanner endpoints
+│   │   ├── alerts.py             # Advanced alert system endpoints
+│   │   └── technicals.py         # Real-time technical analysis
 │   ├── services/
 │   │   ├── ai_assistant_service.py     # Main AI orchestrator
+│   │   ├── ai_market_intelligence.py   # Comprehensive AI context aggregator
+│   │   ├── realtime_technical_service.py # Live technical indicators from Alpaca
+│   │   ├── alert_system.py             # Timeframe-organized alerts
+│   │   ├── predictive_scanner.py       # Setup detection and probability
 │   │   ├── trading_intelligence.py     # Unified scoring engine
+│   │   ├── fundamental_data_service.py # Live fundamentals from Finnhub
 │   │   ├── strategy_knowledge.py       # Proprietary strategies
-│   │   ├── chart_patterns.py           # Basic chart patterns
 │   │   ├── chart_patterns_detailed.py  # 36+ detailed patterns
-│   │   ├── investopedia_knowledge.py   # Technical + Fundamental analysis
+│   │   ├── investopedia_knowledge.py   # Technical + Fundamental knowledge
 │   │   └── ib_flex_service.py          # IB trade history
 │   └── server.py
 └── frontend/
