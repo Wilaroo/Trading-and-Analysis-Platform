@@ -300,17 +300,47 @@ Format your responses clearly with sections when appropriate. Use specific numbe
         """Build context string with relevant knowledge and data"""
         context_parts = []
         
-        # 1. Get relevant strategies from knowledge base
+        # Check if user is asking about news/market
+        news_keywords = ['news', 'market', 'today', 'happening', 'morning', 'premarket', 'headlines', 'sentiment']
+        wants_news = any(keyword in user_message.lower() for keyword in news_keywords)
+        
+        # 1. Get market news if relevant
+        if wants_news:
+            try:
+                news_summary = await self.news_service.get_market_summary()
+                if news_summary.get("available"):
+                    context_parts.append("TODAY'S MARKET NEWS:")
+                    context_parts.append(f"Overall Sentiment: {news_summary.get('overall_sentiment', 'unknown').upper()}")
+                    
+                    themes = news_summary.get("themes", [])
+                    if themes:
+                        context_parts.append(f"Key Themes: {', '.join(themes)}")
+                    
+                    headlines = news_summary.get("headlines", [])
+                    if headlines:
+                        context_parts.append("\nTop Headlines:")
+                        for i, headline in enumerate(headlines[:8], 1):
+                            context_parts.append(f"  {i}. {headline}")
+                    
+                    sentiment = news_summary.get("sentiment_breakdown", {})
+                    context_parts.append(f"\nSentiment: {sentiment.get('bullish', 0)} bullish, {sentiment.get('bearish', 0)} bearish, {sentiment.get('neutral', 0)} neutral")
+                else:
+                    context_parts.append("MARKET NEWS: Unavailable - check Alpaca API connection")
+            except Exception as e:
+                logger.warning(f"Error fetching news: {e}")
+                context_parts.append("MARKET NEWS: Error fetching news data")
+        
+        # 2. Get relevant strategies from knowledge base
         try:
             relevant = self.knowledge_service.search(user_message, limit=5)
             if relevant:
-                context_parts.append("RELEVANT KNOWLEDGE FROM YOUR TRAINING:")
+                context_parts.append("\nRELEVANT KNOWLEDGE FROM YOUR TRAINING:")
                 for item in relevant[:5]:
                     context_parts.append(f"- [{item.get('type', 'note').upper()}] {item.get('title', '')}: {item.get('content', '')[:200]}")
         except Exception as e:
             logger.warning(f"Error fetching knowledge: {e}")
         
-        # 2. Get trading rules
+        # 3. Get trading rules
         try:
             rules = self.knowledge_service.get_by_type("rule")
             if rules:
@@ -320,9 +350,9 @@ Format your responses clearly with sections when appropriate. Use specific numbe
         except Exception as e:
             logger.warning(f"Error fetching rules: {e}")
         
-        # 3. Extract stock symbols from message and get data
+        # 4. Extract stock symbols from message and get data
         symbols = re.findall(r'\b([A-Z]{1,5})\b', user_message.upper())
-        common_words = {'I', 'A', 'THE', 'AND', 'OR', 'FOR', 'TO', 'IS', 'IT', 'IN', 'ON', 'AT', 'BY', 'BE', 'AS', 'AN', 'ARE', 'WAS', 'IF', 'MY', 'ME', 'DO', 'SO', 'UP', 'AM', 'CAN', 'HOW', 'WHAT', 'BUY', 'SELL', 'LONG', 'SHORT'}
+        common_words = {'I', 'A', 'THE', 'AND', 'OR', 'FOR', 'TO', 'IS', 'IT', 'IN', 'ON', 'AT', 'BY', 'BE', 'AS', 'AN', 'ARE', 'WAS', 'IF', 'MY', 'ME', 'DO', 'SO', 'UP', 'AM', 'CAN', 'HOW', 'WHAT', 'BUY', 'SELL', 'LONG', 'SHORT', 'NEWS', 'TODAY', 'MARKET'}
         symbols = [s for s in symbols if s not in common_words and len(s) >= 2]
         
         if symbols:
@@ -337,10 +367,21 @@ Format your responses clearly with sections when appropriate. Use specific numbe
                     context_parts.append(f"  Signal: {q_score.quality_signal}")
                     if quality.roe:
                         context_parts.append(f"  ROE: {quality.roe:.1%}, D/A: {quality.da:.1%}" if quality.da else f"  ROE: {quality.roe:.1%}")
+                    
+                    # Get ticker-specific news if mentioned
+                    if wants_news:
+                        try:
+                            ticker_news = await self.news_service.get_ticker_news(symbol, max_items=3)
+                            if ticker_news and not ticker_news[0].get("is_placeholder"):
+                                context_parts.append(f"  Recent News:")
+                                for news_item in ticker_news[:3]:
+                                    context_parts.append(f"    - {news_item.get('headline', '')[:100]}")
+                        except Exception:
+                            pass
                 except Exception as ex:
                     logger.warning(f"Error getting data for {symbol}: {ex}")
         
-        # 4. Knowledge base stats
+        # 5. Knowledge base stats
         try:
             stats = self.knowledge_service.get_stats()
             context_parts.append(f"\nKNOWLEDGE BASE: {stats.get('total_entries', 0)} entries ({stats.get('by_type', {}).get('strategy', 0)} strategies, {stats.get('by_type', {}).get('rule', 0)} rules)")
