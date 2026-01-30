@@ -323,6 +323,14 @@ Total P&L on {symbol_upper}: ${total_pnl:,.2f}
         return self._trading_rules_engine
     
     @property
+    def trading_intelligence(self):
+        """Lazy load trading intelligence system"""
+        if self._trading_intelligence is None:
+            from services.trading_intelligence import get_trading_intelligence
+            self._trading_intelligence = get_trading_intelligence()
+        return self._trading_intelligence
+    
+    @property
     def chart_pattern_service(self):
         """Lazy load chart pattern service"""
         if not hasattr(self, '_chart_pattern_service') or self._chart_pattern_service is None:
