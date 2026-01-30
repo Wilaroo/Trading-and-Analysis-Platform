@@ -588,6 +588,36 @@ TRADING RULES:
             strategy_context = self.get_strategy_context(strategy_name)
             context_parts.append(strategy_context)
         
+        # 2b. Check if user is asking about CHART PATTERNS
+        chart_pattern_keywords = ['pattern', 'patterns', 'triangle', 'flag', 'pennant', 'wedge', 'head and shoulders',
+                                  'head & shoulders', 'double top', 'double bottom', 'triple top', 'triple bottom',
+                                  'cup and handle', 'channel', 'diamond', 'rounding', 'wyckoff', 'megaphone',
+                                  'broadening', 'rectangle', 'consolidation', 'reversal pattern', 'continuation pattern']
+        wants_chart_patterns = any(keyword in user_message.lower() for keyword in chart_pattern_keywords)
+        
+        if wants_chart_patterns:
+            # Extract specific pattern name if mentioned
+            pattern_name = None
+            specific_patterns = ['ascending triangle', 'descending triangle', 'bull flag', 'bear flag', 
+                               'bull pennant', 'bear pennant', 'head and shoulders', 'inverse head',
+                               'double top', 'double bottom', 'triple top', 'triple bottom',
+                               'cup and handle', 'falling wedge', 'rising wedge', 'diamond',
+                               'wyckoff', 'megaphone', 'rectangle', 'symmetrical triangle']
+            for p in specific_patterns:
+                if p in user_message.lower():
+                    pattern_name = p
+                    break
+            
+            # Detect bias preference
+            bias = None
+            if 'bullish' in user_message.lower():
+                bias = 'bullish'
+            elif 'bearish' in user_message.lower():
+                bias = 'bearish'
+            
+            chart_pattern_context = self.get_chart_pattern_context(pattern_name, bias)
+            context_parts.append(chart_pattern_context)
+        
         # 3. Get relevant strategies from knowledge base
         try:
             relevant = self.knowledge_service.search(user_message, limit=5)
