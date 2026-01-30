@@ -1337,6 +1337,44 @@ curl /api/market-context/indicators/regime
 - `IB_FLEX_QUERY_ID` - TraderSync Activity Flex Query ID (944620)
 
 
+### Jan 30, 2026 - AI Command Center Centralized Layout
+**Implemented:**
+
+1. **New 3-Column Layout** - Centralized AI-first design
+   - Left Column (3/12): Scanner + Holdings
+   - CENTER Column (6/12): AI Command Center - main hub
+   - Right Column (3/12): Market Intel + Alerts + P&L Summary
+
+2. **AI Command Center Component** (`/app/frontend/src/components/AICommandPanel.jsx`)
+   - Single scrollable panel with all features consolidated
+   - AI Chat always visible at top with quick action pills
+   - Collapsible sections with expand/collapse toggles
+   - Clean, unified interface
+
+3. **Sections in AI Command Panel:**
+   - AI Chat (always visible) - Quick actions: My Performance, Market News, Rule Check
+   - Search Ticker - with recent searches
+   - Portfolio/Holdings
+   - Market Indices (SPY, QQQ, VIX)
+   - Alerts (price alerts + enhanced alerts)
+   - Opportunities (scanner results)
+   - Earnings Calendar
+   - Watchlist
+   - Scanner Results
+
+4. **Visual Design:**
+   - Gradient header (cyan to amber)
+   - Connection status indicator
+   - Consistent card styling with collapsible headers
+   - Compact, information-dense layout
+
+**Files Created:**
+- `/app/frontend/src/components/AICommandPanel.jsx` - New centralized AI panel (500+ lines)
+
+**Files Modified:**
+- `/app/frontend/src/pages/CommandCenterPage.js` - Restructured to 3-column layout with AICommandPanel as center
+
+
 ### Jan 30, 2026 - Ticker Search Bar & AI Strategy Recommendations
 **Implemented:**
 
