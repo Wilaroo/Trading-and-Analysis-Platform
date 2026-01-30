@@ -331,6 +331,14 @@ Total P&L on {symbol_upper}: ${total_pnl:,.2f}
         return self._trading_intelligence
     
     @property
+    def investopedia_knowledge(self):
+        """Lazy load Investopedia knowledge service"""
+        if not hasattr(self, '_investopedia_knowledge') or self._investopedia_knowledge is None:
+            from services.investopedia_knowledge import get_investopedia_knowledge
+            self._investopedia_knowledge = get_investopedia_knowledge()
+        return self._investopedia_knowledge
+    
+    @property
     def chart_pattern_service(self):
         """Lazy load chart pattern service"""
         if not hasattr(self, '_chart_pattern_service') or self._chart_pattern_service is None:
