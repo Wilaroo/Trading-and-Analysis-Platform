@@ -1348,76 +1348,76 @@ const CommandCenterPage = ({
 
         {/* Right Column - Alerts & Opportunities */}
         <div className="lg:col-span-3 space-y-4">
-            <div className="space-y-2">
-              {watchlist.length > 0 ? watchlist.slice(0, 8).map((item, idx) => (
+          {/* Market Intelligence Panel */}
+          <Card>
+            <div 
+              onClick={() => toggleSection('news')}
+              className="w-full flex items-center justify-between mb-3 cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <Newspaper className="w-5 h-5 text-purple-400" />
+                <h3 className="text-sm font-semibold uppercase tracking-wider">Market Intel</h3>
+              </div>
+              <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.news ? 'rotate-180' : ''}`} />
+            </div>
+            
+            {expandedSections.news && marketIntelligence && (
+              <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                {marketIntelligence.themes?.slice(0, 3).map((theme, idx) => (
+                  <div key={idx} className="p-2 bg-zinc-900/50 rounded">
+                    <span className="text-xs text-purple-400 font-medium">{theme.title}</span>
+                    <p className="text-[10px] text-zinc-400 mt-1">{theme.summary}</p>
+                  </div>
+                ))}
+                {!marketIntelligence.themes?.length && (
+                  <p className="text-xs text-zinc-500 text-center py-2">Generate market intel</p>
+                )}
+              </div>
+            )}
+          </Card>
+
+          {/* Enhanced Alerts Panel */}
+          <Card>
+            <SectionHeader icon={Bell} title="Alerts" count={enhancedAlerts.length + alerts.length} />
+            <div className="space-y-1 max-h-[250px] overflow-y-auto">
+              {enhancedAlerts.length > 0 ? enhancedAlerts.slice(0, 5).map((alert, idx) => (
                 <div 
                   key={idx}
-                  className="flex items-center justify-between p-2 bg-zinc-900/50 rounded hover:bg-zinc-900 cursor-pointer"
-                  onClick={() => setSelectedTicker(item)}
+                  onClick={() => setSelectedEnhancedAlert(alert)}
+                  className="p-2 bg-zinc-900/50 rounded hover:bg-zinc-800/50 cursor-pointer"
                 >
-                  <span className="font-bold text-white">{item.symbol}</span>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-mono text-white">${formatPrice(item.price)}</span>
-                    <span className={`text-xs font-mono ${item.change_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {formatPercent(item.change_percent)}
-                    </span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-bold text-white">{alert.symbol}</span>
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${
+                      alert.grade === 'A' ? 'bg-green-500 text-black' :
+                      alert.grade === 'B' ? 'bg-cyan-500 text-black' : 'bg-yellow-500 text-black'
+                    }`}>{alert.grade}</span>
                   </div>
+                  <p className="text-[10px] text-zinc-400 mt-1 truncate">{alert.headline}</p>
                 </div>
               )) : (
-                <p className="text-center text-zinc-500 text-sm py-4">
-                  {isConnected ? 'Loading watchlist...' : 'Connect to view watchlist'}
-                </p>
+                <p className="text-xs text-zinc-500 text-center py-2">No active alerts</p>
               )}
             </div>
           </Card>
-        </div>
 
-        {/* 1. Market Intelligence */}
-        <Card>
-          <div 
-            onClick={() => toggleSection('news')}
-            className="w-full flex items-center justify-between mb-3 cursor-pointer"
-          >
-            <div className="flex items-center gap-2">
-              <Newspaper className="w-5 h-5 text-purple-400" />
-              <h3 className="text-sm font-semibold uppercase tracking-wider">Market Intelligence</h3>
-              {isGeneratingIntelligence && (
-                <RefreshCw className="w-4 h-4 text-purple-400 animate-spin" />
-              )}
+          {/* Quick Stats Summary */}
+          <Card>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="p-2 bg-zinc-900/50 rounded text-center">
+                <span className="text-[10px] text-zinc-500 block">Net Liq</span>
+                <span className="text-sm font-mono text-white">{formatCurrency(account?.net_liquidation)}</span>
+              </div>
+              <div className="p-2 bg-zinc-900/50 rounded text-center">
+                <span className="text-[10px] text-zinc-500 block">P&L</span>
+                <span className={`text-sm font-mono ${totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {formatCurrency(account?.unrealized_pnl || totalPnL)}
+                </span>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              {/* Auto-Schedule Toggle */}
-              <button
-                onClick={(e) => { e.stopPropagation(); togglePremarketSchedule(); }}
-                className={`text-xs px-2 py-1 rounded transition-colors ${
-                  premarketScheduled 
-                    ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
-                    : 'bg-zinc-800 text-zinc-400 border border-zinc-700'
-                }`}
-                title={premarketScheduled ? 'Auto-generates at 6:30 AM ET' : 'Enable daily pre-market briefing'}
-              >
-                <Clock className="w-3 h-3 inline mr-1" />
-                {premarketScheduled ? '6:30 AM' : 'Schedule'}
-              </button>
-              {isConnected && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); autoGenerateMarketIntelligence(); }}
-                  disabled={isGeneratingIntelligence}
-                  className="text-xs text-purple-400 hover:text-purple-300 disabled:opacity-50"
-                >
-                  {isGeneratingIntelligence ? 'Generating...' : 'Refresh'}
-                </button>
-              )}
-              <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.news ? 'rotate-180' : ''}`} />
-            </div>
-          </div>
-          
-          {expandedSections.news && (
-            <div className="space-y-3">
-              {/* Loading State */}
-              {isGeneratingIntelligence && (
-                <div className="text-center py-6">
-                  <RefreshCw className="w-8 h-8 text-purple-400 mx-auto mb-2 animate-spin" />
+          </Card>
+        </div>
+      </div>
                   <p className="text-sm text-purple-400">Analyzing markets...</p>
                   <p className="text-xs text-zinc-500 mt-1">Gathering news, stocks, and world events</p>
                 </div>
