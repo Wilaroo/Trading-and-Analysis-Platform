@@ -33,7 +33,7 @@ class EarningsService:
             return {"available": False, "error": "No API key"}
         
         try:
-            url = f"https://finnhub.io/api/v1/calendar/earnings"
+            url = "https://finnhub.io/api/v1/calendar/earnings"
             params = {
                 "symbol": symbol.upper(),
                 "token": self._finnhub_key
@@ -155,7 +155,7 @@ class EarningsService:
             return {"available": False, "error": "No API key"}
         
         try:
-            url = f"https://finnhub.io/api/v1/stock/metric"
+            url = "https://finnhub.io/api/v1/stock/metric"
             params = {
                 "symbol": symbol.upper(),
                 "metric": "all",
