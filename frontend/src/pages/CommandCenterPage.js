@@ -5,6 +5,7 @@ import {
   TrendingDown,
   RefreshCw,
   Zap,
+  Target,
   Activity,
   Search,
   X,
@@ -42,6 +43,7 @@ import {
   Sparkles,
   Bot
 } from 'lucide-react';
+import * as LightweightCharts from 'lightweight-charts';
 import api, { apiLongRunning } from '../utils/api';
 import { toast } from 'sonner';
 import AIAssistant from '../components/AIAssistant';
