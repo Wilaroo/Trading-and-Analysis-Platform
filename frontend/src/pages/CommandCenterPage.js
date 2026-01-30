@@ -2043,6 +2043,29 @@ const CommandCenterPage = ({
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
+  // Ticker Search Handler
+  const handleTickerSearch = async (e) => {
+    e.preventDefault();
+    const symbol = tickerSearchQuery.trim().toUpperCase();
+    if (!symbol) return;
+    
+    setIsSearching(true);
+    try {
+      // Open the ticker detail modal with the searched symbol
+      setSelectedTicker({ 
+        symbol, 
+        quote: {},
+        fromSearch: true  // Flag to indicate this came from search
+      });
+      setTickerSearchQuery('');
+      toast.success(`Loading analysis for ${symbol}...`);
+    } catch (err) {
+      console.error('Search error:', err);
+      toast.error('Failed to search ticker');
+    }
+    setIsSearching(false);
+  };
+
   const handleTrade = (ticker, action) => {
     setTradeModal({ isOpen: true, ticker, action });
     setSelectedTicker(null);
