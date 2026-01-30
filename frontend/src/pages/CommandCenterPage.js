@@ -1486,6 +1486,16 @@ const CommandCenterPage = ({
   // Ticker Search state
   const [tickerSearchQuery, setTickerSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [recentSearches, setRecentSearches] = useState(() => {
+    try {
+      const saved = localStorage.getItem('recentTickerSearches');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [showRecentSearches, setShowRecentSearches] = useState(false);
+  const searchInputRef = useRef(null);
   
   // New P1 features state
   const [soundEnabled, setSoundEnabled] = useState(true);
