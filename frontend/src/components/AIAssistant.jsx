@@ -17,7 +17,8 @@ import {
   Minimize2,
   Maximize2,
   Target,
-  Newspaper
+  Newspaper,
+  BarChart3
 } from 'lucide-react';
 import api from '../utils/api';
 import { toast } from 'sonner';
