@@ -679,3 +679,324 @@ async def find_strategy_setups(strategy: str, limit: int = 5):
     except Exception as e:
         logger.error(f"Error finding setups: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# ===================== TRADING INTELLIGENCE ENDPOINTS =====================
+
+class SetupScoreRequest(BaseModel):
+    """Request model for comprehensive setup scoring"""
+    symbol: str = Field(..., description="Stock symbol")
+    strategy: str = Field(..., description="Strategy name (e.g., 'Spencer Scalp', 'Rubber Band')")
+    direction: str = Field(..., description="Trade direction: 'long' or 'short'")
+    entry_price: float = Field(..., description="Planned entry price")
+    stop_price: float = Field(..., description="Stop loss price")
+    rvol: Optional[float] = Field(default=1.0, description="Relative volume")
+    catalyst_score: Optional[int] = Field(default=0, description="Catalyst score (-10 to +10)")
+    market_regime: Optional[str] = Field(default="volatile", description="Market condition")
+    time_of_day: Optional[str] = Field(default="prime_time", description="Current time period")
+    detected_patterns: Optional[List[str]] = Field(default=None, description="Detected chart patterns")
+
+
+class ValidateTradeRequest(BaseModel):
+    """Request model for trade validation"""
+    symbol: str = Field(..., description="Stock symbol")
+    strategy: str = Field(..., description="Strategy name")
+    direction: str = Field(..., description="Trade direction: 'long' or 'short'")
+    entry_price: float = Field(..., description="Planned entry price")
+    stop_price: float = Field(..., description="Stop loss price")
+    rvol: float = Field(default=1.0, description="Relative volume")
+    against_spy_trend: Optional[bool] = Field(default=False, description="Is trade against SPY trend?")
+    catalyst_score: Optional[int] = Field(default=0, description="Catalyst score (-10 to +10)")
+
+
+@router.post("/intelligence/score-setup")
+async def score_trade_setup(request: SetupScoreRequest):
+    """
+    Comprehensive trade setup scoring using the Trading Intelligence System.
+    
+    Evaluates setup against:
+    - Volume requirements for the strategy
+    - Time of day alignment
+    - Market regime fit
+    - Chart pattern synergy
+    - Catalyst strength
+    - Technical alignment
+    - Risk/reward quality
+    
+    Returns:
+    - Total score (0-100+)
+    - Letter grade (A+, A, B+, B, C, F)
+    - Position sizing recommendation
+    - Detailed score breakdown
+    - Trade/Skip decision
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    try:
+        from services.trading_intelligence import get_trading_intelligence, MarketCondition, TimeOfDay
+        
+        ti = get_trading_intelligence()
+        
+        # Map string inputs to enums
+        regime_map = {
+            "trending_up": MarketCondition.TRENDING_UP,
+            "trending_down": MarketCondition.TRENDING_DOWN,
+            "range_bound": MarketCondition.RANGE_BOUND,
+            "volatile": MarketCondition.VOLATILE,
+            "choppy": MarketCondition.CHOPPY,
+            "breakout": MarketCondition.BREAKOUT,
+            "mean_reversion": MarketCondition.MEAN_REVERSION
+        }
+        
+        time_map = {
+            "premarket": TimeOfDay.PREMARKET,
+            "opening_auction": TimeOfDay.OPENING_AUCTION,
+            "opening_drive": TimeOfDay.OPENING_DRIVE,
+            "morning_momentum": TimeOfDay.MORNING_MOMENTUM,
+            "prime_time": TimeOfDay.PRIME_TIME,
+            "late_morning": TimeOfDay.LATE_MORNING,
+            "midday": TimeOfDay.MIDDAY,
+            "afternoon": TimeOfDay.AFTERNOON,
+            "power_hour": TimeOfDay.POWER_HOUR
+        }
+        
+        market_regime = regime_map.get(request.market_regime, MarketCondition.VOLATILE)
+        time_of_day = time_map.get(request.time_of_day, TimeOfDay.PRIME_TIME)
+        
+        result = ti.score_trade_setup(
+            symbol=request.symbol.upper(),
+            strategy=request.strategy,
+            direction=request.direction.lower(),
+            entry_price=request.entry_price,
+            stop_price=request.stop_price,
+            current_price=request.entry_price,  # Assume current = entry for scoring
+            rvol=request.rvol,
+            catalyst_score=request.catalyst_score,
+            market_regime=market_regime,
+            time_of_day=time_of_day,
+            detected_patterns=request.detected_patterns
+        )
+        
+        return {
+            "success": True,
+            **result
+        }
+        
+    except Exception as e:
+        logger.error(f"Error scoring setup: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/intelligence/validate-trade")
+async def validate_trade_idea(request: ValidateTradeRequest):
+    """
+    Validate a trade idea with go/no-go decision.
+    
+    Checks:
+    - Universal avoidance rules
+    - Strategy-specific avoidance
+    - Time restrictions
+    - Regime alignment
+    - Volume requirements
+    - Catalyst alignment
+    
+    Returns:
+    - Decision: STRONG GO, GO, NEUTRAL, CAUTION, HIGH RISK, NO TRADE
+    - Confidence percentage
+    - Blockers (critical issues)
+    - Warnings (concerns)
+    - Confirmations (positive factors)
+    - Human-readable recommendation
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    try:
+        from services.trading_intelligence import get_trading_intelligence, MarketCondition, TimeOfDay
+        from datetime import datetime
+        
+        ti = get_trading_intelligence()
+        
+        # Determine current time of day
+        now = datetime.now()
+        hour = now.hour
+        minute = now.minute
+        
+        if hour < 9 or (hour == 9 and minute < 30):
+            tod = TimeOfDay.PREMARKET
+        elif hour == 9 and minute < 35:
+            tod = TimeOfDay.OPENING_AUCTION
+        elif hour == 9 and minute < 45:
+            tod = TimeOfDay.OPENING_DRIVE
+        elif hour == 9:
+            tod = TimeOfDay.MORNING_MOMENTUM
+        elif hour == 10 and minute < 45:
+            tod = TimeOfDay.PRIME_TIME
+        elif hour < 12 or (hour == 11 and minute < 30):
+            tod = TimeOfDay.LATE_MORNING
+        elif hour < 14 or (hour == 13 and minute < 30):
+            tod = TimeOfDay.MIDDAY
+        elif hour < 15:
+            tod = TimeOfDay.AFTERNOON
+        else:
+            tod = TimeOfDay.POWER_HOUR
+        
+        result = ti.validate_trade_idea(
+            symbol=request.symbol.upper(),
+            strategy=request.strategy,
+            direction=request.direction.lower(),
+            entry_price=request.entry_price,
+            stop_price=request.stop_price,
+            rvol=request.rvol,
+            time_of_day=tod,
+            market_regime=MarketCondition.VOLATILE,  # Default; could be passed in
+            catalyst_score=request.catalyst_score,
+            against_spy_trend=request.against_spy_trend
+        )
+        
+        return {
+            "success": True,
+            "time_of_day": tod.value,
+            **result
+        }
+        
+    except Exception as e:
+        logger.error(f"Error validating trade: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/intelligence/pattern-strategy-match")
+async def match_patterns_to_strategies(
+    patterns: str,
+    direction: str = "long"
+):
+    """
+    Given detected chart patterns, recommend the best trading strategies.
+    
+    Args:
+        patterns: Comma-separated list of patterns (e.g., "bull_flag,ascending_triangle")
+        direction: Trade direction preference ("long" or "short")
+    
+    Returns:
+        List of strategies that synergize well with the detected patterns
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    try:
+        from services.trading_intelligence import get_trading_intelligence
+        
+        ti = get_trading_intelligence()
+        pattern_list = [p.strip() for p in patterns.split(",")]
+        
+        recommendations = ti.match_patterns_to_strategies(pattern_list, direction.lower())
+        
+        return {
+            "success": True,
+            "detected_patterns": pattern_list,
+            "direction": direction,
+            "recommendations": recommendations
+        }
+        
+    except Exception as e:
+        logger.error(f"Error matching patterns: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/intelligence/market-analysis")
+async def analyze_market_conditions(
+    spy_trend: str = "neutral",
+    vix_level: float = 15.0,
+    breadth: str = "neutral",
+    rvol: float = 1.0,
+    gaps_filling: bool = False,
+    breakouts_working: bool = True
+):
+    """
+    Analyze current market conditions and get regime-specific recommendations.
+    
+    Returns:
+    - Market regime classification
+    - Trading bias
+    - Recommended strategies
+    - Strategies to avoid
+    - Position sizing guidance
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    try:
+        from services.trading_intelligence import get_trading_intelligence
+        
+        ti = get_trading_intelligence()
+        
+        analysis = ti.analyze_market_conditions(
+            spy_trend=spy_trend,
+            vix_level=vix_level,
+            market_breadth=breadth,
+            rvol_market=rvol,
+            gaps_filling=gaps_filling,
+            breakouts_working=breakouts_working
+        )
+        
+        return {
+            "success": True,
+            "regime": analysis.regime.value,
+            "bias": analysis.bias.value,
+            "strength_score": analysis.strength_score,
+            "vix_assessment": analysis.vix_level,
+            "recommended_strategies": analysis.recommended_strategies,
+            "avoid_strategies": analysis.avoid_strategies,
+            "position_sizing": analysis.position_sizing,
+            "notes": analysis.notes
+        }
+        
+    except Exception as e:
+        logger.error(f"Error analyzing market: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/intelligence/predict-outcome")
+async def predict_trade_outcome(
+    setup_score: int,
+    pattern_reliability: float = 0.65,
+    regime_alignment: float = 75.0,
+    volume_strength: float = 2.0
+):
+    """
+    Predict probability of trade success based on multiple factors.
+    
+    Args:
+        setup_score: Overall setup score (0-100)
+        pattern_reliability: Historical pattern success rate (0-1, e.g., 0.67 for bull flag)
+        regime_alignment: How well strategy fits current regime (0-100)
+        volume_strength: RVOL level
+    
+    Returns:
+        Success probability, expected value, confidence level, and factor breakdown
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    try:
+        from services.trading_intelligence import get_trading_intelligence
+        
+        ti = get_trading_intelligence()
+        
+        prediction = ti.predict_trade_outcome(
+            setup_score=setup_score,
+            pattern_reliability=pattern_reliability,
+            regime_alignment=regime_alignment,
+            volume_strength=volume_strength
+        )
+        
+        return {
+            "success": True,
+            **prediction
+        }
+        
+    except Exception as e:
+        logger.error(f"Error predicting outcome: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
