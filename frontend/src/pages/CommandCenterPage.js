@@ -2126,6 +2126,38 @@ const CommandCenterPage = ({
           )}
         </div>
         
+        {/* Ticker Search Bar */}
+        <form onSubmit={handleTickerSearch} className="flex-1 max-w-md mx-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+            <input
+              type="text"
+              value={tickerSearchQuery}
+              onChange={(e) => setTickerSearchQuery(e.target.value.toUpperCase())}
+              placeholder="Search any ticker (e.g., AAPL, TSLA)..."
+              className="w-full pl-10 pr-4 py-2 bg-zinc-900/80 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 text-sm"
+              data-testid="ticker-search-input"
+            />
+            {tickerSearchQuery && (
+              <button
+                type="button"
+                onClick={() => setTickerSearchQuery('')}
+                className="absolute right-10 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-white"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+            <button
+              type="submit"
+              disabled={!tickerSearchQuery || isSearching}
+              className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 bg-cyan-500/20 text-cyan-400 rounded text-xs font-medium hover:bg-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+              data-testid="ticker-search-btn"
+            >
+              {isSearching ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Go'}
+            </button>
+          </div>
+        </form>
+        
         <div className="flex items-center gap-3">
           {/* AI Assistant Button */}
           <button
