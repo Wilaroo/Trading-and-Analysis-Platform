@@ -122,7 +122,7 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
 ## Prioritized Backlog
 
 ### P1 - High Priority
-- [ ] Implement "Rubber Band Scanner" preset
+- [ ] Implement "Rubber Band Scanner" preset (dedicated scanner for user's strategy)
 - [ ] AI Coach proactive warnings for rule violations
 - [ ] Proactive warning for historically losing tickers
 
