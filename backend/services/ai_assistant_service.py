@@ -741,7 +741,113 @@ DECISION: {score_result['trade_or_skip']}
             chart_pattern_context = self.get_chart_pattern_context(pattern_name, bias)
             context_parts.append(chart_pattern_context)
         
-        # 2c. Check if user is asking about SCORING, EVALUATING, or VALIDATING a trade
+        # 2c. Check if user is asking about TECHNICAL INDICATORS (RSI, MACD, Bollinger, etc.)
+        indicator_keywords = ['rsi', 'macd', 'bollinger', 'moving average', 'ema', 'sma', 'stochastic',
+                             'fibonacci', 'fib', 'atr', 'volume analysis', 'indicator', 'oscillator',
+                             'overbought', 'oversold', 'divergence', 'crossover', 'golden cross', 'death cross']
+        wants_indicator_info = any(keyword in user_message.lower() for keyword in indicator_keywords)
+        
+        if wants_indicator_info:
+            try:
+                investopedia = self.investopedia_knowledge
+                # Find specific indicator mentioned
+                indicator_map = {
+                    'rsi': 'rsi', 'relative strength': 'rsi',
+                    'macd': 'macd', 'moving average convergence': 'macd',
+                    'bollinger': 'bollinger_bands', 'bb': 'bollinger_bands',
+                    'fibonacci': 'fibonacci_retracement', 'fib': 'fibonacci_retracement',
+                    'moving average': 'moving_averages', 'ema': 'moving_averages', 'sma': 'moving_averages',
+                    'stochastic': 'stochastic', 'atr': 'atr', 'average true range': 'atr',
+                    'volume': 'volume'
+                }
+                
+                for keyword, indicator_id in indicator_map.items():
+                    if keyword in user_message.lower():
+                        indicator_data = investopedia.get_indicator_knowledge(indicator_id)
+                        if indicator_data:
+                            context_parts.append(f"""
+=== {indicator_data['name']} ===
+Type: {indicator_data['type']}
+{indicator_data['description']}
+
+Calculation: {indicator_data['calculation']}
+
+Interpretation: {indicator_data['interpretation']}
+
+Signals: {', '.join([f"{k}: {v}" for k, v in list(indicator_data['signals'].items())[:4]])}
+
+Trading Tips: {'; '.join(indicator_data['trading_tips'][:3])}
+""")
+                        break
+            except Exception as e:
+                logger.warning(f"Error getting indicator knowledge: {e}")
+        
+        # 2d. Check if user is asking about CANDLESTICK PATTERNS
+        candlestick_keywords = ['doji', 'hammer', 'engulfing', 'shooting star', 'morning star', 'evening star',
+                               'hanging man', 'spinning top', 'three white soldiers', 'three black crows',
+                               'candlestick', 'candle pattern']
+        wants_candlestick_info = any(keyword in user_message.lower() for keyword in candlestick_keywords)
+        
+        if wants_candlestick_info:
+            try:
+                investopedia = self.investopedia_knowledge
+                # Find specific candlestick pattern
+                candle_map = {
+                    'doji': 'doji', 'hammer': 'hammer', 'engulfing': 'bullish_engulfing',
+                    'bullish engulfing': 'bullish_engulfing', 'bearish engulfing': 'bearish_engulfing',
+                    'shooting star': 'shooting_star', 'morning star': 'morning_star',
+                    'evening star': 'evening_star', 'hanging man': 'hanging_man',
+                    'spinning top': 'spinning_top', 'three white soldiers': 'three_white_soldiers',
+                    'three black crows': 'three_black_crows', 'inverted hammer': 'inverted_hammer'
+                }
+                
+                for keyword, pattern_id in candle_map.items():
+                    if keyword in user_message.lower():
+                        candle_data = investopedia.get_candlestick_pattern(pattern_id)
+                        if candle_data:
+                            context_parts.append(f"""
+=== {candle_data['name']} Candlestick Pattern ===
+Type: {candle_data['type']} candle | Bias: {candle_data['bias'].upper()}
+{candle_data['description']}
+
+Identification: {candle_data['identification']}
+Psychology: {candle_data['psychology']}
+Reliability: {candle_data['reliability']}
+Trading Action: {candle_data['trading_action']}
+""")
+                        break
+            except Exception as e:
+                logger.warning(f"Error getting candlestick knowledge: {e}")
+        
+        # 2e. Check if user is asking about RISK MANAGEMENT
+        risk_keywords = ['position size', 'position sizing', 'stop loss', 'risk reward', 'risk management',
+                        'how much to risk', '1% rule', 'one percent', 'max loss', 'daily loss']
+        wants_risk_info = any(keyword in user_message.lower() for keyword in risk_keywords)
+        
+        if wants_risk_info:
+            try:
+                investopedia = self.investopedia_knowledge
+                risk_guide = investopedia.get_risk_management_guide()
+                context_parts.append(f"""
+=== RISK MANAGEMENT KNOWLEDGE ===
+
+1% RULE: {risk_guide['one_percent_rule']['description']}
+Formula: {risk_guide['one_percent_rule']['calculation']}
+
+POSITION SIZING: {risk_guide['position_sizing']['description']}
+Formula: {risk_guide['position_sizing']['formula']}
+
+RISK-REWARD: Minimum {risk_guide['risk_reward_ratio']['minimum']}
+{risk_guide['risk_reward_ratio']['importance']}
+
+STOP LOSS METHODS: {', '.join(risk_guide['stop_loss_placement']['methods'][:3])}
+
+DAILY LOSS LIMIT: {risk_guide['daily_loss_limit']['guideline']}
+""")
+            except Exception as e:
+                logger.warning(f"Error getting risk management knowledge: {e}")
+        
+        # 2f. Check if user is asking about SCORING, EVALUATING, or VALIDATING a trade
         evaluation_keywords = ['score', 'scoring', 'evaluate', 'grade', 'rate', 'quality', 'should i', 
                               'valid', 'validate', 'good trade', 'bad trade', 'a+ setup', 'setup quality',
                               'take this trade', 'enter', 'buy this', 'short this', 'trade idea']
