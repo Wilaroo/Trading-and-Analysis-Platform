@@ -305,13 +305,14 @@ async def enhance_opportunities(data: Dict[str, Any]):
     opportunities = data.get("opportunities", [])
     market_regime = data.get("market_regime", "neutral")
     
-    enhanced = ki.enhance_market_intelligence(opportunities, market_regime)
+    enhanced = await ki.enhance_market_intelligence(opportunities, market_regime, include_news=True)
     
     return {
         "success": True,
         "enhanced_opportunities": enhanced["opportunities"],
         "strategy_insights": enhanced["top_strategy_insights"],
-        "knowledge_stats": enhanced["knowledge_base_stats"]
+        "knowledge_stats": enhanced["knowledge_base_stats"],
+        "market_news": enhanced.get("market_news")
     }
 
 
