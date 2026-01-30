@@ -250,6 +250,22 @@ Format responses with clear sections. Cite specific rules from the playbook."""
             self._trade_history_service = ib_flex_service
         return self._trade_history_service
     
+    @property
+    def market_intelligence(self):
+        """Get the AI market intelligence service for comprehensive context"""
+        if not hasattr(self, '_market_intelligence') or self._market_intelligence is None:
+            from services.ai_market_intelligence import get_ai_market_intelligence
+            self._market_intelligence = get_ai_market_intelligence()
+        return self._market_intelligence
+    
+    @property
+    def technical_service(self):
+        """Get real-time technical analysis service"""
+        if not hasattr(self, '_technical_service') or self._technical_service is None:
+            from services.realtime_technical_service import get_technical_service
+            self._technical_service = get_technical_service()
+        return self._technical_service
+    
     async def get_trade_history_context(self, symbol: str = None) -> str:
         """Get trade history context for AI analysis"""
         try:
