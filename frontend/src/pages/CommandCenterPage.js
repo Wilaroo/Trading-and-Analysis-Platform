@@ -216,6 +216,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
   const [analysis, setAnalysis] = useState(null);
   const [historicalData, setHistoricalData] = useState(null);
   const [qualityData, setQualityData] = useState(null);
+  const [earningsData, setEarningsData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [showTradingLines, setShowTradingLines] = useState(true);
