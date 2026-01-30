@@ -322,3 +322,22 @@ async def get_market_news(
             status_code=500,
             detail=f"Failed to fetch market news: {str(e)}"
         )
+
+
+@router.get("/news/summary")
+async def get_market_news_summary():
+    """
+    Get a summary of today's market news.
+    Returns key headlines, themes, and sentiment for the AI assistant.
+    """
+    try:
+        service = get_news_service()
+        summary = await service.get_market_summary()
+        
+        return summary
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get market summary: {str(e)}"
+        )
