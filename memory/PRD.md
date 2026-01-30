@@ -59,19 +59,30 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
 - ✅ Created stock fundamental scoring system with signals/warnings
 
 ## Key API Endpoints
-- `POST /api/assistant/chat` - AI conversation (with real-time fundamentals + scanner context)
+
+### AI Assistant
+- `POST /api/assistant/chat` - AI conversation (with real-time fundamentals + alert context)
 - `POST /api/assistant/score-setup` - Trade setup scoring
 - `POST /api/assistant/analyze-fundamentals` - Stock fundamental analysis
-- `GET /api/assistant/realtime/fundamentals/{symbol}` - Live fundamental data from Finnhub
-- `GET /api/assistant/realtime/analyze/{symbol}` - Full analysis (fundamentals + technicals)
-- `POST /api/assistant/realtime/compare` - Compare multiple stocks' fundamentals
-- **PREDICTIVE SCANNER ENDPOINTS:**
-- `POST /api/scanner/scan` - Scan for forming trade setups with probability scores
-- `GET /api/scanner/setups` - Get currently tracked forming setups
-- `GET /api/scanner/alerts` - Get active imminent trigger alerts
-- `GET /api/scanner/summary` - Dashboard summary of best opportunities
-- `GET /api/scanner/ai-context` - Formatted context for AI assistant
-- `POST /api/scanner/watchlist` - Set symbols to scan
+- `GET /api/assistant/realtime/fundamentals/{symbol}` - Live fundamental data
+- `GET /api/assistant/realtime/analyze/{symbol}` - Full analysis
+- `POST /api/assistant/realtime/compare` - Compare stocks' fundamentals
+
+### Predictive Scanner
+- `POST /api/scanner/scan` - Scan for forming trade setups
+- `GET /api/scanner/setups` - Get tracked forming setups
+- `GET /api/scanner/alerts` - Get imminent trigger alerts
+- `GET /api/scanner/summary` - Dashboard summary
+
+### Advanced Alert System (NEW)
+- `POST /api/alerts/scan` - Full scan organized by timeframe
+- `GET /api/alerts/scalp` - Scalp alerts: "Setting up now" / "On watch today"
+- `GET /api/alerts/swing` - Swing alerts: "Setting up today" / "This week"
+- `GET /api/alerts/summary` - Quick dashboard summary
+- `POST /api/alerts/check-in-play/{symbol}` - Check if stock is "in play"
+- `GET /api/alerts/scoring-weights` - View timeframe-based scoring weights
+
+### Market Data
 - `GET /api/market/news` - Market news
 - `GET /api/ib/flex-trades` - IB trade history
 
