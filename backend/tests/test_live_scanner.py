@@ -167,7 +167,7 @@ class TestLiveScannerWatchlist:
 
 
 class TestLiveScannerConfig:
-    """Tests for GET/POST /api/live-scanner/config"""
+    """Tests for GET/POST /api/live-scanner/config - Scan interval and setup type configuration"""
     
     def test_get_config_returns_200(self):
         """GET /api/live-scanner/config returns 200"""
@@ -189,8 +189,23 @@ class TestLiveScannerConfig:
         assert "enabled_setups" in data
         assert isinstance(data["enabled_setups"], list)
         
-    def test_update_config(self):
-        """POST /api/live-scanner/config updates configuration"""
+    def test_update_scan_interval_30s(self):
+        """POST /api/live-scanner/config updates scan interval to 30s (aggressive)"""
+        response = requests.post(
+            f"{BASE_URL}/api/live-scanner/config",
+            json={"scan_interval": 30}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] == True
+        assert data["config"]["scan_interval"] == 30
+        
+        # Verify persistence
+        get_response = requests.get(f"{BASE_URL}/api/live-scanner/config")
+        assert get_response.json()["scan_interval"] == 30
+        
+    def test_update_scan_interval_60s(self):
+        """POST /api/live-scanner/config updates scan interval to 60s (standard)"""
         response = requests.post(
             f"{BASE_URL}/api/live-scanner/config",
             json={"scan_interval": 60}
@@ -199,6 +214,74 @@ class TestLiveScannerConfig:
         data = response.json()
         assert data["success"] == True
         assert data["config"]["scan_interval"] == 60
+        
+    def test_update_scan_interval_120s(self):
+        """POST /api/live-scanner/config updates scan interval to 120s (moderate)"""
+        response = requests.post(
+            f"{BASE_URL}/api/live-scanner/config",
+            json={"scan_interval": 120}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["config"]["scan_interval"] == 120
+        
+    def test_update_scan_interval_300s(self):
+        """POST /api/live-scanner/config updates scan interval to 300s (conservative)"""
+        response = requests.post(
+            f"{BASE_URL}/api/live-scanner/config",
+            json={"scan_interval": 300}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["config"]["scan_interval"] == 300
+        
+        # Reset to default
+        requests.post(f"{BASE_URL}/api/live-scanner/config", json={"scan_interval": 60})
+        
+    def test_update_enabled_setups(self):
+        """POST /api/live-scanner/config updates enabled setups"""
+        # Disable some setups
+        response = requests.post(
+            f"{BASE_URL}/api/live-scanner/config",
+            json={"enabled_setups": ["rubber_band", "breakout"]}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] == True
+        assert set(data["config"]["enabled_setups"]) == {"rubber_band", "breakout"}
+        
+        # Verify persistence
+        get_response = requests.get(f"{BASE_URL}/api/live-scanner/config")
+        assert set(get_response.json()["enabled_setups"]) == {"rubber_band", "breakout"}
+        
+        # Reset to all setups
+        requests.post(
+            f"{BASE_URL}/api/live-scanner/config",
+            json={"enabled_setups": ["rubber_band", "breakout", "vwap_bounce", "squeeze"]}
+        )
+        
+    def test_update_config_interval_and_setups_together(self):
+        """POST /api/live-scanner/config updates both interval and setups"""
+        response = requests.post(
+            f"{BASE_URL}/api/live-scanner/config",
+            json={
+                "scan_interval": 120,
+                "enabled_setups": ["vwap_bounce", "squeeze"]
+            }
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["config"]["scan_interval"] == 120
+        assert set(data["config"]["enabled_setups"]) == {"vwap_bounce", "squeeze"}
+        
+        # Reset to defaults
+        requests.post(
+            f"{BASE_URL}/api/live-scanner/config",
+            json={
+                "scan_interval": 60,
+                "enabled_setups": ["rubber_band", "breakout", "vwap_bounce", "squeeze"]
+            }
+        )
 
 
 class TestLiveScannerSSE:
