@@ -247,8 +247,8 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
       };
       
       try {
-        // Fetch comprehensive analysis including quality score
-        const [analysisRes, histRes, qualityRes] = await Promise.all([
+        // Fetch comprehensive analysis including quality score and earnings
+        const [analysisRes, histRes, qualityRes, earningsRes] = await Promise.all([
           fetchWithRetry(() => api.get(`/api/ib/analysis/${ticker.symbol}`)).catch((err) => {
             console.error('Analysis API error:', err);
             return { data: null };
@@ -267,12 +267,17 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
           fetchWithRetry(() => api.get(`/api/quality/score/${ticker.symbol}`)).catch((err) => {
             console.error('Quality score error:', err);
             return { data: null };
+          }),
+          fetchWithRetry(() => api.get(`/api/newsletter/earnings/${ticker.symbol}`)).catch((err) => {
+            console.error('Earnings data error:', err);
+            return { data: null };
           })
         ]);
         
         console.log('Analysis data received:', analysisRes.data);
         console.log('Historical data received:', histRes.data?.bars?.length, 'bars');
         console.log('Quality data received:', qualityRes.data);
+        console.log('Earnings data received:', earningsRes.data);
         
         // Check if IB was busy - show info message but still display data
         if (analysisRes.data?.ib_busy) {
@@ -282,6 +287,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
         setAnalysis(analysisRes.data);
         setHistoricalData(histRes.data?.bars || []);
         setQualityData(qualityRes.data);
+        setEarningsData(earningsRes.data);
       } catch (err) {
         console.error('Error fetching data:', err);
         setChartError('Failed to load data. Please try again.');
