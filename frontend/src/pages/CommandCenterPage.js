@@ -5,7 +5,6 @@ import {
   TrendingDown,
   RefreshCw,
   Zap,
-  Target,
   Activity,
   Search,
   X,
@@ -43,11 +42,14 @@ import {
   Sparkles,
   Bot
 } from 'lucide-react';
-import * as LightweightCharts from 'lightweight-charts';
 import api, { apiLongRunning } from '../utils/api';
 import { toast } from 'sonner';
 import AIAssistant from '../components/AIAssistant';
+import TickerDetailModal from '../components/TickerDetailModal';
+import QuickTradeModal from '../components/QuickTradeModal';
 import { HelpTooltip, HelpIcon } from '../components/HelpTooltip';
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import { playSound, formatPrice, formatPercent, formatVolume, formatCurrency, formatMarketCap } from '../utils/tradingUtils';
 
 // ===================== SOUND UTILITIES =====================
 const playSound = (type = 'alert') => {
