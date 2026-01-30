@@ -745,6 +745,578 @@ class InvestopediaKnowledgeService:
 - Stop trading if limit hit
 """
         return context
+    
+    def get_fundamental_metric(self, metric_name: str) -> Optional[Dict]:
+        """Get knowledge about a fundamental analysis metric"""
+        metric = FUNDAMENTAL_METRICS.get(metric_name.lower().replace(" ", "_").replace("-", "_").replace("/", "_"))
+        if metric:
+            return {
+                "name": metric.name,
+                "category": metric.category,
+                "description": metric.description,
+                "formula": metric.formula,
+                "interpretation": metric.interpretation,
+                "good_values": metric.good_values,
+                "limitations": metric.limitations,
+                "trading_tips": metric.trading_tips
+            }
+        return None
+    
+    def get_all_fundamental_metrics(self) -> List[str]:
+        """Get list of all fundamental analysis metrics"""
+        return list(FUNDAMENTAL_METRICS.keys())
+    
+    def get_valuation_metrics(self) -> List[Dict]:
+        """Get all valuation-related fundamental metrics"""
+        return [
+            self.get_fundamental_metric(name)
+            for name, metric in FUNDAMENTAL_METRICS.items()
+            if metric.category == "valuation"
+        ]
+    
+    def get_profitability_metrics(self) -> List[Dict]:
+        """Get all profitability-related fundamental metrics"""
+        return [
+            self.get_fundamental_metric(name)
+            for name, metric in FUNDAMENTAL_METRICS.items()
+            if metric.category == "profitability"
+        ]
+    
+    def get_financial_health_metrics(self) -> List[Dict]:
+        """Get all financial health metrics"""
+        return [
+            self.get_fundamental_metric(name)
+            for name, metric in FUNDAMENTAL_METRICS.items()
+            if metric.category in ["solvency", "liquidity"]
+        ]
+    
+    def analyze_stock_fundamentals(self, pe: float = None, pb: float = None, 
+                                   de: float = None, roe: float = None,
+                                   peg: float = None, fcf_positive: bool = None) -> Dict:
+        """Analyze a stock based on provided fundamental metrics"""
+        analysis = {
+            "signals": [],
+            "warnings": [],
+            "overall_assessment": "",
+            "value_score": 0  # 0-100
+        }
+        
+        score = 50  # Start neutral
+        
+        if pe is not None:
+            if pe < 0:
+                analysis["warnings"].append("Negative P/E indicates company is losing money")
+                score -= 15
+            elif pe < 15:
+                analysis["signals"].append(f"P/E of {pe:.1f} suggests undervaluation")
+                score += 10
+            elif pe > 25:
+                analysis["warnings"].append(f"P/E of {pe:.1f} may indicate overvaluation")
+                score -= 5
+        
+        if pb is not None:
+            if pb < 1:
+                analysis["signals"].append(f"P/B of {pb:.2f} below book value - potential value play")
+                score += 10
+            elif pb > 3:
+                analysis["warnings"].append(f"P/B of {pb:.2f} is high - may be overvalued")
+                score -= 5
+        
+        if de is not None:
+            if de > 2:
+                analysis["warnings"].append(f"D/E of {de:.2f} indicates high leverage")
+                score -= 10
+            elif de < 0.5:
+                analysis["signals"].append(f"D/E of {de:.2f} shows conservative debt levels")
+                score += 5
+        
+        if roe is not None:
+            if roe > 0.15:
+                analysis["signals"].append(f"ROE of {roe:.1%} indicates strong profitability")
+                score += 10
+            elif roe < 0.10:
+                analysis["warnings"].append(f"ROE of {roe:.1%} below average")
+                score -= 5
+        
+        if peg is not None:
+            if peg < 1:
+                analysis["signals"].append(f"PEG of {peg:.2f} suggests undervaluation relative to growth")
+                score += 15
+            elif peg > 2:
+                analysis["warnings"].append(f"PEG of {peg:.2f} may indicate overvaluation")
+                score -= 10
+        
+        if fcf_positive is not None:
+            if fcf_positive:
+                analysis["signals"].append("Positive free cash flow indicates financial strength")
+                score += 10
+            else:
+                analysis["warnings"].append("Negative free cash flow is concerning")
+                score -= 15
+        
+        # Normalize score
+        analysis["value_score"] = max(0, min(100, score))
+        
+        # Overall assessment
+        if analysis["value_score"] >= 70:
+            analysis["overall_assessment"] = "FUNDAMENTALLY STRONG - Good value indicators"
+        elif analysis["value_score"] >= 50:
+            analysis["overall_assessment"] = "NEUTRAL FUNDAMENTALS - Mixed signals"
+        else:
+            analysis["overall_assessment"] = "FUNDAMENTAL CONCERNS - Proceed with caution"
+        
+        return analysis
+    
+    def get_fundamental_analysis_context_for_ai(self) -> str:
+        """Get formatted fundamental analysis context for AI"""
+        context = """
+=== INVESTOPEDIA FUNDAMENTAL ANALYSIS KNOWLEDGE ===
+
+## WHAT IS FUNDAMENTAL ANALYSIS?
+Fundamental analysis evaluates a company's intrinsic value by examining financial statements, 
+management quality, competitive advantages, and economic conditions. Unlike technical analysis 
+which studies price patterns, fundamental analysis focuses on the underlying business health.
+
+## KEY VALUATION METRICS
+
+### Price-to-Earnings (P/E) Ratio
+- Formula: Stock Price / Earnings Per Share
+- Interpretation: Lower = potentially undervalued
+- Good range: 15-20 for most industries
+- Below 10: Possible value trap or undervaluation
+- Above 25: Growth stock or overvaluation
+
+### Price-to-Book (P/B) Ratio
+- Formula: Stock Price / Book Value Per Share
+- Interpretation: Below 1 = trading below asset value
+- Good range: 1-3 for most industries
+- P/B < 1 may indicate distressed company OR undervaluation
+
+### PEG Ratio (Price/Earnings to Growth)
+- Formula: P/E Ratio / Annual EPS Growth Rate
+- Interpretation: Adjusts P/E for growth
+- PEG < 1: Undervalued relative to growth
+- PEG = 1: Fairly valued per Peter Lynch
+- PEG > 1: May be overvalued
+
+### Price-to-Sales (P/S) Ratio
+- Formula: Market Cap / Total Revenue
+- Useful for unprofitable companies
+- Lower is generally better
+- Industry comparison is crucial
+
+## PROFITABILITY METRICS
+
+### Return on Equity (ROE)
+- Formula: Net Income / Shareholders' Equity
+- Measures profit generated per dollar of equity
+- Good ROE: 15-20%+
+- Above 20%: Excellent
+- Below 10%: Below average
+
+### Earnings Per Share (EPS)
+- Formula: (Net Income - Preferred Dividends) / Shares Outstanding
+- Higher is better
+- Compare year-over-year growth
+- Watch for share buybacks inflating EPS
+
+### Net Profit Margin
+- Formula: Net Income / Revenue
+- Shows how much profit per dollar of sales
+- Higher = more efficient
+- Varies by industry (tech higher, retail lower)
+
+## SOLVENCY & LEVERAGE METRICS
+
+### Debt-to-Equity (D/E) Ratio
+- Formula: Total Liabilities / Shareholders' Equity
+- Below 1: Conservative
+- Above 2: Highly leveraged (risky in downturns)
+- Compare within same industry
+
+### Interest Coverage Ratio
+- Formula: EBIT / Interest Expense
+- Above 3: Comfortable
+- Below 1.5: May struggle to pay interest
+
+## CASH FLOW METRICS
+
+### Free Cash Flow (FCF)
+- Formula: Operating Cash Flow - Capital Expenditures
+- Represents true cash available
+- Positive FCF: Company generates more than it spends
+- Negative FCF: May need financing or be investing heavily
+- FCF trend more important than single reading
+
+### Operating Cash Flow
+- Cash generated from core business operations
+- Should generally track with net income
+- Large discrepancy = potential accounting red flags
+
+## QUALITY INDICATORS
+
+### Competitive Moat
+- Brand recognition, patents, network effects
+- Sustainable competitive advantages
+- Pricing power indicators
+
+### Management Quality
+- Track record, insider ownership
+- Capital allocation decisions
+- Communication transparency
+
+## FUNDAMENTAL ANALYSIS RED FLAGS
+1. Declining revenue for multiple quarters
+2. Negative free cash flow with rising debt
+3. ROE declining while debt increasing
+4. Frequent accounting restatements
+5. High insider selling
+6. Audit qualifications or auditor changes
+7. Customer concentration risk
+8. Inventory growing faster than sales
+
+## COMBINING TECHNICAL AND FUNDAMENTAL ANALYSIS
+- Use fundamentals to identify WHAT to buy
+- Use technicals to determine WHEN to buy
+- Strong fundamentals + bullish chart = Higher conviction
+- Weak fundamentals + bullish chart = Potential trap
+- Strong fundamentals + bearish chart = Possible value opportunity
+"""
+        return context
+
+
+# ==================== FUNDAMENTAL ANALYSIS DATA ====================
+
+@dataclass
+class FundamentalMetric:
+    name: str
+    category: str  # "valuation", "profitability", "solvency", "liquidity", "growth"
+    description: str
+    formula: str
+    interpretation: str
+    good_values: str
+    limitations: List[str]
+    trading_tips: List[str]
+
+
+FUNDAMENTAL_METRICS: Dict[str, FundamentalMetric] = {
+    
+    "pe_ratio": FundamentalMetric(
+        name="Price-to-Earnings (P/E) Ratio",
+        category="valuation",
+        description="Compares a company's stock price to its earnings per share, indicating how much investors pay per dollar of earnings.",
+        formula="P/E = Stock Price / Earnings Per Share (EPS)",
+        interpretation="""
+- Low P/E (<15): May be undervalued or facing challenges
+- Average P/E (15-20): Fairly valued for mature companies
+- High P/E (>25): Growth expectations or overvaluation
+- Negative P/E: Company is losing money
+- Compare to industry average and historical range
+""",
+        good_values="15-20 for mature companies, higher acceptable for growth stocks. Compare within industry.",
+        limitations=[
+            "Doesn't account for growth rate",
+            "Can be manipulated by accounting practices",
+            "Meaningless for companies with no/negative earnings",
+            "Varies significantly by industry",
+            "Backward-looking (uses past earnings)"
+        ],
+        trading_tips=[
+            "Always compare P/E within same industry",
+            "Use forward P/E for growth companies",
+            "Low P/E alone doesn't mean good value - could be value trap",
+            "Combine with PEG ratio for growth-adjusted view",
+            "Check earnings quality, not just quantity"
+        ]
+    ),
+    
+    "pb_ratio": FundamentalMetric(
+        name="Price-to-Book (P/B) Ratio",
+        category="valuation",
+        description="Compares stock price to book value per share, showing what investors pay for company's net assets.",
+        formula="P/B = Stock Price / (Total Assets - Total Liabilities) / Shares Outstanding",
+        interpretation="""
+- P/B < 1: Trading below book value (liquidation value)
+- P/B 1-3: Normal range for most industries
+- P/B > 3: Premium valuation, often for asset-light companies
+- Very low P/B could indicate distress OR undervaluation
+""",
+        good_values="1-3 for most industries. Below 1 merits investigation. Banks/financials: 1-1.5 typical.",
+        limitations=[
+            "Book value doesn't reflect intangible assets well",
+            "Less useful for tech/service companies",
+            "Historical cost vs market value of assets",
+            "Can be distorted by buybacks and write-offs",
+            "Industry-dependent"
+        ],
+        trading_tips=[
+            "Best for asset-heavy industries (banks, real estate)",
+            "P/B < 1 requires deeper investigation",
+            "Compare to company's historical P/B range",
+            "Use alongside ROE for complete picture",
+            "Tangible book value more conservative measure"
+        ]
+    ),
+    
+    "peg_ratio": FundamentalMetric(
+        name="PEG Ratio (Price/Earnings-to-Growth)",
+        category="valuation",
+        description="Adjusts P/E ratio for expected earnings growth rate, providing growth-adjusted valuation.",
+        formula="PEG = P/E Ratio / Annual EPS Growth Rate (%)",
+        interpretation="""
+- PEG < 1: Undervalued relative to growth (per Peter Lynch)
+- PEG = 1: Fairly valued for its growth rate
+- PEG > 1: May be overvalued for its growth
+- Lower PEG generally more attractive
+""",
+        good_values="Below 1.0 considered undervalued. Peter Lynch: P/E should equal growth rate (PEG = 1).",
+        limitations=[
+            "Relies on earnings estimates which may be wrong",
+            "Doesn't work for negative earnings or negative growth",
+            "Growth rate assumptions vary by source",
+            "Doesn't account for risk differences",
+            "Less reliable for cyclical companies"
+        ],
+        trading_tips=[
+            "Use 5-year expected growth rate for stability",
+            "Compare PEG across similar growth companies",
+            "Low PEG + strong fundamentals = attractive",
+            "Be skeptical of very high growth projections",
+            "Works best for growth stocks, not value stocks"
+        ]
+    ),
+    
+    "eps": FundamentalMetric(
+        name="Earnings Per Share (EPS)",
+        category="profitability",
+        description="Profit allocated to each outstanding share of common stock, key indicator of company profitability.",
+        formula="EPS = (Net Income - Preferred Dividends) / Weighted Average Shares Outstanding",
+        interpretation="""
+- Higher EPS = More profitable per share
+- Growing EPS = Business improving
+- Declining EPS = Potential problems
+- Compare year-over-year and quarter-over-quarter
+- Diluted EPS more conservative (includes stock options, convertibles)
+""",
+        good_values="Context-dependent. Focus on EPS growth rate (10-15%+ annually is strong).",
+        limitations=[
+            "Share buybacks can artificially inflate EPS",
+            "One-time items can distort",
+            "Doesn't reflect cash flow",
+            "Size-dependent (larger companies have larger EPS)",
+            "Accounting methods affect comparability"
+        ],
+        trading_tips=[
+            "Track EPS growth over 3-5 years",
+            "Use diluted EPS for conservative view",
+            "Compare actual EPS to analyst estimates",
+            "Watch for quality of earnings, not just quantity",
+            "Earnings surprises drive stock movement"
+        ]
+    ),
+    
+    "roe": FundamentalMetric(
+        name="Return on Equity (ROE)",
+        category="profitability",
+        description="Measures how efficiently a company generates profits from shareholders' equity investment.",
+        formula="ROE = Net Income / Average Shareholders' Equity",
+        interpretation="""
+- ROE > 15%: Good profitability
+- ROE > 20%: Excellent profitability
+- ROE < 10%: Below average
+- Negative ROE: Losing money
+- Very high ROE (>30%) may indicate high leverage
+""",
+        good_values="15-20%+ is strong. Above 20% excellent. Compare within industry.",
+        limitations=[
+            "High debt inflates ROE (risky)",
+            "Doesn't show how equity was financed",
+            "Share buybacks reduce equity, boosting ROE",
+            "Industry variation is significant",
+            "One-time gains can spike ROE temporarily"
+        ],
+        trading_tips=[
+            "Use DuPont analysis to decompose ROE",
+            "Compare ROE to cost of equity",
+            "Consistent ROE more valuable than volatile high ROE",
+            "Check if high ROE comes from leverage",
+            "ROE should exceed 10-year Treasury yield"
+        ]
+    ),
+    
+    "debt_to_equity": FundamentalMetric(
+        name="Debt-to-Equity (D/E) Ratio",
+        category="solvency",
+        description="Compares total liabilities to shareholders' equity, measuring financial leverage and risk.",
+        formula="D/E = Total Liabilities / Total Shareholders' Equity",
+        interpretation="""
+- D/E < 0.5: Conservative, low risk
+- D/E 0.5-1: Moderate leverage
+- D/E 1-2: Significant leverage
+- D/E > 2: High leverage, risky in downturns
+- Optimal varies by industry and interest rates
+""",
+        good_values="Below 1.0 for most industries. Utilities/REITs can sustain higher. Below 2.0 generally preferred.",
+        limitations=[
+            "Industry norms vary dramatically",
+            "Doesn't distinguish debt types",
+            "Off-balance sheet obligations not captured",
+            "Capital-intensive industries need more debt",
+            "Interest rate environment matters"
+        ],
+        trading_tips=[
+            "Compare within same industry only",
+            "Rising D/E during expansion may be fine",
+            "Rising D/E during contraction is concerning",
+            "Check interest coverage ratio alongside",
+            "Consider total debt vs just long-term debt"
+        ]
+    ),
+    
+    "free_cash_flow": FundamentalMetric(
+        name="Free Cash Flow (FCF)",
+        category="liquidity",
+        description="Cash remaining after capital expenditures, available for dividends, debt repayment, or reinvestment.",
+        formula="FCF = Operating Cash Flow - Capital Expenditures",
+        interpretation="""
+- Positive FCF: Generates more cash than needed
+- Negative FCF: Spending more than generating (may be investing)
+- Growing FCF: Business health improving
+- FCF trend more important than single reading
+- FCF should eventually support/exceed dividends
+""",
+        good_values="Positive and growing. FCF yield (FCF/Market Cap) > 5% often attractive.",
+        limitations=[
+            "Lumpy due to CapEx timing",
+            "Can be manipulated via CapEx timing",
+            "Doesn't distinguish maintenance vs growth CapEx",
+            "Working capital changes can distort",
+            "Industry and lifecycle dependent"
+        ],
+        trading_tips=[
+            "Look at 3-5 year FCF trend",
+            "FCF should track or exceed net income long-term",
+            "Negative FCF ok during heavy investment periods",
+            "FCF funds dividends - check sustainability",
+            "FCF per share useful for comparison"
+        ]
+    ),
+    
+    "current_ratio": FundamentalMetric(
+        name="Current Ratio",
+        category="liquidity",
+        description="Measures ability to pay short-term obligations with current assets.",
+        formula="Current Ratio = Current Assets / Current Liabilities",
+        interpretation="""
+- Above 2: Strong liquidity
+- 1.5-2: Healthy liquidity
+- 1-1.5: Adequate but watch closely
+- Below 1: May struggle to meet obligations
+- Too high (>3) may indicate inefficient capital use
+""",
+        good_values="1.5-2.0 for most industries. Above 1.0 minimum.",
+        limitations=[
+            "Inventory may not be quickly convertible",
+            "Doesn't show timing of cash flows",
+            "Industry norms vary",
+            "Doesn't indicate quality of assets",
+            "Seasonal businesses have fluctuating ratios"
+        ],
+        trading_tips=[
+            "Compare to industry average",
+            "Track trend over time",
+            "Use quick ratio for more conservative view",
+            "Consider nature of current assets",
+            "Declining current ratio is warning sign"
+        ]
+    ),
+    
+    "interest_coverage": FundamentalMetric(
+        name="Interest Coverage Ratio",
+        category="solvency",
+        description="Measures ability to pay interest on outstanding debt, indicating financial stability.",
+        formula="Interest Coverage = EBIT / Interest Expense",
+        interpretation="""
+- Above 5: Very comfortable
+- 3-5: Adequate
+- 2-3: Some concern
+- Below 2: Significant risk
+- Below 1: Cannot cover interest payments
+""",
+        good_values="Above 3 preferred. Above 5 very comfortable.",
+        limitations=[
+            "EBIT can be volatile",
+            "Doesn't account for principal repayment",
+            "One-time items affect calculation",
+            "Different debt structures complicate comparison",
+            "Doesn't capture future interest rate risk"
+        ],
+        trading_tips=[
+            "Essential metric for debt-heavy companies",
+            "Declining trend is concerning",
+            "Check during economic downturns",
+            "Compare to peers with similar debt structures",
+            "Use alongside D/E for complete leverage picture"
+        ]
+    ),
+    
+    "dividend_yield": FundamentalMetric(
+        name="Dividend Yield",
+        category="valuation",
+        description="Annual dividend payment as percentage of stock price, showing income return to shareholders.",
+        formula="Dividend Yield = Annual Dividends Per Share / Stock Price × 100",
+        interpretation="""
+- 2-4%: Typical for dividend stocks
+- Above 5%: High yield (check sustainability)
+- Very high (>8%): Often unsustainable or distressed
+- 0%: Growth stocks reinvesting all profits
+""",
+        good_values="2-4% with growth for dividend investors. Sustainability more important than high yield.",
+        limitations=[
+            "High yield may signal price drop or dividend cut risk",
+            "Doesn't show dividend growth",
+            "Payout ratio needed for sustainability assessment",
+            "Tax treatment varies",
+            "Doesn't capture total return"
+        ],
+        trading_tips=[
+            "Check payout ratio for sustainability",
+            "Dividend growth rate matters",
+            "Compare to Treasury yields",
+            "Look for dividend aristocrats (25+ years of increases)",
+            "Yield traps: very high yield often precedes cut"
+        ]
+    ),
+    
+    "price_to_sales": FundamentalMetric(
+        name="Price-to-Sales (P/S) Ratio",
+        category="valuation",
+        description="Compares stock price to revenue per share, useful for unprofitable or cyclical companies.",
+        formula="P/S = Market Cap / Total Revenue (or Stock Price / Revenue Per Share)",
+        interpretation="""
+- P/S < 1: May be undervalued
+- P/S 1-2: Normal for many industries
+- P/S > 3: Premium valuation
+- Lower P/S generally more attractive
+- Very low may indicate problems
+""",
+        good_values="Below 2 for most industries. Tech/growth can be higher. Compare within sector.",
+        limitations=[
+            "Ignores profitability entirely",
+            "Revenue quality matters",
+            "Doesn't account for expenses or margins",
+            "Industry variation is extreme",
+            "Subscription vs one-time revenue different"
+        ],
+        trading_tips=[
+            "Most useful for unprofitable growth companies",
+            "Compare to profit margins for context",
+            "Use alongside P/E when available",
+            "Lower P/S + improving margins = bullish",
+            "Industry comparison essential"
+        ]
+    ),
+}
 
 
 # Singleton
