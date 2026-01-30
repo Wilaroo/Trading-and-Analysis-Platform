@@ -965,21 +965,30 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         # 2f-c. Check if user is asking about SETUPS, OPPORTUNITIES, or TRADES FORMING
         scanner_keywords = ['setup', 'setups', 'opportunity', 'opportunities', 'forming', 'trade ideas',
                           'what should i trade', 'what to trade', 'best trades', 'scanner', 'scan',
-                          'alerts', 'imminent', 'about to trigger', 'rubber band', 'breakout forming']
+                          'alerts', 'imminent', 'about to trigger', 'rubber band', 'breakout forming',
+                          'scalp', 'swing', 'squeeze', 'short squeeze', 'in play']
         wants_scanner_info = any(keyword in user_message.lower() for keyword in scanner_keywords)
         
         if wants_scanner_info:
             try:
-                from services.predictive_scanner import get_predictive_scanner
-                scanner = get_predictive_scanner()
-                
-                # Get current forming setups context
-                scanner_context = scanner.get_setup_summary_for_ai()
-                if scanner_context and "No significant" not in scanner_context:
-                    context_parts.append(scanner_context)
+                # Use advanced alert system for organized alerts
+                from services.alert_system import get_alert_system
+                alert_system = get_alert_system()
+                alert_context = alert_system.get_alerts_summary_for_ai()
+                if alert_context:
+                    context_parts.append(alert_context)
                     
             except Exception as e:
-                logger.warning(f"Error getting scanner context: {e}")
+                logger.warning(f"Error getting alert context: {e}")
+                # Fallback to basic scanner
+                try:
+                    from services.predictive_scanner import get_predictive_scanner
+                    scanner = get_predictive_scanner()
+                    scanner_context = scanner.get_setup_summary_for_ai()
+                    if scanner_context and "No significant" not in scanner_context:
+                        context_parts.append(scanner_context)
+                except Exception as e2:
+                    logger.warning(f"Error getting scanner context: {e2}")
         
         # 2g. Check if user is asking about SCORING, EVALUATING, or VALIDATING a trade
         evaluation_keywords = ['score', 'scoring', 'evaluate', 'grade', 'rate', 'quality', 'should i', 
