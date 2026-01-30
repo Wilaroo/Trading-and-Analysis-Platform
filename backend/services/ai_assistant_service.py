@@ -847,7 +847,66 @@ DAILY LOSS LIMIT: {risk_guide['daily_loss_limit']['guideline']}
             except Exception as e:
                 logger.warning(f"Error getting risk management knowledge: {e}")
         
-        # 2f. Check if user is asking about SCORING, EVALUATING, or VALIDATING a trade
+        # 2f. Check if user is asking about FUNDAMENTAL ANALYSIS
+        fundamental_keywords = ['fundamental', 'fundamentals', 'valuation', 'p/e', 'pe ratio', 'price to earnings',
+                               'p/b', 'pb ratio', 'price to book', 'peg ratio', 'roe', 'return on equity',
+                               'debt to equity', 'd/e ratio', 'free cash flow', 'fcf', 'eps', 'earnings per share',
+                               'dividend yield', 'price to sales', 'interest coverage', 'current ratio',
+                               'intrinsic value', 'book value', 'overvalued', 'undervalued', 'fair value',
+                               'financial health', 'balance sheet', 'income statement', 'cash flow statement']
+        wants_fundamental_info = any(keyword in user_message.lower() for keyword in fundamental_keywords)
+        
+        if wants_fundamental_info:
+            try:
+                investopedia = self.investopedia_knowledge
+                # Check for specific metric requested
+                metric_map = {
+                    'p/e': 'pe_ratio', 'pe ratio': 'pe_ratio', 'price to earnings': 'pe_ratio',
+                    'p/b': 'pb_ratio', 'pb ratio': 'pb_ratio', 'price to book': 'pb_ratio',
+                    'peg': 'peg_ratio', 'peg ratio': 'peg_ratio',
+                    'roe': 'roe', 'return on equity': 'roe',
+                    'debt to equity': 'debt_to_equity', 'd/e': 'debt_to_equity',
+                    'free cash flow': 'free_cash_flow', 'fcf': 'free_cash_flow',
+                    'eps': 'eps', 'earnings per share': 'eps',
+                    'dividend yield': 'dividend_yield',
+                    'price to sales': 'price_to_sales', 'p/s': 'price_to_sales',
+                    'interest coverage': 'interest_coverage',
+                    'current ratio': 'current_ratio'
+                }
+                
+                # Check if asking about specific metric
+                specific_metric_found = False
+                for keyword, metric_id in metric_map.items():
+                    if keyword in user_message.lower():
+                        metric_data = investopedia.get_fundamental_metric(metric_id)
+                        if metric_data:
+                            context_parts.append(f"""
+=== {metric_data['name']} ===
+Category: {metric_data['category']}
+{metric_data['description']}
+
+Formula: {metric_data['formula']}
+
+Interpretation: {metric_data['interpretation']}
+
+Good Values: {metric_data['good_values']}
+
+Trading Tips: {'; '.join(metric_data['trading_tips'][:3])}
+
+Limitations: {'; '.join(metric_data['limitations'][:3])}
+""")
+                            specific_metric_found = True
+                            break
+                
+                # If no specific metric, provide general fundamental context
+                if not specific_metric_found:
+                    fundamental_context = investopedia.get_fundamental_analysis_context_for_ai()
+                    context_parts.append(fundamental_context)
+                    
+            except Exception as e:
+                logger.warning(f"Error getting fundamental analysis knowledge: {e}")
+        
+        # 2g. Check if user is asking about SCORING, EVALUATING, or VALIDATING a trade
         evaluation_keywords = ['score', 'scoring', 'evaluate', 'grade', 'rate', 'quality', 'should i', 
                               'valid', 'validate', 'good trade', 'bad trade', 'a+ setup', 'setup quality',
                               'take this trade', 'enter', 'buy this', 'short this', 'trade idea']
