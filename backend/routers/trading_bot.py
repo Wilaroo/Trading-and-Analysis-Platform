@@ -411,12 +411,21 @@ async def create_demo_trade(request: DemoTradeRequest):
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
     
-    from services.trading_bot_service import BotTrade, TradeStatus, TradeDirection, TradeExplanation
+    from services.trading_bot_service import BotTrade, TradeStatus, TradeDirection, TradeExplanation, STRATEGY_CONFIG, DEFAULT_STRATEGY_CONFIG
     import uuid
     from datetime import datetime, timezone
     
     symbol = request.symbol.upper()
     direction = TradeDirection.LONG if request.direction.lower() == "long" else TradeDirection.SHORT
+    
+    # Get strategy config
+    strategy_cfg = STRATEGY_CONFIG.get(request.setup_type, DEFAULT_STRATEGY_CONFIG)
+    from services.trading_bot_service import TradeTimeframe
+    timeframe_val = strategy_cfg["timeframe"]
+    timeframe_str = timeframe_val.value if isinstance(timeframe_val, TradeTimeframe) else timeframe_val
+    trail_pct = strategy_cfg.get("trail_pct", 0.02)
+    scale_pcts = strategy_cfg.get("scale_out_pcts", [0.33, 0.33, 0.34])
+    close_at_eod = strategy_cfg.get("close_at_eod", True)
     
     # Get current price from Alpaca
     current_price = 100.0  # Default
