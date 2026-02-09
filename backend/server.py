@@ -48,6 +48,7 @@ from routers.scanner import router as scanner_router, init_scanner_router
 from routers.alerts import router as alerts_router, init_alerts_router
 from routers.technicals import router as technicals_router
 from routers.live_scanner import router as live_scanner_router, init_live_scanner_router
+from routers.trading_bot import router as trading_bot_router, init_trading_bot_router
 from services.ib_service import get_ib_service
 from services.newsletter_service import init_newsletter_service
 from services.news_service import init_news_service
@@ -60,6 +61,8 @@ from services.scheduler_service import init_scheduler_service
 from services.alpaca_service import init_alpaca_service
 from services.predictive_scanner import get_predictive_scanner
 from services.alert_system import get_alert_system
+from services.trading_bot_service import get_trading_bot_service
+from services.trade_executor_service import get_trade_executor
 from data.strategies_data import ALL_STRATEGIES_DATA
 
 app = FastAPI(title="TradeCommand API")
