@@ -195,8 +195,11 @@ class BotTrade:
     closed_at: Optional[str] = None
     estimated_duration: str = ""  # e.g., "30min-2hr" for scalp
     
-    # Close reason (manual, stop_loss, target_hit, target_1, target_2, target_3, etc.)
+    # Close reason (manual, stop_loss, target_hit, target_1, target_2, target_3, eod_close, etc.)
     close_reason: Optional[str] = None
+    
+    # EOD close flag (from strategy config)
+    close_at_eod: bool = True
     
     # Explanation
     explanation: Optional[TradeExplanation] = None
