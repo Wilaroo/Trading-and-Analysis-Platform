@@ -43,7 +43,7 @@ class StrategyPerformanceService:
     
     def record_trade(self, trade_dict: Dict):
         """Record a closed trade's performance metrics to MongoDB"""
-        if not self._db:
+        if self._db is None:
             return
 
         try:
