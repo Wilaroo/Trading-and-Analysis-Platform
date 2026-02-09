@@ -98,6 +98,7 @@ const TradeCard = ({ trade, onConfirm, onReject, onClose, onTickerClick, showClo
   // Get close reason color
   const getCloseReasonColor = (reason) => {
     if (reason?.includes('target')) return 'bg-emerald-500/20 text-emerald-400';
+    if (reason?.includes('eod')) return 'bg-amber-500/20 text-amber-400';
     if (reason?.includes('breakeven')) return 'bg-yellow-500/20 text-yellow-400';
     if (reason?.includes('trailing')) return 'bg-cyan-500/20 text-cyan-400';
     if (reason?.includes('stop')) return 'bg-red-500/20 text-red-400';
