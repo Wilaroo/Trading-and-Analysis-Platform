@@ -86,7 +86,13 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
   - Full trade explanations: entry logic, exit logic, position sizing, risk analysis
   - P&L tracking with daily statistics
   - Demo trade generator for testing
-  - Frontend TradingBotPanel with pending/open trades display
+  - Frontend TradingBotPanel with pending/open/closed trades display
+
+- ✅ **Trading Bot Enhancements**
+  - Automatic stop-loss monitoring: Auto-closes positions when price hits stop level
+  - Closed trades tab: Shows trade history with close reason badges (Stop Loss Hit, Manually Closed, Target Hit)
+  - Clickable tickers: Click any symbol to open ticker detail modal with trading stats
+  - Close reason tracking: Records why each trade was closed (manual, stop_loss, target_hit)
 
 ### December 2025
 - ✅ Verified AI Strategy Knowledge (fixed "AI Amnesia")
