@@ -377,6 +377,43 @@ class StrategyConfigUpdate(BaseModel):
     timeframe: Optional[str] = None
 
 
+@router.get("/trades/all")
+async def get_all_trades():
+    """Get all bot trades (pending, open, closed) for the AI Command Panel"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    summary = _trading_bot.get_all_trades_summary()
+    return {"success": True, **summary}
+
+
+@router.post("/evaluate-trade")
+async def ai_evaluate_trade(request: DemoTradeRequest):
+    """Ask AI to evaluate a trade opportunity"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    if not hasattr(_trading_bot, '_ai_assistant') or not _trading_bot._ai_assistant:
+        raise HTTPException(status_code=503, detail="AI assistant not connected to bot")
+    
+    trade_data = {
+        "symbol": request.symbol.upper(),
+        "direction": request.direction,
+        "setup_type": request.setup_type,
+        "timeframe": "intraday",
+        "entry_price": 0,
+        "stop_price": 0,
+        "target_prices": [],
+        "risk_amount": 0,
+        "risk_reward_ratio": 0,
+        "quality_score": 0,
+        "quality_grade": "N/A"
+    }
+    
+    result = await _trading_bot._ai_assistant.evaluate_bot_opportunity(trade_data)
+    return result
+
+
 @router.get("/strategy-configs")
 async def get_strategy_configs():
     """Get all strategy configurations"""
