@@ -141,11 +141,16 @@ const AICommandPanel = ({
     portfolio: true,
     market: true,
     alerts: true,
+    botTrades: true,
     opportunities: false,
     earnings: true,
     watchlist: false,
     scanner: false
   });
+  
+  // Bot trades state
+  const [botTrades, setBotTrades] = useState({ pending: [], open: [], closed: [], daily_stats: {} });
+  const [botTradesTab, setBotTradesTab] = useState('open');
   
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -154,6 +159,25 @@ const AICommandPanel = ({
   const toggleSection = (section) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
+  
+  // Fetch bot trades
+  const fetchBotTrades = useCallback(async () => {
+    try {
+      const res = await api.get('/api/trading-bot/trades/all');
+      if (res.data?.success) {
+        setBotTrades(res.data);
+      }
+    } catch (err) {
+      // Silent fail - bot may not be running
+    }
+  }, []);
+  
+  // Poll bot trades every 10s
+  useEffect(() => {
+    fetchBotTrades();
+    const interval = setInterval(fetchBotTrades, 10000);
+    return () => clearInterval(interval);
+  }, [fetchBotTrades]);
 
   // Scroll to bottom
   useEffect(() => {
