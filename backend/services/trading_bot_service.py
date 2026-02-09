@@ -361,9 +361,9 @@ class TradingBotService:
         
         # Daily stats
         ds = self._daily_stats
-        lines.append(f"\nToday's Stats: {ds.total_trades} trades | {ds.winning_trades}W/{ds.losing_trades}L | P&L: ${ds.realized_pnl:+,.2f}")
-        if ds.total_trades > 0:
-            lines.append(f"Win Rate: {(ds.winning_trades/ds.total_trades*100):.0f}%")
+        lines.append(f"\nToday's Stats: {ds.trades_executed} trades | {ds.trades_won}W/{ds.trades_lost}L | P&L: ${ds.gross_pnl:+,.2f}")
+        if ds.trades_executed > 0:
+            lines.append(f"Win Rate: {ds.win_rate:.0f}%")
         
         # Pending trades
         if self._pending_trades:
