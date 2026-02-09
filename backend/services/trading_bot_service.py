@@ -657,6 +657,12 @@ class TradingBotService:
                     trade.remaining_shares = trade.shares
                     trade.original_shares = trade.shares
                 
+                # Initialize trailing stop config if not set
+                if trade.trailing_stop_config.get('original_stop', 0) == 0:
+                    trade.trailing_stop_config['original_stop'] = trade.stop_price
+                    trade.trailing_stop_config['current_stop'] = trade.stop_price
+                    trade.trailing_stop_config['mode'] = 'original'
+                
                 # Calculate unrealized P&L on remaining shares
                 if trade.direction == TradeDirection.LONG:
                     trade.unrealized_pnl = (trade.current_price - trade.fill_price) * trade.remaining_shares
@@ -668,20 +674,27 @@ class TradingBotService:
                 if total_value > 0:
                     trade.pnl_pct = ((trade.unrealized_pnl + trade.realized_pnl) / (trade.original_shares * trade.fill_price)) * 100
                 
-                # Automatic stop-loss monitoring
+                # Update trailing stop if enabled
+                if trade.trailing_stop_config.get('enabled', True):
+                    await self._update_trailing_stop(trade)
+                
+                # Automatic stop-loss monitoring using current_stop (which may be trailing)
+                effective_stop = trade.trailing_stop_config.get('current_stop', trade.stop_price)
                 stop_hit = False
                 if trade.direction == TradeDirection.LONG:
-                    if trade.current_price <= trade.stop_price:
+                    if trade.current_price <= effective_stop:
                         stop_hit = True
-                        logger.warning(f"STOP HIT: {trade.symbol} price ${trade.current_price:.2f} <= stop ${trade.stop_price:.2f}")
+                        logger.warning(f"STOP HIT: {trade.symbol} price ${trade.current_price:.2f} <= stop ${effective_stop:.2f} (mode: {trade.trailing_stop_config.get('mode')})")
                 else:  # SHORT
-                    if trade.current_price >= trade.stop_price:
+                    if trade.current_price >= effective_stop:
                         stop_hit = True
-                        logger.warning(f"STOP HIT: {trade.symbol} price ${trade.current_price:.2f} >= stop ${trade.stop_price:.2f}")
+                        logger.warning(f"STOP HIT: {trade.symbol} price ${trade.current_price:.2f} >= stop ${effective_stop:.2f} (mode: {trade.trailing_stop_config.get('mode')})")
                 
                 if stop_hit:
-                    logger.info(f"Auto-closing {trade.symbol} due to stop-loss trigger")
-                    await self.close_trade(trade_id, reason="stop_loss")
+                    stop_mode = trade.trailing_stop_config.get('mode', 'original')
+                    reason = f"stop_loss_{stop_mode}" if stop_mode != 'original' else "stop_loss"
+                    logger.info(f"Auto-closing {trade.symbol} due to {stop_mode} stop trigger")
+                    await self.close_trade(trade_id, reason=reason)
                     continue
                 
                 # Automatic target profit-taking with scale-out
