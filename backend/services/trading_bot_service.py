@@ -692,6 +692,7 @@ class TradingBotService:
             
             trade.status = TradeStatus.CLOSED
             trade.closed_at = datetime.now(timezone.utc).isoformat()
+            trade.close_reason = reason
             trade.unrealized_pnl = 0
             
             # Update daily stats
@@ -714,7 +715,7 @@ class TradingBotService:
             await self._notify_trade_update(trade, "closed")
             await self._save_trade(trade)
             
-            logger.info(f"Trade closed: {trade.symbol} P&L: ${trade.realized_pnl:.2f}")
+            logger.info(f"Trade closed ({reason}): {trade.symbol} P&L: ${trade.realized_pnl:.2f}")
             return True
             
         except Exception as e:
