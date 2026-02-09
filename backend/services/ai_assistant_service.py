@@ -1110,7 +1110,7 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         
         # 4. Extract stock symbols from message and get data
         symbols = re.findall(r'\b([A-Z]{1,5})\b', user_message.upper())
-        common_words = {'I', 'A', 'THE', 'AND', 'OR', 'FOR', 'TO', 'IS', 'IT', 'IN', 'ON', 'AT', 'BY', 'BE', 'AS', 'AN', 'ARE', 'WAS', 'IF', 'MY', 'ME', 'DO', 'SO', 'UP', 'AM', 'CAN', 'HOW', 'WHAT', 'BUY', 'SELL', 'LONG', 'SHORT', 'NEWS', 'TODAY', 'MARKET'}
+        common_words = {'I', 'A', 'THE', 'AND', 'OR', 'FOR', 'TO', 'IS', 'IT', 'IN', 'ON', 'AT', 'BY', 'BE', 'AS', 'AN', 'ARE', 'WAS', 'IF', 'MY', 'ME', 'DO', 'SO', 'UP', 'AM', 'CAN', 'HOW', 'WHAT', 'BUY', 'SELL', 'LONG', 'SHORT', 'NEWS', 'TODAY', 'MARKET', 'BOT', 'DOES', 'HAVE', 'SHOW', 'TRADE', 'RIGHT', 'NOW', 'PENDING', 'OPEN', 'CLOSE', 'STATUS', 'THIS'}
         symbols = [s for s in symbols if s not in common_words and len(s) >= 2]
         
         if symbols:
