@@ -85,8 +85,22 @@ const TradeCard = ({ trade, onConfirm, onReject, onClose, onTickerClick, showClo
   const closeReasonLabel = {
     'manual': 'Manually Closed',
     'stop_loss': 'Stop Loss Hit',
+    'stop_loss_breakeven': 'Breakeven Stop Hit',
+    'stop_loss_trailing': 'Trailing Stop Hit',
     'target_hit': 'Target Hit',
+    'target_1_complete': 'All Targets Hit',
+    'target_2_complete': 'All Targets Hit',
+    'target_3_complete': 'All Targets Hit',
     'rejected': 'Rejected'
+  };
+  
+  // Get close reason color
+  const getCloseReasonColor = (reason) => {
+    if (reason?.includes('target')) return 'bg-emerald-500/20 text-emerald-400';
+    if (reason?.includes('breakeven')) return 'bg-yellow-500/20 text-yellow-400';
+    if (reason?.includes('trailing')) return 'bg-cyan-500/20 text-cyan-400';
+    if (reason?.includes('stop')) return 'bg-red-500/20 text-red-400';
+    return 'bg-zinc-500/20 text-zinc-400';
   };
   
   return (
