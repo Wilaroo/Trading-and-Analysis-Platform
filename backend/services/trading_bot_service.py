@@ -129,6 +129,8 @@ class TradeExplanation:
     position_sizing_logic: str
     confidence_factors: List[str]
     warnings: List[str]
+    ai_evaluation: str = ""
+    ai_verdict: str = ""
 
 
 @dataclass
