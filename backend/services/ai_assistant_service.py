@@ -1154,6 +1154,20 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         except Exception:
             pass
         
+        # 7. Trading Bot context - if user asks about bot, its trades, or performance
+        bot_keywords = ['bot', 'trading bot', 'bot trade', 'bot performance', 'bot status', 
+                       'what did the bot', 'bot do', 'bot position', 'autonomous', 'bot p&l',
+                       'bot pnl', 'bot closed', 'bot open', 'pending trade', 'bot took',
+                       'why did the bot', 'explain trade', 'bot running']
+        wants_bot_info = any(keyword in user_message.lower() for keyword in bot_keywords)
+        
+        if wants_bot_info and self._trading_bot:
+            try:
+                bot_context = self._trading_bot.get_bot_context_for_ai()
+                context_parts.append(bot_context)
+            except Exception as e:
+                logger.warning(f"Error getting bot context: {e}")
+        
         return "\n".join(context_parts)
     
     async def _call_llm(self, messages: List[Dict], context: str = "") -> str:
