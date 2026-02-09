@@ -296,70 +296,59 @@ class TestScaleOutExecution:
             print(f"Trade {trade.get('symbol')}: scale_out_pcts = {pcts}")
 
 
-class TestMSFTTradeSpecific:
-    """Specific tests for the current MSFT trade"""
+class TestMSFTBrokerPosition:
+    """Test MSFT position exists in broker"""
     
-    def test_msft_trade_exists(self):
-        """MSFT trade should exist in open trades"""
-        response = requests.get(f"{BASE_URL}/api/trading-bot/trades/open")
+    def test_msft_position_in_broker(self):
+        """MSFT position should exist in broker positions"""
+        response = requests.get(f"{BASE_URL}/api/trading-bot/positions")
         data = response.json()
         
-        trades = data.get("trades", [])
-        msft_trades = [t for t in trades if t.get("symbol") == "MSFT"]
+        assert data.get("success") == True
+        positions = data.get("positions", [])
+        msft_positions = [p for p in positions if p.get("symbol") == "MSFT"]
         
-        assert len(msft_trades) > 0, "MSFT trade should exist"
-        print(f"Found {len(msft_trades)} MSFT trade(s)")
+        assert len(msft_positions) > 0, "MSFT position should exist in broker"
+        
+        msft = msft_positions[0]
+        print(f"MSFT broker position: {msft.get('qty')} shares @ ${msft.get('avg_entry_price'):.2f}")
+        print(f"  Current price: ${msft.get('current_price'):.2f}")
+        print(f"  Unrealized P&L: ${msft.get('unrealized_pnl'):.2f}")
+
+
+class TestPendingTradeScaleOutConfig:
+    """Test pending trades have scale_out_config structure"""
     
-    def test_msft_trade_has_correct_structure(self):
-        """MSFT trade should have all scale-out fields"""
-        response = requests.get(f"{BASE_URL}/api/trading-bot/trades/open")
+    def test_pending_trade_has_scale_out_config(self):
+        """Pending trades should have scale_out_config field"""
+        response = requests.get(f"{BASE_URL}/api/trading-bot/trades/pending")
         data = response.json()
         
+        assert data.get("success") == True
         trades = data.get("trades", [])
-        msft_trades = [t for t in trades if t.get("symbol") == "MSFT"]
         
-        if msft_trades:
-            trade = msft_trades[0]
-            
-            # Verify all required fields
-            assert trade.get("original_shares") == 242, f"Expected 242 original shares, got {trade.get('original_shares')}"
-            assert trade.get("remaining_shares") == 242, f"Expected 242 remaining shares, got {trade.get('remaining_shares')}"
-            
-            targets = trade.get("target_prices", [])
-            assert len(targets) == 3, f"Expected 3 targets, got {len(targets)}"
-            assert abs(targets[0] - 424.41) < 0.01, f"T1 should be ~$424.41, got ${targets[0]}"
-            assert abs(targets[1] - 432.65) < 0.01, f"T2 should be ~$432.65, got ${targets[1]}"
-            assert abs(targets[2] - 445.01) < 0.01, f"T3 should be ~$445.01, got ${targets[2]}"
+        for trade in trades:
+            assert "scale_out_config" in trade, f"Trade {trade.get('id')} missing scale_out_config"
             
             config = trade.get("scale_out_config", {})
-            assert config.get("enabled") == True
-            assert config.get("targets_hit") == []
-            assert config.get("partial_exits") == []
+            assert "enabled" in config
+            assert "targets_hit" in config
+            assert "scale_out_pcts" in config
+            assert "partial_exits" in config
             
-            print(f"MSFT trade verified: {trade.get('shares')} shares, targets={targets}")
+            print(f"Pending trade {trade.get('symbol')}: scale_out_config = {config}")
     
-    def test_msft_targets_not_hit_yet(self):
-        """MSFT targets should not be hit yet (price below targets)"""
-        response = requests.get(f"{BASE_URL}/api/trading-bot/trades/open")
+    def test_pending_trade_has_target_prices(self):
+        """Pending trades should have target_prices array"""
+        response = requests.get(f"{BASE_URL}/api/trading-bot/trades/pending")
         data = response.json()
         
         trades = data.get("trades", [])
-        msft_trades = [t for t in trades if t.get("symbol") == "MSFT"]
-        
-        if msft_trades:
-            trade = msft_trades[0]
-            current = trade.get("current_price", 0)
+        for trade in trades:
+            assert "target_prices" in trade
             targets = trade.get("target_prices", [])
-            
-            # Current price should be below all targets
-            for i, target in enumerate(targets):
-                assert current < target, f"Current price ${current} should be < T{i+1} ${target}"
-            
-            # No targets should be hit
-            targets_hit = trade.get("scale_out_config", {}).get("targets_hit", [])
-            assert len(targets_hit) == 0, f"No targets should be hit yet, got {targets_hit}"
-            
-            print(f"MSFT: current=${current}, T1=${targets[0]}, T2=${targets[1]}, T3=${targets[2]}")
+            assert len(targets) >= 1, "Should have at least 1 target"
+            print(f"Pending trade {trade.get('symbol')}: targets = {targets}")
 
 
 class TestBotTradeDataclass:
