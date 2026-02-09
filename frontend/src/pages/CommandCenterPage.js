@@ -1238,33 +1238,53 @@ const CommandCenterPage = ({
         </Card>
       </div>
 
-      {/* Live Alerts Panel - Real-time trade alerts via SSE */}
-      <LiveAlertsPanel
-        isExpanded={liveAlertsExpanded}
-        onToggleExpand={() => setLiveAlertsExpanded(!liveAlertsExpanded)}
-        onAlertSelect={(alert) => {
-          setSelectedTicker({ symbol: alert.symbol, quote: { price: alert.current_price } });
-        }}
-      />
-
-      {/* Trading Bot Panel - Autonomous trading system */}
-      <div className="mt-4">
-        <TradingBotPanel 
-          onTickerSelect={(ticker) => setSelectedTicker(ticker)}
-        />
+      {/* Tab Navigation */}
+      <div className="flex items-center gap-1 bg-[#0A0A0A] border border-white/10 rounded-lg p-1 mt-1" data-testid="main-tabs">
+        {[
+          { id: 'trading', label: 'Trading', icon: '⚡' },
+          { id: 'coach', label: 'AI Coach', icon: '🧠' },
+          { id: 'analytics', label: 'Analytics', icon: '📊' }
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveMainTab(tab.id)}
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+              activeMainTab === tab.id
+                ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
+                : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+            }`}
+            data-testid={`tab-${tab.id}`}
+          >
+            <span className="text-base">{tab.icon}</span>
+            {tab.label}
+          </button>
+        ))}
       </div>
-      
-      {/* Learning Dashboard - Strategy Performance & Auto-Tuning */}
-      <div className="mt-4">
-        <Card>
-          <LearningDashboard />
-        </Card>
-      </div>
 
-      {/* Main Content - New Central Layout */}
-      <div className="grid lg:grid-cols-12 gap-4">
-        {/* Left Column - Scanner & Controls */}
-        <div className="lg:col-span-3 space-y-4">
+      {/* ==================== TRADING TAB ==================== */}
+      {activeMainTab === 'trading' && (
+        <div className="space-y-4 mt-2">
+          {/* Live Alerts Panel */}
+          <LiveAlertsPanel
+            isExpanded={liveAlertsExpanded}
+            onToggleExpand={() => setLiveAlertsExpanded(!liveAlertsExpanded)}
+            onAlertSelect={(alert) => {
+              setSelectedTicker({ symbol: alert.symbol, quote: { price: alert.current_price } });
+            }}
+          />
+
+          {/* Trading Bot Panel */}
+          <TradingBotPanel 
+            onTickerSelect={(ticker) => setSelectedTicker(ticker)}
+          />
+        </div>
+      )}
+
+      {/* ==================== AI COACH TAB ==================== */}
+      {activeMainTab === 'coach' && (
+        <div className="grid lg:grid-cols-12 gap-4 mt-2">
+          {/* Left - Scanner & Holdings */}
+          <div className="lg:col-span-3 space-y-4">
           {/* Scanner Panel */}
           <Card>
             <SectionHeader icon={Target} title="Scanner" action={
