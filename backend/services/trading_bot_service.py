@@ -1186,6 +1186,7 @@ class TradingBotService:
                 "min_risk_reward": self.risk_params.min_risk_reward
             },
             "enabled_setups": self._enabled_setups,
+            "strategy_configs": self.get_strategy_configs(),
             "pending_trades": len(self._pending_trades),
             "open_trades": len(self._open_trades),
             "daily_stats": asdict(self._daily_stats)
