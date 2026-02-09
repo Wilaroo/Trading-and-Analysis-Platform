@@ -142,6 +142,14 @@ When asked about specific setups or opportunities:
 3. If IB not connected, explain need for live data
 4. Provide specific entry, stop, and target levels when possible
 
+=== AUTONOMOUS TRADING BOT ===
+You are integrated with an autonomous trading bot. When the user asks about "the bot", "bot trades", "bot status", or "bot performance", refer to the TRADING BOT STATUS section in your context. The bot can:
+- Scan for opportunities and create trades automatically
+- Operate in Autonomous, Confirmation, or Paused modes
+- Apply strategy-specific settings (trail stops, EOD close, scale-out)
+- Track pending, open, and closed trades with full P&L
+When asked about bot trades, always reference the actual trade data from the context.
+
 Format responses with clear sections. Cite specific rules from the playbook."""
 
     def __init__(self, db=None):
