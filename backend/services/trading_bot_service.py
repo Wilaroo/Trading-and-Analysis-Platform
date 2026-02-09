@@ -641,6 +641,20 @@ class TradingBotService:
             )
             
             logger.info(f"Trade opportunity created: {symbol} {direction.value} {shares} shares @ ${entry_price:.2f}")
+            
+            # AI evaluation - enrich trade with AI analysis
+            if hasattr(self, '_ai_assistant') and self._ai_assistant:
+                try:
+                    ai_result = await self._ai_assistant.evaluate_bot_opportunity(trade.to_dict())
+                    if ai_result.get("success") and trade.explanation:
+                        trade.explanation.ai_evaluation = ai_result.get("analysis", "")
+                        trade.explanation.ai_verdict = ai_result.get("verdict", "CAUTION")
+                        if ai_result.get("verdict") == "REJECT":
+                            logger.info(f"AI REJECTED trade {symbol}: {ai_result.get('analysis', '')[:100]}")
+                            return None
+                except Exception as e:
+                    logger.warning(f"AI evaluation failed (proceeding anyway): {e}")
+            
             return trade
             
         except Exception as e:
