@@ -130,6 +130,21 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
 - `GET /api/live-scanner/watchlist` - Get/set watchlist symbols
 - `GET /api/live-scanner/config` - Get/update scan configuration
 
+### Trading Bot (Autonomous Trading) - NEW
+- `GET /api/trading-bot/status` - Bot status with risk params and daily stats
+- `POST /api/trading-bot/start` - Start the trading bot
+- `POST /api/trading-bot/stop` - Stop the trading bot
+- `POST /api/trading-bot/mode/{mode}` - Set mode (autonomous/confirmation/paused)
+- `GET /api/trading-bot/trades/pending` - Get trades awaiting confirmation
+- `GET /api/trading-bot/trades/open` - Get open positions
+- `GET /api/trading-bot/trades/closed` - Get closed trades history
+- `POST /api/trading-bot/trades/{id}/confirm` - Execute a pending trade
+- `POST /api/trading-bot/trades/{id}/reject` - Reject a pending trade
+- `POST /api/trading-bot/trades/{id}/close` - Close an open trade
+- `GET /api/trading-bot/account` - Alpaca account info
+- `POST /api/trading-bot/demo-trade` - Create demo trade for testing
+- `POST /api/trading-bot/scan-now` - Trigger manual scan
+
 ### Market Data
 - `GET /api/market/news` - Market news
 - `GET /api/ib/flex-trades` - IB trade history
