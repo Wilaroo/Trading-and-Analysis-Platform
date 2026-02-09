@@ -74,11 +74,20 @@ const PnLDisplay = ({ pnl, pnlPct, size = 'sm' }) => {
 };
 
 // Trade Card Component
-const TradeCard = ({ trade, onConfirm, onReject, onClose, onViewDetails }) => {
+const TradeCard = ({ trade, onConfirm, onReject, onClose, onTickerClick, showCloseReason = false }) => {
   const [expanded, setExpanded] = useState(false);
   const status = STATUS_CONFIG[trade.status] || STATUS_CONFIG.pending;
   const isPending = trade.status === 'pending';
   const isOpen = trade.status === 'open';
+  const isClosed = trade.status === 'closed';
+  
+  // Close reason display
+  const closeReasonLabel = {
+    'manual': 'Manually Closed',
+    'stop_loss': 'Stop Loss Hit',
+    'target_hit': 'Target Hit',
+    'rejected': 'Rejected'
+  };
   
   return (
     <motion.div
@@ -92,15 +101,34 @@ const TradeCard = ({ trade, onConfirm, onReject, onClose, onViewDetails }) => {
       <div className="p-3">
         <div className="flex items-start justify-between gap-2 mb-2">
           <div className="flex items-center gap-2">
-            <span className="text-lg font-bold text-white">{trade.symbol}</span>
+            <button 
+              onClick={() => onTickerClick?.(trade.symbol)}
+              className="text-lg font-bold text-white hover:text-cyan-400 transition-colors cursor-pointer"
+              title={`View ${trade.symbol} details`}
+              data-testid={`ticker-click-${trade.symbol}`}
+            >
+              {trade.symbol}
+            </button>
             <DirectionBadge direction={trade.direction} />
             <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${status.bg} ${status.color}`}>
               {trade.quality_grade}
             </span>
+            {isClosed && trade.close_reason && (
+              <span className={`text-xs px-1.5 py-0.5 rounded ${
+                trade.close_reason === 'stop_loss' ? 'bg-red-500/20 text-red-400' : 
+                trade.close_reason === 'target_hit' ? 'bg-emerald-500/20 text-emerald-400' : 
+                'bg-zinc-500/20 text-zinc-400'
+              }`}>
+                {closeReasonLabel[trade.close_reason] || trade.close_reason}
+              </span>
+            )}
           </div>
           
           {isOpen && (
             <PnLDisplay pnl={trade.unrealized_pnl} pnlPct={trade.pnl_pct} />
+          )}
+          {isClosed && (
+            <PnLDisplay pnl={trade.realized_pnl} pnlPct={(trade.realized_pnl / (trade.fill_price * trade.shares) * 100)} />
           )}
         </div>
         
@@ -116,16 +144,29 @@ const TradeCard = ({ trade, onConfirm, onReject, onClose, onViewDetails }) => {
             <p className="text-white font-mono">{trade.shares}</p>
           </div>
           <div>
-            <span className="text-zinc-500">Entry</span>
-            <p className="text-white font-mono">${trade.entry_price?.toFixed(2)}</p>
+            <span className="text-zinc-500">{isClosed ? 'Fill' : 'Entry'}</span>
+            <p className="text-white font-mono">${(trade.fill_price || trade.entry_price)?.toFixed(2)}</p>
           </div>
+          {isClosed ? (
+            <div>
+              <span className="text-zinc-500">Exit</span>
+              <p className="text-white font-mono">${trade.exit_price?.toFixed(2)}</p>
+            </div>
+          ) : (
+            <div>
+              <span className="text-zinc-500">Stop</span>
+              <p className="text-red-400 font-mono">${trade.stop_price?.toFixed(2)}</p>
+            </div>
+          )}
           <div>
-            <span className="text-zinc-500">Stop</span>
-            <p className="text-red-400 font-mono">${trade.stop_price?.toFixed(2)}</p>
-          </div>
-          <div>
-            <span className="text-zinc-500">Target</span>
-            <p className="text-emerald-400 font-mono">${trade.target_prices?.[0]?.toFixed(2)}</p>
+            <span className="text-zinc-500">{isClosed ? 'P&L' : 'Target'}</span>
+            {isClosed ? (
+              <p className={`font-mono ${trade.realized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {trade.realized_pnl >= 0 ? '+' : ''}${trade.realized_pnl?.toFixed(2)}
+              </p>
+            ) : (
+              <p className="text-emerald-400 font-mono">${trade.target_prices?.[0]?.toFixed(2)}</p>
+            )}
           </div>
         </div>
         
