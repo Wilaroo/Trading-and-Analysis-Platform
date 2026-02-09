@@ -458,6 +458,8 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const [actionLoading, setActionLoading] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState('pending');
+  const [editingStrategy, setEditingStrategy] = useState(null);
+  const [strategyForm, setStrategyForm] = useState({});
   
   const eventSourceRef = useRef(null);
   
