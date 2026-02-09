@@ -134,6 +134,20 @@ from services.background_scanner import get_background_scanner
 background_scanner = get_background_scanner()
 init_live_scanner_router(background_scanner)
 
+# Initialize trading bot
+trading_bot = get_trading_bot_service()
+trade_executor = get_trade_executor()
+from services.alpaca_service import get_alpaca_service
+alpaca_service = get_alpaca_service()
+trading_bot.set_services(
+    alert_system=alert_system,
+    trading_intelligence=None,  # TODO: add trading intelligence service
+    alpaca_service=alpaca_service,
+    trade_executor=trade_executor,
+    db=db
+)
+init_trading_bot_router(trading_bot, trade_executor)
+
 # Include routers
 app.include_router(notifications_router)
 app.include_router(market_context_router)
@@ -156,6 +170,7 @@ app.include_router(scanner_router)
 app.include_router(alerts_router)
 app.include_router(technicals_router)
 app.include_router(live_scanner_router)
+app.include_router(trading_bot_router)
 
 # Collections
 strategies_col = db["strategies"]
