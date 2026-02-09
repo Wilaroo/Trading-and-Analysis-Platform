@@ -464,6 +464,80 @@ Keep analysis concise and actionable. Focus on data-driven insights."""
             })
         except Exception as e:
             logger.error(f"Error recording tuning action: {e}")
+    
+    # ==================== SCHEDULED AUTO-ANALYSIS ====================
+    
+    async def start_scheduler(self):
+        """Start the post-market auto-analysis scheduler (4:15 PM ET daily)"""
+        self._scheduler_running = True
+        logger.info("Learning loop scheduler started - auto-analysis at 4:15 PM ET")
+        
+        while self._scheduler_running:
+            try:
+                from zoneinfo import ZoneInfo
+            except ImportError:
+                from backports.zoneinfo import ZoneInfo
+            
+            now_et = datetime.now(ZoneInfo("America/New_York"))
+            
+            # Check if it's 4:15 PM ET on a weekday
+            if now_et.weekday() < 5 and now_et.hour == 16 and 15 <= now_et.minute <= 16:
+                logger.info("Post-market auto-analysis triggered")
+                try:
+                    result = await self.analyze_performance()
+                    if result.get("success"):
+                        rec_count = len(result.get("recommendations", []))
+                        logger.info(f"Auto-analysis complete: {rec_count} recommendations generated")
+                except Exception as e:
+                    logger.error(f"Auto-analysis failed: {e}")
+                
+                # Sleep 2 min to avoid re-triggering
+                await asyncio.sleep(120)
+            
+            # Check every 30 seconds
+            await asyncio.sleep(30)
+    
+    def stop_scheduler(self):
+        self._scheduler_running = False
+    
+    # ==================== AI CONVERSATIONAL ACCESS ====================
+    
+    def get_learning_summary_for_ai(self) -> str:
+        """Build a context string for the AI to answer learning/performance questions"""
+        stats = self.get_strategy_stats()
+        recs = self.get_pending_recommendations()
+        history = self.get_tuning_history(limit=5)
+        
+        lines = ["=== STRATEGY PERFORMANCE & LEARNING LOOP ==="]
+        
+        if not stats:
+            lines.append("No performance data yet. No trades have been closed.")
+            return "\n".join(lines)
+        
+        # Per-strategy summary
+        for strategy, perf in stats.items():
+            lines.append(f"\n{strategy.upper().replace('_',' ')} ({perf.get('timeframe','?')}):")
+            lines.append(f"  {perf['total_trades']} trades | {perf['wins']}W/{perf['losses']}L | Win Rate: {perf['win_rate']}%")
+            lines.append(f"  Total P&L: ${perf['total_pnl']:.2f} | Avg P&L: ${perf['avg_pnl']:.2f}")
+            lines.append(f"  Best: ${perf['best_trade']:.2f} | Worst: ${perf['worst_trade']:.2f}")
+            reasons = perf.get('close_reasons', {})
+            if reasons:
+                lines.append(f"  Close reasons: {reasons}")
+        
+        # Pending recommendations
+        if recs:
+            lines.append(f"\nPENDING TUNING RECOMMENDATIONS ({len(recs)}):")
+            for r in recs:
+                lines.append(f"  {r['strategy']}.{r['parameter']}: {r['current_value']} -> {r['suggested_value']}")
+                lines.append(f"    Reason: {r.get('reasoning','')}")
+        
+        # Recent tuning history
+        if history:
+            lines.append(f"\nRECENT TUNING HISTORY ({len(history)} entries):")
+            for h in history:
+                lines.append(f"  {h['strategy']}.{h['parameter']}: {h['old_value']} -> {h['new_value']} ({h.get('action','applied')})")
+        
+        return "\n".join(lines)
 
 
 # Singleton
