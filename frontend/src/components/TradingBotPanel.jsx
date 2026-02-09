@@ -158,8 +158,22 @@ const TradeCard = ({ trade, onConfirm, onReject, onClose, onTickerClick, showClo
             </div>
           ) : (
             <div>
-              <span className="text-zinc-500">Stop</span>
-              <p className="text-red-400 font-mono">${trade.stop_price?.toFixed(2)}</p>
+              <span className="text-zinc-500 flex items-center gap-1">
+                Stop
+                {trade.trailing_stop_config?.mode === 'breakeven' && (
+                  <span className="text-[9px] px-1 py-0.5 bg-yellow-500/20 text-yellow-400 rounded">BE</span>
+                )}
+                {trade.trailing_stop_config?.mode === 'trailing' && (
+                  <span className="text-[9px] px-1 py-0.5 bg-cyan-500/20 text-cyan-400 rounded">TRAIL</span>
+                )}
+              </span>
+              <p className={`font-mono ${
+                trade.trailing_stop_config?.mode === 'breakeven' ? 'text-yellow-400' :
+                trade.trailing_stop_config?.mode === 'trailing' ? 'text-cyan-400' :
+                'text-red-400'
+              }`}>
+                ${(trade.trailing_stop_config?.current_stop || trade.stop_price)?.toFixed(2)}
+              </p>
             </div>
           )}
           <div>
@@ -173,6 +187,36 @@ const TradeCard = ({ trade, onConfirm, onReject, onClose, onTickerClick, showClo
             )}
           </div>
         </div>
+        
+        {/* Trailing Stop Status for open trades */}
+        {isOpen && trade.trailing_stop_config?.mode && trade.trailing_stop_config.mode !== 'original' && (
+          <div className={`mt-2 p-2 rounded border ${
+            trade.trailing_stop_config.mode === 'breakeven' 
+              ? 'bg-yellow-500/10 border-yellow-500/20' 
+              : 'bg-cyan-500/10 border-cyan-500/20'
+          }`}>
+            <div className="flex items-center justify-between text-xs">
+              <span className={`flex items-center gap-1 ${
+                trade.trailing_stop_config.mode === 'breakeven' ? 'text-yellow-400' : 'text-cyan-400'
+              }`}>
+                <Shield className="w-3 h-3" />
+                {trade.trailing_stop_config.mode === 'breakeven' ? 'Breakeven Stop Active' : 'Trailing Stop Active'}
+              </span>
+              <span className="text-zinc-400">
+                Original: ${trade.trailing_stop_config.original_stop?.toFixed(2)} → 
+                <span className={trade.trailing_stop_config.mode === 'breakeven' ? 'text-yellow-400' : 'text-cyan-400'}>
+                  {' '}${trade.trailing_stop_config.current_stop?.toFixed(2)}
+                </span>
+              </span>
+            </div>
+            {trade.trailing_stop_config.mode === 'trailing' && trade.trailing_stop_config.high_water_mark > 0 && (
+              <div className="mt-1 text-[10px] text-zinc-500">
+                High: ${trade.trailing_stop_config.high_water_mark?.toFixed(2)} | 
+                Trail: {(trade.trailing_stop_config.trail_pct * 100)?.toFixed(1)}%
+              </div>
+            )}
+          </div>
+        )}
         
         {/* Scale-out progress for open trades */}
         {isOpen && trade.scale_out_config?.partial_exits?.length > 0 && (
