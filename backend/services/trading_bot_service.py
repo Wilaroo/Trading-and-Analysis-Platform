@@ -141,8 +141,9 @@ class BotTrade:
     
     # Setup details
     setup_type: str
-    quality_score: int
-    quality_grade: str
+    timeframe: str = "intraday"  # scalp, intraday, swing, position
+    quality_score: int = 0
+    quality_grade: str = ""
     
     # Price levels
     entry_price: float
