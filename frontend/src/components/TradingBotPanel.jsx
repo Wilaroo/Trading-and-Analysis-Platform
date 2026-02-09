@@ -91,6 +91,7 @@ const TradeCard = ({ trade, onConfirm, onReject, onClose, onTickerClick, showClo
     'target_1_complete': 'All Targets Hit',
     'target_2_complete': 'All Targets Hit',
     'target_3_complete': 'All Targets Hit',
+    'eod_close': 'EOD Auto-Close',
     'rejected': 'Rejected'
   };
   
