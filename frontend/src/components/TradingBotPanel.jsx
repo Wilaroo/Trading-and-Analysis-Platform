@@ -143,8 +143,23 @@ const TradeCard = ({ trade, onConfirm, onReject, onClose, onTickerClick, showClo
         </div>
         
         {/* Setup info */}
-        <div className="text-sm text-zinc-300 mb-2">
-          {trade.setup_type?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+        <div className="flex items-center gap-2 text-sm text-zinc-300 mb-2">
+          <span>{trade.setup_type?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
+          {trade.timeframe && (
+            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+              trade.timeframe === 'scalp' ? 'bg-orange-500/15 text-orange-400' :
+              trade.timeframe === 'intraday' ? 'bg-yellow-500/15 text-yellow-400' :
+              trade.timeframe === 'swing' ? 'bg-cyan-500/15 text-cyan-400' :
+              'bg-violet-500/15 text-violet-400'
+            }`} data-testid={`timeframe-badge-${trade.id}`}>
+              {trade.timeframe?.toUpperCase()}
+            </span>
+          )}
+          {trade.close_at_eod && trade.status !== 'closed' && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+              EOD Close
+            </span>
+          )}
         </div>
         
         {/* Key metrics */}
