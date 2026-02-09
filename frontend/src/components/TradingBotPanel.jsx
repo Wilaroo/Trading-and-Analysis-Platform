@@ -652,6 +652,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
           className={`flex-1 py-2 text-sm font-medium ${
             activeTab === 'pending' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-zinc-400'
           }`}
+          data-testid="tab-pending"
         >
           Pending ({pendingTrades.length})
         </button>
@@ -660,6 +661,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
           className={`flex-1 py-2 text-sm font-medium ${
             activeTab === 'open' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-zinc-400'
           }`}
+          data-testid="tab-open"
         >
           Open ({openTrades.length})
         </button>
@@ -668,6 +670,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
           className={`flex-1 py-2 text-sm font-medium ${
             activeTab === 'closed' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-zinc-400'
           }`}
+          data-testid="tab-closed"
         >
           Closed ({closedTrades.length})
         </button>
