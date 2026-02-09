@@ -578,3 +578,94 @@ async def create_demo_trade(request: DemoTradeRequest):
         "trade": trade.to_dict()
     }
 
+
+class SimulateClosedRequest(BaseModel):
+    symbol: str = "AAPL"
+    setup_type: str = "rubber_band"
+    direction: str = "long"
+    pnl: float = 150.0  # Positive = win, negative = loss
+    close_reason: str = "target_hit"
+
+
+@router.post("/demo/simulate-closed")
+async def simulate_closed_trade(request: SimulateClosedRequest):
+    """Simulate a fully closed trade for testing the learning loop"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    import random
+    from services.trading_bot_service import BotTrade, TradeStatus, TradeDirection, TradeExplanation, STRATEGY_CONFIG, DEFAULT_STRATEGY_CONFIG, TradeTimeframe
+    
+    symbol = request.symbol.upper()
+    direction = TradeDirection.LONG if request.direction.lower() == "long" else TradeDirection.SHORT
+    strategy_cfg = STRATEGY_CONFIG.get(request.setup_type, DEFAULT_STRATEGY_CONFIG)
+    timeframe_val = strategy_cfg["timeframe"]
+    timeframe_str = timeframe_val.value if isinstance(timeframe_val, TradeTimeframe) else timeframe_val
+    trail_pct = strategy_cfg.get("trail_pct", 0.02)
+    
+    entry_price = round(random.uniform(100, 500), 2)
+    pnl = request.pnl
+    shares = random.randint(50, 300)
+    pnl_per_share = pnl / shares
+    exit_price = round(entry_price + pnl_per_share, 2) if direction == TradeDirection.LONG else round(entry_price - pnl_per_share, 2)
+    stop_price = round(entry_price - entry_price * 0.02, 2)
+    
+    trade = BotTrade(
+        id=str(uuid.uuid4())[:8],
+        symbol=symbol,
+        direction=direction,
+        status=TradeStatus.CLOSED,
+        setup_type=request.setup_type,
+        timeframe=timeframe_str,
+        quality_score=random.randint(60, 90),
+        quality_grade=random.choice(["A", "A-", "B+", "B", "B-"]),
+        entry_price=entry_price,
+        current_price=exit_price,
+        stop_price=stop_price,
+        target_prices=[round(entry_price * 1.03, 2), round(entry_price * 1.05, 2)],
+        shares=shares,
+        risk_amount=round(abs(entry_price - stop_price) * shares, 2),
+        potential_reward=round(abs(pnl) * 1.5, 2),
+        risk_reward_ratio=1.5,
+        fill_price=entry_price,
+        exit_price=exit_price,
+        realized_pnl=round(pnl, 2),
+        pnl_pct=round((pnl / (entry_price * shares)) * 100, 2),
+        created_at=datetime.now(timezone.utc).isoformat(),
+        executed_at=datetime.now(timezone.utc).isoformat(),
+        closed_at=datetime.now(timezone.utc).isoformat(),
+        close_reason=request.close_reason,
+        close_at_eod=strategy_cfg.get("close_at_eod", True),
+        estimated_duration=f"{timeframe_str} demo",
+        trailing_stop_config={
+            "trail_pct": trail_pct
+        }
+    )
+    
+    # Add to closed trades list
+    _trading_bot._closed_trades.append(trade)
+    
+    # Update daily stats
+    _trading_bot._daily_stats.trades_executed += 1
+    _trading_bot._daily_stats.net_pnl += pnl
+    _trading_bot._daily_stats.gross_pnl += pnl
+    if pnl > 0:
+        _trading_bot._daily_stats.trades_won += 1
+    else:
+        _trading_bot._daily_stats.trades_lost += 1
+    total = _trading_bot._daily_stats.trades_won + _trading_bot._daily_stats.trades_lost
+    _trading_bot._daily_stats.win_rate = (_trading_bot._daily_stats.trades_won / total * 100) if total > 0 else 0
+    
+    # Record performance for learning loop
+    if hasattr(_trading_bot, '_perf_service') and _trading_bot._perf_service:
+        _trading_bot._perf_service.record_trade(trade.to_dict())
+    
+    # Save to DB
+    await _trading_bot._save_trade(trade)
+    
+    return {
+        "success": True,
+        "message": f"Simulated closed trade: {symbol} P&L=${pnl:.2f}",
+        "trade": trade.to_dict()
+    }
+
