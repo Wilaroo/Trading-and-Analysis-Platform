@@ -184,6 +184,7 @@ app.include_router(alerts_router)
 app.include_router(technicals_router)
 app.include_router(live_scanner_router)
 app.include_router(trading_bot_router)
+app.include_router(learning_dashboard_router)
 
 # Collections
 strategies_col = db["strategies"]
