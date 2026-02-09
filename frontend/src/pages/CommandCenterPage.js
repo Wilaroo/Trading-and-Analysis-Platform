@@ -50,6 +50,7 @@ import AICommandPanel from '../components/AICommandPanel';
 import TickerDetailModal from '../components/TickerDetailModal';
 import QuickTradeModal from '../components/QuickTradeModal';
 import LiveAlertsPanel from '../components/LiveAlertsPanel';
+import TradingBotPanel from '../components/TradingBotPanel';
 import { HelpTooltip, HelpIcon } from '../components/HelpTooltip';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { playSound, formatPrice, formatPercent, formatVolume, formatCurrency, formatMarketCap } from '../utils/tradingUtils';
