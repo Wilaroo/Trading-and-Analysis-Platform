@@ -414,19 +414,6 @@ async def trigger_manual_scan():
     }
 
 
-class DemoTradeRequest(BaseModel):
-    symbol: str = "NVDA"
-    direction: str = "long"
-    setup_type: str = "rubber_band"
-
-
-class StrategyConfigUpdate(BaseModel):
-    trail_pct: Optional[float] = None
-    close_at_eod: Optional[bool] = None
-    scale_out_pcts: Optional[List[float]] = None
-    timeframe: Optional[str] = None
-
-
 @router.get("/strategy-configs")
 async def get_strategy_configs():
     """Get all strategy configurations"""
