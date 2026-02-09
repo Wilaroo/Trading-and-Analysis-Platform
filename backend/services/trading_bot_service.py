@@ -394,6 +394,9 @@ class TradingBotService:
                 # Update open positions
                 await self._update_open_positions()
                 
+                # Check for EOD close on scalp/intraday trades
+                await self._check_eod_close()
+                
             except Exception as e:
                 logger.error(f"Scan loop error: {e}")
             
