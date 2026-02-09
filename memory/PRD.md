@@ -94,6 +94,13 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
   - Clickable tickers: Click any symbol to open ticker detail modal with trading stats
   - Close reason tracking: Records why each trade was closed (manual, stop_loss, target_hit)
 
+- ✅ **Automatic Target Profit-Taking with Scale-Out**
+  - Auto-sells 33% at Target 1, 33% at Target 2, keeps 34% as runner for Target 3
+  - Tracks partial exits with timestamp, shares sold, fill price, P&L
+  - Cumulative realized P&L from all scale-outs + final exit
+  - Frontend shows scale-out progress bar (T1/T2/T3) with locked P&L
+  - Shares displayed as "remaining/original" format during scale-out
+
 ### December 2025
 - ✅ Verified AI Strategy Knowledge (fixed "AI Amnesia")
 - ✅ Integrated Chart Pattern Intelligence (36+ patterns from ChartGuys)
