@@ -659,6 +659,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const mode = status?.mode || 'confirmation';
   const dailyStats = status?.daily_stats;
   const account = status?.account;
+  const strategyConfigs = status?.strategy_configs || {};
   
   return (
     <div className={`bg-zinc-900/95 backdrop-blur-sm border border-zinc-700/50 rounded-xl overflow-hidden ${className}`} data-testid="trading-bot-panel">
