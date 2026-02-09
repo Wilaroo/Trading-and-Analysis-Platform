@@ -361,10 +361,11 @@ const DailyStatsSummary = ({ stats }) => {
 };
 
 // Main Component
-const TradingBotPanel = ({ className = '' }) => {
+const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const [status, setStatus] = useState(null);
   const [pendingTrades, setPendingTrades] = useState([]);
   const [openTrades, setOpenTrades] = useState([]);
+  const [closedTrades, setClosedTrades] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -388,22 +389,32 @@ const TradingBotPanel = ({ className = '' }) => {
   // Fetch trades
   const fetchTrades = useCallback(async () => {
     try {
-      const [pendingRes, openRes] = await Promise.all([
+      const [pendingRes, openRes, closedRes] = await Promise.all([
         fetch(`${API_URL}/api/trading-bot/trades/pending`),
-        fetch(`${API_URL}/api/trading-bot/trades/open`)
+        fetch(`${API_URL}/api/trading-bot/trades/open`),
+        fetch(`${API_URL}/api/trading-bot/trades/closed?limit=20`)
       ]);
       
       const pendingData = await pendingRes.json();
       const openData = await openRes.json();
+      const closedData = await closedRes.json();
       
       if (pendingData.success) setPendingTrades(pendingData.trades || []);
       if (openData.success) setOpenTrades(openData.trades || []);
+      if (closedData.success) setClosedTrades(closedData.trades || []);
       
     } catch (err) {
       console.error('Failed to fetch trades:', err);
     }
     setLoading(false);
   }, []);
+  
+  // Handle ticker click - open ticker modal
+  const handleTickerClick = useCallback((symbol) => {
+    if (onTickerSelect) {
+      onTickerSelect({ symbol, quote: {} });
+    }
+  }, [onTickerSelect]);
   
   // Start/Stop bot
   const toggleBot = async () => {
