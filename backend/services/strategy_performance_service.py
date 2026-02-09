@@ -9,7 +9,9 @@ Features:
 - AI-powered performance analysis and recommendations
 - Auto-tuning engine with safety guardrails
 - Tuning audit trail
+- Scheduled post-market auto-analysis (4:15 PM ET daily)
 """
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
