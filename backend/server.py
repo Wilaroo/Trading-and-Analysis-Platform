@@ -2708,12 +2708,17 @@ async def startup_event():
     # Start background scanner for live alerts
     await background_scanner.start()
     print("Background scanner started - Live alerts active")
+    
+    # Start learning loop scheduler (auto-analysis at 4:15 PM ET)
+    asyncio.create_task(perf_service.start_scheduler())
+    print("Learning loop scheduler started")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean shutdown of background services"""
     await background_scanner.stop()
-    print("Background scanner stopped")
+    perf_service.stop_scheduler()
+    print("Background services stopped")
 
 
 @app.websocket("/ws/quotes")
