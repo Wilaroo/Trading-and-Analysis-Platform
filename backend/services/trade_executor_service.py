@@ -225,9 +225,16 @@ class TradeExecutorService:
             # Stop order is opposite side to close position
             side = OrderSide.SELL if trade.direction.value == "long" else OrderSide.BUY
             
+            # Round stop price to 2 decimal places (Alpaca requirement)
+            stop_price = round(trade.stop_price, 2)
+            
             order_request = StopOrderRequest(
                 symbol=trade.symbol,
                 qty=trade.shares,
+                side=side,
+                stop_price=stop_price,
+                time_in_force=TimeInForce.GTC  # Good till cancelled
+            )
                 side=side,
                 stop_price=trade.stop_price,
                 time_in_force=TimeInForce.GTC  # Good till cancelled
