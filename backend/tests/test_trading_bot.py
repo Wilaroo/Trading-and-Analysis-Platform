@@ -298,3 +298,60 @@ def cleanup_after_tests():
     # Reset to confirmation mode and stop bot
     requests.post(f"{BASE_URL}/api/trading-bot/mode/confirmation")
     requests.post(f"{BASE_URL}/api/trading-bot/stop")
+
+
+class TestClosedTradesCloseReason:
+    """Test closed trades with close_reason field - New Enhancement"""
+    
+    def test_closed_trades_have_close_reason_field(self):
+        """GET /api/trading-bot/trades/closed returns trades with close_reason field"""
+        response = requests.get(f"{BASE_URL}/api/trading-bot/trades/closed")
+        assert response.status_code == 200
+        
+        data = response.json()
+        assert data.get("success") == True
+        
+        trades = data.get("trades", [])
+        if len(trades) > 0:
+            # Verify close_reason field exists in closed trades
+            for trade in trades:
+                assert "close_reason" in trade, f"Trade {trade.get('id')} missing close_reason field"
+                # close_reason should be one of: manual, stop_loss, target_hit, or None
+                valid_reasons = ["manual", "stop_loss", "target_hit", None]
+                assert trade.get("close_reason") in valid_reasons, f"Invalid close_reason: {trade.get('close_reason')}"
+                print(f"Trade {trade.get('id')} ({trade.get('symbol')}): close_reason = {trade.get('close_reason')}")
+    
+    def test_closed_trades_have_realized_pnl(self):
+        """Closed trades should have realized_pnl field"""
+        response = requests.get(f"{BASE_URL}/api/trading-bot/trades/closed")
+        assert response.status_code == 200
+        
+        data = response.json()
+        trades = data.get("trades", [])
+        
+        if len(trades) > 0:
+            for trade in trades:
+                assert "realized_pnl" in trade, f"Trade {trade.get('id')} missing realized_pnl"
+                assert "fill_price" in trade, f"Trade {trade.get('id')} missing fill_price"
+                assert "exit_price" in trade, f"Trade {trade.get('id')} missing exit_price"
+                print(f"Trade {trade.get('symbol')}: fill=${trade.get('fill_price')}, exit=${trade.get('exit_price')}, P&L=${trade.get('realized_pnl')}")
+    
+    def test_daily_stats_win_loss_counts(self):
+        """Daily stats should show correct win/loss counts"""
+        response = requests.get(f"{BASE_URL}/api/trading-bot/stats/daily")
+        assert response.status_code == 200
+        
+        data = response.json()
+        stats = data.get("stats", {})
+        
+        assert "trades_won" in stats
+        assert "trades_lost" in stats
+        assert "win_rate" in stats
+        
+        # Win rate should be calculated correctly
+        total = stats.get("trades_won", 0) + stats.get("trades_lost", 0)
+        if total > 0:
+            expected_win_rate = (stats.get("trades_won", 0) / total) * 100
+            assert abs(stats.get("win_rate", 0) - expected_win_rate) < 0.01
+        
+        print(f"Daily stats: Won={stats.get('trades_won')}, Lost={stats.get('trades_lost')}, Win Rate={stats.get('win_rate')}%")
