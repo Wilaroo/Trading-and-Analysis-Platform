@@ -1234,6 +1234,13 @@ class TradingBotService:
             await self._notify_trade_update(trade, "closed")
             await self._save_trade(trade)
             
+            # Record performance for learning loop
+            if hasattr(self, '_perf_service') and self._perf_service:
+                try:
+                    self._perf_service.record_trade(trade.to_dict())
+                except Exception as e:
+                    logger.warning(f"Failed to record trade performance: {e}")
+            
             logger.info(f"Trade closed ({reason}): {trade.symbol} P&L: ${trade.realized_pnl:.2f}")
             return True
             
