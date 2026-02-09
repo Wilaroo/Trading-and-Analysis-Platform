@@ -597,7 +597,6 @@ async def simulate_closed_trade(request: SimulateClosedRequest):
     
     import random
     from services.trading_bot_service import BotTrade, TradeStatus, TradeDirection, TradeExplanation, STRATEGY_CONFIG, DEFAULT_STRATEGY_CONFIG, TradeTimeframe
-    
     symbol = request.symbol.upper()
     direction = TradeDirection.LONG if request.direction.lower() == "long" else TradeDirection.SHORT
     strategy_cfg = STRATEGY_CONFIG.get(request.setup_type, DEFAULT_STRATEGY_CONFIG)
