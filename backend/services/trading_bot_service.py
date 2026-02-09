@@ -743,7 +743,7 @@ class TradingBotService:
     
     async def _save_trade(self, trade: BotTrade):
         """Save trade to database"""
-        if not self._db:
+        if self._db is None:
             return
         
         try:
@@ -763,7 +763,7 @@ class TradingBotService:
     
     async def load_trades_from_db(self):
         """Load trades from database on startup"""
-        if not self._db:
+        if self._db is None:
             return
         
         try:
