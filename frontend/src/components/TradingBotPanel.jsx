@@ -580,6 +580,36 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
     setActionLoading(null);
   };
   
+  // Save strategy config
+  const saveStrategyConfig = async (strategy) => {
+    setActionLoading(`strategy-${strategy}`);
+    try {
+      const res = await fetch(`${API_URL}/api/trading-bot/strategy-configs/${strategy}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(strategyForm)
+      });
+      const data = await res.json();
+      if (data.success) {
+        await fetchStatus();
+        setEditingStrategy(null);
+        setStrategyForm({});
+      }
+    } catch (err) {
+      console.error('Failed to save strategy config:', err);
+    }
+    setActionLoading(null);
+  };
+  
+  // Start editing a strategy
+  const startEditingStrategy = (strategy, config) => {
+    setEditingStrategy(strategy);
+    setStrategyForm({
+      trail_pct: config.trail_pct,
+      close_at_eod: config.close_at_eod
+    });
+  };
+  
   // Connect to SSE stream
   useEffect(() => {
     const connectStream = () => {
