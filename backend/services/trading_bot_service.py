@@ -326,12 +326,28 @@ class TradingBotService:
             from services.background_scanner import get_background_scanner
             scanner = get_background_scanner()
             
-            # Get current alerts
-            scanner_alerts = scanner.get_alerts()
+            # Get current alerts - method is get_live_alerts
+            scanner_alerts = scanner.get_live_alerts()
             
             for alert in scanner_alerts:
-                if alert.get('setup_type') in self._enabled_setups:
-                    alerts.append(alert)
+                # Convert LiveAlert to dict
+                alert_dict = {
+                    'symbol': alert.symbol,
+                    'setup_type': alert.setup_type,
+                    'direction': alert.direction,
+                    'current_price': alert.current_price,
+                    'trigger_price': alert.trigger_price,
+                    'stop_price': alert.stop_loss,
+                    'targets': [alert.target],
+                    'score': int(alert.trigger_probability * 100),
+                    'trigger_probability': alert.trigger_probability,
+                    'headline': alert.headline,
+                    'technical_reasons': alert.reasoning,
+                    'warnings': []
+                }
+                
+                if alert_dict.get('setup_type') in self._enabled_setups:
+                    alerts.append(alert_dict)
             
         except Exception as e:
             logger.error(f"Error getting alerts: {e}")
