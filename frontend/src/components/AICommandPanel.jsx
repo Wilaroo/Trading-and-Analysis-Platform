@@ -236,6 +236,7 @@ const AICommandPanel = ({
 
   // Quick actions
   const quickActions = [
+    { label: 'Bot Status', action: () => sendMessage('What is the trading bot status? Show me all bot trades and performance.') },
     { label: 'My Performance', action: () => sendMessage('Analyze my trading performance and give me recommendations.') },
     { label: 'Market News', action: () => sendMessage("What's happening in the market today?") },
     { label: 'Rule Check', action: () => sendMessage('Remind me of my trading rules.') },
