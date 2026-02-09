@@ -1253,6 +1253,13 @@ const CommandCenterPage = ({
           onTickerSelect={(ticker) => setSelectedTicker(ticker)}
         />
       </div>
+      
+      {/* Learning Dashboard - Strategy Performance & Auto-Tuning */}
+      <div className="mt-4">
+        <Card>
+          <LearningDashboard />
+        </Card>
+      </div>
 
       {/* Main Content - New Central Layout */}
       <div className="grid lg:grid-cols-12 gap-4">
