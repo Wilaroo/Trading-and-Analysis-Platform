@@ -1246,6 +1246,11 @@ const CommandCenterPage = ({
         }}
       />
 
+      {/* Trading Bot Panel - Autonomous trading system */}
+      <div className="mt-4">
+        <TradingBotPanel />
+      </div>
+
       {/* Main Content - New Central Layout */}
       <div className="grid lg:grid-cols-12 gap-4">
         {/* Left Column - Scanner & Controls */}
