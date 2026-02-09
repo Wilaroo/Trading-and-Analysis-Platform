@@ -639,13 +639,21 @@ class TradingBotService:
                 
                 trade.current_price = quote.get('price', trade.current_price)
                 
-                # Calculate unrealized P&L
-                if trade.direction == TradeDirection.LONG:
-                    trade.unrealized_pnl = (trade.current_price - trade.fill_price) * trade.shares
-                else:
-                    trade.unrealized_pnl = (trade.fill_price - trade.current_price) * trade.shares
+                # Initialize remaining_shares if not set
+                if trade.remaining_shares == 0:
+                    trade.remaining_shares = trade.shares
+                    trade.original_shares = trade.shares
                 
-                trade.pnl_pct = (trade.unrealized_pnl / (trade.fill_price * trade.shares)) * 100
+                # Calculate unrealized P&L on remaining shares
+                if trade.direction == TradeDirection.LONG:
+                    trade.unrealized_pnl = (trade.current_price - trade.fill_price) * trade.remaining_shares
+                else:
+                    trade.unrealized_pnl = (trade.fill_price - trade.current_price) * trade.remaining_shares
+                
+                # Include realized P&L from partial exits
+                total_value = trade.remaining_shares * trade.fill_price
+                if total_value > 0:
+                    trade.pnl_pct = ((trade.unrealized_pnl + trade.realized_pnl) / (trade.original_shares * trade.fill_price)) * 100
                 
                 # Automatic stop-loss monitoring
                 stop_hit = False
@@ -663,16 +671,9 @@ class TradingBotService:
                     await self.close_trade(trade_id, reason="stop_loss")
                     continue
                 
-                # Check if any target price is hit (for logging/notification)
-                if trade.target_prices:
-                    if trade.direction == TradeDirection.LONG:
-                        for i, target in enumerate(trade.target_prices):
-                            if trade.current_price >= target:
-                                logger.info(f"TARGET {i+1} HIT: {trade.symbol} price ${trade.current_price:.2f} >= target ${target:.2f}")
-                    else:
-                        for i, target in enumerate(trade.target_prices):
-                            if trade.current_price <= target:
-                                logger.info(f"TARGET {i+1} HIT: {trade.symbol} price ${trade.current_price:.2f} <= target ${target:.2f}")
+                # Automatic target profit-taking with scale-out
+                if trade.target_prices and trade.scale_out_config.get('enabled', True):
+                    await self._check_and_execute_scale_out(trade)
                 
                 await self._notify_trade_update(trade, "updated")
                 
