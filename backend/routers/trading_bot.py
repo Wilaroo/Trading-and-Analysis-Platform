@@ -498,6 +498,7 @@ async def create_demo_trade(request: DemoTradeRequest):
         direction=direction,
         status=TradeStatus.PENDING,
         setup_type=request.setup_type,
+        timeframe=timeframe_str,
         quality_score=75,
         quality_grade="B+",
         entry_price=entry_price,
@@ -509,8 +510,26 @@ async def create_demo_trade(request: DemoTradeRequest):
         potential_reward=potential_reward,
         risk_reward_ratio=risk_reward_ratio,
         created_at=datetime.now(timezone.utc).isoformat(),
-        estimated_duration="Demo - 30min-2hr",
-        explanation=explanation
+        estimated_duration=f"{timeframe_str.title()} - 30min-2hr",
+        explanation=explanation,
+        close_at_eod=close_at_eod,
+        scale_out_config={
+            "enabled": True,
+            "targets_hit": [],
+            "scale_out_pcts": scale_pcts,
+            "partial_exits": []
+        },
+        trailing_stop_config={
+            "enabled": True,
+            "mode": "original",
+            "original_stop": stop_price,
+            "current_stop": stop_price,
+            "trail_pct": trail_pct,
+            "trail_atr_mult": 1.5,
+            "high_water_mark": 0.0,
+            "low_water_mark": 0.0,
+            "stop_adjustments": []
+        }
     )
     
     # Add to pending trades
