@@ -663,6 +663,14 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
         >
           Open ({openTrades.length})
         </button>
+        <button
+          onClick={() => setActiveTab('closed')}
+          className={`flex-1 py-2 text-sm font-medium ${
+            activeTab === 'closed' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-zinc-400'
+          }`}
+        >
+          Closed ({closedTrades.length})
+        </button>
       </div>
       
       {/* Trade Lists */}
@@ -688,11 +696,12 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
                   onConfirm={confirmTrade}
                   onReject={rejectTrade}
                   onClose={closeTrade}
+                  onTickerClick={handleTickerClick}
                 />
               ))}
             </AnimatePresence>
           )
-        ) : (
+        ) : activeTab === 'open' ? (
           openTrades.length === 0 ? (
             <div className="text-center py-8 text-zinc-500">
               <Activity className="w-8 h-8 mx-auto mb-2 opacity-50" />
@@ -707,6 +716,28 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
                   onConfirm={confirmTrade}
                   onReject={rejectTrade}
                   onClose={closeTrade}
+                  onTickerClick={handleTickerClick}
+                />
+              ))}
+            </AnimatePresence>
+          )
+        ) : (
+          closedTrades.length === 0 ? (
+            <div className="text-center py-8 text-zinc-500">
+              <BarChart3 className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">No closed trades yet</p>
+            </div>
+          ) : (
+            <AnimatePresence>
+              {closedTrades.map(trade => (
+                <TradeCard
+                  key={trade.id}
+                  trade={trade}
+                  onConfirm={confirmTrade}
+                  onReject={rejectTrade}
+                  onClose={closeTrade}
+                  onTickerClick={handleTickerClick}
+                  showCloseReason={true}
                 />
               ))}
             </AnimatePresence>
