@@ -77,6 +77,17 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
   - Save Changes persists to backend, Reset to Defaults restores original config
   - Footer displays real-time stats: symbol count, interval, setup count
 
+- ✅ **Autonomous Trading Bot (NEW)**
+  - Scans for opportunities using background scanner alerts
+  - Evaluates trades with scoring and risk analysis
+  - Calculates position sizing: $2,500 max risk/trade, $1M capital
+  - Executes trades via Alpaca paper trading
+  - Configurable modes: Autonomous (auto-execute), Confirmation (require approval), Paused
+  - Full trade explanations: entry logic, exit logic, position sizing, risk analysis
+  - P&L tracking with daily statistics
+  - Demo trade generator for testing
+  - Frontend TradingBotPanel with pending/open trades display
+
 ### December 2025
 - ✅ Verified AI Strategy Knowledge (fixed "AI Amnesia")
 - ✅ Integrated Chart Pattern Intelligence (36+ patterns from ChartGuys)
