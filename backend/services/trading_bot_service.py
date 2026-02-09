@@ -108,6 +108,19 @@ class BotTrade:
         "partial_exits": []  # List of {target_idx, shares_sold, price, pnl, timestamp}
     })
     
+    # Trailing stop configuration
+    trailing_stop_config: Dict[str, Any] = field(default_factory=lambda: {
+        "enabled": True,
+        "mode": "original",  # "original", "breakeven", "trailing"
+        "original_stop": 0.0,  # Original stop price
+        "current_stop": 0.0,   # Current effective stop price
+        "trail_pct": 0.02,     # Trail by 2% from high (for longs) or low (for shorts)
+        "trail_atr_mult": 1.5, # Alternative: trail by 1.5x ATR
+        "high_water_mark": 0.0,  # Highest price since T2 hit (for longs)
+        "low_water_mark": 0.0,   # Lowest price since T2 hit (for shorts)
+        "stop_adjustments": []   # History of stop adjustments
+    })
+    
     # Execution details
     fill_price: Optional[float] = None
     exit_price: Optional[float] = None
