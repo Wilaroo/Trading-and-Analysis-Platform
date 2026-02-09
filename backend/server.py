@@ -141,12 +141,16 @@ from services.alpaca_service import get_alpaca_service
 alpaca_service = get_alpaca_service()
 trading_bot.set_services(
     alert_system=alert_system,
-    trading_intelligence=None,  # TODO: add trading intelligence service
+    trading_intelligence=None,
     alpaca_service=alpaca_service,
     trade_executor=trade_executor,
     db=db
 )
 init_trading_bot_router(trading_bot, trade_executor)
+
+# Wire AI assistant ↔ Trading bot integration
+assistant_service.set_trading_bot(trading_bot)
+trading_bot._ai_assistant = assistant_service
 
 # Include routers
 app.include_router(notifications_router)
