@@ -1217,16 +1217,42 @@ const CommandCenterPage = ({
           )}
         </Card>
         
-        <Card className="col-span-1">
+        <Card className="col-span-1 cursor-pointer hover:border-yellow-500/30 transition-colors relative" onClick={() => setExpandedStatCard(expandedStatCard === 'alerts' ? null : 'alerts')}>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-yellow-500/10 flex items-center justify-center">
               <Bell className="w-5 h-5 text-yellow-400" />
             </div>
             <div>
               <p className="text-[10px] text-zinc-500 uppercase">Alerts</p>
-              <p className="text-lg font-bold font-mono text-white">{alerts.length}</p>
+              <p className="text-lg font-bold font-mono text-white">{enhancedAlerts.length + alerts.length}</p>
             </div>
           </div>
+          {expandedStatCard === 'alerts' && (
+            <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-[#111] border border-white/10 rounded-lg p-3 shadow-xl min-w-[320px]" data-testid="alerts-dropdown">
+              <p className="text-[10px] text-zinc-500 uppercase mb-2">Active Alerts</p>
+              <div className="space-y-1 max-h-[250px] overflow-y-auto">
+                {enhancedAlerts.length > 0 ? enhancedAlerts.slice(0, 8).map((alert, idx) => (
+                  <div key={idx} className="p-2 bg-zinc-900/50 rounded hover:bg-zinc-800/50 cursor-pointer"
+                    onClick={(e) => { e.stopPropagation(); setSelectedEnhancedAlert(alert); }}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-white">{alert.symbol}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                        alert.grade === 'A' ? 'bg-green-500 text-black' :
+                        alert.grade === 'B' ? 'bg-cyan-500 text-black' : 'bg-yellow-500 text-black'
+                      }`}>{alert.grade}</span>
+                    </div>
+                    <p className="text-[10px] text-zinc-400 mt-0.5 truncate">{alert.headline}</p>
+                  </div>
+                )) : alerts.length > 0 ? alerts.slice(0, 8).map((alert, idx) => (
+                  <div key={idx} className="p-1.5 bg-zinc-900/50 rounded text-xs text-zinc-300">
+                    {alert.symbol || alert.message || JSON.stringify(alert).substring(0, 60)}
+                  </div>
+                )) : (
+                  <p className="text-xs text-zinc-500 text-center py-2">No active alerts</p>
+                )}
+              </div>
+            </div>
+          )}
         </Card>
         
         <Card className="col-span-1">
