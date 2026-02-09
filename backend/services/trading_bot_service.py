@@ -46,6 +46,64 @@ class TradeDirection(str, Enum):
     SHORT = "short"
 
 
+class TradeTimeframe(str, Enum):
+    """Trade timeframe classification"""
+    SCALP = "scalp"           # Minutes to 1 hour, close at EOD
+    INTRADAY = "intraday"     # 1-4 hours, close at EOD
+    SWING = "swing"           # 1-5 days, hold overnight
+    POSITION = "position"     # Weeks to months, hold overnight
+
+
+# Strategy-based configuration
+STRATEGY_CONFIG = {
+    # Setup type -> (timeframe, trail_pct, scale_out_pcts)
+    "rubber_band": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,  # 1% tight trail for scalps
+        "scale_out_pcts": [0.5, 0.3, 0.2],  # More aggressive scale-out
+        "close_at_eod": True
+    },
+    "vwap_bounce": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    "breakout": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,  # 1.5% trail for intraday
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    "squeeze": {
+        "timeframe": TradeTimeframe.SWING,
+        "trail_pct": 0.025,  # 2.5% wider trail for swings
+        "scale_out_pcts": [0.25, 0.25, 0.5],  # Keep more for runner
+        "close_at_eod": False  # Hold overnight
+    },
+    "trend_continuation": {
+        "timeframe": TradeTimeframe.SWING,
+        "trail_pct": 0.025,
+        "scale_out_pcts": [0.25, 0.25, 0.5],
+        "close_at_eod": False
+    },
+    "position_trade": {
+        "timeframe": TradeTimeframe.POSITION,
+        "trail_pct": 0.03,  # 3% widest trail for positions
+        "scale_out_pcts": [0.2, 0.3, 0.5],
+        "close_at_eod": False
+    }
+}
+
+# Default config for unknown setups
+DEFAULT_STRATEGY_CONFIG = {
+    "timeframe": TradeTimeframe.INTRADAY,
+    "trail_pct": 0.02,
+    "scale_out_pcts": [0.33, 0.33, 0.34],
+    "close_at_eod": True
+}
+
+
 @dataclass
 class RiskParameters:
     """Risk management parameters"""
