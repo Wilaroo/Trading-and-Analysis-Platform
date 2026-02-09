@@ -1366,6 +1366,62 @@ Be honest and constructive."""
 
         return await self.chat(prompt, session_id)
     
+    # ===================== AI-BOT INTEGRATION =====================
+    
+    async def evaluate_bot_opportunity(self, trade_data: Dict) -> Dict:
+        """
+        AI evaluates a trade opportunity from the bot.
+        Returns approval/rejection with reasoning.
+        """
+        prompt = f"""AUTONOMOUS BOT TRADE EVALUATION REQUEST:
+
+The trading bot has identified a potential trade. Evaluate it against our strategy rules:
+
+Symbol: {trade_data.get('symbol')}
+Direction: {trade_data.get('direction', 'long').upper()}
+Strategy: {trade_data.get('setup_type', 'unknown')}
+Timeframe: {trade_data.get('timeframe', 'intraday')}
+Entry Price: ${trade_data.get('entry_price', 0):.2f}
+Stop Price: ${trade_data.get('stop_price', 0):.2f}
+Target Prices: {trade_data.get('target_prices', [])}
+Risk Amount: ${trade_data.get('risk_amount', 0):.2f}
+Risk/Reward: {trade_data.get('risk_reward_ratio', 0):.1f}:1
+Quality Score: {trade_data.get('quality_score', 0)} ({trade_data.get('quality_grade', 'N/A')})
+
+Evaluate:
+1. Does this match the strategy criteria?
+2. Any rule violations?
+3. Is the R:R acceptable?
+4. VERDICT: APPROVE, CAUTION, or REJECT
+
+Keep response concise (3-5 sentences max). Start with VERDICT on first line."""
+
+        try:
+            context = ""
+            if self._trading_bot:
+                context = self._trading_bot.get_bot_context_for_ai()
+            
+            messages = [{"role": "user", "content": prompt}]
+            response = await self._call_llm(messages, context)
+            
+            # Parse verdict
+            verdict = "CAUTION"
+            response_lower = response.lower()
+            if "approve" in response_lower[:50]:
+                verdict = "APPROVE"
+            elif "reject" in response_lower[:50]:
+                verdict = "REJECT"
+            
+            return {
+                "success": True,
+                "verdict": verdict,
+                "analysis": response,
+                "symbol": trade_data.get('symbol')
+            }
+        except Exception as e:
+            logger.error(f"AI evaluation error: {e}")
+            return {"success": False, "verdict": "APPROVE", "analysis": f"AI unavailable: {e}"}
+    
     # ===================== COACHING FEATURES =====================
     
     async def check_rule_violations(self, symbol: str, action: str, entry_price: float = None, 
