@@ -370,6 +370,38 @@ class DemoTradeRequest(BaseModel):
     setup_type: str = "rubber_band"
 
 
+class StrategyConfigUpdate(BaseModel):
+    trail_pct: Optional[float] = None
+    close_at_eod: Optional[bool] = None
+    scale_out_pcts: Optional[List[float]] = None
+    timeframe: Optional[str] = None
+
+
+@router.get("/strategy-configs")
+async def get_strategy_configs():
+    """Get all strategy configurations"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    configs = _trading_bot.get_strategy_configs()
+    return {"success": True, "configs": configs}
+
+
+@router.put("/strategy-configs/{strategy}")
+async def update_strategy_config(strategy: str, config: StrategyConfigUpdate):
+    """Update a specific strategy configuration"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    updates = config.dict(exclude_none=True)
+    success = _trading_bot.update_strategy_config(strategy, updates)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Strategy '{strategy}' not found")
+    
+    return {"success": True, "message": f"Strategy '{strategy}' updated", "configs": _trading_bot.get_strategy_configs()}
+
+
 @router.post("/demo-trade")
 async def create_demo_trade(request: DemoTradeRequest):
     """
