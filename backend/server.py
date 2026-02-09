@@ -153,6 +153,14 @@ init_trading_bot_router(trading_bot, trade_executor)
 assistant_service.set_trading_bot(trading_bot)
 trading_bot._ai_assistant = assistant_service
 
+# Initialize strategy performance & learning service
+from services.strategy_performance_service import get_performance_service
+perf_service = get_performance_service()
+perf_service._db = db
+perf_service.set_services(trading_bot=trading_bot, ai_assistant=assistant_service)
+trading_bot._perf_service = perf_service
+init_learning_dashboard(perf_service)
+
 # Include routers
 app.include_router(notifications_router)
 app.include_router(market_context_router)
