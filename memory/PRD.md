@@ -101,6 +101,14 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
   - Frontend shows scale-out progress bar (T1/T2/T3) with locked P&L
   - Shares displayed as "remaining/original" format during scale-out
 
+- ✅ **Trailing Stop Feature**
+  - **Breakeven Stop**: After Target 1 hit, stop automatically moves to entry price (zero risk)
+  - **Trailing Stop**: After Target 2 hit, stop trails price by 2% from high water mark
+  - Tracks high_water_mark and records all stop adjustments with timestamps
+  - Frontend shows "BE" badge (yellow) for breakeven mode, "TRAIL" badge (cyan) for trailing
+  - Trailing Stop Status panel shows: Original stop → Current stop with high water mark
+  - Close reasons: stop_loss_breakeven, stop_loss_trailing for detailed tracking
+
 ### December 2025
 - ✅ Verified AI Strategy Knowledge (fixed "AI Amnesia")
 - ✅ Integrated Chart Pattern Intelligence (36+ patterns from ChartGuys)
