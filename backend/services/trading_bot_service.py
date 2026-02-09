@@ -214,6 +214,8 @@ class BotTrade:
         d = asdict(self)
         d['direction'] = self.direction.value if isinstance(self.direction, TradeDirection) else self.direction
         d['status'] = self.status.value if isinstance(self.status, TradeStatus) else self.status
+        d['timeframe'] = self.timeframe
+        d['close_at_eod'] = self.close_at_eod
         return d
 
 
