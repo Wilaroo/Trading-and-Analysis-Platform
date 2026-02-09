@@ -76,7 +76,7 @@ class StrategyPerformanceService:
     
     def get_strategy_stats(self) -> Dict[str, Any]:
         """Get aggregated performance stats per strategy"""
-        if not self._db:
+        if self._db is None:
             return {}
         
         try:
@@ -138,7 +138,7 @@ class StrategyPerformanceService:
     
     def get_recent_trades(self, strategy: str = None, limit: int = 20) -> List[Dict]:
         """Get recent trade records, optionally filtered by strategy"""
-        if not self._db:
+        if self._db is None:
             return []
         
         try:
@@ -385,7 +385,7 @@ Keep analysis concise and actionable. Focus on data-driven insights."""
     
     def get_pending_recommendations(self) -> List[Dict]:
         """Get all pending recommendations"""
-        if not self._db:
+        if self._db is None:
             return []
         try:
             col = self._db["tuning_recommendations"]
@@ -395,7 +395,7 @@ Keep analysis concise and actionable. Focus on data-driven insights."""
     
     def get_tuning_history(self, limit: int = 20) -> List[Dict]:
         """Get audit trail of all tuning actions"""
-        if not self._db:
+        if self._db is None:
             return []
         try:
             col = self._db["tuning_history"]
@@ -407,7 +407,7 @@ Keep analysis concise and actionable. Focus on data-driven insights."""
     
     def _save_analysis(self, analysis: str, recommendations: List[Dict], stats: Dict):
         """Save analysis and recommendations to DB"""
-        if not self._db:
+        if self._db is None:
             return
         try:
             # Save recommendations
@@ -428,7 +428,7 @@ Keep analysis concise and actionable. Focus on data-driven insights."""
             logger.error(f"Error saving analysis: {e}")
     
     def _get_recommendation(self, rec_id: str) -> Optional[Dict]:
-        if not self._db:
+        if self._db is None:
             return None
         try:
             col = self._db["tuning_recommendations"]
@@ -437,7 +437,7 @@ Keep analysis concise and actionable. Focus on data-driven insights."""
             return None
     
     def _update_recommendation_status(self, rec_id: str, status: str):
-        if not self._db:
+        if self._db is None:
             return
         try:
             col = self._db["tuning_recommendations"]
@@ -446,7 +446,7 @@ Keep analysis concise and actionable. Focus on data-driven insights."""
             logger.error(f"Error updating recommendation: {e}")
     
     def _record_tuning_action(self, rec: Dict, action: str):
-        if not self._db:
+        if self._db is None:
             return
         try:
             col = self._db["tuning_history"]
