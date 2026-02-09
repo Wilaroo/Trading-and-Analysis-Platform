@@ -679,6 +679,135 @@ class TradingBotService:
                 
             except Exception as e:
                 logger.error(f"Error updating position {trade_id}: {e}")
+
+    async def _check_and_execute_scale_out(self, trade: BotTrade):
+        """
+        Check if any target prices are hit and execute scale-out sells.
+        Sells 1/3 at Target 1, 1/3 at Target 2, keeps 1/3 for Target 3 (runner).
+        """
+        if not trade.target_prices or trade.remaining_shares <= 0:
+            return
+        
+        targets_hit = trade.scale_out_config.get('targets_hit', [])
+        scale_out_pcts = trade.scale_out_config.get('scale_out_pcts', [0.33, 0.33, 0.34])
+        
+        for i, target in enumerate(trade.target_prices):
+            if i in targets_hit:
+                continue  # Already sold at this target
+            
+            # Check if target is hit
+            target_hit = False
+            if trade.direction == TradeDirection.LONG:
+                if trade.current_price >= target:
+                    target_hit = True
+            else:  # SHORT
+                if trade.current_price <= target:
+                    target_hit = True
+            
+            if target_hit:
+                # Calculate shares to sell at this target
+                pct_to_sell = scale_out_pcts[i] if i < len(scale_out_pcts) else 0.34
+                
+                # For last target, sell all remaining
+                if i == len(trade.target_prices) - 1:
+                    shares_to_sell = trade.remaining_shares
+                else:
+                    shares_to_sell = max(1, int(trade.original_shares * pct_to_sell))
+                    shares_to_sell = min(shares_to_sell, trade.remaining_shares)
+                
+                if shares_to_sell <= 0:
+                    continue
+                
+                logger.info(f"TARGET {i+1} HIT: {trade.symbol} - Scaling out {shares_to_sell} shares at ${trade.current_price:.2f}")
+                
+                # Execute partial exit
+                exit_result = await self._execute_partial_exit(trade, shares_to_sell, target, i)
+                
+                if exit_result.get('success'):
+                    fill_price = exit_result.get('fill_price', trade.current_price)
+                    
+                    # Calculate P&L for this scale-out
+                    if trade.direction == TradeDirection.LONG:
+                        partial_pnl = (fill_price - trade.fill_price) * shares_to_sell
+                    else:
+                        partial_pnl = (trade.fill_price - fill_price) * shares_to_sell
+                    
+                    # Update trade state
+                    trade.remaining_shares -= shares_to_sell
+                    trade.realized_pnl += partial_pnl
+                    targets_hit.append(i)
+                    trade.scale_out_config['targets_hit'] = targets_hit
+                    
+                    # Record the partial exit
+                    partial_exit_record = {
+                        'target_idx': i + 1,
+                        'target_price': target,
+                        'shares_sold': shares_to_sell,
+                        'fill_price': fill_price,
+                        'pnl': partial_pnl,
+                        'timestamp': datetime.now(timezone.utc).isoformat()
+                    }
+                    trade.scale_out_config.setdefault('partial_exits', []).append(partial_exit_record)
+                    
+                    logger.info(f"Scale-out complete: {trade.symbol} T{i+1} - Sold {shares_to_sell} @ ${fill_price:.2f}, P&L: ${partial_pnl:.2f}, Remaining: {trade.remaining_shares}")
+                    
+                    await self._notify_trade_update(trade, f"scale_out_t{i+1}")
+                    
+                    # If all shares sold, close the trade
+                    if trade.remaining_shares <= 0:
+                        trade.status = TradeStatus.CLOSED
+                        trade.closed_at = datetime.now(timezone.utc).isoformat()
+                        trade.close_reason = f"target_{i+1}_complete"
+                        trade.exit_price = fill_price
+                        trade.unrealized_pnl = 0
+                        
+                        # Update daily stats
+                        if trade.realized_pnl > 0:
+                            self._daily_stats.trades_won += 1
+                            self._daily_stats.largest_win = max(self._daily_stats.largest_win, trade.realized_pnl)
+                        else:
+                            self._daily_stats.trades_lost += 1
+                            self._daily_stats.largest_loss = min(self._daily_stats.largest_loss, trade.realized_pnl)
+                        
+                        self._daily_stats.net_pnl += trade.realized_pnl
+                        total = self._daily_stats.trades_won + self._daily_stats.trades_lost
+                        self._daily_stats.win_rate = (self._daily_stats.trades_won / total * 100) if total > 0 else 0
+                        
+                        # Move to closed trades
+                        del self._open_trades[trade.id]
+                        self._closed_trades.append(trade)
+                        
+                        await self._notify_trade_update(trade, "closed")
+                        await self._save_trade(trade)
+                        
+                        logger.info(f"Trade fully closed at Target {i+1}: {trade.symbol} Total P&L: ${trade.realized_pnl:.2f}")
+                        return
+    
+    async def _execute_partial_exit(self, trade: BotTrade, shares: int, target_price: float, target_idx: int) -> Dict:
+        """Execute a partial position exit (scale-out)"""
+        if not self._trade_executor:
+            # Simulated exit
+            return {
+                'success': True,
+                'fill_price': trade.current_price,
+                'shares': shares,
+                'simulated': True
+            }
+        
+        try:
+            # Use trade executor to sell partial position
+            result = await self._trade_executor.execute_partial_exit(trade, shares)
+            return result
+        except Exception as e:
+            logger.error(f"Partial exit error: {e}")
+            # Fall back to simulated
+            return {
+                'success': True,
+                'fill_price': trade.current_price,
+                'shares': shares,
+                'simulated': True
+            }
+
     
     async def close_trade(self, trade_id: str, reason: str = "manual") -> bool:
         """Close an open trade"""
