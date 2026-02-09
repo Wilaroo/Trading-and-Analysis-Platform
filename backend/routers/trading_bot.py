@@ -41,6 +41,19 @@ class TradeAction(BaseModel):
     reason: Optional[str] = None
 
 
+class DemoTradeRequest(BaseModel):
+    symbol: str = "NVDA"
+    direction: str = "long"
+    setup_type: str = "rubber_band"
+
+
+class StrategyConfigUpdate(BaseModel):
+    trail_pct: Optional[float] = None
+    close_at_eod: Optional[bool] = None
+    scale_out_pcts: Optional[List[float]] = None
+    timeframe: Optional[str] = None
+
+
 def init_trading_bot_router(trading_bot, trade_executor):
     """Initialize router with service dependencies"""
     global _trading_bot, _trade_executor
