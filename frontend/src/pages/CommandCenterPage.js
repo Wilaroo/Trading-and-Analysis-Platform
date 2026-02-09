@@ -1248,7 +1248,9 @@ const CommandCenterPage = ({
 
       {/* Trading Bot Panel - Autonomous trading system */}
       <div className="mt-4">
-        <TradingBotPanel />
+        <TradingBotPanel 
+          onTickerSelect={(ticker) => setSelectedTicker(ticker)}
+        />
       </div>
 
       {/* Main Content - New Central Layout */}
