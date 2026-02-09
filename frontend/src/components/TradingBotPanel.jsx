@@ -141,7 +141,11 @@ const TradeCard = ({ trade, onConfirm, onReject, onClose, onTickerClick, showClo
         <div className="grid grid-cols-4 gap-2 text-xs">
           <div>
             <span className="text-zinc-500">Shares</span>
-            <p className="text-white font-mono">{trade.shares}</p>
+            <p className="text-white font-mono">
+              {isOpen && trade.remaining_shares > 0 && trade.remaining_shares !== trade.shares 
+                ? `${trade.remaining_shares}/${trade.original_shares || trade.shares}` 
+                : trade.shares}
+            </p>
           </div>
           <div>
             <span className="text-zinc-500">{isClosed ? 'Fill' : 'Entry'}</span>
@@ -169,6 +173,36 @@ const TradeCard = ({ trade, onConfirm, onReject, onClose, onTickerClick, showClo
             )}
           </div>
         </div>
+        
+        {/* Scale-out progress for open trades */}
+        {isOpen && trade.scale_out_config?.partial_exits?.length > 0 && (
+          <div className="mt-2 p-2 bg-emerald-500/10 rounded border border-emerald-500/20">
+            <div className="flex items-center gap-2 text-xs text-emerald-400 mb-1">
+              <Target className="w-3 h-3" />
+              <span>Scale-Out Progress</span>
+              <span className="ml-auto text-emerald-300 font-mono">
+                +${trade.realized_pnl?.toFixed(2)} locked
+              </span>
+            </div>
+            <div className="flex gap-1">
+              {trade.target_prices?.map((target, i) => {
+                const isHit = trade.scale_out_config?.targets_hit?.includes(i);
+                return (
+                  <div
+                    key={i}
+                    className={`flex-1 h-1.5 rounded ${isHit ? 'bg-emerald-400' : 'bg-zinc-700'}`}
+                    title={`T${i+1}: $${target.toFixed(2)} ${isHit ? '✓' : ''}`}
+                  />
+                );
+              })}
+            </div>
+            <div className="flex justify-between mt-1 text-[10px] text-zinc-500">
+              <span>T1</span>
+              <span>T2</span>
+              <span>T3</span>
+            </div>
+          </div>
+        )}
         
         {/* Risk metrics */}
         <div className="flex items-center gap-4 mt-2 text-xs">
