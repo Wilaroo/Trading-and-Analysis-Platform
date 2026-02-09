@@ -634,6 +634,33 @@ class TradingBotService:
                 
                 trade.pnl_pct = (trade.unrealized_pnl / (trade.fill_price * trade.shares)) * 100
                 
+                # Automatic stop-loss monitoring
+                stop_hit = False
+                if trade.direction == TradeDirection.LONG:
+                    if trade.current_price <= trade.stop_price:
+                        stop_hit = True
+                        logger.warning(f"STOP HIT: {trade.symbol} price ${trade.current_price:.2f} <= stop ${trade.stop_price:.2f}")
+                else:  # SHORT
+                    if trade.current_price >= trade.stop_price:
+                        stop_hit = True
+                        logger.warning(f"STOP HIT: {trade.symbol} price ${trade.current_price:.2f} >= stop ${trade.stop_price:.2f}")
+                
+                if stop_hit:
+                    logger.info(f"Auto-closing {trade.symbol} due to stop-loss trigger")
+                    await self.close_trade(trade_id, reason="stop_loss")
+                    continue
+                
+                # Check if any target price is hit (for logging/notification)
+                if trade.target_prices:
+                    if trade.direction == TradeDirection.LONG:
+                        for i, target in enumerate(trade.target_prices):
+                            if trade.current_price >= target:
+                                logger.info(f"TARGET {i+1} HIT: {trade.symbol} price ${trade.current_price:.2f} >= target ${target:.2f}")
+                    else:
+                        for i, target in enumerate(trade.target_prices):
+                            if trade.current_price <= target:
+                                logger.info(f"TARGET {i+1} HIT: {trade.symbol} price ${trade.current_price:.2f} <= target ${target:.2f}")
+                
                 await self._notify_trade_update(trade, "updated")
                 
             except Exception as e:
