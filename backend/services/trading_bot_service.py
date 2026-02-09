@@ -706,6 +706,118 @@ class TradingBotService:
             except Exception as e:
                 logger.error(f"Error updating position {trade_id}: {e}")
 
+    async def _update_trailing_stop(self, trade: BotTrade):
+        """
+        Update trailing stop based on targets hit:
+        - Target 1 hit: Move stop to breakeven (entry price)
+        - Target 2 hit: Start trailing stop (follows price by trail_pct)
+        """
+        targets_hit = trade.scale_out_config.get('targets_hit', [])
+        trailing_config = trade.trailing_stop_config
+        current_mode = trailing_config.get('mode', 'original')
+        
+        # Check if we need to upgrade stop mode
+        if 1 in targets_hit and current_mode == 'original':
+            # Target 2 hit (index 1) - start trailing
+            self._activate_trailing_stop(trade)
+        elif 0 in targets_hit and current_mode == 'original':
+            # Target 1 hit (index 0) - move to breakeven
+            self._move_stop_to_breakeven(trade)
+        
+        # Update trailing stop if in trailing mode
+        if current_mode == 'trailing':
+            self._update_trail_position(trade)
+    
+    def _move_stop_to_breakeven(self, trade: BotTrade):
+        """Move stop to breakeven (entry price) after Target 1 hit"""
+        trailing_config = trade.trailing_stop_config
+        old_stop = trailing_config.get('current_stop', trade.stop_price)
+        new_stop = trade.fill_price  # Breakeven = entry price
+        
+        # Only move stop if it's an improvement
+        if trade.direction == TradeDirection.LONG:
+            if new_stop > old_stop:
+                trailing_config['current_stop'] = round(new_stop, 2)
+                trailing_config['mode'] = 'breakeven'
+                self._record_stop_adjustment(trade, old_stop, new_stop, 'breakeven')
+                logger.info(f"BREAKEVEN STOP: {trade.symbol} stop moved from ${old_stop:.2f} to ${new_stop:.2f}")
+        else:  # SHORT
+            if new_stop < old_stop:
+                trailing_config['current_stop'] = round(new_stop, 2)
+                trailing_config['mode'] = 'breakeven'
+                self._record_stop_adjustment(trade, old_stop, new_stop, 'breakeven')
+                logger.info(f"BREAKEVEN STOP: {trade.symbol} stop moved from ${old_stop:.2f} to ${new_stop:.2f}")
+    
+    def _activate_trailing_stop(self, trade: BotTrade):
+        """Activate trailing stop after Target 2 hit"""
+        trailing_config = trade.trailing_stop_config
+        old_stop = trailing_config.get('current_stop', trade.stop_price)
+        
+        # Initialize high/low water mark
+        if trade.direction == TradeDirection.LONG:
+            trailing_config['high_water_mark'] = trade.current_price
+            # Calculate initial trailing stop
+            trail_pct = trailing_config.get('trail_pct', 0.02)
+            new_stop = round(trade.current_price * (1 - trail_pct), 2)
+            # Don't move stop down
+            new_stop = max(new_stop, old_stop)
+        else:  # SHORT
+            trailing_config['low_water_mark'] = trade.current_price
+            trail_pct = trailing_config.get('trail_pct', 0.02)
+            new_stop = round(trade.current_price * (1 + trail_pct), 2)
+            # Don't move stop up
+            new_stop = min(new_stop, old_stop)
+        
+        trailing_config['current_stop'] = new_stop
+        trailing_config['mode'] = 'trailing'
+        
+        if new_stop != old_stop:
+            self._record_stop_adjustment(trade, old_stop, new_stop, 'trailing_activated')
+            logger.info(f"TRAILING STOP ACTIVATED: {trade.symbol} stop at ${new_stop:.2f} (trailing {trail_pct*100:.1f}%)")
+    
+    def _update_trail_position(self, trade: BotTrade):
+        """Update the trailing stop position based on price movement"""
+        trailing_config = trade.trailing_stop_config
+        trail_pct = trailing_config.get('trail_pct', 0.02)
+        old_stop = trailing_config.get('current_stop', trade.stop_price)
+        
+        if trade.direction == TradeDirection.LONG:
+            # Update high water mark
+            high_water = trailing_config.get('high_water_mark', trade.current_price)
+            if trade.current_price > high_water:
+                trailing_config['high_water_mark'] = trade.current_price
+                # Calculate new trailing stop
+                new_stop = round(trade.current_price * (1 - trail_pct), 2)
+                # Only move stop up (never down for longs)
+                if new_stop > old_stop:
+                    trailing_config['current_stop'] = new_stop
+                    self._record_stop_adjustment(trade, old_stop, new_stop, 'trail_up')
+                    logger.info(f"TRAILING STOP MOVED: {trade.symbol} stop raised to ${new_stop:.2f} (high: ${trade.current_price:.2f})")
+        else:  # SHORT
+            # Update low water mark
+            low_water = trailing_config.get('low_water_mark', trade.current_price)
+            if trade.current_price < low_water:
+                trailing_config['low_water_mark'] = trade.current_price
+                # Calculate new trailing stop
+                new_stop = round(trade.current_price * (1 + trail_pct), 2)
+                # Only move stop down (never up for shorts)
+                if new_stop < old_stop:
+                    trailing_config['current_stop'] = new_stop
+                    self._record_stop_adjustment(trade, old_stop, new_stop, 'trail_down')
+                    logger.info(f"TRAILING STOP MOVED: {trade.symbol} stop lowered to ${new_stop:.2f} (low: ${trade.current_price:.2f})")
+    
+    def _record_stop_adjustment(self, trade: BotTrade, old_stop: float, new_stop: float, reason: str):
+        """Record a stop adjustment in the trailing stop history"""
+        adjustment = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'old_stop': old_stop,
+            'new_stop': new_stop,
+            'reason': reason,
+            'price_at_adjustment': trade.current_price
+        }
+        trade.trailing_stop_config.setdefault('stop_adjustments', []).append(adjustment)
+
+
     async def _check_and_execute_scale_out(self, trade: BotTrade):
         """
         Check if any target prices are hit and execute scale-out sells.
