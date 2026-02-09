@@ -94,13 +94,13 @@ class BotTrade:
     
     # Position details
     shares: int
-    original_shares: int = 0  # Original position size before scale-outs
-    remaining_shares: int = 0  # Shares still held after scale-outs
     risk_amount: float
     potential_reward: float
     risk_reward_ratio: float
     
-    # Scale-out tracking
+    # Scale-out tracking (with defaults)
+    original_shares: int = 0  # Original position size before scale-outs
+    remaining_shares: int = 0  # Shares still held after scale-outs
     scale_out_config: Dict[str, Any] = field(default_factory=lambda: {
         "enabled": True,
         "targets_hit": [],  # List of target indices that have been hit
