@@ -199,6 +199,7 @@ const CommandCenterPage = ({
   const [showAssistant, setShowAssistant] = useState(false);
   const [assistantPrompt, setAssistantPrompt] = useState(null);
   const [activeMainTab, setActiveMainTab] = useState('trading');
+  const [expandedStatCard, setExpandedStatCard] = useState(null);
   
   // Ticker Search state
   const [tickerSearchQuery, setTickerSearchQuery] = useState('');
