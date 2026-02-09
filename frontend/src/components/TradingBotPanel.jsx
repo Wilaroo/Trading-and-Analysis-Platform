@@ -128,11 +128,7 @@ const TradeCard = ({ trade, onConfirm, onReject, onClose, onTickerClick, showClo
               {trade.quality_grade}
             </span>
             {isClosed && trade.close_reason && (
-              <span className={`text-xs px-1.5 py-0.5 rounded ${
-                trade.close_reason === 'stop_loss' ? 'bg-red-500/20 text-red-400' : 
-                trade.close_reason === 'target_hit' ? 'bg-emerald-500/20 text-emerald-400' : 
-                'bg-zinc-500/20 text-zinc-400'
-              }`}>
+              <span className={`text-xs px-1.5 py-0.5 rounded ${getCloseReasonColor(trade.close_reason)}`}>
                 {closeReasonLabel[trade.close_reason] || trade.close_reason}
               </span>
             )}
