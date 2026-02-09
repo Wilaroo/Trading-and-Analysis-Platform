@@ -452,6 +452,139 @@ const AICommandPanel = ({
           )}
         </div>
 
+        {/* Bot Trades Section */}
+        <div className="p-3 border-b border-white/10" data-testid="bot-trades-section">
+          <SectionHeader 
+            icon={Bot} 
+            title="Bot Trades" 
+            count={(botTrades.pending?.length || 0) + (botTrades.open?.length || 0)}
+            isExpanded={expandedSections.botTrades}
+            onToggle={() => toggleSection('botTrades')}
+            action={
+              <button 
+                onClick={(e) => { e.stopPropagation(); fetchBotTrades(); }}
+                className="p-1 hover:bg-zinc-700 rounded"
+                data-testid="refresh-bot-trades"
+              >
+                <RefreshCw className="w-3 h-3 text-zinc-400" />
+              </button>
+            }
+          />
+          {expandedSections.botTrades && (
+            <div className="mt-2">
+              {/* Bot P&L Summary */}
+              {botTrades.daily_stats && (
+                <div className="flex items-center justify-between p-2 bg-zinc-900/50 rounded-lg mb-2" data-testid="bot-daily-stats">
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] text-zinc-500">Today</span>
+                    <span className="text-xs text-zinc-300">{botTrades.daily_stats.trades_executed || 0} trades</span>
+                    <span className="text-xs text-zinc-400">
+                      {botTrades.daily_stats.trades_won || 0}W/{botTrades.daily_stats.trades_lost || 0}L
+                    </span>
+                  </div>
+                  <span className={`text-sm font-mono font-semibold ${
+                    (botTrades.daily_stats.gross_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'
+                  }`}>
+                    ${(botTrades.daily_stats.gross_pnl || 0).toFixed(2)}
+                  </span>
+                </div>
+              )}
+              
+              {/* Tabs */}
+              <div className="flex gap-1 mb-2">
+                {['pending', 'open', 'closed'].map(tab => {
+                  const count = botTrades[tab]?.length || 0;
+                  return (
+                    <button
+                      key={tab}
+                      onClick={() => setBotTradesTab(tab)}
+                      className={`flex-1 py-1 px-2 rounded text-[11px] font-medium transition-colors ${
+                        botTradesTab === tab
+                          ? tab === 'open' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                            : tab === 'pending' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                            : 'bg-zinc-500/20 text-zinc-300 border border-zinc-500/30'
+                          : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+                      }`}
+                      data-testid={`bot-trades-tab-${tab}`}
+                    >
+                      {tab.charAt(0).toUpperCase() + tab.slice(1)} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+              
+              {/* Trade List */}
+              <div className="space-y-1 max-h-[180px] overflow-y-auto">
+                {(botTrades[botTradesTab] || []).length > 0 ? (
+                  (botTrades[botTradesTab] || []).slice(0, 8).map((trade, idx) => {
+                    const pnl = trade.realized_pnl || trade.unrealized_pnl || 0;
+                    const isProfit = pnl >= 0;
+                    const tfColors = {
+                      scalp: 'bg-orange-500/15 text-orange-400',
+                      intraday: 'bg-yellow-500/15 text-yellow-400',
+                      swing: 'bg-cyan-500/15 text-cyan-400',
+                      position: 'bg-violet-500/15 text-violet-400'
+                    };
+                    
+                    return (
+                      <div 
+                        key={trade.id || idx}
+                        className="flex items-center justify-between p-2 bg-zinc-900/50 rounded-lg hover:bg-zinc-800/50 cursor-pointer group"
+                        onClick={() => {
+                          sendMessage(`Tell me about the bot's ${trade.symbol} ${trade.setup_type} trade. What's the analysis?`);
+                        }}
+                        data-testid={`bot-trade-${trade.id}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm font-medium text-white">{trade.symbol}</span>
+                              <span className={`text-[9px] px-1 py-0.5 rounded ${
+                                trade.direction === 'long' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                              }`}>
+                                {trade.direction?.toUpperCase()}
+                              </span>
+                              {trade.timeframe && (
+                                <span className={`text-[9px] px-1 py-0.5 rounded ${tfColors[trade.timeframe] || ''}`}>
+                                  {trade.timeframe?.toUpperCase()}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-zinc-500">
+                              {trade.setup_type?.replace(/_/g, ' ')} | {trade.shares} sh @ ${trade.entry_price?.toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          {botTradesTab === 'closed' ? (
+                            <span className={`text-xs font-mono font-semibold ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
+                              ${pnl.toFixed(2)}
+                            </span>
+                          ) : botTradesTab === 'open' ? (
+                            <span className={`text-xs font-mono ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
+                              ${pnl.toFixed(2)}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-zinc-400">{trade.quality_grade}</span>
+                          )}
+                          <div className="text-[10px] text-zinc-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                            Ask AI
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <p className="text-xs text-zinc-500 text-center py-3">
+                    {botTradesTab === 'pending' ? 'No pending trades' : 
+                     botTradesTab === 'open' ? 'No open positions' : 'No closed trades today'}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Opportunities Section */}
         <div className="p-3 border-b border-white/10">
           <SectionHeader 
