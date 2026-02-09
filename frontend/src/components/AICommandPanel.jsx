@@ -27,7 +27,10 @@ import {
   Trash2,
   RefreshCw,
   Newspaper,
-  Activity
+  Activity,
+  Play,
+  Pause,
+  CircleDot
 } from 'lucide-react';
 import api from '../utils/api';
 import { toast } from 'sonner';
