@@ -49,6 +49,7 @@ from routers.alerts import router as alerts_router, init_alerts_router
 from routers.technicals import router as technicals_router
 from routers.live_scanner import router as live_scanner_router, init_live_scanner_router
 from routers.trading_bot import router as trading_bot_router, init_trading_bot_router
+from routers.learning_dashboard import router as learning_dashboard_router, init_learning_dashboard
 from services.ib_service import get_ib_service
 from services.newsletter_service import init_newsletter_service
 from services.news_service import init_news_service
