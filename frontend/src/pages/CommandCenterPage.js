@@ -1332,134 +1332,52 @@ const CommandCenterPage = ({
       {/* ==================== AI COACH TAB ==================== */}
       {activeMainTab === 'coach' && (
         <div className="grid lg:grid-cols-12 gap-4 mt-2">
-          {/* Left - Scanner & Holdings */}
-          <div className="lg:col-span-3 space-y-4">
-          {/* Holdings Panel */}
-          <Card>
-            <button 
-              onClick={() => toggleSection('holdings')}
-              className="w-full flex items-center justify-between mb-3"
-            >
-              <div className="flex items-center gap-2">
-                <Briefcase className="w-5 h-5 text-cyan-400" />
-                <h3 className="text-sm font-semibold uppercase tracking-wider">Holdings</h3>
-                <span className="text-xs text-zinc-500">({positions.length})</span>
-              </div>
-              <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.holdings ? 'rotate-180' : ''}`} />
-            </button>
-            
-            {expandedSections.holdings && (
-              <div className="space-y-1 max-h-[200px] overflow-y-auto">
-                {positions.length > 0 ? positions.map((pos, idx) => (
-                  <div 
-                    key={idx} 
-                    className="flex items-center justify-between p-2 bg-zinc-900/50 rounded hover:bg-zinc-900 cursor-pointer"
-                    onClick={() => setSelectedTicker({ symbol: pos.symbol, quote: { price: pos.avg_cost } })}
-                  >
-                    <div>
-                      <span className="font-bold text-white text-sm">{pos.symbol}</span>
-                      <span className="text-xs text-zinc-500 ml-1">{pos.quantity}</span>
-                    </div>
-                    <span className={`text-xs ${(pos.unrealized_pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {formatCurrency(pos.unrealized_pnl || 0)}
-                    </span>
-                  </div>
-                )) : (
-                  <p className="text-center text-zinc-500 text-xs py-2">No positions</p>
-                )}
-              </div>
-            )}
-          </Card>
-        </div>
-
-        {/* CENTER - AI Command Panel */}
-        <div className="lg:col-span-6">
-          <div className="h-[calc(100vh-220px)] min-h-[600px]">
-            <AICommandPanel
-              onTickerSelect={(ticker) => setSelectedTicker(ticker)}
-              watchlist={watchlist}
-              alerts={[...enhancedAlerts, ...alerts]}
-              opportunities={opportunities}
-              earnings={earnings}
-              portfolio={positions}
-              scanResults={opportunities}
-              marketIndices={marketContext?.indices || []}
-              isConnected={isConnected}
-              onRefresh={() => runScanner()}
-            />
+          {/* CENTER - AI Command Panel (wider now) */}
+          <div className="lg:col-span-9">
+            <div className="h-[calc(100vh-220px)] min-h-[600px]">
+              <AICommandPanel
+                onTickerSelect={(ticker) => setSelectedTicker(ticker)}
+                watchlist={watchlist}
+                alerts={[...enhancedAlerts, ...alerts]}
+                opportunities={opportunities}
+                earnings={earnings}
+                portfolio={positions}
+                scanResults={opportunities}
+                marketIndices={marketContext?.indices || []}
+                isConnected={isConnected}
+                onRefresh={() => runScanner()}
+              />
+            </div>
           </div>
-        </div>
 
-        {/* Right Column - Market Intel & Alerts */}
-        <div className="lg:col-span-3 space-y-4">
-          {/* Market Intelligence Panel */}
-          <Card>
-            <div 
-              onClick={() => toggleSection('news')}
-              className="w-full flex items-center justify-between mb-3 cursor-pointer"
-            >
-              <div className="flex items-center gap-2">
-                <Newspaper className="w-5 h-5 text-purple-400" />
-                <h3 className="text-sm font-semibold uppercase tracking-wider">Market Intel</h3>
-              </div>
-              <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.news ? 'rotate-180' : ''}`} />
-            </div>
-            
-            {expandedSections.news && newsletter && (
-              <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                {newsletter.top_stories?.slice(0, 3).map((story, idx) => (
-                  <div key={idx} className="p-2 bg-zinc-900/50 rounded">
-                    <p className="text-xs text-zinc-300">{story.headline || story}</p>
-                  </div>
-                ))}
-                {!newsletter.top_stories?.length && (
-                  <p className="text-xs text-zinc-500 text-center py-2">No market intel available</p>
-                )}
-              </div>
-            )}
-          </Card>
-
-          {/* Enhanced Alerts Panel */}
-          <Card>
-            <SectionHeader icon={Bell} title="Alerts" count={enhancedAlerts.length + alerts.length} />
-            <div className="space-y-1 max-h-[250px] overflow-y-auto">
-              {enhancedAlerts.length > 0 ? enhancedAlerts.slice(0, 5).map((alert, idx) => (
-                <div 
-                  key={idx}
-                  onClick={() => setSelectedEnhancedAlert(alert)}
-                  className="p-2 bg-zinc-900/50 rounded hover:bg-zinc-800/50 cursor-pointer"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-bold text-white">{alert.symbol}</span>
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${
-                      alert.grade === 'A' ? 'bg-green-500 text-black' :
-                      alert.grade === 'B' ? 'bg-cyan-500 text-black' : 'bg-yellow-500 text-black'
-                    }`}>{alert.grade}</span>
-                  </div>
-                  <p className="text-[10px] text-zinc-400 mt-1 truncate">{alert.headline}</p>
+          {/* Right - Market Intel only */}
+          <div className="lg:col-span-3 space-y-4">
+            <Card>
+              <div 
+                onClick={() => toggleSection('news')}
+                className="w-full flex items-center justify-between mb-3 cursor-pointer"
+              >
+                <div className="flex items-center gap-2">
+                  <Newspaper className="w-5 h-5 text-purple-400" />
+                  <h3 className="text-sm font-semibold uppercase tracking-wider">Market Intel</h3>
                 </div>
-              )) : (
-                <p className="text-xs text-zinc-500 text-center py-2">No active alerts</p>
+                <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSections.news ? 'rotate-180' : ''}`} />
+              </div>
+              
+              {expandedSections.news && newsletter && (
+                <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                  {newsletter.top_stories?.slice(0, 3).map((story, idx) => (
+                    <div key={idx} className="p-2 bg-zinc-900/50 rounded">
+                      <p className="text-xs text-zinc-300">{story.headline || story}</p>
+                    </div>
+                  ))}
+                  {!newsletter.top_stories?.length && (
+                    <p className="text-xs text-zinc-500 text-center py-2">No market intel available</p>
+                  )}
+                </div>
               )}
-            </div>
-          </Card>
-
-          {/* Quick Stats Summary */}
-          <Card>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="p-2 bg-zinc-900/50 rounded text-center">
-                <span className="text-[10px] text-zinc-500 block">Net Liq</span>
-                <span className="text-sm font-mono text-white">{formatCurrency(account?.net_liquidation)}</span>
-              </div>
-              <div className="p-2 bg-zinc-900/50 rounded text-center">
-                <span className="text-[10px] text-zinc-500 block">P&L</span>
-                <span className={`text-sm font-mono ${totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {formatCurrency(account?.unrealized_pnl || totalPnL)}
-                </span>
-              </div>
-            </div>
-          </Card>
-        </div>
+            </Card>
+          </div>
         </div>
       )}
 
