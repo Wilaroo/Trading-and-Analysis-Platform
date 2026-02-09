@@ -315,6 +315,39 @@ class TradingBotService:
         """Set which setup types to trade"""
         self._enabled_setups = setups
     
+    def get_strategy_configs(self) -> Dict[str, Any]:
+        """Get all strategy configurations"""
+        result = {}
+        for key, config in STRATEGY_CONFIG.items():
+            result[key] = {
+                "timeframe": config["timeframe"].value if isinstance(config["timeframe"], TradeTimeframe) else config["timeframe"],
+                "trail_pct": config["trail_pct"],
+                "scale_out_pcts": config["scale_out_pcts"],
+                "close_at_eod": config["close_at_eod"]
+            }
+        return result
+    
+    def update_strategy_config(self, strategy: str, updates: Dict[str, Any]) -> bool:
+        """Update a specific strategy configuration"""
+        if strategy not in STRATEGY_CONFIG:
+            return False
+        config = STRATEGY_CONFIG[strategy]
+        if "trail_pct" in updates:
+            config["trail_pct"] = float(updates["trail_pct"])
+        if "close_at_eod" in updates:
+            config["close_at_eod"] = bool(updates["close_at_eod"])
+        if "scale_out_pcts" in updates:
+            pcts = updates["scale_out_pcts"]
+            if isinstance(pcts, list) and len(pcts) >= 2:
+                config["scale_out_pcts"] = [float(p) for p in pcts]
+        if "timeframe" in updates:
+            try:
+                config["timeframe"] = TradeTimeframe(updates["timeframe"])
+            except ValueError:
+                pass
+        logger.info(f"Strategy config updated: {strategy} -> {config}")
+        return True
+    
     # ==================== BOT CONTROL ====================
     
     async def start(self):
