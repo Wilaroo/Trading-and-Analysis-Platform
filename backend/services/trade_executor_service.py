@@ -306,6 +306,58 @@ class TradeExecutorService:
         except Exception as e:
             logger.error(f"Target order error: {e}")
             return {"success": False, "error": str(e)}
+
+    # ==================== PARTIAL EXIT (SCALE-OUT) ====================
+    
+    async def execute_partial_exit(self, trade, shares: int) -> Dict[str, Any]:
+        """Execute a partial position exit (scale-out at target)"""
+        if self._mode == ExecutorMode.SIMULATED:
+            return {
+                "success": True,
+                "order_id": f"SIM-PARTIAL-{trade.id}",
+                "fill_price": trade.current_price,
+                "shares": shares,
+                "simulated": True
+            }
+        
+        if not self._ensure_initialized():
+            return {"success": False, "error": "Executor not initialized"}
+        
+        try:
+            if self._mode == ExecutorMode.PAPER:
+                from alpaca.trading.requests import MarketOrderRequest
+                from alpaca.trading.enums import OrderSide, TimeInForce
+                
+                # Sell partial position (opposite side)
+                side = OrderSide.SELL if trade.direction.value == "long" else OrderSide.BUY
+                
+                order_request = MarketOrderRequest(
+                    symbol=trade.symbol,
+                    qty=shares,
+                    side=side,
+                    time_in_force=TimeInForce.DAY
+                )
+                
+                order = await asyncio.to_thread(
+                    lambda: self._alpaca_client.submit_order(order_request)
+                )
+                
+                # Wait for fill
+                filled_order = await self._wait_for_fill(order.id, timeout=30)
+                
+                fill_price = float(filled_order.filled_avg_price) if filled_order and filled_order.filled_avg_price else trade.current_price
+                
+                return {
+                    "success": True,
+                    "order_id": str(order.id),
+                    "fill_price": fill_price,
+                    "shares": shares
+                }
+                
+        except Exception as e:
+            logger.error(f"Partial exit error: {e}")
+            return {"success": False, "error": str(e)}
+
     
     # ==================== CLOSE POSITION ====================
     
