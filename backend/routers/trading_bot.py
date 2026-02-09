@@ -397,23 +397,23 @@ async def create_demo_trade(request: DemoTradeRequest):
     except Exception as e:
         logger.warning(f"Could not get quote for {symbol}: {e}")
     
-    # Calculate trade parameters
-    entry_price = current_price
-    atr_estimate = current_price * 0.02  # Estimate 2% ATR
+    # Calculate trade parameters - round to 2 decimals
+    entry_price = round(current_price, 2)
+    atr_estimate = round(current_price * 0.02, 2)  # Estimate 2% ATR
     
     if direction == TradeDirection.LONG:
-        stop_price = entry_price - atr_estimate
+        stop_price = round(entry_price - atr_estimate, 2)
         target_prices = [
-            entry_price + atr_estimate * 1.5,
-            entry_price + atr_estimate * 2.5,
-            entry_price + atr_estimate * 4
+            round(entry_price + atr_estimate * 1.5, 2),
+            round(entry_price + atr_estimate * 2.5, 2),
+            round(entry_price + atr_estimate * 4, 2)
         ]
     else:
-        stop_price = entry_price + atr_estimate
+        stop_price = round(entry_price + atr_estimate, 2)
         target_prices = [
-            entry_price - atr_estimate * 1.5,
-            entry_price - atr_estimate * 2.5,
-            entry_price - atr_estimate * 4
+            round(entry_price - atr_estimate * 1.5, 2),
+            round(entry_price - atr_estimate * 2.5, 2),
+            round(entry_price - atr_estimate * 4, 2)
         ]
     
     # Calculate position size
