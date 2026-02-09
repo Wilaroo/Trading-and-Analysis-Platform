@@ -235,10 +235,6 @@ class TradeExecutorService:
                 stop_price=stop_price,
                 time_in_force=TimeInForce.GTC  # Good till cancelled
             )
-                side=side,
-                stop_price=trade.stop_price,
-                time_in_force=TimeInForce.GTC  # Good till cancelled
-            )
             
             order = await asyncio.to_thread(
                 lambda: self._alpaca_client.submit_order(order_request)
@@ -247,7 +243,7 @@ class TradeExecutorService:
             return {
                 "success": True,
                 "order_id": str(order.id),
-                "stop_price": trade.stop_price
+                "stop_price": stop_price
             }
             
         except Exception as e:
