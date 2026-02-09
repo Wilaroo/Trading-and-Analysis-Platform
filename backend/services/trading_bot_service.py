@@ -350,6 +350,59 @@ class TradingBotService:
         logger.info(f"Strategy config updated: {strategy} -> {config}")
         return True
     
+    def get_bot_context_for_ai(self) -> str:
+        """Build a context string about bot state for the AI assistant"""
+        lines = []
+        lines.append("=== TRADING BOT STATUS ===")
+        lines.append(f"Running: {self._running} | Mode: {self._mode.value}")
+        lines.append(f"Capital: ${self.risk_params.starting_capital:,.0f} | Max Risk/Trade: ${self.risk_params.max_risk_per_trade:,.0f}")
+        
+        # Daily stats
+        ds = self._daily_stats
+        lines.append(f"\nToday's Stats: {ds.total_trades} trades | {ds.winning_trades}W/{ds.losing_trades}L | P&L: ${ds.realized_pnl:+,.2f}")
+        if ds.total_trades > 0:
+            lines.append(f"Win Rate: {(ds.winning_trades/ds.total_trades*100):.0f}%")
+        
+        # Pending trades
+        if self._pending_trades:
+            lines.append(f"\nPENDING TRADES ({len(self._pending_trades)}):")
+            for t in self._pending_trades.values():
+                lines.append(f"  {t.symbol} {t.direction.value.upper()} | {t.setup_type} ({t.timeframe}) | Entry: ${t.entry_price:.2f} | Stop: ${t.stop_price:.2f} | R:R {t.risk_reward_ratio:.1f}:1 | Grade: {t.quality_grade}")
+        
+        # Open trades
+        if self._open_trades:
+            lines.append(f"\nOPEN TRADES ({len(self._open_trades)}):")
+            for t in self._open_trades.values():
+                pnl_str = f"${t.unrealized_pnl:+,.2f}" if t.unrealized_pnl else "N/A"
+                lines.append(f"  {t.symbol} {t.direction.value.upper()} | {t.setup_type} ({t.timeframe}) | Entry: ${t.entry_price:.2f} | Current: ${t.current_price:.2f} | P&L: {pnl_str} | EOD Close: {t.close_at_eod}")
+        
+        # Closed trades (last 10)
+        if self._closed_trades:
+            recent_closed = self._closed_trades[-10:]
+            lines.append(f"\nRECENT CLOSED TRADES ({len(self._closed_trades)} total, showing last {len(recent_closed)}):")
+            for t in reversed(recent_closed):
+                lines.append(f"  {t.symbol} {t.direction.value.upper()} | {t.setup_type} ({t.timeframe}) | P&L: ${t.realized_pnl:+,.2f} ({t.pnl_pct:+.1f}%) | Reason: {t.close_reason or 'N/A'}")
+        
+        # Strategy configs summary
+        lines.append("\nSTRATEGY CONFIGS:")
+        for key, cfg in STRATEGY_CONFIG.items():
+            tf = cfg["timeframe"].value if isinstance(cfg["timeframe"], TradeTimeframe) else cfg["timeframe"]
+            lines.append(f"  {key}: {tf} | trail {cfg['trail_pct']*100:.1f}% | EOD close: {cfg['close_at_eod']}")
+        
+        return "\n".join(lines)
+    
+    def get_all_trades_summary(self) -> Dict:
+        """Get all trades for the AI Command Panel"""
+        pending = [t.to_dict() for t in self._pending_trades.values()]
+        open_trades = [t.to_dict() for t in self._open_trades.values()]
+        closed = [t.to_dict() for t in self._closed_trades]
+        return {
+            "pending": pending,
+            "open": open_trades,
+            "closed": closed,
+            "daily_stats": asdict(self._daily_stats)
+        }
+    
     # ==================== BOT CONTROL ====================
     
     async def start(self):
