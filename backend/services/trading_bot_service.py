@@ -533,6 +533,14 @@ class TradingBotService:
             # Generate explanation
             explanation = self._generate_explanation(alert, shares, entry_price, stop_price, target_prices)
             
+            # Get strategy config for this setup type
+            strategy_cfg = STRATEGY_CONFIG.get(setup_type, DEFAULT_STRATEGY_CONFIG)
+            timeframe_val = strategy_cfg["timeframe"]
+            timeframe_str = timeframe_val.value if isinstance(timeframe_val, TradeTimeframe) else timeframe_val
+            trail_pct = strategy_cfg.get("trail_pct", 0.02)
+            scale_pcts = strategy_cfg.get("scale_out_pcts", [0.33, 0.33, 0.34])
+            close_at_eod = strategy_cfg.get("close_at_eod", True)
+            
             # Create trade
             trade = BotTrade(
                 id=str(uuid.uuid4())[:8],
@@ -540,6 +548,7 @@ class TradingBotService:
                 direction=direction,
                 status=TradeStatus.PENDING,
                 setup_type=setup_type,
+                timeframe=timeframe_str,
                 quality_score=quality_score,
                 quality_grade=quality_grade,
                 entry_price=entry_price,
@@ -552,7 +561,25 @@ class TradingBotService:
                 risk_reward_ratio=risk_reward_ratio,
                 created_at=datetime.now(timezone.utc).isoformat(),
                 estimated_duration=self._estimate_duration(setup_type),
-                explanation=explanation
+                explanation=explanation,
+                close_at_eod=close_at_eod,
+                scale_out_config={
+                    "enabled": True,
+                    "targets_hit": [],
+                    "scale_out_pcts": scale_pcts,
+                    "partial_exits": []
+                },
+                trailing_stop_config={
+                    "enabled": True,
+                    "mode": "original",
+                    "original_stop": stop_price,
+                    "current_stop": stop_price,
+                    "trail_pct": trail_pct,
+                    "trail_atr_mult": 1.5,
+                    "high_water_mark": 0.0,
+                    "low_water_mark": 0.0,
+                    "stop_adjustments": []
+                }
             )
             
             logger.info(f"Trade opportunity created: {symbol} {direction.value} {shares} shares @ ${entry_price:.2f}")
