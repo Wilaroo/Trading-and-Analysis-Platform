@@ -1272,6 +1272,7 @@ class TradingBotService:
                 direction=TradeDirection(d.get('direction', 'long')),
                 status=TradeStatus(d.get('status', 'pending')),
                 setup_type=d.get('setup_type', ''),
+                timeframe=d.get('timeframe', 'intraday'),
                 quality_score=d.get('quality_score', 0),
                 quality_grade=d.get('quality_grade', ''),
                 entry_price=d.get('entry_price', 0),
@@ -1291,7 +1292,8 @@ class TradingBotService:
                 executed_at=d.get('executed_at'),
                 closed_at=d.get('closed_at'),
                 estimated_duration=d.get('estimated_duration', ''),
-                explanation=None,  # TODO: deserialize explanation
+                close_at_eod=d.get('close_at_eod', True),
+                explanation=None,
                 entry_order_id=d.get('entry_order_id'),
                 stop_order_id=d.get('stop_order_id'),
                 target_order_ids=d.get('target_order_ids', [])
