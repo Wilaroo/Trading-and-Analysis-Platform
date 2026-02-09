@@ -45,7 +45,7 @@ class StrategyPerformanceService:
         """Record a closed trade's performance metrics to MongoDB"""
         if not self._db:
             return
-        
+
         try:
             col = self._db["strategy_performance"]
             record = {
