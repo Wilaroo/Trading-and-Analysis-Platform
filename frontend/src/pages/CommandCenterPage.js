@@ -1184,7 +1184,7 @@ const CommandCenterPage = ({
           </div>
         </Card>
         
-        <Card className="col-span-1">
+        <Card className="col-span-1 cursor-pointer hover:border-purple-500/30 transition-colors relative" onClick={() => setExpandedStatCard(expandedStatCard === 'positions' ? null : 'positions')}>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
               <Briefcase className="w-5 h-5 text-purple-400" />
@@ -1194,6 +1194,27 @@ const CommandCenterPage = ({
               <p className="text-lg font-bold font-mono text-white">{positions.length}</p>
             </div>
           </div>
+          {expandedStatCard === 'positions' && (
+            <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-[#111] border border-white/10 rounded-lg p-3 shadow-xl min-w-[280px]" data-testid="positions-dropdown">
+              <p className="text-[10px] text-zinc-500 uppercase mb-2">Holdings</p>
+              <div className="space-y-1 max-h-[200px] overflow-y-auto">
+                {positions.length > 0 ? positions.map((pos, idx) => (
+                  <div key={idx} className="flex items-center justify-between p-1.5 bg-zinc-900/50 rounded hover:bg-zinc-800/50 cursor-pointer"
+                    onClick={(e) => { e.stopPropagation(); setSelectedTicker({ symbol: pos.symbol, quote: { price: pos.avg_cost } }); }}>
+                    <div>
+                      <span className="font-bold text-white text-sm">{pos.symbol}</span>
+                      <span className="text-xs text-zinc-500 ml-1">{pos.quantity} sh</span>
+                    </div>
+                    <span className={`text-xs font-mono ${(pos.unrealized_pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {formatCurrency(pos.unrealized_pnl || 0)}
+                    </span>
+                  </div>
+                )) : (
+                  <p className="text-xs text-zinc-500 text-center py-2">No positions</p>
+                )}
+              </div>
+            </div>
+          )}
         </Card>
         
         <Card className="col-span-1">
