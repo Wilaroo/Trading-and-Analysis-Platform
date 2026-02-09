@@ -810,30 +810,43 @@ class TradingBotService:
 
     
     async def close_trade(self, trade_id: str, reason: str = "manual") -> bool:
-        """Close an open trade"""
+        """Close an open trade (sells remaining shares)"""
         if trade_id not in self._open_trades:
             return False
         
         trade = self._open_trades[trade_id]
         
+        # Use remaining shares if we've done partial exits, otherwise use original shares
+        shares_to_close = trade.remaining_shares if trade.remaining_shares > 0 else trade.shares
+        
         try:
-            if self._trade_executor:
+            if self._trade_executor and shares_to_close > 0:
+                # Update trade.shares temporarily for the executor
+                original_shares = trade.shares
+                trade.shares = shares_to_close
+                
                 result = await self._trade_executor.close_position(trade)
+                
+                trade.shares = original_shares  # Restore
+                
                 if result.get('success'):
                     trade.exit_price = result.get('fill_price', trade.current_price)
             else:
                 trade.exit_price = trade.current_price
             
-            # Calculate realized P&L
-            if trade.direction == TradeDirection.LONG:
-                trade.realized_pnl = (trade.exit_price - trade.fill_price) * trade.shares
-            else:
-                trade.realized_pnl = (trade.fill_price - trade.exit_price) * trade.shares
+            # Calculate realized P&L for remaining shares and add to cumulative
+            if shares_to_close > 0:
+                if trade.direction == TradeDirection.LONG:
+                    final_pnl = (trade.exit_price - trade.fill_price) * shares_to_close
+                else:
+                    final_pnl = (trade.fill_price - trade.exit_price) * shares_to_close
+                trade.realized_pnl += final_pnl
             
             trade.status = TradeStatus.CLOSED
             trade.closed_at = datetime.now(timezone.utc).isoformat()
             trade.close_reason = reason
             trade.unrealized_pnl = 0
+            trade.remaining_shares = 0
             
             # Update daily stats
             self._daily_stats.net_pnl += trade.realized_pnl
