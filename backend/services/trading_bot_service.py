@@ -831,6 +831,38 @@ class TradingBotService:
             except Exception as e:
                 logger.error(f"Error updating position {trade_id}: {e}")
 
+    async def _check_eod_close(self):
+        """
+        Close trades marked close_at_eod near market close (3:50 PM ET).
+        Scalp and intraday trades must be closed before end of day.
+        """
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+        
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        
+        # Only run on weekdays during market hours
+        if now_et.weekday() >= 5:
+            return
+        
+        # Close at 3:50 PM ET (10 min before market close)
+        eod_hour = 15
+        eod_minute = 50
+        
+        if now_et.hour < eod_hour or (now_et.hour == eod_hour and now_et.minute < eod_minute):
+            return
+        
+        # After 4:00 PM, stop checking (market closed)
+        if now_et.hour >= 16:
+            return
+        
+        for trade_id, trade in list(self._open_trades.items()):
+            if trade.close_at_eod:
+                logger.info(f"EOD CLOSE: Closing {trade.symbol} ({trade.timeframe}) - close_at_eod=True")
+                await self.close_trade(trade_id, reason="eod_close")
+
     async def _update_trailing_stop(self, trade: BotTrade):
         """
         Update trailing stop based on targets hit:
