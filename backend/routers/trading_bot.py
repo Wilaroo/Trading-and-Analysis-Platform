@@ -344,3 +344,140 @@ async def get_broker_positions():
     
     positions = await _trade_executor.get_positions()
     return {"success": True, "positions": positions}
+
+
+# ==================== MANUAL CONTROLS ====================
+
+@router.post("/scan-now")
+async def trigger_manual_scan():
+    """Manually trigger a scan for trade opportunities"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    await _trading_bot._scan_for_opportunities()
+    
+    return {
+        "success": True,
+        "message": "Scan completed",
+        "pending_trades": len(_trading_bot.get_pending_trades()),
+        "open_trades": len(_trading_bot.get_open_trades())
+    }
+
+
+class DemoTradeRequest(BaseModel):
+    symbol: str = "NVDA"
+    direction: str = "long"
+    setup_type: str = "rubber_band"
+
+
+@router.post("/demo-trade")
+async def create_demo_trade(request: DemoTradeRequest):
+    """
+    Create a demo trade for testing purposes.
+    This simulates finding a trade opportunity without requiring live market data.
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    from services.trading_bot_service import BotTrade, TradeStatus, TradeDirection, TradeExplanation
+    import uuid
+    from datetime import datetime, timezone
+    
+    symbol = request.symbol.upper()
+    direction = TradeDirection.LONG if request.direction.lower() == "long" else TradeDirection.SHORT
+    
+    # Get current price from Alpaca
+    current_price = 100.0  # Default
+    try:
+        from services.alpaca_service import get_alpaca_service
+        alpaca = get_alpaca_service()
+        quote = await alpaca.get_quote(symbol)
+        if quote and quote.get('price'):
+            current_price = quote['price']
+    except Exception as e:
+        logger.warning(f"Could not get quote for {symbol}: {e}")
+    
+    # Calculate trade parameters
+    entry_price = current_price
+    atr_estimate = current_price * 0.02  # Estimate 2% ATR
+    
+    if direction == TradeDirection.LONG:
+        stop_price = entry_price - atr_estimate
+        target_prices = [
+            entry_price + atr_estimate * 1.5,
+            entry_price + atr_estimate * 2.5,
+            entry_price + atr_estimate * 4
+        ]
+    else:
+        stop_price = entry_price + atr_estimate
+        target_prices = [
+            entry_price - atr_estimate * 1.5,
+            entry_price - atr_estimate * 2.5,
+            entry_price - atr_estimate * 4
+        ]
+    
+    # Calculate position size
+    risk_per_share = abs(entry_price - stop_price)
+    max_shares = int(_trading_bot.risk_params.max_risk_per_trade / risk_per_share)
+    shares = min(max_shares, int(_trading_bot.risk_params.starting_capital * 0.1 / entry_price))
+    shares = max(shares, 1)
+    
+    risk_amount = shares * risk_per_share
+    potential_reward = shares * abs(target_prices[0] - entry_price)
+    risk_reward_ratio = potential_reward / risk_amount if risk_amount > 0 else 0
+    
+    # Generate explanation
+    explanation = TradeExplanation(
+        summary=f"Demo {request.setup_type.replace('_', ' ').title()} setup on {symbol}. "
+                f"{'Buying' if direction == TradeDirection.LONG else 'Shorting'} {shares} shares at ${entry_price:.2f}.",
+        setup_identified=f"Demo {request.setup_type} pattern for testing",
+        technical_reasons=[
+            f"Setup type: {request.setup_type}",
+            f"Current price: ${current_price:.2f}",
+            "Demo trade for testing - not based on live analysis"
+        ],
+        fundamental_reasons=[],
+        risk_analysis={
+            "risk_per_share": f"${risk_per_share:.2f}",
+            "total_risk": f"${risk_amount:.2f}",
+            "max_risk_allowed": f"${_trading_bot.risk_params.max_risk_per_trade:.2f}",
+            "risk_pct_of_capital": f"{(risk_amount / _trading_bot.risk_params.starting_capital * 100):.3f}%"
+        },
+        entry_logic=f"Demo entry at ${entry_price:.2f}",
+        exit_logic=f"Stop at ${stop_price:.2f}, Target at ${target_prices[0]:.2f}",
+        position_sizing_logic=f"Position: {shares} shares based on ${_trading_bot.risk_params.max_risk_per_trade:.0f} max risk",
+        confidence_factors=["Demo trade for testing"],
+        warnings=["This is a DEMO trade for testing purposes only"]
+    )
+    
+    # Create trade
+    trade = BotTrade(
+        id=str(uuid.uuid4())[:8],
+        symbol=symbol,
+        direction=direction,
+        status=TradeStatus.PENDING,
+        setup_type=request.setup_type,
+        quality_score=75,
+        quality_grade="B+",
+        entry_price=entry_price,
+        current_price=current_price,
+        stop_price=stop_price,
+        target_prices=target_prices,
+        shares=shares,
+        risk_amount=risk_amount,
+        potential_reward=potential_reward,
+        risk_reward_ratio=risk_reward_ratio,
+        created_at=datetime.now(timezone.utc).isoformat(),
+        estimated_duration="Demo - 30min-2hr",
+        explanation=explanation
+    )
+    
+    # Add to pending trades
+    _trading_bot._pending_trades[trade.id] = trade
+    
+    return {
+        "success": True,
+        "message": f"Demo trade created for {symbol}",
+        "trade": trade.to_dict()
+    }
+
