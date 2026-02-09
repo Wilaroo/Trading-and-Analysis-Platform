@@ -1,0 +1,346 @@
+"""
+Trading Bot API Router
+Endpoints for controlling the autonomous trading bot,
+managing trades, and viewing trade explanations.
+"""
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from typing import List, Optional, Dict, Any
+import asyncio
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/trading-bot", tags=["trading-bot"])
+
+# Service references (set during init)
+_trading_bot = None
+_trade_executor = None
+
+
+class RiskParamsUpdate(BaseModel):
+    max_risk_per_trade: Optional[float] = None
+    max_daily_loss: Optional[float] = None
+    starting_capital: Optional[float] = None
+    max_position_pct: Optional[float] = None
+    max_open_positions: Optional[int] = None
+    min_risk_reward: Optional[float] = None
+
+
+class BotConfigUpdate(BaseModel):
+    mode: Optional[str] = None  # "autonomous", "confirmation", "paused"
+    enabled_setups: Optional[List[str]] = None
+    scan_interval: Optional[int] = None
+    watchlist: Optional[List[str]] = None
+
+
+class TradeAction(BaseModel):
+    action: str  # "confirm", "reject", "close"
+    reason: Optional[str] = None
+
+
+def init_trading_bot_router(trading_bot, trade_executor):
+    """Initialize router with service dependencies"""
+    global _trading_bot, _trade_executor
+    _trading_bot = trading_bot
+    _trade_executor = trade_executor
+    logger.info("Trading bot router initialized")
+
+
+# ==================== BOT CONTROL ====================
+
+@router.get("/status")
+async def get_bot_status():
+    """Get trading bot status and statistics"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    status = _trading_bot.get_status()
+    
+    # Add account info if available
+    if _trade_executor:
+        account = await _trade_executor.get_account_info()
+        status["account"] = account
+    
+    return {"success": True, **status}
+
+
+@router.post("/start")
+async def start_bot():
+    """Start the trading bot"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    await _trading_bot.start()
+    return {"success": True, "message": "Trading bot started", "mode": _trading_bot.get_mode().value}
+
+
+@router.post("/stop")
+async def stop_bot():
+    """Stop the trading bot"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    await _trading_bot.stop()
+    return {"success": True, "message": "Trading bot stopped"}
+
+
+@router.post("/mode/{mode}")
+async def set_bot_mode(mode: str):
+    """Set bot operating mode (autonomous, confirmation, paused)"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    from services.trading_bot_service import BotMode
+    
+    try:
+        bot_mode = BotMode(mode.lower())
+        _trading_bot.set_mode(bot_mode)
+        return {"success": True, "mode": bot_mode.value}
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid mode: {mode}. Use 'autonomous', 'confirmation', or 'paused'")
+
+
+@router.post("/config")
+async def update_bot_config(config: BotConfigUpdate):
+    """Update bot configuration"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    from services.trading_bot_service import BotMode
+    
+    if config.mode:
+        try:
+            bot_mode = BotMode(config.mode.lower())
+            _trading_bot.set_mode(bot_mode)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid mode: {config.mode}")
+    
+    if config.enabled_setups:
+        _trading_bot.set_enabled_setups(config.enabled_setups)
+    
+    if config.scan_interval:
+        _trading_bot._scan_interval = config.scan_interval
+    
+    if config.watchlist:
+        _trading_bot.set_watchlist(config.watchlist)
+    
+    return {"success": True, "message": "Configuration updated"}
+
+
+@router.post("/risk-params")
+async def update_risk_params(params: RiskParamsUpdate):
+    """Update risk management parameters"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    updates = params.dict(exclude_none=True)
+    _trading_bot.update_risk_params(**updates)
+    
+    return {"success": True, "risk_params": _trading_bot.get_status()["risk_params"]}
+
+
+# ==================== TRADE MANAGEMENT ====================
+
+@router.get("/trades/pending")
+async def get_pending_trades():
+    """Get all trades awaiting confirmation"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    trades = _trading_bot.get_pending_trades()
+    return {"success": True, "count": len(trades), "trades": trades}
+
+
+@router.get("/trades/open")
+async def get_open_trades():
+    """Get all open positions"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    trades = _trading_bot.get_open_trades()
+    return {"success": True, "count": len(trades), "trades": trades}
+
+
+@router.get("/trades/closed")
+async def get_closed_trades(limit: int = Query(50, ge=1, le=500)):
+    """Get closed trades history"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    trades = _trading_bot.get_closed_trades(limit=limit)
+    return {"success": True, "count": len(trades), "trades": trades}
+
+
+@router.get("/trades/{trade_id}")
+async def get_trade(trade_id: str):
+    """Get details of a specific trade including explanation"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    trade = _trading_bot.get_trade(trade_id)
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    
+    return {"success": True, "trade": trade}
+
+
+@router.post("/trades/{trade_id}/confirm")
+async def confirm_trade(trade_id: str):
+    """Confirm a pending trade for execution"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    success = await _trading_bot.confirm_trade(trade_id)
+    
+    if success:
+        trade = _trading_bot.get_trade(trade_id)
+        return {"success": True, "message": "Trade executed", "trade": trade}
+    else:
+        raise HTTPException(status_code=400, detail="Failed to execute trade or trade not found")
+
+
+@router.post("/trades/{trade_id}/reject")
+async def reject_trade(trade_id: str, reason: Optional[str] = None):
+    """Reject a pending trade"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    success = await _trading_bot.reject_trade(trade_id)
+    
+    if success:
+        return {"success": True, "message": "Trade rejected"}
+    else:
+        raise HTTPException(status_code=404, detail="Trade not found")
+
+
+@router.post("/trades/{trade_id}/close")
+async def close_trade(trade_id: str, reason: Optional[str] = "manual"):
+    """Close an open trade"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    success = await _trading_bot.close_trade(trade_id, reason=reason)
+    
+    if success:
+        trade = _trading_bot.get_trade(trade_id)
+        return {"success": True, "message": "Trade closed", "trade": trade}
+    else:
+        raise HTTPException(status_code=400, detail="Failed to close trade or trade not found")
+
+
+# ==================== STATISTICS ====================
+
+@router.get("/stats/daily")
+async def get_daily_stats():
+    """Get daily trading statistics"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    stats = _trading_bot.get_daily_stats()
+    return {"success": True, "stats": stats}
+
+
+@router.get("/stats/performance")
+async def get_performance_stats():
+    """Get overall performance statistics"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    # Get all closed trades
+    closed = _trading_bot.get_closed_trades(limit=500)
+    
+    total_pnl = sum(t.get('realized_pnl', 0) for t in closed)
+    winners = [t for t in closed if t.get('realized_pnl', 0) > 0]
+    losers = [t for t in closed if t.get('realized_pnl', 0) < 0]
+    
+    return {
+        "success": True,
+        "stats": {
+            "total_trades": len(closed),
+            "total_pnl": total_pnl,
+            "winners": len(winners),
+            "losers": len(losers),
+            "win_rate": (len(winners) / len(closed) * 100) if closed else 0,
+            "avg_win": sum(t.get('realized_pnl', 0) for t in winners) / len(winners) if winners else 0,
+            "avg_loss": sum(t.get('realized_pnl', 0) for t in losers) / len(losers) if losers else 0,
+            "largest_win": max((t.get('realized_pnl', 0) for t in winners), default=0),
+            "largest_loss": min((t.get('realized_pnl', 0) for t in losers), default=0),
+            "profit_factor": abs(sum(t.get('realized_pnl', 0) for t in winners) / sum(t.get('realized_pnl', 0) for t in losers)) if losers else 0
+        }
+    }
+
+
+# ==================== REAL-TIME STREAMING ====================
+
+@router.get("/stream")
+async def stream_bot_updates():
+    """
+    Server-Sent Events stream for real-time bot updates.
+    Streams: new trades, trade executions, P&L updates, status changes
+    """
+    async def event_generator():
+        queue = asyncio.Queue()
+        
+        async def trade_callback(trade, event_type):
+            await queue.put({"type": event_type, "trade": trade.to_dict()})
+        
+        if _trading_bot:
+            _trading_bot.add_trade_callback(trade_callback)
+        
+        # Send initial connection message
+        yield f"data: {json.dumps({'type': 'connected', 'timestamp': str(datetime.now())})}\n\n"
+        
+        try:
+            while True:
+                try:
+                    # Wait for updates with timeout for heartbeat
+                    update = await asyncio.wait_for(queue.get(), timeout=30)
+                    yield f"data: {json.dumps(update)}\n\n"
+                except asyncio.TimeoutError:
+                    # Send heartbeat
+                    yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+        except asyncio.CancelledError:
+            pass
+    
+    from datetime import datetime
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+# ==================== ACCOUNT INFO ====================
+
+@router.get("/account")
+async def get_account_info():
+    """Get broker account information"""
+    if not _trade_executor:
+        raise HTTPException(status_code=503, detail="Trade executor not initialized")
+    
+    account = await _trade_executor.get_account_info()
+    positions = await _trade_executor.get_positions()
+    
+    return {
+        "success": True,
+        "account": account,
+        "positions": positions
+    }
+
+
+@router.get("/positions")
+async def get_broker_positions():
+    """Get current positions from broker"""
+    if not _trade_executor:
+        raise HTTPException(status_code=503, detail="Trade executor not initialized")
+    
+    positions = await _trade_executor.get_positions()
+    return {"success": True, "positions": positions}
