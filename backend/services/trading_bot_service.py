@@ -94,9 +94,19 @@ class BotTrade:
     
     # Position details
     shares: int
+    original_shares: int = 0  # Original position size before scale-outs
+    remaining_shares: int = 0  # Shares still held after scale-outs
     risk_amount: float
     potential_reward: float
     risk_reward_ratio: float
+    
+    # Scale-out tracking
+    scale_out_config: Dict[str, Any] = field(default_factory=lambda: {
+        "enabled": True,
+        "targets_hit": [],  # List of target indices that have been hit
+        "scale_out_pcts": [0.33, 0.33, 0.34],  # Percentage to sell at each target
+        "partial_exits": []  # List of {target_idx, shares_sold, price, pnl, timestamp}
+    })
     
     # Execution details
     fill_price: Optional[float] = None
@@ -104,7 +114,7 @@ class BotTrade:
     
     # P&L
     unrealized_pnl: float = 0.0
-    realized_pnl: float = 0.0
+    realized_pnl: float = 0.0  # Cumulative from all scale-outs + final exit
     pnl_pct: float = 0.0
     
     # Timing
@@ -113,7 +123,7 @@ class BotTrade:
     closed_at: Optional[str] = None
     estimated_duration: str = ""  # e.g., "30min-2hr" for scalp
     
-    # Close reason (manual, stop_loss, target_hit, etc.)
+    # Close reason (manual, stop_loss, target_hit, target_1, target_2, target_3, etc.)
     close_reason: Optional[str] = None
     
     # Explanation
