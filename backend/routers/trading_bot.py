@@ -13,7 +13,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/trading-bot", tags=["trading-bot"])
+router = APIRouter(prefix="/api/trading-bot", tags=["trading-bot"])
 
 # Service references (set during init)
 _trading_bot = None
