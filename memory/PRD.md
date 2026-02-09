@@ -1,205 +1,80 @@
-# TradeCommand - Advanced Trading and Analysis Platform
+# TradeCommand - Trading and Analysis Platform
 
 ## Original Problem Statement
-Build "TradeCommand," an advanced Trading and Analysis Platform with a highly intelligent AI assistant that serves as a trading coach. The AI integrates the user's proprietary trading strategies, advanced chart patterns, technical analysis, risk management rules, and fundamental analysis to provide comprehensive trade analysis and personalized coaching.
+Build "TradeCommand," an advanced Trading and Analysis Platform with a highly intelligent AI assistant that serves as a trading coach. The platform includes a fully autonomous trading bot integrated into the AI Command Center, capable of scanning for opportunities, evaluating trades, managing risk, calculating position sizes, and executing trades (both paper and live) based on user-defined strategies.
 
-## Core Requirements (Implemented)
-1. **AI Assistant/Coach** - Sophisticated AI hub providing:
-   - Trade analysis based on proprietary strategies
-   - Real-time market news integration
-   - Personalized coaching with rule enforcement
-   - Knowledge of 36+ chart patterns from ChartGuys
-   - Technical analysis (RSI, MACD, Bollinger Bands, etc.)
-   - Fundamental analysis (P/E, ROE, D/E, FCF, etc.)
-   
-2. **Unified Trading Intelligence** - Centralized `TradingIntelligenceService`:
-   - Deep integration of all knowledge sources
-   - Trade setup scoring system (0-100 with grades A+ to F)
-   - Pattern-strategy synergy analysis
-   - Time-of-day and market regime awareness
+## Tech Stack
+- **Frontend**: React, TailwindCSS, Framer Motion, Lightweight Charts (TradingView)
+- **Backend**: FastAPI, Python
+- **Database**: MongoDB
+- **Integrations**: Alpaca (paper trading), Finnhub (fundamentals), IB (scanners), Emergent LLM (GPT), yfinance
 
-3. **Real Trade Data Integration**:
-   - Interactive Brokers Flex Web Service connection
-   - Historical trade analysis
-   - Performance metrics calculation
-
-4. **UI/UX** - 3-column "AI Command Center" consolidating all modules
-
-## Architecture
-
+## Core Architecture
 ```
 /app/
 ├── backend/
-│   ├── routers/
-│   │   ├── assistant.py          # AI endpoints
-│   │   ├── scanner.py            # Predictive scanner endpoints
-│   │   ├── alerts.py             # Advanced alert system endpoints
-│   │   ├── technicals.py         # Real-time technical analysis
-│   │   └── live_scanner.py       # SSE endpoint for background scanning (NEW)
-│   ├── services/
-│   │   ├── ai_assistant_service.py     # Main AI orchestrator
-│   │   ├── ai_market_intelligence.py   # Comprehensive AI context aggregator
-│   │   ├── realtime_technical_service.py # Live technical indicators from Alpaca
-│   │   ├── alert_system.py             # Timeframe-organized alerts
-│   │   ├── predictive_scanner.py       # Setup detection and probability
-│   │   ├── background_scanner.py       # Async background scanning service (NEW)
-│   │   ├── trading_intelligence.py     # Unified scoring engine
-│   │   ├── fundamental_data_service.py # Live fundamentals from Finnhub
-│   │   ├── strategy_knowledge.py       # Proprietary strategies
-│   │   ├── chart_patterns_detailed.py  # 36+ detailed patterns
-│   │   ├── investopedia_knowledge.py   # Technical + Fundamental knowledge
-│   │   └── ib_flex_service.py          # IB trade history
+│   ├── routers/ (trading_bot.py, live_scanner.py, assistant.py, etc.)
+│   ├── services/ (trading_bot_service.py, trade_executor_service.py, background_scanner.py, etc.)
 │   └── server.py
 └── frontend/
     └── src/
-        ├── pages/CommandCenterPage.js
-        └── components/
-            ├── AICommandPanel.jsx
-            └── LiveAlertsPanel.jsx      # Real-time alerts panel (NEW)
+        ├── components/ (TradingBotPanel.jsx, LiveAlertsPanel.jsx, etc.)
+        └── pages/ (CommandCenterPage.js, etc.)
 ```
 
-## What's Been Implemented
+## Completed Features
 
-### January 2026
-- ✅ **Background Scanning System (P0 COMPLETE)**
-  - Non-blocking async scanner running continuously in background
-  - Server-Sent Events (SSE) for real-time alert streaming
-  - Auto-starts on server startup, scans every 60 seconds
-  - Watches 15 default symbols (NVDA, TSLA, AMD, META, AAPL, etc.)
-  - 4 setup types: rubber_band, breakout, vwap_bounce, squeeze
-  - Frontend LiveAlertsPanel with real-time status
-  - Scanner control endpoints (start/stop/config)
+### Phase 1: Core Platform
+- AI Assistant powered by TradingIntelligenceService with real-time data
+- Background scanner with SSE-based real-time alerts
+- Chart patterns, technical analysis, fundamental data services
 
-- ✅ **LiveAlertsPanel Settings Enhancement**
-  - Customizable scan intervals: 30s (Aggressive), 1m (Standard), 2m (Moderate), 5m (Conservative)
-  - Watchlist editing: Add/remove symbols directly from UI
-  - Setup type toggles: Enable/disable individual setup types
-  - Save Changes persists to backend, Reset to Defaults restores original config
-  - Footer displays real-time stats: symbol count, interval, setup count
+### Phase 2: Autonomous Trading Bot (Feature Complete)
+- Full trade lifecycle: opportunity evaluation, order execution (Alpaca), position tracking, trade closing
+- Risk management: position sizing, max risk per trade, daily loss limits
+- Bot modes: Autonomous, Confirmation, Paused
+- Advanced features: profit-taking with multi-level scale-out, dynamic trailing stops, automatic stop-loss
 
-- ✅ **Autonomous Trading Bot (NEW)**
-  - Scans for opportunities using background scanner alerts
-  - Evaluates trades with scoring and risk analysis
-  - Calculates position sizing: $2,500 max risk/trade, $1M capital
-  - Executes trades via Alpaca paper trading
-  - Configurable modes: Autonomous (auto-execute), Confirmation (require approval), Paused
-  - Full trade explanations: entry logic, exit logic, position sizing, risk analysis
-  - P&L tracking with daily statistics
-  - Demo trade generator for testing
-  - Frontend TradingBotPanel with pending/open/closed trades display
-
-- ✅ **Trading Bot Enhancements**
-  - Automatic stop-loss monitoring: Auto-closes positions when price hits stop level
-  - Closed trades tab: Shows trade history with close reason badges (Stop Loss Hit, Manually Closed, Target Hit)
-  - Clickable tickers: Click any symbol to open ticker detail modal with trading stats
-  - Close reason tracking: Records why each trade was closed (manual, stop_loss, target_hit)
-
-- ✅ **Automatic Target Profit-Taking with Scale-Out**
-  - Auto-sells 33% at Target 1, 33% at Target 2, keeps 34% as runner for Target 3
-  - Tracks partial exits with timestamp, shares sold, fill price, P&L
-  - Cumulative realized P&L from all scale-outs + final exit
-  - Frontend shows scale-out progress bar (T1/T2/T3) with locked P&L
-  - Shares displayed as "remaining/original" format during scale-out
-
-- ✅ **Trailing Stop Feature**
-  - **Breakeven Stop**: After Target 1 hit, stop automatically moves to entry price (zero risk)
-  - **Trailing Stop**: After Target 2 hit, stop trails price by 2% from high water mark
-  - Tracks high_water_mark and records all stop adjustments with timestamps
-  - Frontend shows "BE" badge (yellow) for breakeven mode, "TRAIL" badge (cyan) for trailing
-  - Trailing Stop Status panel shows: Original stop → Current stop with high water mark
-  - Close reasons: stop_loss_breakeven, stop_loss_trailing for detailed tracking
-
-### December 2025
-- ✅ Verified AI Strategy Knowledge (fixed "AI Amnesia")
-- ✅ Integrated Chart Pattern Intelligence (36+ patterns from ChartGuys)
-- ✅ Created Unified Trading Intelligence System
-- ✅ Added Trade Scoring API (`/api/assistant/score-setup`)
-- ✅ Integrated Technical Analysis from Investopedia (RSI, MACD, Bollinger Bands, etc.)
-- ✅ **Added Fundamental Analysis Knowledge Base** (P/E, P/B, PEG, ROE, D/E, FCF, EPS, etc.)
-- ✅ Created stock fundamental scoring system with signals/warnings
+### Phase 3: Strategy-Specific Configurations (Completed Dec 2025)
+- **TradeTimeframe enum**: scalp, intraday, swing, position
+- **STRATEGY_CONFIG dict**: 6 pre-configured strategies with per-strategy trail_pct, scale_out_pcts, close_at_eod
+- **EOD Close Logic**: Automatically closes scalp/intraday trades at 3:50 PM ET
+- **API Endpoints**: GET/PUT /api/trading-bot/strategy-configs for CRUD operations
+- **Frontend UI**: Strategy Configuration panel in settings with inline editing
+- **Trade Cards**: Timeframe badges (SCALP/INTRADAY/SWING/POSITION) with color coding, EOD Close badge
 
 ## Key API Endpoints
-
-### AI Assistant
-- `POST /api/assistant/chat` - AI conversation (with real-time fundamentals + alert context)
-- `POST /api/assistant/score-setup` - Trade setup scoring
-- `POST /api/assistant/analyze-fundamentals` - Stock fundamental analysis
-- `GET /api/assistant/realtime/fundamentals/{symbol}` - Live fundamental data
-- `GET /api/assistant/realtime/analyze/{symbol}` - Full analysis
-- `POST /api/assistant/realtime/compare` - Compare stocks' fundamentals
-
-### Predictive Scanner
-- `POST /api/scanner/scan` - Scan for forming trade setups
-- `GET /api/scanner/setups` - Get tracked forming setups
-- `GET /api/scanner/alerts` - Get imminent trigger alerts
-- `GET /api/scanner/summary` - Dashboard summary
-
-### Advanced Alert System
-- `POST /api/alerts/scan` - Full scan organized by timeframe
-- `GET /api/alerts/scalp` - Scalp alerts: "Setting up now" / "On watch today"
-- `GET /api/alerts/swing` - Swing alerts: "Setting up today" / "This week"
-- `GET /api/alerts/summary` - Quick dashboard summary
-- `POST /api/alerts/check-in-play/{symbol}` - Check if stock is "in play"
-- `GET /api/alerts/scoring-weights` - View timeframe-based scoring weights
-
-### Live Scanner (Background Scanning) - NEW
-- `GET /api/live-scanner/stream` - SSE endpoint for real-time alert streaming
-- `GET /api/live-scanner/status` - Scanner running status and stats
-- `GET /api/live-scanner/alerts` - Get current live alerts
-- `POST /api/live-scanner/start` - Start background scanner
-- `POST /api/live-scanner/stop` - Stop background scanner
-- `GET /api/live-scanner/watchlist` - Get/set watchlist symbols
-- `GET /api/live-scanner/config` - Get/update scan configuration
-
-### Trading Bot (Autonomous Trading) - NEW
-- `GET /api/trading-bot/status` - Bot status with risk params and daily stats
-- `POST /api/trading-bot/start` - Start the trading bot
-- `POST /api/trading-bot/stop` - Stop the trading bot
-- `POST /api/trading-bot/mode/{mode}` - Set mode (autonomous/confirmation/paused)
-- `GET /api/trading-bot/trades/pending` - Get trades awaiting confirmation
-- `GET /api/trading-bot/trades/open` - Get open positions
-- `GET /api/trading-bot/trades/closed` - Get closed trades history
-- `POST /api/trading-bot/trades/{id}/confirm` - Execute a pending trade
-- `POST /api/trading-bot/trades/{id}/reject` - Reject a pending trade
-- `POST /api/trading-bot/trades/{id}/close` - Close an open trade
-- `GET /api/trading-bot/account` - Alpaca account info
+- `POST /api/trading-bot/start|stop` - Bot control
+- `GET /api/trading-bot/status` - Status with strategy_configs
+- `GET /api/trading-bot/strategy-configs` - All strategy configs
+- `PUT /api/trading-bot/strategy-configs/{strategy}` - Update strategy config
+- `GET /api/trading-bot/trades/pending|open|closed` - Trade lists
 - `POST /api/trading-bot/demo-trade` - Create demo trade for testing
-- `POST /api/trading-bot/scan-now` - Trigger manual scan
+- `GET /api/live-scanner/stream-alerts` - SSE real-time alerts
 
-### Market Data
-- `GET /api/market/news` - Market news
-- `GET /api/ib/flex-trades` - IB trade history
-
-## 3rd Party Integrations
-- Interactive Brokers Flex Web Service
-- Finnhub (market news, earnings)
-- Alpaca Trading API (market data)
-- Emergent LLM Key (GPT) - AI Assistant
-- TradingView (`lightweight-charts`) - Frontend charting
+## Strategy Configurations
+| Strategy | Timeframe | Trail % | EOD Close | Scale-Out |
+|----------|-----------|---------|-----------|-----------|
+| Rubber Band | Scalp | 1.0% | Yes | 50/30/20 |
+| VWAP Bounce | Scalp | 1.0% | Yes | 50/30/20 |
+| Breakout | Intraday | 1.5% | Yes | 33/33/34 |
+| Squeeze | Swing | 2.5% | No | 25/25/50 |
+| Trend Continuation | Swing | 2.5% | No | 25/25/50 |
+| Position Trade | Position | 3.0% | No | 20/30/50 |
 
 ## Prioritized Backlog
 
-### P1 - High Priority
-- [ ] Implement "Rubber Band Scanner" preset (dedicated scanner for user's strategy)
-- [ ] AI Coach proactive warnings for rule violations
-- [ ] Proactive warning for historically losing tickers
+### P1 - Next Up
+- Implement "Rubber Band Scanner" Preset
+- AI Coach Proactive Warnings (real-time rule violation detection)
 
-### P2 - Medium Priority
-- [ ] AI Assistant backtesting feature
-- [ ] Keyboard shortcuts help overlay (`?` key)
-- [ ] Trade Journal build-out
-- [ ] Full user authentication
+### P2 - Future
+- Database Persistence for Bot State (survive restarts)
+- AI Assistant Backtesting Feature
+- Keyboard Shortcuts Help Overlay
+- Trade Journal (full implementation)
+- Full User Authentication
 
-### P3 - Future
-- [ ] Anchored VWAP Study
-- [ ] Dedicated fundamental analysis API endpoint
-
-## Known Issues
-- Non-critical Python linting errors
-- NPM vulnerabilities (from npm audit)
-
-## Credentials Required
-- `FINNHUB_API_KEY`
-- `IB_FLEX_TOKEN` + `IB_FLEX_QUERY_ID`
-- `APCA_API_KEY_ID` + `APCA_API_SECRET_KEY`
-- `EMERGENT_LLM_KEY`
+## Known Limitations
+- Bot state (trades, P&L) is primarily in-memory; lost on restart
+- Demo trade generator is main testing tool outside market hours
