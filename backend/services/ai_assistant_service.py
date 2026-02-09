@@ -1176,6 +1176,20 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
             except Exception as e:
                 logger.warning(f"Error getting bot context: {e}")
         
+        # 8. Learning loop context - if user asks about performance, recommendations, tuning
+        learning_keywords = ['performance', 'win rate', 'strategy stats', 'how are my strategies',
+                           'recommendation', 'tuning', 'learning', 'which strategy', 'best strategy',
+                           'worst strategy', 'improve', 'optimize', 'analytics', 'auto-tun']
+        wants_learning = any(keyword in user_message.lower() for keyword in learning_keywords)
+        
+        if wants_learning and self._trading_bot and hasattr(self._trading_bot, '_perf_service'):
+            try:
+                perf_service = self._trading_bot._perf_service
+                learning_context = perf_service.get_learning_summary_for_ai()
+                context_parts.append(learning_context)
+            except Exception as e:
+                logger.warning(f"Error getting learning context: {e}")
+        
         return "\n".join(context_parts)
     
     async def _call_llm(self, messages: List[Dict], context: str = "") -> str:
