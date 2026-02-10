@@ -353,6 +353,10 @@ DATA CONTEXT:
         market_ctx = await self._gather_market_data_context()
         context_parts.append(market_ctx)
 
+        watchlist_ctx = await self._gather_watchlist_context()
+        if watchlist_ctx:
+            context_parts.append(watchlist_ctx)
+
         positions_ctx = await self._gather_positions_context()
         context_parts.append(positions_ctx)
 
@@ -361,6 +365,10 @@ DATA CONTEXT:
 
         learning_ctx = self._gather_learning_context()
         context_parts.append(learning_ctx)
+
+        scanner_ctx = await self._gather_scanner_context()
+        if scanner_ctx:
+            context_parts.append(scanner_ctx)
 
         full_context = "\n\n".join(context_parts)
 
