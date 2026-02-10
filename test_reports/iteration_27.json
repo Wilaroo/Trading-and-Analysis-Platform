@@ -1,0 +1,87 @@
+{
+  "summary": "Frontend testing complete for Signals tab removal and Signal Bubbles integration. All requested features verified: (1) Main navigation has only 'Command' and 'Analytics' tabs - Signals tab correctly removed, (2) TradingBotPanel visible on Command tab with all components, (3) Backend /api/live-scanner/alerts endpoint working (returns 0 alerts currently), (4) Signal bubbles section correctly conditional - only renders when liveSignals.length > 0, (5) Market Intelligence panel visible with AI-generated reports.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Command Center",
+        "issues": ["WebSocket shows 'Disconnected' status - known issue for quotes stream, not related to core functionality"]
+      }
+    ]
+  },
+  "passed_tests": [
+    "Main tabs container has exactly 2 tabs: Command and Analytics",
+    "Signals tab correctly REMOVED from navigation",
+    "TradingBotPanel visible on Command tab (data-testid='trading-bot-panel')",
+    "Bot status indicator shows STOPPED/ACTIVE state",
+    "Mode selector buttons present: Autonomous, Confirmation, Paused (data-testid='mode-*')",
+    "Trade tabs present: Pending (0), Open (0), Closed (0) (data-testid='tab-pending/open/closed')",
+    "Daily P&L section visible with Today's P&L, Trades, Win Rate, W/L stats",
+    "Settings button present (data-testid='bot-settings-btn')",
+    "Toggle bot button present (data-testid='toggle-bot-btn')",
+    "GET /api/live-scanner/alerts returns success with scanner_running: true",
+    "GET /api/live-scanner/status shows scanner running with 4 scans, 0 alerts",
+    "Live signals strip correctly hidden when alerts count is 0",
+    "Analytics tab navigation works - shows Learning Loop with strategy performance",
+    "Market Intelligence panel visible with Early Market Report content"
+  ],
+  "test_report_links": [
+    "/app/test_reports/iteration_27.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "TradingBotPanel.jsx correctly fetches from /api/live-scanner/alerts (Line 670-679)",
+    "Signal bubbles only render when liveSignals.length > 0 (Line 911 conditional)",
+    "Signal bubbles have correct data-testid='signal-bubble-{SYMBOL}' for testing",
+    "handleTickerClick correctly calls onTickerSelect to open modal",
+    "CommandCenterPage.js correctly has only 2 tabs: coach (Command) and analytics"
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% - /api/live-scanner/alerts endpoint working",
+    "frontend": "100% - All UI features verified"
+  },
+  "test_credentials": "No auth required",
+  "seed_data_creation": "None needed",
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "mocked_apis_list": [],
+    "note": "All APIs are real - scanner running but 0 alerts generated (normal when no trade setups detected)"
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Signals tab removal verified. Key test data-testids: main-tabs, tab-coach, tab-analytics, trading-bot-panel, mode-autonomous/confirmation/paused, tab-pending/open/closed, bot-settings-btn, toggle-bot-btn, live-signals-strip (only visible when alerts > 0), signal-bubble-{SYMBOL}, market-intel-panel. Scanner is running with 15 symbols watchlist, 90s interval, 4 enabled setups (rubber_band, vwap_bounce, breakout, squeeze).",
+  "features_tested": {
+    "tab_navigation": {
+      "command_tab": true,
+      "analytics_tab": true,
+      "signals_tab_removed": true,
+      "total_tabs": 2
+    },
+    "trading_bot_panel": {
+      "visible": true,
+      "bot_status": "STOPPED",
+      "mode_selector": ["Autonomous", "Confirmation", "Paused"],
+      "trade_tabs": ["Pending (0)", "Open (0)", "Closed (0)"],
+      "daily_pnl": true,
+      "settings_button": true,
+      "toggle_button": true
+    },
+    "live_signals": {
+      "endpoint": "/api/live-scanner/alerts",
+      "scanner_running": true,
+      "alerts_count": 0,
+      "signal_bubbles_visible": false,
+      "note": "Signal bubbles only render when liveSignals.length > 0"
+    },
+    "market_intelligence": {
+      "panel_visible": true,
+      "report_content": "Early Market Report with market status, news movers, bot activity"
+    }
+  }
+}
