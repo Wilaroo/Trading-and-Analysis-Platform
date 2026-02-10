@@ -2738,6 +2738,7 @@ async def shutdown_event():
     """Clean shutdown of background services"""
     await background_scanner.stop()
     perf_service.stop_scheduler()
+    market_intel_service.stop_scheduler()
     print("Background services stopped")
 
 
