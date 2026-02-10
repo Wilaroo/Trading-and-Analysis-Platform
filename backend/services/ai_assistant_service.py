@@ -1204,8 +1204,14 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         
         return "\n".join(context_parts)
     
-    async def _call_llm(self, messages: List[Dict], context: str = "") -> str:
-        """Call the LLM with the given messages. Tries Ollama first, falls back to Emergent/OpenAI."""
+    async def _call_llm(self, messages: List[Dict], context: str = "", complexity: str = "standard") -> str:
+        """Call the LLM with smart routing based on task complexity.
+        
+        complexity:
+          - "light"    → Ollama only (quick chat, report formatting, summaries)
+          - "standard" → Ollama first, Emergent fallback (general use)
+          - "deep"     → Emergent/GPT-4o directly (strategy analysis, trade evaluation, complex reasoning)
+        """
         
         # Build the full message list with system prompt
         full_messages = [
@@ -1213,8 +1219,12 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         ]
         full_messages.extend(messages)
         
-        # Try Ollama first (free, local)
-        if LLMProvider.OLLAMA in self.llm_clients:
+        # Smart routing: skip Ollama for deep complexity tasks
+        use_ollama = complexity in ("light", "standard") and LLMProvider.OLLAMA in self.llm_clients
+        use_emergent_primary = complexity == "deep"
+        
+        # Try Ollama first for light/standard tasks
+        if use_ollama:
             try:
                 import httpx
                 
@@ -1239,16 +1249,19 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                     result = response.json()
                     content = result.get("message", {}).get("content", "")
                     if content:
-                        logger.info(f"Ollama response OK ({ollama_cfg['model']}, {len(content)} chars)")
+                        logger.info(f"Ollama response OK ({ollama_cfg['model']}, {len(content)} chars, complexity={complexity})")
                         return content
                     raise Exception("Empty Ollama response")
                 else:
                     raise Exception(f"Ollama HTTP {response.status_code}: {response.text[:200]}")
                     
             except Exception as e:
+                if complexity == "light":
+                    logger.error(f"Ollama failed for light task (no fallback): {e}")
+                    raise
                 logger.warning(f"Ollama call failed, falling back to Emergent: {e}")
         
-        # Fallback to Emergent
+        # Emergent (primary for deep tasks, fallback for standard)
         if LLMProvider.EMERGENT in self.llm_clients:
             try:
                 from emergentintegrations.llm.chat import LlmChat, UserMessage
@@ -1277,7 +1290,7 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                 if asyncio.iscoroutine(response):
                     response = await response
                 
-                logger.info(f"Emergent fallback response OK ({len(response)} chars)")
+                logger.info(f"Emergent GPT-4o response OK ({len(response)} chars, complexity={complexity})")
                 return response
                 
             except Exception as e:
