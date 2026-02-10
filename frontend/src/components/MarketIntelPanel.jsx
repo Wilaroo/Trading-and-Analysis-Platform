@@ -43,6 +43,7 @@ const MarketIntelPanel = () => {
   const [generating, setGenerating] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(true);
+  const [autoTriggered, setAutoTriggered] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -66,11 +67,37 @@ const MarketIntelPanel = () => {
     setLoading(false);
   }, []);
 
+  // Auto-trigger: on first load, check if we should generate a report
   useEffect(() => {
-    fetchData();
+    const checkAutoTrigger = async () => {
+      if (autoTriggered) return;
+      try {
+        const res = await api.get('/api/market-intel/auto-trigger');
+        if (res.data?.should_generate && res.data?.report_type) {
+          setAutoTriggered(true);
+          setGenerating(res.data.report_type);
+          toast.info('Preparing your morning briefing...', { duration: 8000, id: 'auto-trigger' });
+          try {
+            const genRes = await api.post(`/api/market-intel/generate/${res.data.report_type}?force=false`);
+            if (genRes.data?.success) {
+              setActiveReport(genRes.data.report);
+              toast.success(`${genRes.data.report.label} ready`, { id: 'auto-trigger' });
+              fetchData();
+            }
+          } catch (genErr) {
+            console.log('Auto-trigger generation failed:', genErr.message);
+          }
+          setGenerating(null);
+        }
+      } catch (err) {
+        console.log('Auto-trigger check failed:', err.message);
+      }
+    };
+
+    fetchData().then(checkAutoTrigger);
     const interval = setInterval(fetchData, 60000);
     return () => clearInterval(interval);
-  }, [fetchData]);
+  }, [fetchData, autoTriggered]);
 
   const handleGenerate = async (reportType) => {
     setGenerating(reportType);
