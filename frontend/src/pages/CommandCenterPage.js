@@ -1,27 +1,11 @@
 import React from 'react';
-import {
-  TrendingUp,
-  TrendingDown,
-  Activity,
-  ArrowUpRight,
-  ArrowDownRight,
-} from 'lucide-react';
 import TickerDetailModal from '../components/TickerDetailModal';
 import QuickTradeModal from '../components/QuickTradeModal';
 import HeaderBar from '../components/layout/HeaderBar';
 import QuickStatsRow from '../components/layout/QuickStatsRow';
-import TradingTab from '../components/tabs/TradingTab';
 import AICoachTab from '../components/tabs/AICoachTab';
 import AnalyticsTab from '../components/tabs/AnalyticsTab';
 import { useCommandCenterData } from '../hooks/useCommandCenterData';
-
-const scanTypes = [
-  { id: 'TOP_PERC_GAIN', label: 'Top Gainers', icon: TrendingUp },
-  { id: 'TOP_PERC_LOSE', label: 'Top Losers', icon: TrendingDown },
-  { id: 'MOST_ACTIVE', label: 'Most Active', icon: Activity },
-  { id: 'HIGH_OPEN_GAP', label: 'Gap Up', icon: ArrowUpRight },
-  { id: 'LOW_OPEN_GAP', label: 'Gap Down', icon: ArrowDownRight },
-];
 
 const CommandCenterPage = ({ 
   ibConnected, 
@@ -65,10 +49,9 @@ const CommandCenterPage = ({
         setSelectedEnhancedAlert={data.setSelectedEnhancedAlert}
       />
 
-      {/* Tab Navigation */}
+      {/* Tab Navigation — 2 tabs */}
       <div className="flex items-center gap-1 bg-[#0A0A0A] border border-white/10 rounded-lg p-1 mt-1" data-testid="main-tabs">
         {[
-          { id: 'trading', label: 'Signals', icon: '\u26A1' },
           { id: 'coach', label: 'Command', icon: '\uD83C\uDFAF' },
           { id: 'analytics', label: 'Analytics', icon: '\uD83D\uDCCA' }
         ].map(tab => (
@@ -89,14 +72,6 @@ const CommandCenterPage = ({
       </div>
 
       {/* Tab Content */}
-      {data.activeMainTab === 'trading' && (
-        <TradingTab
-          liveAlertsExpanded={data.liveAlertsExpanded}
-          setLiveAlertsExpanded={data.setLiveAlertsExpanded}
-          setSelectedTicker={data.setSelectedTicker}
-        />
-      )}
-
       {data.activeMainTab === 'coach' && (
         <AICoachTab
           setSelectedTicker={data.setSelectedTicker}
@@ -111,16 +86,7 @@ const CommandCenterPage = ({
       )}
 
       {data.activeMainTab === 'analytics' && (
-        <AnalyticsTab
-          isConnected={data.isConnected}
-          isScanning={data.isScanning}
-          runScanner={data.runScanner}
-          selectedScanType={data.selectedScanType}
-          setSelectedScanType={data.setSelectedScanType}
-          scanTypes={scanTypes}
-          opportunities={data.opportunities}
-          setSelectedTicker={data.setSelectedTicker}
-        />
+        <AnalyticsTab />
       )}
 
       {/* Ticker Detail Modal */}
