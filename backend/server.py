@@ -172,7 +172,8 @@ market_intel_service.set_services(
     trading_bot=trading_bot,
     perf_service=perf_service,
     alpaca_service=alpaca_service,
-    news_service=news_service
+    news_service=news_service,
+    scanner_service=background_scanner
 )
 init_market_intel_router(market_intel_service)
 
