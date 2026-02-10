@@ -44,7 +44,22 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 7. Scanner Signals (live alerts from enhanced scanner)
 
 ## Enhanced Scanner (Feb 2026)
-**264 symbols scanned every 60 seconds with 30 SMB strategies**
+**227 symbols scanned every 60 seconds with 30 SMB strategies**
+
+### Features Implemented:
+| Feature | Description |
+|---------|-------------|
+| **RVOL Pre-filtering** | Skips symbols with RVOL < 0.8 to focus on active stocks |
+| **Tape Reading** | Analyzes bid/ask spread, order imbalance, momentum for confirmation |
+| **Win-Rate Tracking** | Records outcomes for each strategy, calculates win rate & profit factor |
+| **Auto-Execution** | Wires high-priority tape-confirmed alerts directly to Trading Bot |
+
+### API Endpoints:
+- `GET /api/live-scanner/stats/strategies` - Win-rate stats per setup
+- `POST /api/live-scanner/stats/record-outcome` - Record alert result
+- `POST /api/live-scanner/auto-execute/enable` - Enable/disable auto-execution
+- `GET /api/live-scanner/auto-execute/status` - Auto-execute status
+- `POST /api/live-scanner/config/rvol-filter` - Set RVOL filter threshold
 
 ### Strategies Implemented:
 | Category | Strategies |
