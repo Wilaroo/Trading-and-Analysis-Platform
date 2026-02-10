@@ -333,7 +333,7 @@ const AICommandPanel = ({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-              placeholder="Ask AI anything..."
+              placeholder="Ask AI anything or type a ticker (AAPL, NVDA)..."
               className="flex-1 px-3 py-2 bg-zinc-900 border border-white/10 rounded-lg text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
             />
             <button
