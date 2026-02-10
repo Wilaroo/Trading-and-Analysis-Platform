@@ -154,7 +154,7 @@ async def get_live_alerts(priority: Optional[str] = None):
     if not _scanner:
         raise HTTPException(status_code=500, detail="Scanner not initialized")
     
-    from services.background_scanner import AlertPriority
+    from services.enhanced_scanner import AlertPriority
     
     priority_filter = None
     if priority:
@@ -169,7 +169,7 @@ async def get_live_alerts(priority: Optional[str] = None):
         "success": True,
         "count": len(alerts),
         "alerts": [a.to_dict() for a in alerts],
-        "scanner_running": _scanner.is_running()
+        "scanner_running": _scanner._running
     }
 
 
