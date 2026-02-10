@@ -7,7 +7,8 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
 - **Frontend**: React, TailwindCSS, Framer Motion, Lightweight Charts
 - **Backend**: FastAPI, Python
 - **Database**: MongoDB
-- **Integrations**: Alpaca (paper trading), Finnhub, IB, Emergent LLM (GPT-4o), yfinance
+- **AI**: Ollama (primary, local/free) -> Emergent LLM GPT-4o (fallback)
+- **Integrations**: Alpaca (paper trading), Finnhub, IB, yfinance
 
 ## Architecture (3-Tab Layout - Consolidated Feb 2026)
 ```
@@ -23,69 +24,59 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
 │   │   ├── trading_bot_service.py
 │   │   ├── strategy_performance_service.py
 │   │   ├── market_intel_service.py      # Market Intelligence & Strategy Playbook
-│   │   ├── ai_assistant_service.py
+│   │   ├── ai_assistant_service.py      # Dual LLM: Ollama primary, Emergent fallback
 │   │   ├── alpaca_service.py
 │   │   └── background_scanner.py
-│   └── server.py
+│   └── server.py                        # Includes GET /api/llm/status
 └── frontend/
     └── src/
         ├── hooks/
         │   └── useCommandCenterData.js
         ├── components/
         │   ├── layout/
-        │   │   ├── HeaderBar.jsx          # AI Coach shortcut (navigates to Command tab)
+        │   │   ├── HeaderBar.jsx
         │   │   └── QuickStatsRow.jsx
         │   ├── tabs/
         │   │   ├── TradingTab.jsx         # Signals only (TradeSignals)
         │   │   ├── AICoachTab.jsx         # Unified: Bot + AI Chat + Market Intel
-        │   │   └── AnalyticsTab.jsx       # Learning Dashboard + Scanner
-        │   ├── shared/
-        │   │   └── UIComponents.jsx
+        │   │   └── AnalyticsTab.jsx
         │   ├── MarketIntelPanel.jsx       # Time-of-day reports + auto-trigger
         │   ├── TradingBotPanel.jsx
         │   ├── LearningDashboard.jsx
         │   ├── AICommandPanel.jsx
         │   └── TradeSignals.jsx
         └── pages/
-            └── CommandCenterPage.js       # Thin orchestrator (~160 lines)
+            └── CommandCenterPage.js
 ```
 
-## Tab Structure (Consolidated Feb 2026)
+## Tab Structure
 | Tab | Label | Contents |
 |-----|-------|----------|
 | Signals | Lightning icon | Trade Signals feed |
 | Command | Target icon | Trading Bot + AI Chat + Market Intel (unified hub) |
 | Analytics | Chart icon | Learning Dashboard + Scanner |
 
+## Ollama Integration (Feb 2026)
+- **Primary provider**: Ollama via ngrok tunnel (llama3:8b)
+- **Fallback**: Emergent LLM (GPT-4o) — auto-switches if Ollama unreachable
+- **Available models**: llama3:8b, qwen2.5:7b, gemma3:4b
+- **Config**: `OLLAMA_URL` and `OLLAMA_MODEL` in backend/.env
+- **Status endpoint**: `GET /api/llm/status` — shows provider, connectivity, available models
+- **Architecture**: `_call_llm()` tries Ollama first → catches errors → falls back to Emergent
+- **Note**: ngrok free tier URL changes on restart — update `OLLAMA_URL` in .env when it changes
+
 ## Completed Features
 1. Core platform: AI assistant, background scanner, SSE alerts
-2. Autonomous trading bot: full lifecycle, risk mgmt, profit-taking, trailing stops
-3. Strategy configs: 6 strategies, EOD auto-close, CRUD API, frontend editing
-4. AI <-> Bot integration: AI evaluates trades, bot awareness in chat
-5. Mutual Learning Loop: performance tracking, AI analysis, auto-tuning, scheduled post-market
-6. Performance optimization: centralized caching, batch APIs, tab-aware polling
-7. UI Consolidation: 6 alert panels merged into 2 clean systems
-8. CommandCenterPage Refactoring: 1464-line monolith -> 7 modular components
-9. Market Intelligence & Strategy Playbook: Time-of-day AI-generated reports (5 daily)
-10. Morning Routine Auto-Trigger: Auto-generates appropriate report on app open
-11. **Bot + AI Unification**: Merged Trading Bot into Command tab alongside AI Chat and Market Intel
-
-## Market Intelligence System
-### Report Schedule (Eastern Time)
-| Time | Type | Content |
-|------|------|---------|
-| 8:30 AM | Pre-Market Briefing | Overnight recap, earnings, upgrades/downgrades, strategy playbook |
-| 10:30 AM | Early Market Report | First hour recap, key movers, bot activity, emerging setups |
-| 2:00 PM | Midday Report | Day progress, P&L update, strategy scorecard, afternoon outlook |
-| 2:30 PM | Power Hour Report | EOD setup, position review, momentum assessment, action items |
-| 4:30 PM | Post-Market Wrap | Day summary, P&L recap, trade review, learning insights |
-
-### API Endpoints
-- `GET /api/market-intel/current` - Most relevant report for current time
-- `GET /api/market-intel/reports` - All today's reports
-- `GET /api/market-intel/schedule` - Schedule with generation status
-- `GET /api/market-intel/auto-trigger` - Check if auto-generation needed
-- `POST /api/market-intel/generate/{type}` - Generate specific report
+2. Autonomous trading bot with strategy configs
+3. AI <-> Bot integration: mutual awareness
+4. Mutual Learning Loop: performance tracking, AI analysis, auto-tuning
+5. Performance optimization: caching, batching, tab-aware polling
+6. UI Consolidation: clean 3-tab layout, header dropdowns
+7. CommandCenterPage Refactoring: modular components
+8. Market Intelligence & Strategy Playbook: 5 daily auto-reports
+9. Morning Routine Auto-Trigger
+10. Bot + AI Unification: merged into Command tab
+11. **Ollama Integration: local LLM as primary, Emergent as fallback**
 
 ## Prioritized Backlog
 
