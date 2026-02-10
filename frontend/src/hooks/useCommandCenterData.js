@@ -39,7 +39,7 @@ export function useCommandCenterData({
   // AI Assistant state
   const [showAssistant, setShowAssistant] = useState(false);
   const [assistantPrompt, setAssistantPrompt] = useState(null);
-  const [activeMainTab, setActiveMainTab] = useState('trading');
+  const [activeMainTab, setActiveMainTab] = useState('coach');
   const [expandedStatCard, setExpandedStatCard] = useState(null);
 
   // Ticker Search state
