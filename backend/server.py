@@ -156,6 +156,10 @@ init_trading_bot_router(trading_bot, trade_executor)
 assistant_service.set_trading_bot(trading_bot)
 trading_bot._ai_assistant = assistant_service
 
+# Wire Scanner ↔ Trading bot for auto-execution
+background_scanner.set_trading_bot(trading_bot)
+background_scanner.db = db
+
 # Initialize strategy performance & learning service
 from services.strategy_performance_service import get_performance_service
 perf_service = get_performance_service()
