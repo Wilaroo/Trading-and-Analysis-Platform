@@ -8,7 +8,21 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 - **Backend**: FastAPI, Python
 - **Database**: MongoDB
 - **AI**: Smart Routing — Ollama (local/free) + GPT-4o (Emergent, deep tasks)
-- **Integrations**: Alpaca, Finnhub (real-time news), IB Gateway, yfinance
+- **Integrations**: Alpaca, Finnhub, IB Gateway (see Data Sources below)
+
+## Data Sources
+
+| Source | Provides | Availability |
+|--------|----------|--------------|
+| **Alpaca** | Real-time quotes, paper trading, account data | Cloud (always on) |
+| **Finnhub** | 100 live news headlines, earnings calendar | Cloud (always on) |
+| **IB Gateway** | VIX index, IB scanners, fundamentals, live trading | Local only (requires IB Gateway running) |
+| **Ollama** | Free AI for chat, summaries, market intel | Via ngrok tunnel |
+
+## Startup Modes
+- **Cloud Dev**: Ollama + ngrok → `https://market-intel-90.preview.emergentagent.com`
+- **Full Local**: All services on PC → `http://localhost:3000`
+- See `/documents/STARTUP_GUIDE.md` for detailed instructions
 
 ## Smart AI Routing (Feb 2026)
 | Complexity | Model | Tasks | Cost |
