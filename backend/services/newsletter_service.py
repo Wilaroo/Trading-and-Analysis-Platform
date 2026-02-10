@@ -194,6 +194,31 @@ class NewsletterService:
         prompt = self._build_newsletter_prompt(context_data)
         
         try:
+            # Use shared AI assistant with smart routing (deep = GPT-4o)
+            if self._ai_assistant:
+                system_message = """You are an experienced daytrader writing your morning premarket newsletter. 
+Your writing style is:
+- Direct and actionable - traders need to know what to watch NOW
+- Confident but measured - acknowledge uncertainty where it exists
+- Data-driven - cite specific numbers, levels, and percentages
+- Time-conscious - premarket is limited, focus on what matters TODAY
+
+Structure your response as JSON with these sections:
+- market_sentiment: (bullish/bearish/neutral) with a 1-2 sentence explanation
+- overnight_recap: Key overnight developments (futures, international markets, crypto)
+- key_levels: Important S/R levels for SPY/QQQ
+- opportunities: Array of 3-5 stocks to watch with entry/stop/target ideas
+- catalyst_watch: Earnings, economic data, fed speakers today
+- risk_factors: What could derail the setup
+- game_plan: Your specific trading plan for today
+
+Return ONLY valid JSON, no markdown code blocks."""
+                
+                messages = [{"role": "user", "content": prompt}]
+                response = await self._ai_assistant._call_llm(messages, system_message, complexity="deep")
+                return response
+            
+            # Fallback: direct Emergent call if AI assistant not wired
             from emergentintegrations.llm.chat import LlmChat, UserMessage
             
             system_message = """You are an experienced daytrader writing your morning premarket newsletter. 
