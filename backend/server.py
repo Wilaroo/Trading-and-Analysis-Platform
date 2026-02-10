@@ -2659,32 +2659,34 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 # Default symbols to stream
-DEFAULT_STREAM_SYMBOLS = ["SPY", "QQQ", "DIA", "IWM", "VIX", "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "AMD"]
+DEFAULT_STREAM_SYMBOLS = ["SPY", "QQQ", "DIA", "IWM", "AAPL", "MSFT", "NVDA", "TSLA"]
 
 async def stream_quotes():
-    """Background task to stream quotes to all connected clients"""
-    # Stagger initial requests to avoid rate limits
-    await asyncio.sleep(2)
+    """Background task to stream quotes using batch API"""
+    await asyncio.sleep(3)
     
     while True:
         if manager.active_connections:
             try:
-                # Collect all subscribed symbols
                 all_symbols = set(DEFAULT_STREAM_SYMBOLS)
                 for symbols in manager.subscriptions.values():
                     all_symbols.update(symbols)
                 
-                # Fetch quotes for all symbols (uses cache)
-                quotes = []
-                symbol_list = list(all_symbols)[:10]  # Limit symbols
+                # Use batch quote API - single request for all symbols
+                symbol_list = [s for s in list(all_symbols)[:12] if s not in ("VIX", "^VIX", "$VIX")]
                 
-                for i, symbol in enumerate(symbol_list):
-                    quote = await fetch_quote(symbol)
-                    if quote:
-                        quotes.append(quote)
-                    # Small delay between requests to avoid rate limits
-                    if i < len(symbol_list) - 1:
-                        await asyncio.sleep(0.5)
+                quotes = []
+                try:
+                    batch_results = await alpaca_service.get_quotes_batch(symbol_list)
+                    for symbol, data in batch_results.items():
+                        quotes.append(data)
+                except Exception:
+                    # Fallback to individual fetches (limited)
+                    for symbol in symbol_list[:5]:
+                        quote = await fetch_quote(symbol)
+                        if quote:
+                            quotes.append(quote)
+                        await asyncio.sleep(0.3)
                 
                 if quotes:
                     message = {
@@ -2696,8 +2698,7 @@ async def stream_quotes():
             except Exception as e:
                 print(f"Stream error: {e}")
         
-        # Wait before next update (longer to respect rate limits)
-        await asyncio.sleep(10)  # Update every 10 seconds
+        await asyncio.sleep(15)  # 15s interval (was 10s)
 
 @app.on_event("startup")
 async def startup_event():
