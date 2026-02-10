@@ -47,7 +47,7 @@ const CommandCenterPage = ({
         isSearching={data.isSearching}
         recentSearches={data.recentSearches}
         clearRecentSearches={data.clearRecentSearches}
-        setShowAssistant={data.setShowAssistant}
+        onNavigateToCoach={() => data.setActiveMainTab('coach')}
         wsConnected={wsConnected}
         wsLastUpdate={wsLastUpdate}
         connectionChecked={data.connectionChecked}
