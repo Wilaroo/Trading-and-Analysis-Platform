@@ -261,6 +261,9 @@ class AlpacaService:
                         "trade_count": int(bar.trade_count) if bar.trade_count else None
                     })
             
+            # Cache bars
+            self._bars_cache[cache_key] = {'bars': result, '_cached_at': datetime.now(timezone.utc)}
+            
             return result
             
         except Exception as e:
