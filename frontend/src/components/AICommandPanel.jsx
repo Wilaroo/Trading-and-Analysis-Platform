@@ -220,10 +220,17 @@ const AICommandPanel = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Send message
+  // Send message — auto-detects ticker symbols
   const sendMessage = useCallback(async (messageText = null) => {
-    const text = messageText || input.trim();
+    let text = (messageText || input.trim());
     if (!text || isLoading) return;
+
+    // Auto-detect bare ticker symbol (1-5 uppercase letters only)
+    const tickerMatch = text.match(/^(\$?[A-Z]{1,5})$/);
+    if (tickerMatch) {
+      const sym = tickerMatch[1].replace('$', '');
+      text = `Give me a full analysis on ${sym}. Include current outlook, key levels, any recent news, strategy fit, and a trade recommendation.`;
+    }
 
     const userMessage = { role: 'user', content: text, timestamp: new Date().toISOString() };
     setMessages(prev => [...prev, userMessage]);
