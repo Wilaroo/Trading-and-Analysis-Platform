@@ -197,16 +197,17 @@ class AlpacaService:
             return {}
     
     async def get_bars(self, symbol: str, timeframe: str = "1Day", limit: int = 100) -> List[Dict[str, Any]]:
-        """
-        Get historical bars/candles for a symbol.
-        
-        Args:
-            symbol: Stock symbol
-            timeframe: Bar timeframe - "1Min", "5Min", "15Min", "1Hour", "1Day"
-            limit: Number of bars to return
-        """
+        """Get historical bars with caching."""
         if not self._ensure_initialized():
             return []
+        
+        # Check bars cache
+        cache_key = f"{symbol.upper()}_{timeframe}_{limit}"
+        if cache_key in self._bars_cache:
+            cached = self._bars_cache[cache_key]
+            age = (datetime.now(timezone.utc) - cached.get('_cached_at', datetime.min.replace(tzinfo=timezone.utc))).total_seconds()
+            if age < self._bars_cache_ttl:
+                return cached.get('bars', [])
             
         try:
             from alpaca.data.requests import StockBarsRequest
