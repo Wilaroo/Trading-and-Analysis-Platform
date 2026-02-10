@@ -14,8 +14,9 @@ Report Schedule (Eastern Time):
 import asyncio
 import logging
 import os
+import requests
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 import json
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ class MarketIntelService:
         self._alpaca_service = None
         self._news_service = None
         self._scheduler_running = False
+        self._finnhub_key = os.environ.get("FINNHUB_API_KEY", "")
 
     def set_services(self, ai_assistant=None, trading_bot=None, perf_service=None,
                      alpaca_service=None, news_service=None):
@@ -58,74 +60,98 @@ class MarketIntelService:
     # ==================== CONTEXT GATHERING ====================
 
     async def _gather_news_context(self) -> str:
-        """Gather news, earnings, upgrades/downgrades"""
+        """Gather REAL news from Finnhub directly — no hallucination"""
         parts = []
-        try:
-            if self._news_service:
-                summary = await self._news_service.get_market_summary()
-                if summary.get("available"):
-                    parts.append("=== MARKET NEWS ===")
-                    parts.append(f"Sentiment: {summary.get('overall_sentiment', 'N/A').upper()}")
-                    themes = summary.get("themes", [])
-                    if themes:
-                        parts.append(f"Themes: {', '.join(themes)}")
-                    for i, h in enumerate(summary.get("headlines", [])[:10], 1):
-                        parts.append(f"  {i}. {h}")
-                    sb = summary.get("sentiment_breakdown", {})
-                    parts.append(f"Breakdown: {sb.get('bullish',0)} bullish, {sb.get('bearish',0)} bearish, {sb.get('neutral',0)} neutral")
-        except Exception as e:
-            logger.warning(f"Error gathering news: {e}")
-            parts.append("News data unavailable")
 
-        # Earnings calendar
-        try:
-            if self._alpaca_service:
-                from services.alpaca_service import get_alpaca_service
-                svc = get_alpaca_service()
-                # Try to get recent news with earnings/upgrade focus
-                news = await svc.get_news(limit=15)
-                earnings_news = [n for n in (news or []) if any(kw in (n.get("headline","") + n.get("summary","")).lower() for kw in ["earnings", "beat", "miss", "revenue", "eps", "guidance", "upgrade", "downgrade", "outperform", "underperform", "price target"])]
-                if earnings_news:
-                    parts.append("\n=== EARNINGS & ANALYST ACTIONS ===")
-                    for n in earnings_news[:8]:
-                        parts.append(f"  - {n.get('headline','')}")
-        except Exception as e:
-            logger.warning(f"Error gathering earnings/analyst news: {e}")
+        # Fetch real market news from Finnhub
+        if self._finnhub_key:
+            try:
+                resp = requests.get(
+                    "https://finnhub.io/api/v1/news",
+                    params={"category": "general", "token": self._finnhub_key},
+                    timeout=10
+                )
+                if resp.status_code == 200:
+                    news_items = resp.json()
+                    if news_items:
+                        parts.append("=== REAL-TIME MARKET NEWS (from Finnhub — these are REAL headlines) ===")
+                        for i, item in enumerate(news_items[:15], 1):
+                            headline = item.get("headline", "")
+                            summary = item.get("summary", "")[:150]
+                            source = item.get("source", "")
+                            ts = item.get("datetime", 0)
+                            time_str = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%m/%d %I:%M %p") if ts else ""
+                            parts.append(f"  {i}. [{source}] {headline}")
+                            if summary:
+                                parts.append(f"     {summary}")
+                            if time_str:
+                                parts.append(f"     Published: {time_str} UTC")
 
-        return "\n".join(parts) if parts else "No news data available"
+                        # Categorize for the AI
+                        earnings_kw = ["earnings", "beat", "miss", "revenue", "eps", "guidance", "quarterly", "profit"]
+                        analyst_kw = ["upgrade", "downgrade", "price target", "outperform", "underperform", "overweight", "buy rating", "sell rating"]
+
+                        earnings_news = [n for n in news_items[:50] if any(kw in (n.get("headline", "") + n.get("summary", "")).lower() for kw in earnings_kw)]
+                        analyst_news = [n for n in news_items[:50] if any(kw in (n.get("headline", "") + n.get("summary", "")).lower() for kw in analyst_kw)]
+
+                        if earnings_news:
+                            parts.append("\n=== EARNINGS NEWS (filtered from above) ===")
+                            for n in earnings_news[:5]:
+                                parts.append(f"  - {n.get('headline', '')}")
+
+                        if analyst_news:
+                            parts.append("\n=== ANALYST UPGRADES/DOWNGRADES (filtered from above) ===")
+                            for n in analyst_news[:5]:
+                                parts.append(f"  - {n.get('headline', '')}")
+
+                        if not earnings_news and not analyst_news:
+                            parts.append("\n(No earnings or analyst actions found in recent news)")
+                else:
+                    parts.append(f"News API returned status {resp.status_code}")
+            except Exception as e:
+                logger.warning(f"Error fetching Finnhub news: {e}")
+                parts.append(f"News fetch error: {e}")
+        else:
+            parts.append("No Finnhub API key configured — cannot fetch real news")
+
+        return "\n".join(parts) if parts else "No real-time news available"
 
     def _gather_bot_context(self) -> str:
-        """Gather trading bot status and trades"""
+        """Gather EXACT trading bot status — read directly from service"""
         if not self._trading_bot:
-            return "Trading bot not connected"
+            return "=== TRADING BOT STATUS ===\nBot service not connected"
         try:
-            return self._trading_bot.get_bot_context_for_ai()
+            ctx = self._trading_bot.get_bot_context_for_ai()
+            return f"(This is EXACT bot data read from the system — do not modify or guess)\n{ctx}"
         except Exception as e:
             logger.warning(f"Error getting bot context: {e}")
-            return "Bot context unavailable"
+            return f"=== TRADING BOT STATUS ===\nError reading bot state: {e}"
 
     def _gather_learning_context(self) -> str:
-        """Gather strategy performance data"""
+        """Gather EXACT strategy performance data from the learning loop"""
         if not self._perf_service:
-            return "Learning loop not connected"
+            return "=== STRATEGY PERFORMANCE ===\nLearning loop not connected"
         try:
-            return self._perf_service.get_learning_summary_for_ai()
+            ctx = self._perf_service.get_learning_summary_for_ai()
+            return f"(This is EXACT performance data from the database — do not modify or guess)\n{ctx}"
         except Exception as e:
             logger.warning(f"Error getting learning context: {e}")
-            return "Performance data unavailable"
+            return f"=== STRATEGY PERFORMANCE ===\nError reading performance data: {e}"
 
     async def _gather_positions_context(self) -> str:
-        """Gather current positions and P&L"""
+        """Gather EXACT current positions and P&L from Alpaca"""
         parts = []
         try:
             if self._alpaca_service:
                 account = await self._alpaca_service.get_account()
                 positions = await self._alpaca_service.get_positions()
                 if account:
-                    parts.append("=== ACCOUNT STATUS ===")
+                    parts.append("=== ACCOUNT STATUS (EXACT from Alpaca) ===")
                     parts.append(f"Equity: ${float(account.get('equity', 0)):,.2f}")
                     parts.append(f"Day P&L: ${float(account.get('unrealized_pl', 0)):,.2f}")
                     parts.append(f"Buying Power: ${float(account.get('buying_power', 0)):,.2f}")
+                else:
+                    parts.append("=== ACCOUNT STATUS ===\nAccount data unavailable")
                 if positions:
                     parts.append(f"\nOPEN POSITIONS ({len(positions)}):")
                     for p in positions[:10]:
@@ -134,116 +160,124 @@ class MarketIntelService:
                         pnl = float(p.get("unrealized_pl", 0))
                         pnl_pct = float(p.get("unrealized_plpc", 0)) * 100
                         parts.append(f"  {sym}: {qty} sh | P&L: ${pnl:,.2f} ({pnl_pct:+.1f}%)")
+                else:
+                    parts.append("\nOPEN POSITIONS: None")
         except Exception as e:
             logger.warning(f"Error gathering positions: {e}")
-        return "\n".join(parts) if parts else "Position data unavailable"
+            parts.append(f"=== ACCOUNT STATUS ===\nError: {e}")
+        return "\n".join(parts)
 
     async def _gather_market_data_context(self) -> str:
-        """Gather market index data"""
+        """Gather EXACT market index data"""
         parts = []
         try:
             if self._alpaca_service:
                 quotes = await self._alpaca_service.get_quotes_batch(["SPY", "QQQ", "IWM", "DIA", "VIX"])
                 if quotes:
-                    parts.append("=== MARKET INDICES ===")
+                    parts.append("=== MARKET INDICES (EXACT live quotes) ===")
                     for q in quotes:
                         sym = q.get("symbol", "?")
                         price = q.get("price", 0)
                         chg = q.get("change_percent", 0)
                         parts.append(f"  {sym}: ${price:.2f} ({chg:+.2f}%)")
+                else:
+                    parts.append("=== MARKET INDICES ===\nQuote data unavailable")
         except Exception as e:
             logger.warning(f"Error gathering market data: {e}")
-        return "\n".join(parts) if parts else "Market data unavailable"
+            parts.append(f"=== MARKET INDICES ===\nError: {e}")
+        return "\n".join(parts)
 
     # ==================== REPORT GENERATION ====================
 
-    def _get_report_prompt(self, report_type: str, context: str) -> str:
-        """Get the AI prompt for each report type"""
+    def _get_report_prompt(self, report_type: str, context: str, now_et: datetime) -> str:
+        """Get the AI prompt for each report type with strict anti-hallucination rules"""
+        current_time_str = now_et.strftime("%I:%M %p ET on %A, %B %d, %Y")
+
+        base_rules = f"""CRITICAL RULES — YOU MUST FOLLOW THESE:
+1. The current time is {current_time_str}. Use this as the report timestamp.
+2. ONLY reference news headlines, tickers, and data that appear in the DATA CONTEXT below.
+3. DO NOT invent, fabricate, or hallucinate any news stories, ticker symbols, prices, or events.
+4. If a section has no relevant data, say "No data available for this section" — do NOT make something up.
+5. The bot status, positions, and performance data below are EXACT system readings. Report them verbatim.
+6. If market data shows $0.00 or 0.00%, the market may be closed. State that clearly.
+"""
+
         prompts = {
-            "premarket": f"""Generate a PRE-MARKET INTELLIGENCE BRIEFING (8:30 AM ET).
+            "premarket": f"""{base_rules}
 
-You are a senior trading coach preparing your trader for the day ahead. Cover:
+Generate a PRE-MARKET INTELLIGENCE BRIEFING for {current_time_str}.
 
-1. **OVERNIGHT RECAP**: Key overnight developments, futures direction, Asia/Europe session summary
-2. **EARNINGS & CATALYSTS**: Any earnings releases (beats/misses), analyst upgrades/downgrades, price target changes
-3. **PRE-MARKET MOVERS**: Notable pre-market gainers/losers and why
-4. **KEY LEVELS**: Important support/resistance levels for major indices (SPY, QQQ)
-5. **STRATEGY PLAYBOOK**: Based on market conditions and the learning loop data, recommend:
-   - Which strategies to favor today (e.g., "Momentum strategies favored" or "Mean reversion day")
-   - Time-of-day strategy recommendations
-   - Position sizing guidance (normal, reduced, or aggressive)
-   - Specific setups to watch for
-6. **RISK WARNINGS**: Any macro risks, economic data releases, Fed speakers, or events to watch
-7. **GAME PLAN**: 3-5 bullet point action plan for the day
+Cover these sections (skip any with no data, do NOT fabricate):
+1. **NEWS RECAP**: Summarize ONLY the real headlines from the DATA CONTEXT below
+2. **EARNINGS & ANALYST ACTIONS**: ONLY mention if found in the news data
+3. **MARKET LEVELS**: Reference the EXACT index prices from the data
+4. **STRATEGY PLAYBOOK**: Based on the EXACT learning loop data, recommend strategies
+5. **RISK WARNINGS**: Based ONLY on real news headlines
+6. **GAME PLAN**: 3-5 bullet points for the day
 
 DATA CONTEXT:
-{context}
+{context}""",
 
-Format with clear sections using ** for headers. Be specific and actionable. Keep it concise but comprehensive.""",
+            "early_market": f"""{base_rules}
 
-            "early_market": f"""Generate an EARLY MARKET REPORT (10:30 AM ET, first hour of trading complete).
+Generate an EARLY MARKET REPORT for {current_time_str}.
 
-Cover:
-1. **FIRST HOUR RECAP**: How did the open play out? Gap fills? Failed gaps? Volume trends?
-2. **KEY MOVERS**: Top 3-5 stocks making significant moves and why
-3. **BOT ACTIVITY**: How is the trading bot performing so far today? Any trades taken?
-4. **STRATEGY PERFORMANCE**: Which strategies are working/not working in today's conditions?
-5. **EMERGING SETUPS**: Patterns forming for the rest of the morning session (10:00-11:30 is prime time)
-6. **UPDATED PLAYBOOK**: Any adjustments to the morning playbook based on first hour action
-7. **RISK UPDATE**: Any new developments or risks
-
-DATA CONTEXT:
-{context}
-
-Be specific about what's changed since pre-market. Reference actual data.""",
-
-            "midday": f"""Generate a MIDDAY MARKET REPORT (2:00 PM ET).
-
-Cover:
-1. **DAY PROGRESS**: Market trend, breadth, sector rotation
-2. **P&L UPDATE**: Bot and position performance so far
-3. **STRATEGY SCORECARD**: Which strategies have worked/failed today with specifics
-4. **AFTERNOON OUTLOOK**: Expected market behavior for the afternoon session
-5. **POSITION MANAGEMENT**: Should any positions be trimmed, added to, or closed?
-6. **MIDDAY RULES REMINDER**: Remind about midday rules (reduce size 50%, mean reversion only 11:30-1:30)
-7. **SETUPS FOR AFTERNOON**: What to watch for in the 1:30-3:00 PM window
+Cover (using ONLY real data below):
+1. **MARKET STATUS**: Report EXACT index prices and changes from data
+2. **NEWS MOVERS**: Summarize ONLY real headlines that mention specific stocks
+3. **BOT ACTIVITY**: Report the EXACT bot status from the data below — do not guess
+4. **STRATEGY PERFORMANCE**: Use EXACT numbers from learning loop data
+5. **SETUPS**: Based on real market data and strategy configs
+6. **UPDATED PLAYBOOK**: Adjustments based on real data
 
 DATA CONTEXT:
-{context}
+{context}""",
 
-Focus on what's actionable for the afternoon. Reference bot performance data.""",
+            "midday": f"""{base_rules}
 
-            "power_hour": f"""Generate a POWER HOUR REPORT (2:30 PM ET, preparing for last 1.5 hours).
+Generate a MIDDAY MARKET REPORT for {current_time_str}.
 
-Cover:
-1. **CLOSING SETUP**: Market positioning heading into the close
-2. **EOD STRATEGY**: Which strategies work in the 3:00-4:00 window (HOD Breakout, Time-of-Day Fade)
-3. **POSITION REVIEW**: Which positions to close vs. hold overnight?
-4. **BOT EOD SETTINGS**: Reminder about EOD auto-close settings, any trades that should be manually managed
-5. **KEY LEVELS TO WATCH**: Critical levels for the final push
-6. **MOMENTUM ASSESSMENT**: Is there late-day momentum building or fading?
-7. **ACTION ITEMS**: Specific 3-5 things to do before 4:00 PM
-
-DATA CONTEXT:
-{context}
-
-Be decisive and action-oriented. This is about executing, not analyzing.""",
-
-            "post_market": f"""Generate a POST-MARKET WRAP REPORT (4:30 PM ET).
-
-Cover:
-1. **DAY SUMMARY**: How did the market close? Final moves, closing stats
-2. **P&L RECAP**: Full day P&L for bot and manual positions
-3. **TRADE REVIEW**: Key trades of the day - what worked, what didn't, and why
-4. **STRATEGY PERFORMANCE**: Which strategies performed best/worst today
-5. **LEARNING INSIGHTS**: What did we learn today? Any patterns to note?
-6. **TOMORROW PREPARATION**: After-hours earnings, events, or developments to watch overnight
-7. **SELF-IMPROVEMENT**: One specific thing to improve tomorrow based on today's performance
+Cover (using ONLY real data below):
+1. **MARKET STATUS**: EXACT index prices and direction from data
+2. **P&L UPDATE**: EXACT bot stats and position data — report verbatim
+3. **STRATEGY SCORECARD**: EXACT performance numbers from learning loop
+4. **NEWS UPDATE**: Only real headlines from data
+5. **AFTERNOON OUTLOOK**: Based on real market data and strategy performance
+6. **POSITION MANAGEMENT**: Based on EXACT open positions
 
 DATA CONTEXT:
-{context}
+{context}""",
 
-Be reflective and educational. Help the trader learn from the day."""
+            "power_hour": f"""{base_rules}
+
+Generate a POWER HOUR REPORT for {current_time_str}.
+
+Cover (using ONLY real data below):
+1. **MARKET POSITIONING**: EXACT index levels heading into close
+2. **EOD STRATEGY**: Based on real strategy configs and performance data
+3. **POSITION REVIEW**: EXACT open positions — close vs hold recommendations
+4. **BOT EOD SETTINGS**: Read EXACT EOD close settings from strategy configs
+5. **KEY LEVELS**: From EXACT market data
+6. **ACTION ITEMS**: 3-5 specific actions based on real data
+
+DATA CONTEXT:
+{context}""",
+
+            "post_market": f"""{base_rules}
+
+Generate a POST-MARKET WRAP REPORT for {current_time_str}.
+
+Cover (using ONLY real data below):
+1. **MARKET CLOSE**: EXACT final index prices from data
+2. **P&L RECAP**: EXACT bot P&L and position data — report verbatim
+3. **TRADE REVIEW**: EXACT trades from bot data (if any)
+4. **STRATEGY PERFORMANCE**: EXACT numbers from learning loop
+5. **NEWS RECAP**: Key headlines from real news data
+6. **TOMORROW PREP**: Based on real news and strategy performance
+7. **LEARNING**: One specific insight from EXACT data
+
+DATA CONTEXT:
+{context}"""
         }
         return prompts.get(report_type, prompts["premarket"])
 
@@ -258,7 +292,15 @@ Be reflective and educational. Help the trader learn from the day."""
             if existing:
                 return {"success": True, "report": existing, "cached": True}
 
-        # Gather context from all sources
+        # Get current time
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+
+        # Gather context from all real sources
         context_parts = []
 
         news_ctx = await self._gather_news_context()
@@ -278,8 +320,8 @@ Be reflective and educational. Help the trader learn from the day."""
 
         full_context = "\n\n".join(context_parts)
 
-        # Get time-specific prompt
-        prompt = self._get_report_prompt(report_type, full_context)
+        # Get time-specific prompt with anti-hallucination rules
+        prompt = self._get_report_prompt(report_type, full_context, now_et)
 
         try:
             messages = [{"role": "user", "content": prompt}]
@@ -293,13 +335,6 @@ Be reflective and educational. Help the trader learn from the day."""
                     label = sched["label"]
                     icon = sched["icon"]
                     break
-
-            try:
-                from zoneinfo import ZoneInfo
-            except ImportError:
-                from backports.zoneinfo import ZoneInfo
-
-            now_et = datetime.now(ZoneInfo("America/New_York"))
 
             report = {
                 "type": report_type,
@@ -378,12 +413,9 @@ Be reflective and educational. Help the trader learn from the day."""
             from backports.zoneinfo import ZoneInfo
 
         now_et = datetime.now(ZoneInfo("America/New_York"))
-        today = now_et.strftime("%Y-%m-%d")
 
-        # Find the most recent report that should exist by now
         current_minutes = now_et.hour * 60 + now_et.minute
 
-        # Go through schedule in reverse to find latest applicable
         applicable_type = None
         for sched in reversed(REPORT_SCHEDULE):
             sched_minutes = sched["hour"] * 60 + sched["minute"]
@@ -396,7 +428,6 @@ Be reflective and educational. Help the trader learn from the day."""
             if report:
                 return report
 
-        # Fallback: return any report from today
         reports = self.get_todays_reports()
         return reports[-1] if reports else None
 
@@ -432,7 +463,7 @@ Be reflective and educational. Help the trader learn from the day."""
     async def start_scheduler(self):
         """Start the auto-generation scheduler"""
         self._scheduler_running = True
-        logger.info("Market intel scheduler started - reports will auto-generate at scheduled times")
+        logger.info("Market intel scheduler started")
 
         triggered_today = set()
 
@@ -445,18 +476,15 @@ Be reflective and educational. Help the trader learn from the day."""
             now_et = datetime.now(ZoneInfo("America/New_York"))
             today_key = now_et.strftime("%Y-%m-%d")
 
-            # Reset triggered set at midnight
             if not any(today_key in t for t in triggered_today):
                 triggered_today.clear()
 
-            # Only run on weekdays
             if now_et.weekday() < 5:
                 for sched in REPORT_SCHEDULE:
                     trigger_key = f"{today_key}_{sched['type']}"
                     if trigger_key in triggered_today:
                         continue
 
-                    # Check if it's time (within a 2-minute window)
                     if now_et.hour == sched["hour"] and sched["minute"] <= now_et.minute <= sched["minute"] + 1:
                         logger.info(f"Auto-generating {sched['label']}...")
                         triggered_today.add(trigger_key)
