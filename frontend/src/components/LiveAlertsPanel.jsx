@@ -645,7 +645,7 @@ const LiveAlertsPanel = ({
     const cleanup = connectToStream();
     
     // Periodic status refresh
-    const statusInterval = setInterval(fetchStatus, 30000);
+    const statusInterval = setInterval(fetchStatus, 60000);
     
     return () => {
       cleanup?.();
