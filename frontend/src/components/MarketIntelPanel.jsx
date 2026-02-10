@@ -16,7 +16,7 @@ import {
   Circle,
   AlertCircle
 } from 'lucide-react';
-import api from '../../utils/api';
+import api from '../utils/api';
 import { toast } from 'sonner';
 
 const REPORT_ICONS = {
