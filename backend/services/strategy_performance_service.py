@@ -210,7 +210,7 @@ Keep analysis concise and actionable. Focus on data-driven insights."""
             
             # Actually use direct LLM call for better analysis
             messages = [{"role": "user", "content": prompt}]
-            analysis_text = await self._ai_assistant._call_llm(messages, "")
+            analysis_text = await self._ai_assistant._call_llm(messages, "", complexity="deep")
             
             # Parse recommendations from the analysis
             recommendations = self._parse_recommendations(analysis_text, stats, current_configs)
