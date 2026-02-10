@@ -114,24 +114,27 @@ const SectionHeader = ({ icon: Icon, title, count, isExpanded, onToggle, action 
 );
 
 // Chat Message Component
-const ChatMessage = ({ message, isUser }) => (
-  <div className={`flex gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
-    <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
-      isUser ? 'bg-cyan-500/20' : 'bg-amber-500/20'
-    }`}>
-      {isUser ? <User className="w-3 h-3 text-cyan-400" /> : <Bot className="w-3 h-3 text-amber-400" />}
-    </div>
-    <div className={`flex-1 max-w-[90%] ${isUser ? 'text-right' : ''}`}>
-      <div className={`inline-block p-2.5 rounded-lg text-sm ${
-        isUser ? 'bg-cyan-500/10 border border-cyan-500/20 text-white' : 'bg-zinc-800/50 border border-white/5 text-zinc-200'
+const ChatMessage = ({ message, isUser, onTickerClick }) => {
+  const mdComponents = createMarkdownComponents(onTickerClick);
+  return (
+    <div className={`flex gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
+      <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
+        isUser ? 'bg-cyan-500/20' : 'bg-amber-500/20'
       }`}>
-        {isUser ? message.content : (
-          <ReactMarkdown components={markdownComponents}>{message.content}</ReactMarkdown>
-        )}
+        {isUser ? <User className="w-3 h-3 text-cyan-400" /> : <Bot className="w-3 h-3 text-amber-400" />}
+      </div>
+      <div className={`flex-1 max-w-[90%] ${isUser ? 'text-right' : ''}`}>
+        <div className={`inline-block p-2.5 rounded-lg text-sm ${
+          isUser ? 'bg-cyan-500/10 border border-cyan-500/20 text-white' : 'bg-zinc-800/50 border border-white/5 text-zinc-200'
+        }`}>
+          {isUser ? message.content : (
+            <ReactMarkdown components={mdComponents}>{message.content}</ReactMarkdown>
+          )}
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 // Quick Action Pill
 const QuickPill = ({ label, onClick, loading, active }) => (
