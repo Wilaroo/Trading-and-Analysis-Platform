@@ -1,66 +1,69 @@
 # TradeCommand - Trading and Analysis Platform
 
 ## Original Problem Statement
-Build "TradeCommand," an advanced Trading and Analysis Platform with a highly intelligent AI assistant that serves as a trading coach. Features a fully autonomous trading bot with a mutual learning loop — AI and bot learn from and improve each other. UI streamlined into a tab-based layout for clean navigation.
+Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading coach, autonomous trading bot, and mutual learning loop.
 
 ## Tech Stack
 - **Frontend**: React, TailwindCSS, Framer Motion, Lightweight Charts
 - **Backend**: FastAPI, Python
 - **Database**: MongoDB
-- **AI**: Ollama (primary, local/free) -> Emergent LLM GPT-4o (fallback)
-- **Integrations**: Alpaca (paper trading), Finnhub (real-time news), IB, yfinance
+- **AI**: Smart Routing — Ollama (local/free) + GPT-4o (Emergent, deep tasks)
+- **Integrations**: Alpaca, Finnhub (real-time news), IB Gateway, yfinance
 
-## Architecture (3-Tab Layout)
+## Smart AI Routing (Feb 2026)
+| Complexity | Model | Tasks | Cost |
+|-----------|-------|-------|------|
+| **light** | Ollama (llama3:8b) | Quick chat, summaries | Free |
+| **standard** | Ollama first, GPT-4o fallback | Market intel reports, general chat | Free (mostly) |
+| **deep** | GPT-4o (Emergent) | Strategy analysis, trade evaluation, "should I buy", recommendations | Credits |
+
+### Deep Keyword Triggers
+`should i buy`, `should i sell`, `analyze`, `evaluate`, `deep dive`, `strategy`, `backtest`, `risk`, `recommend`, `quality score`, `compare`, `portfolio`, `rebalance`, `hedge`, `options`, `earnings play`, `swing trade`, `position size`, `thesis`
+
+## Market Intel Data Sources (7 total)
+1. Finnhub News (100 live headlines, earnings & analyst actions filtered)
+2. Market Indices (SPY, QQQ, IWM, DIA, VIX)
+3. Watchlist Quotes (AAPL, MSFT, NVDA, TSLA, AMD, META, GOOGL, AMZN)
+4. Account/Positions (Alpaca)
+5. Trading Bot Status (exact state from service)
+6. Strategy Performance (exact from learning loop DB)
+7. Scanner Signals (live alerts from background scanner)
+
+## Architecture
 ```
 /app/
 ├── backend/
-│   ├── routers/
-│   │   ├── trading_bot.py
-│   │   ├── learning_dashboard.py
-│   │   ├── market_intel.py
-│   │   ├── live_scanner.py
-│   │   └── assistant.py
+│   ├── routers/ (trading_bot, learning_dashboard, market_intel, assistant, etc.)
 │   ├── services/
+│   │   ├── ai_assistant_service.py      # Smart routing: _call_llm(complexity=light|standard|deep)
+│   │   ├── market_intel_service.py      # 7 data sources, anti-hallucination prompts
 │   │   ├── trading_bot_service.py
-│   │   ├── strategy_performance_service.py
-│   │   ├── market_intel_service.py      # Anti-hallucination + real Finnhub news
-│   │   ├── ai_assistant_service.py      # Ollama primary, Emergent fallback
-│   │   ├── alpaca_service.py
+│   │   ├── strategy_performance_service.py  # Learning loop → deep routing
+│   │   ├── newsletter_service.py        # Now routes through shared AI assistant (deep)
+│   │   ├── llm_service.py              # OllamaProvider added as first priority
 │   │   └── background_scanner.py
 │   └── server.py
-└── frontend/
-    └── src/
-        ├── hooks/useCommandCenterData.js
-        ├── components/
-        │   ├── layout/ (HeaderBar, QuickStatsRow)
-        │   ├── tabs/ (TradingTab, AICoachTab, AnalyticsTab)
-        │   ├── MarketIntelPanel.jsx
-        │   ├── TradingBotPanel.jsx
-        │   ├── LearningDashboard.jsx
-        │   └── AICommandPanel.jsx
-        └── pages/CommandCenterPage.js
+└── frontend/ (React, 3-tab layout: Signals | Command | Analytics)
 ```
 
 ## Completed Features
 1. Core platform: AI assistant, background scanner, SSE alerts
-2. Autonomous trading bot with strategy configs
+2. Autonomous trading bot with strategy configs (6 strategies)
 3. AI <-> Bot integration: mutual awareness
 4. Mutual Learning Loop: performance tracking, AI analysis, auto-tuning
 5. Performance optimization: caching, batching, tab-aware polling
-6. UI Consolidation: 3-tab layout (Signals | Command | Analytics)
-7. CommandCenterPage Refactoring: modular components
-8. Market Intelligence: 5 daily auto-reports with real-time news
-9. Morning Routine Auto-Trigger
-10. Bot + AI Unification: merged into Command tab
-11. Ollama Integration: local LLM primary, Emergent fallback
-12. **Anti-Hallucination Fix**: Real Finnhub news, exact bot/strategy data, correct timestamps
+6. UI: 3-tab layout (Signals | Command | Analytics), modular components
+7. Market Intelligence: 5 daily auto-reports, real Finnhub news, anti-hallucination
+8. Morning Routine Auto-Trigger
+9. Ollama Integration: local LLM via ngrok tunnel
+10. Smart AI Routing: Ollama (light/standard) + GPT-4o (deep)
+11. Enhanced Market Intel: 7 data sources (news, indices, watchlist, positions, bot, learning, scanner)
+12. Newsletter + LLM Service routed through shared AI system
 
 ## Prioritized Backlog
-
 ### P1 - Next Up
 - Rubber Band Scanner Preset
 - AI Coach Proactive Warnings
-
 ### P2 - Future
 - Full bot state persistence in MongoDB
 - AI Backtesting Feature
