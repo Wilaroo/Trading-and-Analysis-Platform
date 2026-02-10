@@ -41,12 +41,6 @@ const CommandCenterPage = ({
       {/* Header */}
       <HeaderBar
         systemHealth={data.systemHealth}
-        tickerSearchQuery={data.tickerSearchQuery}
-        setTickerSearchQuery={data.setTickerSearchQuery}
-        handleTickerSearch={data.handleTickerSearch}
-        isSearching={data.isSearching}
-        recentSearches={data.recentSearches}
-        clearRecentSearches={data.clearRecentSearches}
         onNavigateToCoach={() => data.setActiveMainTab('coach')}
         wsConnected={wsConnected}
         wsLastUpdate={wsLastUpdate}
@@ -55,7 +49,6 @@ const CommandCenterPage = ({
         connecting={data.connecting}
         handleConnectToIB={data.handleConnectToIB}
         handleDisconnectFromIB={data.handleDisconnectFromIB}
-        searchInputRef={data.searchInputRef}
       />
 
       {/* Quick Stats Row */}
