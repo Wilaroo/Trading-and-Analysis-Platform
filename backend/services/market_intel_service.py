@@ -195,15 +195,18 @@ class MarketIntelService:
         parts = []
         if self._scanner_service:
             try:
-                recent = self._scanner_service.get_recent_signals(limit=10)
-                if recent:
-                    parts.append("=== SCANNER SIGNALS (EXACT recent scanner results) ===")
-                    for sig in recent:
-                        sym = sig.get("symbol", "?")
-                        strategy = sig.get("strategy", "?")
-                        grade = sig.get("grade", "?")
-                        price = sig.get("price", 0)
-                        parts.append(f"  {sym}: {strategy} signal (Grade {grade}) @ ${price:.2f}")
+                alerts = self._scanner_service.get_live_alerts()
+                if alerts:
+                    parts.append("=== SCANNER SIGNALS (EXACT recent scanner alerts) ===")
+                    for alert in alerts[:10]:
+                        sym = getattr(alert, 'symbol', '?')
+                        setup = getattr(alert, 'setup_type', '?')
+                        priority = getattr(alert, 'priority', '?')
+                        price = getattr(alert, 'price', 0)
+                        msg = getattr(alert, 'message', '')
+                        parts.append(f"  {sym}: {setup} ({priority}) @ ${price:.2f}")
+                        if msg:
+                            parts.append(f"    {msg[:100]}")
                 else:
                     parts.append("=== SCANNER SIGNALS ===\nNo recent signals")
             except Exception as e:
