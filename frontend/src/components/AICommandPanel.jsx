@@ -346,50 +346,6 @@ const AICommandPanel = ({
           </div>
         </div>
 
-        {/* Ticker Search Section */}
-        <div className="p-3 border-b border-white/10">
-          <SectionHeader 
-            icon={Search} 
-            title="Search Ticker" 
-            isExpanded={expandedSections.search}
-            onToggle={() => toggleSection('search')}
-          />
-          {expandedSections.search && (
-            <div className="mt-2">
-              <form onSubmit={handleSearch} className="flex gap-2">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value.toUpperCase())}
-                  placeholder="Enter symbol (AAPL, TSLA...)"
-                  className="flex-1 px-3 py-2 bg-zinc-900 border border-white/10 rounded-lg text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
-                />
-                <button
-                  type="submit"
-                  disabled={!searchQuery}
-                  className="px-4 py-2 bg-cyan-500/20 text-cyan-400 rounded-lg hover:bg-cyan-500/30 disabled:opacity-50 text-sm font-medium"
-                >
-                  Analyze
-                </button>
-              </form>
-              {recentSearches.length > 0 && (
-                <div className="flex gap-2 mt-2 flex-wrap">
-                  <span className="text-xs text-zinc-500">Recent:</span>
-                  {recentSearches.map((sym, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => onTickerSelect?.({ symbol: sym, quote: {} })}
-                      className="text-xs text-cyan-400 hover:text-cyan-300"
-                    >
-                      {sym}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
         {/* Bot Trades Section */}
         <div className="p-3 border-b border-white/10" data-testid="bot-trades-section">
           <SectionHeader 
