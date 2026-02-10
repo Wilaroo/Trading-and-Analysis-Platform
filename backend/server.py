@@ -2728,6 +2728,10 @@ async def startup_event():
     # Start learning loop scheduler (auto-analysis at 4:15 PM ET)
     asyncio.create_task(perf_service.start_scheduler())
     print("Learning loop scheduler started")
+    
+    # Start market intel scheduler (auto-generates reports at scheduled times)
+    asyncio.create_task(market_intel_service.start_scheduler())
+    print("Market intel scheduler started")
 
 @app.on_event("shutdown")
 async def shutdown_event():
