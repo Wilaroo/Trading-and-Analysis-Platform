@@ -117,9 +117,6 @@ const CommandCenterPage = ({
           marketContext={data.marketContext}
           isConnected={data.isConnected}
           runScanner={data.runScanner}
-          newsletter={data.newsletter}
-          expandedSections={data.expandedSections}
-          toggleSection={data.toggleSection}
         />
       )}
 
