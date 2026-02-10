@@ -177,7 +177,6 @@ const AICommandPanel = ({
   
   // Section expansion state
   const [expandedSections, setExpandedSections] = useState({
-    search: true,
     botTrades: true,
     earnings: true,
     watchlist: false,
