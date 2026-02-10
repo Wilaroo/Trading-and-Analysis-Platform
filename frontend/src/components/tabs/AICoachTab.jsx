@@ -10,8 +10,6 @@ const AICoachTab = ({
   alerts,
   opportunities,
   earnings,
-  positions,
-  marketContext,
   isConnected,
   runScanner,
 }) => {
@@ -32,9 +30,7 @@ const AICoachTab = ({
             alerts={[...enhancedAlerts, ...alerts]}
             opportunities={opportunities}
             earnings={earnings}
-            portfolio={positions}
             scanResults={opportunities}
-            marketIndices={marketContext?.indices || []}
             isConnected={isConnected}
             onRefresh={() => runScanner()}
           />
