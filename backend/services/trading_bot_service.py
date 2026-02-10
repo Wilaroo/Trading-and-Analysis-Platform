@@ -56,11 +56,131 @@ class TradeTimeframe(str, Enum):
 
 # Strategy-based configuration
 STRATEGY_CONFIG = {
-    # Setup type -> (timeframe, trail_pct, scale_out_pcts)
+    # ==================== OPENING STRATEGIES ====================
+    "first_vwap_pullback": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    "opening_drive": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    "first_move_up": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.5],
+        "close_at_eod": True
+    },
+    "first_move_down": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.5],
+        "close_at_eod": True
+    },
+    "bella_fade": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.5],
+        "close_at_eod": True
+    },
+    
+    # ==================== MORNING MOMENTUM ====================
+    "orb": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    "orb_long": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    "orb_short": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    "hitchhiker": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.5],  # ONE AND DONE style
+        "close_at_eod": True
+    },
+    "gap_give_go": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    "gap_pick_roll": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    
+    # ==================== CORE SESSION ====================
+    "spencer_scalp": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.33, 0.33, 0.34],  # 1R, 2R, 3R scale
+        "close_at_eod": True
+    },
+    "second_chance": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    "backside": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.5],  # ONE AND DONE
+        "close_at_eod": True
+    },
+    "off_sides": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.5],  # ONE ATTEMPT ONLY
+        "close_at_eod": True
+    },
+    "off_sides_short": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.5],
+        "close_at_eod": True
+    },
+    "fashionably_late": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    
+    # ==================== MEAN REVERSION ====================
     "rubber_band": {
         "timeframe": TradeTimeframe.SCALP,
-        "trail_pct": 0.01,  # 1% tight trail for scalps
-        "scale_out_pcts": [0.5, 0.3, 0.2],  # More aggressive scale-out
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    "rubber_band_long": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    "rubber_band_short": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
         "close_at_eod": True
     },
     "vwap_bounce": {
@@ -69,17 +189,109 @@ STRATEGY_CONFIG = {
         "scale_out_pcts": [0.5, 0.3, 0.2],
         "close_at_eod": True
     },
-    "breakout": {
+    "vwap_fade": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    "vwap_fade_long": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    "vwap_fade_short": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    "tidal_wave": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    
+    # ==================== CONSOLIDATION ====================
+    "big_dog": {
         "timeframe": TradeTimeframe.INTRADAY,
-        "trail_pct": 0.015,  # 1.5% trail for intraday
+        "trail_pct": 0.015,
         "scale_out_pcts": [0.33, 0.33, 0.34],
         "close_at_eod": True
     },
+    "puppy_dog": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    "9_ema_scalp": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    "abc_scalp": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    
+    # ==================== AFTERNOON ====================
+    "hod_breakout": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    "time_of_day_fade": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.5],
+        "close_at_eod": True
+    },
+    
+    # ==================== SPECIAL ====================
+    "breaking_news": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    "volume_capitulation": {
+        "timeframe": TradeTimeframe.SCALP,
+        "trail_pct": 0.01,
+        "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    "range_break": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    "range_break_long": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    "breakout": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.33, 0.33, 0.34],
+        "close_at_eod": True
+    },
+    
+    # ==================== SWING/POSITION ====================
     "squeeze": {
         "timeframe": TradeTimeframe.SWING,
-        "trail_pct": 0.025,  # 2.5% wider trail for swings
-        "scale_out_pcts": [0.25, 0.25, 0.5],  # Keep more for runner
-        "close_at_eod": False  # Hold overnight
+        "trail_pct": 0.025,
+        "scale_out_pcts": [0.25, 0.25, 0.5],
+        "close_at_eod": False
     },
     "trend_continuation": {
         "timeframe": TradeTimeframe.SWING,
@@ -89,7 +301,7 @@ STRATEGY_CONFIG = {
     },
     "position_trade": {
         "timeframe": TradeTimeframe.POSITION,
-        "trail_pct": 0.03,  # 3% widest trail for positions
+        "trail_pct": 0.03,
         "scale_out_pcts": [0.2, 0.3, 0.5],
         "close_at_eod": False
     }
