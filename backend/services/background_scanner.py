@@ -78,7 +78,7 @@ class BackgroundScannerService:
         self._scan_task: Optional[asyncio.Task] = None
         
         # Configuration
-        self._scan_interval = 60  # seconds between scans
+        self._scan_interval = 90  # seconds between scans
         self._watchlist: List[str] = []
         self._enabled_setups: Set[str] = {"rubber_band", "breakout", "vwap_bounce", "squeeze"}
         
