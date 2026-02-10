@@ -76,8 +76,8 @@ const CommandCenterPage = ({
       {/* Tab Navigation */}
       <div className="flex items-center gap-1 bg-[#0A0A0A] border border-white/10 rounded-lg p-1 mt-1" data-testid="main-tabs">
         {[
-          { id: 'trading', label: 'Trading', icon: '\u26A1' },
-          { id: 'coach', label: 'AI Coach', icon: '\uD83E\uDDE0' },
+          { id: 'trading', label: 'Signals', icon: '\u26A1' },
+          { id: 'coach', label: 'Command', icon: '\uD83C\uDFAF' },
           { id: 'analytics', label: 'Analytics', icon: '\uD83D\uDCCA' }
         ].map(tab => (
           <button
