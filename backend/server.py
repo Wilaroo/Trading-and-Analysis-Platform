@@ -133,9 +133,9 @@ init_scanner_router(predictive_scanner)
 alert_system = get_alert_system()
 init_alerts_router(alert_system)
 
-# Initialize background scanner for live alerts
-from services.background_scanner import get_background_scanner
-background_scanner = get_background_scanner()
+# Initialize ENHANCED background scanner for live alerts (200+ symbols, all SMB strategies)
+from services.enhanced_scanner import get_enhanced_scanner
+background_scanner = get_enhanced_scanner()
 init_live_scanner_router(background_scanner)
 
 # Initialize trading bot
