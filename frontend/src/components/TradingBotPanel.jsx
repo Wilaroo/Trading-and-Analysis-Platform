@@ -907,6 +907,35 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
         <DailyStatsSummary stats={dailyStats} />
       </div>
       
+      {/* Live Signal Bubbles */}
+      {liveSignals.length > 0 && (
+        <div className="px-4 py-2 border-b border-zinc-700/50" data-testid="live-signals-strip">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            <span className="text-[10px] text-zinc-500 uppercase whitespace-nowrap flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+              Signals
+            </span>
+            {liveSignals.map((sig, idx) => {
+              const priorityColor = sig.priority === 'HIGH' ? 'border-green-500/40 bg-green-500/10 text-green-400' :
+                                    sig.priority === 'MEDIUM' ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-400' :
+                                    'border-zinc-600 bg-zinc-800 text-zinc-400';
+              return (
+                <button
+                  key={idx}
+                  onClick={() => handleTickerClick(sig.symbol)}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-medium border whitespace-nowrap hover:brightness-125 transition-all ${priorityColor}`}
+                  data-testid={`signal-bubble-${sig.symbol}`}
+                  title={sig.message || `${sig.setup_type} on ${sig.symbol}`}
+                >
+                  <span className="font-mono font-bold">{sig.symbol}</span>
+                  <span className="opacity-70">{sig.setup_type?.split('_')[0] || 'Setup'}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      
       {/* Tabs */}
       <div className="flex border-b border-zinc-700/50">
         <button
