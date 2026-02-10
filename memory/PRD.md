@@ -9,7 +9,7 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
 - **Database**: MongoDB
 - **Integrations**: Alpaca (paper trading), Finnhub, IB, Emergent LLM (GPT-4o), yfinance
 
-## Architecture (3-Tab Layout)
+## Architecture (3-Tab Layout - Consolidated Feb 2026)
 ```
 /app/
 ├── backend/
@@ -33,22 +33,29 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
         │   └── useCommandCenterData.js
         ├── components/
         │   ├── layout/
-        │   │   ├── HeaderBar.jsx
+        │   │   ├── HeaderBar.jsx          # AI Coach shortcut (navigates to Command tab)
         │   │   └── QuickStatsRow.jsx
         │   ├── tabs/
-        │   │   ├── TradingTab.jsx
-        │   │   ├── AICoachTab.jsx         # Uses MarketIntelPanel
-        │   │   └── AnalyticsTab.jsx
+        │   │   ├── TradingTab.jsx         # Signals only (TradeSignals)
+        │   │   ├── AICoachTab.jsx         # Unified: Bot + AI Chat + Market Intel
+        │   │   └── AnalyticsTab.jsx       # Learning Dashboard + Scanner
         │   ├── shared/
         │   │   └── UIComponents.jsx
-        │   ├── MarketIntelPanel.jsx       # Time-of-day Market Intelligence + Auto-trigger
+        │   ├── MarketIntelPanel.jsx       # Time-of-day reports + auto-trigger
         │   ├── TradingBotPanel.jsx
         │   ├── LearningDashboard.jsx
         │   ├── AICommandPanel.jsx
         │   └── TradeSignals.jsx
         └── pages/
-            └── CommandCenterPage.js       # ~160 lines (refactored)
+            └── CommandCenterPage.js       # Thin orchestrator (~160 lines)
 ```
+
+## Tab Structure (Consolidated Feb 2026)
+| Tab | Label | Contents |
+|-----|-------|----------|
+| Signals | Lightning icon | Trade Signals feed |
+| Command | Target icon | Trading Bot + AI Chat + Market Intel (unified hub) |
+| Analytics | Chart icon | Learning Dashboard + Scanner |
 
 ## Completed Features
 1. Core platform: AI assistant, background scanner, SSE alerts
@@ -56,28 +63,22 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
 3. Strategy configs: 6 strategies, EOD auto-close, CRUD API, frontend editing
 4. AI <-> Bot integration: AI evaluates trades, bot awareness in chat
 5. Mutual Learning Loop: performance tracking, AI analysis, auto-tuning, scheduled post-market
-6. 3-tab UI: Trading | AI Coach | Analytics
-7. Performance optimization: centralized caching, batch APIs, tab-aware polling
-8. UI Consolidation: 6 alert panels merged into 2 clean systems
-9. CommandCenterPage Refactoring: 1464-line monolith -> 7 modular components
-10. Market Intelligence & Strategy Playbook: Time-of-day AI-generated reports
-11. **Morning Routine Auto-Trigger**: Auto-generates appropriate report on app open
+6. Performance optimization: centralized caching, batch APIs, tab-aware polling
+7. UI Consolidation: 6 alert panels merged into 2 clean systems
+8. CommandCenterPage Refactoring: 1464-line monolith -> 7 modular components
+9. Market Intelligence & Strategy Playbook: Time-of-day AI-generated reports (5 daily)
+10. Morning Routine Auto-Trigger: Auto-generates appropriate report on app open
+11. **Bot + AI Unification**: Merged Trading Bot into Command tab alongside AI Chat and Market Intel
 
 ## Market Intelligence System
 ### Report Schedule (Eastern Time)
 | Time | Type | Content |
 |------|------|---------|
-| 8:30 AM | Pre-Market Briefing | Overnight recap, earnings, upgrades/downgrades, strategy playbook, risk warnings |
+| 8:30 AM | Pre-Market Briefing | Overnight recap, earnings, upgrades/downgrades, strategy playbook |
 | 10:30 AM | Early Market Report | First hour recap, key movers, bot activity, emerging setups |
 | 2:00 PM | Midday Report | Day progress, P&L update, strategy scorecard, afternoon outlook |
 | 2:30 PM | Power Hour Report | EOD setup, position review, momentum assessment, action items |
-| 4:30 PM | Post-Market Wrap | Day summary, P&L recap, trade review, learning insights, tomorrow prep |
-
-### Auto-Trigger
-- On app open, `GET /api/market-intel/auto-trigger` checks current time window
-- If no report exists for the current time slot, auto-generates it
-- Shows "Preparing your morning briefing..." toast during generation
-- Works weekdays only, from 6 AM ET onwards
+| 4:30 PM | Post-Market Wrap | Day summary, P&L recap, trade review, learning insights |
 
 ### API Endpoints
 - `GET /api/market-intel/current` - Most relevant report for current time
