@@ -419,39 +419,6 @@ const AICommandPanel = ({
           )}
         </div>
 
-        {/* Alerts Section */}
-        <div className="p-3 border-b border-white/10">
-          <SectionHeader 
-            icon={Bell} 
-            title="Alerts" 
-            count={alerts.length}
-            isExpanded={expandedSections.alerts}
-            onToggle={() => toggleSection('alerts')}
-          />
-          {expandedSections.alerts && (
-            <div className="mt-2 space-y-1 max-h-[150px] overflow-y-auto">
-              {alerts.length > 0 ? alerts.slice(0, 5).map((alert, idx) => (
-                <div 
-                  key={idx}
-                  onClick={() => onTickerSelect?.({ symbol: alert.symbol, quote: {} })}
-                  className="flex items-center justify-between p-2 bg-zinc-900/50 rounded-lg hover:bg-zinc-800/50 cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${
-                      alert.type === 'price' ? 'bg-cyan-500' : 
-                      alert.type === 'earnings' ? 'bg-amber-500' : 'bg-purple-500'
-                    }`} />
-                    <span className="text-sm font-medium text-white">{alert.symbol}</span>
-                  </div>
-                  <span className="text-xs text-zinc-400">{alert.message || alert.headline}</span>
-                </div>
-              )) : (
-                <p className="text-xs text-zinc-500 text-center py-2">No active alerts</p>
-              )}
-            </div>
-          )}
-        </div>
-
         {/* Bot Trades Section */}
         <div className="p-3 border-b border-white/10" data-testid="bot-trades-section">
           <SectionHeader 
