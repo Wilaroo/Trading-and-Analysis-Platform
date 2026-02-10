@@ -669,7 +669,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
     // Fetch live scanner signals
     const fetchSignals = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/scanner/live-alerts`);
+        const res = await fetch(`${API_URL}/api/live-scanner/alerts`);
         const data = await res.json();
         if (data.alerts) {
           setLiveSignals(data.alerts.slice(0, 8));
