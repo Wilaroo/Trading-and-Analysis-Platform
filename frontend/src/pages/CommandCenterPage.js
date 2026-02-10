@@ -113,8 +113,6 @@ const CommandCenterPage = ({
           alerts={data.alerts}
           opportunities={data.opportunities}
           earnings={data.earnings}
-          positions={data.positions}
-          marketContext={data.marketContext}
           isConnected={data.isConnected}
           runScanner={data.runScanner}
         />
