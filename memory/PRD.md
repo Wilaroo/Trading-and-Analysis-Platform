@@ -9,7 +9,7 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
 - **Database**: MongoDB
 - **Integrations**: Alpaca (paper trading), Finnhub, IB, Emergent LLM (GPT), yfinance
 
-## Architecture (3-Tab Layout)
+## Architecture (3-Tab Layout - Refactored Feb 2026)
 ```
 /app/
 ├── backend/
@@ -29,13 +29,24 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
 │   └── server.py
 └── frontend/
     └── src/
+        ├── hooks/
+        │   └── useCommandCenterData.js   # All state + data fetching (extracted)
         ├── components/
-        │   ├── TradingBotPanel.jsx       # Bot control (20s polling)
-        │   ├── LearningDashboard.jsx     # Strategy perf (60s polling)
-        │   ├── AICommandPanel.jsx        # AI chat + Bot Trades (30s polling)
-        │   └── LiveAlertsPanel.jsx       # Real-time alerts (60s polling)
+        │   ├── layout/
+        │   │   ├── HeaderBar.jsx          # Search, connections, system health
+        │   │   └── QuickStatsRow.jsx      # 6 stat cards with dropdowns
+        │   ├── tabs/
+        │   │   ├── TradingTab.jsx         # TradeSignals + TradingBotPanel
+        │   │   ├── AICoachTab.jsx         # AICommandPanel + Market Intel
+        │   │   └── AnalyticsTab.jsx       # LearningDashboard + Scanner
+        │   ├── shared/
+        │   │   └── UIComponents.jsx       # Card, Badge, SectionHeader
+        │   ├── TradingBotPanel.jsx        # Bot control (20s polling)
+        │   ├── LearningDashboard.jsx      # Strategy perf (60s polling)
+        │   ├── AICommandPanel.jsx         # AI chat + Bot Trades (30s polling)
+        │   └── TradeSignals.jsx           # Trade signals feed
         └── pages/
-            └── CommandCenterPage.js      # 3-tab layout, tab-aware polling
+            └── CommandCenterPage.js       # Thin orchestrator (~165 lines)
 ```
 
 ## Performance Optimization Summary (Dec 2025)
@@ -59,10 +70,24 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with a highly in
 1. Core platform: AI assistant, background scanner, SSE alerts
 2. Autonomous trading bot: full lifecycle, risk mgmt, profit-taking, trailing stops
 3. Strategy configs: 6 strategies, EOD auto-close, CRUD API, frontend editing
-4. AI ↔ Bot integration: AI evaluates trades, bot awareness in chat, Bot Trades in AI panel
+4. AI <-> Bot integration: AI evaluates trades, bot awareness in chat, Bot Trades in AI panel
 5. Mutual Learning Loop: performance tracking, AI analysis, auto-tuning, scheduled post-market
 6. 3-tab UI: Trading | AI Coach | Analytics with expandable stat card dropdowns
 7. Performance optimization: centralized caching, batch APIs, tab-aware polling
+8. UI Consolidation: Merged 6 alert panels into 2 clean systems (TradeSignals + header dropdowns)
+9. **CommandCenterPage Refactoring (Feb 2026)**: Split 1464-line monolith into 7 modular components
+
+## Refactoring Summary (Feb 2026)
+| File | Lines | Purpose |
+|------|-------|---------|
+| CommandCenterPage.js | 165 | Thin orchestrator |
+| useCommandCenterData.js | ~250 | All state + data fetching hook |
+| HeaderBar.jsx | ~200 | Search, connections, system health |
+| QuickStatsRow.jsx | ~180 | 6 stat cards with dropdowns |
+| TradingTab.jsx | ~30 | TradeSignals + TradingBotPanel |
+| AICoachTab.jsx | ~74 | AICommandPanel + Market Intel |
+| AnalyticsTab.jsx | ~82 | LearningDashboard + Scanner |
+| UIComponents.jsx | ~43 | Card, Badge, SectionHeader |
 
 ## Prioritized Backlog
 
