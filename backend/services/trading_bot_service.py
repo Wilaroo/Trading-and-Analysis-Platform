@@ -258,7 +258,7 @@ class TradingBotService:
         
         # Configuration
         self._enabled_setups = ["rubber_band", "breakout", "vwap_bounce", "squeeze"]
-        self._scan_interval = 30  # seconds
+        self._scan_interval = 60  # seconds (was 30 - reduced to avoid API overload)
         self._watchlist: List[str] = []
         
         # Services (injected)
