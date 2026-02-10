@@ -865,9 +865,6 @@ const CommandCenterPage = ({
     const fastPoll = setInterval(() => {
       checkOrderFills();
       checkPriceAlerts();
-      if (isActiveTab && activeMainTab === 'coach') {
-        fetchEnhancedAlerts();
-      }
     }, 30000);
     
     return () => clearInterval(fastPoll);
