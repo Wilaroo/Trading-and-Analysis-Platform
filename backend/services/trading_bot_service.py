@@ -1379,6 +1379,68 @@ class TradingBotService:
         except Exception as e:
             logger.error(f"Error deserializing trade: {e}")
             return None
+    
+    # ==================== SCANNER AUTO-EXECUTION ====================
+    
+    async def submit_trade_from_scanner(self, trade_request: Dict):
+        """
+        Submit a trade from the enhanced scanner for auto-execution.
+        Called when a high-priority alert with tape confirmation is detected.
+        """
+        try:
+            symbol = trade_request.get('symbol')
+            direction = trade_request.get('direction', 'long')
+            setup_type = trade_request.get('setup_type')
+            entry_price = trade_request.get('entry_price')
+            stop_loss = trade_request.get('stop_loss')
+            target = trade_request.get('target')
+            alert_id = trade_request.get('alert_id')
+            
+            logger.info(f"🤖 Scanner auto-submit: {symbol} {direction.upper()} {setup_type}")
+            
+            # Create alert dict for existing evaluation flow
+            alert = {
+                'symbol': symbol,
+                'setup_type': setup_type,
+                'direction': direction,
+                'current_price': entry_price,
+                'trigger_price': entry_price,
+                'stop_price': stop_loss,
+                'targets': [target],
+                'score': 80,  # Auto-execute alerts are pre-screened
+                'trigger_probability': 0.65,
+                'headline': f"Auto-execute: {setup_type} on {symbol}",
+                'technical_reasons': [
+                    f"Tape confirmed {setup_type} setup",
+                    f"Auto-executed from scanner alert"
+                ],
+                'warnings': [],
+                'source': 'scanner_auto_execute',
+                'alert_id': alert_id
+            }
+            
+            # Evaluate and create trade
+            trade = await self._evaluate_opportunity(alert)
+            
+            if trade:
+                if self._mode == BotMode.AUTONOMOUS:
+                    # Direct execution
+                    await self._execute_trade(trade)
+                    logger.info(f"✅ Auto-executed: {trade.symbol} {trade.direction.value.upper()}")
+                else:
+                    # Add to pending for confirmation
+                    self._pending_trades[trade.id] = trade
+                    await self._notify_trade_update(trade, "pending")
+                    logger.info(f"⏳ Auto-submit pending confirmation: {trade.symbol}")
+                
+                return {"success": True, "trade_id": trade.id}
+            else:
+                logger.warning(f"Scanner auto-submit rejected: {symbol} did not pass evaluation")
+                return {"success": False, "reason": "Failed evaluation"}
+                
+        except Exception as e:
+            logger.error(f"Scanner auto-submit error: {e}")
+            return {"success": False, "reason": str(e)}
 
 
 # Singleton instance
