@@ -261,21 +261,10 @@ const AICommandPanel = ({
     setIsLoading(false);
   }, [input, isLoading, sessionId]);
 
-  // Handle search
-  const handleSearch = (e) => {
-    e.preventDefault();
-    const symbol = searchQuery.trim().toUpperCase();
-    if (!symbol) return;
-    
-    // Add to recent searches
-    const updated = [symbol, ...recentSearches.filter(s => s !== symbol)].slice(0, 5);
-    setRecentSearches(updated);
-    localStorage.setItem('recentTickerSearches', JSON.stringify(updated));
-    
-    onTickerSelect?.({ symbol, quote: {} });
-    setSearchQuery('');
-    toast.success(`Loading ${symbol}...`);
-  };
+  // Handle ticker click from AI response
+  const handleTickerClick = useCallback((symbol) => {
+    onTickerSelect?.({ symbol, quote: {}, fromSearch: true });
+  }, [onTickerSelect]);
 
   // Quick actions
   const quickActions = [
