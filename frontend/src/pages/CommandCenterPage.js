@@ -858,24 +858,21 @@ const CommandCenterPage = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connectionChecked, isConnected, isActiveTab]);
 
-  // Fast polling for order fills and price alerts (every 10s when enabled)
-  // This runs regardless of active tab to catch important alerts
+  // Polling for order fills and price alerts (every 30s)
   useEffect(() => {
     if (!isConnected) return;
     
     const fastPoll = setInterval(() => {
-      // Price alerts and order fills are important - run even when not on Command Center
-      // But skip heavy operations like enhanced alerts when not active
       checkOrderFills();
       checkPriceAlerts();
-      if (isActiveTab) {
+      if (isActiveTab && activeMainTab === 'coach') {
         fetchEnhancedAlerts();
       }
-    }, 10000);
+    }, 30000);
     
     return () => clearInterval(fastPoll);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, soundEnabled, priceAlerts.length, isActiveTab]);
+  }, [isConnected, soundEnabled, priceAlerts.length, isActiveTab, activeMainTab]);
 
   const toggleSection = (section) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
