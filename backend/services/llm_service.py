@@ -322,7 +322,7 @@ class LLMService:
                 logger.warning(f"Forced provider {forced_provider} not available, falling back")
         
         # Try providers in priority order
-        priority = ["openai", "anthropic", "emergent"]
+        priority = ["ollama", "openai", "anthropic", "emergent"]
         for name in priority:
             provider = self.providers[name]
             if provider.is_available():
