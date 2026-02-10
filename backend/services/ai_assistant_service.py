@@ -155,7 +155,8 @@ Format responses with clear sections. Cite specific rules from the playbook."""
 
     def __init__(self, db=None):
         self.db = db
-        self.provider = LLMProvider.EMERGENT
+        # Ollama preferred if configured, otherwise Emergent
+        self.provider = LLMProvider.OLLAMA if os.environ.get("OLLAMA_URL") else LLMProvider.EMERGENT
         self.conversations: Dict[str, ConversationContext] = {}
         self._trading_intelligence = None
         self._trading_bot = None
