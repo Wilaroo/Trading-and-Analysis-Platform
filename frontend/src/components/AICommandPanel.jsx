@@ -115,9 +115,7 @@ const AICommandPanel = ({
   alerts = [],
   opportunities = [],
   earnings = [],
-  portfolio = [],
   scanResults = [],
-  marketIndices = [],
   isConnected = false,
   onRefresh
 }) => {
