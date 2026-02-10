@@ -167,14 +167,6 @@ const AICommandPanel = ({
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState(`session_${Date.now()}`);
   
-  // Search state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [recentSearches, setRecentSearches] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('recentTickerSearches') || '[]');
-    } catch { return []; }
-  });
-  
   // Section expansion state
   const [expandedSections, setExpandedSections] = useState({
     botTrades: true,
