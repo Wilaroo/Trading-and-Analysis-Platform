@@ -190,6 +190,47 @@ class MarketIntelService:
             parts.append(f"=== MARKET INDICES ===\nError: {e}")
         return "\n".join(parts)
 
+    async def _gather_scanner_context(self) -> str:
+        """Gather recent scanner results"""
+        parts = []
+        if self._scanner_service:
+            try:
+                recent = self._scanner_service.get_recent_signals(limit=10)
+                if recent:
+                    parts.append("=== SCANNER SIGNALS (EXACT recent scanner results) ===")
+                    for sig in recent:
+                        sym = sig.get("symbol", "?")
+                        strategy = sig.get("strategy", "?")
+                        grade = sig.get("grade", "?")
+                        price = sig.get("price", 0)
+                        parts.append(f"  {sym}: {strategy} signal (Grade {grade}) @ ${price:.2f}")
+                else:
+                    parts.append("=== SCANNER SIGNALS ===\nNo recent signals")
+            except Exception as e:
+                logger.warning(f"Error gathering scanner data: {e}")
+        return "\n".join(parts) if parts else ""
+
+    async def _gather_watchlist_context(self) -> str:
+        """Gather watchlist quotes"""
+        parts = []
+        try:
+            if self._alpaca_service:
+                # Default watchlist tickers
+                watchlist_symbols = ["AAPL", "MSFT", "NVDA", "TSLA", "AMD", "META", "GOOGL", "AMZN"]
+                quotes = await self._alpaca_service.get_quotes_batch(watchlist_symbols)
+                if quotes:
+                    parts.append("=== WATCHLIST QUOTES (EXACT live prices) ===")
+                    for q in quotes:
+                        sym = q.get("symbol", "?")
+                        price = q.get("price", 0)
+                        chg = q.get("change_percent", 0)
+                        vol = q.get("volume", 0)
+                        parts.append(f"  {sym}: ${price:.2f} ({chg:+.2f}%) vol: {vol:,}")
+        except Exception as e:
+            logger.warning(f"Error gathering watchlist: {e}")
+        return "\n".join(parts) if parts else ""
+
+
     # ==================== REPORT GENERATION ====================
 
     def _get_report_prompt(self, report_type: str, context: str, now_et: datetime) -> str:
