@@ -1311,12 +1311,12 @@ const CommandCenterPage = ({
       {/* ==================== TRADING TAB ==================== */}
       {activeMainTab === 'trading' && (
         <div className="space-y-4 mt-2">
-          {/* Live Alerts Panel */}
-          <LiveAlertsPanel
+          {/* Trade Signals - Compact unified signal feed */}
+          <TradeSignals
             isExpanded={liveAlertsExpanded}
             onToggleExpand={() => setLiveAlertsExpanded(!liveAlertsExpanded)}
-            onAlertSelect={(alert) => {
-              setSelectedTicker({ symbol: alert.symbol, quote: { price: alert.current_price } });
+            onSignalSelect={(signal) => {
+              setSelectedTicker({ symbol: signal.symbol, quote: { price: signal.price } });
             }}
           />
 
