@@ -1484,6 +1484,42 @@ async def health_check():
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
+@app.get("/api/llm/status")
+async def llm_status():
+    """Check which LLM provider is active and test connectivity"""
+    status = {
+        "primary_provider": assistant_service.provider.value,
+        "providers": {}
+    }
+    
+    for provider, cfg in assistant_service.llm_clients.items():
+        info = {"available": cfg.get("available", False)}
+        if provider.value == "ollama":
+            info["url"] = cfg.get("url", "")
+            info["model"] = cfg.get("model", "")
+            # Quick connectivity test
+            try:
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(
+                        f"{cfg['url']}/api/tags",
+                        timeout=5,
+                        headers={"ngrok-skip-browser-warning": "true"}
+                    )
+                info["connected"] = resp.status_code == 200
+                if resp.status_code == 200:
+                    models = [m["name"] for m in resp.json().get("models", [])]
+                    info["models_available"] = models
+            except Exception as e:
+                info["connected"] = False
+                info["error"] = str(e)
+        elif provider.value == "emergent":
+            info["role"] = "fallback"
+        status["providers"][provider.value] = info
+    
+    return status
+
+
 @app.get("/api/system/monitor")
 async def system_monitor():
     """
