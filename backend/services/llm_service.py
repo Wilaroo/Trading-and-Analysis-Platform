@@ -161,6 +161,57 @@ class AnthropicProvider(LLMProvider):
             raise
 
 
+class OllamaProvider(LLMProvider):
+    """Local Ollama provider — free, runs via ngrok tunnel"""
+    
+    def __init__(self):
+        self.url = os.environ.get("OLLAMA_URL", "")
+        self.model = os.environ.get("OLLAMA_MODEL", "llama3:8b")
+    
+    @property
+    def name(self) -> str:
+        return "Ollama"
+    
+    def is_available(self) -> bool:
+        return bool(self.url)
+    
+    def generate(self, prompt: str, system_prompt: str = None, max_tokens: int = 2000, temperature: float = 0.7) -> str:
+        import requests as req
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        
+        try:
+            resp = req.post(
+                f"{self.url.rstrip('/')}/api/chat",
+                json={"model": self.model, "messages": messages, "stream": False},
+                timeout=90,
+                headers={"ngrok-skip-browser-warning": "true"}
+            )
+            resp.raise_for_status()
+            return resp.json()["message"]["content"]
+        except Exception as e:
+            logger.error(f"Ollama generation error: {e}")
+            raise
+    
+    def generate_json(self, prompt: str, system_prompt: str = None, max_tokens: int = 2000) -> Dict[str, Any]:
+        json_prompt = f"{prompt}\n\nRespond with valid JSON only, no other text."
+        response = self.generate(json_prompt, system_prompt, max_tokens, temperature=0.3)
+        try:
+            if response.strip().startswith("{"):
+                return json.loads(response)
+            import re
+            json_match = re.search(r'\{[\s\S]*\}', response)
+            if json_match:
+                return json.loads(json_match.group())
+            raise ValueError("No JSON found in response")
+        except Exception as e:
+            logger.error(f"Ollama JSON parsing error: {e}")
+            raise
+
+
+
 class EmergentProvider(LLMProvider):
     """Emergent LLM Key provider - for development on Emergent platform"""
     
