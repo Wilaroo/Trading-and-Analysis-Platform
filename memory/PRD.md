@@ -52,13 +52,14 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 3. AI <-> Bot integration: mutual awareness
 4. Mutual Learning Loop: performance tracking, AI analysis, auto-tuning
 5. Performance optimization: caching, batching, tab-aware polling
-6. UI: 3-tab layout (Signals | Command | Analytics), modular components
+6. UI: **2-tab layout (Command | Analytics)** - Consolidated from 3 tabs
 7. Market Intelligence: 5 daily auto-reports, real Finnhub news, anti-hallucination
 8. Morning Routine Auto-Trigger
 9. Ollama Integration: local LLM via ngrok tunnel
 10. Smart AI Routing: Ollama (light/standard) + GPT-4o (deep)
 11. Enhanced Market Intel: 7 data sources (news, indices, watchlist, positions, bot, learning, scanner)
 12. Newsletter + LLM Service routed through shared AI system
+13. **Signal Bubbles Integration** (Feb 2026): Live scanner signals displayed as clickable bubbles in TradingBotPanel - removed separate Signals tab
 
 ## Prioritized Backlog
 ### P1 - Next Up
