@@ -1368,7 +1368,7 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
             assistant_msg = AssistantMessage(
                 role="assistant",
                 content=response_text,
-                metadata={"provider": self.provider.value}
+                metadata={"provider": "gpt-4o" if complexity == "deep" else "ollama"}
             )
             conv.messages.append(assistant_msg)
             
@@ -1380,7 +1380,8 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                 "response": response_text,
                 "session_id": session_id,
                 "message_count": len(conv.messages),
-                "provider": self.provider.value
+                "provider": "gpt-4o" if complexity == "deep" else "ollama",
+                "complexity": complexity
             }
             
         except Exception as e:
