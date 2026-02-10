@@ -184,7 +184,17 @@ Format responses with clear sections. Cite specific rules from the playbook."""
         """Initialize available LLM clients"""
         self.llm_clients = {}
         
-        # Emergent (via emergentintegrations)
+        # Ollama (local/tunneled - PRIMARY, free)
+        ollama_url = os.environ.get("OLLAMA_URL")
+        if ollama_url:
+            self.llm_clients[LLMProvider.OLLAMA] = {
+                "available": True,
+                "url": ollama_url.rstrip("/"),
+                "model": os.environ.get("OLLAMA_MODEL", "llama3:8b")
+            }
+            logger.info(f"Ollama client initialized: {ollama_url} (model: {self.llm_clients[LLMProvider.OLLAMA]['model']})")
+        
+        # Emergent (via emergentintegrations) - FALLBACK
         try:
             emergent_key = os.environ.get("EMERGENT_LLM_KEY")
             if emergent_key:
@@ -194,7 +204,7 @@ Format responses with clear sections. Cite specific rules from the playbook."""
                     "client": LlmChat,
                     "key": emergent_key
                 }
-                logger.info("Emergent LLM client initialized")
+                logger.info("Emergent LLM client initialized (fallback)")
         except ImportError as e:
             logger.warning(f"emergentintegrations not installed: {e}")
         
