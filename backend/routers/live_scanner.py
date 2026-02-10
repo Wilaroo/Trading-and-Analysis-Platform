@@ -265,5 +265,100 @@ async def get_config():
         "scan_interval": _scanner._scan_interval,
         "enabled_setups": list(_scanner._enabled_setups),
         "min_scan_interval": _scanner._min_scan_interval,
-        "symbols_per_batch": _scanner._symbols_per_batch
+        "symbols_per_batch": _scanner._symbols_per_batch,
+        "min_rvol_filter": _scanner._min_rvol_filter,
+        "auto_execute_enabled": _scanner._auto_execute_enabled
+    }
+
+
+# ===================== Strategy Stats (Win-Rate Tracking) =====================
+
+@router.get("/stats/strategies")
+async def get_strategy_stats(setup_type: Optional[str] = None):
+    """Get win-rate statistics for strategies"""
+    if not _scanner:
+        raise HTTPException(status_code=500, detail="Scanner not initialized")
+    
+    stats = _scanner.get_strategy_stats(setup_type)
+    
+    return {
+        "success": True,
+        "stats": stats
+    }
+
+
+@router.post("/stats/record-outcome")
+async def record_alert_outcome(
+    alert_id: str = Query(..., description="Alert ID"),
+    outcome: str = Query(..., description="Outcome: won, lost, expired, cancelled"),
+    pnl: float = Query(default=0.0, description="Realized P&L")
+):
+    """Record the outcome of an alert for win-rate tracking"""
+    if not _scanner:
+        raise HTTPException(status_code=500, detail="Scanner not initialized")
+    
+    if outcome not in ["won", "lost", "expired", "cancelled"]:
+        raise HTTPException(status_code=400, detail="Invalid outcome. Use: won, lost, expired, cancelled")
+    
+    _scanner.record_alert_outcome(alert_id, outcome, pnl)
+    
+    return {
+        "success": True,
+        "message": f"Recorded {outcome} for alert {alert_id}"
+    }
+
+
+# ===================== Auto-Execution Control =====================
+
+@router.post("/auto-execute/enable")
+async def enable_auto_execute(
+    enabled: bool = Query(default=True),
+    min_win_rate: float = Query(default=0.55, ge=0.0, le=1.0),
+    min_priority: str = Query(default="high", regex="^(critical|high)$")
+):
+    """Enable or disable auto-execution of high-priority alerts"""
+    if not _scanner:
+        raise HTTPException(status_code=500, detail="Scanner not initialized")
+    
+    _scanner.enable_auto_execute(enabled, min_win_rate, min_priority)
+    
+    return {
+        "success": True,
+        "auto_execute_enabled": enabled,
+        "min_win_rate": min_win_rate,
+        "min_priority": min_priority
+    }
+
+
+@router.get("/auto-execute/status")
+async def get_auto_execute_status():
+    """Get auto-execution status"""
+    if not _scanner:
+        raise HTTPException(status_code=500, detail="Scanner not initialized")
+    
+    return {
+        "success": True,
+        "enabled": _scanner._auto_execute_enabled,
+        "min_win_rate": _scanner._auto_execute_min_win_rate,
+        "min_priority": _scanner._auto_execute_min_priority.value,
+        "trading_bot_connected": _scanner._trading_bot is not None
+    }
+
+
+# ===================== RVOL Pre-filter =====================
+
+@router.post("/config/rvol-filter")
+async def set_rvol_filter(
+    min_rvol: float = Query(default=0.8, ge=0.0, le=5.0, description="Minimum RVOL to scan symbol")
+):
+    """Set minimum RVOL filter for pre-filtering symbols"""
+    if not _scanner:
+        raise HTTPException(status_code=500, detail="Scanner not initialized")
+    
+    _scanner._min_rvol_filter = min_rvol
+    
+    return {
+        "success": True,
+        "min_rvol_filter": min_rvol,
+        "message": f"Symbols with RVOL < {min_rvol} will be skipped"
     }
