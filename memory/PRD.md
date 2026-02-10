@@ -41,7 +41,34 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 4. Account/Positions (Alpaca)
 5. Trading Bot Status (exact state from service)
 6. Strategy Performance (exact from learning loop DB)
-7. Scanner Signals (live alerts from background scanner)
+7. Scanner Signals (live alerts from enhanced scanner)
+
+## Enhanced Scanner (Feb 2026)
+**264 symbols scanned every 60 seconds with 30 SMB strategies**
+
+### Strategies Implemented:
+| Category | Strategies |
+|----------|------------|
+| **Opening (9:30-9:45)** | First VWAP Pullback, Opening Drive, First Move Up/Down, Bella Fade |
+| **Morning Momentum** | ORB, HitchHiker, Gap Give and Go, Gap Pick and Roll |
+| **Core Session** | Spencer Scalp, Second Chance, Back$ide, Off Sides, Fashionably Late |
+| **Mean Reversion** | Rubber Band, VWAP Bounce, VWAP Fade, Tidal Wave |
+| **Consolidation** | Big Dog, Puppy Dog, 9-EMA Scalp, ABC Scalp |
+| **Afternoon** | HOD Breakout, Time-of-Day Fade |
+| **Special** | Breaking News, Volume Capitulation, Range Break, Breakout |
+
+### Time-of-Day Filtering:
+- Each strategy only triggers during its valid time window
+- Time windows: opening_auction, opening_drive, morning_momentum, morning_session, late_morning, midday, afternoon, close
+
+### Market Regime Detection:
+- Scanner reads SPY to determine: strong_uptrend, strong_downtrend, range_bound, volatile, momentum, fade
+- Strategies filtered based on optimal market conditions
+
+### Watchlist (264 symbols):
+- Mega cap tech, growth tech, financials, healthcare, energy, industrials
+- High-volume movers, semiconductors, cloud/software, cybersecurity
+- ETFs (SPY, QQQ, IWM, sector ETFs, leveraged ETFs)
 
 ## Architecture
 ```
