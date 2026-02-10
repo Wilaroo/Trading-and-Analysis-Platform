@@ -1204,7 +1204,7 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         return "\n".join(context_parts)
     
     async def _call_llm(self, messages: List[Dict], context: str = "") -> str:
-        """Call the LLM with the given messages"""
+        """Call the LLM with the given messages. Tries Ollama first, falls back to Emergent/OpenAI."""
         
         # Build the full message list with system prompt
         full_messages = [
@@ -1212,22 +1212,54 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         ]
         full_messages.extend(messages)
         
-        # Try Emergent first
-        if self.provider == LLMProvider.EMERGENT and LLMProvider.EMERGENT in self.llm_clients:
+        # Try Ollama first (free, local)
+        if LLMProvider.OLLAMA in self.llm_clients:
+            try:
+                import httpx
+                
+                ollama_cfg = self.llm_clients[LLMProvider.OLLAMA]
+                url = f"{ollama_cfg['url']}/api/chat"
+                
+                payload = {
+                    "model": ollama_cfg["model"],
+                    "messages": full_messages,
+                    "stream": False,
+                }
+                
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        url,
+                        json=payload,
+                        timeout=90,
+                        headers={"ngrok-skip-browser-warning": "true"}
+                    )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    content = result.get("message", {}).get("content", "")
+                    if content:
+                        logger.info(f"Ollama response OK ({ollama_cfg['model']}, {len(content)} chars)")
+                        return content
+                    raise Exception("Empty Ollama response")
+                else:
+                    raise Exception(f"Ollama HTTP {response.status_code}: {response.text[:200]}")
+                    
+            except Exception as e:
+                logger.warning(f"Ollama call failed, falling back to Emergent: {e}")
+        
+        # Fallback to Emergent
+        if LLMProvider.EMERGENT in self.llm_clients:
             try:
                 from emergentintegrations.llm.chat import LlmChat, UserMessage
                 import asyncio
                 
-                # Build system message from context
                 system_message = self.SYSTEM_PROMPT + "\n\n" + context
                 
-                # Build initial messages from conversation history (excluding the last user message)
                 initial_msgs = []
-                for msg in full_messages[:-1]:  # Exclude last message
+                for msg in full_messages[:-1]:
                     if msg["role"] != "system":
                         initial_msgs.append({"role": msg["role"], "content": msg["content"]})
                 
-                # Create chat instance
                 chat = LlmChat(
                     api_key=self.llm_clients[LLMProvider.EMERGENT]["key"],
                     session_id=f"assistant_{id(self)}",
@@ -1235,26 +1267,23 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                     initial_messages=initial_msgs if initial_msgs else None
                 )
                 
-                # Set model
                 chat = chat.with_model("openai", "gpt-4o")
                 
-                # Get the last user message
                 last_msg = full_messages[-1]["content"] if full_messages else "Hello"
                 
-                # Send message and get response (it's a coroutine)
                 response = chat.send_message(UserMessage(last_msg))
                 
-                # Await if it's a coroutine
                 if asyncio.iscoroutine(response):
                     response = await response
                 
+                logger.info(f"Emergent fallback response OK ({len(response)} chars)")
                 return response
                 
             except Exception as e:
                 logger.error(f"Emergent LLM error: {e}")
                 raise
         
-        # Fallback to OpenAI if available
+        # Last resort: OpenAI direct
         elif LLMProvider.OPENAI in self.llm_clients:
             try:
                 import httpx
