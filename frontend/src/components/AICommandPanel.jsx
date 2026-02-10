@@ -358,67 +358,6 @@ const AICommandPanel = ({
           )}
         </div>
 
-        {/* Portfolio/Holdings Section */}
-        <div className="p-3 border-b border-white/10">
-          <SectionHeader 
-            icon={Briefcase} 
-            title="Portfolio" 
-            count={portfolio.length}
-            isExpanded={expandedSections.portfolio}
-            onToggle={() => toggleSection('portfolio')}
-          />
-          {expandedSections.portfolio && (
-            <div className="mt-2 space-y-1">
-              {portfolio.length > 0 ? portfolio.slice(0, 5).map((pos, idx) => (
-                <div 
-                  key={idx}
-                  onClick={() => onTickerSelect?.({ symbol: pos.symbol, quote: pos })}
-                  className="flex items-center justify-between p-2 bg-zinc-900/50 rounded-lg hover:bg-zinc-800/50 cursor-pointer"
-                >
-                  <div>
-                    <span className="text-sm font-medium text-white">{pos.symbol}</span>
-                    <span className="text-xs text-zinc-500 ml-2">{pos.quantity} shares</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-sm text-white">${formatPrice(pos.market_value)}</span>
-                    <span className={`text-xs ml-2 ${pos.unrealized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {formatPercent(pos.unrealized_pnl_pct)}
-                    </span>
-                  </div>
-                </div>
-              )) : (
-                <p className="text-xs text-zinc-500 text-center py-2">No positions</p>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Market Tracking Section */}
-        <div className="p-3 border-b border-white/10">
-          <SectionHeader 
-            icon={Activity} 
-            title="Market Indices" 
-            isExpanded={expandedSections.market}
-            onToggle={() => toggleSection('market')}
-          />
-          {expandedSections.market && (
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              {(marketIndices.length > 0 ? marketIndices : [
-                { symbol: 'SPY', price: 0, change_percent: 0 },
-                { symbol: 'QQQ', price: 0, change_percent: 0 },
-                { symbol: 'VIX', price: 0, change_percent: 0 }
-              ]).slice(0, 6).map((idx, i) => (
-                <div key={i} className="p-2 bg-zinc-900/50 rounded-lg text-center">
-                  <span className="text-xs text-zinc-400 block">{idx.symbol}</span>
-                  <span className={`text-sm font-mono ${idx.change_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {idx.price > 0 ? formatPercent(idx.change_percent) : '--'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
         {/* Bot Trades Section */}
         <div className="p-3 border-b border-white/10" data-testid="bot-trades-section">
           <SectionHeader 
