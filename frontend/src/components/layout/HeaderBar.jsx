@@ -1,12 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React from 'react';
 import {
   Target,
-  Search,
-  X,
-  Clock,
-  ArrowUpRight,
-  Loader2,
-  Trash2,
   Activity,
   RefreshCw,
   Database,
@@ -14,7 +8,6 @@ import {
   Monitor,
   Sparkles
 } from 'lucide-react';
-import { toast } from 'sonner';
 
 const HeaderBar = ({
   systemHealth,
