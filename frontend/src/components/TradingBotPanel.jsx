@@ -791,111 +791,169 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
                 </div>
               )}
               
-              {/* Strategy Configurations */}
+              {/* Strategy Configurations - Categorized */}
               <div className="mt-4">
                 <h4 className="text-sm font-medium text-zinc-300 flex items-center gap-2 mb-3">
                   <Sliders className="w-4 h-4 text-cyan-400" />
-                  Strategy Configurations
+                  Strategy Configurations ({Object.keys(strategyConfigs).length} strategies)
                 </h4>
-                <div className="space-y-2">
-                  {Object.entries(strategyConfigs).map(([key, config]) => {
-                    const isEditing = editingStrategy === key;
-                    const tfColors = {
-                      scalp: 'text-orange-400 bg-orange-500/15 border-orange-500/30',
-                      intraday: 'text-yellow-400 bg-yellow-500/15 border-yellow-500/30',
-                      swing: 'text-cyan-400 bg-cyan-500/15 border-cyan-500/30',
-                      position: 'text-violet-400 bg-violet-500/15 border-violet-500/30'
-                    };
-                    const tfStyle = tfColors[config.timeframe] || tfColors.intraday;
-                    
-                    return (
-                      <div key={key} className="p-2.5 bg-zinc-700/40 rounded-lg border border-zinc-600/30" data-testid={`strategy-config-${key}`}>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-white">
-                              {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                            </span>
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded border ${tfStyle}`}>
-                              {config.timeframe?.toUpperCase()}
-                            </span>
-                          </div>
-                          {!isEditing ? (
-                            <button
-                              onClick={() => startEditingStrategy(key, config)}
-                              className="text-[10px] text-cyan-400 hover:text-cyan-300 px-1.5 py-0.5 rounded bg-cyan-500/10"
-                              data-testid={`edit-strategy-${key}`}
-                            >
-                              Edit
-                            </button>
-                          ) : (
-                            <div className="flex gap-1">
-                              <button
-                                onClick={() => saveStrategyConfig(key)}
-                                disabled={actionLoading === `strategy-${key}`}
-                                className="text-[10px] text-emerald-400 hover:text-emerald-300 px-1.5 py-0.5 rounded bg-emerald-500/10"
-                                data-testid={`save-strategy-${key}`}
-                              >
-                                {actionLoading === `strategy-${key}` ? '...' : 'Save'}
-                              </button>
-                              <button
-                                onClick={() => { setEditingStrategy(null); setStrategyForm({}); }}
-                                className="text-[10px] text-zinc-400 hover:text-zinc-300 px-1.5 py-0.5 rounded bg-zinc-600/30"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          )}
-                        </div>
+                
+                {/* Strategy Categories */}
+                {(() => {
+                  // Define strategy categories
+                  const categories = {
+                    'Opening (9:30-9:45)': ['first_vwap_pullback', 'opening_drive', 'first_move_up', 'first_move_down', 'bella_fade'],
+                    'Morning Momentum': ['orb', 'orb_long', 'orb_short', 'hitchhiker', 'gap_give_go', 'gap_pick_roll'],
+                    'Core Session': ['spencer_scalp', 'second_chance', 'backside', 'off_sides', 'off_sides_short', 'fashionably_late'],
+                    'Mean Reversion': ['rubber_band', 'rubber_band_long', 'rubber_band_short', 'vwap_bounce', 'vwap_fade', 'vwap_fade_long', 'vwap_fade_short', 'tidal_wave'],
+                    'Consolidation': ['big_dog', 'puppy_dog', '9_ema_scalp', 'abc_scalp'],
+                    'Afternoon': ['hod_breakout', 'time_of_day_fade'],
+                    'Special': ['breaking_news', 'volume_capitulation', 'range_break', 'range_break_long', 'breakout'],
+                    'Swing/Position': ['squeeze', 'trend_continuation', 'position_trade']
+                  };
+                  
+                  const categoryColors = {
+                    'Opening (9:30-9:45)': 'border-amber-500/40 bg-amber-500/5',
+                    'Morning Momentum': 'border-orange-500/40 bg-orange-500/5',
+                    'Core Session': 'border-cyan-500/40 bg-cyan-500/5',
+                    'Mean Reversion': 'border-purple-500/40 bg-purple-500/5',
+                    'Consolidation': 'border-blue-500/40 bg-blue-500/5',
+                    'Afternoon': 'border-rose-500/40 bg-rose-500/5',
+                    'Special': 'border-emerald-500/40 bg-emerald-500/5',
+                    'Swing/Position': 'border-violet-500/40 bg-violet-500/5'
+                  };
+                  
+                  const categoryIcons = {
+                    'Opening (9:30-9:45)': '🌅',
+                    'Morning Momentum': '🚀',
+                    'Core Session': '⚡',
+                    'Mean Reversion': '🎯',
+                    'Consolidation': '📊',
+                    'Afternoon': '☀️',
+                    'Special': '💥',
+                    'Swing/Position': '📈'
+                  };
+                  
+                  const tfColors = {
+                    scalp: 'text-orange-400 bg-orange-500/15 border-orange-500/30',
+                    intraday: 'text-yellow-400 bg-yellow-500/15 border-yellow-500/30',
+                    swing: 'text-cyan-400 bg-cyan-500/15 border-cyan-500/30',
+                    position: 'text-violet-400 bg-violet-500/15 border-violet-500/30'
+                  };
+                  
+                  return (
+                    <div className="space-y-3">
+                      {Object.entries(categories).map(([category, strategyKeys]) => {
+                        const categoryStrategies = strategyKeys.filter(key => strategyConfigs[key]);
+                        if (categoryStrategies.length === 0) return null;
                         
-                        {isEditing ? (
-                          <div className="space-y-2 mt-2">
-                            <div className="flex items-center justify-between">
-                              <label className="text-[11px] text-zinc-400">Trail Stop %</label>
-                              <input
-                                type="number"
-                                step="0.001"
-                                min="0.001"
-                                max="0.2"
-                                value={strategyForm.trail_pct ?? config.trail_pct}
-                                onChange={(e) => setStrategyForm(f => ({ ...f, trail_pct: parseFloat(e.target.value) }))}
-                                className="w-20 px-2 py-1 text-xs bg-zinc-800 border border-zinc-600 rounded text-white font-mono text-right"
-                                data-testid={`input-trail-pct-${key}`}
-                              />
+                        return (
+                          <div key={category} className={`rounded-lg border p-2 ${categoryColors[category]}`}>
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-sm">{categoryIcons[category]}</span>
+                              <span className="text-xs font-semibold text-zinc-200">{category}</span>
+                              <span className="text-[10px] text-zinc-500">({categoryStrategies.length})</span>
                             </div>
-                            <div className="flex items-center justify-between">
-                              <label className="text-[11px] text-zinc-400">Close at EOD</label>
-                              <button
-                                onClick={() => setStrategyForm(f => ({ ...f, close_at_eod: !(f.close_at_eod ?? config.close_at_eod) }))}
-                                className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
-                                  (strategyForm.close_at_eod ?? config.close_at_eod)
-                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                    : 'bg-zinc-600/30 text-zinc-400 border border-zinc-600/30'
-                                }`}
-                                data-testid={`toggle-eod-${key}`}
-                              >
-                                {(strategyForm.close_at_eod ?? config.close_at_eod) ? 'Yes' : 'No'}
-                              </button>
+                            <div className="grid grid-cols-1 gap-1.5">
+                              {categoryStrategies.map(key => {
+                                const config = strategyConfigs[key];
+                                const isEditing = editingStrategy === key;
+                                const tfStyle = tfColors[config.timeframe] || tfColors.intraday;
+                                
+                                return (
+                                  <div key={key} className="p-2 bg-zinc-800/60 rounded border border-zinc-700/40" data-testid={`strategy-config-${key}`}>
+                                    <div className="flex items-center justify-between mb-1">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-[11px] font-medium text-white">
+                                          {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                        </span>
+                                        <span className={`text-[9px] px-1 py-0.5 rounded border ${tfStyle}`}>
+                                          {config.timeframe?.toUpperCase()}
+                                        </span>
+                                      </div>
+                                      {!isEditing ? (
+                                        <button
+                                          onClick={() => startEditingStrategy(key, config)}
+                                          className="text-[9px] text-cyan-400 hover:text-cyan-300 px-1 py-0.5 rounded bg-cyan-500/10"
+                                          data-testid={`edit-strategy-${key}`}
+                                        >
+                                          Edit
+                                        </button>
+                                      ) : (
+                                        <div className="flex gap-1">
+                                          <button
+                                            onClick={() => saveStrategyConfig(key)}
+                                            disabled={actionLoading === `strategy-${key}`}
+                                            className="text-[9px] text-emerald-400 hover:text-emerald-300 px-1 py-0.5 rounded bg-emerald-500/10"
+                                            data-testid={`save-strategy-${key}`}
+                                          >
+                                            {actionLoading === `strategy-${key}` ? '...' : 'Save'}
+                                          </button>
+                                          <button
+                                            onClick={() => { setEditingStrategy(null); setStrategyForm({}); }}
+                                            className="text-[9px] text-zinc-400 hover:text-zinc-300 px-1 py-0.5 rounded bg-zinc-600/30"
+                                          >
+                                            ✕
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                    
+                                    {isEditing ? (
+                                      <div className="space-y-2 mt-2">
+                                        <div className="flex items-center justify-between">
+                                          <label className="text-[10px] text-zinc-400">Trail Stop %</label>
+                                          <input
+                                            type="number"
+                                            step="0.001"
+                                            min="0.001"
+                                            max="0.2"
+                                            value={strategyForm.trail_pct ?? config.trail_pct}
+                                            onChange={(e) => setStrategyForm(f => ({ ...f, trail_pct: parseFloat(e.target.value) }))}
+                                            className="w-16 px-1.5 py-0.5 text-[10px] bg-zinc-900 border border-zinc-600 rounded text-white font-mono text-right"
+                                            data-testid={`input-trail-pct-${key}`}
+                                          />
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                          <label className="text-[10px] text-zinc-400">Close at EOD</label>
+                                          <button
+                                            onClick={() => setStrategyForm(f => ({ ...f, close_at_eod: !(f.close_at_eod ?? config.close_at_eod) }))}
+                                            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                                              (strategyForm.close_at_eod ?? config.close_at_eod)
+                                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                                : 'bg-zinc-600/30 text-zinc-400 border border-zinc-600/30'
+                                            }`}
+                                            data-testid={`toggle-eod-${key}`}
+                                          >
+                                            {(strategyForm.close_at_eod ?? config.close_at_eod) ? 'Yes' : 'No'}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="flex items-center gap-2 text-[10px]">
+                                        <span className="text-zinc-500">
+                                          Trail: <span className="text-zinc-300 font-mono">{(config.trail_pct * 100).toFixed(1)}%</span>
+                                        </span>
+                                        <span className="text-zinc-500">
+                                          EOD: <span className={config.close_at_eod ? 'text-emerald-400' : 'text-zinc-400'}>
+                                            {config.close_at_eod ? 'Close' : 'Hold'}
+                                          </span>
+                                        </span>
+                                        <span className="text-zinc-500">
+                                          Scale: <span className="text-zinc-300 font-mono">{config.scale_out_pcts?.map(p => `${(p*100).toFixed(0)}%`).join('/')}</span>
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
-                        ) : (
-                          <div className="flex items-center gap-3 text-[11px]">
-                            <span className="text-zinc-500">
-                              Trail: <span className="text-zinc-300 font-mono">{(config.trail_pct * 100).toFixed(1)}%</span>
-                            </span>
-                            <span className="text-zinc-500">
-                              EOD: <span className={config.close_at_eod ? 'text-emerald-400' : 'text-zinc-400'}>
-                                {config.close_at_eod ? 'Close' : 'Hold'}
-                              </span>
-                            </span>
-                            <span className="text-zinc-500">
-                              Scale: <span className="text-zinc-300 font-mono">{config.scale_out_pcts?.map(p => `${(p*100).toFixed(0)}%`).join('/')}</span>
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </motion.div>
