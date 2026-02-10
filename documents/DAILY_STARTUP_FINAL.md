@@ -2,7 +2,7 @@
 
 ---
 
-## EVERY MORNING: 4 Steps
+## EVERY MORNING: 5 Steps
 
 ---
 
@@ -19,24 +19,22 @@
 
 ---
 
-### STEP 2: Check Ollama
+### STEP 2: Start Ollama
 
 1. Press `Win + R`
 2. Type `powershell` and press Enter
 
-**This is PowerShell #1 (Ollama Check)**
+**This is PowerShell #1 (OLLAMA)**
 
 Type:
 ```
 ollama serve
 ```
 
-| You See | Meaning |
-|---------|---------|
-| `Listening on 127.0.0.1:11434` | ✅ Now running |
-| `bind: Only one usage...` | ✅ Already running |
-
-If already running, you can close this window. Otherwise, **leave it open**.
+| You See | Meaning | Action |
+|---------|---------|--------|
+| `Listening on 127.0.0.1:11434` | ✅ Now running | Leave window open |
+| `bind: Only one usage...` | ✅ Already running | Type `exit` to close window |
 
 ---
 
@@ -112,12 +110,27 @@ npm start
 │                                                             │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
+│   [PowerShell #1 - OLLAMA]     (may be closed if already    │
+│   Shows: Listening...           running as service)         │
+│                                                             │
 │   [PowerShell #2 - BACKEND]    [PowerShell #3 - FRONTEND]   │
 │   Shows: server logs           Shows: Compiled successfully │
 │   Port: 8001                   Port: 3000                   │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## WHAT'S RUNNING
+
+| Service | Purpose | How to Verify |
+|---------|---------|---------------|
+| IB Gateway | Live market data, VIX, scanners | Green status in app |
+| Ollama | Free AI (saves credits) | `curl http://localhost:11434` |
+| MongoDB | Database | Running as Windows service |
+| Backend | API server | PowerShell #2 shows logs |
+| Frontend | Web app | Browser at localhost:3000 |
 
 ---
 
@@ -148,23 +161,28 @@ Then **refresh your browser** (F5).
 - Press `Ctrl + C`
 - Type `exit` and press Enter
 
-### 3. Close IB Gateway
+### 3. Close Ollama (if open)
+- Click on **PowerShell #1 (OLLAMA)**
+- Press `Ctrl + C`
+- Type `exit` and press Enter
+
+### 4. Close IB Gateway
 - Click the **X** on IB Gateway app
 
-### 4. Close Browser
+### 5. Close Browser
 - Close the browser tab
 
 ---
 
 ## QUICK REFERENCE CARD
 
-| Window | Name | Command |
-|--------|------|---------|
-| App | IB Gateway | Login → Paper Trading |
-| PS #1 | Ollama (optional check) | `ollama serve` |
-| PS #2 | **BACKEND** | `cd ...\backend` → `.\venv\Scripts\Activate` → `uvicorn server:app --host 0.0.0.0 --port 8001 --reload` |
-| PS #3 | **FRONTEND** | `cd ...\frontend` → `npm start` |
-| Browser | TradeCommand | `http://localhost:3000` → Click Connect |
+| Step | Window | Command |
+|------|--------|---------|
+| 1 | IB Gateway App | Login → Paper Trading → Wait for green |
+| 2 | PowerShell #1 (OLLAMA) | `ollama serve` |
+| 3 | PowerShell #2 (BACKEND) | `cd C:\Users\13174\Trading-and-Analysis-Platform\backend` → `.\venv\Scripts\Activate` → `uvicorn server:app --host 0.0.0.0 --port 8001 --reload` |
+| 4 | PowerShell #3 (FRONTEND) | `cd C:\Users\13174\Trading-and-Analysis-Platform\frontend` → `npm start` |
+| 5 | Browser | Click **Connect** button |
 
 ---
 
@@ -173,8 +191,21 @@ Then **refresh your browser** (F5).
 | Problem | Solution |
 |---------|----------|
 | IB Gateway won't connect | Restart IB Gateway, check internet |
+| Ollama not responding | Open new PowerShell, run `ollama serve` |
 | Backend error | Check PowerShell #2 for red error messages |
 | Frontend won't compile | Run `npm install` then `npm start` again |
-| AI not responding | Check Ollama is running: `ollama serve` |
+| AI not responding | Verify Ollama: `curl http://localhost:11434` |
 | Need latest code | `git pull origin main` then refresh browser |
 | Port already in use | Close old PowerShell windows, try again |
+
+---
+
+## QUICK OLLAMA CHECK
+
+To verify Ollama is running anytime:
+
+```powershell
+curl http://localhost:11434
+```
+
+✅ If it says `Ollama is running` — you're good!
