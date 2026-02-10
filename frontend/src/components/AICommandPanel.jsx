@@ -552,51 +552,6 @@ const AICommandPanel = ({
           )}
         </div>
 
-        {/* Opportunities Section */}
-        <div className="p-3 border-b border-white/10">
-          <SectionHeader 
-            icon={Zap} 
-            title="Opportunities" 
-            count={opportunities.length}
-            isExpanded={expandedSections.opportunities}
-            onToggle={() => toggleSection('opportunities')}
-            action={
-              <button 
-                onClick={(e) => { e.stopPropagation(); onRefresh?.(); }}
-                className="p-1 hover:bg-zinc-700 rounded"
-              >
-                <RefreshCw className="w-3 h-3 text-zinc-400" />
-              </button>
-            }
-          />
-          {expandedSections.opportunities && (
-            <div className="mt-2 space-y-1 max-h-[150px] overflow-y-auto">
-              {opportunities.length > 0 ? opportunities.slice(0, 5).map((opp, idx) => (
-                <div 
-                  key={idx}
-                  onClick={() => onTickerSelect?.({ symbol: opp.symbol, quote: opp })}
-                  className="flex items-center justify-between p-2 bg-zinc-900/50 rounded-lg hover:bg-zinc-800/50 cursor-pointer"
-                >
-                  <div>
-                    <span className="text-sm font-medium text-white">{opp.symbol}</span>
-                    <span className={`text-xs ml-2 px-1.5 py-0.5 rounded ${
-                      opp.direction === 'LONG' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
-                    }`}>{opp.direction}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${
-                      opp.grade === 'A' ? 'bg-green-500 text-black' :
-                      opp.grade === 'B' ? 'bg-cyan-500 text-black' : 'bg-yellow-500 text-black'
-                    }`}>{opp.grade}</span>
-                  </div>
-                </div>
-              )) : (
-                <p className="text-xs text-zinc-500 text-center py-2">No opportunities found</p>
-              )}
-            </div>
-          )}
-        </div>
-
         {/* Earnings Section */}
         <div className="p-3 border-b border-white/10">
           <SectionHeader 
