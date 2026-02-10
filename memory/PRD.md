@@ -33,7 +33,7 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 ```
 /app/
 ├── backend/
-│   ├── routers/ (trading_bot, learning_dashboard, market_intel, assistant, etc.)
+│   ├── routers/ (trading_bot, learning_dashboard, market_intel, assistant, live_scanner)
 │   ├── services/
 │   │   ├── ai_assistant_service.py      # Smart routing: _call_llm(complexity=light|standard|deep)
 │   │   ├── market_intel_service.py      # 7 data sources, anti-hallucination prompts
@@ -41,9 +41,15 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 │   │   ├── strategy_performance_service.py  # Learning loop → deep routing
 │   │   ├── newsletter_service.py        # Now routes through shared AI assistant (deep)
 │   │   ├── llm_service.py              # OllamaProvider added as first priority
-│   │   └── background_scanner.py
+│   │   └── background_scanner.py        # Generates alerts → live_scanner router
 │   └── server.py
-└── frontend/ (React, 3-tab layout: Signals | Command | Analytics)
+└── frontend/
+    ├── pages/CommandCenterPage.js       # 2-tab layout: Command | Analytics
+    ├── components/
+    │   ├── TradingBotPanel.jsx          # Bot control + Signal Bubbles (fetches /api/live-scanner/alerts)
+    │   ├── AICommandPanel.jsx           # AI chat with ticker detection
+    │   └── MarketIntel/MarketIntelPanel.jsx
+    └── hooks/useCommandCenterData.js
 ```
 
 ## Completed Features
