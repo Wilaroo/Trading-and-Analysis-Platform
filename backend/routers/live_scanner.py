@@ -228,7 +228,8 @@ async def get_watchlist():
     
     return {
         "success": True,
-        "watchlist": _scanner._watchlist or _scanner._get_default_watchlist()
+        "watchlist": _scanner._watchlist,
+        "count": len(_scanner._watchlist)
     }
 
 
