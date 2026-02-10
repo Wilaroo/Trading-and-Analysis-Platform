@@ -1488,7 +1488,7 @@ Keep response concise (3-5 sentences max). Start with VERDICT on first line."""
                 context = self._trading_bot.get_bot_context_for_ai()
             
             messages = [{"role": "user", "content": prompt}]
-            response = await self._call_llm(messages, context)
+            response = await self._call_llm(messages, context, complexity="deep")
             
             # Parse verdict
             verdict = "CAUTION"
