@@ -471,10 +471,10 @@ const CommandCenterPage = ({
     checkSchedulerStatus();
   }, []);
   
-  // Fetch system health on mount and every 30 seconds
+  // Fetch system health on mount and every 60 seconds
   useEffect(() => {
     fetchSystemHealth();
-    const interval = setInterval(fetchSystemHealth, 30000);
+    const interval = setInterval(fetchSystemHealth, 60000);
     return () => clearInterval(interval);
   }, []);
   
