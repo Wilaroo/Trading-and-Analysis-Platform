@@ -477,8 +477,10 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const [activeTab, setActiveTab] = useState('pending');
   const [editingStrategy, setEditingStrategy] = useState(null);
   const [strategyForm, setStrategyForm] = useState({});
+  const [liveSignals, setLiveSignals] = useState([]);
   
   const eventSourceRef = useRef(null);
+  const signalSourceRef = useRef(null);
   
   // Fetch bot status
   const fetchStatus = useCallback(async () => {
