@@ -2,7 +2,7 @@
 Background Scanner API with Server-Sent Events (SSE)
 Provides real-time push notifications for trade alerts
 """
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List
