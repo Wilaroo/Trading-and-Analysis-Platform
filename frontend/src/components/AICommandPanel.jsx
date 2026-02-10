@@ -266,7 +266,7 @@ const AICommandPanel = ({
   ];
 
   return (
-    <div className="flex flex-col h-full bg-[#0A0A0A] border border-white/10 rounded-xl overflow-hidden">
+    <div className="flex flex-col h-full bg-[#0A0A0A] border border-white/10 rounded-xl overflow-hidden" data-testid="ai-command-panel">
       {/* Header */}
       <div className="flex items-center justify-between p-3 border-b border-white/10 bg-gradient-to-r from-cyan-900/20 to-amber-900/10">
         <div className="flex items-center gap-2">
@@ -284,58 +284,59 @@ const AICommandPanel = ({
         </div>
       </div>
 
-      {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto">
-        {/* AI Chat Section - Always Visible */}
-        <div className="p-3 border-b border-white/10">
-          {/* Quick Actions */}
-          <div className="flex items-center gap-2 mb-3 flex-wrap">
-            {quickActions.map((qa, idx) => (
-              <QuickPill key={idx} label={qa.label} onClick={qa.action} loading={isLoading} />
-            ))}
-          </div>
-          
-          {/* Messages */}
-          <div className="space-y-3 max-h-[400px] overflow-y-auto mb-3" data-testid="chat-messages">
-            {messages.length === 0 ? (
-              <div className="text-center py-4">
-                <Sparkles className="w-6 h-6 text-amber-400 mx-auto mb-2" />
-                <p className="text-xs text-zinc-500">Ask me anything about trading, markets, or your performance</p>
-              </div>
-            ) : (
-              messages.map((msg, idx) => (
-                <ChatMessage key={idx} message={msg} isUser={msg.role === 'user'} onTickerClick={handleTickerClick} />
-              ))
-            )}
-            {isLoading && (
-              <div className="flex items-center gap-2 text-zinc-400">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span className="text-xs">Thinking...</span>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-          
-          {/* Input */}
-          <div className="flex gap-2">
-            <input
-              ref={inputRef}
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-              placeholder="Ask AI anything or type a ticker (AAPL, NVDA)..."
-              className="flex-1 px-3 py-2 bg-zinc-900 border border-white/10 rounded-lg text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
-            />
-            <button
-              onClick={() => sendMessage()}
-              disabled={!input.trim() || isLoading}
-              className="px-3 py-2 bg-cyan-500 text-black rounded-lg hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          </div>
+      {/* Chat Input - Sticky at top */}
+      <div className="p-3 border-b border-white/10">
+        <div className="flex items-center gap-2 mb-2 flex-wrap">
+          {quickActions.map((qa, idx) => (
+            <QuickPill key={idx} label={qa.label} onClick={qa.action} loading={isLoading} />
+          ))}
         </div>
+        <div className="flex gap-2">
+          <input
+            ref={inputRef}
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
+            placeholder="Ask AI anything or type a ticker (AAPL, NVDA)..."
+            className="flex-1 px-3 py-2 bg-zinc-900 border border-white/10 rounded-lg text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
+            data-testid="ai-chat-input"
+          />
+          <button
+            onClick={() => sendMessage()}
+            disabled={!input.trim() || isLoading}
+            className="px-3 py-2 bg-cyan-500 text-black rounded-lg hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed"
+            data-testid="ai-chat-send"
+          >
+            <Send className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* Scrollable Content: Messages first, then other sections */}
+      <div className="flex-1 overflow-y-auto">
+        {/* Chat Messages - show when there are messages or loading */}
+        {(messages.length > 0 || isLoading) ? (
+          <div className="p-3 border-b border-white/10">
+            <div className="space-y-3" data-testid="chat-messages">
+              {messages.map((msg, idx) => (
+                <ChatMessage key={idx} message={msg} isUser={msg.role === 'user'} onTickerClick={handleTickerClick} />
+              ))}
+              {isLoading && (
+                <div className="flex items-center gap-2 text-zinc-400">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span className="text-xs">Thinking...</span>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+          </div>
+        ) : (
+          <div className="p-3 border-b border-white/10 text-center py-6">
+            <Sparkles className="w-6 h-6 text-amber-400 mx-auto mb-2" />
+            <p className="text-xs text-zinc-500">Ask me anything or type a ticker symbol to get a full analysis</p>
+          </div>
+        )}
 
         {/* Bot Trades Section */}
         <div className="p-3 border-b border-white/10" data-testid="bot-trades-section">
