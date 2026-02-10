@@ -41,7 +41,6 @@ const CommandCenterPage = ({
       {/* Header */}
       <HeaderBar
         systemHealth={data.systemHealth}
-        onNavigateToCoach={() => data.setActiveMainTab('coach')}
         wsConnected={wsConnected}
         wsLastUpdate={wsLastUpdate}
         connectionChecked={data.connectionChecked}
