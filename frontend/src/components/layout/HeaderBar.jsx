@@ -5,13 +5,11 @@ import {
   RefreshCw,
   Database,
   WifiOff,
-  Monitor,
-  Sparkles
+  Monitor
 } from 'lucide-react';
 
 const HeaderBar = ({
   systemHealth,
-  onNavigateToCoach,
   wsConnected,
   wsLastUpdate,
   connectionChecked,
