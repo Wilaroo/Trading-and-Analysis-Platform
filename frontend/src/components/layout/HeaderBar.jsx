@@ -155,15 +155,15 @@ const HeaderBar = ({
       </form>
       
       <div className="flex items-center gap-3">
-        {/* AI Assistant Button */}
+        {/* AI Coach Shortcut */}
         <button
-          onClick={() => setShowAssistant(true)}
+          onClick={onNavigateToCoach}
           className="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-cyan-500/20 text-amber-400 rounded text-sm hover:from-amber-500/30 hover:to-cyan-500/30 border border-amber-500/30"
-          title="AI Trading Assistant & Coach"
-          data-testid="ai-assistant-btn"
+          title="Go to AI Coach & Bot"
+          data-testid="ai-coach-shortcut-btn"
         >
           <Sparkles className="w-4 h-4" />
-          <span className="hidden sm:inline">AI Assistant</span>
+          <span className="hidden sm:inline">AI Coach</span>
         </button>
         
         {/* Dual Connection Status Indicator */}
