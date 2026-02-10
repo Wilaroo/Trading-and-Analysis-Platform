@@ -25,6 +25,7 @@ class NewsletterService:
         self.api_key = EMERGENT_LLM_KEY
         self._stock_service = None
         self._alpaca_service = None
+        self._ai_assistant = None
         
     def set_ib_service(self, ib_service):
         """Set the IB service for market data"""
@@ -37,6 +38,10 @@ class NewsletterService:
     def set_alpaca_service(self, alpaca_service):
         """Set the Alpaca service directly"""
         self._alpaca_service = alpaca_service
+    
+    def set_ai_assistant(self, ai_assistant):
+        """Set the AI assistant for smart-routed LLM calls"""
+        self._ai_assistant = ai_assistant
     
     async def _get_quote(self, symbol: str) -> Optional[Dict]:
         """Get quote with Alpaca priority"""
