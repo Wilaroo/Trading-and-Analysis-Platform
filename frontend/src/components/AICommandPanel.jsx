@@ -175,7 +175,7 @@ const AICommandPanel = ({
   // Poll bot trades every 10s
   useEffect(() => {
     fetchBotTrades();
-    const interval = setInterval(fetchBotTrades, 10000);
+    const interval = setInterval(fetchBotTrades, 30000);
     return () => clearInterval(interval);
   }, [fetchBotTrades]);
 
