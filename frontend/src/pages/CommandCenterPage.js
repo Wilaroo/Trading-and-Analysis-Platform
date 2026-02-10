@@ -49,7 +49,6 @@ import { toast } from 'sonner';
 import AICommandPanel from '../components/AICommandPanel';
 import TickerDetailModal from '../components/TickerDetailModal';
 import QuickTradeModal from '../components/QuickTradeModal';
-import LiveAlertsPanel from '../components/LiveAlertsPanel';
 import TradingBotPanel from '../components/TradingBotPanel';
 import LearningDashboard from '../components/LearningDashboard';
 import TradeSignals from '../components/TradeSignals';
