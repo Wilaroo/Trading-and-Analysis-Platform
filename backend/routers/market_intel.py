@@ -44,6 +44,39 @@ async def get_schedule():
     }
 
 
+@router.get("/auto-trigger")
+async def auto_trigger():
+    """Check if a report should be auto-generated on app open.
+    Returns the report type to generate, or null if current report exists."""
+    from services.market_intel_service import applicable_report_type
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+    from datetime import datetime
+
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    # Only auto-trigger on weekdays
+    if now_et.weekday() >= 5:
+        return {"should_generate": False, "reason": "weekend"}
+
+    current_minutes = now_et.hour * 60 + now_et.minute
+    target_type = applicable_report_type(current_minutes)
+
+    # Before first report time (8:30), still offer premarket if after 6 AM
+    if target_type is None and current_minutes >= 360:
+        target_type = "premarket"
+
+    if not target_type:
+        return {"should_generate": False, "reason": "too_early"}
+
+    existing = _service._get_todays_report(target_type)
+    if existing:
+        return {"should_generate": False, "reason": "already_exists", "current_type": target_type}
+
+    return {"should_generate": True, "report_type": target_type}
+
+
 @router.post("/generate/{report_type}")
 async def generate_report(report_type: str, force: bool = False):
     """Manually trigger generation of a specific report type"""
