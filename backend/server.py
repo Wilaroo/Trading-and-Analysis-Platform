@@ -1488,9 +1488,14 @@ async def health_check():
 
 @app.get("/api/llm/status")
 async def llm_status():
-    """Check which LLM provider is active and test connectivity"""
+    """Check which LLM provider is active and show smart routing config"""
     status = {
         "primary_provider": assistant_service.provider.value,
+        "smart_routing": {
+            "light": "Ollama (free) — quick chat, summaries",
+            "standard": "Ollama first, GPT-4o fallback — general use",
+            "deep": "GPT-4o (Emergent) — strategy analysis, trade evaluation, complex reasoning",
+        },
         "providers": {}
     }
     
@@ -1499,7 +1504,7 @@ async def llm_status():
         if provider.value == "ollama":
             info["url"] = cfg.get("url", "")
             info["model"] = cfg.get("model", "")
-            # Quick connectivity test
+            info["role"] = "primary (light + standard tasks)"
             try:
                 import httpx
                 async with httpx.AsyncClient() as client:
@@ -1516,7 +1521,7 @@ async def llm_status():
                 info["connected"] = False
                 info["error"] = str(e)
         elif provider.value == "emergent":
-            info["role"] = "fallback"
+            info["role"] = "deep tasks + fallback"
         status["providers"][provider.value] = info
     
     return status
