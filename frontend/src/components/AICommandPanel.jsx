@@ -296,7 +296,7 @@ const AICommandPanel = ({
           </div>
           
           {/* Messages */}
-          <div className="space-y-3 max-h-[200px] overflow-y-auto mb-3">
+          <div className="space-y-3 max-h-[400px] overflow-y-auto mb-3" data-testid="chat-messages">
             {messages.length === 0 ? (
               <div className="text-center py-4">
                 <Sparkles className="w-6 h-6 text-amber-400 mx-auto mb-2" />
