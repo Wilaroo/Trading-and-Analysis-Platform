@@ -299,6 +299,7 @@ class LLMService:
     
     def __init__(self):
         self.providers: Dict[str, LLMProvider] = {
+            "ollama": OllamaProvider(),
             "openai": OpenAIProvider(),
             "anthropic": AnthropicProvider(),
             "emergent": EmergentProvider()
