@@ -313,7 +313,7 @@ const AICommandPanel = ({
               </div>
             ) : (
               messages.map((msg, idx) => (
-                <ChatMessage key={idx} message={msg} isUser={msg.role === 'user'} />
+                <ChatMessage key={idx} message={msg} isUser={msg.role === 'user'} onTickerClick={handleTickerClick} />
               ))
             )}
             {isLoading && (
