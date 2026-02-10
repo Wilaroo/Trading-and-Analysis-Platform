@@ -1351,8 +1351,18 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         llm_messages = [{"role": m.role, "content": m.content} for m in recent_messages]
         
         try:
-            # Call LLM
-            response_text = await self._call_llm(llm_messages, context)
+            # Smart routing: detect complexity from user message
+            msg_lower = user_message.lower()
+            deep_keywords = [
+                "should i buy", "should i sell", "analyze", "evaluate", "deep dive",
+                "strategy", "backtest", "risk", "recommend", "quality score",
+                "compare", "portfolio", "rebalance", "hedge", "options",
+                "earnings play", "swing trade", "position size", "thesis"
+            ]
+            complexity = "deep" if any(kw in msg_lower for kw in deep_keywords) else "standard"
+            
+            # Call LLM with smart routing
+            response_text = await self._call_llm(llm_messages, context, complexity=complexity)
             
             # Add assistant response
             assistant_msg = AssistantMessage(
