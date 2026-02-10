@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 class LLMProvider(Enum):
+    OLLAMA = "ollama"
     EMERGENT = "emergent"
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
