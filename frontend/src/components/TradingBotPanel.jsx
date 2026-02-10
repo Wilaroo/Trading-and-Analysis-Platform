@@ -666,9 +666,24 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
     fetchStatus();
     fetchTrades();
     
+    // Fetch live scanner signals
+    const fetchSignals = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/scanner/live-alerts`);
+        const data = await res.json();
+        if (data.alerts) {
+          setLiveSignals(data.alerts.slice(0, 8));
+        }
+      } catch (err) {
+        // Scanner may not be available
+      }
+    };
+    fetchSignals();
+    
     const interval = setInterval(() => {
       fetchStatus();
       fetchTrades();
+      fetchSignals();
     }, 20000);
     
     return () => clearInterval(interval);
