@@ -91,7 +91,7 @@ class RealTimeTechnicalService:
     def __init__(self):
         self._alpaca_service = None
         self._cache: Dict[str, TechnicalSnapshot] = {}
-        self._cache_ttl = 30  # 30 second cache for technical data
+        self._cache_ttl = 120  # 2 minute cache for technical data
         
     @property
     def alpaca(self):
