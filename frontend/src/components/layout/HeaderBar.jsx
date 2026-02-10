@@ -18,12 +18,6 @@ import { toast } from 'sonner';
 
 const HeaderBar = ({
   systemHealth,
-  tickerSearchQuery,
-  setTickerSearchQuery,
-  handleTickerSearch,
-  isSearching,
-  recentSearches,
-  clearRecentSearches,
   onNavigateToCoach,
   wsConnected,
   wsLastUpdate,
@@ -32,9 +26,7 @@ const HeaderBar = ({
   connecting,
   handleConnectToIB,
   handleDisconnectFromIB,
-  searchInputRef,
 }) => {
-  const [showRecentSearches, setShowRecentSearches] = useState(false);
 
   return (
     <div className="flex items-center justify-between">
