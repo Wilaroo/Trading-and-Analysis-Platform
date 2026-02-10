@@ -667,7 +667,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
     const interval = setInterval(() => {
       fetchStatus();
       fetchTrades();
-    }, 10000);
+    }, 20000);
     
     return () => clearInterval(interval);
   }, [fetchStatus, fetchTrades]);
