@@ -64,7 +64,9 @@ class AlpacaService:
     def __init__(self):
         self._initialized = False
         self._quote_cache: Dict[str, Dict] = {}
-        self._cache_ttl = 5  # seconds
+        self._bars_cache: Dict[str, Dict] = {}
+        self._cache_ttl = 15  # seconds for quotes
+        self._bars_cache_ttl = 120  # seconds for bars
         
     def _ensure_initialized(self) -> bool:
         """Ensure clients are initialized"""
