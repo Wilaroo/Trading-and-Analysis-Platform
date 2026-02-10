@@ -37,16 +37,55 @@ import { toast } from 'sonner';
 import ReactMarkdown from 'react-markdown';
 import { formatPrice, formatPercent, formatVolume } from '../utils/tradingUtils';
 
-// Markdown components
-const markdownComponents = {
-  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+// Ticker-aware Markdown components — makes ticker symbols clickable
+const TickerLink = ({ symbol, onClick }) => (
+  <button
+    onClick={() => onClick(symbol)}
+    className="inline-flex items-center gap-0.5 px-1 py-0.5 bg-cyan-500/10 border border-cyan-500/20 rounded text-cyan-400 font-mono font-semibold text-xs hover:bg-cyan-500/20 hover:border-cyan-500/40 transition-colors cursor-pointer"
+    data-testid={`ticker-link-${symbol}`}
+  >
+    {symbol}
+    <ArrowUpRight className="w-3 h-3" />
+  </button>
+);
+
+// Parse text and wrap ticker symbols in clickable links
+const TickerAwareText = ({ text, onTickerClick }) => {
+  if (!text || typeof text !== 'string') return text;
+  // Match common ticker patterns: $AAPL, AAPL, MSFT (1-5 uppercase letters, optionally preceded by $)
+  const parts = text.split(/(\$?[A-Z]{1,5}(?=[\s,.:;!?)}\]"]|$))/g);
+  const knownTickers = new Set([
+    'AAPL','MSFT','NVDA','TSLA','AMD','META','GOOGL','AMZN','GOOG','NFLX',
+    'SPY','QQQ','IWM','DIA','VIX','SOFI','PLTR','RIVN','INTC','UBER',
+    'COST','WMT','TGT','JPM','BAC','GS','V','MA','PYPL','SQ','SHOP',
+    'CRM','ORCL','ADBE','NOW','SNOW','NET','CRWD','ZS','DDOG','MDB',
+    'COIN','HOOD','RBLX','ROKU','SNAP','PINS','SPOT','SE','MELI',
+    'BA','LMT','GE','CAT','DE','HON','MMM','UNH','JNJ','PFE','MRNA',
+    'LLY','ABBV','BMY','GILD','AMGN','XOM','CVX','COP','SLB','OXY',
+    'AVGO','QCOM','MU','AMAT','LRCX','KLAC','TXN','MRVL','ARM',
+    'F','GM','TM','NIO','XPEV','LI','LCID','FSR','DIS','CMCSA','WBD',
+    'T','VZ','TMUS','KO','PEP','MCD','SBUX','NKE','LULU'
+  ]);
+  
+  return parts.map((part, i) => {
+    const clean = part.replace('$', '');
+    if (knownTickers.has(clean) && part.length >= 2) {
+      return <TickerLink key={i} symbol={clean} onClick={onTickerClick} />;
+    }
+    return part;
+  });
+};
+
+// Markdown components factory — creates ticker-aware renderers
+const createMarkdownComponents = (onTickerClick) => ({
+  p: ({ children }) => <p className="mb-2 last:mb-0">{typeof children === 'string' ? <TickerAwareText text={children} onTickerClick={onTickerClick} /> : children}</p>,
   ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
   ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
-  li: ({ children }) => <li className="text-zinc-200">{children}</li>,
-  strong: ({ children }) => <strong className="text-cyan-400 font-semibold">{children}</strong>,
+  li: ({ children }) => <li className="text-zinc-200">{typeof children === 'string' ? <TickerAwareText text={children} onTickerClick={onTickerClick} /> : children}</li>,
+  strong: ({ children }) => <strong className="text-cyan-400 font-semibold">{typeof children === 'string' ? <TickerAwareText text={children} onTickerClick={onTickerClick} /> : children}</strong>,
   h3: ({ children }) => <h3 className="text-sm font-bold text-white mb-1">{children}</h3>,
   code: ({ children }) => <code className="bg-black/30 px-1 rounded text-amber-400">{children}</code>,
-};
+});
 
 // Section Header Component
 const SectionHeader = ({ icon: Icon, title, count, isExpanded, onToggle, action }) => (
