@@ -210,9 +210,14 @@ class AlpacaService:
         cache_key = f"{symbol.upper()}_{timeframe}_{limit}"
         if cache_key in self._bars_cache:
             cached = self._bars_cache[cache_key]
-            age = (datetime.now(timezone.utc) - cached.get('_cached_at', datetime.min.replace(tzinfo=timezone.utc))).total_seconds()
-            if age < self._bars_cache_ttl:
-                return cached.get('bars', [])
+            cached_at_str = cached.get('_cached_at', '')
+            try:
+                cached_at = datetime.fromisoformat(cached_at_str) if cached_at_str else datetime.min.replace(tzinfo=timezone.utc)
+                age = (datetime.now(timezone.utc) - cached_at).total_seconds()
+                if age < self._bars_cache_ttl:
+                    return cached.get('bars', [])
+            except (ValueError, TypeError):
+                pass  # Invalid cache, will fetch fresh data
             
         try:
             from alpaca.data.requests import StockBarsRequest
@@ -267,7 +272,7 @@ class AlpacaService:
                     })
             
             # Cache bars
-            self._bars_cache[cache_key] = {'bars': result, '_cached_at': datetime.now(timezone.utc)}
+            self._bars_cache[cache_key] = {'bars': result, '_cached_at': datetime.now(timezone.utc).isoformat()}
             
             return result
             
