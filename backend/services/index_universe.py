@@ -170,8 +170,8 @@ class IndexUniverseManager:
         # ETFs first (market context)
         priority.extend(self.get_index_symbols(IndexType.ETF)[:20])
         
-        # Nasdaq 100 (most liquid tech)
-        priority.extend(self.get_index_symbols(IndexType.NASDAQ100))
+        # Nasdaq 1000 (most liquid tech)
+        priority.extend(self.get_index_symbols(IndexType.NASDAQ1000)[:200])
         
         # Fill with S&P 500 top names
         remaining = count - len(priority)
@@ -185,7 +185,7 @@ class IndexUniverseManager:
         """Get universe statistics"""
         return {
             "sp500": self._indices[IndexType.SP500].count,
-            "nasdaq100": self._indices[IndexType.NASDAQ100].count,
+            "nasdaq1000": self._indices[IndexType.NASDAQ1000].count,
             "russell2000": self._indices[IndexType.RUSSELL2000].count,
             "etfs": self._indices[IndexType.ETF].count,
             "total_unique": self.get_universe_count(),
