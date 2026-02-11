@@ -404,7 +404,7 @@ export function useCommandCenterData({
     handleConnectToIB, handleDisconnectFromIB,
     // Data
     account, positions, opportunities, marketContext, alerts,
-    newsletter, watchlist, earnings, enhancedAlerts, priceAlerts,
+    watchlist, earnings, enhancedAlerts, priceAlerts,
     systemHealth, totalPnL,
     // UI state
     isScanning, selectedScanType, setSelectedScanType,
