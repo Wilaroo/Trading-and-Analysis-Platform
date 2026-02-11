@@ -113,9 +113,14 @@ class FundamentalDataService:
         cache_key = f"fundamentals_{symbol}"
         if cache_key in self._cache:
             cached = self._cache[cache_key]
-            cache_age = (datetime.now(timezone.utc) - cached.get('_cached_at', datetime.min.replace(tzinfo=timezone.utc))).total_seconds()
-            if cache_age < self._cache_ttl:
-                return cached.get('data')
+            cached_at_str = cached.get('_cached_at', '')
+            try:
+                cached_at = datetime.fromisoformat(cached_at_str) if cached_at_str else datetime.min.replace(tzinfo=timezone.utc)
+                cache_age = (datetime.now(timezone.utc) - cached_at).total_seconds()
+                if cache_age < self._cache_ttl:
+                    return cached.get('data')
+            except (ValueError, TypeError):
+                pass  # Invalid cache, will fetch fresh data
         
         try:
             # Fetch basic financials (includes most ratios)
@@ -194,7 +199,7 @@ class FundamentalDataService:
                 # Cache the result
                 self._cache[cache_key] = {
                     'data': fundamental_data,
-                    '_cached_at': datetime.now(timezone.utc)
+                    '_cached_at': datetime.now(timezone.utc).isoformat()
                 }
                 
                 return fundamental_data
