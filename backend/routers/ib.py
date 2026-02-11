@@ -913,13 +913,16 @@ async def get_comprehensive_analysis(symbol: str):
         
         # Get news - use Finnhub for URLs
         try:
-            if _news_service:
-                news = await _news_service.get_ticker_news(symbol, max_items=5)
+            from services.news_service import get_news_service
+            news_svc = get_news_service()
+            if news_svc:
+                news = await news_svc.get_ticker_news(symbol, max_items=5)
                 analysis["news"] = news if news else []
             elif _ib_service:
                 news = await _ib_service.get_news_for_symbol(symbol)
                 analysis["news"] = news[:5] if news else []
-        except:
+        except Exception as e:
+            print(f"Error fetching news: {e}")
             pass
     
     # Fill in fallback data if not populated
