@@ -391,6 +391,71 @@ class EnhancedBackgroundScanner:
         self._auto_execute_min_priority = AlertPriority(min_priority)
         logger.info(f"Auto-execute {'enabled' if enabled else 'disabled'} (min_win_rate={min_win_rate}, min_priority={min_priority})")
     
+    # ==================== AI ASSISTANT INTEGRATION ====================
+    
+    def set_ai_assistant(self, ai_assistant):
+        """Wire the AI assistant for proactive coaching notifications"""
+        self._ai_assistant = ai_assistant
+        logger.info("AI assistant wired to scanner for proactive notifications")
+    
+    def enable_ai_notifications(self, enabled: bool = True, min_priority: str = "high"):
+        """Enable/disable AI proactive notifications for scanner alerts"""
+        self._ai_notify_enabled = enabled
+        self._ai_notify_min_priority = AlertPriority(min_priority)
+        logger.info(f"AI notifications {'enabled' if enabled else 'disabled'} (min_priority={min_priority})")
+    
+    async def _notify_ai_of_alert(self, alert: LiveAlert):
+        """
+        Send proactive AI coaching notification for high-priority alerts.
+        Creates both a chat message in AI panel AND triggers toast notification.
+        """
+        if not self._ai_assistant or not self._ai_notify_enabled:
+            return
+        
+        # Only notify for high-priority alerts
+        priority_order = {AlertPriority.CRITICAL: 4, AlertPriority.HIGH: 3, AlertPriority.MEDIUM: 2, AlertPriority.LOW: 1}
+        min_priority_val = priority_order.get(self._ai_notify_min_priority, 3)
+        alert_priority_val = priority_order.get(alert.priority, 1)
+        
+        if alert_priority_val < min_priority_val:
+            return
+        
+        try:
+            # Generate coaching context for this alert
+            coaching_data = {
+                "symbol": alert.symbol,
+                "setup_type": alert.setup_type,
+                "direction": alert.direction,
+                "current_price": alert.current_price,
+                "trigger_price": alert.trigger_price,
+                "stop_loss": alert.stop_loss,
+                "target": alert.target,
+                "risk_reward": alert.risk_reward,
+                "win_rate": alert.strategy_win_rate,
+                "tape_confirmation": alert.tape_confirmation,
+                "headline": alert.headline,
+                "reasoning": alert.reasoning[:3] if alert.reasoning else [],
+                "time_window": alert.time_window,
+                "market_regime": alert.market_regime,
+                "priority": alert.priority.value
+            }
+            
+            # Call AI to generate proactive coaching message
+            if hasattr(self._ai_assistant, 'generate_scanner_coaching'):
+                coaching_result = await self._ai_assistant.generate_scanner_coaching(coaching_data)
+                if coaching_result.get("success"):
+                    logger.info(f"🧠 AI coaching generated for {alert.symbol}: {coaching_result.get('summary', '')[:50]}...")
+            else:
+                # Fallback: use existing coaching alert method
+                coaching_result = await self._ai_assistant.get_coaching_alert(
+                    "scanner_opportunity",
+                    coaching_data
+                )
+                logger.info(f"🧠 AI notified of {alert.symbol} opportunity")
+                
+        except Exception as e:
+            logger.warning(f"AI notification failed for {alert.symbol}: {e}")
+    
     async def _auto_execute_alert(self, alert: LiveAlert):
         """Auto-execute an alert through the trading bot"""
         if not self._trading_bot or not self._auto_execute_enabled:
