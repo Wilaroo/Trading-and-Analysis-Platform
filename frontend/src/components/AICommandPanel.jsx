@@ -544,15 +544,6 @@ const StatsHeader = ({ status, account, marketContext, positions, onToggle, onMo
     </div>
   );
 };
-              <Icon className="w-3 h-3" />
-              {m.charAt(0).toUpperCase() + m.slice(1)}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
 
 // ===================== MAIN COMPONENT =====================
 
@@ -564,7 +555,10 @@ const AICommandPanel = ({
   earnings = [],
   scanResults = [],
   isConnected = false,
-  onRefresh
+  onRefresh,
+  account = {},
+  marketContext = {},
+  positions = []
 }) => {
   // Chat state
   const [messages, setMessages] = useState([]);
