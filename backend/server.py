@@ -163,6 +163,9 @@ trading_bot._ai_assistant = assistant_service
 background_scanner.set_trading_bot(trading_bot)
 background_scanner.db = db
 
+# Wire Scanner ↔ AI assistant for proactive coaching notifications
+background_scanner.set_ai_assistant(assistant_service)
+
 # Initialize strategy performance & learning service
 from services.strategy_performance_service import get_performance_service
 perf_service = get_performance_service()
