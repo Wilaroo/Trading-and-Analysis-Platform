@@ -2100,6 +2100,15 @@ class EnhancedBackgroundScanner:
             self._alert_subscribers.remove(queue)
     
     def get_stats(self) -> Dict:
+        # Get wave scanner info if available
+        wave_info = {}
+        try:
+            from services.wave_scanner import get_wave_scanner
+            wave_scanner = get_wave_scanner()
+            wave_info = wave_scanner.get_stats()
+        except:
+            pass
+        
         return {
             "running": self._running,
             "scan_count": self._scan_count,
@@ -2114,7 +2123,8 @@ class EnhancedBackgroundScanner:
             "time_window": self._get_current_time_window().value,
             "last_scan": self._last_scan_time.isoformat() if self._last_scan_time else None,
             "auto_execute_enabled": self._auto_execute_enabled,
-            "min_rvol_filter": self._min_rvol_filter
+            "min_rvol_filter": self._min_rvol_filter,
+            "wave_scanner": wave_info
         }
 
 
