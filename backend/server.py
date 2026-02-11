@@ -2113,7 +2113,7 @@ async def get_wave_scanner_stats():
 @app.get("/api/wave-scanner/config")
 async def get_wave_scanner_config():
     """Get wave scanner configuration"""
-    return wave_scanner.get_config()
+    return wave_scanner.get_scan_config()
 
 
 # ===================== INDEX UNIVERSE API =====================
