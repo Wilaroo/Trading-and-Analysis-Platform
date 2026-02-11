@@ -1014,13 +1014,13 @@ class SupportResistanceService:
                 combined_strength = min(10, sum(l.strength for l in group_levels) / len(group_levels) + len(group_levels))
                 
                 confluence_zones.append({
-                    "price": round(avg_price, 2),
-                    "level_count": len(group_levels),
+                    "price": float(round(avg_price, 2)),
+                    "level_count": int(len(group_levels)),
                     "types": list(set(l.level_type.value for l in group_levels)),
-                    "strength": round(combined_strength, 1),
-                    "is_support": avg_price < current_price,
-                    "is_resistance": avg_price > current_price,
-                    "distance_pct": round(abs(avg_price - current_price) / current_price * 100, 2)
+                    "strength": float(round(combined_strength, 1)),
+                    "is_support": bool(avg_price < current_price),
+                    "is_resistance": bool(avg_price > current_price),
+                    "distance_pct": float(round(abs(avg_price - current_price) / current_price * 100, 2))
                 })
         
         return sorted(confluence_zones, key=lambda x: x["strength"], reverse=True)[:5]
@@ -1028,20 +1028,20 @@ class SupportResistanceService:
     def get_key_levels_summary(self, analysis: SRAnalysis) -> Dict:
         """Get a concise summary of key S/R levels"""
         return {
-            "symbol": analysis.symbol,
-            "current_price": analysis.current_price,
+            "symbol": str(analysis.symbol),
+            "current_price": float(analysis.current_price),
             "nearest_support": analysis.nearest_support.to_dict() if analysis.nearest_support else None,
             "nearest_resistance": analysis.nearest_resistance.to_dict() if analysis.nearest_resistance else None,
             "strongest_support": analysis.strongest_support.to_dict() if analysis.strongest_support else None,
             "strongest_resistance": analysis.strongest_resistance.to_dict() if analysis.strongest_resistance else None,
             "volume_profile": {
-                "poc": round(analysis.poc, 2) if analysis.poc else None,
-                "value_area_high": round(analysis.value_area_high, 2) if analysis.value_area_high else None,
-                "value_area_low": round(analysis.value_area_low, 2) if analysis.value_area_low else None,
-                "in_value_area": analysis.in_value_area
+                "poc": float(round(analysis.poc, 2)) if analysis.poc else None,
+                "value_area_high": float(round(analysis.value_area_high, 2)) if analysis.value_area_high else None,
+                "value_area_low": float(round(analysis.value_area_low, 2)) if analysis.value_area_low else None,
+                "in_value_area": bool(analysis.in_value_area)
             },
-            "pivot_point": round(analysis.pivot_point, 2) if analysis.pivot_point else None,
-            "near_key_level": analysis.near_key_level,
+            "pivot_point": float(round(analysis.pivot_point, 2)) if analysis.pivot_point else None,
+            "near_key_level": bool(analysis.near_key_level),
             "confluence_zones": analysis.level_confluence,
             "support_levels": [l.to_dict() for l in analysis.support_levels[:5]],
             "resistance_levels": [l.to_dict() for l in analysis.resistance_levels[:5]]
