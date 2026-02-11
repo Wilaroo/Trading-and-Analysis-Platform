@@ -213,6 +213,7 @@ app.include_router(market_intel_router)
 # Collections
 strategies_col = db["strategies"]
 watchlists_col = db["watchlists"]
+smart_watchlist_col = db["smart_watchlist"]  # New: for hybrid auto/manual watchlist
 alerts_col = db["alerts"]
 portfolios_col = db["portfolios"]
 newsletters_col = db["newsletters"]
@@ -220,6 +221,11 @@ scans_col = db["scans"]
 insider_col = db["insider_trades"]
 cot_col = db["cot_data"]
 earnings_col = db["earnings"]
+
+# Initialize smart watchlist and wave scanner
+smart_watchlist = init_smart_watchlist(smart_watchlist_col)
+index_universe = get_index_universe()
+wave_scanner = init_wave_scanner(smart_watchlist, index_universe)
 
 # ===================== STRATEGY HELPERS =====================
 # Strategies are now stored in MongoDB and accessed via strategy_service
