@@ -374,69 +374,176 @@ const ConfirmationDialog = ({ isOpen, trade, onConfirm, onCancel, loading }) => 
   );
 };
 
-// ===================== BOT STATUS HEADER =====================
+// ===================== COMPREHENSIVE STATS HEADER =====================
 
-const BotStatusHeader = ({ status, onToggle, onModeChange, loading }) => {
+const StatsHeader = ({ status, account, marketContext, positions, onToggle, onModeChange, loading }) => {
   const isRunning = status?.running;
   const mode = status?.mode || 'confirmation';
-  const pnl = status?.daily_stats?.net_pnl || 0;
+  const botPnl = status?.daily_stats?.net_pnl || 0;
   const openCount = status?.open_trades_count || 0;
   const pendingCount = status?.pending_trades_count || 0;
   
+  // Account data
+  const netLiq = account?.net_liquidation || 0;
+  const accountPnl = account?.unrealized_pnl || 0;
+  const totalPnl = botPnl + accountPnl;
+  
+  // Market regime colors
+  const regimeConfig = {
+    'Trending Up': { color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+    'Trending Down': { color: 'text-red-400', bg: 'bg-red-500/10' },
+    'Consolidation': { color: 'text-amber-400', bg: 'bg-amber-500/10' },
+    'High Volatility': { color: 'text-orange-400', bg: 'bg-orange-500/10' },
+    'range_bound': { color: 'text-amber-400', bg: 'bg-amber-500/10' },
+    'strong_uptrend': { color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+    'strong_downtrend': { color: 'text-red-400', bg: 'bg-red-500/10' },
+    'volatile': { color: 'text-orange-400', bg: 'bg-orange-500/10' },
+  };
+  
+  const regime = marketContext?.regime || 'Loading...';
+  const regimeStyle = regimeConfig[regime] || { color: 'text-zinc-400', bg: 'bg-zinc-500/10' };
+  
+  const formatCurrency = (val) => {
+    if (val === undefined || val === null) return '$--';
+    return val >= 0 ? `$${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` 
+                    : `-$${Math.abs(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+  
   return (
-    <div className="flex items-center justify-between px-3 py-2 bg-zinc-900/80 border-b border-white/5">
-      {/* Left: Bot Status & P&L */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={onToggle}
-          disabled={loading}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-            isRunning 
-              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30' 
-              : 'bg-zinc-700 text-zinc-300 border border-zinc-600 hover:bg-zinc-600'
-          }`}
-          data-testid="bot-toggle"
-        >
-          {loading ? (
-            <Loader2 className="w-3 h-3 animate-spin" />
-          ) : isRunning ? (
-            <Activity className="w-3 h-3" />
-          ) : (
-            <Power className="w-3 h-3" />
-          )}
-          {isRunning ? 'RUNNING' : 'STOPPED'}
-        </button>
+    <div className="bg-zinc-900/80 border-b border-white/5">
+      {/* Top Row: Account Stats */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-white/5">
+        {/* Left: Net Liq + P&L + Positions */}
+        <div className="flex items-center gap-6">
+          {/* Net Liquidation */}
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-cyan-500/10 flex items-center justify-center">
+              <DollarSign className="w-4 h-4 text-cyan-400" />
+            </div>
+            <div>
+              <p className="text-[9px] text-zinc-500 uppercase">Net Liq</p>
+              <p className="text-sm font-bold font-mono text-white" data-testid="net-liquidation">
+                {formatCurrency(netLiq)}
+              </p>
+            </div>
+          </div>
+          
+          {/* Divider */}
+          <div className="w-px h-8 bg-white/10" />
+          
+          {/* Today's P&L */}
+          <div className="flex items-center gap-2">
+            <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${totalPnl >= 0 ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
+              {totalPnl >= 0 ? <TrendingUp className="w-4 h-4 text-emerald-400" /> : <TrendingDown className="w-4 h-4 text-red-400" />}
+            </div>
+            <div>
+              <p className="text-[9px] text-zinc-500 uppercase">Today P&L</p>
+              <p className={`text-sm font-bold font-mono ${totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} data-testid="todays-pnl">
+                {totalPnl >= 0 ? '+' : ''}{formatCurrency(totalPnl)}
+              </p>
+            </div>
+          </div>
+          
+          {/* Divider */}
+          <div className="w-px h-8 bg-white/10" />
+          
+          {/* Positions */}
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-purple-500/10 flex items-center justify-center">
+              <Briefcase className="w-4 h-4 text-purple-400" />
+            </div>
+            <div>
+              <p className="text-[9px] text-zinc-500 uppercase">Positions</p>
+              <p className="text-sm font-bold font-mono text-white" data-testid="positions-count">
+                {positions?.length || 0}
+              </p>
+            </div>
+          </div>
+        </div>
         
-        <div className="flex items-center gap-3 text-xs">
-          <span className={`font-mono font-bold ${pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-            {pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}
-          </span>
-          <div className="flex items-center gap-2 text-zinc-500">
-            <span>{openCount} open</span>
-            {pendingCount > 0 && <span className="text-amber-400">{pendingCount} pending</span>}
+        {/* Right: Market Regime */}
+        <div className="flex items-center gap-2">
+          <div className={`w-7 h-7 rounded-lg ${regimeStyle.bg} flex items-center justify-center`}>
+            <Activity className={`w-4 h-4 ${regimeStyle.color}`} />
+          </div>
+          <div>
+            <p className="text-[9px] text-zinc-500 uppercase">Market</p>
+            <p className={`text-sm font-semibold ${regimeStyle.color}`} data-testid="market-regime">
+              {regime.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+            </p>
           </div>
         </div>
       </div>
       
-      {/* Right: Mode Selector */}
-      <div className="flex items-center gap-1">
-        {['confirmation', 'auto', 'paused'].map(m => {
-          const icons = { confirmation: Shield, auto: Zap, paused: Pause };
-          const Icon = icons[m];
-          const isActive = mode === m;
-          return (
-            <button
-              key={m}
-              onClick={() => onModeChange(m)}
-              className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
-                isActive
-                  ? m === 'auto' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                    : m === 'confirmation' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
-                    : 'bg-zinc-600 text-zinc-300 border border-zinc-500'
-                  : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
-              }`}
-              data-testid={`mode-${m}`}
-            >
+      {/* Bottom Row: Bot Controls */}
+      <div className="flex items-center justify-between px-4 py-1.5">
+        {/* Left: Bot Status */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onToggle}
+            disabled={loading}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+              isRunning 
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30' 
+                : 'bg-zinc-700 text-zinc-300 border border-zinc-600 hover:bg-zinc-600'
+            }`}
+            data-testid="bot-toggle"
+          >
+            {loading ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : isRunning ? (
+              <Activity className="w-3 h-3" />
+            ) : (
+              <Power className="w-3 h-3" />
+            )}
+            Bot {isRunning ? 'ON' : 'OFF'}
+          </button>
+          
+          <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+            <span className={`font-mono font-semibold ${botPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {botPnl >= 0 ? '+' : ''}${botPnl.toFixed(0)}
+            </span>
+            <span>•</span>
+            <span>{openCount} open</span>
+            {pendingCount > 0 && (
+              <>
+                <span>•</span>
+                <span className="text-amber-400">{pendingCount} pending</span>
+              </>
+            )}
+          </div>
+        </div>
+        
+        {/* Right: Mode Selector */}
+        <div className="flex items-center gap-1">
+          {['confirmation', 'auto', 'paused'].map(m => {
+            const icons = { confirmation: Shield, auto: Zap, paused: Pause };
+            const Icon = icons[m];
+            const isActive = mode === m;
+            const labels = { confirmation: 'Confirm', auto: 'Auto', paused: 'Paused' };
+            return (
+              <button
+                key={m}
+                onClick={() => onModeChange(m)}
+                className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                  isActive
+                    ? m === 'auto' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                      : m === 'confirmation' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                      : 'bg-zinc-600 text-zinc-300 border border-zinc-500'
+                    : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+                }`}
+                data-testid={`mode-${m}`}
+              >
+                <Icon className="w-3 h-3" />
+                {labels[m]}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
               <Icon className="w-3 h-3" />
               {m.charAt(0).toUpperCase() + m.slice(1)}
             </button>
