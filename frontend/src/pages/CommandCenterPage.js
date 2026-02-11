@@ -2,7 +2,6 @@ import React from 'react';
 import TickerDetailModal from '../components/TickerDetailModal';
 import QuickTradeModal from '../components/QuickTradeModal';
 import HeaderBar from '../components/layout/HeaderBar';
-import QuickStatsRow from '../components/layout/QuickStatsRow';
 import AICoachTab from '../components/tabs/AICoachTab';
 import AnalyticsTab from '../components/tabs/AnalyticsTab';
 import { useCommandCenterData } from '../hooks/useCommandCenterData';
@@ -21,7 +20,7 @@ const CommandCenterPage = ({
   });
 
   return (
-    <div className="space-y-4 pb-8" data-testid="command-center-page">
+    <div className="space-y-3 pb-8" data-testid="command-center-page">
       {/* Header */}
       <HeaderBar
         systemHealth={data.systemHealth}
@@ -32,21 +31,6 @@ const CommandCenterPage = ({
         connecting={data.connecting}
         handleConnectToIB={data.handleConnectToIB}
         handleDisconnectFromIB={data.handleDisconnectFromIB}
-      />
-
-      {/* Quick Stats Row */}
-      <QuickStatsRow
-        account={data.account}
-        totalPnL={data.totalPnL}
-        positions={data.positions}
-        enhancedAlerts={data.enhancedAlerts}
-        alerts={data.alerts}
-        marketContext={data.marketContext}
-        opportunities={data.opportunities}
-        expandedStatCard={data.expandedStatCard}
-        setExpandedStatCard={data.setExpandedStatCard}
-        setSelectedTicker={data.setSelectedTicker}
-        setSelectedEnhancedAlert={data.setSelectedEnhancedAlert}
       />
 
       {/* Tab Navigation — 2 tabs */}
