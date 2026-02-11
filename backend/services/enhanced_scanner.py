@@ -2354,6 +2354,7 @@ class EnhancedBackgroundScanner:
             "active_alerts": len(self._live_alerts),
             "watchlist_size": len(self._watchlist),
             "symbols_scanned_last": self._symbols_scanned_last,
+            "symbols_skipped_adv": self._symbols_skipped_adv,
             "symbols_skipped_rvol": self._symbols_skipped_rvol,
             "scan_interval": self._scan_interval,
             "enabled_setups": list(self._enabled_setups),
@@ -2362,6 +2363,9 @@ class EnhancedBackgroundScanner:
             "last_scan": self._last_scan_time.isoformat() if self._last_scan_time else None,
             "auto_execute_enabled": self._auto_execute_enabled,
             "min_rvol_filter": self._min_rvol_filter,
+            "min_adv_general": self._min_adv_general,
+            "min_adv_intraday": self._min_adv_intraday,
+            "adv_cache_size": len(self._adv_cache),
             "wave_scanner": wave_info
         }
 
