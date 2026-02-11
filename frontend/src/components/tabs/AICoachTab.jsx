@@ -11,12 +11,15 @@ const AICoachTab = ({
   earnings,
   isConnected,
   runScanner,
+  account,
+  marketContext,
+  positions,
 }) => {
   return (
-    <div className="grid lg:grid-cols-12 gap-4 mt-2" data-testid="ai-coach-tab-content">
+    <div className="grid lg:grid-cols-12 gap-4" data-testid="ai-coach-tab-content">
       {/* LEFT - AI Trading Assistant (Bot + AI integrated) - Takes more space */}
       <div className="lg:col-span-8">
-        <div className="h-[calc(100vh-280px)] min-h-[600px]">
+        <div className="h-[calc(100vh-200px)] min-h-[650px]">
           <AICommandPanel
             onTickerSelect={(ticker) => setSelectedTicker(ticker)}
             watchlist={watchlist}
@@ -26,6 +29,9 @@ const AICoachTab = ({
             scanResults={opportunities}
             isConnected={isConnected}
             onRefresh={() => runScanner()}
+            account={account}
+            marketContext={marketContext}
+            positions={positions}
           />
         </div>
       </div>
