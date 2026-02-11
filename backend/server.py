@@ -2907,13 +2907,16 @@ async def startup_event():
     # Attempt auto-connect to IB Gateway if it's running
     try:
         ib_service = get_ib_service()
-        if not ib_service.is_connected():
+        status = ib_service.get_connection_status()
+        if not status.get("connected", False):
             print("Attempting auto-connect to IB Gateway...")
             success = await ib_service.connect()
             if success:
                 print("✅ Auto-connected to IB Gateway")
             else:
                 print("⚠️ IB Gateway not available - manual connect required")
+        else:
+            print("✅ IB Gateway already connected")
     except Exception as e:
         print(f"⚠️ IB auto-connect skipped: {e}")
     
