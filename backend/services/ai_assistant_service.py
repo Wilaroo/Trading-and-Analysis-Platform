@@ -1761,6 +1761,130 @@ Is this position too large based on my rules? What's the max I should have?""",
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
     
+    async def generate_scanner_coaching(self, alert_data: Dict) -> Dict:
+        """
+        Generate proactive coaching message for a scanner opportunity.
+        Creates both an AI chat message AND returns data for toast notification.
+        
+        Called by the enhanced scanner when high-priority opportunities are detected.
+        
+        alert_data should include:
+        - symbol, setup_type, direction, current_price
+        - trigger_price, stop_loss, target, risk_reward
+        - win_rate, tape_confirmation, headline, reasoning
+        - time_window, market_regime, priority
+        """
+        symbol = alert_data.get('symbol', 'UNKNOWN')
+        setup_type = alert_data.get('setup_type', 'unknown')
+        direction = alert_data.get('direction', 'long')
+        priority = alert_data.get('priority', 'medium')
+        win_rate = alert_data.get('win_rate', 0)
+        tape = alert_data.get('tape_confirmation', False)
+        r_r = alert_data.get('risk_reward', 0)
+        
+        # Build a concise prompt for quick coaching response
+        prompt = f"""🚨 SCANNER OPPORTUNITY DETECTED - QUICK COACHING NEEDED
+
+**{symbol}** - {setup_type.replace('_', ' ').title()} {direction.upper()}
+Priority: {priority.upper()} | Win Rate: {win_rate*100:.0f}% | R:R {r_r:.1f}:1
+Tape Confirmation: {'YES ✓' if tape else 'NO'}
+
+Setup Details:
+- Current: ${alert_data.get('current_price', 0):.2f}
+- Entry: ${alert_data.get('trigger_price', 0):.2f}
+- Stop: ${alert_data.get('stop_loss', 0):.2f}  
+- Target: ${alert_data.get('target', 0):.2f}
+- Time Window: {alert_data.get('time_window', 'unknown')}
+- Market Regime: {alert_data.get('market_regime', 'unknown')}
+
+Reasoning: {'; '.join(alert_data.get('reasoning', [])[:3])}
+
+Based on my playbook knowledge, provide a BRIEF 2-3 sentence coaching response:
+1. Is this a valid setup for the current conditions?
+2. Any quick warnings or confirmations needed?
+3. Suggested action: TAKE, WAIT, or PASS?
+
+Keep it punchy and actionable - trader needs to act fast!"""
+
+        try:
+            # Use the existing chat method with a special session for scanner coaching
+            session_id = f"scanner_coach_{datetime.now().strftime('%Y%m%d')}"
+            response = await self.chat(prompt, session_id, complexity="light")
+            
+            coaching_text = response.get("response", "")
+            
+            # Extract a brief summary for toast notification (first sentence or first 80 chars)
+            summary = coaching_text.split('.')[0][:100] if coaching_text else f"{setup_type} on {symbol}"
+            
+            # Determine verdict based on response content
+            coaching_lower = coaching_text.lower()
+            if any(word in coaching_lower for word in ['take', 'valid', 'confirmed', 'good setup', 'looks good']):
+                verdict = "TAKE"
+            elif any(word in coaching_lower for word in ['pass', 'skip', 'avoid', 'warning', 'caution']):
+                verdict = "PASS"
+            else:
+                verdict = "WAIT"
+            
+            # Store the coaching message for the chat panel to pick up
+            coaching_message = {
+                "type": "scanner_coaching",
+                "symbol": symbol,
+                "setup_type": setup_type,
+                "direction": direction,
+                "priority": priority,
+                "coaching": coaching_text,
+                "summary": summary,
+                "verdict": verdict,
+                "alert_data": alert_data,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+            # Store in a queue for the frontend to poll
+            if not hasattr(self, '_coaching_notifications'):
+                self._coaching_notifications = []
+            self._coaching_notifications.append(coaching_message)
+            # Keep only last 20 notifications
+            self._coaching_notifications = self._coaching_notifications[-20:]
+            
+            logger.info(f"🧠 Scanner coaching for {symbol}: {verdict} - {summary[:50]}...")
+            
+            return {
+                "success": True,
+                "symbol": symbol,
+                "setup_type": setup_type,
+                "coaching": coaching_text,
+                "summary": summary,
+                "verdict": verdict,
+                "timestamp": coaching_message["timestamp"]
+            }
+            
+        except Exception as e:
+            logger.warning(f"Scanner coaching generation failed: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "symbol": symbol,
+                "setup_type": setup_type
+            }
+    
+    def get_coaching_notifications(self, since: str = None) -> List[Dict]:
+        """
+        Get recent coaching notifications for the frontend.
+        Optionally filter by timestamp.
+        """
+        if not hasattr(self, '_coaching_notifications'):
+            self._coaching_notifications = []
+        
+        if since:
+            try:
+                since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
+                return [n for n in self._coaching_notifications 
+                       if datetime.fromisoformat(n['timestamp'].replace('Z', '+00:00')) > since_dt]
+            except:
+                pass
+        
+        return self._coaching_notifications[-10:]  # Return last 10 by default
+    
     async def get_trade_review(self, trade_data: Dict) -> Dict:
         """
         AI review of a completed trade for learning.
