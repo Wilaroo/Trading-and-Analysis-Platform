@@ -2902,7 +2902,23 @@ async def startup_event():
     
     # Give services time to initialize before starting heavy background tasks
     # This prevents overwhelming IB Gateway on startup
-    await asyncio.sleep(5)
+    await asyncio.sleep(3)
+    
+    # Attempt auto-connect to IB Gateway if it's running
+    try:
+        ib_service = get_ib_service()
+        if not ib_service.is_connected():
+            print("Attempting auto-connect to IB Gateway...")
+            success = await ib_service.connect()
+            if success:
+                print("✅ Auto-connected to IB Gateway")
+            else:
+                print("⚠️ IB Gateway not available - manual connect required")
+    except Exception as e:
+        print(f"⚠️ IB auto-connect skipped: {e}")
+    
+    # Wait a bit more after IB connection attempt
+    await asyncio.sleep(2)
     
     # Start background scanner for live alerts
     await background_scanner.start()
