@@ -126,7 +126,7 @@ class AlpacaService:
                     "volume": int(trade.size) if trade else 0,
                     "timestamp": quote.timestamp.isoformat() if quote.timestamp else datetime.now(timezone.utc).isoformat(),
                     "source": "alpaca",
-                    "_cached_at": datetime.now(timezone.utc)
+                    "_cached_at": datetime.now(timezone.utc).isoformat()
                 }
                 
                 # Cache the result
@@ -184,7 +184,7 @@ class AlpacaService:
                         "volume": int(trade.size) if trade else 0,
                         "timestamp": quote.timestamp.isoformat() if quote.timestamp else now.isoformat(),
                         "source": "alpaca",
-                        "_cached_at": now
+                        "_cached_at": now.isoformat()
                     }
                     
                     # Cache each result
