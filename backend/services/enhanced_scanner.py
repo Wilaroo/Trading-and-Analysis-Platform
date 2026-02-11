@@ -469,6 +469,27 @@ class EnhancedBackgroundScanner:
         except Exception as e:
             logger.warning(f"AI notification failed for {alert.symbol}: {e}")
     
+    def set_volume_filters(self, min_adv_general: int = 100_000, min_adv_intraday: int = 500_000):
+        """
+        Configure average daily volume (ADV) filters.
+        
+        Args:
+            min_adv_general: Minimum ADV for general/swing setups (default 100K)
+            min_adv_intraday: Minimum ADV for intraday/scalp setups (default 500K)
+        """
+        self._min_adv_general = min_adv_general
+        self._min_adv_intraday = min_adv_intraday
+        logger.info(f"Volume filters updated: General>={min_adv_general:,}, Intraday>={min_adv_intraday:,}")
+    
+    def get_volume_filter_config(self) -> Dict:
+        """Get current volume filter configuration"""
+        return {
+            "min_adv_general": self._min_adv_general,
+            "min_adv_intraday": self._min_adv_intraday,
+            "intraday_setups": list(self._intraday_setups),
+            "symbols_skipped_adv_last_scan": getattr(self, '_symbols_skipped_adv', 0)
+        }
+    
     async def _auto_execute_alert(self, alert: LiveAlert):
         """Auto-execute an alert through the trading bot"""
         if not self._trading_bot or not self._auto_execute_enabled:
