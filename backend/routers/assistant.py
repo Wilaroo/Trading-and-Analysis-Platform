@@ -677,6 +677,78 @@ async def find_strategy_setups(strategy: str, limit: int = 5):
         }
         
     except Exception as e:
+
+
+# ==================== SCANNER COACHING NOTIFICATIONS ====================
+
+@router.get("/coach/scanner-notifications")
+async def get_scanner_coaching_notifications(since: Optional[str] = None):
+    """
+    Get proactive AI coaching notifications from scanner alerts.
+    These are generated automatically when high-priority opportunities are detected.
+    
+    Args:
+        since: Optional ISO timestamp to filter notifications after this time
+    
+    Returns:
+        List of coaching notifications with verdict (TAKE/WAIT/PASS)
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    try:
+        notifications = _assistant_service.get_coaching_notifications(since)
+        return {
+            "success": True,
+            "notifications": notifications,
+            "count": len(notifications),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting scanner notifications: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/coach/scanner-coaching")
+async def generate_scanner_coaching_manual(symbol: str, setup_type: str):
+    """
+    Manually request AI coaching for a specific scanner alert.
+    Useful when you want coaching on an opportunity you've spotted.
+    
+    Args:
+        symbol: Stock symbol
+        setup_type: Type of setup (e.g., 'rubber_band_long', 'breakout')
+    """
+    if not _assistant_service:
+        raise HTTPException(status_code=500, detail="Assistant service not initialized")
+    
+    try:
+        # Build minimal alert data
+        alert_data = {
+            "symbol": symbol.upper(),
+            "setup_type": setup_type,
+            "direction": "long" if "long" not in setup_type.lower() else "long",
+            "current_price": 0,
+            "trigger_price": 0,
+            "stop_loss": 0,
+            "target": 0,
+            "risk_reward": 0,
+            "win_rate": 0,
+            "tape_confirmation": False,
+            "headline": f"Manual coaching request: {setup_type} on {symbol}",
+            "reasoning": [],
+            "time_window": "unknown",
+            "market_regime": "unknown",
+            "priority": "medium"
+        }
+        
+        result = await _assistant_service.generate_scanner_coaching(alert_data)
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error generating scanner coaching: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
         logger.error(f"Error finding setups: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
