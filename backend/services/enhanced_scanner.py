@@ -270,6 +270,18 @@ class EnhancedBackgroundScanner:
         self._rvol_cache: Dict[str, Tuple[float, datetime]] = {}
         self._rvol_cache_ttl = 300  # 5 minutes
         
+        # Average Daily Volume (ADV) filters
+        self._min_adv_general = 100_000      # Min ADV for general/swing setups
+        self._min_adv_intraday = 500_000     # Min ADV for intraday/scalp setups
+        self._adv_cache: Dict[str, int] = {}  # Cache ADV values
+        
+        # Intraday/scalp setups requiring higher volume
+        self._intraday_setups = {
+            "first_vwap_pullback", "first_move_up", "first_move_down", "bella_fade",
+            "back_through_open", "up_through_open", "opening_drive",
+            "orb", "hitchhiker", "spencer_scalp", "9_ema_scalp", "abc_scalp"
+        }
+        
         # Watchlist - expanded to 200+ symbols
         self._watchlist: List[str] = self._get_expanded_watchlist()
         
