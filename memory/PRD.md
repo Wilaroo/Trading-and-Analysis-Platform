@@ -146,8 +146,7 @@ Triggers AI Coaching Notification
 └── frontend/
     ├── pages/CommandCenterPage.js       # 2-tab layout: Command | Analytics
     ├── components/
-    │   ├── TradingBotPanel.jsx          # Bot control + Signal Bubbles
-    │   ├── AICommandPanel.jsx           # AI chat with ticker detection
+    │   ├── AICommandPanel.jsx           # **AI Trading Assistant** - Bot + AI + Scanner integrated
     │   ├── RightSidebar.jsx             # Smart Watchlist widget
     │   └── MarketIntel/MarketIntelPanel.jsx
     └── utils/
@@ -173,10 +172,17 @@ Triggers AI Coaching Notification
 16. **Wave Scanning** (Feb 2026): Tiered scanning of 1,425 symbols
 17. **Smart Watchlist** (Feb 2026): Hybrid auto/manual with strategy-based expiration
 18. **Scanner → AI Coaching** (Feb 2026): Proactive notifications for high-priority alerts
+19. **AI Trading Assistant** (Feb 2026): Integrated panel with Bot + AI + Scanner
+    - Bot controls (Start/Stop, Mode selector) in header
+    - Coaching alerts with Execute/Half Size/Pass buttons
+    - Confirmation dialog before trade execution
+    - Conversational trading: "take NVDA", "show my trades", "stop the bot"
+    - Removed separate TradingBotPanel
 
 ## Prioritized Backlog
 ### P0 - Completed
 - ✅ Scanner ↔ AI ↔ Trading Bot real-time integration
+- ✅ AI Trading Assistant integrated panel
 
 ### P1 - Next Up
 - Full index population (Russell 2000 needs ~1,600 more, Nasdaq 1000 needs ~400 more)
