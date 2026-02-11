@@ -1747,7 +1747,15 @@ Total exposure: ${data.get('exposure', 0):,.2f}
 
 Is this position too large based on my rules? What's the max I should have?""",
             
-            "rule_reminder": """Give me a random but important reminder from my trading rules. Something I might forget in the heat of trading. Make it punchy and memorable."""
+            "rule_reminder": """Give me a random but important reminder from my trading rules. Something I might forget in the heat of trading. Make it punchy and memorable.""",
+            
+            "scanner_opportunity": f"""🚨 SCANNER OPPORTUNITY: {data.get('symbol', 'Unknown')}
+Setup: {data.get('setup_type', 'Unknown')} {data.get('direction', 'unknown').upper()}
+Priority: {data.get('priority', 'medium').upper()}
+Win Rate: {data.get('win_rate', 0)*100:.0f}% | R:R: {data.get('risk_reward', 0):.1f}:1
+Tape: {'CONFIRMED ✓' if data.get('tape_confirmation') else 'Not confirmed'}
+
+Quick coaching: Is this a valid setup? Any concerns? Action: TAKE, WAIT, or PASS?"""
         }
         
         prompt = coaching_prompts.get(context_type, f"Provide coaching guidance for: {context_type}")
