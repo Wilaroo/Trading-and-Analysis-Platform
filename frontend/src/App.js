@@ -116,6 +116,8 @@ function App() {
       const busy = res.data?.is_busy || false;
       const busyOp = res.data?.busy_operation || null;
       
+      console.log('[IB Check] API returned:', { connected, busy, busyOp });
+      
       setIbConnected(connected);
       setIbConnectionChecked(true);
       setIbBusy(busy);
