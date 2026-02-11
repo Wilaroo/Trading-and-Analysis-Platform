@@ -14,7 +14,9 @@ import {
   ChevronUp,
   Star,
   Target,
-  Clock
+  Clock,
+  Plus,
+  X
 } from 'lucide-react';
 import MarketIntelPanel from './MarketIntelPanel';
 import api from '../utils/api';
