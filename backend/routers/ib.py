@@ -13,6 +13,7 @@ from services.data_cache import get_data_cache
 from services.stock_data import get_stock_service
 from services.alpaca_service import get_alpaca_service
 from services.news_service import get_news_service
+from services.support_resistance_service import get_sr_service
 
 router = APIRouter(prefix="/api/ib", tags=["Interactive Brokers"])
 
