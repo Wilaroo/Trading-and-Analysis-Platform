@@ -942,9 +942,12 @@ const AICommandPanel = ({
         </div>
       </div>
       
-      {/* Bot Status Header */}
-      <BotStatusHeader
+      {/* Comprehensive Stats Header */}
+      <StatsHeader
         status={botStatus}
+        account={account}
+        marketContext={marketContext}
+        positions={positions}
         onToggle={toggleBot}
         onModeChange={changeMode}
         loading={botLoading}
