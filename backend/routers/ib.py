@@ -1295,6 +1295,94 @@ async def get_comprehensive_analysis(symbol: str):
     return analysis
 
 
+# ===================== Support/Resistance Analysis Endpoint =====================
+
+@router.get("/sr-analysis/{symbol}")
+async def get_support_resistance_analysis(symbol: str):
+    """
+    Get comprehensive Support/Resistance analysis for a ticker.
+    
+    Uses multiple methodologies:
+    - Pivot Points (Classic, Fibonacci, Camarilla, Woodie, DeMark)
+    - Volume Profile (POC, VAH, VAL, HVN, LVN)
+    - Historical Reaction Zones (multi-touch levels)
+    - Technical Levels (SMAs, EMAs, VWAP)
+    - Reference Levels (HOD, LOD, Previous day, Week, Month, 52-week)
+    - Round Numbers and Gap Levels
+    """
+    symbol = symbol.upper()
+    
+    try:
+        # Get historical bars
+        bars = None
+        current_price = None
+        
+        if _alpaca_service:
+            bars = await _alpaca_service.get_bars(symbol, timeframe="1Day", limit=100)
+            quote = await _alpaca_service.get_quote(symbol)
+            if quote:
+                current_price = quote.get("price", quote.get("last_price"))
+        
+        if not bars or len(bars) < 10:
+            raise HTTPException(status_code=400, detail=f"Insufficient data for {symbol}")
+        
+        if not current_price:
+            current_price = bars[-1]["close"]
+        
+        # Get enhanced S/R analysis
+        sr_service = get_sr_service()
+        sr_analysis = await sr_service.get_sr_analysis(
+            symbol=symbol,
+            bars=bars,
+            current_price=current_price,
+            include_pivots=True,
+            include_volume_profile=True,
+            include_reaction_zones=True
+        )
+        
+        # Get summary
+        summary = sr_service.get_key_levels_summary(sr_analysis)
+        
+        return {
+            "symbol": symbol,
+            "current_price": current_price,
+            "timestamp": sr_analysis.timestamp.isoformat(),
+            "analysis": {
+                "nearest_support": summary["nearest_support"],
+                "nearest_resistance": summary["nearest_resistance"],
+                "strongest_support": summary["strongest_support"],
+                "strongest_resistance": summary["strongest_resistance"],
+                "volume_profile": summary["volume_profile"],
+                "pivot_point": summary["pivot_point"],
+                "near_key_level": summary["near_key_level"],
+                "confluence_zones": summary["confluence_zones"]
+            },
+            "support_levels": summary["support_levels"],
+            "resistance_levels": summary["resistance_levels"],
+            "methodology": {
+                "pivot_types": ["Classic", "Fibonacci", "Camarilla", "Woodie", "DeMark"],
+                "volume_profile": {
+                    "enabled": True,
+                    "metrics": ["POC", "VAH", "VAL", "HVN", "LVN"]
+                },
+                "reaction_zones": {
+                    "enabled": True,
+                    "min_touches": 2,
+                    "lookback_bars": len(bars)
+                },
+                "technical_levels": ["20 SMA", "50 SMA", "100 SMA", "200 SMA", "9 EMA", "21 EMA", "VWAP"],
+                "reference_levels": ["HOD", "LOD", "Prev H/L/C", "Week H/L", "Month H/L", "52-Week H/L"],
+                "round_numbers": True,
+                "gap_levels": True
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error calculating S/R for {symbol}: {str(e)}")
+
+
 # ===================== Order Fill Tracking =====================
 
 # In-memory store for tracking orders (would use Redis/DB in production)
