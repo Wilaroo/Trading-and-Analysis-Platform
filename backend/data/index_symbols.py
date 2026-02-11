@@ -1,14 +1,53 @@
 """
-Expanded Index Symbol Lists
-Contains comprehensive symbol lists for:
-- S&P 500 (~500 symbols)
-- Nasdaq 1000 (~1000 symbols) 
-- Russell 2000 (~2000 symbols)
-- Key ETFs (~100 symbols)
+ETF-Based Trading Universe
+===========================
+Symbols organized by ETF membership (SPY, QQQ, IWM) with priority-based scanning.
+
+Priority:
+- Tier 1: SPY constituents (S&P 500 large caps) - Always scanned
+- Tier 2: QQQ constituents (Nasdaq-100 tech/growth) - Always scanned  
+- Tier 3: IWM constituents (Russell 2000 small caps) - Rotating batches
+
+Volume Filters:
+- General scanning: avg daily volume >= 100,000
+- Intraday/scalp setups: avg daily volume >= 500,000
+
+Refresh Schedule:
+- Quarterly (March, June, September, December)
+- Last updated: February 2026
+
+Next refresh due: March 2026
 """
 
-# ===================== S&P 500 =====================
-SP500_SYMBOLS = [
+from datetime import datetime, timezone
+from typing import List, Dict, Set
+
+# ===================== METADATA =====================
+UNIVERSE_METADATA = {
+    "last_updated": "2026-02-11",
+    "next_rebalance": "2026-03-20",  # Third Friday of March (quarterly rebalance)
+    "version": "2.0",
+    "source": "ETF constituents (SPY, QQQ, IWM)"
+}
+
+# Quarterly rebalance schedule (third Friday of rebalance month)
+REBALANCE_DATES = [
+    "2026-03-20",  # Q1
+    "2026-06-19",  # Q2
+    "2026-09-18",  # Q3
+    "2026-12-18",  # Q4
+]
+
+# ===================== VOLUME THRESHOLDS =====================
+VOLUME_FILTERS = {
+    "general_min_adv": 100_000,     # Minimum avg daily volume for general scanning
+    "intraday_min_adv": 500_000,    # Minimum avg daily volume for intraday/scalp setups
+    "scalp_min_adv": 500_000,       # Same as intraday
+}
+
+# ===================== SPY CONSTITUENTS (S&P 500) =====================
+# ~500 large cap stocks - PRIORITY TIER 1
+SPY_SYMBOLS = [
     # Technology (65)
     "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "NVDA", "META", "TSLA",
     "AVGO", "ORCL", "CSCO", "CRM", "ADBE", "ACN", "IBM", "INTC",
@@ -27,7 +66,7 @@ SP500_SYMBOLS = [
     "HBAN", "RF", "ZION", "MTB", "NTRS", "STT", "BK", "NDAQ", "CBOE",
     "MSCI", "FDS", "MKTX", "VRSN", "RJF", "SEIC", "LPLA", "SF",
     "HOOD", "SOFI", "COIN", "WTW", "AJG", "RYAN", "ERIE", "AIZ",
-    "RE", "ACGL", "RNR", "EG", "WLTW", "GL",
+    "RE", "ACGL", "RNR", "EG", "GL",
     
     # Healthcare (65)
     "UNH", "JNJ", "PFE", "MRK", "ABBV", "LLY", "TMO", "ABT", "DHR",
@@ -66,7 +105,7 @@ SP500_SYMBOLS = [
     "AME", "ROP", "IR", "DOV", "SWK", "FAST", "GWW", "CTAS", "PAYX",
     "VRSK", "BR", "LDOS", "J", "FTV", "TDG", "HWM", "WAB", "TT",
     "CARR", "OTIS", "SNA", "IEX", "GNRC", "XYL", "NDSN", "RBC",
-    "AOS", "LII", "ALLE", "MAS", "MKTX", "LECO", "AXON", "TFX",
+    "AOS", "LII", "ALLE", "MAS", "LECO", "AXON",
     
     # Materials (30)
     "LIN", "APD", "SHW", "ECL", "FCX", "NEM", "NUE", "DD", "DOW",
@@ -92,302 +131,235 @@ SP500_SYMBOLS = [
     "ROKU", "LYV", "MSGS", "SIRI", "IHRT", "NWSA", "NWS",
 ]
 
-# ===================== NASDAQ 1000 =====================
-# Includes top 1000 Nasdaq-listed stocks
-NASDAQ1000_SYMBOLS = [
-    # Mega Cap Tech (already in S&P but Nasdaq listed)
-    "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "NVDA", "META", "TSLA",
-    "AVGO", "ADBE", "CSCO", "COST", "PEP", "INTC", "AMD", "CMCSA",
-    "NFLX", "INTU", "TXN", "QCOM", "AMGN", "HON", "AMAT", "BKNG",
+# ===================== QQQ CONSTITUENTS (NASDAQ-100) =====================
+# ~100 large cap tech/growth stocks - PRIORITY TIER 1
+QQQ_SYMBOLS = [
+    # Mega Cap
+    "AAPL", "MSFT", "AMZN", "NVDA", "META", "GOOGL", "GOOG", "TSLA",
+    "AVGO", "COST", "ADBE", "PEP", "CSCO", "NFLX", "AMD", "CMCSA",
+    "INTC", "INTU", "TMUS", "TXN", "QCOM", "AMGN", "HON", "AMAT",
     
-    # Large Cap Nasdaq
-    "ISRG", "SBUX", "VRTX", "ADP", "GILD", "MDLZ", "ADI", "REGN",
-    "LRCX", "PYPL", "FISV", "PANW", "KLAC", "MU", "SNPS", "CDNS",
-    "MNST", "MAR", "ORLY", "MELI", "FTNT", "CTAS", "CSX", "MCHP",
-    "KDP", "ADSK", "ABNB", "NXPI", "AEP", "DXCM", "PCAR", "AZN",
-    "PAYX", "CPRT", "MRNA", "ROST", "CHTR", "KHC", "LULU", "WDAY",
-    "EXC", "CRWD", "ODFL", "IDXX", "XEL", "FAST", "CTSH", "MRVL",
-    "EA", "DLTR", "VRSK", "BIIB", "GEHC", "CSGP", "TEAM", "DDOG",
-    "ZS", "ANSS", "ILMN", "FANG", "WBD", "CEG", "BKR", "TTD",
-    "ALGN", "EBAY", "SIRI", "ZM", "LCID", "RIVN", "ENPH", "OKTA",
-    "DOCU", "SPLK",
+    # Large Cap Tech
+    "BKNG", "ISRG", "SBUX", "VRTX", "ADP", "GILD", "MDLZ", "ADI",
+    "REGN", "LRCX", "PYPL", "FISV", "PANW", "KLAC", "MU", "SNPS",
+    "CDNS", "MNST", "MAR", "ORLY", "MELI", "FTNT", "CTAS", "CSX",
+    "MCHP", "KDP", "ADSK", "ABNB", "NXPI", "AEP", "DXCM", "PCAR",
+    "AZN", "PAYX", "CPRT", "MRNA", "ROST", "CHTR", "KHC", "LULU",
     
-    # Mid Cap Nasdaq Tech
-    "BILL", "CFLT", "CRSP", "DKNG", "DOCN", "DUOL", "ESTC", "FIVE",
-    "FIVN", "GLOB", "GTLB", "HCP", "HUBS", "JAMF", "KTOS", "LITE",
-    "MANH", "MARA", "MDB", "NET", "PATH", "PCOR", "PD", "PLTR",
-    "PTON", "RBLX", "S", "SAMSARA", "SHOP", "SMAR", "SNOW", "SQ",
-    "SPOT", "TASK", "TOST", "TWLO", "U", "VEEV", "WDAY", "WING",
-    "WIX", "WOLF", "ZEN", "ZI", "ZM", "ZS", "PINS", "SNAP", "SE",
+    # High Growth Tech
+    "WDAY", "EXC", "CRWD", "ODFL", "IDXX", "XEL", "FAST", "CTSH",
+    "MRVL", "EA", "DLTR", "VRSK", "BIIB", "GEHC", "CSGP", "TEAM",
+    "DDOG", "ZS", "ANSS", "ILMN", "FANG", "WBD", "CEG", "BKR",
+    "TTD", "ALGN", "EBAY", "SIRI", "ZM", "LCID", "RIVN", "ENPH",
+    "OKTA", "DOCU", "SPLK", "ON", "DASH", "COIN", "HOOD", "PLTR",
     
-    # Biotech Nasdaq
-    "ABBV", "ALKS", "ALNY", "AMGN", "ARWR", "BGNE", "BIIB", "BMRN",
-    "BLUE", "BNTX", "CRSP", "EDIT", "EXAS", "EXEL", "FATE", "FGEN",
-    "FOLD", "GILD", "GERN", "HALO", "HZNP", "ICPT", "IDYA", "ILMN",
-    "IMVT", "INCY", "IONS", "IOVA", "IRWD", "JAZZ", "LGND", "MDGL",
-    "MRNA", "NBIX", "NTLA", "NVAX", "PCVX", "RARE", "REGN", "RGEN",
-    "RVMD", "SAGE", "SGEN", "SRPT", "TECH", "UTHR", "VCNX", "VRTX",
-    "XENE", "YMAB", "ZLAB", "ZNTL", "ARNA", "ARCT", "BEAM", "BHVN",
-    
-    # Financial Services Nasdaq
-    "ALLY", "AFRM", "CBSH", "CFFN", "CHCO", "COIN", "COLB", "CVBF",
-    "EWBC", "FCNCA", "FFBC", "FIBK", "FISI", "FITB", "FRC", "GBCI",
-    "HOOD", "IBKR", "IBTX", "LKFN", "NAVI", "NDAQ", "NTRS", "OCFC",
-    "OPBK", "OZK", "PACW", "PNFP", "QCRH", "SBCF", "SIVB", "SOFI",
-    "SBNY", "SIGI", "STBA", "STT", "TFSL", "TRMK", "UBSI", "UCBI",
-    "UMBF", "UPST", "WABC", "WAFD", "WSBC", "WSFS", "WTFC", "ZION",
-    
-    # Consumer Nasdaq
-    "AMZN", "BKNG", "CDW", "CHWY", "CMG", "COLM", "COST", "CPRI",
-    "CROX", "DECK", "DG", "DKS", "DLTR", "EBAY", "ETSY", "EXPE",
-    "FIVE", "GRMN", "GRPN", "HAS", "HD", "HIBB", "JD", "KSS",
-    "LULU", "LVS", "LYFT", "MAR", "MAT", "MCD", "MDLZ", "NCLH",
-    "NKE", "ORLY", "OSTK", "PAYX", "PDD", "PENN", "PLAY", "PLNT",
-    "POOL", "PTON", "ROST", "SBUX", "SHAK", "SIG", "SIRI", "SKX",
-    "TCOM", "TGT", "TRIP", "TSCO", "UBER", "ULTA", "VFC", "WDAY",
-    "WING", "WMT", "WSM", "WYNN", "YETI", "YUM",
-    
-    # Healthcare Nasdaq
-    "ABCL", "ABMD", "ACAD", "ACHC", "ADUS", "AGIO", "AKRO", "ALEC",
-    "ALGN", "ALHC", "AMEH", "AMED", "AMPH", "AMN", "AMRN", "ANGO",
-    "ANIP", "ARWR", "ATEC", "ATRC", "AVNS", "AXGN", "AXNX", "AZTA",
-    "BHC", "BLFS", "BMEA", "BPMC", "CARA", "CERS", "CEVA", "CGEM",
-    "CHE", "CIEN", "CLPT", "CNMD", "CORT", "CPRX", "CTLT", "CUE",
-    "DCPH", "DMTK", "DNLI", "DRIO", "DVA", "DVAX", "DXCM", "DYNT",
-    "EBS", "EMBC", "ENSG", "EOLS", "ESCA", "EVH", "EXAS", "FGEN",
-    
-    # Industrial Nasdaq
-    "AAON", "AEIS", "AGCO", "AIMC", "ALGM", "ALIT", "ALRM", "AMAT",
-    "AMBA", "AMKR", "AMSC", "ANET", "AOSL", "APLS", "APPN", "ARNA",
-    "ASML", "ASPN", "AUDC", "AVGO", "AZPN", "BAND", "BCOV", "BE",
-    "BILL", "BLKB", "BMBL", "BRZE", "CACI", "CALX", "CCCS", "CDXC",
-    "CEVA", "CGNX", "CHKP", "CIEN", "CLBT", "CMBM", "COHR", "COUP",
-    "CPRT", "CRUS", "CSGS", "CTXS", "CW", "CYRX", "DBX", "DIOD",
-    
-    # Energy/Utilities Nasdaq
-    "AES", "AEP", "AMRC", "ARRY", "AY", "BEPC", "CEG", "CHRD",
-    "CLNE", "CWEN", "ENPH", "EXC", "FCEL", "FSLR", "NEE", "OGE",
-    "PCG", "PEGI", "PNW", "PLUG", "RUN", "SEDG", "SPWR", "STEM",
-    "SUNW", "VECO", "WOLF", "XEL",
-    
-    # More Mid/Small Cap Nasdaq (to reach ~1000)
-    "AAOI", "AAXN", "ABCB", "ABCO", "ABUS", "ACBI", "ACCD", "ACCO",
-    "ACEL", "ACER", "ACGL", "ACIA", "ACLS", "ACNB", "ACRX", "ACTG",
-    "ADAP", "ADCT", "ADMA", "ADMS", "ADPT", "ADTN", "ADUS", "ADVM",
-    "AEHR", "AEIS", "AEMD", "AERI", "AEVA", "AFCG", "AFIB", "AFMD",
-    "AGEN", "AGIO", "AGLE", "AGMH", "AGNC", "AGRI", "AGRX", "AGTC",
-    "AHCO", "AHT", "AI", "AIHS", "AIMC", "AINV", "AIRG", "AIRT",
-    "AKAM", "AKBA", "AKRO", "AKTS", "AKUS", "ALBO", "ALDX", "ALEC",
-    "ALGM", "ALGN", "ALGT", "ALIM", "ALJJ", "ALKS", "ALLK", "ALLO",
-    "ALLT", "ALNY", "ALOT", "ALPN", "ALRM", "ALRN", "ALRS", "ALSK",
-    "ALTA", "ALTG", "ALTO", "ALTR", "ALTU", "ALV", "ALVR", "ALXN",
-    "AMAL", "AMAM", "AMBC", "AMBI", "AMBP", "AMCR", "AMCX", "AMDA",
-    "AMED", "AMEH", "AMERB", "AMGN", "AMHC", "AMKR", "AMNB", "AMOT",
-    "AMPE", "AMPH", "AMPL", "AMPY", "AMRK", "AMRN", "AMRS", "AMSC",
-    "AMSF", "AMST", "AMSWA", "AMTB", "AMTX", "AMWD", "AMYT", "ANAB",
-    "ANDE", "ANGI", "ANGN", "ANIK", "ANIP", "ANIX", "ANNX", "ANPC",
-    "ANSS", "ANTE", "ANTX", "ANY", "AOSL", "AOUT", "APAM", "APDN",
-    "APEI", "APEX", "APGB", "APGE", "APH", "API", "APLD", "APLE",
-    "APLS", "APLT", "APM", "APOG", "APOP", "APPF", "APPN", "APPS",
-    "APRE", "APRN", "APRS", "APTX", "APVO", "APWC", "APYX", "AQB",
-    "AQMS", "AQN", "AQST", "AQUA", "ARAV", "ARAY", "ARBG", "ARCC",
-    "ARCE", "ARCH", "ARCO", "ARCT", "ARDS", "ARDX", "AREC", "ARGX",
-    "ARHS", "ARIK", "ARKK", "ARKO", "ARKR", "ARL", "ARLO", "ARLP",
-    "ARMK", "ARMP", "ARNC", "AROC", "AROW", "ARQT", "ARR", "ARRY",
-    "ARTL", "ARTNA", "ARTW", "ARVN", "ARWR", "ARYA", "ASAI", "ASAN",
-    "ASB", "ASCA", "ASGN", "ASIX", "ASLE", "ASLN", "ASM", "ASMB",
-    "ASML", "ASND", "ASO", "ASPS", "ASPN", "ASPU", "ASRT", "ASRV",
-    "ASTC", "ASTE", "ASTL", "ASTR", "ASTS", "ASUR", "ASXC", "ASYS",
-    "ATAI", "ATAT", "ATAX", "ATCOL", "ATEC", "ATEN", "ATER", "ATEX",
-    "ATGE", "ATHM", "ATHX", "ATI", "ATIF", "ATIP", "ATKR", "ATLC",
-    "ATLO", "ATNF", "ATNI", "ATNM", "ATNX", "ATOM", "ATOS", "ATRA",
+    # Additional Nasdaq-100
+    "PDD", "JD", "MSTR", "ARM", "SMCI", "CPNG", "DKNG", "RBLX",
+    "PTON", "SNOW", "UBER", "LYFT", "SPOT", "PINS", "SNAP", "SQ",
 ]
 
-# ===================== RUSSELL 2000 =====================
-# Small cap stocks - comprehensive list
-RUSSELL2000_SYMBOLS = [
-    # Small Cap Technology
-    "AAOI", "AAXN", "ABCB", "ABMD", "ACAD", "ACBI", "ACCD", "ACCO",
-    "ACEL", "ACER", "ACIA", "ACLS", "ACNB", "ACRX", "ACTG", "ADAP",
-    "ADCT", "ADMA", "ADMS", "ADPT", "ADTN", "ADUS", "ADVM", "AEHR",
-    "AEIS", "AEMD", "AERI", "AEVA", "AFCG", "AFIB", "AFMD", "AGEN",
-    "AGIO", "AGLE", "AGMH", "AGNC", "AGRI", "AGRX", "AGTC", "AHCO",
-    "AIHS", "AINV", "AIRG", "AIRT", "AKBA", "AKRO", "AKTS", "AKUS",
-    "ALBO", "ALDX", "ALEC", "ALGM", "ALGT", "ALIM", "ALJJ", "ALLK",
-    "ALLO", "ALLT", "ALOT", "ALPN", "ALRM", "ALRN", "ALRS", "ALSK",
-    "ALTA", "ALTG", "ALTO", "ALTR", "ALTU", "ALVR", "AMAL", "AMAM",
-    "AMBC", "AMBI", "AMBP", "AMCX", "AMDA", "AMEH", "AMHC", "AMNB",
-    "AMOT", "AMPE", "AMPH", "AMPL", "AMPY", "AMRK", "AMRN", "AMRS",
-    "AMSF", "AMST", "AMSWA", "AMTB", "AMTX", "AMWD", "AMYT", "ANAB",
-    "ANDE", "ANGI", "ANGN", "ANIK", "ANIP", "ANIX", "ANNX", "ANPC",
-    "ANTE", "ANTX", "AOSL", "AOUT", "APAM", "APDN", "APEI", "APEX",
-    "APGB", "APGE", "API", "APLD", "APLE", "APLS", "APLT", "APM",
-    "APOG", "APOP", "APPF", "APPN", "APPS", "APRE", "APRN", "APRS",
+# ===================== IWM CONSTITUENTS (RUSSELL 2000) =====================
+# Small caps - PRIORITY TIER 3 (rotating batches)
+IWM_SYMBOLS = [
+    # Small Cap Technology (High Volume)
+    "SMCI", "IONQ", "SOUN", "RGTI", "BIGC", "DUOL", "GLBE", "DOCS",
+    "PYCR", "VERX", "TTWO", "BILL", "CFLT", "ESTC", "GTLB", "HUBS",
+    "JAMF", "KTOS", "LITE", "MANH", "MDB", "NET", "PATH", "PCOR",
+    "PD", "SMAR", "TASK", "TOST", "TWLO", "U", "VEEV", "WIX",
+    "WOLF", "ZEN", "ZI", "CWAN", "DLO", "FRSH", "GENI", "GLOB",
+    "HCP", "KNBE", "LSPD", "NCNO", "NTNX", "OLO", "PAYC", "PING",
+    "QLYS", "QTWO", "RAMP", "RPD", "SDGR", "SMAR", "SPSC", "TENB",
+    "VRNS", "WK", "YEXT", "ZUO", "APLS", "CRNC", "DCBO", "ENVX",
     
-    # Small Cap Healthcare/Biotech
-    "ABCL", "ABEO", "ABIO", "ABNB", "ABOS", "ABUS", "ACAD", "ACER",
-    "ACHC", "ACHV", "ACIU", "ACOR", "ACRX", "ACRS", "ACRV", "ACST",
-    "ACTG", "ACVA", "ADAP", "ADCT", "ADGI", "ADIL", "ADMA", "ADMS",
-    "ADPT", "ADRO", "ADTX", "ADUS", "ADVM", "ADXN", "AEHR", "AEIS",
-    "AEMD", "AENT", "AERI", "AESE", "AEY", "AFAR", "AFBI", "AFCG",
-    "AFIB", "AFRM", "AFYA", "AGBA", "AGEN", "AGIO", "AGLE", "AGMH",
-    "AGNC", "AGRI", "AGRX", "AGTC", "AHCO", "AHG", "AHI", "AHT",
-    "AHPI", "AIHS", "AIMD", "AIMH", "AINC", "AINV", "AIRC", "AIRG",
-    "AIRI", "AIRT", "AIT", "AIU", "AIV", "AKAM", "AKBA", "AKLI",
-    "AKRO", "AKTS", "AKUS", "AKYA", "ALBO", "ALBT", "ALC", "ALCO",
-    "ALDX", "ALEC", "ALEX", "ALF", "ALFI", "ALG", "ALGM", "ALGS",
-    "ALGT", "ALHC", "ALIM", "ALIT", "ALJJ", "ALKS", "ALLK", "ALLO",
-    "ALLT", "ALLY", "ALNA", "ALNY", "ALOT", "ALPA", "ALPN", "ALPP",
-    "ALRM", "ALRN", "ALRS", "ALSK", "ALSN", "ALT", "ALTA", "ALTG",
-    "ALTI", "ALTL", "ALTO", "ALTR", "ALTU", "ALTX", "ALVR", "ALXO",
+    # Small Cap Biotech/Healthcare (High Volume)
+    "ABCL", "ACAD", "ALKS", "ALNY", "ARWR", "BEAM", "BGNE", "BHVN",
+    "BLUE", "CRSP", "EDIT", "EXAS", "EXEL", "FATE", "FOLD", "GERN",
+    "HALO", "ICPT", "IDYA", "IONS", "IOVA", "IRWD", "JAZZ", "LGND",
+    "MDGL", "NBIX", "NTLA", "NVAX", "PCVX", "RARE", "RGEN", "RVMD",
+    "SAGE", "SRPT", "UTHR", "VCNX", "XENE", "YMAB", "ZLAB", "ZNTL",
+    "ARCT", "ARNA", "AUPH", "BCRX", "BGRY", "BMEA", "CARA", "CERS",
+    "CGEM", "CLVS", "CPRX", "DCPH", "DNLI", "DRIO", "DVAX", "FGEN",
     
-    # Small Cap Financials
-    "AACI", "AADI", "AAL", "AAMC", "AAME", "AAN", "AAOI", "AAON",
-    "AAP", "AAPL", "AAT", "AAU", "AB", "ABB", "ABBV", "ABC",
-    "ABCB", "ABCL", "ABCM", "ABEO", "ABEV", "ABG", "ABIO", "ABM",
-    "ABNB", "ABOS", "ABR", "ABSI", "ABT", "ABTX", "ABUS", "ACAD",
-    "ACAH", "ACAQ", "ACAT", "ACB", "ACBI", "ACC", "ACCD", "ACCO",
-    "ACEL", "ACER", "ACES", "ACET", "ACEVA", "ACGL", "ACHC", "ACHR",
-    "ACHV", "ACI", "ACIC", "ACIU", "ACIW", "ACLS", "ACM", "ACMR",
-    "ACN", "ACNB", "ACOR", "ACP", "ACRE", "ACRS", "ACRV", "ACRX",
-    "ACST", "ACT", "ACTD", "ACTG", "ACTL", "ACVA", "ACXM", "ACXP",
-    "ADAG", "ADAL", "ADAP", "ADBE", "ADC", "ADCT", "ADD", "ADEA",
+    # Small Cap Financials (High Volume)
+    "AFRM", "ALLY", "COIN", "HOOD", "IBKR", "LPLA", "NAVI", "NDAQ",
+    "SOFI", "UPST", "OZK", "PACW", "PNFP", "SBCF", "UBSI", "UCBI",
+    "UMBF", "WAFD", "WSFS", "WTFC", "CBSH", "COLB", "CVBF", "EWBC",
+    "FCNCA", "FFBC", "FIBK", "FITB", "GBCI", "LKFN", "NTRS", "OCFC",
+    "STT", "TRMK", "ZION", "ABCB", "BANC", "BOKF", "BPOP", "CADE",
     
-    # Small Cap Consumer
-    "AAL", "AAME", "AAOI", "AAON", "AAP", "AAT", "ABB", "ABBV",
-    "ABG", "ABM", "ABNB", "ABR", "ABT", "ABTX", "ACAD", "ACC",
-    "ACCO", "ACEL", "ACH", "ACHC", "ACI", "ACIW", "ACM", "ACMR",
-    "ACN", "ACOR", "ACP", "ACRE", "ACRX", "ACT", "ACTG", "ADBE",
-    "ADC", "ADD", "ADEA", "ADEL", "ADI", "ADM", "ADMA", "ADMP",
-    "ADMS", "ADN", "ADNT", "ADP", "ADPT", "ADS", "ADSK", "ADT",
-    "ADTN", "ADTX", "ADUS", "ADV", "ADVM", "ADVS", "ADX", "ADXN",
-    "AE", "AEE", "AEG", "AEGN", "AEHR", "AEIS", "AEL", "AEM",
-    "AEMD", "AEO", "AEP", "AER", "AERI", "AES", "AESE", "AEVA",
-    "AEY", "AEYE", "AFB", "AFC", "AFG", "AFGE", "AFI", "AFIB",
+    # Small Cap Consumer (High Volume)
+    "CHWY", "CVNA", "DKS", "ETSY", "FIVE", "GRPN", "HIBB", "LULU",
+    "OSTK", "PENN", "PLAY", "PLNT", "SHAK", "SIG", "SKX", "WING",
+    "YETI", "BROS", "CAKE", "CAVA", "COOK", "EAT", "EYE", "FWRG",
+    "JACK", "KRUS", "LOCO", "MODG", "PRTY", "PSMT", "RUTH", "TXRH",
+    "BJRI", "BLMN", "CBRL", "CHUY", "DENN", "DIN", "FRGI", "GTIM",
     
-    # Small Cap Energy
-    "AADI", "AAL", "AAP", "AAPL", "AAT", "ABBV", "ABG", "ABM",
-    "ABNB", "ABR", "ACA", "ACAD", "ACCO", "ACH", "ACI", "ACM",
-    "ACN", "ACP", "ACRE", "ACT", "ACTG", "ADBE", "ADC", "ADEA",
-    "ADI", "ADM", "ADP", "ADS", "ADSK", "ADT", "ADTN", "ADV",
-    "ADX", "AE", "AEE", "AEG", "AEL", "AEM", "AEO", "AEP",
-    "AER", "AES", "AFB", "AFC", "AFG", "AFI", "AFL", "AFT",
-    "AG", "AGBA", "AGC", "AGCO", "AGD", "AGE", "AGEN", "AGFY",
-    "AGI", "AGIO", "AGL", "AGLE", "AGM", "AGNC", "AGO", "AGR",
-    "AGRI", "AGRX", "AGS", "AGTC", "AGX", "AGYS", "AHC", "AHCO",
-    "AHG", "AHH", "AHI", "AHPI", "AHR", "AHT", "AI", "AIC",
+    # Small Cap Energy (High Volume)
+    "AMLP", "AM", "AROC", "CIVI", "CPE", "CRGY", "DMLP", "DRQ",
+    "ERF", "GPOR", "GPRK", "HESM", "HLX", "HP", "KOS", "LPI",
+    "MTDR", "MUR", "NOG", "OVV", "PARR", "PDCE", "PDS", "PR",
+    "PTEN", "REPX", "RIG", "ROCC", "SD", "SM", "SWN", "TDW",
+    "TRGP", "TTI", "USAC", "VNOM", "VTS", "WTI", "WTTR", "XEC",
     
-    # Small Cap Industrials
-    "AAON", "AAP", "AAT", "ABBV", "ABG", "ABM", "ABR", "ABT",
-    "ABTX", "ACAD", "ACC", "ACCO", "ACEL", "ACH", "ACI", "ACIW",
-    "ACM", "ACMR", "ACN", "ACOR", "ACP", "ACRE", "ACT", "ACTG",
-    "ADBE", "ADC", "ADEA", "ADI", "ADM", "ADP", "ADS", "ADSK",
-    "ADT", "ADTN", "ADV", "ADX", "AE", "AEE", "AEG", "AEL",
-    "AEM", "AEO", "AEP", "AER", "AES", "AFB", "AFC", "AFG",
-    "AFI", "AFL", "AFT", "AG", "AGCO", "AGE", "AGEN", "AGI",
-    "AGIO", "AGL", "AGLE", "AGM", "AGNC", "AGO", "AGR", "AGRI",
-    "AGS", "AGTC", "AGX", "AGYS", "AHC", "AHCO", "AHH", "AHR",
-    "AHT", "AI", "AIC", "AIG", "AIHS", "AIM", "AIN", "AINV",
+    # Small Cap Industrials (High Volume)
+    "AAL", "ALK", "ARCB", "ASGN", "ATKR", "AWI", "AYI", "BECN",
+    "BLDR", "BMI", "BWXT", "CACI", "CAR", "CIR", "CLH", "CNXN",
+    "CRS", "CW", "DY", "EBC", "ENS", "ESE", "EXPO", "FELE",
+    "FIX", "FLOW", "FORM", "FSS", "GBX", "GEF", "GFF", "GHC",
+    "GMS", "GNW", "HI", "HNI", "HRI", "HXL", "IBOC", "IESC",
     
-    # Small Cap REITs
-    "ACC", "ACRE", "ADC", "AFCG", "AFT", "AG", "AGM", "AGNC",
-    "AGO", "AHH", "AHT", "AI", "AIG", "AIM", "AIN", "AINV",
-    "AIR", "AIV", "AIZ", "AJG", "AJRD", "AJX", "AKAM", "AKR",
-    "AL", "ALB", "ALC", "ALEX", "ALG", "ALGN", "ALIT", "ALK",
-    "ALL", "ALLE", "ALLY", "ALNY", "ALOT", "ALP", "ALPN", "ALRM",
-    "ALS", "ALSN", "ALT", "ALTA", "ALTG", "ALTI", "ALTO", "ALTR",
-    "ALV", "ALVR", "ALX", "ALXN", "ALXO", "AM", "AMAG", "AMAL",
-    "AMAT", "AMBA", "AMBC", "AMBI", "AMC", "AMCR", "AMCX", "AMD",
-    "AME", "AMED", "AMEH", "AMG", "AMGN", "AMH", "AMHC", "AMK",
-    "AMKR", "AMLP", "AMLX", "AMN", "AMNB", "AMOT", "AMP", "AMPE",
+    # Small Cap REITs (High Volume)
+    "ACC", "ADC", "AGNC", "AIV", "AKR", "ALEX", "APLE", "BFS",
+    "BRG", "BXMT", "CIO", "CLPR", "CTO", "DEA", "DEI", "ELME",
+    "EPR", "ESRT", "FAF", "GEO", "GMRE", "GTY", "HIW", "INN",
+    "IIPR", "JBGS", "KRG", "LAMR", "LXP", "MAC", "MDV", "MPW",
+    "NHI", "NNN", "OFC", "OHI", "OUT", "PCH", "PDM", "PEB",
     
-    # Additional Small Caps (Meme stocks, SPACs, High Beta)
-    "GME", "AMC", "BB", "BBBY", "CLOV", "WISH", "WKHS", "RIDE",
-    "GOEV", "HYLN", "NKLA", "SPCE", "PLTR", "SOFI", "HOOD", "COIN",
-    "RBLX", "UPST", "AFRM", "DKNG", "PENN", "SKLZ", "PTON", "BYND",
-    "CRSR", "LMND", "ROOT", "OPEN", "VLDR", "LAZR", "MVIS", "QS",
-    "CHPT", "BLNK", "FCEL", "PLUG", "BE", "ENVX", "ARVL", "PTRA",
-    "GGPI", "CCIV", "DCRC", "SNPR", "THCB", "STPK", "GIK", "CIIC",
-    "FSR", "CANOO", "SOLO", "AYRO", "WKHS", "XL", "CLSK", "MARA",
-    "RIOT", "HUT", "BITF", "HIVE", "BTBT", "CAN", "EBON", "SOS",
+    # High Beta / Meme / SPACs (High Volume)
+    "GME", "AMC", "BB", "CLOV", "WISH", "WKHS", "RIDE", "GOEV",
+    "HYLN", "NKLA", "SPCE", "SKLZ", "BYND", "CRSR", "LMND", "ROOT",
+    "OPEN", "VLDR", "LAZR", "MVIS", "QS", "CHPT", "BLNK", "FCEL",
+    "PLUG", "BE", "ARVL", "PTRA", "FSR", "SOLO", "AYRO", "XL",
+    "CLSK", "MARA", "RIOT", "HUT", "BITF", "HIVE", "BTBT", "CAN",
     
-    # More Russell 2000 Components (Alphabetical expansion)
-    "AAOI", "AAWW", "ABCB", "ABCO", "ABEO", "ABEV", "ABG", "ABIO",
-    "ABMD", "ABNB", "ABOS", "ABR", "ABST", "ABTX", "ABUS", "ACAD",
-    "ACAH", "ACAM", "ACAQ", "ACB", "ACBI", "ACCD", "ACCO", "ACEL",
-    "ACER", "ACES", "ACET", "ACGL", "ACHC", "ACHR", "ACHV", "ACI",
-    "ACIC", "ACIU", "ACIW", "ACLS", "ACMR", "ACNB", "ACOR", "ACP",
-    "ACRE", "ACRS", "ACRV", "ACRX", "ACST", "ACTD", "ACTG", "ACTL",
-    "ACVA", "ACXM", "ACXP", "ADAG", "ADAL", "ADAP", "ADBE", "ADC",
-    "ADCT", "ADD", "ADEA", "ADEL", "ADGI", "ADGM", "ADI", "ADIL",
-    "ADM", "ADMA", "ADMP", "ADMS", "ADN", "ADNT", "ADP", "ADPT",
-    "ADRO", "ADS", "ADSK", "ADT", "ADTH", "ADTN", "ADTX", "ADUS",
-    "ADV", "ADVM", "ADVS", "ADVY", "ADX", "ADXN", "ADXS", "AE",
-    "AEAE", "AEB", "AEE", "AEG", "AEGN", "AEHR", "AEIS", "AEL",
-    "AEM", "AEMD", "AENT", "AEO", "AEP", "AER", "AERI", "AES",
-    "AESE", "AEVA", "AEY", "AEYE", "AEZS", "AF", "AFAR", "AFB",
-    "AFBI", "AFC", "AFCG", "AFG", "AFGE", "AFI", "AFIB", "AFIN",
-    "AFL", "AFMD", "AFRI", "AFRM", "AFT", "AFTR", "AFYA", "AG",
-    "AGAC", "AGBA", "AGC", "AGCO", "AGD", "AGE", "AGEN", "AGFS",
-    "AGFY", "AGI", "AGIO", "AGL", "AGLE", "AGM", "AGMH", "AGNC",
+    # Additional Russell 2000 (Alphabetical - High Volume Focus)
+    "AAOI", "AAXJ", "ABCB", "ABCM", "ABEO", "ABG", "ABM", "ABNB",
+    "ABR", "ABST", "ABUS", "ACAD", "ACBI", "ACCD", "ACCO", "ACEL",
+    "ACER", "ACIA", "ACLS", "ACMR", "ACNB", "ACOR", "ACRE", "ACRX",
+    "ACTG", "ADAP", "ADCT", "ADEA", "ADI", "ADMA", "ADNT", "ADP",
+    "ADPT", "ADSK", "ADTN", "ADUS", "ADVM", "ADXN", "AEHR", "AEIS",
+    "AEMD", "AERI", "AEVA", "AFCG", "AFG", "AFIB", "AFMD", "AGEN",
+    "AGIO", "AGLE", "AGNC", "AGRI", "AGRX", "AGTC", "AHCO", "AIHS",
+    "AINV", "AIRG", "AIRT", "AKAM", "AKBA", "AKRO", "AKTS", "AKUS",
+    "ALBO", "ALDX", "ALEC", "ALGM", "ALGN", "ALGT", "ALHC", "ALIM",
+    "ALJJ", "ALKS", "ALLK", "ALLO", "ALLT", "ALLY", "ALNY", "ALOT",
+    "ALPN", "ALRM", "ALRS", "ALSK", "ALTA", "ALTG", "ALTO", "ALTR",
+    "ALVR", "ALXO", "AMAL", "AMBA", "AMBC", "AMCR", "AMCX", "AMED",
+    "AMEH", "AMGN", "AMKR", "AMNB", "AMOT", "AMPE", "AMPH", "AMPL",
+    "AMPY", "AMRN", "AMRS", "AMSC", "AMSF", "AMSWA", "AMTB", "AMTX",
+    "AMWD", "AMYT", "ANAB", "ANDE", "ANGI", "ANIK", "ANIP", "ANSS",
+    "ANTE", "AOSL", "AOUT", "APAM", "APDN", "APEI", "APEX", "APGE",
+    "APLD", "APLE", "APLS", "APLT", "APOG", "APPF", "APPN", "APPS",
+    "APRN", "APTX", "APVO", "APYX", "AQMS", "AQST", "AQUA", "ARAV",
+    "ARAY", "ARCC", "ARCH", "ARCO", "ARCT", "ARDX", "ARES", "ARGX",
+    "ARHS", "ARKK", "ARKO", "ARLO", "ARMK", "AROC", "AROW", "ARQT",
+    "ARRY", "ARTL", "ARTNA", "ARVN", "ARWR", "ASAI", "ASAN", "ASB",
+    "ASGN", "ASIX", "ASLE", "ASML", "ASND", "ASO", "ASPN", "ASPS",
+    "ASRT", "ASTC", "ASTE", "ASTR", "ASTS", "ASUR", "ASXC", "ATAI",
+    "ATEC", "ATEN", "ATER", "ATGE", "ATHM", "ATHX", "ATKR", "ATLC",
+    "ATLO", "ATNF", "ATNI", "ATNM", "ATOM", "ATOS", "ATRA",
 ]
 
-# ===================== ETFs =====================
+# ===================== KEY ETFs (Always Scanned) =====================
 ETF_SYMBOLS = [
     # Major Index ETFs
-    "SPY", "QQQ", "IWM", "DIA", "MDY", "IJR", "IWB", "IWF", "IWD",
-    "VTI", "VOO", "VTV", "VUG", "VB", "VBR", "VBK", "VO", "VOE",
+    "SPY", "QQQ", "IWM", "DIA", "MDY", "IJR",
     
     # Sector ETFs
     "XLF", "XLK", "XLE", "XLV", "XLI", "XLY", "XLP", "XLU", "XLRE", "XLC", "XLB",
-    "VGT", "VHT", "VFH", "VCR", "VDC", "VDE", "VIS", "VAW", "VNQ", "VOX",
-    "IYW", "IYF", "IYH", "IYC", "IYK", "IYE", "IYJ", "IYM", "IYR", "IYZ",
     
-    # Leveraged/Inverse
-    "TQQQ", "SQQQ", "SPXU", "UPRO", "SOXL", "SOXS", "LABU", "LABD",
-    "TNA", "TZA", "FAS", "FAZ", "NUGT", "DUST", "JNUG", "JDST",
-    "SPXS", "SDOW", "UDOW", "URTY", "SRTY", "ERX", "ERY", "GUSH", "DRIP",
-    "FNGU", "FNGD", "TECL", "TECS", "CURE", "HIBL", "HIBS", "WEBL", "WEBS",
-    
-    # ARK ETFs
-    "ARKK", "ARKG", "ARKF", "ARKQ", "ARKW", "ARKX", "PRNT", "IZRL",
+    # Leveraged
+    "TQQQ", "SQQQ", "SPXU", "UPRO", "SOXL", "SOXS", "TNA", "TZA",
     
     # Volatility
-    "VXX", "UVXY", "SVXY", "VIXY", "VIXM", "VXZ", "TVIX",
+    "VXX", "UVXY", "SVXY",
     
-    # Bonds/Rates
-    "TLT", "IEF", "SHY", "HYG", "LQD", "JNK", "BND", "AGG", "VCIT",
-    "VCSH", "VGSH", "VGIT", "VGLT", "MUB", "SUB", "TIP", "STIP",
-    "TMF", "TMV", "TBT", "TBF", "EDV", "ZROZ", "SPTL", "SPLB",
+    # Key Thematic
+    "ARKK", "ARKG", "ARKF", "ARKW",
     
     # Commodities
-    "GLD", "SLV", "USO", "UNG", "PPLT", "PALL", "DBC", "DBA",
-    "GDX", "GDXJ", "SIL", "SILJ", "COPX", "REMX", "URA", "WEAT",
-    "CORN", "SOYB", "CANE", "JO", "NIB", "COW", "WOOD", "CUT",
-    
-    # International
-    "EEM", "EFA", "FXI", "EWJ", "EWZ", "VWO", "IEMG", "VEA", "VEU",
-    "EWY", "EWT", "EWG", "EWU", "EWC", "EWA", "EWH", "EWS", "EWM",
-    "INDA", "INDY", "PIN", "SMIN", "FM", "IEUR", "ERUS", "RSX",
-    
-    # Thematic
-    "ARKK", "BOTZ", "ROBO", "HACK", "CIBR", "CLOU", "WCLD", "IGV",
-    "SKYY", "FINX", "IPAY", "BLOK", "BITO", "GBTC", "ETHE", "MSOS",
-    "MJ", "YOLO", "POTX", "ICLN", "TAN", "FAN", "QCLN", "PBW",
-    "LIT", "DRIV", "IDRV", "KARS", "CARZ", "JETS", "AWAY", "NERD",
-    "ESPO", "HERO", "GAMR", "BETZ", "BJK", "PEJ", "SOCL", "BUZZ",
-    
-    # Factor ETFs
-    "MTUM", "VLUE", "QUAL", "SIZE", "USMV", "SPLV", "SPHD", "HDV",
-    "VIG", "DGRO", "NOBL", "SDY", "DVY", "VYM", "SCHD", "SPYD",
+    "GLD", "SLV", "USO", "GDX",
 ]
 
-# Combined unique list function
-def get_all_symbols():
-    """Get all unique symbols across all indices"""
+
+# ===================== HELPER FUNCTIONS =====================
+
+def get_spy_symbols() -> List[str]:
+    """Get SPY constituents (Tier 1 priority)"""
+    return list(set(SPY_SYMBOLS))
+
+def get_qqq_symbols() -> List[str]:
+    """Get QQQ constituents (Tier 1 priority)"""
+    return list(set(QQQ_SYMBOLS))
+
+def get_iwm_symbols() -> List[str]:
+    """Get IWM constituents (Tier 3 rotating)"""
+    return list(set(IWM_SYMBOLS))
+
+def get_etf_symbols() -> List[str]:
+    """Get key ETFs (always scanned)"""
+    return list(set(ETF_SYMBOLS))
+
+def get_tier1_symbols() -> List[str]:
+    """
+    Get Tier 1 symbols (SPY + QQQ + ETFs)
+    These are scanned every cycle
+    """
+    tier1 = set(SPY_SYMBOLS)
+    tier1.update(QQQ_SYMBOLS)
+    tier1.update(ETF_SYMBOLS)
+    return list(tier1)
+
+def get_tier3_symbols() -> List[str]:
+    """
+    Get Tier 3 symbols (IWM only, excluding those in Tier 1)
+    These are scanned in rotating batches
+    """
+    tier1 = set(get_tier1_symbols())
+    tier3 = set(IWM_SYMBOLS) - tier1
+    return list(tier3)
+
+def get_all_symbols() -> List[str]:
+    """Get all unique symbols across all tiers"""
     all_syms = set()
-    all_syms.update(SP500_SYMBOLS)
-    all_syms.update(NASDAQ1000_SYMBOLS)
-    all_syms.update(RUSSELL2000_SYMBOLS)
+    all_syms.update(SPY_SYMBOLS)
+    all_syms.update(QQQ_SYMBOLS)
+    all_syms.update(IWM_SYMBOLS)
     all_syms.update(ETF_SYMBOLS)
     return list(all_syms)
+
+def get_universe_stats() -> Dict:
+    """Get statistics about the symbol universe"""
+    spy = set(SPY_SYMBOLS)
+    qqq = set(QQQ_SYMBOLS)
+    iwm = set(IWM_SYMBOLS)
+    etfs = set(ETF_SYMBOLS)
+    
+    tier1 = spy | qqq | etfs
+    tier3 = iwm - tier1
+    
+    return {
+        "spy_count": len(spy),
+        "qqq_count": len(qqq),
+        "iwm_count": len(iwm),
+        "etf_count": len(etfs),
+        "tier1_count": len(tier1),
+        "tier3_count": len(tier3),
+        "total_unique": len(spy | qqq | iwm | etfs),
+        "overlap_spy_qqq": len(spy & qqq),
+        "metadata": UNIVERSE_METADATA
+    }
+
+def is_rebalance_due() -> bool:
+    """Check if quarterly rebalance is due"""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    for rebal_date in REBALANCE_DATES:
+        if today >= rebal_date and rebal_date > UNIVERSE_METADATA["last_updated"]:
+            return True
+    return False
+
+def get_next_rebalance_date() -> str:
+    """Get the next quarterly rebalance date"""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    for rebal_date in REBALANCE_DATES:
+        if rebal_date > today:
+            return rebal_date
+    return "2027-03-19"  # Next year Q1
+
+
+# ===================== LEGACY COMPATIBILITY =====================
+# Keep these for backward compatibility with existing code
+
+SP500_SYMBOLS = SPY_SYMBOLS
+NASDAQ1000_SYMBOLS = QQQ_SYMBOLS  # QQQ is Nasdaq-100, close enough
+RUSSELL2000_SYMBOLS = IWM_SYMBOLS
