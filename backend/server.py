@@ -2923,18 +2923,29 @@ async def websocket_quotes(websocket: WebSocket):
     try:
         initial_quotes = []
         for symbol in DEFAULT_STREAM_SYMBOLS[:8]:
-            quote = await fetch_quote(symbol)
-            if quote:
-                initial_quotes.append(quote)
+            try:
+                quote = await fetch_quote(symbol)
+                if quote:
+                    # Ensure all values are JSON serializable
+                    clean_quote = {k: v for k, v in quote.items() if not k.startswith('_')}
+                    initial_quotes.append(clean_quote)
+            except Exception as symbol_err:
+                print(f"Error fetching quote for {symbol}: {symbol_err}")
             await asyncio.sleep(0.3)  # Stagger requests
         
-        await manager.send_personal_message({
-            "type": "initial",
-            "data": initial_quotes,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }, websocket)
+        if initial_quotes:
+            await manager.send_personal_message({
+                "type": "initial",
+                "data": initial_quotes,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }, websocket)
+            print(f"Sent {len(initial_quotes)} initial quotes")
+        else:
+            print("No initial quotes available")
     except Exception as e:
         print(f"Error sending initial data: {e}")
+        import traceback
+        traceback.print_exc()
     
     try:
         while True:
@@ -2961,9 +2972,12 @@ async def websocket_quotes(websocket: WebSocket):
                 await manager.send_personal_message({"type": "pong"}, websocket)
     
     except WebSocketDisconnect:
+        print("WebSocket client disconnected gracefully")
         manager.disconnect(websocket)
     except Exception as e:
         print(f"WebSocket error: {e}")
+        import traceback
+        traceback.print_exc()
         manager.disconnect(websocket)
 
 @app.get("/api/stream/status")
