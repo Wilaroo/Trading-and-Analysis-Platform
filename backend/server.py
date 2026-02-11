@@ -2896,8 +2896,13 @@ async def stream_quotes():
 @app.on_event("startup")
 async def startup_event():
     """Start background streaming task and background scanner"""
+    # Start WebSocket streaming first (lightweight)
     asyncio.create_task(stream_quotes())
     print("WebSocket streaming started")
+    
+    # Give services time to initialize before starting heavy background tasks
+    # This prevents overwhelming IB Gateway on startup
+    await asyncio.sleep(5)
     
     # Start background scanner for live alerts
     await background_scanner.start()
