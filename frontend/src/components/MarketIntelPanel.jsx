@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import api from '../utils/api';
 import { toast } from 'sonner';
+import { renderTickerAwareContent } from '../utils/tickerUtils';
 
 const REPORT_ICONS = {
   sunrise: Sunrise,
