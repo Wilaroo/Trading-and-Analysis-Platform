@@ -596,7 +596,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                         <div className="flex items-center gap-2 mt-1 text-xs text-zinc-500">
                           <span>{item.source}</span>
                           <span>•</span>
-                          <span>{new Date(item.datetime).toLocaleString()}</span>
+                          <span>{new Date(item.timestamp || item.datetime).toLocaleString()}</span>
                           {item.sentiment && (
                             <>
                               <span>•</span>
