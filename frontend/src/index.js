@@ -27,8 +27,8 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
+// Note: StrictMode disabled to prevent double-mounting issues with WebSockets
+// and IB connections. Re-enable for debugging if needed.
 root.render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
+  <App />
 );
