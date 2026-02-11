@@ -1022,10 +1022,12 @@ class EnhancedBackgroundScanner:
             
             # Skip low volume stocks (RVOL filter)
             if snapshot.rvol < self._min_rvol_filter:
+                self._symbols_skipped_rvol += 1
                 return
             
-            # Update RVOL cache
+            # Update caches
             self._rvol_cache[symbol] = (snapshot.rvol, datetime.now(timezone.utc))
+            self._adv_cache[symbol] = int(snapshot.avg_volume)
             
             # Get tape reading for this symbol
             tape = await self._get_tape_reading(symbol, snapshot)
@@ -1038,6 +1040,14 @@ class EnhancedBackgroundScanner:
                 # Check time and regime validity
                 if not self._is_setup_valid_now(setup_type):
                     continue
+                
+                # ADV filter - intraday/scalp setups require higher volume
+                if setup_type in self._intraday_setups:
+                    if snapshot.avg_volume < self._min_adv_intraday:
+                        continue  # Skip this setup for this symbol (low volume)
+                else:
+                    if snapshot.avg_volume < self._min_adv_general:
+                        continue  # Skip this setup for this symbol (low volume)
                 
                 # Call appropriate scanner method
                 alert = await self._check_setup(setup_type, symbol, snapshot, tape)
