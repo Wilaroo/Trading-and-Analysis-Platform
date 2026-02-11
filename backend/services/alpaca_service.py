@@ -92,9 +92,14 @@ class AlpacaService:
         cache_key = symbol_upper
         if cache_key in self._quote_cache:
             cached = self._quote_cache[cache_key]
-            cache_age = (datetime.now(timezone.utc) - cached.get('_cached_at', datetime.min.replace(tzinfo=timezone.utc))).total_seconds()
-            if cache_age < self._cache_ttl:
-                return cached
+            cached_at_str = cached.get('_cached_at', '')
+            try:
+                cached_at = datetime.fromisoformat(cached_at_str) if cached_at_str else datetime.min.replace(tzinfo=timezone.utc)
+                cache_age = (datetime.now(timezone.utc) - cached_at).total_seconds()
+                if cache_age < self._cache_ttl:
+                    return cached
+            except (ValueError, TypeError):
+                pass  # Invalid cache, will fetch fresh data
         
         try:
             from alpaca.data.requests import StockLatestQuoteRequest, StockLatestTradeRequest
