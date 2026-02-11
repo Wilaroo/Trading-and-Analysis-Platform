@@ -172,26 +172,32 @@ Triggers AI Coaching Notification
 16. **Wave Scanning** (Feb 2026): Tiered scanning of 1,425 symbols
 17. **Smart Watchlist** (Feb 2026): Hybrid auto/manual with strategy-based expiration
 18. **Scanner → AI Coaching** (Feb 2026): Proactive notifications for high-priority alerts
-19. **AI Trading Assistant** (Feb 2026): Integrated panel with Bot + AI + Scanner
+19. **AI Trading Assistant Phase 1** (Feb 2026): Integrated panel with Bot + AI + Scanner
     - Bot controls (Start/Stop, Mode selector) in header
     - Coaching alerts with Execute/Half Size/Pass buttons
     - Confirmation dialog before trade execution
     - Conversational trading: "take NVDA", "show my trades", "stop the bot"
     - Removed separate TradingBotPanel
+20. **AI Trading Assistant Phase 2** (Feb 2026): AI-Curated Opportunities
+    - Two-column layout: Expanded chat (left) + Curated widget (right)
+    - AI-Curated Opportunities widget shows top 3-5 TAKE/WAIT setups
+    - Rank badges (#1, #2, #3), verdict icons, one-click Execute/Pass
+    - Collapsed sections (Bot Trades, Earnings, Watchlist) for more chat space
+    - Toast notifications for new TAKE opportunities
 
 ## Prioritized Backlog
 ### P0 - Completed
 - ✅ Scanner ↔ AI ↔ Trading Bot real-time integration
-- ✅ AI Trading Assistant integrated panel
+- ✅ AI Trading Assistant Phase 1 (integrated panel)
+- ✅ AI Trading Assistant Phase 2 (AI-curated opportunities widget)
 
 ### P1 - Next Up
 - Full index population (Russell 2000 needs ~1,600 more, Nasdaq 1000 needs ~400 more)
-- Frontend toast notifications for AI coaching alerts
-- AI coaching panel integration with scanner notifications
+- Portfolio awareness: Proactive suggestions ("Scale out of AMD?", "Heavy tech exposure")
+- Audio alerts for high-priority setups
 
 ### P2 - Future
 - Strategy backtesting integration
-- Alert sounds / browser push notifications
 - Level 2 order book analysis (tape reading)
 - Full bot state persistence in MongoDB
 - Weekly performance digest
