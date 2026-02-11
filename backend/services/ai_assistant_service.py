@@ -1013,29 +1013,61 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         scanner_keywords = ['setup', 'setups', 'opportunity', 'opportunities', 'forming', 'trade ideas',
                           'what should i trade', 'what to trade', 'best trades', 'scanner', 'scan',
                           'alerts', 'imminent', 'about to trigger', 'rubber band', 'breakout forming',
-                          'scalp', 'swing', 'squeeze', 'short squeeze', 'in play']
+                          'scalp', 'swing', 'squeeze', 'short squeeze', 'in play', 'watchlist']
         wants_scanner_info = any(keyword in user_message.lower() for keyword in scanner_keywords)
         
         if wants_scanner_info:
             try:
-                # Use advanced alert system for organized alerts
-                from services.alert_system import get_alert_system
-                alert_system = get_alert_system()
-                alert_context = alert_system.get_alerts_summary_for_ai()
-                if alert_context:
-                    context_parts.append(alert_context)
+                # Primary: Use enhanced scanner for real-time alerts
+                from services.enhanced_scanner import get_enhanced_scanner
+                scanner = get_enhanced_scanner()
+                live_alerts = scanner.get_live_alerts()
+                
+                if live_alerts:
+                    alert_lines = ["\n**🔴 LIVE SCANNER ALERTS:**"]
+                    for alert in live_alerts[:10]:  # Top 10
+                        tape_icon = "✓" if alert.tape_confirmation else ""
+                        priority_icon = "🔥" if alert.priority.value in ["high", "critical"] else ""
+                        alert_lines.append(
+                            f"- {priority_icon}**{alert.symbol}** {alert.direction.upper()} @ ${alert.current_price:.2f} - "
+                            f"{alert.setup_type} (WR: {alert.strategy_win_rate:.0%}) {tape_icon}"
+                        )
+                    context_parts.append("\n".join(alert_lines))
+                
+                # Also get smart watchlist context
+                try:
+                    from services.smart_watchlist_service import get_smart_watchlist
+                    watchlist = get_smart_watchlist()
+                    wl_items = watchlist.get_watchlist()[:5]
+                    if wl_items:
+                        wl_lines = ["\n**📋 SMART WATCHLIST (Top 5):**"]
+                        for item in wl_items:
+                            source = "📌" if item.is_sticky else "🔍"
+                            wl_lines.append(f"- {source} **{item.symbol}** ({item.timeframe.value}) - {len(item.strategies_matched)} strategies matched")
+                        context_parts.append("\n".join(wl_lines))
+                except Exception as wl_e:
+                    logger.debug(f"Watchlist context error: {wl_e}")
                     
             except Exception as e:
-                logger.warning(f"Error getting alert context: {e}")
-                # Fallback to basic scanner
+                logger.warning(f"Error getting enhanced scanner context: {e}")
+                # Fallback to alert system
                 try:
-                    from services.predictive_scanner import get_predictive_scanner
-                    scanner = get_predictive_scanner()
-                    scanner_context = scanner.get_setup_summary_for_ai()
-                    if scanner_context and "No significant" not in scanner_context:
-                        context_parts.append(scanner_context)
+                    from services.alert_system import get_alert_system
+                    alert_system = get_alert_system()
+                    alert_context = alert_system.get_alerts_summary_for_ai()
+                    if alert_context:
+                        context_parts.append(alert_context)
                 except Exception as e2:
-                    logger.warning(f"Error getting scanner context: {e2}")
+                    logger.warning(f"Error getting alert context: {e2}")
+                    # Fallback to basic scanner
+                    try:
+                        from services.predictive_scanner import get_predictive_scanner
+                        scanner = get_predictive_scanner()
+                        scanner_context = scanner.get_setup_summary_for_ai()
+                        if scanner_context and "No significant" not in scanner_context:
+                            context_parts.append(scanner_context)
+                    except Exception as e3:
+                        logger.warning(f"Error getting scanner context: {e3}")
         
         # 2f-d. Get REAL-TIME TECHNICAL DATA for mentioned symbols
         # Extract symbols from message - use strict filtering to avoid common words
