@@ -184,17 +184,25 @@ Triggers AI Coaching Notification
     - Rank badges (#1, #2, #3), verdict icons, one-click Execute/Pass
     - Collapsed sections (Bot Trades, Earnings, Watchlist) for more chat space
     - Toast notifications for new TAKE opportunities
+21. **Consolidated Stats Header** (Feb 2026): Removed QuickStatsRow
+    - All stats moved into AI Trading Assistant header
+    - Two-row layout: Account stats (top) + Bot controls (bottom)
+    - Top row: Net Liquidation, Today's P&L, Positions, Market Regime
+    - Bottom row: Bot toggle, P&L, open count, Mode selector
+    - Cleaner UI with more vertical space for content
 
 ## Prioritized Backlog
 ### P0 - Completed
 - ✅ Scanner ↔ AI ↔ Trading Bot real-time integration
 - ✅ AI Trading Assistant Phase 1 (integrated panel)
 - ✅ AI Trading Assistant Phase 2 (AI-curated opportunities widget)
+- ✅ Consolidated Stats Header (removed QuickStatsRow)
 
 ### P1 - Next Up
-- Full index population (Russell 2000 needs ~1,600 more, Nasdaq 1000 needs ~400 more)
 - Portfolio awareness: Proactive suggestions ("Scale out of AMD?", "Heavy tech exposure")
 - Audio alerts for high-priority setups
+- Focus Mode: Hide all sections except chat + top opportunity when actively trading
+- Full index population (Russell 2000 needs ~1,600 more, Nasdaq 1000 needs ~400 more)
 
 ### P2 - Future
 - Strategy backtesting integration
