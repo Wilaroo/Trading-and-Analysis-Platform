@@ -1143,21 +1143,27 @@ class EnhancedBackgroundScanner:
         return adv_data
     
     async def _scan_symbol_all_setups(self, symbol: str):
-        """Scan a single symbol for ALL enabled setups with tape reading"""
+        """
+        Scan a single symbol for ALL enabled setups with tape reading.
+        
+        NOTE: This method is only called for symbols that ALREADY passed ADV pre-filter.
+        We still check for higher intraday threshold for scalp setups.
+        """
         try:
             # Get technical snapshot
             snapshot = await self.technical_service.get_technical_snapshot(symbol)
             if not snapshot:
                 return
             
-            # Skip low volume stocks (RVOL filter)
+            # Skip low RVOL stocks (second filter after ADV)
             if snapshot.rvol < self._min_rvol_filter:
                 self._symbols_skipped_rvol += 1
                 return
             
-            # Update caches
-            self._rvol_cache[symbol] = (snapshot.rvol, datetime.now(timezone.utc))
-            self._adv_cache[symbol] = int(snapshot.avg_volume)
+            # Update caches with fresh data
+            now = datetime.now(timezone.utc)
+            self._rvol_cache[symbol] = (snapshot.rvol, now)
+            self._adv_cache[symbol] = (int(snapshot.avg_volume), now)
             
             # Get tape reading for this symbol
             tape = await self._get_tape_reading(symbol, snapshot)
@@ -1171,13 +1177,11 @@ class EnhancedBackgroundScanner:
                 if not self._is_setup_valid_now(setup_type):
                     continue
                 
-                # ADV filter - intraday/scalp setups require higher volume
+                # Intraday/scalp setups require HIGHER volume threshold
+                # (General ADV threshold already passed in pre-filter)
                 if setup_type in self._intraday_setups:
                     if snapshot.avg_volume < self._min_adv_intraday:
-                        continue  # Skip this setup for this symbol (low volume)
-                else:
-                    if snapshot.avg_volume < self._min_adv_general:
-                        continue  # Skip this setup for this symbol (low volume)
+                        continue  # Skip intraday setup - needs more volume
                 
                 # Call appropriate scanner method
                 alert = await self._check_setup(setup_type, symbol, snapshot, tape)
