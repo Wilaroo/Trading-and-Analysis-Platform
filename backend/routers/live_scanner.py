@@ -362,3 +362,44 @@ async def set_rvol_filter(
         "min_rvol_filter": min_rvol,
         "message": f"Symbols with RVOL < {min_rvol} will be skipped"
     }
+
+
+# ===================== ADV Volume Filter =====================
+
+@router.get("/config/volume-filter")
+async def get_volume_filter():
+    """Get current average daily volume (ADV) filter configuration"""
+    if not _scanner:
+        raise HTTPException(status_code=500, detail="Scanner not initialized")
+    
+    return {
+        "success": True,
+        **_scanner.get_volume_filter_config()
+    }
+
+
+@router.post("/config/volume-filter")
+async def set_volume_filter(
+    min_adv_general: int = Query(default=100_000, ge=0, description="Min ADV for general/swing setups"),
+    min_adv_intraday: int = Query(default=500_000, ge=0, description="Min ADV for intraday/scalp setups")
+):
+    """
+    Configure average daily volume (ADV) filters.
+    
+    - General/Swing setups: Stocks must have ADV >= min_adv_general
+    - Intraday/Scalp setups: Stocks must have ADV >= min_adv_intraday
+    
+    This ensures you only get alerts for liquid stocks that can be traded efficiently.
+    """
+    if not _scanner:
+        raise HTTPException(status_code=500, detail="Scanner not initialized")
+    
+    _scanner.set_volume_filters(min_adv_general, min_adv_intraday)
+    
+    return {
+        "success": True,
+        "min_adv_general": min_adv_general,
+        "min_adv_intraday": min_adv_intraday,
+        "message": f"Volume filters set: General>={min_adv_general:,}, Intraday>={min_adv_intraday:,}"
+    }
+
