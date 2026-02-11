@@ -10,25 +10,22 @@ import {
   ChevronRight,
   TrendingUp,
   TrendingDown,
-  Bell,
   Calendar,
   Eye,
   Zap,
-  DollarSign,
-  BarChart3,
   Target,
   Sparkles,
   AlertTriangle,
-  CheckCircle2,
   ArrowUpRight,
   RefreshCw,
   Activity,
-  Play,
   Pause,
   Power,
   Shield,
-  Settings,
-  Check
+  Check,
+  Star,
+  ArrowRight,
+  Clock
 } from 'lucide-react';
 import api from '../utils/api';
 import { toast } from 'sonner';
@@ -87,21 +84,21 @@ const createMarkdownComponents = (onTickerClick) => ({
 
 // ===================== UI COMPONENTS =====================
 
-const SectionHeader = ({ icon: Icon, title, count, isExpanded, onToggle, action }) => (
+const SectionHeader = ({ icon: Icon, title, count, isExpanded, onToggle, action, compact = false }) => (
   <div 
-    className="flex items-center justify-between py-2 px-3 bg-zinc-900/50 rounded-lg cursor-pointer hover:bg-zinc-800/50 transition-colors"
+    className={`flex items-center justify-between ${compact ? 'py-1.5 px-2' : 'py-2 px-3'} bg-zinc-900/50 rounded-lg cursor-pointer hover:bg-zinc-800/50 transition-colors`}
     onClick={onToggle}
   >
     <div className="flex items-center gap-2">
-      <Icon className="w-4 h-4 text-cyan-400" />
-      <span className="text-sm font-medium text-white">{title}</span>
+      <Icon className={`${compact ? 'w-3 h-3' : 'w-4 h-4'} text-cyan-400`} />
+      <span className={`${compact ? 'text-xs' : 'text-sm'} font-medium text-white`}>{title}</span>
       {count !== undefined && (
-        <span className="text-xs text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded">{count}</span>
+        <span className="text-[10px] text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded">{count}</span>
       )}
     </div>
     <div className="flex items-center gap-2">
       {action}
-      {isExpanded ? <ChevronDown className="w-4 h-4 text-zinc-400" /> : <ChevronRight className="w-4 h-4 text-zinc-400" />}
+      {isExpanded ? <ChevronDown className="w-3 h-3 text-zinc-400" /> : <ChevronRight className="w-3 h-3 text-zinc-400" />}
     </div>
   </div>
 );
@@ -109,132 +106,188 @@ const SectionHeader = ({ icon: Icon, title, count, isExpanded, onToggle, action 
 const ChatMessage = ({ message, isUser, onTickerClick }) => {
   const mdComponents = createMarkdownComponents(onTickerClick);
   return (
-    <div className={`flex gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
-      <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
-        isUser ? 'bg-cyan-500/20' : 'bg-amber-500/20'
+    <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
+      <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
+        isUser ? 'bg-cyan-500/20' : 'bg-gradient-to-br from-amber-500/30 to-cyan-500/30'
       }`}>
-        {isUser ? <User className="w-3 h-3 text-cyan-400" /> : <Bot className="w-3 h-3 text-amber-400" />}
+        {isUser ? <User className="w-4 h-4 text-cyan-400" /> : <Bot className="w-4 h-4 text-amber-400" />}
       </div>
-      <div className={`flex-1 max-w-[90%] ${isUser ? 'text-right' : ''}`}>
-        <div className={`inline-block p-2.5 rounded-lg text-sm ${
-          isUser ? 'bg-cyan-500/10 border border-cyan-500/20 text-white' : 'bg-zinc-800/50 border border-white/5 text-zinc-200'
+      <div className={`flex-1 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
+        <div className={`inline-block p-3 rounded-xl text-sm ${
+          isUser ? 'bg-cyan-500/10 border border-cyan-500/20 text-white' : 'bg-zinc-800/70 border border-white/5 text-zinc-200'
         }`}>
           {isUser ? message.content : (
             <ReactMarkdown components={mdComponents}>{message.content}</ReactMarkdown>
           )}
+        </div>
+        <div className="text-[10px] text-zinc-600 mt-1">
+          {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </div>
       </div>
     </div>
   );
 };
 
-const QuickPill = ({ label, onClick, loading, active }) => (
+const QuickPill = ({ label, onClick, loading, icon: Icon }) => (
   <button
     onClick={onClick}
     disabled={loading}
-    className={`px-2.5 py-1 rounded-full text-xs transition-all ${
-      active 
-        ? 'bg-cyan-500 text-black font-medium' 
-        : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700 border border-zinc-700'
-    } disabled:opacity-50`}
+    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs bg-zinc-800 text-zinc-300 hover:bg-zinc-700 border border-zinc-700 transition-all disabled:opacity-50"
   >
+    {Icon && <Icon className="w-3 h-3" />}
     {label}
   </button>
 );
 
-// ===================== COACHING ALERT MESSAGE =====================
+// ===================== AI-CURATED OPPORTUNITIES WIDGET =====================
 
-const CoachingAlertMessage = ({ alert, onExecute, onPass, onHalfSize, onTickerClick, executing }) => {
-  const verdictColors = {
-    'TAKE': 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-    'WAIT': 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-    'PASS': 'bg-red-500/20 text-red-400 border-red-500/30'
+const CuratedOpportunityCard = ({ opportunity, rank, onExecute, onPass, onTickerClick, executing }) => {
+  const verdictConfig = {
+    'TAKE': { bg: 'bg-emerald-500/20', border: 'border-emerald-500/40', text: 'text-emerald-400', icon: Check },
+    'WAIT': { bg: 'bg-amber-500/20', border: 'border-amber-500/40', text: 'text-amber-400', icon: Clock },
+    'PASS': { bg: 'bg-red-500/20', border: 'border-red-500/40', text: 'text-red-400', icon: X }
   };
   
-  const priorityColors = {
-    'critical': 'bg-red-500',
-    'high': 'bg-amber-500',
-    'medium': 'bg-blue-500',
-    'low': 'bg-zinc-500'
-  };
-
+  const config = verdictConfig[opportunity.verdict] || verdictConfig.WAIT;
+  const VerdictIcon = config.icon;
+  
   return (
-    <div className="flex gap-2">
-      <div className="flex-shrink-0 w-6 h-6 rounded-full bg-gradient-to-br from-cyan-500 to-amber-500 flex items-center justify-center">
-        <Zap className="w-3 h-3 text-black" />
+    <motion.div
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay: rank * 0.1 }}
+      className={`relative p-3 rounded-xl ${config.bg} border ${config.border} hover:scale-[1.02] transition-transform cursor-pointer`}
+      data-testid={`curated-opportunity-${rank}`}
+    >
+      {/* Rank Badge */}
+      <div className="absolute -top-2 -left-2 w-6 h-6 rounded-full bg-zinc-900 border-2 border-cyan-500 flex items-center justify-center">
+        <span className="text-xs font-bold text-cyan-400">#{rank}</span>
       </div>
-      <div className="flex-1">
-        <div className="bg-gradient-to-r from-cyan-900/20 to-amber-900/10 border border-cyan-500/20 rounded-lg p-3">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${priorityColors[alert.priority] || priorityColors.medium}`} />
-              <button 
-                onClick={() => onTickerClick(alert.symbol)}
-                className="text-lg font-bold text-white hover:text-cyan-400 transition-colors"
-              >
-                {alert.symbol}
-              </button>
-              <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                alert.direction === 'long' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
-              }`}>
-                {alert.direction?.toUpperCase()}
-              </span>
-            </div>
-            <span className={`text-xs px-2 py-1 rounded border ${verdictColors[alert.verdict] || verdictColors.WAIT}`}>
-              {alert.verdict}
-            </span>
-          </div>
-          
-          {/* Setup Info */}
-          <div className="text-xs text-zinc-400 mb-2">
-            {alert.setup_type?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-            {alert.alert_data?.win_rate > 0 && (
-              <span className="ml-2 text-zinc-500">
-                WR: {(alert.alert_data.win_rate * 100).toFixed(0)}%
-              </span>
-            )}
-            {alert.alert_data?.risk_reward > 0 && (
-              <span className="ml-2 text-zinc-500">
-                R:R {alert.alert_data.risk_reward.toFixed(1)}:1
-              </span>
-            )}
-          </div>
-          
-          {/* AI Coaching */}
-          <div className="text-sm text-zinc-200 mb-3">
-            {alert.coaching || alert.summary}
-          </div>
-          
-          {/* Action Buttons */}
+      
+      {/* Header */}
+      <div className="flex items-center justify-between mb-2 ml-4">
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={() => onTickerClick(opportunity.symbol)}
+            className="text-lg font-bold text-white hover:text-cyan-400 transition-colors"
+          >
+            {opportunity.symbol}
+          </button>
+          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+            opportunity.direction === 'long' ? 'bg-emerald-500/30 text-emerald-400' : 'bg-red-500/30 text-red-400'
+          }`}>
+            {opportunity.direction?.toUpperCase()}
+          </span>
+        </div>
+        <div className={`flex items-center gap-1 px-2 py-1 rounded-lg ${config.bg} ${config.text}`}>
+          <VerdictIcon className="w-3 h-3" />
+          <span className="text-xs font-bold">{opportunity.verdict}</span>
+        </div>
+      </div>
+      
+      {/* Setup & Stats */}
+      <div className="flex items-center gap-3 text-[11px] text-zinc-400 mb-2 ml-4">
+        <span>{opportunity.setup_type?.replace(/_/g, ' ')}</span>
+        {opportunity.alert_data?.win_rate > 0 && (
+          <span className="text-zinc-500">WR: {(opportunity.alert_data.win_rate * 100).toFixed(0)}%</span>
+        )}
+        {opportunity.alert_data?.risk_reward > 0 && (
+          <span className="text-zinc-500">R:R {opportunity.alert_data.risk_reward.toFixed(1)}:1</span>
+        )}
+      </div>
+      
+      {/* AI Summary */}
+      <p className="text-xs text-zinc-300 mb-3 ml-4 line-clamp-2">
+        {opportunity.summary || opportunity.coaching?.slice(0, 100)}
+      </p>
+      
+      {/* Quick Actions */}
+      <div className="flex items-center gap-2 ml-4">
+        {opportunity.verdict === 'TAKE' && (
+          <button
+            onClick={() => onExecute(opportunity)}
+            disabled={executing}
+            className="flex items-center gap-1 px-3 py-1.5 bg-emerald-500 text-black rounded-lg text-xs font-semibold hover:bg-emerald-400 transition-colors disabled:opacity-50"
+          >
+            {executing ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowRight className="w-3 h-3" />}
+            Execute
+          </button>
+        )}
+        {opportunity.verdict === 'WAIT' && (
+          <button
+            onClick={() => onExecute(opportunity)}
+            disabled={executing}
+            className="flex items-center gap-1 px-3 py-1.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg text-xs font-medium hover:bg-amber-500/30 transition-colors disabled:opacity-50"
+          >
+            Execute Anyway
+          </button>
+        )}
+        <button
+          onClick={() => onPass(opportunity)}
+          className="px-3 py-1.5 bg-zinc-700/50 text-zinc-400 rounded-lg text-xs hover:bg-zinc-700 transition-colors"
+        >
+          Pass
+        </button>
+      </div>
+    </motion.div>
+  );
+};
+
+const AICuratedWidget = ({ opportunities, onExecute, onPass, onTickerClick, executing, onRefresh, loading }) => {
+  const topOpportunities = opportunities
+    .filter(o => o.verdict === 'TAKE' || o.verdict === 'WAIT')
+    .slice(0, 5);
+  
+  if (topOpportunities.length === 0) {
+    return (
+      <div className="p-4 bg-zinc-900/50 rounded-xl border border-white/5">
+        <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => onExecute(alert)}
-              disabled={executing}
-              className="flex items-center gap-1 px-3 py-1.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-medium hover:bg-emerald-500/30 transition-colors disabled:opacity-50"
-              data-testid={`execute-alert-${alert.symbol}`}
-            >
-              {executing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-              Execute
-            </button>
-            <button
-              onClick={() => onHalfSize(alert)}
-              disabled={executing}
-              className="flex items-center gap-1 px-3 py-1.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg text-xs font-medium hover:bg-amber-500/30 transition-colors disabled:opacity-50"
-              data-testid={`half-size-alert-${alert.symbol}`}
-            >
-              Half Size
-            </button>
-            <button
-              onClick={() => onPass(alert)}
-              className="flex items-center gap-1 px-3 py-1.5 bg-zinc-500/20 text-zinc-400 border border-zinc-500/30 rounded-lg text-xs font-medium hover:bg-zinc-500/30 transition-colors"
-              data-testid={`pass-alert-${alert.symbol}`}
-            >
-              <X className="w-3 h-3" />
-              Pass
-            </button>
+            <Star className="w-4 h-4 text-amber-400" />
+            <span className="text-sm font-semibold text-white">AI-Curated Opportunities</span>
+          </div>
+          <button onClick={onRefresh} className="p-1.5 hover:bg-zinc-700 rounded-lg transition-colors">
+            <RefreshCw className={`w-3 h-3 text-zinc-400 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+        <div className="text-center py-6">
+          <Target className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+          <p className="text-xs text-zinc-500">No high-quality setups detected</p>
+          <p className="text-[10px] text-zinc-600 mt-1">Scanner is analyzing the market...</p>
+        </div>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="p-3 bg-gradient-to-br from-zinc-900/80 to-zinc-800/50 rounded-xl border border-cyan-500/20">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-amber-500 to-cyan-500 flex items-center justify-center">
+            <Star className="w-3 h-3 text-black" />
+          </div>
+          <div>
+            <span className="text-sm font-semibold text-white">AI-Curated Opportunities</span>
+            <span className="text-[10px] text-zinc-500 ml-2">Top {topOpportunities.length} setups</span>
           </div>
         </div>
+        <button onClick={onRefresh} className="p-1.5 hover:bg-zinc-700 rounded-lg transition-colors">
+          <RefreshCw className={`w-3 h-3 text-zinc-400 ${loading ? 'animate-spin' : ''}`} />
+        </button>
+      </div>
+      
+      <div className="space-y-3">
+        {topOpportunities.map((opp, idx) => (
+          <CuratedOpportunityCard
+            key={opp.timestamp || idx}
+            opportunity={opp}
+            rank={idx + 1}
+            onExecute={onExecute}
+            onPass={onPass}
+            onTickerClick={onTickerClick}
+            executing={executing}
+          />
+        ))}
       </div>
     </div>
   );
@@ -303,14 +356,14 @@ const ConfirmationDialog = ({ isOpen, trade, onConfirm, onCancel, loading }) => 
         <div className="flex gap-3">
           <button
             onClick={onCancel}
-            className="flex-1 py-2 bg-zinc-700 text-white rounded-lg hover:bg-zinc-600 transition-colors"
+            className="flex-1 py-2.5 bg-zinc-700 text-white rounded-lg hover:bg-zinc-600 transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={onConfirm}
             disabled={loading}
-            className="flex-1 py-2 bg-cyan-500 text-black font-medium rounded-lg hover:bg-cyan-400 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            className="flex-1 py-2.5 bg-cyan-500 text-black font-semibold rounded-lg hover:bg-cyan-400 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
             Confirm Trade
@@ -331,13 +384,13 @@ const BotStatusHeader = ({ status, onToggle, onModeChange, loading }) => {
   const pendingCount = status?.pending_trades_count || 0;
   
   return (
-    <div className="flex items-center justify-between p-2 bg-zinc-900/70 border-b border-white/10">
+    <div className="flex items-center justify-between px-3 py-2 bg-zinc-900/80 border-b border-white/5">
       {/* Left: Bot Status & P&L */}
       <div className="flex items-center gap-3">
         <button
           onClick={onToggle}
           disabled={loading}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
             isRunning 
               ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30' 
               : 'bg-zinc-700 text-zinc-300 border border-zinc-600 hover:bg-zinc-600'
@@ -354,20 +407,14 @@ const BotStatusHeader = ({ status, onToggle, onModeChange, loading }) => {
           {isRunning ? 'RUNNING' : 'STOPPED'}
         </button>
         
-        <div className="flex items-center gap-2 text-xs">
-          <span className={`font-mono font-semibold ${pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+        <div className="flex items-center gap-3 text-xs">
+          <span className={`font-mono font-bold ${pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
             {pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}
           </span>
-          <span className="text-zinc-500">|</span>
-          <span className="text-zinc-400">
-            {openCount} open
-          </span>
-          {pendingCount > 0 && (
-            <>
-              <span className="text-zinc-500">|</span>
-              <span className="text-amber-400">{pendingCount} pending</span>
-            </>
-          )}
+          <div className="flex items-center gap-2 text-zinc-500">
+            <span>{openCount} open</span>
+            {pendingCount > 0 && <span className="text-amber-400">{pendingCount} pending</span>}
+          </div>
         </div>
       </div>
       
@@ -418,12 +465,11 @@ const AICommandPanel = ({
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId] = useState(`session_${Date.now()}`);
   
-  // Section expansion state
+  // Section expansion state - collapsed by default for more chat space
   const [expandedSections, setExpandedSections] = useState({
-    botTrades: true,
+    botTrades: false,
     earnings: false,
-    watchlist: false,
-    scanner: false
+    watchlist: false
   });
   
   // Bot state
@@ -432,10 +478,11 @@ const AICommandPanel = ({
   const [botTradesTab, setBotTradesTab] = useState('open');
   const [botLoading, setBotLoading] = useState(false);
   
-  // Coaching alerts state
+  // Coaching alerts state (for AI-Curated Widget)
   const [coachingAlerts, setCoachingAlerts] = useState([]);
   const [dismissedAlerts, setDismissedAlerts] = useState(new Set());
   const [lastCoachingFetch, setLastCoachingFetch] = useState(null);
+  const [coachingLoading, setCoachingLoading] = useState(false);
   
   // Confirmation dialog
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, trade: null });
@@ -500,6 +547,7 @@ const AICommandPanel = ({
   // ===================== COACHING ALERTS =====================
   
   const fetchCoachingAlerts = useCallback(async () => {
+    setCoachingLoading(true);
     try {
       const params = lastCoachingFetch ? `?since=${lastCoachingFetch}` : '';
       const res = await fetch(`${API_URL}/api/assistant/coach/scanner-notifications${params}`);
@@ -512,15 +560,16 @@ const AICommandPanel = ({
           setCoachingAlerts(prev => {
             const existing = new Set(prev.map(a => a.timestamp));
             const unique = newAlerts.filter(a => !existing.has(a.timestamp));
-            return [...prev, ...unique].slice(-10); // Keep last 10
-          });
-          
-          // Show toast for new alerts
-          newAlerts.forEach(alert => {
-            toast.info(
-              `🎯 ${alert.symbol}: ${alert.verdict} - ${alert.summary?.slice(0, 50)}...`,
-              { duration: 8000 }
-            );
+            if (unique.length > 0) {
+              // Show toast for new TAKE alerts only
+              unique.filter(a => a.verdict === 'TAKE').forEach(alert => {
+                toast.success(
+                  `🎯 ${alert.symbol}: ${alert.verdict} - ${alert.summary?.slice(0, 40)}...`,
+                  { duration: 6000 }
+                );
+              });
+            }
+            return [...prev, ...unique].slice(-15);
           });
         }
       }
@@ -529,12 +578,12 @@ const AICommandPanel = ({
     } catch (err) {
       console.error('Failed to fetch coaching alerts:', err);
     }
+    setCoachingLoading(false);
   }, [lastCoachingFetch, dismissedAlerts]);
   
   // ===================== TRADE EXECUTION =====================
   
   const executeFromAlert = async (alert, halfSize = false) => {
-    // Show confirmation dialog
     setConfirmDialog({
       isOpen: true,
       trade: { ...alert, halfSize }
@@ -547,7 +596,6 @@ const AICommandPanel = ({
     
     setExecuting(true);
     try {
-      // Submit trade to bot
       const payload = {
         symbol: trade.symbol,
         direction: trade.direction || 'long',
@@ -570,23 +618,20 @@ const AICommandPanel = ({
       if (data.success) {
         toast.success(`Trade submitted: ${trade.symbol} ${trade.direction?.toUpperCase()}`);
         
-        // Add confirmation to chat
         setMessages(prev => [...prev, {
           role: 'assistant',
           content: `✅ **Trade Submitted**: ${trade.symbol} ${trade.direction?.toUpperCase()}\n\n` +
-            `- Entry: $${payload.entry_price?.toFixed(2) || 'Market'}\n` +
-            `- Stop: $${payload.stop_price?.toFixed(2)}\n` +
-            `- Target: $${payload.target_prices[0]?.toFixed(2)}\n` +
-            `- Size: ${trade.halfSize ? 'Half Position' : 'Full Position'}\n\n` +
-            `Trade is now pending confirmation.`,
+            `• Entry: $${payload.entry_price?.toFixed(2) || 'Market'}\n` +
+            `• Stop: $${payload.stop_price?.toFixed(2)}\n` +
+            `• Target: $${payload.target_prices[0]?.toFixed(2)}\n` +
+            `• Size: ${trade.halfSize ? 'Half' : 'Full'}\n\n` +
+            `Trade pending confirmation.`,
           timestamp: new Date().toISOString()
         }]);
         
-        // Dismiss the alert
         setDismissedAlerts(prev => new Set([...prev, trade.timestamp]));
         setCoachingAlerts(prev => prev.filter(a => a.timestamp !== trade.timestamp));
         
-        // Refresh trades
         await fetchBotTrades();
       } else {
         toast.error(data.detail || 'Failed to submit trade');
@@ -602,12 +647,7 @@ const AICommandPanel = ({
   const passOnAlert = (alert) => {
     setDismissedAlerts(prev => new Set([...prev, alert.timestamp]));
     setCoachingAlerts(prev => prev.filter(a => a.timestamp !== alert.timestamp));
-    
-    setMessages(prev => [...prev, {
-      role: 'assistant',
-      content: `⏭️ Passed on ${alert.symbol} ${alert.setup_type?.replace(/_/g, ' ')}`,
-      timestamp: new Date().toISOString()
-    }]);
+    toast.info(`Passed on ${alert.symbol}`);
   };
   
   // ===================== TRADE COMMANDS =====================
@@ -615,50 +655,36 @@ const AICommandPanel = ({
   const parseTradeCommand = (text) => {
     const lowerText = text.toLowerCase();
     
-    // "take the NVDA trade" / "execute NVDA"
     const takeMatch = lowerText.match(/(?:take|execute|buy|go long)\s+(?:the\s+)?(\w+)/);
     if (takeMatch) {
       const symbol = takeMatch[1].toUpperCase();
       const alert = coachingAlerts.find(a => a.symbol === symbol);
-      if (alert) {
-        return { type: 'execute', alert };
-      }
+      if (alert) return { type: 'execute', alert };
     }
     
-    // "pass on AMD" / "skip AMD"
     const passMatch = lowerText.match(/(?:pass|skip|ignore)\s+(?:on\s+)?(\w+)/);
     if (passMatch) {
       const symbol = passMatch[1].toUpperCase();
       const alert = coachingAlerts.find(a => a.symbol === symbol);
-      if (alert) {
-        return { type: 'pass', alert };
-      }
+      if (alert) return { type: 'pass', alert };
     }
     
-    // "half size NVDA" / "take NVDA with half"
-    const halfMatch = lowerText.match(/(?:half\s+(?:size|position)?|take\s+\w+\s+(?:with\s+)?half)\s*(\w+)?/);
+    const halfMatch = lowerText.match(/(?:half\s+(?:size|position)?)\s*(\w+)?/);
     if (halfMatch) {
-      const symbolFromMatch = halfMatch[1]?.toUpperCase();
-      // Also check if symbol is mentioned elsewhere
       const symbolInText = text.match(/\b([A-Z]{1,5})\b/);
-      const symbol = symbolFromMatch || symbolInText?.[1];
+      const symbol = halfMatch[1]?.toUpperCase() || symbolInText?.[1];
       const alert = coachingAlerts.find(a => a.symbol === symbol);
-      if (alert) {
-        return { type: 'half', alert };
-      }
+      if (alert) return { type: 'half', alert };
     }
     
-    // "show trades" / "my trades"
     if (/(?:show|list|what are|my)\s*(?:open\s+)?trades/.test(lowerText)) {
       return { type: 'show_trades' };
     }
     
-    // "stop the bot" / "pause bot"
     if (/(?:stop|pause)\s+(?:the\s+)?bot/.test(lowerText)) {
       return { type: 'stop_bot' };
     }
     
-    // "start the bot"
     if (/(?:start|resume)\s+(?:the\s+)?bot/.test(lowerText)) {
       return { type: 'start_bot' };
     }
@@ -669,14 +695,13 @@ const AICommandPanel = ({
   // Scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, coachingAlerts]);
+  }, [messages]);
 
   // Send message
   const sendMessage = useCallback(async (messageText = null) => {
     let text = (messageText || input.trim());
     if (!text || isLoading) return;
 
-    // Check for trade commands first
     const command = parseTradeCommand(text);
     if (command) {
       setInput('');
@@ -694,7 +719,7 @@ const AICommandPanel = ({
         case 'show_trades':
           const tradesText = botTrades.open?.length > 0
             ? botTrades.open.map(t => 
-                `• ${t.symbol} ${t.direction?.toUpperCase()}: ${t.shares} sh @ $${t.entry_price?.toFixed(2)} | P&L: $${(t.unrealized_pnl || 0).toFixed(2)}`
+                `• **${t.symbol}** ${t.direction?.toUpperCase()}: ${t.shares} sh @ $${t.entry_price?.toFixed(2)} | P&L: $${(t.unrealized_pnl || 0).toFixed(2)}`
               ).join('\n')
             : 'No open trades';
           setMessages(prev => [...prev, 
@@ -703,18 +728,14 @@ const AICommandPanel = ({
           ]);
           return;
         case 'stop_bot':
-          if (botStatus?.running) {
-            await toggleBot();
-          }
+          if (botStatus?.running) await toggleBot();
           setMessages(prev => [...prev,
             { role: 'user', content: text, timestamp: new Date().toISOString() },
             { role: 'assistant', content: '🛑 Bot stopped.', timestamp: new Date().toISOString() }
           ]);
           return;
         case 'start_bot':
-          if (!botStatus?.running) {
-            await toggleBot();
-          }
+          if (!botStatus?.running) await toggleBot();
           setMessages(prev => [...prev,
             { role: 'user', content: text, timestamp: new Date().toISOString() },
             { role: 'assistant', content: '▶️ Bot started.', timestamp: new Date().toISOString() }
@@ -725,7 +746,6 @@ const AICommandPanel = ({
       }
     }
 
-    // Auto-detect bare ticker symbol
     const tickerMatch = text.match(/^(\$?[A-Z]{1,5})$/);
     if (tickerMatch) {
       const sym = tickerMatch[1].replace('$', '');
@@ -761,7 +781,6 @@ const AICommandPanel = ({
     setIsLoading(false);
   }, [input, isLoading, sessionId, botTrades, botStatus, coachingAlerts]);
 
-  // Handle ticker click
   const handleTickerClick = useCallback((symbol) => {
     onTickerSelect?.({ symbol, quote: {}, fromSearch: true });
   }, [onTickerSelect]);
@@ -783,13 +802,15 @@ const AICommandPanel = ({
     };
   }, [fetchBotStatus, fetchBotTrades, fetchCoachingAlerts]);
 
-  // Quick actions
   const quickActions = [
-    { label: 'My Trades', action: () => sendMessage('Show my open trades') },
-    { label: 'Performance', action: () => sendMessage('Analyze my trading performance today.') },
-    { label: 'Market', action: () => sendMessage("What's happening in the market today?") },
-    { label: 'Rules', action: () => sendMessage('Remind me of my key trading rules.') },
+    { label: 'My Trades', action: () => sendMessage('Show my open trades'), icon: Target },
+    { label: 'Performance', action: () => sendMessage('Analyze my trading performance today.'), icon: TrendingUp },
+    { label: 'Market', action: () => sendMessage("What's happening in the market today?"), icon: Activity },
+    { label: 'Rules', action: () => sendMessage('Remind me of my key trading rules.'), icon: Shield },
   ];
+
+  // Filter active coaching alerts
+  const activeCoachingAlerts = coachingAlerts.filter(a => !dismissedAlerts.has(a.timestamp));
 
   return (
     <div className="flex flex-col h-full bg-[#0A0A0A] border border-white/10 rounded-xl overflow-hidden" data-testid="ai-command-panel">
@@ -802,20 +823,20 @@ const AICommandPanel = ({
         loading={executing}
       />
       
-      {/* Header with Bot Status */}
-      <div className="flex items-center justify-between p-3 border-b border-white/10 bg-gradient-to-r from-cyan-900/20 to-amber-900/10">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-amber-500 flex items-center justify-center">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-gradient-to-r from-cyan-900/20 via-zinc-900 to-amber-900/10">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500 to-amber-500 flex items-center justify-center shadow-lg shadow-cyan-500/20">
             <Bot className="w-5 h-5 text-black" />
           </div>
           <div>
-            <h2 className="text-sm font-bold text-white">AI Trading Assistant</h2>
-            <p className="text-[10px] text-zinc-500">Scanner + AI + Bot integrated</p>
+            <h2 className="text-base font-bold text-white">AI Trading Assistant</h2>
+            <p className="text-[10px] text-zinc-500">Scanner • AI • Bot — All-in-One</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-          <span className="text-xs text-zinc-400">{isConnected ? 'Connected' : 'Disconnected'}</span>
+          <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+          <span className="text-xs text-zinc-400">{isConnected ? 'Live' : 'Offline'}</span>
         </div>
       </div>
       
@@ -827,229 +848,227 @@ const AICommandPanel = ({
         loading={botLoading}
       />
 
-      {/* Chat Input */}
-      <div className="p-3 border-b border-white/10">
-        <div className="flex items-center gap-2 mb-2 flex-wrap">
-          {quickActions.map((qa, idx) => (
-            <QuickPill key={idx} label={qa.label} onClick={qa.action} loading={isLoading} />
-          ))}
-        </div>
-        <div className="flex gap-2">
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-            placeholder="Ask AI, type ticker, or 'take NVDA'..."
-            className="flex-1 px-3 py-2 bg-zinc-900 border border-white/10 rounded-lg text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
-            data-testid="ai-chat-input"
-          />
-          <button
-            onClick={() => sendMessage()}
-            disabled={!input.trim() || isLoading}
-            className="px-3 py-2 bg-cyan-500 text-black rounded-lg hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed"
-            data-testid="ai-chat-send"
-          >
-            <Send className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto">
-        {/* Coaching Alerts (Actionable) */}
-        {coachingAlerts.filter(a => !dismissedAlerts.has(a.timestamp)).length > 0 && (
-          <div className="p-3 border-b border-white/10 bg-gradient-to-r from-cyan-900/5 to-amber-900/5">
-            <div className="flex items-center gap-2 mb-2">
-              <Zap className="w-4 h-4 text-amber-400" />
-              <span className="text-sm font-medium text-white">AI Coaching Alerts</span>
-              <span className="text-xs text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded">
-                {coachingAlerts.filter(a => !dismissedAlerts.has(a.timestamp)).length}
-              </span>
-            </div>
-            <div className="space-y-3">
-              {coachingAlerts.filter(a => !dismissedAlerts.has(a.timestamp)).map((alert, idx) => (
-                <CoachingAlertMessage
-                  key={alert.timestamp || idx}
-                  alert={alert}
-                  onExecute={(a) => executeFromAlert(a, false)}
-                  onHalfSize={(a) => executeFromAlert(a, true)}
-                  onPass={passOnAlert}
-                  onTickerClick={handleTickerClick}
-                  executing={executing}
-                />
+      {/* Main Content - Two Column Layout */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* LEFT: Chat Area (Expanded) */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Chat Input at Top */}
+          <div className="p-3 border-b border-white/5 bg-zinc-900/30">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              {quickActions.map((qa, idx) => (
+                <QuickPill key={idx} label={qa.label} onClick={qa.action} loading={isLoading} icon={qa.icon} />
               ))}
             </div>
-          </div>
-        )}
-        
-        {/* Chat Messages */}
-        {(messages.length > 0 || isLoading) ? (
-          <div className="p-3 border-b border-white/10">
-            <div className="space-y-3" data-testid="chat-messages">
-              {messages.map((msg, idx) => (
-                <ChatMessage key={idx} message={msg} isUser={msg.role === 'user'} onTickerClick={handleTickerClick} />
-              ))}
-              {isLoading && (
-                <div className="flex items-center gap-2 text-zinc-400">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span className="text-xs">Thinking...</span>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-          </div>
-        ) : (
-          <div className="p-3 border-b border-white/10 text-center py-6">
-            <Sparkles className="w-6 h-6 text-amber-400 mx-auto mb-2" />
-            <p className="text-xs text-zinc-500">Ask anything, type a ticker, or say "take NVDA" to trade</p>
-          </div>
-        )}
-
-        {/* Bot Trades Section */}
-        <div className="p-3 border-b border-white/10" data-testid="bot-trades-section">
-          <SectionHeader 
-            icon={Bot} 
-            title="Bot Trades" 
-            count={(botTrades.pending?.length || 0) + (botTrades.open?.length || 0)}
-            isExpanded={expandedSections.botTrades}
-            onToggle={() => toggleSection('botTrades')}
-            action={
-              <button 
-                onClick={(e) => { e.stopPropagation(); fetchBotTrades(); }}
-                className="p-1 hover:bg-zinc-700 rounded"
+            <div className="flex gap-2">
+              <input
+                ref={inputRef}
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
+                placeholder="Ask anything, type ticker, or 'take NVDA'..."
+                className="flex-1 px-4 py-2.5 bg-zinc-800 border border-white/10 rounded-xl text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                data-testid="ai-chat-input"
+              />
+              <button
+                onClick={() => sendMessage()}
+                disabled={!input.trim() || isLoading}
+                className="px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-cyan-400 text-black rounded-xl hover:from-cyan-400 hover:to-cyan-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                data-testid="ai-chat-send"
               >
-                <RefreshCw className="w-3 h-3 text-zinc-400" />
+                <Send className="w-4 h-4" />
               </button>
-            }
-          />
-          {expandedSections.botTrades && (
-            <div className="mt-2">
-              {/* Tabs */}
-              <div className="flex gap-1 mb-2">
-                {['pending', 'open', 'closed'].map(tab => {
-                  const count = botTrades[tab]?.length || 0;
-                  return (
-                    <button
-                      key={tab}
-                      onClick={() => setBotTradesTab(tab)}
-                      className={`flex-1 py-1 px-2 rounded text-[11px] font-medium transition-colors ${
-                        botTradesTab === tab
-                          ? tab === 'open' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
-                            : tab === 'pending' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                            : 'bg-zinc-500/20 text-zinc-300 border border-zinc-500/30'
-                          : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
-                      }`}
-                    >
-                      {tab.charAt(0).toUpperCase() + tab.slice(1)} ({count})
-                    </button>
-                  );
-                })}
+            </div>
+          </div>
+
+          {/* Chat Messages - Expanded Area */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4" data-testid="chat-messages">
+            {messages.length === 0 && !isLoading ? (
+              <div className="flex flex-col items-center justify-center h-full text-center py-8">
+                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-amber-500/20 flex items-center justify-center mb-4">
+                  <Sparkles className="w-8 h-8 text-amber-400" />
+                </div>
+                <h3 className="text-lg font-semibold text-white mb-2">Ready to assist</h3>
+                <p className="text-sm text-zinc-500 max-w-xs">
+                  Ask me anything about the market, analyze a ticker, or trade directly with commands like "take NVDA"
+                </p>
               </div>
-              
-              {/* Trade List */}
-              <div className="space-y-1 max-h-[180px] overflow-y-auto">
-                {(botTrades[botTradesTab] || []).length > 0 ? (
-                  (botTrades[botTradesTab] || []).slice(0, 8).map((trade, idx) => {
-                    const pnl = trade.realized_pnl || trade.unrealized_pnl || 0;
-                    const isProfit = pnl >= 0;
-                    
-                    return (
-                      <div 
-                        key={trade.id || idx}
-                        className="flex items-center justify-between p-2 bg-zinc-900/50 rounded-lg hover:bg-zinc-800/50 cursor-pointer group"
-                        onClick={() => handleTickerClick(trade.symbol)}
-                      >
-                        <div className="flex items-center gap-2">
+            ) : (
+              <>
+                {messages.map((msg, idx) => (
+                  <ChatMessage key={idx} message={msg} isUser={msg.role === 'user'} onTickerClick={handleTickerClick} />
+                ))}
+                {isLoading && (
+                  <div className="flex items-center gap-3 text-zinc-400">
+                    <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center">
+                      <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                    </div>
+                    <span className="text-sm">Analyzing...</span>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT: AI-Curated Opportunities + Collapsible Sections */}
+        <div className="w-80 border-l border-white/5 bg-zinc-900/30 overflow-y-auto">
+          {/* AI-Curated Opportunities Widget */}
+          <div className="p-3">
+            <AICuratedWidget
+              opportunities={activeCoachingAlerts}
+              onExecute={(a) => executeFromAlert(a, false)}
+              onPass={passOnAlert}
+              onTickerClick={handleTickerClick}
+              executing={executing}
+              onRefresh={fetchCoachingAlerts}
+              loading={coachingLoading}
+            />
+          </div>
+          
+          {/* Bot Trades Section */}
+          <div className="p-3 pt-0">
+            <SectionHeader 
+              icon={Bot} 
+              title="Bot Trades" 
+              count={(botTrades.pending?.length || 0) + (botTrades.open?.length || 0)}
+              isExpanded={expandedSections.botTrades}
+              onToggle={() => toggleSection('botTrades')}
+              compact
+            />
+            <AnimatePresence>
+              {expandedSections.botTrades && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="mt-2 space-y-1">
+                    <div className="flex gap-1 mb-2">
+                      {['pending', 'open', 'closed'].map(tab => (
+                        <button
+                          key={tab}
+                          onClick={() => setBotTradesTab(tab)}
+                          className={`flex-1 py-1 px-2 rounded text-[10px] font-medium ${
+                            botTradesTab === tab
+                              ? 'bg-cyan-500/20 text-cyan-400'
+                              : 'text-zinc-500 hover:text-zinc-300'
+                          }`}
+                        >
+                          {tab.charAt(0).toUpperCase() + tab.slice(1)} ({botTrades[tab]?.length || 0})
+                        </button>
+                      ))}
+                    </div>
+                    <div className="space-y-1 max-h-[150px] overflow-y-auto">
+                      {(botTrades[botTradesTab] || []).slice(0, 5).map((trade, idx) => (
+                        <div 
+                          key={trade.id || idx}
+                          className="flex items-center justify-between p-2 bg-zinc-800/50 rounded-lg hover:bg-zinc-800 cursor-pointer text-xs"
+                          onClick={() => handleTickerClick(trade.symbol)}
+                        >
                           <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-medium text-white">{trade.symbol}</span>
-                              <span className={`text-[9px] px-1 py-0.5 rounded ${
-                                trade.direction === 'long' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
-                              }`}>
-                                {trade.direction?.toUpperCase()}
-                              </span>
-                            </div>
-                            <span className="text-[10px] text-zinc-500">
-                              {trade.setup_type?.replace(/_/g, ' ')} | {trade.shares} sh
+                            <span className="font-medium text-white">{trade.symbol}</span>
+                            <span className={`ml-1 text-[9px] ${trade.direction === 'long' ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {trade.direction?.toUpperCase()}
                             </span>
                           </div>
+                          <span className={`font-mono ${(trade.realized_pnl || trade.unrealized_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            ${(trade.realized_pnl || trade.unrealized_pnl || 0).toFixed(2)}
+                          </span>
                         </div>
-                        <span className={`text-xs font-mono font-semibold ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
-                          ${pnl.toFixed(2)}
-                        </span>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <p className="text-xs text-zinc-500 text-center py-3">
-                    {botTradesTab === 'pending' ? 'No pending trades' : 
-                     botTradesTab === 'open' ? 'No open positions' : 'No closed trades'}
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Earnings Section */}
-        <div className="p-3 border-b border-white/10">
-          <SectionHeader 
-            icon={Calendar} 
-            title="Earnings" 
-            count={earnings.length}
-            isExpanded={expandedSections.earnings}
-            onToggle={() => toggleSection('earnings')}
-          />
-          {expandedSections.earnings && (
-            <div className="mt-2 space-y-1 max-h-[120px] overflow-y-auto">
-              {earnings.length > 0 ? earnings.slice(0, 5).map((earn, idx) => (
-                <div 
-                  key={idx}
-                  onClick={() => onTickerSelect?.({ symbol: earn.symbol, quote: {} })}
-                  className="flex items-center justify-between p-2 bg-zinc-900/50 rounded-lg hover:bg-zinc-800/50 cursor-pointer"
-                >
-                  <span className="text-sm font-medium text-white">{earn.symbol}</span>
-                  <span className="text-xs text-zinc-400">{earn.timing || 'BMO'}</span>
-                </div>
-              )) : (
-                <p className="text-xs text-zinc-500 text-center py-2">No upcoming earnings</p>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Watchlist Section */}
-        <div className="p-3">
-          <SectionHeader 
-            icon={Eye} 
-            title="Watchlist" 
-            count={watchlist.length}
-            isExpanded={expandedSections.watchlist}
-            onToggle={() => toggleSection('watchlist')}
-          />
-          {expandedSections.watchlist && (
-            <div className="mt-2 space-y-1 max-h-[120px] overflow-y-auto">
-              {watchlist.length > 0 ? watchlist.slice(0, 8).map((item, idx) => (
-                <div 
-                  key={idx}
-                  onClick={() => onTickerSelect?.({ symbol: item.symbol, quote: item })}
-                  className="flex items-center justify-between p-2 bg-zinc-900/50 rounded-lg hover:bg-zinc-800/50 cursor-pointer"
-                >
-                  <span className="text-sm font-medium text-white">{item.symbol}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-mono text-white">${formatPrice(item.price)}</span>
-                    <span className={`text-xs ${item.change_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {formatPercent(item.change_percent)}
-                    </span>
+                      ))}
+                      {(botTrades[botTradesTab] || []).length === 0 && (
+                        <p className="text-[10px] text-zinc-600 text-center py-2">No {botTradesTab} trades</p>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )) : (
-                <p className="text-xs text-zinc-500 text-center py-2">Watchlist empty</p>
+                </motion.div>
               )}
-            </div>
-          )}
+            </AnimatePresence>
+          </div>
+
+          {/* Earnings Section */}
+          <div className="p-3 pt-0">
+            <SectionHeader 
+              icon={Calendar} 
+              title="Earnings" 
+              count={earnings.length}
+              isExpanded={expandedSections.earnings}
+              onToggle={() => toggleSection('earnings')}
+              compact
+            />
+            <AnimatePresence>
+              {expandedSections.earnings && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="mt-2 space-y-1 max-h-[100px] overflow-y-auto">
+                    {earnings.slice(0, 5).map((earn, idx) => (
+                      <div 
+                        key={idx}
+                        onClick={() => onTickerSelect?.({ symbol: earn.symbol, quote: {} })}
+                        className="flex items-center justify-between p-2 bg-zinc-800/50 rounded-lg hover:bg-zinc-800 cursor-pointer text-xs"
+                      >
+                        <span className="font-medium text-white">{earn.symbol}</span>
+                        <span className="text-zinc-500">{earn.timing || 'BMO'}</span>
+                      </div>
+                    ))}
+                    {earnings.length === 0 && (
+                      <p className="text-[10px] text-zinc-600 text-center py-2">No upcoming earnings</p>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Watchlist Section */}
+          <div className="p-3 pt-0">
+            <SectionHeader 
+              icon={Eye} 
+              title="Watchlist" 
+              count={watchlist.length}
+              isExpanded={expandedSections.watchlist}
+              onToggle={() => toggleSection('watchlist')}
+              compact
+            />
+            <AnimatePresence>
+              {expandedSections.watchlist && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="mt-2 space-y-1 max-h-[100px] overflow-y-auto">
+                    {watchlist.slice(0, 6).map((item, idx) => (
+                      <div 
+                        key={idx}
+                        onClick={() => onTickerSelect?.({ symbol: item.symbol, quote: item })}
+                        className="flex items-center justify-between p-2 bg-zinc-800/50 rounded-lg hover:bg-zinc-800 cursor-pointer text-xs"
+                      >
+                        <span className="font-medium text-white">{item.symbol}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-white">${formatPrice(item.price)}</span>
+                          <span className={item.change_percent >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                            {formatPercent(item.change_percent)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                    {watchlist.length === 0 && (
+                      <p className="text-[10px] text-zinc-600 text-center py-2">Watchlist empty</p>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
     </div>
