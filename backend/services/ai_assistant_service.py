@@ -1808,8 +1808,9 @@ Keep it punchy and actionable - trader needs to act fast!"""
 
         try:
             # Use the existing chat method with a special session for scanner coaching
+            # Note: complexity is auto-detected based on keywords in the message
             session_id = f"scanner_coach_{datetime.now().strftime('%Y%m%d')}"
-            response = await self.chat(prompt, session_id, complexity="light")
+            response = await self.chat(prompt, session_id)
             
             coaching_text = response.get("response", "")
             
