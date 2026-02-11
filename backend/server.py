@@ -66,6 +66,9 @@ from services.predictive_scanner import get_predictive_scanner
 from services.alert_system import get_alert_system
 from services.trading_bot_service import get_trading_bot_service
 from services.trade_executor_service import get_trade_executor
+from services.smart_watchlist_service import init_smart_watchlist, get_smart_watchlist
+from services.index_universe import get_index_universe
+from services.wave_scanner import init_wave_scanner, get_wave_scanner
 from data.strategies_data import ALL_STRATEGIES_DATA
 
 app = FastAPI(title="TradeCommand API")
