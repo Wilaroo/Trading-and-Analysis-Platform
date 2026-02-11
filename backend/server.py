@@ -2866,13 +2866,17 @@ async def stream_quotes():
                 try:
                     batch_results = await alpaca_service.get_quotes_batch(symbol_list)
                     for symbol, data in batch_results.items():
-                        quotes.append(data)
-                except Exception:
+                        # Clean internal cache fields before broadcasting
+                        clean_data = {k: v for k, v in data.items() if not k.startswith('_')}
+                        quotes.append(clean_data)
+                except Exception as batch_err:
+                    print(f"Batch quote error: {batch_err}")
                     # Fallback to individual fetches (limited)
                     for symbol in symbol_list[:5]:
                         quote = await fetch_quote(symbol)
                         if quote:
-                            quotes.append(quote)
+                            clean_quote = {k: v for k, v in quote.items() if not k.startswith('_')}
+                            quotes.append(clean_quote)
                         await asyncio.sleep(0.3)
                 
                 if quotes:
@@ -2884,6 +2888,8 @@ async def stream_quotes():
                     await manager.broadcast(message)
             except Exception as e:
                 print(f"Stream error: {e}")
+                import traceback
+                traceback.print_exc()
         
         await asyncio.sleep(15)  # 15s interval (was 10s)
 
