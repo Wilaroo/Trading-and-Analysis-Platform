@@ -209,3 +209,38 @@ Triggers AI Coaching Notification
 - Level 2 order book analysis (tape reading)
 - Full bot state persistence in MongoDB
 - Weekly performance digest
+
+---
+
+## Session Log - February 11, 2026
+
+### P0 Bug Fix: IB Connection UI Issue
+**Problem**: Frontend UI showed IB Gateway as "disconnected" despite backend being connected.
+
+**Root Causes Fixed**:
+1. `datetime` objects in `alpaca_service.py` not serialized to ISO strings before WebSocket broadcast
+2. React StrictMode causing double-mounting and rapid WebSocket connect/disconnect cycles
+3. Stale WebSocket connections not being properly cleaned up
+
+**Fixes Applied**:
+- Converted all `_cached_at` datetime fields to `.isoformat()` strings
+- Disabled React StrictMode in `index.js`
+- Improved WebSocket `ConnectionManager` to auto-cleanup stale connections
+- Added auto-connect to IB Gateway on backend startup
+
+### System Optimizations Implemented
+1. **Staggered Polling Intervals**: Bot status 20s, trades 25s, coaching 15s (were all 10-15s)
+2. **Batch Init Endpoint**: New `GET /api/dashboard/init` returns system health, alerts, smart watchlist in ONE call
+3. **Phased Startup Loading**: Critical data first, earnings calendar loads last (1s delay)
+4. **Removed Unused Newsletter Fetch**: No longer fetched on Command Center startup
+5. **Reduced IB Check Interval**: 30s → 15s for faster UI updates
+
+### Files Modified
+- `backend/server.py` - WebSocket manager, auto-connect, batch init endpoint
+- `backend/services/alpaca_service.py` - datetime serialization fix
+- `backend/services/fundamental_data_service.py` - datetime serialization fix
+- `frontend/src/index.js` - Disabled StrictMode
+- `frontend/src/App.js` - IB check interval, debug logging
+- `frontend/src/hooks/useCommandCenterData.js` - Batch init, staggered loading
+- `frontend/src/components/AICommandPanel.jsx` - Optimized polling intervals
+- `frontend/src/components/layout/HeaderBar.jsx` - Safety check for systemHealth.services
