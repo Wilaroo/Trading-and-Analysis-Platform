@@ -1112,38 +1112,50 @@ class EnhancedBackgroundScanner:
         adv_data = {}
         
         try:
-            # Get historical bars to calculate ADV (20-day average)
-            from datetime import timedelta
+            # Process symbols in parallel batches
+            chunk_size = 20  # Smaller chunks for rate limit safety
             
-            # Batch process in chunks to avoid rate limits
-            chunk_size = 50
             for i in range(0, len(symbols), chunk_size):
                 chunk = symbols[i:i + chunk_size]
                 
-                try:
-                    bars = await self.alpaca_service.get_multi_bars(
-                        chunk,
-                        timeframe="1D",
-                        limit=20
-                    )
-                    
-                    if bars:
-                        for symbol, symbol_bars in bars.items():
-                            if symbol_bars:
-                                volumes = [bar.get("volume", 0) for bar in symbol_bars]
-                                adv = int(sum(volumes) / len(volumes)) if volumes else 0
-                                adv_data[symbol] = adv
-                                
-                except Exception as e:
-                    logger.debug(f"Error fetching bars for chunk: {e}")
-                    # Default to allowing these symbols through
-                    for symbol in chunk:
+                # Fetch bars for each symbol in parallel
+                tasks = []
+                for symbol in chunk:
+                    tasks.append(self._fetch_single_adv(symbol))
+                
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                for symbol, result in zip(chunk, results):
+                    if isinstance(result, Exception):
+                        # Default to allowing through on error
                         adv_data[symbol] = self._min_adv_general
+                    else:
+                        adv_data[symbol] = result
+                
+                # Small delay between chunks
+                if i + chunk_size < len(symbols):
+                    await asyncio.sleep(0.2)
                         
         except Exception as e:
             logger.warning(f"Batch ADV fetch failed: {e}")
+            # Default all symbols to pass through
+            for symbol in symbols:
+                if symbol not in adv_data:
+                    adv_data[symbol] = self._min_adv_general
         
         return adv_data
+    
+    async def _fetch_single_adv(self, symbol: str) -> int:
+        """Fetch ADV for a single symbol"""
+        try:
+            bars = await self.alpaca_service.get_bars(symbol, timeframe="1Day", limit=20)
+            if bars:
+                volumes = [bar.get("volume", 0) for bar in bars]
+                return int(sum(volumes) / len(volumes)) if volumes else 0
+            return 0
+        except Exception as e:
+            logger.debug(f"ADV fetch failed for {symbol}: {e}")
+            return 0
     
     async def _scan_symbol_all_setups(self, symbol: str):
         """
