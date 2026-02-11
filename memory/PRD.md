@@ -44,22 +44,43 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 7. Scanner Signals (live alerts from enhanced scanner)
 
 ## Enhanced Scanner (Feb 2026)
-**227 symbols scanned every 60 seconds with 30 SMB strategies**
+**1,425 symbols scanned via wave scanning with 30+ SMB strategies**
 
 ### Features Implemented:
 | Feature | Description |
 |---------|-------------|
+| **Wave Scanning** | Tiered scanning: Watchlist (T1) → High RVOL (T2) → Rotating Universe (T3) |
+| **Smart Watchlist** | Hybrid auto-populated + manual watchlist with strategy-based expiration |
 | **RVOL Pre-filtering** | Skips symbols with RVOL < 0.8 to focus on active stocks |
 | **Tape Reading** | Analyzes bid/ask spread, order imbalance, momentum for confirmation |
 | **Win-Rate Tracking** | Records outcomes for each strategy, calculates win rate & profit factor |
 | **Auto-Execution** | Wires high-priority tape-confirmed alerts directly to Trading Bot |
+| **AI Coaching** | Proactive AI notifications for high-priority scanner alerts (NEW Feb 2026) |
 
-### API Endpoints:
+### Scanner → AI → Bot Integration (Feb 2026)
+```
+Scanner detects HIGH/CRITICAL alert
+    ↓
+Auto-populates Smart Watchlist
+    ↓
+Triggers AI Coaching Notification ← NEW
+    ↓
+(If auto-execute enabled) Submits to Trading Bot
+```
+
+### New API Endpoints (Feb 2026):
+- `GET /api/assistant/coach/scanner-notifications` - Get proactive coaching alerts
+- `POST /api/assistant/coach/scanner-coaching?symbol=X&setup_type=Y` - Manual coaching
+
+### Existing API Endpoints:
 - `GET /api/live-scanner/stats/strategies` - Win-rate stats per setup
 - `POST /api/live-scanner/stats/record-outcome` - Record alert result
 - `POST /api/live-scanner/auto-execute/enable` - Enable/disable auto-execution
 - `GET /api/live-scanner/auto-execute/status` - Auto-execute status
 - `POST /api/live-scanner/config/rvol-filter` - Set RVOL filter threshold
+- `GET /api/smart-watchlist` - Get hybrid watchlist
+- `POST /api/smart-watchlist/add` - Manual add to watchlist
+- `DELETE /api/smart-watchlist/{symbol}` - Remove from watchlist
 
 ### Strategies Implemented:
 | Category | Strategies |
@@ -80,38 +101,46 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 - Scanner reads SPY to determine: strong_uptrend, strong_downtrend, range_bound, volatile, momentum, fade
 - Strategies filtered based on optimal market conditions
 
-### Watchlist (264 symbols):
-- Mega cap tech, growth tech, financials, healthcare, energy, industrials
-- High-volume movers, semiconductors, cloud/software, cybersecurity
-- ETFs (SPY, QQQ, IWM, sector ETFs, leveraged ETFs)
+### Universe Coverage:
+- S&P 500: 493 symbols
+- Nasdaq 1000: 610 symbols
+- Russell 2000: 412 symbols (partial)
+- ETFs: 228 symbols
+- **Total Unique: 1,425 symbols**
 
 ## Architecture
 ```
 /app/
 ├── backend/
+│   ├── data/
+│   │   └── index_symbols.py           # S&P 500, Nasdaq 1000, Russell 2000 lists
 │   ├── routers/ (trading_bot, learning_dashboard, market_intel, assistant, live_scanner)
 │   ├── services/
-│   │   ├── ai_assistant_service.py      # Smart routing: _call_llm(complexity=light|standard|deep)
-│   │   ├── market_intel_service.py      # 7 data sources, anti-hallucination prompts
+│   │   ├── ai_assistant_service.py      # Smart routing + Scanner coaching notifications
+│   │   ├── enhanced_scanner.py          # Wave scanning + AI/Bot integration
+│   │   ├── smart_watchlist_service.py   # Hybrid auto/manual watchlist
+│   │   ├── wave_scanner.py              # Tiered universe scanning
+│   │   ├── index_universe.py            # Large symbol universe management
+│   │   ├── support_resistance_service.py # Advanced S/R calculation
 │   │   ├── trading_bot_service.py
-│   │   ├── strategy_performance_service.py  # Learning loop → deep routing
-│   │   ├── newsletter_service.py        # Now routes through shared AI assistant (deep)
-│   │   ├── llm_service.py              # OllamaProvider added as first priority
-│   │   └── background_scanner.py        # Generates alerts → live_scanner router
+│   │   ├── strategy_performance_service.py
+│   │   └── market_intel_service.py
 │   └── server.py
 └── frontend/
     ├── pages/CommandCenterPage.js       # 2-tab layout: Command | Analytics
     ├── components/
-    │   ├── TradingBotPanel.jsx          # Bot control + Signal Bubbles (fetches /api/live-scanner/alerts)
+    │   ├── TradingBotPanel.jsx          # Bot control + Signal Bubbles
     │   ├── AICommandPanel.jsx           # AI chat with ticker detection
+    │   ├── RightSidebar.jsx             # Smart Watchlist widget
     │   └── MarketIntel/MarketIntelPanel.jsx
-    └── hooks/useCommandCenterData.js
+    └── utils/
+        └── tickerUtils.jsx              # Clickable ticker utility
 ```
 
 ## Completed Features
 1. Core platform: AI assistant, background scanner, SSE alerts
-2. Autonomous trading bot with strategy configs (6 strategies)
-3. AI <-> Bot integration: mutual awareness
+2. Autonomous trading bot with strategy configs (30+ strategies)
+3. AI ↔ Bot integration: mutual awareness
 4. Mutual Learning Loop: performance tracking, AI analysis, auto-tuning
 5. Performance optimization: caching, batching, tab-aware polling
 6. UI: **2-tab layout (Command | Analytics)** - Consolidated from 3 tabs
@@ -119,16 +148,27 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 8. Morning Routine Auto-Trigger
 9. Ollama Integration: local LLM via ngrok tunnel
 10. Smart AI Routing: Ollama (light/standard) + GPT-4o (deep)
-11. Enhanced Market Intel: 7 data sources (news, indices, watchlist, positions, bot, learning, scanner)
+11. Enhanced Market Intel: 7 data sources
 12. Newsletter + LLM Service routed through shared AI system
-13. **Signal Bubbles Integration** (Feb 2026): Live scanner signals displayed as clickable bubbles in TradingBotPanel - removed separate Signals tab
+13. Signal Bubbles Integration: Live scanner signals displayed as clickable bubbles
+14. **Clickable Tickers & News** (Feb 2026): All stock tickers clickable throughout UI
+15. **Advanced S/R Analysis** (Feb 2026): Pivot Points, Volume Profile, historical zones
+16. **Wave Scanning** (Feb 2026): Tiered scanning of 1,425 symbols
+17. **Smart Watchlist** (Feb 2026): Hybrid auto/manual with strategy-based expiration
+18. **Scanner → AI Coaching** (Feb 2026): Proactive notifications for high-priority alerts
 
 ## Prioritized Backlog
+### P0 - Completed
+- ✅ Scanner ↔ AI ↔ Trading Bot real-time integration
+
 ### P1 - Next Up
-- Rubber Band Scanner Preset
-- AI Coach Proactive Warnings
+- Full index population (Russell 2000 needs ~1,600 more, Nasdaq 1000 needs ~400 more)
+- Frontend toast notifications for AI coaching alerts
+- AI coaching panel integration with scanner notifications
+
 ### P2 - Future
+- Strategy backtesting integration
+- Alert sounds / browser push notifications
+- Level 2 order book analysis (tape reading)
 - Full bot state persistence in MongoDB
-- AI Backtesting Feature
-- Keyboard Shortcuts, Trade Journal, Full Auth
 - Weekly performance digest
