@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://tradehub-420.preview.emergentagent.com
+https://finpro-command.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://tradehub-420.preview.emergentagent.com
+https://finpro-command.preview.emergentagent.com
 ```
