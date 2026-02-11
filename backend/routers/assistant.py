@@ -676,7 +676,11 @@ async def find_strategy_setups(strategy: str, limit: int = 5):
             "message": f"Found {len(top_setups)} {strategy} setups" if top_setups else f"No {strategy} setups found in current market conditions"
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"Error finding strategy setups: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==================== SCANNER COACHING NOTIFICATIONS ====================
