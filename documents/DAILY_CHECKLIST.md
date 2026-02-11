@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://trader-hq.preview.emergentagent.com
+https://tradehub-420.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://trader-hq.preview.emergentagent.com
+https://tradehub-420.preview.emergentagent.com
 ```
