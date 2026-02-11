@@ -21,7 +21,6 @@ export function useCommandCenterData({
   const [opportunities, setOpportunities] = useState([]);
   const [marketContext, setMarketContext] = useState(null);
   const [alerts, setAlerts] = useState([]);
-  const [newsletter, setNewsletter] = useState(null);
   const [watchlist, setWatchlist] = useState([]);
   const [earnings, setEarnings] = useState([]);
 
