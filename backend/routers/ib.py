@@ -900,15 +900,71 @@ async def get_comprehensive_analysis(symbol: str):
             highs = [b.get("high", 0) for b in bars[-50:]]
             lows = [b.get("low", 0) for b in bars[-50:]]
             
-            analysis["support_resistance"] = {
-                "resistance_1": round(max(highs), 2) if highs else round(close * 1.03, 2),
-                "resistance_2": round(sorted(highs, reverse=True)[5], 2) if len(highs) > 5 else round(close * 1.05, 2),
-                "support_1": round(min(lows), 2) if lows else round(close * 0.97, 2),
-                "support_2": round(sorted(lows)[5], 2) if len(lows) > 5 else round(close * 0.95, 2),
-                "pivot": round((max(highs) + min(lows) + close) / 3, 2) if highs and lows else round(close, 2),
-                "day_high": round(bars[-1].get("high", close * 1.01), 2),
-                "day_low": round(bars[-1].get("low", close * 0.99), 2)
-            }
+            # === ENHANCED SUPPORT/RESISTANCE CALCULATION ===
+            try:
+                sr_service = get_sr_service()
+                sr_analysis = await sr_service.get_sr_analysis(
+                    symbol=symbol,
+                    bars=bars,
+                    current_price=close,
+                    include_pivots=True,
+                    include_volume_profile=True,
+                    include_reaction_zones=True
+                )
+                
+                # Get the key levels summary
+                sr_summary = sr_service.get_key_levels_summary(sr_analysis)
+                
+                # Build enhanced S/R response
+                analysis["support_resistance"] = {
+                    # Legacy format for backwards compatibility
+                    "resistance_1": sr_summary["nearest_resistance"]["price"] if sr_summary["nearest_resistance"] else round(close * 1.03, 2),
+                    "resistance_2": sr_summary["resistance_levels"][1]["price"] if len(sr_summary["resistance_levels"]) > 1 else round(close * 1.05, 2),
+                    "support_1": sr_summary["nearest_support"]["price"] if sr_summary["nearest_support"] else round(close * 0.97, 2),
+                    "support_2": sr_summary["support_levels"][1]["price"] if len(sr_summary["support_levels"]) > 1 else round(close * 0.95, 2),
+                    "pivot": sr_summary["pivot_point"] if sr_summary["pivot_point"] else round((max(highs) + min(lows) + close) / 3, 2),
+                    "day_high": round(bars[-1].get("high", close * 1.01), 2),
+                    "day_low": round(bars[-1].get("low", close * 0.99), 2),
+                    
+                    # Enhanced data
+                    "volume_profile": sr_summary["volume_profile"],
+                    "confluence_zones": sr_summary["confluence_zones"],
+                    "near_key_level": sr_summary["near_key_level"],
+                    
+                    # Full level details
+                    "support_levels": sr_summary["support_levels"],
+                    "resistance_levels": sr_summary["resistance_levels"],
+                    
+                    # Methodology breakdown
+                    "methodology": {
+                        "includes_pivots": ["Classic", "Fibonacci", "Camarilla", "Woodie", "DeMark"],
+                        "includes_volume_profile": True,
+                        "includes_reaction_zones": True,
+                        "includes_ma_levels": ["20 SMA", "50 SMA", "100 SMA", "200 SMA", "9 EMA", "21 EMA", "VWAP"],
+                        "includes_reference_levels": ["HOD", "LOD", "Prev High/Low/Close", "Week/Month H/L", "52-Week H/L"],
+                        "includes_round_numbers": True,
+                        "includes_gaps": True
+                    }
+                }
+                
+                # Add strongest levels info
+                if sr_summary["strongest_support"]:
+                    analysis["support_resistance"]["strongest_support"] = sr_summary["strongest_support"]
+                if sr_summary["strongest_resistance"]:
+                    analysis["support_resistance"]["strongest_resistance"] = sr_summary["strongest_resistance"]
+                    
+            except Exception as sr_error:
+                print(f"Enhanced S/R calculation error for {symbol}: {sr_error}")
+                # Fallback to simple calculation
+                analysis["support_resistance"] = {
+                    "resistance_1": round(max(highs), 2) if highs else round(close * 1.03, 2),
+                    "resistance_2": round(sorted(highs, reverse=True)[5], 2) if len(highs) > 5 else round(close * 1.05, 2),
+                    "support_1": round(min(lows), 2) if lows else round(close * 0.97, 2),
+                    "support_2": round(sorted(lows)[5], 2) if len(lows) > 5 else round(close * 0.95, 2),
+                    "pivot": round((max(highs) + min(lows) + close) / 3, 2) if highs and lows else round(close, 2),
+                    "day_high": round(bars[-1].get("high", close * 1.01), 2),
+                    "day_low": round(bars[-1].get("low", close * 0.99), 2)
+                }
         except Exception as e:
             print(f"Error processing historical data: {e}")
     
