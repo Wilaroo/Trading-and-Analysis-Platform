@@ -870,8 +870,8 @@ class SupportResistanceService:
         
         for interval in intervals:
             # Round up and down
-            round_up = np.ceil(current_price / interval) * interval
-            round_down = np.floor(current_price / interval) * interval
+            round_up = float(np.ceil(current_price / interval) * interval)
+            round_down = float(np.floor(current_price / interval) * interval)
             
             # Add a few levels above and below
             for i in range(-2, 3):
@@ -881,7 +881,7 @@ class SupportResistanceService:
                 if level_up > 0 and abs(level_up - current_price) / current_price < 0.10:  # Within 10%
                     strength = 3 if interval == intervals[0] else 4 if interval == intervals[1] else 5
                     levels.append(SRLevel(
-                        level_up,
+                        float(level_up),
                         LevelType.ROUND_NUMBER,
                         strength=strength,
                         notes=f"${level_up:.0f} round number"
