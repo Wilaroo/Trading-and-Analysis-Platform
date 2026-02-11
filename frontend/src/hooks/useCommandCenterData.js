@@ -352,33 +352,42 @@ export function useCommandCenterData({
 
   // ==================== EFFECTS ====================
 
-  // System health on mount + interval
+  // System health on mount + interval (60s is fine - rarely changes)
   useEffect(() => {
     fetchSystemHealth();
     const interval = setInterval(fetchSystemHealth, 60000);
     return () => clearInterval(interval);
   }, []);
 
-  // Initial data load
+  // Initial data load - optimized with staggered loading
   useEffect(() => {
     if (!connectionChecked) return;
     const init = async () => {
+      // Phase 1: Critical data first (account, watchlist)
       if (isConnected) {
         await Promise.all([fetchAccountData(), fetchWatchlist(isConnected)]);
-        setTimeout(async () => {
-          await Promise.all([fetchMarketContext(), fetchEnhancedAlerts()]);
-        }, 500);
       }
-      fetchAlerts();
-      fetchNewsletter();
-      fetchEarnings();
-      fetchPriceAlerts();
+      
+      // Phase 2: Important data with slight delay
+      setTimeout(async () => {
+        await Promise.all([
+          fetchAlerts(),
+          fetchPriceAlerts(),
+          isConnected ? fetchMarketContext() : Promise.resolve(),
+          isConnected ? fetchEnhancedAlerts() : Promise.resolve(),
+        ]);
+      }, 300);
+      
+      // Phase 3: Lower priority - earnings at the end
+      setTimeout(() => {
+        fetchEarnings();
+      }, 1000);
     };
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connectionChecked, isConnected, isActiveTab]);
 
-  // Polling for order fills and price alerts
+  // Polling for order fills and price alerts (30s is appropriate)
   useEffect(() => {
     if (!isConnected) return;
     const fastPoll = setInterval(() => {
