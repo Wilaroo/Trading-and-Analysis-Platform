@@ -911,10 +911,14 @@ async def get_comprehensive_analysis(symbol: str):
         except Exception as e:
             print(f"Error processing historical data: {e}")
         
-        # Get news
+        # Get news - use Finnhub for URLs
         try:
-            news = await _ib_service.get_news_for_symbol(symbol)
-            analysis["news"] = news[:5] if news else []
+            if _news_service:
+                news = await _news_service.get_ticker_news(symbol, max_items=5)
+                analysis["news"] = news if news else []
+            elif _ib_service:
+                news = await _ib_service.get_news_for_symbol(symbol)
+                analysis["news"] = news[:5] if news else []
         except:
             pass
     
