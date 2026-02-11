@@ -995,10 +995,13 @@ class EnhancedBackgroundScanner:
                 self._last_scan_time = datetime.now(timezone.utc)
                 self._scan_count += 1
                 
-                logger.info(f"📊 Scan #{self._scan_count} in {scan_duration:.1f}s | "
-                           f"Regime: {self._market_regime.value} | Window: {current_window.value} | "
-                           f"Scanned: {self._symbols_scanned_last} | Skipped: {self._symbols_skipped_rvol} | "
-                           f"Alerts: {len(self._live_alerts)}")
+                logger.info(
+                    f"📊 Scan #{self._scan_count} in {scan_duration:.1f}s | "
+                    f"Regime: {self._market_regime.value} | Window: {current_window.value} | "
+                    f"Scanned: {self._symbols_scanned_last} | "
+                    f"Skipped: ADV={self._symbols_skipped_adv}, RVOL={self._symbols_skipped_rvol} | "
+                    f"Alerts: {len(self._live_alerts)}"
+                )
                 
                 # Clean up expired alerts
                 self._cleanup_expired_alerts()
