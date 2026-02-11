@@ -15,7 +15,6 @@ import {
   Zap,
   Target,
   Sparkles,
-  AlertTriangle,
   ArrowUpRight,
   RefreshCw,
   Activity,
@@ -25,7 +24,9 @@ import {
   Check,
   Star,
   ArrowRight,
-  Clock
+  Clock,
+  DollarSign,
+  Briefcase
 } from 'lucide-react';
 import api from '../utils/api';
 import { toast } from 'sonner';
