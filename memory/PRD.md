@@ -44,18 +44,33 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 7. Scanner Signals (live alerts from enhanced scanner)
 
 ## Enhanced Scanner (Feb 2026)
-**1,425 symbols scanned via wave scanning with 30+ SMB strategies**
+**~1,083 symbols scanned via ETF-based wave scanning (SPY + QQQ + IWM) with 30+ SMB strategies**
 
 ### Features Implemented:
 | Feature | Description |
 |---------|-------------|
+| **ETF-Based Universe** | Stocks organized by SPY (Tier 1), QQQ (Tier 1), IWM (Tier 3 rotating) |
+| **Volume Filtering** | ADV >= 100K for general, ADV >= 500K for intraday/scalp setups |
 | **Wave Scanning** | Tiered scanning: Watchlist (T1) → High RVOL (T2) → Rotating Universe (T3) |
 | **Smart Watchlist** | Hybrid auto-populated + manual watchlist with strategy-based expiration |
 | **RVOL Pre-filtering** | Skips symbols with RVOL < 0.8 to focus on active stocks |
 | **Tape Reading** | Analyzes bid/ask spread, order imbalance, momentum for confirmation |
 | **Win-Rate Tracking** | Records outcomes for each strategy, calculates win rate & profit factor |
 | **Auto-Execution** | Wires high-priority tape-confirmed alerts directly to Trading Bot |
-| **AI Coaching** | Proactive AI notifications for high-priority scanner alerts (NEW Feb 2026) |
+| **AI Coaching** | Proactive AI notifications for high-priority scanner alerts |
+| **Quarterly Rebalance Alerts** | System flags when ETF lists need refreshing |
+
+### Universe Structure:
+| ETF | Coverage | Count | Priority |
+|-----|----------|-------|----------|
+| SPY | S&P 500 Large Caps | ~492 | **Tier 1** (every scan) |
+| QQQ | Nasdaq-100 Tech | ~120 | **Tier 1** (every scan) |
+| IWM | Russell 2000 Small Caps | ~545 | **Tier 3** (rotating) |
+| **Total Unique** | | ~1,083 | |
+
+### Volume Filters:
+- **General/Swing setups**: ADV >= 100,000
+- **Intraday/Scalp setups**: ADV >= 500,000
 
 ### Scanner → AI → Bot Integration (Feb 2026)
 ```
@@ -63,7 +78,7 @@ Scanner detects HIGH/CRITICAL alert
     ↓
 Auto-populates Smart Watchlist
     ↓
-Triggers AI Coaching Notification ← NEW
+Triggers AI Coaching Notification
     ↓
 (If auto-execute enabled) Submits to Trading Bot
 ```
@@ -71,6 +86,8 @@ Triggers AI Coaching Notification ← NEW
 ### New API Endpoints (Feb 2026):
 - `GET /api/assistant/coach/scanner-notifications` - Get proactive coaching alerts
 - `POST /api/assistant/coach/scanner-coaching?symbol=X&setup_type=Y` - Manual coaching
+- `GET /api/live-scanner/config/volume-filter` - Get ADV filter settings
+- `POST /api/live-scanner/config/volume-filter` - Set ADV filter thresholds
 
 ### Existing API Endpoints:
 - `GET /api/live-scanner/stats/strategies` - Win-rate stats per setup
