@@ -105,15 +105,15 @@ class SRLevel:
     
     def to_dict(self) -> Dict:
         return {
-            "price": round(self.price, 2),
+            "price": float(round(self.price, 2)),
             "type": self.level_type.value,
-            "strength": self.strength,
-            "touches": self.touches,
-            "is_support": self.is_support,
-            "is_resistance": self.is_resistance,
-            "volume_at_level": round(self.volume_at_level, 0),
+            "strength": int(self.strength),
+            "touches": int(self.touches),
+            "is_support": bool(self.is_support),
+            "is_resistance": bool(self.is_resistance),
+            "volume_at_level": float(round(self.volume_at_level, 0)),
             "last_tested": self.last_tested.isoformat() if self.last_tested else None,
-            "notes": self.notes
+            "notes": str(self.notes)
         }
 
 
