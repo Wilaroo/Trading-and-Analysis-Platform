@@ -86,7 +86,7 @@ class WaveScanner:
         # Check if we completed a full universe scan
         if wave_num == 0 and self._current_wave > 0:
             self._last_full_scan_complete = datetime.now(timezone.utc)
-            logger.info(f"🔄 Full universe scan complete - starting new cycle")
+            logger.info("🔄 Full universe scan complete - starting new cycle")
         
         self._current_wave = wave_num
         
