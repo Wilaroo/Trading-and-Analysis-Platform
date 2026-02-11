@@ -2049,6 +2049,104 @@ async def remove_from_watchlist(symbol: str):
         raise HTTPException(status_code=404, detail=f"{symbol} not found in watchlist")
     return {"message": f"{symbol} removed from watchlist", "symbol": symbol.upper()}
 
+
+# ===================== SMART WATCHLIST API =====================
+# New hybrid auto-populated + manual watchlist system
+
+@app.get("/api/smart-watchlist")
+async def get_smart_watchlist_api():
+    """
+    Get the smart watchlist (hybrid auto + manual)
+    Auto-populated from scanner hits, manually editable
+    Max 50 symbols, with strategy-based expiration
+    """
+    return smart_watchlist.to_api_response()
+
+@app.post("/api/smart-watchlist/add")
+async def add_to_smart_watchlist(data: dict):
+    """
+    Manually add a symbol to smart watchlist
+    Manual adds are 'sticky' - they won't auto-expire
+    """
+    symbol = data.get("symbol", "").upper()
+    notes = data.get("notes", "")
+    
+    if not symbol:
+        raise HTTPException(status_code=400, detail="Symbol is required")
+    
+    result = smart_watchlist.add_manual(symbol, notes)
+    return result
+
+@app.delete("/api/smart-watchlist/{symbol}")
+async def remove_from_smart_watchlist(symbol: str):
+    """
+    Manually remove a symbol from smart watchlist
+    Symbol will be blacklisted from auto-add for 24 hours
+    """
+    result = smart_watchlist.remove_manual(symbol.upper())
+    if not result.get("success"):
+        raise HTTPException(status_code=404, detail=result.get("message"))
+    return result
+
+@app.get("/api/smart-watchlist/stats")
+async def get_smart_watchlist_stats():
+    """Get smart watchlist statistics"""
+    return smart_watchlist.get_stats()
+
+
+# ===================== WAVE SCANNER API =====================
+
+@app.get("/api/wave-scanner/batch")
+async def get_wave_scanner_batch():
+    """
+    Get the next batch of symbols to scan
+    Returns tiered symbols: Tier1 (watchlist), Tier2 (high RVOL), Tier3 (universe wave)
+    """
+    batch = await wave_scanner.get_scan_batch()
+    return batch
+
+@app.get("/api/wave-scanner/stats")
+async def get_wave_scanner_stats():
+    """Get wave scanner statistics"""
+    return wave_scanner.get_stats()
+
+@app.get("/api/wave-scanner/config")
+async def get_wave_scanner_config():
+    """Get wave scanner configuration"""
+    return wave_scanner.get_config()
+
+
+# ===================== INDEX UNIVERSE API =====================
+
+@app.get("/api/universe/stats")
+async def get_universe_stats():
+    """Get index universe statistics"""
+    return index_universe.get_stats()
+
+@app.get("/api/universe/symbols/{index_type}")
+async def get_index_symbols(index_type: str):
+    """
+    Get symbols for a specific index
+    Valid types: sp500, nasdaq100, russell2000, etf
+    """
+    from services.index_universe import IndexType
+    
+    try:
+        idx_type = IndexType(index_type.lower())
+    except ValueError:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid index type. Valid: sp500, nasdaq100, russell2000, etf"
+        )
+    
+    symbols = index_universe.get_index_symbols(idx_type)
+    return {
+        "index": index_type,
+        "count": len(symbols),
+        "symbols": symbols
+    }
+
+
 # ----- Portfolio -----
 @app.get("/api/portfolio")
 async def get_portfolio():
