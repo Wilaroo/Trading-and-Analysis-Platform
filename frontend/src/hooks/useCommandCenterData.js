@@ -183,13 +183,6 @@ export function useCommandCenterData({
     } catch { setAlerts([]); }
   };
 
-  const fetchNewsletter = async () => {
-    try {
-      const res = await api.get('/api/newsletter/latest');
-      setNewsletter(res.data);
-    } catch { setNewsletter(null); }
-  };
-
   const fetchWatchlist = async (connected) => {
     try {
       const res = await api.get('/api/watchlist');
