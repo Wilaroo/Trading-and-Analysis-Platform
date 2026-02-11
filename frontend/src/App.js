@@ -150,8 +150,7 @@ function App() {
     checkIbConnection();
   }, [checkIbConnection]);
   
-  // Periodic connection check every 30 seconds
-  // If disconnected, the backend will attempt auto-reconnect
+  // Periodic connection check every 15 seconds for more responsive UI
   useEffect(() => {
     const interval = setInterval(async () => {
       const connected = await checkIbConnection();
@@ -159,7 +158,7 @@ function App() {
       if (!connected && ibConnectionChecked) {
         console.log('IB connection check: disconnected - backend will attempt auto-reconnect');
       }
-    }, 30000);
+    }, 15000);  // Reduced from 30s to 15s
     return () => clearInterval(interval);
   }, [checkIbConnection, ibConnectionChecked]);
 
