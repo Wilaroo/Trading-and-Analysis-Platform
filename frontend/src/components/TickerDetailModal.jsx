@@ -7,12 +7,14 @@ import {
   AlertTriangle,
   Sparkles,
   Bot,
-  CheckCircle2
+  CheckCircle2,
+  ExternalLink
 } from 'lucide-react';
 import * as LightweightCharts from 'lightweight-charts';
 import api from '../utils/api';
 import { HelpTooltip } from './HelpTooltip';
 import { formatPrice, formatPercent, formatVolume } from '../utils/tradingUtils';
+import { TickerAwareText } from '../utils/tickerUtils';
 
 const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
   const [analysis, setAnalysis] = useState(null);
