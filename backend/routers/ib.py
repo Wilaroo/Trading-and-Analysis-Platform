@@ -1025,15 +1025,49 @@ async def get_comprehensive_analysis(symbol: str):
         }
     
     if not analysis["support_resistance"]:
-        analysis["support_resistance"] = {
-            "resistance_1": round(base_price * 1.025, 2),
-            "resistance_2": round(base_price * 1.05, 2),
-            "support_1": round(base_price * 0.975, 2),
-            "support_2": round(base_price * 0.95, 2),
-            "pivot": round(base_price, 2),
-            "day_high": round(base_price * 1.015, 2),
-            "day_low": round(base_price * 0.985, 2)
-        }
+        # Try to get bars from Alpaca for enhanced S/R even if IB didn't have data
+        try:
+            if _alpaca_service:
+                fallback_bars = await _alpaca_service.get_bars(symbol, timeframe="1Day", limit=60)
+                if fallback_bars and len(fallback_bars) >= 10:
+                    sr_service = get_sr_service()
+                    sr_analysis = await sr_service.get_sr_analysis(
+                        symbol=symbol,
+                        bars=fallback_bars,
+                        current_price=base_price,
+                        include_pivots=True,
+                        include_volume_profile=True,
+                        include_reaction_zones=True
+                    )
+                    sr_summary = sr_service.get_key_levels_summary(sr_analysis)
+                    
+                    analysis["support_resistance"] = {
+                        "resistance_1": sr_summary["nearest_resistance"]["price"] if sr_summary["nearest_resistance"] else round(base_price * 1.025, 2),
+                        "resistance_2": sr_summary["resistance_levels"][1]["price"] if len(sr_summary["resistance_levels"]) > 1 else round(base_price * 1.05, 2),
+                        "support_1": sr_summary["nearest_support"]["price"] if sr_summary["nearest_support"] else round(base_price * 0.975, 2),
+                        "support_2": sr_summary["support_levels"][1]["price"] if len(sr_summary["support_levels"]) > 1 else round(base_price * 0.95, 2),
+                        "pivot": sr_summary["pivot_point"] if sr_summary["pivot_point"] else round(base_price, 2),
+                        "day_high": round(base_price * 1.015, 2),
+                        "day_low": round(base_price * 0.985, 2),
+                        "volume_profile": sr_summary["volume_profile"],
+                        "confluence_zones": sr_summary["confluence_zones"],
+                        "support_levels": sr_summary["support_levels"],
+                        "resistance_levels": sr_summary["resistance_levels"]
+                    }
+        except Exception as e:
+            print(f"Fallback S/R calculation error: {e}")
+        
+        # Final fallback if still not populated
+        if not analysis["support_resistance"]:
+            analysis["support_resistance"] = {
+                "resistance_1": round(base_price * 1.025, 2),
+                "resistance_2": round(base_price * 1.05, 2),
+                "support_1": round(base_price * 0.975, 2),
+                "support_2": round(base_price * 0.95, 2),
+                "pivot": round(base_price, 2),
+                "day_high": round(base_price * 1.015, 2),
+                "day_low": round(base_price * 0.985, 2)
+            }
     
     # Calculate scores
     technicals = analysis["technicals"]
