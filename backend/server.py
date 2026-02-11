@@ -2784,6 +2784,55 @@ async def get_dashboard_stats():
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
+@app.get("/api/dashboard/init")
+async def get_dashboard_init():
+    """
+    Batch endpoint for initial dashboard data load.
+    Returns multiple data sources in one request to reduce API calls on startup.
+    """
+    try:
+        # Fetch all data in parallel
+        ib_status = get_ib_service().get_connection_status()
+        
+        # Add busy status to IB
+        is_busy, busy_op = get_ib_service().is_busy()
+        ib_status["is_busy"] = is_busy
+        ib_status["busy_operation"] = busy_op
+        
+        # Get system health
+        system_health = await get_system_monitor()
+        
+        # Get alerts
+        alerts_data = await get_alerts()
+        
+        # Get smart watchlist
+        smart_watchlist = smart_watchlist_service.get_watchlist()
+        
+        # Get live scanner status
+        scanner_status = {
+            "active": background_scanner._running if background_scanner else False,
+            "alerts_count": len(background_scanner._live_alerts) if background_scanner else 0,
+        }
+        
+        return {
+            "ib_status": ib_status,
+            "system_health": system_health,
+            "alerts": alerts_data,
+            "smart_watchlist": [item.to_dict() for item in smart_watchlist[:20]],
+            "scanner_status": scanner_status,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "ib_status": {"connected": False},
+            "system_health": {"overall_status": "error"},
+            "alerts": {"alerts": [], "unread_count": 0},
+            "smart_watchlist": [],
+            "scanner_status": {"active": False},
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
 # ===================== WEBSOCKET REAL-TIME STREAMING =====================
 
 class ConnectionManager:
