@@ -2820,13 +2820,28 @@ class ConnectionManager:
             await websocket.send_json(message)
         except Exception as e:
             print(f"Error sending message: {e}")
+            # Clean up stale connection
+            self.disconnect(websocket)
     
     async def broadcast(self, message: dict):
-        for connection in self.active_connections:
+        """Broadcast message to all active connections, cleaning up stale ones"""
+        stale_connections = []
+        
+        # Create a copy of the list to avoid modification during iteration
+        connections_to_send = self.active_connections.copy()
+        
+        for connection in connections_to_send:
             try:
                 await connection.send_json(message)
             except Exception as e:
-                print(f"Error broadcasting: {e}")
+                # Connection is stale or closed, mark for removal
+                stale_connections.append(connection)
+                if str(e):  # Only print if there's an actual error message
+                    print(f"Error broadcasting (removing stale connection): {e}")
+        
+        # Clean up stale connections
+        for stale in stale_connections:
+            self.disconnect(stale)
 
 manager = ConnectionManager()
 
