@@ -63,6 +63,9 @@ export function useCommandCenterData({
   // System health
   const [systemHealth, setSystemHealth] = useState(null);
   const [isGeneratingIntelligence, setIsGeneratingIntelligence] = useState(false);
+  
+  // Smart watchlist from batch init
+  const [smartWatchlist, setSmartWatchlist] = useState([]);
 
   // Keyboard shortcuts
   useKeyboardShortcuts({
