@@ -1015,24 +1015,132 @@ class EnhancedBackgroundScanner:
                 await asyncio.sleep(10)
     
     async def _run_optimized_scan(self):
-        """Run optimized scan with RVOL pre-filtering and parallel processing"""
-        # Pre-filter watchlist based on RVOL (skip dead stocks)
-        active_symbols = await self._get_active_symbols()
-        self._symbols_scanned_last = len(active_symbols)
+        """
+        Run optimized scan with ADV as FIRST checkpoint.
         
-        logger.debug(f"Scanning {len(active_symbols)} active symbols (filtered from {len(self._watchlist)})")
+        Flow:
+        1. Get candidate symbols from wave scanner
+        2. FIRST FILTER: Check ADV (skip if < minimum)
+        3. SECOND FILTER: Check RVOL (skip if < threshold)
+        4. Only then: Get full snapshot and run setup checks
+        """
+        # Reset counters
+        self._symbols_skipped_rvol = 0
+        self._symbols_skipped_adv = 0
         
-        # Scan in larger batches with concurrent processing
-        for i in range(0, len(active_symbols), self._symbols_per_batch):
-            batch = active_symbols[i:i + self._symbols_per_batch]
+        # Get candidate symbols from wave scanner
+        all_candidates = await self._get_active_symbols()
+        
+        # FIRST CHECKPOINT: Pre-filter by ADV before ANY expensive operations
+        adv_filtered_symbols = await self._prefilter_by_adv(all_candidates)
+        
+        self._symbols_scanned_last = len(adv_filtered_symbols)
+        
+        logger.debug(
+            f"Scanning {len(adv_filtered_symbols)} symbols "
+            f"(ADV filtered from {len(all_candidates)}, skipped {self._symbols_skipped_adv})"
+        )
+        
+        # Scan in batches with concurrent processing
+        for i in range(0, len(adv_filtered_symbols), self._symbols_per_batch):
+            batch = adv_filtered_symbols[i:i + self._symbols_per_batch]
             
             # Process batch concurrently
             tasks = [self._scan_symbol_all_setups(symbol) for symbol in batch]
             await asyncio.gather(*tasks, return_exceptions=True)
             
             # Small delay between batches
-            if i + self._symbols_per_batch < len(active_symbols):
+            if i + self._symbols_per_batch < len(adv_filtered_symbols):
                 await asyncio.sleep(self._batch_delay)
+    
+    async def _prefilter_by_adv(self, symbols: List[str]) -> List[str]:
+        """
+        Pre-filter symbols by Average Daily Volume (ADV).
+        This is the FIRST checkpoint - runs BEFORE any other scanning.
+        
+        Uses cached ADV when available, fetches fresh data for unknown symbols.
+        Symbols below minimum ADV are completely skipped (no further processing).
+        """
+        now = datetime.now(timezone.utc)
+        qualified_symbols = []
+        symbols_needing_adv = []
+        
+        # Check cache first for quick filtering
+        for symbol in symbols:
+            if symbol in self._adv_cache:
+                cached_adv, cached_time = self._adv_cache[symbol]
+                if (now - cached_time).total_seconds() < self._adv_cache_ttl:
+                    # Use cached value
+                    if cached_adv >= self._min_adv_general:
+                        qualified_symbols.append(symbol)
+                    else:
+                        self._symbols_skipped_adv += 1
+                    continue
+            
+            # Need to fetch ADV for this symbol
+            symbols_needing_adv.append(symbol)
+        
+        # Batch fetch ADV for unknown symbols
+        if symbols_needing_adv:
+            try:
+                # Get ADV data in batch via Alpaca bars
+                adv_data = await self._batch_fetch_adv(symbols_needing_adv)
+                
+                for symbol in symbols_needing_adv:
+                    adv = adv_data.get(symbol, 0)
+                    self._adv_cache[symbol] = (adv, now)
+                    
+                    if adv >= self._min_adv_general:
+                        qualified_symbols.append(symbol)
+                    else:
+                        self._symbols_skipped_adv += 1
+                        
+            except Exception as e:
+                logger.warning(f"ADV batch fetch failed, allowing all: {e}")
+                qualified_symbols.extend(symbols_needing_adv)
+        
+        return qualified_symbols
+    
+    async def _batch_fetch_adv(self, symbols: List[str]) -> Dict[str, int]:
+        """
+        Fetch average daily volume for multiple symbols efficiently.
+        Returns dict of {symbol: avg_daily_volume}
+        """
+        adv_data = {}
+        
+        try:
+            # Get historical bars to calculate ADV (20-day average)
+            from datetime import timedelta
+            
+            # Batch process in chunks to avoid rate limits
+            chunk_size = 50
+            for i in range(0, len(symbols), chunk_size):
+                chunk = symbols[i:i + chunk_size]
+                
+                try:
+                    bars = await self.alpaca_service.get_multi_bars(
+                        chunk,
+                        timeframe="1D",
+                        limit=20
+                    )
+                    
+                    if bars:
+                        for symbol, symbol_bars in bars.items():
+                            if symbol_bars:
+                                volumes = [bar.get("volume", 0) for bar in symbol_bars]
+                                adv = int(sum(volumes) / len(volumes)) if volumes else 0
+                                adv_data[symbol] = adv
+                                
+                except Exception as e:
+                    logger.debug(f"Error fetching bars for chunk: {e}")
+                    # Default to allowing these symbols through
+                    for symbol in chunk:
+                        adv_data[symbol] = self._min_adv_general
+                        
+        except Exception as e:
+            logger.warning(f"Batch ADV fetch failed: {e}")
+        
+        return adv_data
     
     async def _scan_symbol_all_setups(self, symbol: str):
         """Scan a single symbol for ALL enabled setups with tape reading"""
