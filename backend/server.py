@@ -2800,13 +2800,13 @@ async def get_dashboard_init():
         ib_status["busy_operation"] = busy_op
         
         # Get system health
-        system_health = await get_system_monitor()
+        system_health = await system_monitor()
         
         # Get alerts
         alerts_data = await get_alerts()
         
         # Get smart watchlist
-        smart_watchlist = smart_watchlist_service.get_watchlist()
+        smart_watchlist_items = get_smart_watchlist()
         
         # Get live scanner status
         scanner_status = {
@@ -2818,7 +2818,7 @@ async def get_dashboard_init():
             "ib_status": ib_status,
             "system_health": system_health,
             "alerts": alerts_data,
-            "smart_watchlist": [item.to_dict() for item in smart_watchlist[:20]],
+            "smart_watchlist": [item.to_dict() for item in smart_watchlist_items[:20]],
             "scanner_status": scanner_status,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
