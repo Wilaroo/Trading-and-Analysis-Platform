@@ -887,15 +887,18 @@ const AICommandPanel = ({
     onTickerSelect?.({ symbol, quote: {}, fromSearch: true });
   }, [onTickerSelect]);
 
-  // Poll data
+  // Poll data - optimized intervals to reduce API load
+  // Staggered: bot status 20s, trades 25s, coaching 15s (most time-sensitive)
   useEffect(() => {
+    // Initial fetch with staggered timing
     fetchBotStatus();
-    fetchBotTrades();
-    fetchCoachingAlerts();
+    setTimeout(fetchBotTrades, 200);
+    setTimeout(fetchCoachingAlerts, 400);
     
-    const statusInterval = setInterval(fetchBotStatus, 10000);
-    const tradesInterval = setInterval(fetchBotTrades, 15000);
-    const coachingInterval = setInterval(fetchCoachingAlerts, 10000);
+    // Staggered polling intervals to avoid burst requests
+    const statusInterval = setInterval(fetchBotStatus, 20000);    // Bot status rarely changes
+    const tradesInterval = setInterval(fetchBotTrades, 25000);    // Trades update less frequently  
+    const coachingInterval = setInterval(fetchCoachingAlerts, 15000); // Coaching alerts more time-sensitive
     
     return () => {
       clearInterval(statusInterval);
