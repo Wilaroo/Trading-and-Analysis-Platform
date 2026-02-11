@@ -1942,6 +1942,31 @@ class EnhancedBackgroundScanner:
         self._live_alerts[alert.id] = alert
         self._alerts_generated += 1
         
+        # === AUTO-POPULATE SMART WATCHLIST ===
+        try:
+            from services.smart_watchlist_service import get_smart_watchlist
+            smart_wl = get_smart_watchlist()
+            if smart_wl:
+                # Calculate score based on alert properties
+                score = 50
+                if alert.priority.value == "critical":
+                    score += 30
+                elif alert.priority.value == "high":
+                    score += 20
+                if alert.tape_confirmation:
+                    score += 10
+                if alert.strategy_win_rate and alert.strategy_win_rate > 0.6:
+                    score += 10
+                
+                smart_wl.add_scanner_hit(
+                    symbol=alert.symbol,
+                    strategy=alert.setup_type,
+                    score=min(100, score),
+                    notes=alert.headline
+                )
+        except Exception as e:
+            logger.debug(f"Could not add to smart watchlist: {e}")
+        
         # Persist to database
         if self.db:
             try:
