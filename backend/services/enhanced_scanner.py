@@ -270,10 +270,11 @@ class EnhancedBackgroundScanner:
         self._rvol_cache: Dict[str, Tuple[float, datetime]] = {}
         self._rvol_cache_ttl = 300  # 5 minutes
         
-        # Average Daily Volume (ADV) filters
+        # Average Daily Volume (ADV) filters - FIRST checkpoint before any scanning
         self._min_adv_general = 100_000      # Min ADV for general/swing setups
         self._min_adv_intraday = 500_000     # Min ADV for intraday/scalp setups
-        self._adv_cache: Dict[str, int] = {}  # Cache ADV values
+        self._adv_cache: Dict[str, Tuple[int, datetime]] = {}  # Cache ADV values with timestamp
+        self._adv_cache_ttl = 3600  # 1 hour (ADV doesn't change much intraday)
         
         # Intraday/scalp setups requiring higher volume
         self._intraday_setups = {
