@@ -315,6 +315,7 @@ class EnhancedBackgroundScanner:
         self._last_scan_time: Optional[datetime] = None
         self._symbols_scanned_last = 0
         self._symbols_skipped_rvol = 0
+        self._symbols_skipped_adv = 0  # Skipped due to low volume
         
         # Market context
         self._market_regime: MarketRegime = MarketRegime.RANGE_BOUND
