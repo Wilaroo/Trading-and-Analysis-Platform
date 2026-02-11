@@ -330,7 +330,7 @@ const RightSidebar = ({ onTickerSelect }) => {
   return (
     <div className="space-y-3" data-testid="right-sidebar">
       {/* Market Intelligence Panel */}
-      <MarketIntelPanel />
+      <MarketIntelPanel onTickerSelect={onTickerSelect} />
       
       {/* Scanner Results */}
       <ScannerResultsWidget onTickerSelect={onTickerSelect} />
