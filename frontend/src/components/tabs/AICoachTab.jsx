@@ -1,7 +1,7 @@
 import React from 'react';
 import AICommandPanel from '../AICommandPanel';
 import TradingBotPanel from '../TradingBotPanel';
-import MarketIntelPanel from '../MarketIntelPanel';
+import RightSidebar from '../RightSidebar';
 
 const AICoachTab = ({
   setSelectedTicker,
@@ -37,9 +37,9 @@ const AICoachTab = ({
         </div>
       </div>
 
-      {/* RIGHT - Market Intelligence */}
+      {/* RIGHT - Market Intel + Earnings + Watchlist + Scanner */}
       <div className="lg:col-span-4">
-        <MarketIntelPanel />
+        <RightSidebar onTickerSelect={(ticker) => setSelectedTicker(ticker)} />
       </div>
     </div>
   );
