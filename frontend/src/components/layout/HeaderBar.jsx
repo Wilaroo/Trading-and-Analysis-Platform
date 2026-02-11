@@ -31,11 +31,11 @@ const HeaderBar = ({
         </div>
         
         {/* Compact System Monitor */}
-        {systemHealth && (
+        {systemHealth && systemHealth.services && (
           <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/50 rounded-lg border border-zinc-800" data-testid="system-health-indicator">
             <Monitor className="w-4 h-4 text-zinc-400" />
             <div className="flex items-center gap-1.5">
-              {systemHealth.services.slice(0, 5).map((service, idx) => {
+              {(systemHealth.services || []).slice(0, 5).map((service, idx) => {
                 const statusColor = service.status === 'healthy' ? 'bg-green-500' :
                                    service.status === 'warning' ? 'bg-yellow-500' :
                                    service.status === 'disconnected' ? 'bg-orange-500' :
