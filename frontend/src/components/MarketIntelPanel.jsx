@@ -37,7 +37,7 @@ const REPORT_COLORS = {
   post_market: { bg: 'bg-purple-500/10', border: 'border-purple-500/30', text: 'text-purple-400', dot: 'bg-purple-400' },
 };
 
-const MarketIntelPanel = () => {
+const MarketIntelPanel = ({ onTickerSelect }) => {
   const [schedule, setSchedule] = useState([]);
   const [reports, setReports] = useState([]);
   const [activeReport, setActiveReport] = useState(null);
@@ -45,6 +45,12 @@ const MarketIntelPanel = () => {
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(true);
   const [autoTriggered, setAutoTriggered] = useState(false);
+
+  const handleTickerClick = (symbol) => {
+    if (onTickerSelect) {
+      onTickerSelect(symbol);
+    }
+  };
 
   const fetchData = useCallback(async () => {
     try {
