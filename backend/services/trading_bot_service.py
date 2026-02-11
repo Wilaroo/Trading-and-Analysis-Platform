@@ -711,19 +711,19 @@ class TradingBotService:
             logger.error(f"Scan error: {e}")
     
     async def _get_trade_alerts(self) -> List[Dict]:
-        """Get trade alerts from alert system"""
+        """Get trade alerts from enhanced scanner"""
         alerts = []
         
         try:
-            # Use background scanner alerts if available
-            from services.background_scanner import get_background_scanner
-            scanner = get_background_scanner()
+            # Use enhanced scanner (primary)
+            from services.enhanced_scanner import get_enhanced_scanner
+            scanner = get_enhanced_scanner()
             
-            # Get current alerts - method is get_live_alerts
+            # Get current live alerts
             scanner_alerts = scanner.get_live_alerts()
             
             for alert in scanner_alerts:
-                # Convert LiveAlert to dict
+                # Convert LiveAlert to dict format for trading bot
                 alert_dict = {
                     'symbol': alert.symbol,
                     'setup_type': alert.setup_type,
@@ -731,21 +731,54 @@ class TradingBotService:
                     'current_price': alert.current_price,
                     'trigger_price': alert.trigger_price,
                     'stop_price': alert.stop_loss,
-                    'targets': [alert.target],
-                    'score': int(alert.trigger_probability * 100),
-                    'trigger_probability': alert.trigger_probability,
+                    'targets': [alert.target] if alert.target else [],
+                    'score': int((alert.trigger_probability or 0.5) * 100),
+                    'trigger_probability': alert.trigger_probability or 0.5,
                     'headline': alert.headline,
-                    'technical_reasons': alert.reasoning,
-                    'warnings': []
+                    'technical_reasons': alert.reasoning or [],
+                    'warnings': [],
+                    'priority': alert.priority.value if alert.priority else 'medium',
+                    'tape_confirmation': alert.tape_confirmation,
+                    'strategy_win_rate': alert.strategy_win_rate,
+                    'auto_execute_eligible': alert.auto_execute_eligible
                 }
                 
-                if alert_dict.get('setup_type') in self._enabled_setups:
+                # Check if setup is enabled
+                base_setup = alert.setup_type.split("_long")[0].split("_short")[0]
+                if base_setup in self._enabled_setups or alert.setup_type in self._enabled_setups:
                     alerts.append(alert_dict)
             
         except Exception as e:
-            logger.error(f"Error getting alerts: {e}")
+            logger.error(f"Error getting alerts from enhanced scanner: {e}")
+            
+            # Fallback to old background scanner
+            try:
+                from services.background_scanner import get_background_scanner
+                scanner = get_background_scanner()
+                scanner_alerts = scanner.get_live_alerts()
+                
+                for alert in scanner_alerts:
+                    alert_dict = {
+                        'symbol': alert.symbol,
+                        'setup_type': alert.setup_type,
+                        'direction': alert.direction,
+                        'current_price': alert.current_price,
+                        'trigger_price': alert.trigger_price,
+                        'stop_price': alert.stop_loss,
+                        'targets': [alert.target],
+                        'score': int(alert.trigger_probability * 100),
+                        'trigger_probability': alert.trigger_probability,
+                        'headline': alert.headline,
+                        'technical_reasons': alert.reasoning,
+                        'warnings': []
+                    }
+                    
+                    if alert_dict.get('setup_type') in self._enabled_setups:
+                        alerts.append(alert_dict)
+            except:
+                pass
         
-        return alerts[:10]  # Limit to top 10
+        return alerts[:20]  # Top 20 alerts
     
     async def _evaluate_opportunity(self, alert: Dict) -> Optional[BotTrade]:
         """Evaluate an alert and create a trade if it meets criteria"""
