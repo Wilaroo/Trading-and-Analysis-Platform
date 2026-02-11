@@ -347,33 +347,62 @@ export function useCommandCenterData({
 
   // ==================== EFFECTS ====================
 
-  // System health on mount + interval (60s is fine - rarely changes)
+  // Batch init - fetches multiple data sources in one call
+  const fetchBatchInit = async () => {
+    try {
+      const res = await api.get('/api/dashboard/init');
+      const data = res.data;
+      
+      // Update all states from batch response
+      if (data.system_health) {
+        setSystemHealth(data.system_health);
+      }
+      if (data.alerts) {
+        setAlerts(data.alerts.alerts || []);
+      }
+      if (data.smart_watchlist) {
+        setSmartWatchlist(data.smart_watchlist);
+      }
+      
+      return data;
+    } catch (err) {
+      console.error('Batch init failed:', err);
+      return null;
+    }
+  };
+
+  // System health - now part of batch init, only poll separately at longer interval
   useEffect(() => {
-    fetchSystemHealth();
+    // Initial system health comes from batch init
     const interval = setInterval(fetchSystemHealth, 60000);
     return () => clearInterval(interval);
   }, []);
 
-  // Initial data load - optimized with staggered loading
+  // Initial data load - optimized with batch init + staggered loading
   useEffect(() => {
     if (!connectionChecked) return;
     const init = async () => {
-      // Phase 1: Critical data first (account, watchlist)
+      // Phase 1: Batch init (system health, alerts, smart watchlist in ONE call)
+      await fetchBatchInit();
+      
+      // Phase 2: IB-dependent data (only if connected)
       if (isConnected) {
         await Promise.all([fetchAccountData(), fetchWatchlist(isConnected)]);
+        
+        // Phase 3: Additional IB data with slight delay
+        setTimeout(async () => {
+          await Promise.all([
+            fetchPriceAlerts(),
+            fetchMarketContext(),
+            fetchEnhancedAlerts(),
+          ]);
+        }, 300);
+      } else {
+        // Not connected - just fetch price alerts
+        fetchPriceAlerts();
       }
       
-      // Phase 2: Important data with slight delay
-      setTimeout(async () => {
-        await Promise.all([
-          fetchAlerts(),
-          fetchPriceAlerts(),
-          isConnected ? fetchMarketContext() : Promise.resolve(),
-          isConnected ? fetchEnhancedAlerts() : Promise.resolve(),
-        ]);
-      }, 300);
-      
-      // Phase 3: Lower priority - earnings at the end
+      // Phase 4: Lower priority - earnings at the end
       setTimeout(() => {
         fetchEarnings();
       }, 1000);
