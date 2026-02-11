@@ -485,39 +485,73 @@ class EnhancedBackgroundScanner:
             "CMG", "YUM", "DPZ", "QSR",
         ]
     
-    # ==================== RVOL PRE-FILTERING ====================
+    # ==================== RVOL PRE-FILTERING & WAVE SCANNING ====================
     
     async def _get_active_symbols(self) -> List[str]:
-        """Pre-filter symbols by RVOL to skip dead stocks"""
+        """
+        Get symbols to scan using wave-based approach:
+        - Tier 1: Smart Watchlist (always)
+        - Tier 2: High RVOL pool
+        - Tier 3: Rotating universe wave
+        """
         active_symbols = []
         skipped = 0
         
-        for symbol in self._watchlist:
-            try:
-                # Check cache first
-                if symbol in self._rvol_cache:
-                    cached_rvol, cached_time = self._rvol_cache[symbol]
-                    if (datetime.now(timezone.utc) - cached_time).total_seconds() < self._rvol_cache_ttl:
-                        if cached_rvol >= self._min_rvol_filter:
-                            active_symbols.append(symbol)
-                        else:
-                            skipped += 1
-                        continue
-                
-                # Quick RVOL check via Alpaca
-                quote = await self.alpaca_service.get_quote(symbol)
-                if quote:
-                    # Estimate RVOL from volume vs expected
-                    # For now, pass all symbols and let the full scan filter
+        try:
+            # Use wave scanner for tiered symbol selection
+            from services.wave_scanner import get_wave_scanner
+            wave_scanner = get_wave_scanner()
+            
+            batch = await wave_scanner.get_scan_batch()
+            
+            # Combine all tiers
+            all_symbols = []
+            all_symbols.extend(batch.get("tier1_watchlist", []))
+            all_symbols.extend(batch.get("tier2_high_rvol", []))
+            all_symbols.extend(batch.get("tier3_wave", []))
+            
+            # Remove duplicates while preserving order (Tier 1 priority)
+            seen = set()
+            for symbol in all_symbols:
+                if symbol not in seen:
+                    seen.add(symbol)
                     active_symbols.append(symbol)
-                    self._rvol_cache[symbol] = (1.0, datetime.now(timezone.utc))
-                else:
-                    skipped += 1
-                    self._rvol_cache[symbol] = (0.0, datetime.now(timezone.utc))
+            
+            wave_info = batch.get("universe_progress", {})
+            logger.debug(
+                f"Wave scan batch: T1={len(batch.get('tier1_watchlist', []))} "
+                f"T2={len(batch.get('tier2_high_rvol', []))} "
+                f"T3={len(batch.get('tier3_wave', []))} "
+                f"Wave={wave_info.get('current_wave', 0)}/{wave_info.get('total_waves', 0)} "
+                f"({wave_info.get('progress_pct', 0)}%)"
+            )
+            
+        except Exception as e:
+            logger.warning(f"Wave scanner unavailable, falling back to static watchlist: {e}")
+            # Fallback to static watchlist
+            for symbol in self._watchlist:
+                try:
+                    # Check cache first
+                    if symbol in self._rvol_cache:
+                        cached_rvol, cached_time = self._rvol_cache[symbol]
+                        if (datetime.now(timezone.utc) - cached_time).total_seconds() < self._rvol_cache_ttl:
+                            if cached_rvol >= self._min_rvol_filter:
+                                active_symbols.append(symbol)
+                            else:
+                                skipped += 1
+                            continue
                     
-            except Exception as e:
-                # If we can't check, include the symbol
-                active_symbols.append(symbol)
+                    # Quick RVOL check via Alpaca
+                    quote = await self.alpaca_service.get_quote(symbol)
+                    if quote:
+                        active_symbols.append(symbol)
+                        self._rvol_cache[symbol] = (1.0, datetime.now(timezone.utc))
+                    else:
+                        skipped += 1
+                        self._rvol_cache[symbol] = (0.0, datetime.now(timezone.utc))
+                        
+                except Exception as e:
+                    active_symbols.append(symbol)
         
         self._symbols_skipped_rvol = skipped
         return active_symbols
