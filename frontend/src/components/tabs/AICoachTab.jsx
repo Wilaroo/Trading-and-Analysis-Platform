@@ -14,9 +14,9 @@ const AICoachTab = ({
 }) => {
   return (
     <div className="grid lg:grid-cols-12 gap-4 mt-2" data-testid="ai-coach-tab-content">
-      {/* LEFT - AI Trading Assistant (Bot + AI integrated) */}
+      {/* LEFT - AI Trading Assistant (Bot + AI integrated) - Takes more space */}
       <div className="lg:col-span-8">
-        <div className="h-[calc(100vh-340px)] min-h-[500px]">
+        <div className="h-[calc(100vh-280px)] min-h-[600px]">
           <AICommandPanel
             onTickerSelect={(ticker) => setSelectedTicker(ticker)}
             watchlist={watchlist}
@@ -30,7 +30,7 @@ const AICoachTab = ({
         </div>
       </div>
 
-      {/* RIGHT - Market Intel + Earnings + Watchlist + Scanner */}
+      {/* RIGHT - Market Intel + Scanner */}
       <div className="lg:col-span-4">
         <RightSidebar onTickerSelect={(ticker) => setSelectedTicker(ticker)} />
       </div>
