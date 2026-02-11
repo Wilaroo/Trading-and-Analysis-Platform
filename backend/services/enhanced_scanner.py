@@ -318,6 +318,11 @@ class EnhancedBackgroundScanner:
         self._auto_execute_min_priority = AlertPriority.HIGH
         self._trading_bot = None
         
+        # AI Assistant for proactive coaching notifications
+        self._ai_assistant = None
+        self._ai_notify_enabled = True  # Enable AI notifications for high-priority alerts
+        self._ai_notify_min_priority = AlertPriority.HIGH  # Minimum priority to trigger AI notification
+        
         # Services
         self._technical_service = None
         self._alpaca_service = None
