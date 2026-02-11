@@ -107,30 +107,47 @@ const EarningsWidget = ({ onTickerSelect }) => {
   );
 };
 
-// ===================== COMPACT WATCHLIST WIDGET =====================
+// ===================== SMART WATCHLIST WIDGET =====================
 const WatchlistWidget = ({ onTickerSelect }) => {
   const [watchlist, setWatchlist] = useState([]);
   const [quotes, setQuotes] = useState({});
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(true);
+  const [stats, setStats] = useState(null);
+  const [newSymbol, setNewSymbol] = useState('');
+  const [showAddInput, setShowAddInput] = useState(false);
 
   const fetchWatchlist = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get('/api/watchlist');
+      // Use smart watchlist API
+      const res = await api.get('/api/smart-watchlist');
       const items = res.data.watchlist || [];
       setWatchlist(items);
+      setStats(res.data.stats);
       
-      // Fetch quotes
+      // Fetch quotes for symbols
       if (items.length > 0) {
         const symbols = items.map(w => w.symbol);
-        const quotesRes = await api.post('/api/quotes/batch', symbols);
-        const quotesMap = {};
-        quotesRes.data.quotes?.forEach(q => { quotesMap[q.symbol] = q; });
-        setQuotes(quotesMap);
+        try {
+          const quotesRes = await api.post('/api/quotes/batch', symbols);
+          const quotesMap = {};
+          quotesRes.data.quotes?.forEach(q => { quotesMap[q.symbol] = q; });
+          setQuotes(quotesMap);
+        } catch (e) {
+          console.log('Quote fetch failed, continuing without quotes');
+        }
       }
     } catch (err) {
-      console.error('Failed to load watchlist:', err);
+      console.error('Failed to load smart watchlist:', err);
+      // Fallback to old watchlist
+      try {
+        const res = await api.get('/api/watchlist');
+        const items = res.data.watchlist || [];
+        setWatchlist(items.map(w => ({ ...w, source: 'legacy' })));
+      } catch (e) {
+        console.error('Fallback also failed:', e);
+      }
     } finally {
       setLoading(false);
     }
@@ -138,9 +155,53 @@ const WatchlistWidget = ({ onTickerSelect }) => {
 
   useEffect(() => {
     fetchWatchlist();
-    const interval = setInterval(fetchWatchlist, 60000); // Refresh every minute
+    const interval = setInterval(fetchWatchlist, 30000); // Refresh every 30 seconds
     return () => clearInterval(interval);
   }, [fetchWatchlist]);
+
+  const handleAddSymbol = async () => {
+    if (!newSymbol.trim()) return;
+    try {
+      await api.post('/api/smart-watchlist/add', { symbol: newSymbol.toUpperCase() });
+      setNewSymbol('');
+      setShowAddInput(false);
+      fetchWatchlist();
+    } catch (err) {
+      console.error('Failed to add symbol:', err);
+    }
+  };
+
+  const handleRemoveSymbol = async (symbol, e) => {
+    e.stopPropagation();
+    try {
+      await api.delete(`/api/smart-watchlist/${symbol}`);
+      fetchWatchlist();
+    } catch (err) {
+      console.error('Failed to remove symbol:', err);
+    }
+  };
+
+  const getSourceBadge = (item) => {
+    if (item.is_sticky || item.source === 'manual') {
+      return <span className="text-[9px] px-1 py-0.5 rounded bg-blue-500/20 text-blue-400">PIN</span>;
+    }
+    if (item.source === 'scanner') {
+      return <span className="text-[9px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400">SCAN</span>;
+    }
+    return null;
+  };
+
+  const getTimeframeBadge = (tf) => {
+    const colors = {
+      scalp: 'bg-purple-500/20 text-purple-400',
+      intraday: 'bg-cyan-500/20 text-cyan-400',
+      swing: 'bg-emerald-500/20 text-emerald-400',
+      position: 'bg-blue-500/20 text-blue-400'
+    };
+    return <span className={`text-[9px] px-1 py-0.5 rounded ${colors[tf] || 'bg-zinc-500/20 text-zinc-400'}`}>
+      {tf?.toUpperCase() || 'DAY'}
+    </span>;
+  };
 
   return (
     <div className="bg-zinc-900/60 rounded-lg border border-zinc-700/50" data-testid="watchlist-widget">
@@ -150,22 +211,68 @@ const WatchlistWidget = ({ onTickerSelect }) => {
       >
         <div className="flex items-center gap-2">
           <Eye className="w-4 h-4 text-cyan-400" />
-          <span className="text-sm font-medium text-zinc-200">Watchlist</span>
-          <span className="text-xs text-zinc-500">({watchlist.length})</span>
+          <span className="text-sm font-medium text-zinc-200">Smart Watchlist</span>
+          <span className="text-xs text-zinc-500">
+            ({watchlist.length}/{stats?.max_size || 50})
+          </span>
         </div>
-        {expanded ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowAddInput(!showAddInput); }}
+            className="p-1 hover:bg-zinc-700 rounded transition-colors"
+            title="Add symbol"
+          >
+            <Plus className="w-3 h-3 text-zinc-400" />
+          </button>
+          {expanded ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
+        </div>
       </button>
       
+      {/* Quick stats bar */}
+      {expanded && stats && (
+        <div className="px-3 pb-2 flex items-center gap-2 text-[10px] text-zinc-500">
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+            {stats.manual} pinned
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+            {stats.scanner} scanner
+          </span>
+        </div>
+      )}
+
+      {/* Add symbol input */}
+      {showAddInput && (
+        <div className="px-3 pb-2 flex items-center gap-2">
+          <input
+            type="text"
+            value={newSymbol}
+            onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+            onKeyDown={(e) => e.key === 'Enter' && handleAddSymbol()}
+            placeholder="SYMBOL"
+            className="flex-1 px-2 py-1 text-xs bg-zinc-800 border border-zinc-700 rounded text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500"
+            autoFocus
+          />
+          <button
+            onClick={handleAddSymbol}
+            className="px-2 py-1 text-xs bg-cyan-600 hover:bg-cyan-500 rounded text-white transition-colors"
+          >
+            Add
+          </button>
+        </div>
+      )}
+      
       {expanded && (
-        <div className="px-3 pb-3 space-y-1.5 max-h-48 overflow-y-auto">
+        <div className="px-3 pb-3 space-y-1.5 max-h-64 overflow-y-auto">
           {loading ? (
             <div className="flex items-center justify-center py-4">
               <RefreshCw className="w-4 h-4 text-zinc-500 animate-spin" />
             </div>
           ) : watchlist.length === 0 ? (
-            <p className="text-xs text-zinc-500 text-center py-2">Watchlist empty</p>
+            <p className="text-xs text-zinc-500 text-center py-2">No symbols - scanner will auto-populate</p>
           ) : (
-            watchlist.slice(0, 10).map((item, idx) => {
+            watchlist.slice(0, 20).map((item, idx) => {
               const quote = quotes[item.symbol];
               const changePercent = quote?.change_percent || 0;
               const isPositive = changePercent >= 0;
@@ -174,17 +281,31 @@ const WatchlistWidget = ({ onTickerSelect }) => {
                 <div
                   key={idx}
                   onClick={() => onTickerSelect?.(item.symbol)}
-                  className="flex items-center justify-between p-2 bg-zinc-800/40 rounded hover:bg-zinc-800/70 cursor-pointer transition-colors"
+                  className="flex items-center justify-between p-2 bg-zinc-800/40 rounded hover:bg-zinc-800/70 cursor-pointer transition-colors group"
                 >
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-white">{item.symbol}</span>
+                    {getSourceBadge(item)}
+                    {item.timeframe && getTimeframeBadge(item.timeframe)}
                     {quote?.price && (
                       <span className="text-[10px] text-zinc-400 font-mono">${quote.price.toFixed(2)}</span>
                     )}
                   </div>
-                  <div className={`flex items-center gap-1 text-[10px] font-mono ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {isPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                    {isPositive ? '+' : ''}{changePercent.toFixed(2)}%
+                  <div className="flex items-center gap-2">
+                    {item.signal_count > 1 && (
+                      <span className="text-[9px] text-zinc-500">{item.signal_count}x</span>
+                    )}
+                    <div className={`flex items-center gap-1 text-[10px] font-mono ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {isPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                      {isPositive ? '+' : ''}{changePercent.toFixed(2)}%
+                    </div>
+                    <button
+                      onClick={(e) => handleRemoveSymbol(item.symbol, e)}
+                      className="p-0.5 opacity-0 group-hover:opacity-100 hover:bg-zinc-700 rounded transition-all"
+                      title="Remove"
+                    >
+                      <X className="w-3 h-3 text-zinc-500 hover:text-red-400" />
+                    </button>
                   </div>
                 </div>
               );
