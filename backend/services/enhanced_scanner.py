@@ -2081,6 +2081,14 @@ class EnhancedBackgroundScanner:
         # Notify subscribers
         await self._notify_subscribers(alert)
         
+        # === PROACTIVE AI COACHING NOTIFICATION ===
+        # Notify AI assistant of high-priority opportunities for coaching
+        if alert.priority.value in ["critical", "high"]:
+            try:
+                await self._notify_ai_of_alert(alert)
+            except Exception as e:
+                logger.debug(f"AI notification skipped: {e}")
+        
         self._enforce_alert_limit()
         
         tape_indicator = "✓ TAPE" if alert.tape_confirmation else ""
