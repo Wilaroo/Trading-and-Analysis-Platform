@@ -128,30 +128,7 @@ const MarketIntelPanel = ({ onTickerSelect }) => {
 
   const renderMarkdown = (text) => {
     if (!text) return null;
-    return text.split('\n').map((line, i) => {
-      // Headers
-      if (line.startsWith('**') && line.endsWith('**')) {
-        return <h3 key={i} className="text-sm font-bold text-white mt-3 mb-1">{line.replace(/\*\*/g, '')}</h3>;
-      }
-      // Bold sections within text
-      const parts = line.split(/(\*\*[^*]+\*\*)/g);
-      const rendered = parts.map((part, j) => {
-        if (part.startsWith('**') && part.endsWith('**')) {
-          return <strong key={j} className="text-white font-semibold">{part.replace(/\*\*/g, '')}</strong>;
-        }
-        return part;
-      });
-
-      if (line.startsWith('- ') || line.startsWith('  - ')) {
-        const indent = line.startsWith('  ') ? 'ml-4' : 'ml-2';
-        return <p key={i} className={`text-xs text-zinc-300 ${indent} py-0.5`}>{rendered}</p>;
-      }
-      if (line.match(/^\d+\./)) {
-        return <p key={i} className="text-xs text-zinc-300 ml-2 py-0.5">{rendered}</p>;
-      }
-      if (line.trim() === '') return <div key={i} className="h-1" />;
-      return <p key={i} className="text-xs text-zinc-400 py-0.5">{rendered}</p>;
-    });
+    return renderTickerAwareContent(text, handleTickerClick);
   };
 
   if (loading) {
