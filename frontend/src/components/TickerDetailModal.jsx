@@ -579,12 +579,34 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
                 {activeTab === 'news' && (
                   <div className="space-y-2">
                     {news.length > 0 ? news.map((item, idx) => (
-                      <div key={idx} className="p-3 rounded-lg bg-zinc-900/50 border border-zinc-800">
-                        <p className="text-sm text-white">{item.headline}</p>
+                      <div key={idx} className="p-3 rounded-lg bg-zinc-900/50 border border-zinc-800 hover:border-zinc-700 transition-colors">
+                        {item.url ? (
+                          <a 
+                            href={item.url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-sm text-white hover:text-cyan-400 transition-colors flex items-start gap-2 group"
+                          >
+                            <span className="flex-1">{item.headline}</span>
+                            <ExternalLink className="w-4 h-4 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity mt-0.5" />
+                          </a>
+                        ) : (
+                          <p className="text-sm text-white">{item.headline}</p>
+                        )}
                         <div className="flex items-center gap-2 mt-1 text-xs text-zinc-500">
                           <span>{item.source}</span>
                           <span>•</span>
                           <span>{new Date(item.datetime).toLocaleString()}</span>
+                          {item.sentiment && (
+                            <>
+                              <span>•</span>
+                              <span className={
+                                item.sentiment === 'bullish' ? 'text-green-400' :
+                                item.sentiment === 'bearish' ? 'text-red-400' :
+                                'text-zinc-400'
+                              }>{item.sentiment}</span>
+                            </>
+                          )}
                         </div>
                       </div>
                     )) : <p className="text-center text-zinc-500 py-10">No recent news available</p>}
