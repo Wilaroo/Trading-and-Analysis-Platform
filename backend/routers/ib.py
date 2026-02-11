@@ -1188,7 +1188,19 @@ async def get_comprehensive_analysis(symbol: str):
         "summary": f"{bias_strength} {bias} bias. {strategy_text}Score: {scores.get('overall', 50)}/100 ({scores.get('grade', 'C')})"
     }
     
-    # Add sample news if empty
+    # Fetch news from Finnhub (always try, independent of bars data)
+    if not analysis["news"]:
+        try:
+            from services.news_service import get_news_service
+            news_svc = get_news_service()
+            if news_svc:
+                news = await news_svc.get_ticker_news(symbol, max_items=5)
+                if news:
+                    analysis["news"] = news
+        except Exception as e:
+            print(f"Error fetching Finnhub news: {e}")
+
+    # Add sample news if still empty
     if not analysis["news"]:
         analysis["news"] = [
             {
