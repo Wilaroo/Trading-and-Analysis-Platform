@@ -418,7 +418,7 @@ body {
 /* Tab styles */
 .tab {
   @apply px-4 py-2 text-sm uppercase tracking-wider text-zinc-500 border-b-2 border-transparent;
-  transition: color 0.2s ease-out, border-color 0.2s ease-out;
+  transition: all 0.2s ease-out;
 }
 
 .tab:hover {
@@ -427,4 +427,90 @@ body {
 
 .tab.active {
   @apply text-cyan-400 border-cyan-400;
+  text-shadow: 0 0 10px var(--primary-glow);
+}
+
+/* Glass tabs - pill style */
+.glass-tab {
+  @apply px-4 py-1.5 text-xs font-medium uppercase tracking-wider rounded-full;
+  @apply text-zinc-500 bg-transparent border border-transparent;
+  transition: all 0.2s ease-out;
+}
+
+.glass-tab:hover {
+  @apply text-zinc-300 bg-white/5;
+}
+
+.glass-tab.active {
+  @apply text-cyan-400 bg-cyan-400/10 border-cyan-400/30;
+  box-shadow: 0 0 10px var(--primary-glow);
+}
+
+/* Input styles */
+.input-glass {
+  @apply w-full px-4 py-2.5 rounded-lg text-sm;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  transition: all 0.2s ease-out;
+}
+
+.input-glass::placeholder {
+  color: var(--text-muted);
+}
+
+.input-glass:focus {
+  outline: none;
+  border-color: var(--primary-main);
+  box-shadow: 0 0 15px var(--primary-glow);
+}
+
+/* Status indicator */
+.status-indicator {
+  @apply flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium;
+  backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-default);
+}
+
+.status-indicator.online {
+  @apply text-green-400;
+  border-color: rgba(0, 255, 148, 0.3);
+}
+
+.status-indicator.offline {
+  @apply text-red-400;
+  border-color: rgba(255, 46, 46, 0.3);
+}
+
+.status-indicator.connecting {
+  @apply text-yellow-400;
+  border-color: rgba(255, 214, 0, 0.3);
+}
+
+/* Section header */
+.section-header {
+  @apply flex items-center gap-3 mb-4;
+}
+
+.section-title {
+  @apply text-lg font-semibold text-white;
+}
+
+.section-icon {
+  @apply w-8 h-8 rounded-lg flex items-center justify-center;
+  background: var(--primary-glow);
+  color: var(--primary-main);
+}
+
+/* Divider */
+.divider {
+  @apply h-px w-full;
+  background: linear-gradient(90deg, transparent, var(--border-default), transparent);
+}
+
+.divider-glow {
+  @apply h-px w-full;
+  background: linear-gradient(90deg, transparent, var(--primary-main), transparent);
+  box-shadow: 0 0 10px var(--primary-glow);
 }
