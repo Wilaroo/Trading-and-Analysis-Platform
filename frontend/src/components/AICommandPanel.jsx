@@ -353,11 +353,11 @@ const AICuratedWidget = ({ opportunities, onExecute, onPass, onTickerClick, onVi
   return (
     <div className="p-3 rounded-xl relative"
          style={{
-           background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.6) 100%)',
+           background: 'linear-gradient(135deg, rgba(21, 28, 36, 0.95) 0%, rgba(26, 35, 50, 0.9) 100%)',
            backdropFilter: 'blur(16px)',
            WebkitBackdropFilter: 'blur(16px)',
-           border: '1px solid rgba(0, 0, 0, 0.06)',
-           boxShadow: '0 4px 20px rgba(0, 0, 0, 0.06)'
+           border: '1px solid rgba(0, 212, 255, 0.3)',
+           boxShadow: '0 4px 25px rgba(0, 0, 0, 0.3), 0 0 30px var(--primary-glow)'
          }}>
       {/* Animated gradient border */}
       <div 
@@ -369,7 +369,7 @@ const AICuratedWidget = ({ opportunities, onExecute, onPass, onTickerClick, onVi
           mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
           WebkitMaskComposite: 'xor',
           maskComposite: 'exclude',
-          opacity: 0.5,
+          opacity: 0.7,
           animation: 'gradient-rotate 6s linear infinite'
         }}
       />
@@ -378,18 +378,18 @@ const AICuratedWidget = ({ opportunities, onExecute, onPass, onTickerClick, onVi
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded-lg flex items-center justify-center"
                style={{
-                 background: 'linear-gradient(135deg, var(--warning), var(--primary-main))',
-                 boxShadow: '0 2px 10px var(--warning-glow)'
+                 background: 'linear-gradient(135deg, var(--warning), var(--secondary-main))',
+                 boxShadow: '0 2px 15px var(--warning-glow)'
                }}>
             <Star className="w-3 h-3 text-white" />
           </div>
           <div>
-            <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>AI-Curated <span style={{ color: 'var(--primary-dark)' }}>Opportunities</span></span>
-            <span className="text-[10px] ml-2" style={{ color: 'var(--text-muted)' }}>Top {topOpportunities.length} setups</span>
+            <span className="text-sm font-semibold text-white">AI-Curated <span className="neon-text">Opportunities</span></span>
+            <span className="text-[10px] text-zinc-400 ml-2">Top {topOpportunities.length} setups</span>
           </div>
         </div>
-        <button onClick={onRefresh} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
-          <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} style={{ color: 'var(--text-secondary)' }} />
+        <button onClick={onRefresh} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors">
+          <RefreshCw className={`w-3 h-3 text-zinc-400 ${loading ? 'animate-spin' : ''}`} />
         </button>
       </div>
       
