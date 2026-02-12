@@ -418,7 +418,7 @@ class BackgroundScannerService:
         self._alerts_generated += 1
         
         # Persist to database
-        if self.db:
+        if self.db is not None:
             try:
                 await self._save_alert_to_db(alert)
             except Exception as e:
