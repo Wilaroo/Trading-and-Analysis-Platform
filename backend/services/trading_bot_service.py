@@ -480,6 +480,13 @@ class TradingBotService:
         self._trade_executor = None
         self._db = None
         
+        # Enhanced intelligence services (lazy loaded)
+        self._web_research = None
+        self._market_intelligence = None
+        self._technical_service = None
+        self._quality_service = None
+        self._news_service = None
+        
         # Callbacks for real-time updates
         self._trade_callbacks: List[callable] = []
         
