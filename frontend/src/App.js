@@ -99,6 +99,14 @@ function App() {
   const [ibConnected, setIbConnected] = useState(false);
   const [ibConnectionChecked, setIbConnectionChecked] = useState(false);
 
+  // ============= WebSocket-pushed state (replaces polling) =============
+  const [wsBotStatus, setWsBotStatus] = useState(null);
+  const [wsBotTrades, setWsBotTrades] = useState([]);
+  const [wsScannerAlerts, setWsScannerAlerts] = useState([]);
+  const [wsScannerStatus, setWsScannerStatus] = useState(null);
+  const [wsSmartWatchlist, setWsSmartWatchlist] = useState([]);
+  const [wsCoachingNotifications, setWsCoachingNotifications] = useState([]);
+
   // Save activeTab to localStorage when it changes
   useEffect(() => {
     localStorage.setItem('tradecommand_activeTab', activeTab);
