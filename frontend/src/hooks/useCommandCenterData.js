@@ -467,9 +467,12 @@ export function useCommandCenterData({
       // Phase 1b: Fetch credit budget (lightweight, runs in parallel)
       fetchCreditBudget();
       
+      // Phase 1c: Always fetch positions (works with Alpaca even without IB)
+      fetchAccountData();
+      
       // Phase 2: IB-dependent data (only if connected)
       if (isConnected) {
-        await Promise.all([fetchAccountData(), fetchWatchlist(isConnected)]);
+        await fetchWatchlist(isConnected);
         
         // Phase 3: Additional IB data with slight delay
         setTimeout(async () => {
