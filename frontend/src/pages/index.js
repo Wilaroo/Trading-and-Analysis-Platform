@@ -1,5 +1,4 @@
 export { default as DashboardPage } from './DashboardPage';
-export { default as ChartsPage } from './ChartsPage';
 export { default as ScannerPage } from './ScannerPage';
 export { default as StrategiesPage } from './StrategiesPage';
 export { default as WatchlistPage } from './WatchlistPage';
