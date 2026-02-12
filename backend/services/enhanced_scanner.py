@@ -828,7 +828,7 @@ class EnhancedBackgroundScanner:
         alert.actual_pnl = pnl
         
         # Save to outcomes collection
-        if self.alert_outcomes_collection:
+        if self.alert_outcomes_collection is not None:
             try:
                 self.alert_outcomes_collection.insert_one({
                     "alert_id": alert_id,
