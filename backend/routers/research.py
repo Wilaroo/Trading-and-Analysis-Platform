@@ -162,3 +162,85 @@ async def get_analyst_ratings(ticker: str):
     except Exception as e:
         logger.error(f"Analyst ratings failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===================== AGENT SKILLS ENDPOINTS =====================
+
+@router.get("/skills/company-info/{ticker}")
+async def get_company_info_skill(ticker: str):
+    """
+    AGENT SKILL: Get comprehensive company information
+    
+    Combines multiple FREE sources first, then uses Tavily only if needed.
+    Results are cached for 1 hour to minimize credit usage.
+    
+    Returns: Company profile, fundamentals, news, and analyst sentiment
+    """
+    try:
+        service = get_web_research_service()
+        result = await service.get_company_info(ticker.upper())
+        return result
+    except Exception as e:
+        logger.error(f"Company info skill failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/skills/stock-analysis/{ticker}")
+async def get_stock_analysis_skill(
+    ticker: str,
+    analysis_type: str = Query(
+        default="comprehensive",
+        description="Analysis depth: quick (0 credits), news (1 credit), comprehensive (1-2 credits)"
+    )
+):
+    """
+    AGENT SKILL: Get stock analysis and trading context
+    
+    - **quick**: Price context and basic data only (FREE)
+    - **news**: News-focused analysis (1 Tavily credit)
+    - **comprehensive**: Full analysis with all sources (1-2 credits)
+    
+    Results are cached for 10 minutes.
+    """
+    try:
+        if analysis_type not in ["quick", "news", "comprehensive"]:
+            analysis_type = "comprehensive"
+        
+        service = get_web_research_service()
+        result = await service.get_stock_analysis(ticker.upper(), analysis_type)
+        return result
+    except Exception as e:
+        logger.error(f"Stock analysis skill failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/skills/market-context")
+async def get_market_context_skill():
+    """
+    AGENT SKILL: Get current market context and sentiment
+    
+    Returns market indices, news themes, market regime, and trading recommendations.
+    Results are cached for 15 minutes. Uses ~1 Tavily credit per fresh call.
+    """
+    try:
+        service = get_web_research_service()
+        result = await service.get_market_context()
+        return result
+    except Exception as e:
+        logger.error(f"Market context skill failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/stats")
+async def get_research_stats():
+    """
+    Get research service statistics including cache hit rate and credit usage
+    
+    Useful for monitoring Tavily credit consumption.
+    """
+    try:
+        service = get_web_research_service()
+        return service.get_cache_stats()
+    except Exception as e:
+        logger.error(f"Stats retrieval failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
