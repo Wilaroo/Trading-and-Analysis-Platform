@@ -170,8 +170,9 @@ function App() {
     return () => clearInterval(interval);
   }, [checkIbConnection, ibConnectionChecked]);
 
-  // WebSocket handler for real-time updates
+  // WebSocket handler for real-time updates (quotes + system status)
   const handleWebSocketMessage = useCallback((message) => {
+    // Quote updates
     if (message.type === 'quotes' || message.type === 'initial') {
       const quotesMap = {};
       message.data.forEach(quote => {
@@ -199,6 +200,49 @@ function App() {
             top_movers: updatedMovers
           }
         };
+      });
+    }
+    
+    // IB Connection status (replaces polling)
+    else if (message.type === 'ib_status') {
+      const { connected, busy } = message.data;
+      setIbConnected(connected);
+      setIbConnectionChecked(true);
+      setIbBusy(busy);
+    }
+    
+    // Trading bot status (replaces polling)
+    else if (message.type === 'bot_status') {
+      setWsBotStatus(message.data);
+    }
+    
+    // Trading bot trades (replaces polling)
+    else if (message.type === 'bot_trades') {
+      setWsBotTrades(message.data);
+    }
+    
+    // Scanner status (replaces polling)
+    else if (message.type === 'scanner_status') {
+      setWsScannerStatus(message.data);
+    }
+    
+    // Scanner alerts (replaces polling)
+    else if (message.type === 'scanner_alerts') {
+      setWsScannerAlerts(message.data);
+    }
+    
+    // Smart watchlist (replaces polling)
+    else if (message.type === 'smart_watchlist') {
+      setWsSmartWatchlist(message.data);
+    }
+    
+    // AI Coaching notifications (replaces polling)
+    else if (message.type === 'coaching_notifications') {
+      setWsCoachingNotifications(prev => {
+        // Merge new notifications, avoiding duplicates
+        const existingIds = new Set(prev.map(n => n.id));
+        const newNotifications = message.data.filter(n => !existingIds.has(n.id));
+        return [...newNotifications, ...prev].slice(0, 50); // Keep last 50
       });
     }
   }, []);
