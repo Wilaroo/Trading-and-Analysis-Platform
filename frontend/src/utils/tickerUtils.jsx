@@ -23,7 +23,18 @@ export const KNOWN_TICKERS = new Set([
   'GME', 'AMC', 'BB', 'NOK', 'WISH', 'CLOV', 'SPCE', 'BYND', 'DASH',
   'ABNB', 'DKNG', 'PENN', 'MGM', 'WYNN', 'LVS', 'BTC', 'ETH',
   'IBM', 'CSCO', 'HPQ', 'DELL', 'VMW', 'PANW', 'FTNT', 'SPLK',
-  'WORK', 'TEAM', 'ATLASSIAN', 'ASANA', 'MNDY', 'PATH', 'AI', 'PLTR'
+  'WORK', 'TEAM', 'ATLASSIAN', 'ASANA', 'MNDY', 'PATH', 'AI', 'PLTR',
+  // Additional scanner/watchlist tickers
+  'RGTI', 'AKBA', 'BROS', 'ASTS', 'NCNO', 'RIG', 'AAOI', 'CRGY', 'PEB',
+  'BLMN', 'PLNT', 'TOST', 'SMCI', 'IONQ', 'MARA', 'RIOT', 'CIFR',
+  'HIMS', 'SEDG', 'ENPH', 'FSLR', 'PLUG', 'BE', 'CHPT', 'QS', 'JOBY',
+  'LUNR', 'RKLB', 'IRDM', 'ASTR', 'VORB', 'RDW', 'DNA', 'SSSS',
+  'OPEN', 'RDFN', 'ZG', 'Z', 'EXAS', 'CELH', 'DUOL', 'APP', 'TTD',
+  'BILL', 'HUBS', 'TWST', 'CRSP', 'NTLA', 'EDIT', 'BEAM', 'VRTX',
+  'DXCM', 'ISRG', 'INTU', 'WDAY', 'VEEV', 'CDNS', 'SNPS', 'ANSS',
+  'ZI', 'ESTC', 'COUP', 'FSLY', 'NEWR', 'EVBG', 'LSPD', 'GTLB',
+  'CFLT', 'WIX', 'GDDY', 'SQSP', 'DOCN', 'FROG', 'API', 'SUMO',
+  'APPS', 'PUBM', 'MGNI', 'BRZE', 'S', 'KVYO', 'SOUN', 'UPST'
 ]);
 
 // Clickable ticker link component
