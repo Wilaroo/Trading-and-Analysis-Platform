@@ -655,11 +655,12 @@ body {
 }
 
 .tab.active {
-  color: var(--primary-dark);
+  color: var(--primary-main);
   border-color: var(--primary-main);
+  text-shadow: 0 0 20px var(--primary-glow);
 }
 
-/* Glass tabs - pill style - Light mode */
+/* Glass tabs - pill style - NEON */
 .glass-tab {
   @apply px-4 py-2 text-xs font-medium uppercase tracking-wider rounded-xl;
   color: var(--text-muted);
@@ -670,25 +671,25 @@ body {
 
 .glass-tab:hover {
   color: var(--text-secondary);
-  background: rgba(0, 184, 217, 0.06);
+  background: rgba(0, 212, 255, 0.08);
 }
 
 .glass-tab.active {
-  color: var(--primary-dark);
-  background: rgba(0, 184, 217, 0.12);
+  color: var(--primary-main);
+  background: rgba(0, 212, 255, 0.15);
   border-color: var(--primary-main);
-  box-shadow: 0 4px 15px var(--primary-glow);
+  box-shadow: 0 0 20px var(--primary-glow), inset 0 0 15px var(--primary-glow);
 }
 
-/* Input styles - Light mode */
+/* Input styles - DARK GLASS */
 .input-glass {
   @apply w-full px-4 py-2.5 rounded-xl text-sm;
-  background: rgba(255, 255, 255, 0.8);
+  background: rgba(15, 20, 25, 0.8);
   backdrop-filter: blur(8px);
-  border: 1px solid rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--glass-border);
   color: var(--text-primary);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .input-glass::placeholder {
@@ -698,35 +699,38 @@ body {
 .input-glass:focus {
   outline: none;
   border-color: var(--primary-main);
-  box-shadow: 0 0 0 3px var(--primary-glow), inset 0 1px 2px rgba(0, 0, 0, 0.05);
-  background: white;
+  box-shadow: 0 0 20px var(--primary-glow), inset 0 0 10px var(--primary-glow);
+  background: rgba(15, 20, 25, 0.95);
 }
 
-/* Status indicator - Light mode */
+/* Status indicator - VIBRANT */
 .status-indicator {
   @apply flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium;
   backdrop-filter: blur(12px);
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
   transition: all 0.2s ease;
 }
 
 .status-indicator.online {
-  color: var(--success);
+  color: var(--success-bright);
   border-color: var(--success);
-  background: rgba(0, 200, 83, 0.1);
+  background: rgba(16, 185, 129, 0.15);
+  box-shadow: 0 0 15px var(--success-glow);
 }
 
 .status-indicator.offline {
   color: var(--error);
   border-color: var(--error);
-  background: rgba(255, 23, 68, 0.1);
+  background: rgba(239, 68, 68, 0.15);
+  box-shadow: 0 0 15px var(--error-glow);
 }
 
 .status-indicator.connecting {
   color: var(--warning);
   border-color: var(--warning);
-  background: rgba(255, 179, 0, 0.1);
+  background: rgba(245, 158, 11, 0.15);
+  box-shadow: 0 0 15px var(--warning-glow);
 }
 
 /* Section header */
