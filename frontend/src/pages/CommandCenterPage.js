@@ -17,7 +17,14 @@ const CommandCenterPage = ({
   wsConnected = false,
   wsLastUpdate = null,
   ibBusy = false,
-  ibBusyOperation = null
+  ibBusyOperation = null,
+  // WebSocket-pushed data (replaces polling)
+  wsBotStatus = null,
+  wsBotTrades = [],
+  wsScannerAlerts = [],
+  wsScannerStatus = null,
+  wsSmartWatchlist = [],
+  wsCoachingNotifications = []
 }) => {
   const data = useCommandCenterData({
     ibConnected, ibConnectionChecked, connectToIb, checkIbConnection, isActiveTab,
