@@ -452,7 +452,7 @@ const WatchlistWidget = ({ onTickerSelect, onViewChart }) => {
 };
 
 // ===================== COMPACT SCANNER RESULTS WIDGET =====================
-const ScannerResultsWidget = ({ onTickerSelect }) => {
+const ScannerResultsWidget = ({ onTickerSelect, onViewChart }) => {
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(true);
