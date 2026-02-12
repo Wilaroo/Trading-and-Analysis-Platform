@@ -463,6 +463,20 @@ export function useCommandCenterData({
     return () => clearInterval(interval);
   }, []);
 
+  // Fetch positions immediately on mount - doesn't depend on IB connection
+  // Alpaca positions are always available
+  useEffect(() => {
+    console.log('[useEffect-positions] Fetching positions on mount...');
+    fetchAccountData();
+    // Refresh positions every 30 seconds
+    const positionsInterval = setInterval(() => {
+      console.log('[useEffect-positions] Refreshing positions...');
+      fetchAccountData();
+    }, 30000);
+    return () => clearInterval(positionsInterval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Initial data load - optimized with batch init + staggered loading
   useEffect(() => {
     console.log('[useEffect] connectionChecked:', connectionChecked, 'isConnected:', isConnected, 'isActiveTab:', isActiveTab);
