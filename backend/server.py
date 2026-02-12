@@ -51,6 +51,7 @@ from routers.live_scanner import router as live_scanner_router, init_live_scanne
 from routers.trading_bot import router as trading_bot_router, init_trading_bot_router
 from routers.learning_dashboard import router as learning_dashboard_router, init_learning_dashboard
 from routers.market_intel import router as market_intel_router, init_market_intel_router
+from routers.research import router as research_router
 from services.market_intel_service import get_market_intel_service
 from services.ib_service import get_ib_service
 from services.newsletter_service import init_newsletter_service
