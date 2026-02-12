@@ -428,36 +428,36 @@ body {
   color: var(--text-secondary);
 }
 
-/* Badge styles */
+/* Badge styles - Light mode */
 .badge {
-  @apply rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wide border border-current bg-opacity-10;
+  @apply rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wide border border-current;
 }
 
 .badge-success {
-  @apply text-green-400 bg-green-400/10 border-green-400/30;
+  @apply text-emerald-600 bg-emerald-50 border-emerald-200;
 }
 
 .badge-warning {
-  @apply text-yellow-400 bg-yellow-400/10 border-yellow-400/30;
+  @apply text-amber-600 bg-amber-50 border-amber-200;
 }
 
 .badge-error {
-  @apply text-red-400 bg-red-400/10 border-red-400/30;
+  @apply text-rose-600 bg-rose-50 border-rose-200;
 }
 
 .badge-info {
-  @apply text-cyan-400 bg-cyan-400/10 border-cyan-400/30;
+  @apply text-cyan-600 bg-cyan-50 border-cyan-200;
 }
 
-/* Button styles - NEON ENHANCED */
+/* Button styles - Light mode with gradient */
 .btn-primary {
-  @apply bg-cyan-400 text-black font-bold px-4 py-2 rounded-lg uppercase tracking-wider;
-  @apply hover:bg-cyan-300;
-  box-shadow: 0 0 20px rgba(0, 229, 255, 0.5), 0 0 40px rgba(0, 229, 255, 0.2);
+  @apply font-bold px-4 py-2 rounded-lg uppercase tracking-wider text-white;
+  background: linear-gradient(135deg, var(--primary-main), var(--accent-main));
+  box-shadow: 0 4px 15px var(--primary-glow);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   overflow: hidden;
-  border: 1px solid rgba(0, 229, 255, 0.5);
+  border: none;
 }
 
 .btn-primary::before {
@@ -474,50 +474,47 @@ body {
 }
 
 .btn-primary:hover {
-  box-shadow: 0 0 30px rgba(0, 229, 255, 0.7), 0 0 60px rgba(0, 229, 255, 0.3);
+  box-shadow: 0 6px 25px var(--primary-glow-strong);
   transform: translateY(-2px);
-  border-color: rgba(0, 229, 255, 0.8);
 }
 
 .btn-secondary {
-  @apply border text-white px-4 py-2 rounded-lg uppercase tracking-wider;
-  border-color: rgba(255, 255, 255, 0.2);
-  background: var(--glass-bg);
-  backdrop-filter: blur(8px);
+  @apply border px-4 py-2 rounded-lg uppercase tracking-wider;
+  border-color: var(--primary-main);
+  color: var(--primary-dark);
+  background: transparent;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .btn-secondary:hover {
-  border-color: var(--primary-main);
-  color: var(--primary-main);
-  box-shadow: 0 0 20px var(--primary-glow), inset 0 0 20px var(--primary-glow);
-  background: rgba(0, 229, 255, 0.08);
+  background: var(--primary-glow);
+  box-shadow: 0 4px 15px var(--primary-glow);
 }
 
 .btn-ghost {
-  @apply text-zinc-400 px-3 py-1.5 rounded-lg;
-  @apply hover:text-white;
+  @apply px-3 py-1.5 rounded-lg;
+  color: var(--text-secondary);
   transition: all 0.2s ease-out;
   background: transparent;
 }
 
 .btn-ghost:hover {
-  background: rgba(255, 255, 255, 0.05);
-  box-shadow: inset 0 0 20px rgba(255, 255, 255, 0.03);
+  color: var(--primary-dark);
+  background: rgba(0, 184, 217, 0.08);
 }
 
 .btn-icon {
-  @apply p-2 rounded-xl text-zinc-400;
-  @apply hover:text-cyan-400;
+  @apply p-2 rounded-xl;
+  color: var(--text-secondary);
   background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  border: 1px solid rgba(0, 0, 0, 0.06);
   transition: all 0.2s ease-out;
 }
 
 .btn-icon:hover {
+  color: var(--primary-dark);
   box-shadow: var(--shadow-neon);
-  border-color: var(--border-active);
-  background: rgba(0, 229, 255, 0.1);
+  border-color: var(--primary-main);
 }
 
 /* Table styles */
