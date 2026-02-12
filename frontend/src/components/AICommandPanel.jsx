@@ -37,13 +37,13 @@ const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
 // ===================== TICKER UTILITIES =====================
 
-const TickerLink = ({ symbol, onClick }) => (
+const TickerLink = ({ symbol, onClick, showBrackets = false }) => (
   <button
     onClick={() => onClick(symbol)}
     className="inline-flex items-center gap-0.5 px-1 py-0.5 bg-cyan-500/10 border border-cyan-500/20 rounded text-cyan-400 font-mono font-semibold text-xs hover:bg-cyan-500/20 hover:border-cyan-500/40 transition-colors cursor-pointer"
     data-testid={`ticker-link-${symbol}`}
   >
-    {symbol}
+    {showBrackets ? `(${symbol})` : symbol}
     <ArrowUpRight className="w-3 h-3" />
   </button>
 );
