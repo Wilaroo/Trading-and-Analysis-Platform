@@ -330,11 +330,11 @@ const HeaderBar = ({
     <>
       <div className="flex items-center justify-between p-4 rounded-2xl"
            style={{
-             background: 'rgba(255, 255, 255, 0.7)',
+             background: 'rgba(21, 28, 36, 0.9)',
              backdropFilter: 'blur(24px)',
              WebkitBackdropFilter: 'blur(24px)',
-             border: '1px solid rgba(0, 0, 0, 0.06)',
-             boxShadow: '0 4px 20px rgba(0, 0, 0, 0.06)',
+             border: '1px solid rgba(255, 255, 255, 0.1)',
+             boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
              position: 'relative',
              overflow: 'hidden'
            }}>
@@ -348,7 +348,7 @@ const HeaderBar = ({
             mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
             WebkitMaskComposite: 'xor',
             maskComposite: 'exclude',
-            opacity: 0.5,
+            opacity: 0.6,
             animation: 'gradient-rotate 6s linear infinite'
           }}
         />
@@ -358,16 +358,16 @@ const HeaderBar = ({
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center"
                  style={{
-                   background: 'linear-gradient(135deg, var(--primary-main), var(--accent-main))',
-                   boxShadow: '0 4px 15px var(--primary-glow)'
+                   background: 'linear-gradient(135deg, var(--primary-main), var(--secondary-main))',
+                   boxShadow: '0 4px 20px var(--primary-glow-strong)'
                  }}>
               <Target className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
-                Command <span style={{ color: 'var(--primary-dark)' }}>Center</span>
+              <h1 className="text-xl font-bold tracking-tight text-white">
+                Command <span className="neon-text">Center</span>
               </h1>
-              <p className="text-xs tracking-wide" style={{ color: 'var(--text-muted)' }}>Real-time trading intelligence hub</p>
+              <p className="text-zinc-400 text-xs tracking-wide">Real-time trading intelligence hub</p>
             </div>
           </div>
           
