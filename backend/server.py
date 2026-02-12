@@ -234,6 +234,21 @@ smart_watchlist = init_smart_watchlist(smart_watchlist_col)
 index_universe = get_index_universe()
 wave_scanner = init_wave_scanner(smart_watchlist, index_universe)
 
+# Initialize market intel service (moved here to wire smart_watchlist)
+market_intel_service = get_market_intel_service()
+market_intel_service._db = db
+market_intel_service.set_services(
+    ai_assistant=assistant_service,
+    trading_bot=trading_bot,
+    perf_service=perf_service,
+    alpaca_service=alpaca_service,
+    news_service=news_service,
+    scanner_service=background_scanner,
+    smart_watchlist=smart_watchlist,
+    alert_system=alert_system
+)
+init_market_intel_router(market_intel_service)
+
 # ===================== STRATEGY HELPERS =====================
 # Strategies are now stored in MongoDB and accessed via strategy_service
 # Use strategy_service.get_all_strategies() to get all strategies
