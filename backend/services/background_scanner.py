@@ -101,7 +101,7 @@ class BackgroundScannerService:
         self._scan_count = 0
         self._alerts_generated = 0
         
-        if db:
+        if db is not None:
             self.alerts_collection = db["live_alerts"]
     
     @property
