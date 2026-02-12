@@ -158,15 +158,16 @@ function App() {
     checkIbConnection();
   }, [checkIbConnection]);
   
-  // Periodic connection check every 15 seconds for more responsive UI
+  // Periodic connection check as FALLBACK only (60 seconds)
+  // Primary IB status comes via WebSocket now
   useEffect(() => {
     const interval = setInterval(async () => {
+      // Only poll if not getting WebSocket updates
       const connected = await checkIbConnection();
-      // Log connection status for debugging
       if (!connected && ibConnectionChecked) {
-        console.log('IB connection check: disconnected - backend will attempt auto-reconnect');
+        console.log('IB connection check (fallback): disconnected');
       }
-    }, 15000);  // Reduced from 30s to 15s
+    }, 60000);  // Reduced to 60s - WebSocket handles real-time updates
     return () => clearInterval(interval);
   }, [checkIbConnection, ibConnectionChecked]);
 
