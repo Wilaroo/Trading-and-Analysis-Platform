@@ -1033,6 +1033,267 @@ class TradingBotService:
         }
         return durations.get(setup_type, "1hr - 4hr")
     
+    # ==================== ENHANCED INTELLIGENCE GATHERING ====================
+    
+    async def _gather_trade_intelligence(self, symbol: str, alert: Dict) -> Dict[str, Any]:
+        """
+        Gather comprehensive intelligence for trade evaluation.
+        This is what makes the bot "smart" - it uses the same data sources as the AI assistant.
+        """
+        intelligence = {
+            "symbol": symbol,
+            "gathered_at": datetime.now(timezone.utc).isoformat(),
+            "news": None,
+            "technicals": None,
+            "market_context": None,
+            "quality_metrics": None,
+            "warnings": [],
+            "enhancements": []
+        }
+        
+        try:
+            # Run intelligence gathering in parallel for speed
+            tasks = []
+            
+            # 1. Get recent news (critical for informed trading)
+            if self.web_research:
+                tasks.append(self._get_news_intelligence(symbol))
+            else:
+                tasks.append(asyncio.coroutine(lambda: None)())
+            
+            # 2. Get technical analysis
+            if self.technical_service:
+                tasks.append(self._get_technical_intelligence(symbol))
+            else:
+                tasks.append(asyncio.coroutine(lambda: None)())
+            
+            # 3. Get quality metrics
+            if self.quality_service:
+                tasks.append(self._get_quality_intelligence(symbol))
+            else:
+                tasks.append(asyncio.coroutine(lambda: None)())
+            
+            # Execute all in parallel with timeout
+            try:
+                results = await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=10.0  # 10 second max for intelligence gathering
+                )
+                
+                if len(results) > 0 and results[0] and not isinstance(results[0], Exception):
+                    intelligence["news"] = results[0]
+                if len(results) > 1 and results[1] and not isinstance(results[1], Exception):
+                    intelligence["technicals"] = results[1]
+                if len(results) > 2 and results[2] and not isinstance(results[2], Exception):
+                    intelligence["quality_metrics"] = results[2]
+                    
+            except asyncio.TimeoutError:
+                intelligence["warnings"].append("Intelligence gathering timed out - proceeding with basic data")
+                logger.warning(f"Intelligence gathering timeout for {symbol}")
+            
+            # Analyze gathered intelligence for warnings and enhancements
+            self._analyze_intelligence(intelligence, alert)
+            
+        except Exception as e:
+            logger.error(f"Intelligence gathering error for {symbol}: {e}")
+            intelligence["warnings"].append(f"Error gathering intelligence: {str(e)}")
+        
+        return intelligence
+    
+    async def _get_news_intelligence(self, symbol: str) -> Optional[Dict]:
+        """Get recent news that could impact the trade"""
+        try:
+            # Search for recent news about this stock
+            result = await self.web_research.tavily.search_financial(
+                f"{symbol} stock news latest",
+                max_results=3
+            )
+            
+            news_data = {
+                "has_news": len(result.results) > 0,
+                "summary": result.answer[:500] if result.answer else None,
+                "headlines": [r.title for r in result.results[:3]],
+                "sentiment": self._analyze_news_sentiment(result),
+                "key_topics": self._extract_news_topics(result)
+            }
+            
+            return news_data
+            
+        except Exception as e:
+            logger.warning(f"News intelligence error for {symbol}: {e}")
+            return None
+    
+    async def _get_technical_intelligence(self, symbol: str) -> Optional[Dict]:
+        """Get real-time technical analysis"""
+        try:
+            analysis = await self.technical_service.get_realtime_analysis(symbol)
+            
+            return {
+                "trend": analysis.get("trend", {}).get("direction", "neutral"),
+                "momentum": analysis.get("momentum", {}).get("rsi", 50),
+                "support_levels": analysis.get("support_resistance", {}).get("supports", []),
+                "resistance_levels": analysis.get("support_resistance", {}).get("resistances", []),
+                "volume_trend": analysis.get("volume", {}).get("trend", "normal"),
+                "signals": analysis.get("signals", [])
+            }
+            
+        except Exception as e:
+            logger.warning(f"Technical intelligence error for {symbol}: {e}")
+            return None
+    
+    async def _get_quality_intelligence(self, symbol: str) -> Optional[Dict]:
+        """Get quality score and metrics"""
+        try:
+            score_data = await self.quality_service.score_opportunity({
+                "symbol": symbol,
+                "setup_type": "general"
+            })
+            
+            return {
+                "quality_score": score_data.get("score", 50),
+                "grade": score_data.get("grade", "C"),
+                "strengths": score_data.get("strengths", []),
+                "weaknesses": score_data.get("weaknesses", [])
+            }
+            
+        except Exception as e:
+            logger.warning(f"Quality intelligence error for {symbol}: {e}")
+            return None
+    
+    def _analyze_news_sentiment(self, news_result) -> str:
+        """Analyze sentiment from news results"""
+        if not news_result or not news_result.answer:
+            return "neutral"
+        
+        answer_lower = news_result.answer.lower()
+        
+        # Positive indicators
+        positive = ["surge", "rally", "gain", "beat", "upgrade", "buy", "bullish", "strong", "positive"]
+        negative = ["drop", "fall", "miss", "downgrade", "sell", "bearish", "weak", "negative", "crash"]
+        
+        pos_count = sum(1 for word in positive if word in answer_lower)
+        neg_count = sum(1 for word in negative if word in answer_lower)
+        
+        if pos_count > neg_count + 1:
+            return "positive"
+        elif neg_count > pos_count + 1:
+            return "negative"
+        return "neutral"
+    
+    def _extract_news_topics(self, news_result) -> List[str]:
+        """Extract key topics from news"""
+        topics = []
+        if news_result and news_result.answer:
+            answer_lower = news_result.answer.lower()
+            
+            topic_map = {
+                "earnings": ["earnings", "revenue", "profit", "quarterly"],
+                "analyst": ["analyst", "upgrade", "downgrade", "rating", "target"],
+                "product": ["product", "launch", "announce", "release"],
+                "legal": ["lawsuit", "legal", "sec", "investigation"],
+                "merger": ["merger", "acquisition", "deal", "buyout"],
+                "macro": ["fed", "rate", "inflation", "economy"]
+            }
+            
+            for topic, keywords in topic_map.items():
+                if any(kw in answer_lower for kw in keywords):
+                    topics.append(topic)
+        
+        return topics[:3]  # Top 3 topics
+    
+    def _analyze_intelligence(self, intelligence: Dict, alert: Dict):
+        """Analyze gathered intelligence and add warnings/enhancements"""
+        warnings = intelligence["warnings"]
+        enhancements = intelligence["enhancements"]
+        
+        # News analysis
+        news = intelligence.get("news")
+        if news:
+            if news.get("sentiment") == "negative":
+                warnings.append(f"⚠️ Negative news sentiment detected")
+            elif news.get("sentiment") == "positive":
+                enhancements.append(f"✅ Positive news sentiment")
+            
+            topics = news.get("key_topics", [])
+            if "earnings" in topics:
+                warnings.append("⚠️ Earnings-related news - volatility likely")
+            if "legal" in topics:
+                warnings.append("⚠️ Legal/regulatory news detected")
+            if "analyst" in topics:
+                enhancements.append("✅ Analyst coverage - increased visibility")
+        
+        # Technical analysis
+        technicals = intelligence.get("technicals")
+        if technicals:
+            direction = alert.get("direction", "long")
+            trend = technicals.get("trend", "neutral")
+            
+            # Check if trade aligns with trend
+            if direction == "long" and trend == "down":
+                warnings.append("⚠️ Trading against downtrend")
+            elif direction == "short" and trend == "up":
+                warnings.append("⚠️ Shorting against uptrend")
+            elif (direction == "long" and trend == "up") or (direction == "short" and trend == "down"):
+                enhancements.append("✅ Trade aligns with trend")
+            
+            # RSI extremes
+            rsi = technicals.get("momentum", 50)
+            if rsi > 70 and direction == "long":
+                warnings.append(f"⚠️ RSI overbought ({rsi:.0f})")
+            elif rsi < 30 and direction == "short":
+                warnings.append(f"⚠️ RSI oversold ({rsi:.0f})")
+            
+            # Volume
+            vol_trend = technicals.get("volume_trend", "normal")
+            if vol_trend == "high":
+                enhancements.append("✅ High volume confirms move")
+            elif vol_trend == "low":
+                warnings.append("⚠️ Low volume - watch for false breakout")
+        
+        # Quality metrics
+        quality = intelligence.get("quality_metrics")
+        if quality:
+            score = quality.get("quality_score", 50)
+            if score >= 80:
+                enhancements.append(f"✅ High quality setup ({score}/100)")
+            elif score < 50:
+                warnings.append(f"⚠️ Low quality score ({score}/100)")
+    
+    def _calculate_intelligence_adjustment(self, intelligence: Dict) -> int:
+        """
+        Calculate score adjustment based on intelligence.
+        Returns a value to add/subtract from the base quality score.
+        """
+        adjustment = 0
+        
+        # News sentiment
+        news = intelligence.get("news")
+        if news:
+            sentiment = news.get("sentiment", "neutral")
+            if sentiment == "positive":
+                adjustment += 5
+            elif sentiment == "negative":
+                adjustment -= 10  # Negative news is more impactful
+        
+        # Technical alignment
+        technicals = intelligence.get("technicals")
+        if technicals:
+            vol_trend = technicals.get("volume_trend", "normal")
+            if vol_trend == "high":
+                adjustment += 5
+            elif vol_trend == "low":
+                adjustment -= 5
+        
+        # Warnings count
+        warnings = intelligence.get("warnings", [])
+        adjustment -= len(warnings) * 3  # Each warning reduces score
+        
+        # Enhancements count
+        enhancements = intelligence.get("enhancements", [])
+        adjustment += len(enhancements) * 2  # Each enhancement increases score
+        
+        return adjustment
+    
     def _generate_explanation(self, alert: Dict, shares: int, entry: float, stop: float, targets: List[float]) -> TradeExplanation:
         """Generate detailed explanation for the trade"""
         symbol = alert.get('symbol', '')
