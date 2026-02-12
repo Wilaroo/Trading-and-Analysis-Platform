@@ -651,7 +651,11 @@ const AICommandPanel = ({
   onRefresh,
   account = {},
   marketContext = {},
-  positions = []
+  positions = [],
+  // WebSocket-pushed data (replaces polling)
+  wsBotStatus = null,
+  wsBotTrades = [],
+  wsCoachingNotifications = []
 }) => {
   // Chat state
   const [messages, setMessages] = useState([]);
