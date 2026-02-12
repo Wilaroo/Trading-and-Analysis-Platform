@@ -185,13 +185,13 @@ IWM_SYMBOLS = [
     "SOFI", "UPST", "OZK", "PACW", "PNFP", "SBCF", "UBSI", "UCBI",
     "UMBF", "WAFD", "WSFS", "WTFC", "CBSH", "COLB", "CVBF", "EWBC",
     "FCNCA", "FFBC", "FIBK", "FITB", "GBCI", "LKFN", "NTRS", "OCFC",
-    "STT", "TRMK", "ZION", "ABCB", "BANC", "BOKF", "BPOP", "CADE",
+    "STT", "TRMK", "ZION", "ABCB", "BANC", "BOKF", "BPOP",
     
     # Small Cap Consumer (High Volume)
     "CHWY", "CVNA", "DKS", "ETSY", "FIVE", "GRPN", "HIBB", "LULU",
     "OSTK", "PENN", "PLAY", "PLNT", "SHAK", "SIG", "SKX", "WING",
     "YETI", "BROS", "CAKE", "CAVA", "COOK", "EAT", "EYE", "FWRG",
-    "JACK", "KRUS", "LOCO", "MODG", "PRTY", "PSMT", "RUTH", "TXRH",
+    "JACK", "KRUS", "LOCO", "PRTY", "PSMT", "TXRH",
     "BJRI", "BLMN", "CBRL", "CHUY", "DENN", "DIN", "FRGI", "GTIM",
     
     # Small Cap Energy (High Volume)
