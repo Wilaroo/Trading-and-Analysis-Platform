@@ -462,22 +462,13 @@ export function useCommandCenterData({
 
   // Initial data load - optimized with batch init + staggered loading
   useEffect(() => {
-    console.log('[useEffect] connectionChecked:', connectionChecked, 'isConnected:', isConnected, 'isActiveTab:', isActiveTab);
-    if (!connectionChecked) {
-      console.log('[useEffect] Skipping - connectionChecked is false');
-      return;
-    }
+    if (!connectionChecked) return;
     const init = async () => {
-      console.log('[init] Starting data initialization...');
       // Phase 1: Batch init (system health, alerts, smart watchlist in ONE call)
       await fetchBatchInit();
       
       // Phase 1b: Fetch credit budget (lightweight, runs in parallel)
       fetchCreditBudget();
-      
-      // Phase 1c: Always fetch positions (works with Alpaca even without IB)
-      console.log('[init] Calling fetchAccountData...');
-      fetchAccountData();
       
       // Phase 2: IB-dependent data (only if connected)
       if (isConnected) {
