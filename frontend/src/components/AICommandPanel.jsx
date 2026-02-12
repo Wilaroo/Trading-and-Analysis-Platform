@@ -1121,6 +1121,7 @@ const AICommandPanel = ({
               onExecute={(a) => executeFromAlert(a, false)}
               onPass={passOnAlert}
               onTickerClick={handleTickerClick}
+              onViewChart={onViewChart}
               executing={executing}
               onRefresh={fetchCoachingAlerts}
               loading={coachingLoading}
