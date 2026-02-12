@@ -531,7 +531,7 @@ body {
   background: rgba(0, 212, 255, 0.15);
 }
 
-/* Table styles - Light mode */
+/* Table styles - Dark mode */
 .data-table {
   @apply w-full;
 }
@@ -543,21 +543,21 @@ body {
 
 .data-table td {
   @apply py-2 px-4 font-mono-data;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  border-bottom: 1px solid var(--border-subtle);
   color: var(--text-primary);
 }
 
 .data-table tr:hover td {
-  background: rgba(0, 184, 217, 0.05);
+  background: rgba(0, 212, 255, 0.08);
 }
 
-/* Card styles - Light mode with animated gradient border */
+/* Card styles - WITH ANIMATED GRADIENT BORDER */
 .card {
   @apply rounded-xl p-5;
   backdrop-filter: blur(var(--glass-blur-strong));
   -webkit-backdrop-filter: blur(var(--glass-blur-strong));
   background: var(--glass-bg);
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--glass-border);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: var(--shadow-card);
   position: relative;
@@ -582,24 +582,24 @@ body {
   mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  opacity: 0.4;
+  opacity: 0.5;
   animation: gradient-rotate 6s linear infinite;
   pointer-events: none;
 }
 
 .card:hover {
-  box-shadow: var(--shadow-neon), var(--shadow-card);
-  transform: translateY(-2px);
+  box-shadow: var(--shadow-pop);
+  transform: translateY(-3px);
   background: var(--glass-bg-hover);
 }
 
 .card:hover::before {
-  opacity: 0.8;
+  opacity: 0.9;
 }
 
 .card-header {
   @apply flex items-center justify-between pb-3 mb-3;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .card-title {
@@ -618,7 +618,7 @@ body {
 }
 
 .card-interactive:hover {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
 }
 
 /* Ticker tape animation */
@@ -631,19 +631,19 @@ body {
   animation: ticker 30s linear infinite;
 }
 
-/* Loading skeleton - Light mode */
+/* Loading skeleton */
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
 
 .skeleton {
-  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background: linear-gradient(90deg, var(--bg-paper) 25%, var(--bg-subtle) 50%, var(--bg-paper) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
 
-/* Tab styles - Light mode with gradient active */
+/* Tab styles - VIBRANT ACTIVE STATES */
 .tab {
   @apply px-4 py-2 text-sm uppercase tracking-wider border-b-2 border-transparent;
   color: var(--text-muted);
