@@ -429,6 +429,8 @@ export function useCommandCenterData({
 
   // Refresh credit budget periodically (every 5 minutes)
   useEffect(() => {
+    // Fetch immediately on mount (doesn't depend on IB connection)
+    fetchCreditBudget();
     const budgetInterval = setInterval(fetchCreditBudget, 300000);
     return () => clearInterval(budgetInterval);
   }, []);
