@@ -102,7 +102,7 @@ const EarningsWidget = ({ onTickerSelect }) => {
   const weekDays = getWeekDays();
 
   return (
-    <div className="bg-zinc-900/60 rounded-lg border border-zinc-700/50" data-testid="earnings-widget">
+    <div className="glass-card" data-testid="earnings-widget">
       <button 
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center justify-between p-3 hover:bg-zinc-800/50 transition-colors"
@@ -340,7 +340,7 @@ const WatchlistWidget = ({ onTickerSelect, onViewChart, wsWatchlist = [] }) => {
   };
 
   return (
-    <div className="bg-zinc-900/60 rounded-lg border border-zinc-700/50" data-testid="watchlist-widget">
+    <div className="glass-card" data-testid="watchlist-widget">
       <button 
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center justify-between p-3 hover:bg-zinc-800/50 transition-colors"
@@ -524,7 +524,7 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
   };
 
   return (
-    <div className="bg-zinc-900/60 rounded-lg border border-zinc-700/50" data-testid="scanner-results-widget">
+    <div className="glass-card" data-testid="scanner-results-widget">
       <button 
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center justify-between p-3 hover:bg-zinc-800/50 transition-colors"
