@@ -87,6 +87,13 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation, height = 
 
         chartRef.current = chart;
 
+        // Configure price scale first
+        chart.priceScale('right').applyOptions({
+          autoScale: true,
+          borderVisible: true,
+          scaleMargins: { top: 0.1, bottom: 0.2 },
+        });
+
         const candleSeries = chart.addCandlestickSeries({
           upColor: '#00FF94',
           downColor: '#FF2E2E',
@@ -97,11 +104,6 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation, height = 
           priceScaleId: 'right',
         });
         candleSeriesRef.current = candleSeries;
-        
-        chart.priceScale('right').applyOptions({
-          autoScale: true,
-          scaleMargins: { top: 0.1, bottom: 0.2 },
-        });
 
         const volumeSeries = chart.addHistogramSeries({
           color: '#26a69a',
