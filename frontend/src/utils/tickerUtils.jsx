@@ -119,17 +119,38 @@ export const renderTickerAwareContent = (text, onTickerClick) => {
   if (!text) return null;
   
   return text.split('\n').map((line, i) => {
-    // Headers (bold text)
-    if (line.startsWith('**') && line.endsWith('**')) {
-      const headerText = line.replace(/\*\*/g, '');
+    // Main section headers (## H2)
+    if (line.startsWith('## ')) {
+      const headerText = line.replace('## ', '');
       return (
-        <h3 key={i} className="text-sm font-bold text-white mt-3 mb-1">
+        <h2 key={i} className="text-sm font-bold text-cyan-400 mt-4 mb-2 pb-1 border-b border-cyan-500/30">
+          <TickerAwareText text={headerText} onTickerClick={onTickerClick} />
+        </h2>
+      );
+    }
+    
+    // Sub-section headers (### H3)
+    if (line.startsWith('### ')) {
+      const headerText = line.replace('### ', '');
+      return (
+        <h3 key={i} className="text-xs font-bold text-white mt-3 mb-1.5 flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full" />
           <TickerAwareText text={headerText} onTickerClick={onTickerClick} />
         </h3>
       );
     }
     
-    // Bold sections within text
+    // Full-line bold text (standalone headers)
+    if (line.startsWith('**') && line.endsWith('**')) {
+      const headerText = line.replace(/\*\*/g, '');
+      return (
+        <h3 key={i} className="text-xs font-bold text-white mt-3 mb-1">
+          <TickerAwareText text={headerText} onTickerClick={onTickerClick} />
+        </h3>
+      );
+    }
+    
+    // Bold sections within text (inline bold)
     const parts = line.split(/(\*\*[^*]+\*\*)/g);
     const rendered = parts.map((part, j) => {
       if (part.startsWith('**') && part.endsWith('**')) {
@@ -143,22 +164,34 @@ export const renderTickerAwareContent = (text, onTickerClick) => {
       return <TickerAwareText key={j} text={part} onTickerClick={onTickerClick} />;
     });
     
-    // List items
+    // List items with bullets
     if (line.startsWith('- ') || line.startsWith('  - ')) {
-      const indent = line.startsWith('  ') ? 'ml-4' : 'ml-2';
-      return <p key={i} className={`text-xs text-zinc-300 ${indent} py-0.5`}>{rendered}</p>;
+      const indent = line.startsWith('  ') ? 'ml-3' : '';
+      const bulletColor = line.startsWith('  ') ? 'bg-zinc-500' : 'bg-cyan-400/60';
+      return (
+        <div key={i} className={`flex items-start gap-1.5 text-[11px] text-zinc-300 ${indent} py-0.5`}>
+          <span className={`w-1 h-1 ${bulletColor} rounded-full mt-1.5 flex-shrink-0`} />
+          <span>{rendered}</span>
+        </div>
+      );
     }
     
     // Numbered items
     if (line.match(/^\d+\./)) {
-      return <p key={i} className="text-xs text-zinc-300 ml-2 py-0.5">{rendered}</p>;
+      const num = line.match(/^(\d+)/)[1];
+      return (
+        <div key={i} className="flex items-start gap-1.5 text-[11px] text-zinc-300 py-0.5">
+          <span className="text-cyan-400/80 font-mono text-[10px] min-w-[14px]">{num}.</span>
+          <span>{rendered}</span>
+        </div>
+      );
     }
     
     // Empty lines
-    if (line.trim() === '') return <div key={i} className="h-1" />;
+    if (line.trim() === '') return <div key={i} className="h-1.5" />;
     
     // Regular text
-    return <p key={i} className="text-xs text-zinc-400 py-0.5">{rendered}</p>;
+    return <p key={i} className="text-[11px] text-zinc-300 py-0.5">{rendered}</p>;
   });
 };
 
