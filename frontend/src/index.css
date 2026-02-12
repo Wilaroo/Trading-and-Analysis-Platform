@@ -120,64 +120,111 @@ body {
 /* Selection styling */
 ::selection {
   background: var(--primary-main);
-  color: var(--bg-default);
+  color: white;
 }
 
-/* Glass morphism utility - TRUE GLASS EFFECT */
+/* Glass morphism utility - LIGHT MODE GLASS */
 .glass {
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
-  box-shadow: 
-    var(--shadow-ambient),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+  box-shadow: var(--shadow-card);
+}
+
+/* Animated Gradient Border Container */
+.gradient-border {
+  position: relative;
+  border-radius: var(--radius-lg);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur-strong));
+  -webkit-backdrop-filter: blur(var(--glass-blur-strong));
+}
+
+.gradient-border::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px;
+  background: linear-gradient(
+    var(--gradient-angle, 135deg),
+    var(--primary-main),
+    var(--secondary-main),
+    var(--accent-main),
+    var(--primary-main)
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: gradient-rotate 4s linear infinite;
+}
+
+@keyframes gradient-rotate {
+  0% { --gradient-angle: 0deg; }
+  100% { --gradient-angle: 360deg; }
+}
+
+@property --gradient-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
 }
 
 .glass-card {
   backdrop-filter: blur(var(--glass-blur-strong));
   -webkit-backdrop-filter: blur(var(--glass-blur-strong));
   background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  border: 1px solid rgba(0, 0, 0, 0.06);
   border-radius: var(--radius-lg);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
-  box-shadow: 
-    var(--shadow-ambient),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.06),
-    0 0 0 1px rgba(0, 229, 255, 0.03);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
 }
 
+/* Animated gradient border on cards */
 .glass-card::before {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  padding: 1px;
-  background: linear-gradient(135deg, rgba(255,255,255,0.15), transparent 40%, transparent 60%, rgba(0, 229, 255, 0.1));
+  padding: 1.5px;
+  background: linear-gradient(
+    var(--gradient-angle, 135deg),
+    var(--primary-main),
+    var(--secondary-main),
+    var(--accent-main),
+    var(--primary-main)
+  );
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
+  opacity: 0.5;
+  animation: gradient-rotate 6s linear infinite;
   pointer-events: none;
 }
 
 .glass-card:hover {
   background: var(--glass-bg-hover);
-  border-color: var(--border-active);
   box-shadow: 
     var(--shadow-neon),
-    var(--shadow-ambient),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+    var(--shadow-card);
   transform: translateY(-2px);
 }
 
-/* Glass panel - lighter variant with visible blur */
+.glass-card:hover::before {
+  opacity: 0.9;
+}
+
+/* Glass panel - lighter variant with animated border */
 .glass-panel {
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
   background: var(--glass-bg-light);
-  border: 1px solid var(--glass-border);
+  border: 1px solid rgba(0, 0, 0, 0.06);
   border-radius: var(--radius-lg);
   box-shadow: 
     var(--shadow-ambient),
