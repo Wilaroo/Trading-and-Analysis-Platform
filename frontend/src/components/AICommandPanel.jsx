@@ -583,6 +583,15 @@ const AICuratedWidget = ({ opportunities, onExecute, onPass, onTickerClick, onVi
 const ConfirmationDialog = ({ isOpen, trade, onConfirm, onCancel, loading }) => {
   if (!isOpen || !trade) return null;
   
+  const isCloseAction = trade.isClose;
+  const isAddAction = trade.isAdd;
+  const actionLabel = isCloseAction ? 'Close Position' : isAddAction ? 'Add to Position' : 'Confirm Trade';
+  const actionIcon = isCloseAction ? Minus : isAddAction ? Plus : Check;
+  const ActionIcon = actionIcon;
+  const iconBg = isCloseAction ? 'bg-red-500/20' : isAddAction ? 'bg-emerald-500/20' : 'bg-cyan-500/20';
+  const iconColor = isCloseAction ? 'text-red-400' : isAddAction ? 'text-emerald-400' : 'text-cyan-400';
+  const buttonBg = isCloseAction ? 'bg-red-500 hover:bg-red-400' : isAddAction ? 'bg-emerald-500 hover:bg-emerald-400' : 'bg-cyan-500 hover:bg-cyan-400';
+  
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" data-testid="trade-confirmation-dialog">
       <motion.div
@@ -591,12 +600,14 @@ const ConfirmationDialog = ({ isOpen, trade, onConfirm, onCancel, loading }) => 
         className="bg-zinc-900 border border-white/10 rounded-xl p-5 max-w-md w-full mx-4"
       >
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center">
-            <Target className="w-5 h-5 text-cyan-400" />
+          <div className={`w-10 h-10 rounded-lg ${iconBg} flex items-center justify-center`}>
+            <ActionIcon className={`w-5 h-5 ${iconColor}`} />
           </div>
           <div>
-            <h3 className="text-lg font-bold text-white">Confirm Trade</h3>
-            <p className="text-xs text-zinc-500">Review before executing</p>
+            <h3 className="text-lg font-bold text-white">{actionLabel}</h3>
+            <p className="text-xs text-zinc-500">
+              {isCloseAction ? 'This will close your entire position' : isAddAction ? 'Add shares to existing position' : 'Review before executing'}
+            </p>
           </div>
         </div>
         
@@ -606,35 +617,49 @@ const ConfirmationDialog = ({ isOpen, trade, onConfirm, onCancel, loading }) => 
             <span className={`px-2 py-1 rounded text-sm font-medium ${
               trade.direction === 'long' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
             }`}>
-              {trade.direction?.toUpperCase()}
+              {isCloseAction ? 'CLOSE' : trade.direction?.toUpperCase()}
             </span>
           </div>
           
           <div className="grid grid-cols-2 gap-3 text-sm">
+            {!isCloseAction && (
+              <>
+                <div>
+                  <span className="text-zinc-500">Action</span>
+                  <p className="text-white">{isAddAction ? 'Add to Position' : trade.setup_type?.replace(/_/g, ' ')}</p>
+                </div>
+                <div>
+                  <span className="text-zinc-500">Size</span>
+                  <p className="text-white">{trade.halfSize ? 'Half Position' : 'Full Position'}</p>
+                </div>
+              </>
+            )}
+            {isCloseAction && trade.shares && (
+              <div className="col-span-2">
+                <span className="text-zinc-500">Closing</span>
+                <p className="text-white">{trade.shares} shares at market</p>
+              </div>
+            )}
             <div>
-              <span className="text-zinc-500">Setup</span>
-              <p className="text-white">{trade.setup_type?.replace(/_/g, ' ')}</p>
-            </div>
-            <div>
-              <span className="text-zinc-500">Size</span>
-              <p className="text-white">{trade.halfSize ? 'Half Position' : 'Full Position'}</p>
-            </div>
-            <div>
-              <span className="text-zinc-500">Entry</span>
+              <span className="text-zinc-500">{isCloseAction ? 'Market Price' : 'Entry'}</span>
               <p className="text-white font-mono">${trade.alert_data?.trigger_price?.toFixed(2) || 'Market'}</p>
             </div>
-            <div>
-              <span className="text-zinc-500">Stop</span>
-              <p className="text-red-400 font-mono">${trade.alert_data?.stop_loss?.toFixed(2) || '--'}</p>
-            </div>
-            <div>
-              <span className="text-zinc-500">Target</span>
-              <p className="text-emerald-400 font-mono">${trade.alert_data?.target?.toFixed(2) || '--'}</p>
-            </div>
-            <div>
-              <span className="text-zinc-500">R:R</span>
-              <p className="text-white">{trade.alert_data?.risk_reward?.toFixed(1) || '--'}:1</p>
-            </div>
+            {!isCloseAction && (
+              <>
+                <div>
+                  <span className="text-zinc-500">Stop</span>
+                  <p className="text-red-400 font-mono">${trade.alert_data?.stop_loss?.toFixed(2) || '--'}</p>
+                </div>
+                <div>
+                  <span className="text-zinc-500">Target</span>
+                  <p className="text-emerald-400 font-mono">${trade.alert_data?.target?.toFixed(2) || '--'}</p>
+                </div>
+                <div>
+                  <span className="text-zinc-500">R:R</span>
+                  <p className="text-white">{trade.alert_data?.risk_reward?.toFixed(1) || '--'}:1</p>
+                </div>
+              </>
+            )}
           </div>
         </div>
         
