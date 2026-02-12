@@ -15,6 +15,13 @@ const AICoachTab = ({
   marketContext,
   positions,
   viewChart,
+  // WebSocket-pushed data (replaces polling)
+  wsBotStatus = null,
+  wsBotTrades = [],
+  wsScannerAlerts = [],
+  wsScannerStatus = null,
+  wsSmartWatchlist = [],
+  wsCoachingNotifications = []
 }) => {
   return (
     <div className="grid lg:grid-cols-12 gap-4" data-testid="ai-coach-tab-content">
@@ -34,6 +41,10 @@ const AICoachTab = ({
             account={account}
             marketContext={marketContext}
             positions={positions}
+            // WebSocket-pushed data
+            wsBotStatus={wsBotStatus}
+            wsBotTrades={wsBotTrades}
+            wsCoachingNotifications={wsCoachingNotifications}
           />
         </div>
       </div>
@@ -43,6 +54,10 @@ const AICoachTab = ({
         <RightSidebar 
           onTickerSelect={(ticker) => setSelectedTicker(ticker)} 
           onViewChart={viewChart}
+          // WebSocket-pushed data
+          wsScannerAlerts={wsScannerAlerts}
+          wsScannerStatus={wsScannerStatus}
+          wsSmartWatchlist={wsSmartWatchlist}
         />
       </div>
     </div>
