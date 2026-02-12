@@ -3037,11 +3037,11 @@ async def stream_system_status():
                 
                 # Scanner Status
                 try:
-                    scanner_status = background_scanner.get_status()
+                    scanner_status = background_scanner.get_stats()
                     scanner_data = {
                         "running": scanner_status.get("running", False),
                         "scan_count": scanner_status.get("scan_count", 0),
-                        "alerts_count": scanner_status.get("alerts_count", 0),
+                        "alerts_count": scanner_status.get("active_alerts", 0),
                         "symbols_scanned": scanner_status.get("symbols_scanned_last", 0)
                     }
                     if scanner_data != last_scanner_status:
