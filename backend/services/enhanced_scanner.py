@@ -370,7 +370,7 @@ class EnhancedBackgroundScanner:
     
     def _load_strategy_stats(self):
         """Load strategy stats from database"""
-        if self.stats_collection:
+        if self.stats_collection is not None:
             try:
                 for doc in self.stats_collection.find():
                     setup_type = doc.get("setup_type")
@@ -395,7 +395,7 @@ class EnhancedBackgroundScanner:
     
     def _save_strategy_stats(self, setup_type: str):
         """Save strategy stats to database"""
-        if self.stats_collection and setup_type in self._strategy_stats:
+        if self.stats_collection is not None and setup_type in self._strategy_stats:
             stats = self._strategy_stats[setup_type]
             try:
                 self.stats_collection.update_one(
