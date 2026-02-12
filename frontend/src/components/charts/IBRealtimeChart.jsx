@@ -154,43 +154,30 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation, height = 
       if (response.data.bars && response.data.bars.length > 0) {
         console.log('[Chart] Received', response.data.bars.length, 'bars');
         
-        const candleData = response.data.bars.map(bar => ({
-          time: new Date(bar.time || bar.date || bar.timestamp).getTime() / 1000,
-          open: bar.open,
-          high: bar.high,
-          low: bar.low,
-          close: bar.close,
-        }));
-        
-        const volumeData = response.data.bars.map(bar => ({
-          time: new Date(bar.time || bar.date || bar.timestamp).getTime() / 1000,
-          value: bar.volume,
-          color: bar.close >= bar.open ? '#00FF9433' : '#FF2E2E33',
+        // For line series, use close price
+        const lineData = response.data.bars.map(bar => ({
+          time: Math.floor(new Date(bar.time || bar.date || bar.timestamp).getTime() / 1000),
+          value: bar.close,
         }));
         
         // Sort data by time ascending (required by lightweight-charts)
-        candleData.sort((a, b) => a.time - b.time);
-        volumeData.sort((a, b) => a.time - b.time);
+        lineData.sort((a, b) => a.time - b.time);
         
         // Set data on chart
         if (candleSeriesRef.current && chartRef.current) {
-          console.log('[Chart] Setting candle data...', {
-            firstBar: candleData[0],
-            lastBar: candleData[candleData.length - 1],
-            total: candleData.length
+          console.log('[Chart] Setting line data...', {
+            firstBar: lineData[0],
+            lastBar: lineData[lineData.length - 1],
+            total: lineData.length
           });
           
           // Ensure data is valid
-          const validData = candleData.filter(d => 
-            d.time && !isNaN(d.open) && !isNaN(d.high) && !isNaN(d.low) && !isNaN(d.close)
+          const validData = lineData.filter(d => 
+            d.time && !isNaN(d.value)
           );
           
           if (validData.length > 0) {
             candleSeriesRef.current.setData(validData);
-            
-            if (volumeSeriesRef.current) {
-              volumeSeriesRef.current.setData(volumeData);
-            }
             
             // Set the visible range to include ALL data
             const firstTime = validData[0].time;
