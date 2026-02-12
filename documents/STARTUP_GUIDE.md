@@ -37,7 +37,7 @@ Wait for: `Session Status: online`
 
 **Step 3: Open TradeCommand**
 ```
-https://command-charts.preview.emergentagent.com
+https://broker-fix-1.preview.emergentagent.com
 ```
 
 **That's it!** The app auto-connects to Alpaca and Finnhub.
@@ -153,6 +153,6 @@ Your app automatically routes AI requests to save credits:
 
 ## Current URLs
 
-- **Cloud App:** https://command-charts.preview.emergentagent.com
+- **Cloud App:** https://broker-fix-1.preview.emergentagent.com
 - **Local App:** http://localhost:3000
 - **ngrok Tunnel:** https://pseudoaccidentally-linty-addie.ngrok-free.dev
