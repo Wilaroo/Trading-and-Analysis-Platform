@@ -1130,7 +1130,7 @@ const AICommandPanel = ({
           </div>
 
           {/* Chat Input at Bottom */}
-          <div className="p-3 border-t border-white/5 bg-zinc-900/30">
+          <div className="p-3 border-t border-white/5 bg-black/30">
             <div className="flex items-center gap-2 mb-2 flex-wrap">
               {quickActions.map((qa, idx) => (
                 <QuickPill key={idx} label={qa.label} onClick={qa.action} loading={isLoading} icon={qa.icon} />
@@ -1144,13 +1144,13 @@ const AICommandPanel = ({
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
                 placeholder="Ask anything, type ticker, or 'take NVDA'..."
-                className="flex-1 px-4 py-2.5 bg-zinc-800 border border-white/10 rounded-xl text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                className="input-glass flex-1"
                 data-testid="ai-chat-input"
               />
               <button
                 onClick={() => sendMessage()}
                 disabled={!input.trim() || isLoading}
-                className="px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-cyan-400 text-black rounded-xl hover:from-cyan-400 hover:to-cyan-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="btn-primary px-4 py-2.5 rounded-xl"
                 data-testid="ai-chat-send"
               >
                 <Send className="w-4 h-4" />
@@ -1160,7 +1160,7 @@ const AICommandPanel = ({
         </div>
 
         {/* RIGHT: AI-Curated Opportunities + Collapsible Sections */}
-        <div className="w-80 border-l border-white/5 bg-zinc-900/30 overflow-y-auto">
+        <div className="w-80 border-l border-white/5 bg-black/20 overflow-y-auto">
           {/* AI-Curated Opportunities Widget */}
           <div className="p-3">
             <AICuratedWidget
