@@ -270,7 +270,7 @@ body {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
 }
 
-/* Neon glow effect - ENHANCED */
+/* Neon glow effect - Light mode adjusted */
 .neon-glow {
   box-shadow: var(--shadow-neon);
 }
@@ -289,55 +289,55 @@ body {
 }
 
 .neon-text {
-  text-shadow: 0 0 10px var(--primary-glow-strong), 0 0 30px var(--primary-glow), 0 0 50px var(--primary-glow);
-  color: var(--primary-main);
+  color: var(--primary-dark);
+  text-shadow: 0 0 20px var(--primary-glow);
 }
 
 .neon-text-magenta {
-  text-shadow: 0 0 10px var(--secondary-glow-strong), 0 0 30px var(--secondary-glow);
-  color: var(--secondary-main);
+  color: var(--secondary-dark);
+  text-shadow: 0 0 20px var(--secondary-glow);
 }
 
 .neon-border {
   border-color: var(--primary-main);
-  box-shadow: inset 0 0 15px var(--primary-glow), 0 0 15px var(--primary-glow);
+  box-shadow: 0 0 15px var(--primary-glow);
 }
 
-/* Neon line accent - enhanced */
+/* Neon line accent - light mode */
 .neon-line {
   height: 2px;
   background: linear-gradient(90deg, transparent, var(--primary-main), transparent);
-  box-shadow: 0 0 15px var(--primary-glow-strong), 0 0 30px var(--primary-glow);
+  box-shadow: 0 0 10px var(--primary-glow);
 }
 
 .neon-line-vertical {
   width: 2px;
   background: linear-gradient(180deg, transparent, var(--primary-main), transparent);
-  box-shadow: 0 0 15px var(--primary-glow-strong), 0 0 30px var(--primary-glow);
+  box-shadow: 0 0 10px var(--primary-glow);
 }
 
-/* Neon dot indicator - MORE VISIBLE */
+/* Status dot indicators - Light mode */
 .neon-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--primary-main);
-  box-shadow: 0 0 8px var(--primary-main), 0 0 16px var(--primary-glow-strong), 0 0 24px var(--primary-glow);
+  box-shadow: 0 0 6px var(--primary-main), 0 0 12px var(--primary-glow);
 }
 
 .neon-dot-success {
   background: var(--success);
-  box-shadow: 0 0 8px var(--success), 0 0 16px var(--success-glow), 0 0 24px var(--success-glow);
+  box-shadow: 0 0 6px var(--success), 0 0 12px var(--success-glow);
 }
 
 .neon-dot-error {
   background: var(--error);
-  box-shadow: 0 0 8px var(--error), 0 0 16px var(--error-glow), 0 0 24px var(--error-glow);
+  box-shadow: 0 0 6px var(--error), 0 0 12px var(--error-glow);
 }
 
 .neon-dot-warning {
   background: var(--warning);
-  box-shadow: 0 0 8px var(--warning), 0 0 16px var(--warning-glow), 0 0 24px var(--warning-glow);
+  box-shadow: 0 0 6px var(--warning), 0 0 12px var(--warning-glow);
 }
 
 /* Neon ring - for icons and avatars */
