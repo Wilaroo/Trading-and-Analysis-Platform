@@ -224,6 +224,169 @@ const QuickPill = ({ label, onClick, loading, icon: Icon }) => (
   </button>
 );
 
+// ===================== POSITION CARD WITH QUICK ACTIONS =====================
+
+const PositionCard = ({ position, onTickerClick, onViewChart, onClosePosition, onAddPosition, onSetAlert }) => {
+  const [showActions, setShowActions] = useState(false);
+  const [actionLoading, setActionLoading] = useState(null);
+  
+  const pos = position;
+  const qty = pos.qty || pos.quantity || 0;
+  const pnl = pos.unrealized_pnl || pos.unrealized_pl || 0;
+  const pnlPercent = (pos.unrealized_plpc || pos.unrealized_pnl_percent || 0) * 100;
+  const avgCost = pos.avg_entry_price || pos.avg_cost || 0;
+  const currentPrice = pos.current_price || 0;
+  const isLong = qty > 0;
+  
+  const handleAction = async (action, e) => {
+    e.stopPropagation();
+    setActionLoading(action);
+    
+    try {
+      switch (action) {
+        case 'close':
+          await onClosePosition(pos);
+          break;
+        case 'add':
+          await onAddPosition(pos);
+          break;
+        case 'alert':
+          await onSetAlert(pos);
+          break;
+        default:
+          break;
+      }
+    } catch (err) {
+      // Error handled by parent
+    }
+    
+    setActionLoading(null);
+    setShowActions(false);
+  };
+  
+  return (
+    <div 
+      className="relative group rounded-lg transition-all border border-white/5 hover:border-cyan-500/30"
+      style={{ background: 'rgba(21, 28, 36, 0.6)' }}
+      data-testid={`position-${pos.symbol}`}
+    >
+      {/* Main Position Info */}
+      <div 
+        className="flex items-center justify-between p-2 cursor-pointer hover:bg-cyan-500/10 rounded-lg transition-colors"
+        onClick={() => onTickerClick(pos.symbol)}
+      >
+        <div className="flex items-center gap-2">
+          <div className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold ${
+            isLong ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+          }`}>
+            {isLong ? 'L' : 'S'}
+          </div>
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="font-bold text-white text-xs">{pos.symbol}</span>
+              <ArrowUpRight className="w-2.5 h-2.5 text-cyan-400" />
+            </div>
+            <span className="text-[9px] text-zinc-500">
+              {Math.abs(qty)} shares @ ${avgCost.toFixed(2)}
+            </span>
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-2">
+          <div className="text-right">
+            <p className={`text-xs font-bold font-mono ${pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}
+            </p>
+            <p className="text-[9px] text-zinc-500">
+              {pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%
+            </p>
+          </div>
+          
+          {/* Quick Actions Toggle */}
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowActions(!showActions); }}
+            className="p-1 rounded hover:bg-white/10 transition-colors opacity-0 group-hover:opacity-100"
+            data-testid={`position-actions-toggle-${pos.symbol}`}
+          >
+            <MoreHorizontal className="w-3.5 h-3.5 text-zinc-400" />
+          </button>
+        </div>
+      </div>
+      
+      {/* Quick Actions Panel */}
+      <AnimatePresence>
+        {showActions && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="flex items-center gap-1.5 px-2 pb-2 pt-1 border-t border-white/5">
+              {/* Close Position */}
+              <button
+                onClick={(e) => handleAction('close', e)}
+                disabled={actionLoading === 'close'}
+                className="flex items-center gap-1 px-2 py-1 rounded bg-red-500/20 text-red-400 text-[10px] font-medium hover:bg-red-500/30 transition-colors disabled:opacity-50"
+                data-testid={`close-position-${pos.symbol}`}
+              >
+                {actionLoading === 'close' ? (
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                ) : (
+                  <Minus className="w-2.5 h-2.5" />
+                )}
+                Close
+              </button>
+              
+              {/* Add to Position */}
+              <button
+                onClick={(e) => handleAction('add', e)}
+                disabled={actionLoading === 'add'}
+                className="flex items-center gap-1 px-2 py-1 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-medium hover:bg-emerald-500/30 transition-colors disabled:opacity-50"
+                data-testid={`add-position-${pos.symbol}`}
+              >
+                {actionLoading === 'add' ? (
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                ) : (
+                  <Plus className="w-2.5 h-2.5" />
+                )}
+                Add
+              </button>
+              
+              {/* Set Price Alert */}
+              <button
+                onClick={(e) => handleAction('alert', e)}
+                disabled={actionLoading === 'alert'}
+                className="flex items-center gap-1 px-2 py-1 rounded bg-amber-500/20 text-amber-400 text-[10px] font-medium hover:bg-amber-500/30 transition-colors disabled:opacity-50"
+                data-testid={`set-alert-${pos.symbol}`}
+              >
+                {actionLoading === 'alert' ? (
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                ) : (
+                  <Bell className="w-2.5 h-2.5" />
+                )}
+                Alert
+              </button>
+              
+              {/* View Chart */}
+              {onViewChart && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onViewChart(pos.symbol); setShowActions(false); }}
+                  className="flex items-center gap-1 px-2 py-1 rounded bg-cyan-500/20 text-cyan-400 text-[10px] font-medium hover:bg-cyan-500/30 transition-colors"
+                  data-testid={`view-chart-${pos.symbol}`}
+                >
+                  <LineChart className="w-2.5 h-2.5" />
+                  Chart
+                </button>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
 // ===================== AI-CURATED OPPORTUNITIES WIDGET =====================
 
 const CuratedOpportunityCard = ({ opportunity, rank, onExecute, onPass, onTickerClick, onViewChart, executing }) => {
