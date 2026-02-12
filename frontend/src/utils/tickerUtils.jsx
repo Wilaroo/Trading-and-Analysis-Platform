@@ -63,9 +63,12 @@ export const NewsLink = ({ url, children, className = '' }) => {
 export const TickerAwareText = ({ text, onTickerClick, className = '' }) => {
   if (!text || typeof text !== 'string') return <span className={className}>{text}</span>;
   
-  // Match common ticker patterns: $AAPL, AAPL, MSFT (1-5 uppercase letters, optionally preceded by $)
-  // Also match patterns like "Kraft Heinz (KHC)" - ticker in parentheses
-  const tickerRegex = /(\$[A-Z]{1,5}(?=[\s,.:;!?)}\]"]|$))|(\([A-Z]{1,5}\))|(\b[A-Z]{1,5}\b(?=[\s,.:;!?)}\]'"]|$))/g;
+  // Match common ticker patterns:
+  // - $AAPL (dollar sign prefix)
+  // - AAPL: or AAPL, (ticker followed by punctuation)
+  // - (KHC) (ticker in parentheses)
+  // - AAPL at word boundary with known ticker check
+  const tickerRegex = /(\$[A-Z]{1,5}(?=[\s,.:;!?)}\]"]|$))|(\([A-Z]{1,5}\))|(\b[A-Z]{1,5}\b(?=[\s,.:;!?)}\]'"]|:|\||$))/g;
   
   const parts = [];
   let lastIndex = 0;
