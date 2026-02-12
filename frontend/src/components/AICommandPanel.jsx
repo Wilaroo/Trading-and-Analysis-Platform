@@ -27,7 +27,11 @@ import {
   Clock,
   DollarSign,
   Briefcase,
-  LineChart
+  LineChart,
+  Plus,
+  Minus,
+  Bell,
+  MoreHorizontal
 } from 'lucide-react';
 import api from '../utils/api';
 import { toast } from 'sonner';
