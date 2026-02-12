@@ -10,28 +10,34 @@
 @tailwind utilities;
 
 :root {
-  --bg-default: #050505;
-  --bg-paper: #0A0A0A;
-  --bg-subtle: #121212;
-  --bg-elevated: #161616;
+  --bg-default: #030308;
+  --bg-paper: #080812;
+  --bg-subtle: #0d0d1a;
+  --bg-elevated: #12121f;
   
   /* Primary neon cyan */
   --primary-main: #00E5FF;
   --primary-hover: #33EBFF;
-  --primary-glow: rgba(0, 229, 255, 0.15);
-  --primary-glow-strong: rgba(0, 229, 255, 0.4);
+  --primary-glow: rgba(0, 229, 255, 0.25);
+  --primary-glow-strong: rgba(0, 229, 255, 0.5);
+  --primary-glow-intense: rgba(0, 229, 255, 0.7);
   
   /* Secondary neon magenta */
   --secondary-main: #FF00F5;
-  --secondary-glow: rgba(255, 0, 245, 0.15);
+  --secondary-glow: rgba(255, 0, 245, 0.25);
+  --secondary-glow-strong: rgba(255, 0, 245, 0.5);
   
-  /* Status colors */
+  /* Accent neon purple */
+  --accent-main: #9D4EDD;
+  --accent-glow: rgba(157, 78, 221, 0.3);
+  
+  /* Status colors - more vibrant */
   --success: #00FF94;
-  --success-glow: rgba(0, 255, 148, 0.2);
+  --success-glow: rgba(0, 255, 148, 0.35);
   --warning: #FFD600;
-  --warning-glow: rgba(255, 214, 0, 0.2);
-  --error: #FF2E2E;
-  --error-glow: rgba(255, 46, 46, 0.2);
+  --warning-glow: rgba(255, 214, 0, 0.35);
+  --error: #FF2E63;
+  --error-glow: rgba(255, 46, 99, 0.35);
   --info: #2979FF;
   
   /* Text */
@@ -39,22 +45,31 @@
   --text-secondary: #A1A1AA;
   --text-muted: #52525B;
   
-  /* Borders */
-  --border-default: rgba(255, 255, 255, 0.08);
-  --border-subtle: rgba(255, 255, 255, 0.05);
-  --border-active: rgba(0, 229, 255, 0.4);
+  /* Borders - more visible */
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-active: rgba(0, 229, 255, 0.5);
+  --border-glow: rgba(0, 229, 255, 0.3);
   
-  /* Glass effect */
-  --glass-bg: rgba(10, 10, 10, 0.75);
-  --glass-bg-light: rgba(20, 20, 20, 0.6);
-  --glass-blur: 16px;
-  --glass-border: rgba(255, 255, 255, 0.1);
+  /* Glass effect - MUCH more transparent */
+  --glass-bg: rgba(13, 13, 26, 0.4);
+  --glass-bg-hover: rgba(13, 13, 26, 0.55);
+  --glass-bg-light: rgba(20, 20, 40, 0.35);
+  --glass-bg-dark: rgba(8, 8, 18, 0.6);
+  --glass-blur: 20px;
+  --glass-blur-strong: 28px;
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-border-glow: rgba(0, 229, 255, 0.2);
   
-  /* Shadows */
-  --shadow-neon: 0 0 20px var(--primary-glow);
-  --shadow-neon-strong: 0 0 30px var(--primary-glow-strong);
+  /* Shadows - enhanced neon */
+  --shadow-neon: 0 0 20px var(--primary-glow), 0 0 40px var(--primary-glow);
+  --shadow-neon-strong: 0 0 25px var(--primary-glow-strong), 0 0 50px var(--primary-glow);
+  --shadow-neon-magenta: 0 0 20px var(--secondary-glow), 0 0 40px var(--secondary-glow);
+  --shadow-ambient: 0 8px 32px rgba(0, 0, 0, 0.4);
   
-  --radius: 0.5rem;
+  --radius: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
 }
 
 * {
