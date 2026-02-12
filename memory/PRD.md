@@ -258,6 +258,7 @@ Triggers AI Coaching Notification
    - Projects usage and warns if on track to exceed
    - Resets automatically on month rollover
    - **Frontend indicator in header bar** showing remaining credits with color-coded status
+   - **Clickable modal** with detailed usage breakdown: circular progress ring, stats grid (daily avg, projected, session, days left), on-track indicator, recent queries list
 
 6. **AI Assistant Integration**:
    - Updated intent detection to route to Agent Skills
