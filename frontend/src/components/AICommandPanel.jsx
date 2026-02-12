@@ -1057,7 +1057,7 @@ const AICommandPanel = ({
   const activeCoachingAlerts = coachingAlerts.filter(a => !dismissedAlerts.has(a.timestamp));
 
   return (
-    <div className="flex flex-col h-full bg-[#0A0A0A] border border-white/10 rounded-xl overflow-hidden" data-testid="ai-command-panel">
+    <div className="flex flex-col h-full glass-card overflow-hidden" data-testid="ai-command-panel">
       {/* Confirmation Dialog */}
       <ConfirmationDialog
         isOpen={confirmDialog.isOpen}
