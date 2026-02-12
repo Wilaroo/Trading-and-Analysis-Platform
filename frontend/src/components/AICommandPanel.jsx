@@ -983,25 +983,68 @@ const AICommandPanel = ({
     onTickerSelect?.({ symbol, quote: {}, fromSearch: true });
   }, [onTickerSelect]);
 
-  // Poll data - optimized intervals to reduce API load
-  // Staggered: bot status 20s, trades 25s, coaching 15s (most time-sensitive)
+  // ===================== SYNC WEBSOCKET DATA =====================
+  // Use WebSocket-pushed data when available, with fallback to API fetch
+  
   useEffect(() => {
-    // Initial fetch with staggered timing
-    fetchBotStatus();
-    setTimeout(fetchBotTrades, 200);
-    setTimeout(fetchCoachingAlerts, 400);
-    
-    // Staggered polling intervals to avoid burst requests
-    const statusInterval = setInterval(fetchBotStatus, 20000);    // Bot status rarely changes
-    const tradesInterval = setInterval(fetchBotTrades, 25000);    // Trades update less frequently  
-    const coachingInterval = setInterval(fetchCoachingAlerts, 15000); // Coaching alerts more time-sensitive
-    
-    return () => {
-      clearInterval(statusInterval);
-      clearInterval(tradesInterval);
-      clearInterval(coachingInterval);
-    };
-  }, [fetchBotStatus, fetchBotTrades, fetchCoachingAlerts]);
+    // Sync bot status from WebSocket
+    if (wsBotStatus) {
+      setBotStatus({
+        success: true,
+        running: wsBotStatus.state === 'running',
+        ...wsBotStatus
+      });
+    }
+  }, [wsBotStatus]);
+  
+  useEffect(() => {
+    // Sync bot trades from WebSocket
+    if (wsBotTrades && wsBotTrades.length >= 0) {
+      // Group trades by status
+      const pending = wsBotTrades.filter(t => t.status === 'pending');
+      const open = wsBotTrades.filter(t => t.status === 'open' || t.status === 'filled');
+      const closed = wsBotTrades.filter(t => t.status === 'closed' || t.status === 'exited');
+      
+      setBotTrades({
+        success: true,
+        pending,
+        open,
+        closed,
+        all: wsBotTrades,
+        daily_stats: botTrades.daily_stats || {}
+      });
+    }
+  }, [wsBotTrades]);
+  
+  useEffect(() => {
+    // Sync coaching notifications from WebSocket
+    if (wsCoachingNotifications && wsCoachingNotifications.length > 0) {
+      setCoachingAlerts(prev => {
+        // Merge new notifications, avoiding duplicates
+        const existingIds = new Set(prev.map(n => n.id || n.timestamp));
+        const newNotifications = wsCoachingNotifications.filter(n => !existingIds.has(n.id || n.timestamp));
+        if (newNotifications.length > 0) {
+          return [...newNotifications, ...prev].slice(0, 50);
+        }
+        return prev;
+      });
+    }
+  }, [wsCoachingNotifications]);
+
+  // Initial data fetch only (WebSocket handles subsequent updates)
+  useEffect(() => {
+    // Only fetch if no WebSocket data available
+    if (!wsBotStatus) {
+      fetchBotStatus();
+    }
+    if (!wsBotTrades || wsBotTrades.length === 0) {
+      fetchBotTrades();
+    }
+    if (!wsCoachingNotifications || wsCoachingNotifications.length === 0) {
+      fetchCoachingAlerts();
+    }
+    // No polling intervals - WebSocket handles real-time updates
+  }, []); // Only on mount
 
   const quickActions = [
     { label: 'My Trades', action: () => sendMessage('Show my open trades'), icon: Target },
