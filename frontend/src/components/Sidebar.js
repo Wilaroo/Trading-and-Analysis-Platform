@@ -29,15 +29,15 @@ export const Sidebar = ({ activeTab, setActiveTab }) => {
         backdropFilter: 'blur(24px)',
         WebkitBackdropFilter: 'blur(24px)',
         borderRight: '1px solid rgba(255, 255, 255, 0.08)',
-        boxShadow: '4px 0 30px rgba(0, 0, 0, 0.3)'
+        boxShadow: '4px 0 20px rgba(0, 0, 0, 0.3)'
       }}
-      initial={{ width: 64 }}
-      animate={{ width: isExpanded ? 220 : 64 }}
+      initial={{ width: 52 }}
+      animate={{ width: isExpanded ? 180 : 52 }}
       onMouseEnter={() => setIsExpanded(true)}
       onMouseLeave={() => setIsExpanded(false)}
     >
       {/* Animated gradient border on right edge */}
-      <div className="absolute inset-y-0 right-0 w-[2px] overflow-hidden">
+      <div className="absolute inset-y-0 right-0 w-[1.5px] overflow-hidden">
         <div 
           className="h-full w-full"
           style={{
@@ -49,14 +49,14 @@ export const Sidebar = ({ activeTab, setActiveTab }) => {
       </div>
 
       {/* Logo */}
-      <div className="p-4 border-b border-white/[0.08]">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center"
+      <div className="p-2.5 border-b border-white/[0.08]">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center"
                style={{ 
                  background: 'linear-gradient(135deg, var(--primary-main), var(--secondary-main))',
-                 boxShadow: '0 4px 20px var(--primary-glow-strong)'
+                 boxShadow: '0 2px 12px var(--primary-glow-strong)'
                }}>
-            <Activity className="w-5 h-5 text-white" />
+            <Activity className="w-3.5 h-3.5 text-white" />
           </div>
           <AnimatePresence>
             {isExpanded && (
@@ -64,9 +64,9 @@ export const Sidebar = ({ activeTab, setActiveTab }) => {
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -10 }}
-                className="font-bold text-lg whitespace-nowrap text-white"
+                className="font-bold text-sm whitespace-nowrap text-white"
               >
-                Trade<span className="neon-text">Command</span>
+                Trade<span className="neon-text">Cmd</span>
               </motion.span>
             )}
           </AnimatePresence>
@@ -74,7 +74,7 @@ export const Sidebar = ({ activeTab, setActiveTab }) => {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 py-4 px-2">
+      <nav className="flex-1 py-2 px-1.5">
         {navItems.map((item) => {
           const isActive = activeTab === item.id;
           return (
@@ -82,7 +82,7 @@ export const Sidebar = ({ activeTab, setActiveTab }) => {
               key={item.id}
               data-testid={`nav-${item.id}`}
               onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 mb-1 rounded-xl transition-all duration-200 border ${
+              className={`w-full flex items-center gap-2 px-2 py-1.5 mb-0.5 rounded-lg transition-all duration-200 border ${
                 isActive
                   ? 'text-white'
                   : item.highlight 
@@ -92,24 +92,24 @@ export const Sidebar = ({ activeTab, setActiveTab }) => {
               style={isActive ? {
                 background: 'linear-gradient(135deg, rgba(0, 212, 255, 0.2), rgba(168, 85, 247, 0.1))',
                 borderColor: 'var(--primary-main)',
-                boxShadow: '0 0 25px var(--primary-glow), inset 0 0 20px var(--primary-glow)'
+                boxShadow: '0 0 15px var(--primary-glow), inset 0 0 12px var(--primary-glow)'
               } : {}}
             >
-              <item.icon className={`w-5 h-5 flex-shrink-0 ${isActive ? 'text-cyan-400 drop-shadow-[0_0_10px_rgba(0,212,255,0.8)]' : ''}`} />
+              <item.icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-cyan-400' : ''}`} />
               <AnimatePresence>
                 {isExpanded && (
                   <motion.span
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    className="whitespace-nowrap flex items-center gap-2 text-sm font-medium"
+                    className="whitespace-nowrap flex items-center gap-1.5 text-[11px] font-medium"
                   >
                     {item.label}
                   </motion.span>
                 )}
               </AnimatePresence>
               {isActive && isExpanded && (
-                <ChevronRight className="w-4 h-4 ml-auto text-cyan-400" />
+                <ChevronRight className="w-3 h-3 ml-auto text-cyan-400" />
               )}
             </button>
           );
@@ -117,7 +117,7 @@ export const Sidebar = ({ activeTab, setActiveTab }) => {
       </nav>
       
       {/* Footer */}
-      <div className="p-4 border-t border-white/[0.08]">
+      <div className="p-2 border-t border-white/[0.08]">
         <AnimatePresence>
           {isExpanded && (
             <motion.div
@@ -126,8 +126,8 @@ export const Sidebar = ({ activeTab, setActiveTab }) => {
               exit={{ opacity: 0 }}
               className="text-center"
             >
-              <p className="text-[10px] font-mono text-zinc-500">
-                v2.0 • <span className="text-cyan-400">Vibrant</span>
+              <p className="text-[9px] font-mono text-zinc-500">
+                v2.0 • <span className="text-cyan-400">Compact</span>
               </p>
             </motion.div>
           )}
