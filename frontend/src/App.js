@@ -390,9 +390,16 @@ function App() {
         </div>
       )}
       
-      <main className="ml-16 min-h-screen bg-[#030305]">
+      <main className="ml-16 min-h-screen relative">
+        {/* Background gradient layers for glass effect visibility */}
+        <div className="fixed inset-0 ml-16 pointer-events-none overflow-hidden">
+          <div className="absolute -top-1/4 -right-1/4 w-1/2 h-1/2 bg-cyan-500/[0.07] rounded-full blur-[120px]" />
+          <div className="absolute top-1/3 -left-1/4 w-1/3 h-1/3 bg-purple-500/[0.05] rounded-full blur-[100px]" />
+          <div className="absolute -bottom-1/4 right-1/3 w-1/2 h-1/2 bg-magenta-500/[0.04] rounded-full blur-[120px]" />
+        </div>
+        
         {/* Ticker Tape with glass effect */}
-        <div className="glass-surface border-b border-white/5">
+        <div className="glass-header sticky top-0 z-10">
           <TickerTape indices={dashboardData.overview?.indices} isConnected={isConnected} lastUpdate={lastUpdate} />
         </div>
         
