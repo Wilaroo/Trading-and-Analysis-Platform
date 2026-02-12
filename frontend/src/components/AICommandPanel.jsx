@@ -960,36 +960,7 @@ const AICommandPanel = ({
       <div className="flex-1 flex overflow-hidden">
         {/* LEFT: Chat Area (Expanded) */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Chat Input at Top */}
-          <div className="p-3 border-b border-white/5 bg-zinc-900/30">
-            <div className="flex items-center gap-2 mb-2 flex-wrap">
-              {quickActions.map((qa, idx) => (
-                <QuickPill key={idx} label={qa.label} onClick={qa.action} loading={isLoading} icon={qa.icon} />
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <input
-                ref={inputRef}
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-                placeholder="Ask anything, type ticker, or 'take NVDA'..."
-                className="flex-1 px-4 py-2.5 bg-zinc-800 border border-white/10 rounded-xl text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
-                data-testid="ai-chat-input"
-              />
-              <button
-                onClick={() => sendMessage()}
-                disabled={!input.trim() || isLoading}
-                className="px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-cyan-400 text-black rounded-xl hover:from-cyan-400 hover:to-cyan-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                data-testid="ai-chat-send"
-              >
-                <Send className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* Chat Messages - Expanded Area */}
+          {/* Chat Messages - Above Input (Standard Chat Layout) */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4" data-testid="chat-messages">
             {messages.length === 0 && !isLoading ? (
               <div className="flex flex-col items-center justify-center h-full text-center py-8">
@@ -1017,6 +988,35 @@ const AICommandPanel = ({
                 <div ref={messagesEndRef} />
               </>
             )}
+          </div>
+
+          {/* Chat Input at Bottom */}
+          <div className="p-3 border-t border-white/5 bg-zinc-900/30">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              {quickActions.map((qa, idx) => (
+                <QuickPill key={idx} label={qa.label} onClick={qa.action} loading={isLoading} icon={qa.icon} />
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input
+                ref={inputRef}
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
+                placeholder="Ask anything, type ticker, or 'take NVDA'..."
+                className="flex-1 px-4 py-2.5 bg-zinc-800 border border-white/10 rounded-xl text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                data-testid="ai-chat-input"
+              />
+              <button
+                onClick={() => sendMessage()}
+                disabled={!input.trim() || isLoading}
+                className="px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-cyan-400 text-black rounded-xl hover:from-cyan-400 hover:to-cyan-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                data-testid="ai-chat-send"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
 
