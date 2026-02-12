@@ -385,13 +385,18 @@ function App() {
       
       {/* Alert Threshold Indicator */}
       {audioEnabled && (
-        <div className="fixed bottom-4 right-28 z-50 bg-paper border border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-400">
+        <div className="fixed bottom-4 right-28 z-50 glass-panel px-3 py-2 text-xs text-zinc-400 font-mono">
           Alert: ±{alertThreshold}%
         </div>
       )}
       
-      <main className="ml-16 lg:ml-64 min-h-screen">
-        <TickerTape indices={dashboardData.overview?.indices} isConnected={isConnected} lastUpdate={lastUpdate} />
+      <main className="ml-16 min-h-screen bg-[#030305]">
+        {/* Ticker Tape with glass effect */}
+        <div className="glass-surface border-b border-white/5">
+          <TickerTape indices={dashboardData.overview?.indices} isConnected={isConnected} lastUpdate={lastUpdate} />
+        </div>
+        
+        {/* Main Content Area */}
         <div className="p-6">
           <AnimatePresence mode="wait">
             <motion.div key={activeTab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
