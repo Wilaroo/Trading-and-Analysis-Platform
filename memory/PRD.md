@@ -400,6 +400,59 @@ Intelligence gathering timeout for CADE
 
 ---
 
+## Session Log - February 12, 2026 (Click-to-Chart in AI Chat)
+
+### Feature: Click-to-Chart Integration in AI Chat Messages
+**Goal**: Allow users to click a chart icon next to ticker symbols in AI chat responses to navigate directly to the Charts tab with that symbol loaded.
+
+**Implementation:**
+1. **TickerLink Component Enhancement** (`AICommandPanel.jsx` lines 41-63):
+   - Added `onViewChart` prop support
+   - Amber-colored LineChart icon button appears when `onViewChart` is provided
+   - Uses `data-testid="ticker-chart-{symbol}"` for testing
+   - Styled as a split-button: cyan ticker link (left) + amber chart icon (right)
+
+2. **Prop Propagation Chain**:
+   - `CommandCenterPage.js` → passes `viewChart` to `AICoachTab`
+   - `AICoachTab.jsx` → passes `viewChart` as `onViewChart` to `AICommandPanel` and `RightSidebar`
+   - `AICommandPanel.jsx` → passes `onViewChart` to:
+     - `TickerLink` (in `TickerAwareText`)
+     - `ChatMessage`
+     - `CuratedOpportunityCard`
+     - `AICuratedWidget`
+   - `RightSidebar.jsx` → passes `onViewChart` to:
+     - `ScannerResultsWidget`
+     - `WatchlistWidget`
+     - `EarningsWidget`
+
+3. **viewChart Function** (`useCommandCenterData.js` lines 338-344):
+   - Sets the chart symbol
+   - Saves to localStorage
+   - Adds to recent charts history
+   - Switches to 'charts' tab automatically
+
+4. **Code Cleanup**:
+   - Deleted deprecated `/frontend/src/components/charts/IBRealtimeChart.jsx`
+   - Deleted redundant `/frontend/src/pages/ChartsPage.js` and its route from `App.js`
+
+**Testing Results**:
+- Code review: All implementations verified correct
+- Chart icons appear in AI-Curated Opportunity cards
+- Chart icons appear on hover in Scanner Alerts and Smart Watchlist widgets
+- AI chat backend responds correctly (GPT-4o fallback works when Ollama unavailable)
+
+### Files Modified
+- `frontend/src/components/AICommandPanel.jsx` - TickerLink with chart icon, prop propagation
+- `frontend/src/components/RightSidebar.jsx` - Chart icons in Scanner, Watchlist, Earnings widgets
+- `frontend/src/components/tabs/AICoachTab.jsx` - Pass onViewChart prop
+- `frontend/src/pages/CommandCenterPage.js` - Pass viewChart to AICoachTab
+
+### Files Deleted
+- `frontend/src/components/charts/IBRealtimeChart.jsx` (deprecated, replaced by TradingView)
+- `frontend/src/pages/ChartsPage.js` (replaced by ChartsTab in Command Center)
+
+---
+
 ## Session Log - February 11, 2026
 
 ### P0 Bug Fix: IB Connection UI Issue
