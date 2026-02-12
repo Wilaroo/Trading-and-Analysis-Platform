@@ -820,17 +820,25 @@ class FinvizScraper:
 class WebResearchService:
     """
     Unified web research service combining Tavily + custom scrapers
-    Main interface for the AI assistant
+    Main interface for the AI assistant with credit budget tracking
     """
     
-    def __init__(self):
-        self.tavily = TavilySearchService()
+    def __init__(self, db=None):
+        self.db = db
+        self.tavily = TavilySearchService(db=db)
         self.sec = SECEdgarScraper()
         self.yahoo = YahooFinanceScraper()
         self.finviz = FinvizScraper()
         
         # Research cache (MongoDB will be used in production)
         self._research_cache: Dict[str, Dict] = {}
+    
+    def set_db(self, db):
+        """Set database reference for persistent credit tracking"""
+        self.db = db
+        self.tavily.db = db
+        # Reinitialize credit tracker with DB
+        get_credit_tracker(db)
     
     async def search(self, query: str, max_results: int = 5) -> ResearchResponse:
         """General web search using Tavily"""
