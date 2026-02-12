@@ -324,6 +324,25 @@ export function useCommandCenterData({
     localStorage.removeItem('recentTickerSearches');
   };
 
+  // ==================== CHARTS ====================
+
+  const addToRecentCharts = (symbol) => {
+    setRecentCharts(prev => {
+      const filtered = prev.filter(s => s !== symbol);
+      const updated = [symbol, ...filtered].slice(0, 8);
+      localStorage.setItem('recentChartSymbols', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const viewChart = (symbol) => {
+    const sym = symbol.toUpperCase().trim();
+    setChartSymbol(sym);
+    localStorage.setItem('tradecommand_chart_symbol', sym);
+    addToRecentCharts(sym);
+    setActiveMainTab('charts');
+  };
+
   const handleTickerSearch = async (e, symbolOverride = null) => {
     if (e) e.preventDefault();
     const symbol = (symbolOverride || tickerSearchQuery).trim().toUpperCase();
