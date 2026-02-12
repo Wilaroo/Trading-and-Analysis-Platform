@@ -591,20 +591,36 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart }) => {
 };
 
 // ===================== MAIN RIGHT SIDEBAR COMPONENT =====================
-const RightSidebar = ({ onTickerSelect, onViewChart }) => {
+const RightSidebar = ({ 
+  onTickerSelect, 
+  onViewChart,
+  // WebSocket-pushed data
+  wsScannerAlerts = [],
+  wsScannerStatus = null,
+  wsSmartWatchlist = []
+}) => {
   return (
     <div className="space-y-3" data-testid="right-sidebar">
       {/* Market Intelligence Panel */}
       <MarketIntelPanel onTickerSelect={onTickerSelect} onViewChart={onViewChart} />
       
       {/* Scanner Results */}
-      <ScannerResultsWidget onTickerSelect={onTickerSelect} onViewChart={onViewChart} />
+      <ScannerResultsWidget 
+        onTickerSelect={onTickerSelect} 
+        onViewChart={onViewChart}
+        wsAlerts={wsScannerAlerts}
+        wsStatus={wsScannerStatus}
+      />
       
       {/* Earnings Widget */}
       <EarningsWidget onTickerSelect={onTickerSelect} onViewChart={onViewChart} />
       
       {/* Watchlist Widget */}
-      <WatchlistWidget onTickerSelect={onTickerSelect} onViewChart={onViewChart} />
+      <WatchlistWidget 
+        onTickerSelect={onTickerSelect} 
+        onViewChart={onViewChart}
+        wsWatchlist={wsSmartWatchlist}
+      />
     </div>
   );
 };
