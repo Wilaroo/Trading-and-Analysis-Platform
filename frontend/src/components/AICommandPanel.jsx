@@ -314,7 +314,7 @@ const CuratedOpportunityCard = ({ opportunity, rank, onExecute, onPass, onTicker
   );
 };
 
-const AICuratedWidget = ({ opportunities, onExecute, onPass, onTickerClick, executing, onRefresh, loading }) => {
+const AICuratedWidget = ({ opportunities, onExecute, onPass, onTickerClick, onViewChart, executing, onRefresh, loading }) => {
   const topOpportunities = opportunities
     .filter(o => o.verdict === 'TAKE' || o.verdict === 'WAIT')
     .slice(0, 5);
@@ -366,6 +366,7 @@ const AICuratedWidget = ({ opportunities, onExecute, onPass, onTickerClick, exec
             onExecute={onExecute}
             onPass={onPass}
             onTickerClick={onTickerClick}
+            onViewChart={onViewChart}
             executing={executing}
           />
         ))}
