@@ -630,6 +630,7 @@ const StatsHeader = ({ status, account, marketContext, positions, onToggle, onMo
 
 const AICommandPanel = ({ 
   onTickerSelect,
+  onViewChart,
   watchlist = [],
   alerts = [],
   opportunities = [],
