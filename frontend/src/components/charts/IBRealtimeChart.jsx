@@ -205,7 +205,15 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation, height = 
             
             // Force chart to recalculate and fit content
             chartRef.current.timeScale().fitContent();
-            chartRef.current.applyOptions({});
+            
+            // Force price scale to auto-fit
+            chartRef.current.priceScale('right').applyOptions({ autoScale: true });
+            
+            // Trigger resize to force redraw
+            const rect = chartContainerRef.current?.getBoundingClientRect();
+            if (rect) {
+              chartRef.current.resize(Math.floor(rect.width), Math.floor(rect.height));
+            }
             
             // Get visible range after setting data
             const range = chartRef.current.timeScale().getVisibleRange();
