@@ -660,9 +660,9 @@ body {
   animation: shimmer 1.5s infinite;
 }
 
-/* Tab styles - VIBRANT ACTIVE STATES */
+/* Tab styles - COMPACT */
 .tab {
-  @apply px-4 py-2 text-sm uppercase tracking-wider border-b-2 border-transparent;
+  @apply px-2.5 py-1.5 text-[10px] uppercase tracking-wider border-b-2 border-transparent;
   color: var(--text-muted);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -674,12 +674,12 @@ body {
 .tab.active {
   color: var(--primary-main);
   border-color: var(--primary-main);
-  text-shadow: 0 0 20px var(--primary-glow);
+  text-shadow: 0 0 15px var(--primary-glow);
 }
 
-/* Glass tabs - pill style - NEON */
+/* Glass tabs - COMPACT pill style */
 .glass-tab {
-  @apply px-4 py-2 text-xs font-medium uppercase tracking-wider rounded-xl;
+  @apply px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider rounded-lg;
   color: var(--text-muted);
   border: 1px solid transparent;
   background: transparent;
@@ -695,18 +695,18 @@ body {
   color: var(--primary-main);
   background: rgba(0, 212, 255, 0.15);
   border-color: var(--primary-main);
-  box-shadow: 0 0 20px var(--primary-glow), inset 0 0 15px var(--primary-glow);
+  box-shadow: 0 0 15px var(--primary-glow), inset 0 0 10px var(--primary-glow);
 }
 
-/* Input styles - DARK GLASS */
+/* Input styles - COMPACT */
 .input-glass {
-  @apply w-full px-4 py-2.5 rounded-xl text-sm;
+  @apply w-full px-2.5 py-1.5 rounded-lg text-xs;
   background: rgba(15, 20, 25, 0.8);
   backdrop-filter: blur(8px);
   border: 1px solid var(--glass-border);
   color: var(--text-primary);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 .input-glass::placeholder {
@@ -716,13 +716,13 @@ body {
 .input-glass:focus {
   outline: none;
   border-color: var(--primary-main);
-  box-shadow: 0 0 20px var(--primary-glow), inset 0 0 10px var(--primary-glow);
+  box-shadow: 0 0 15px var(--primary-glow), inset 0 0 8px var(--primary-glow);
   background: rgba(15, 20, 25, 0.95);
 }
 
-/* Status indicator - VIBRANT */
+/* Status indicator - COMPACT */
 .status-indicator {
-  @apply flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium;
+  @apply flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium;
   backdrop-filter: blur(12px);
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
