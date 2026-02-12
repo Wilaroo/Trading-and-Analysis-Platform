@@ -137,31 +137,36 @@ export function useCommandCenterData({
       try {
         const positionsRes = await api.get('/api/ib/account/positions');
         positionsData = positionsRes.data?.positions || [];
+        console.log('IB positions loaded:', positionsData.length);
       } catch (ibErr) {
+        console.log('IB positions not available, trying trading-bot...');
         // IB not connected, try trading-bot positions (Alpaca)
         try {
           const botPositionsRes = await api.get('/api/trading-bot/positions');
+          console.log('Trading bot positions response:', botPositionsRes.data);
           if (botPositionsRes.data?.success && botPositionsRes.data?.positions) {
             positionsData = botPositionsRes.data.positions.map(p => ({
               symbol: p.symbol,
-              qty: p.qty,
-              quantity: p.qty,
-              avg_entry_price: p.avg_entry_price,
-              avg_cost: p.avg_entry_price,
-              current_price: p.current_price,
-              market_value: p.qty * p.current_price,
-              unrealized_pnl: p.unrealized_pnl,
-              unrealized_pl: p.unrealized_pnl,
-              unrealized_plpc: p.unrealized_pnl_pct / 100,
-              unrealized_pnl_percent: p.unrealized_pnl_pct / 100,
-              side: p.side
+              qty: parseFloat(p.qty) || 0,
+              quantity: parseFloat(p.qty) || 0,
+              avg_entry_price: parseFloat(p.avg_entry_price) || 0,
+              avg_cost: parseFloat(p.avg_entry_price) || 0,
+              current_price: parseFloat(p.current_price) || 0,
+              market_value: (parseFloat(p.qty) || 0) * (parseFloat(p.current_price) || 0),
+              unrealized_pnl: parseFloat(p.unrealized_pnl) || 0,
+              unrealized_pl: parseFloat(p.unrealized_pnl) || 0,
+              unrealized_plpc: (parseFloat(p.unrealized_pnl_pct) || 0) / 100,
+              unrealized_pnl_percent: (parseFloat(p.unrealized_pnl_pct) || 0) / 100,
+              side: p.side || 'long'
             }));
+            console.log('Mapped positions:', positionsData);
           }
         } catch (botErr) {
-          console.log('Trading bot positions not available:', botErr.message);
+          console.log('Trading bot positions error:', botErr.message);
         }
       }
       
+      console.log('Setting positions:', positionsData.length);
       setPositions(positionsData);
       
       // Try to fetch account summary
@@ -169,7 +174,7 @@ export function useCommandCenterData({
         const accountRes = await api.get('/api/ib/account/summary');
         setAccount(accountRes.data);
       } catch (accErr) {
-        console.log('Account summary not available');
+        // console.log('Account summary not available');
       }
     } catch (err) {
       console.error('Error fetching account:', err);
