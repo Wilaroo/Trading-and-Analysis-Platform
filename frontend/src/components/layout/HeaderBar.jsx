@@ -5,7 +5,9 @@ import {
   RefreshCw,
   Database,
   WifiOff,
-  Monitor
+  Monitor,
+  Zap,
+  AlertTriangle
 } from 'lucide-react';
 
 const HeaderBar = ({
@@ -17,7 +19,30 @@ const HeaderBar = ({
   connecting,
   handleConnectToIB,
   handleDisconnectFromIB,
+  creditBudget,
 }) => {
+
+  // Credit budget status color and icon
+  const getCreditStatusConfig = () => {
+    if (!creditBudget) return { color: 'zinc', icon: null, pulse: false };
+    
+    const { status_level, usage_percent } = creditBudget;
+    
+    switch (status_level) {
+      case 'critical':
+        return { color: 'red', icon: <AlertTriangle className="w-3 h-3" />, pulse: true };
+      case 'high':
+        return { color: 'orange', icon: <AlertTriangle className="w-3 h-3" />, pulse: true };
+      case 'medium':
+        return { color: 'yellow', icon: <Zap className="w-3 h-3" />, pulse: false };
+      case 'low':
+        return { color: 'blue', icon: <Zap className="w-3 h-3" />, pulse: false };
+      default:
+        return { color: 'green', icon: <Zap className="w-3 h-3" />, pulse: false };
+    }
+  };
+
+  const creditConfig = getCreditStatusConfig();
 
   return (
     <div className="flex items-center justify-between">
@@ -56,6 +81,55 @@ const HeaderBar = ({
             }`}>
               {systemHealth.summary.healthy}/{systemHealth.summary.total}
             </span>
+          </div>
+        )}
+        
+        {/* Credit Budget Indicator */}
+        {creditBudget && (
+          <div 
+            className={`flex items-center gap-2 px-3 py-1.5 bg-zinc-900/50 rounded-lg border ${
+              creditConfig.color === 'red' ? 'border-red-500/50' :
+              creditConfig.color === 'orange' ? 'border-orange-500/50' :
+              creditConfig.color === 'yellow' ? 'border-yellow-500/50' :
+              creditConfig.color === 'green' ? 'border-green-500/30' :
+              'border-zinc-800'
+            } ${creditConfig.pulse ? 'animate-pulse' : ''}`}
+            title={`Tavily Credits: ${creditBudget.credits_used}/${creditBudget.monthly_limit} used this month\nDaily avg: ${creditBudget.daily_average}\nProjected: ${creditBudget.projected_monthly_usage}/month\n${creditBudget.on_track ? '✓ On track' : '⚠ May exceed budget'}`}
+            data-testid="credit-budget-indicator"
+          >
+            <span className={`${
+              creditConfig.color === 'red' ? 'text-red-400' :
+              creditConfig.color === 'orange' ? 'text-orange-400' :
+              creditConfig.color === 'yellow' ? 'text-yellow-400' :
+              creditConfig.color === 'green' ? 'text-green-400' :
+              'text-zinc-400'
+            }`}>
+              {creditConfig.icon}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-zinc-400">AI Credits</span>
+              <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full transition-all ${
+                    creditConfig.color === 'red' ? 'bg-red-500' :
+                    creditConfig.color === 'orange' ? 'bg-orange-500' :
+                    creditConfig.color === 'yellow' ? 'bg-yellow-500' :
+                    creditConfig.color === 'green' ? 'bg-green-500' :
+                    'bg-cyan-500'
+                  }`}
+                  style={{ width: `${Math.min(creditBudget.usage_percent, 100)}%` }}
+                />
+              </div>
+              <span className={`text-xs font-medium ${
+                creditConfig.color === 'red' ? 'text-red-400' :
+                creditConfig.color === 'orange' ? 'text-orange-400' :
+                creditConfig.color === 'yellow' ? 'text-yellow-400' :
+                creditConfig.color === 'green' ? 'text-green-400' :
+                'text-zinc-300'
+              }`}>
+                {creditBudget.credits_remaining}
+              </span>
+            </div>
           </div>
         )}
       </div>
