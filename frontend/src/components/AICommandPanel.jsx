@@ -1094,20 +1094,20 @@ const AICommandPanel = ({
   const activeCoachingAlerts = coachingAlerts.filter(a => !dismissedAlerts.has(a.timestamp));
 
   return (
-    <div className="flex flex-col h-full overflow-hidden rounded-2xl relative" 
+    <div className="flex flex-col h-full overflow-hidden rounded-xl relative" 
          style={{
            background: 'rgba(21, 28, 36, 0.9)',
            backdropFilter: 'blur(24px)',
            WebkitBackdropFilter: 'blur(24px)',
            border: '1px solid rgba(255, 255, 255, 0.1)',
-           boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)'
+           boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)'
          }}
          data-testid="ai-command-panel">
       {/* Animated gradient border */}
       <div 
-        className="absolute inset-0 rounded-2xl pointer-events-none"
+        className="absolute inset-0 rounded-xl pointer-events-none"
         style={{
-          padding: '1.5px',
+          padding: '1px',
           background: 'linear-gradient(var(--gradient-angle, 135deg), var(--primary-main), var(--secondary-main), var(--accent-main), var(--primary-main))',
           WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
           mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
@@ -1127,27 +1127,27 @@ const AICommandPanel = ({
         loading={executing}
       />
       
-      {/* Header - with gradient accent */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.08]"
+      {/* Header - COMPACT */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.08]"
            style={{
-             background: 'linear-gradient(135deg, rgba(0, 212, 255, 0.1) 0%, transparent 50%, rgba(255, 46, 147, 0.05) 100%)'
+             background: 'linear-gradient(135deg, rgba(0, 212, 255, 0.08) 0%, transparent 50%, rgba(255, 46, 147, 0.04) 100%)'
            }}>
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center"
                style={{
                  background: 'linear-gradient(135deg, var(--primary-main), var(--secondary-main))',
-                 boxShadow: '0 4px 20px var(--primary-glow-strong)'
+                 boxShadow: '0 2px 12px var(--primary-glow-strong)'
                }}>
-            <Bot className="w-5 h-5 text-white" />
+            <Bot className="w-3.5 h-3.5 text-white" />
           </div>
           <div>
-            <h2 className="text-base font-bold text-white">AI Trading <span className="neon-text">Assistant</span></h2>
-            <p className="text-[10px] text-zinc-400 tracking-wide">Scanner • AI • Bot — All-in-One</p>
+            <h2 className="text-xs font-bold text-white">AI Trading <span className="neon-text">Assistant</span></h2>
+            <p className="text-[9px] text-zinc-500 tracking-wide">Scanner • AI • Bot</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <span className={`neon-dot${isConnected ? '-success' : '-error'}`} style={{width: '8px', height: '8px'}} />
-          <span className="text-xs text-zinc-400 font-medium">{isConnected ? 'Live' : 'Offline'}</span>
+        <div className="flex items-center gap-1.5">
+          <span className={`neon-dot${isConnected ? '-success' : '-error'}`} style={{width: '6px', height: '6px'}} />
+          <span className="text-[10px] text-zinc-500 font-medium">{isConnected ? 'Live' : 'Offline'}</span>
         </div>
       </div>
       
