@@ -37,18 +37,18 @@ export const KNOWN_TICKERS = new Set([
   'APPS', 'PUBM', 'MGNI', 'BRZE', 'S', 'KVYO', 'SOUN', 'UPST'
 ]);
 
-// Clickable ticker link component
+// Clickable ticker link component - PROMINENT STYLE
 export const TickerLink = ({ symbol, onClick }) => (
   <button
     onClick={(e) => {
       e.stopPropagation();
       onClick(symbol);
     }}
-    className="inline-flex items-center gap-0.5 px-1 py-0.5 bg-cyan-500/10 border border-cyan-500/20 rounded text-cyan-400 font-mono font-semibold text-xs hover:bg-cyan-500/20 hover:border-cyan-500/40 transition-colors cursor-pointer"
+    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-cyan-500/20 border border-cyan-500/40 rounded text-cyan-400 font-mono font-bold text-[11px] hover:bg-cyan-500/30 hover:border-cyan-500/60 hover:text-cyan-300 transition-all cursor-pointer shadow-[0_0_8px_rgba(0,212,255,0.2)] hover:shadow-[0_0_12px_rgba(0,212,255,0.4)]"
     data-testid={`ticker-link-${symbol}`}
   >
     {symbol}
-    <ArrowUpRight className="w-3 h-3" />
+    <ArrowUpRight className="w-2.5 h-2.5" />
   </button>
 );
 
