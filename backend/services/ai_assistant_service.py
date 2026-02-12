@@ -1409,12 +1409,18 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         return "\n".join(context_parts)
     
     async def _call_llm(self, messages: List[Dict], context: str = "", complexity: str = "standard") -> str:
-        """Call the LLM with smart routing based on task complexity.
+        """
+        Call the LLM with smart routing.
+        
+        LOCAL-FIRST ARCHITECTURE:
+        - Ollama (local) is the PRIMARY LLM for all tasks
+        - Emergent/GPT-4o is only used as fallback when Ollama is unavailable
+        - Tavily provides web research data that Ollama synthesizes
         
         complexity:
-          - "light"    → Ollama only (quick chat, report formatting, summaries)
-          - "standard" → Ollama first, Emergent fallback (general use)
-          - "deep"     → Emergent/GPT-4o directly (strategy analysis, trade evaluation, complex reasoning)
+          - "light"    → Ollama only (quick chat, simple responses)
+          - "standard" → Ollama with Emergent fallback
+          - "deep"     → Ollama first, then Emergent fallback (research synthesis, analysis)
         """
         
         # Build the full message list with system prompt
@@ -1423,12 +1429,10 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         ]
         full_messages.extend(messages)
         
-        # Smart routing: skip Ollama for deep complexity tasks
-        use_ollama = complexity in ("light", "standard") and LLMProvider.OLLAMA in self.llm_clients
-        use_emergent_primary = complexity == "deep"
+        # ALWAYS try Ollama first (local, free, no API limits)
+        ollama_available = LLMProvider.OLLAMA in self.llm_clients
         
-        # Try Ollama first for light/standard tasks
-        if use_ollama:
+        if ollama_available:
             try:
                 import httpx
                 
@@ -1445,7 +1449,7 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                     response = await client.post(
                         url,
                         json=payload,
-                        timeout=90,
+                        timeout=120,  # Increased timeout for complex research synthesis
                         headers={"ngrok-skip-browser-warning": "true"}
                     )
                 
@@ -1460,12 +1464,13 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                     raise Exception(f"Ollama HTTP {response.status_code}: {response.text[:200]}")
                     
             except Exception as e:
+                logger.warning(f"Ollama call failed: {e}")
+                # Only continue to fallback if not a light task
                 if complexity == "light":
-                    logger.error(f"Ollama failed for light task (no fallback): {e}")
-                    raise
-                logger.warning(f"Ollama call failed, falling back to Emergent: {e}")
+                    # For light tasks, return a simple error message instead of failing
+                    return "I'm having trouble connecting to my local AI. Please try again."
         
-        # Emergent (primary for deep tasks, fallback for standard)
+        # Fallback: Try Emergent (GPT-4o) if Ollama failed or unavailable
         if LLMProvider.EMERGENT in self.llm_clients:
             try:
                 from emergentintegrations.llm.chat import LlmChat, UserMessage
@@ -1498,39 +1503,18 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                 return response
                 
             except Exception as e:
+                error_msg = str(e).lower()
                 logger.error(f"Emergent LLM error: {e}")
-                # Fall back to Ollama if Emergent fails (e.g., external access denied)
-                if "external access" in str(e).lower() or "access_denied" in str(e).lower():
-                    logger.warning("Emergent key not available externally, falling back to Ollama")
-                    try:
-                        import httpx
-                        ollama_cfg = self.llm_clients.get(LLMProvider.OLLAMA)
-                        if ollama_cfg:
-                            url = f"{ollama_cfg['url']}/api/chat"
-                            payload = {
-                                "model": ollama_cfg["model"],
-                                "messages": full_messages,
-                                "stream": False,
-                            }
-                            async with httpx.AsyncClient() as client:
-                                response = await client.post(
-                                    url,
-                                    json=payload,
-                                    timeout=90,
-                                    headers={"ngrok-skip-browser-warning": "true"}
-                                )
-                            if response.status_code == 200:
-                                result = response.json()
-                                content = result.get("message", {}).get("content", "")
-                                if content:
-                                    logger.info(f"Ollama fallback response OK ({len(content)} chars)")
-                                    return content
-                    except Exception as ollama_err:
-                        logger.error(f"Ollama fallback also failed: {ollama_err}")
+                
+                # If Emergent fails due to external access restriction, give helpful message
+                if "external access" in error_msg or "access_denied" in error_msg:
+                    return ("I apologize, but I'm currently running in local mode without cloud AI access. "
+                           "Please ensure Ollama is running locally (ollama serve) for full functionality. "
+                           "You can still use the research endpoints directly: /api/research/news?query=...")
                 raise
         
-        # Last resort: OpenAI direct
-        elif LLMProvider.OPENAI in self.llm_clients:
+        # Last resort: Direct OpenAI if key is available
+        if LLMProvider.OPENAI in self.llm_clients:
             try:
                 import httpx
                 
@@ -1558,8 +1542,9 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                 logger.error(f"OpenAI error: {e}")
                 raise
         
-        else:
-            raise Exception("No LLM provider available")
+        # No LLM available
+        return ("No AI model is currently available. Please ensure Ollama is running locally "
+               "(run 'ollama serve' in a terminal) or configure an OpenAI API key.")
     
     async def chat(self, user_message: str, session_id: str = "default", user_id: str = "default") -> Dict:
         """
