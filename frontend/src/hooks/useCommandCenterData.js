@@ -502,6 +502,12 @@ export function useCommandCenterData({
     tickerSearchQuery, setTickerSearchQuery,
     isSearching, recentSearches, clearRecentSearches,
     searchInputRef, handleTickerSearch,
+    // Charts
+    chartSymbol, setChartSymbol: (sym) => {
+      setChartSymbol(sym);
+      localStorage.setItem('tradecommand_chart_symbol', sym);
+    },
+    recentCharts, addToRecentCharts, viewChart,
     // Actions
     runScanner, fetchAccountData, handleTrade, askAIAboutStock,
   };
