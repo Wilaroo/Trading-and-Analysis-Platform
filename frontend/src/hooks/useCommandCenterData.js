@@ -66,6 +66,9 @@ export function useCommandCenterData({
   
   // Smart watchlist from batch init
   const [smartWatchlist, setSmartWatchlist] = useState([]);
+  
+  // Credit budget for Tavily
+  const [creditBudget, setCreditBudget] = useState(null);
 
   // Keyboard shortcuts
   useKeyboardShortcuts({
