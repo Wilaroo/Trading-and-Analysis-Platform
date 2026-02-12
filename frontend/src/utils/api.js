@@ -20,9 +20,9 @@ export const getWebSocketUrl = () => {
   const host = window.location.host;
   // For development with proxy, connect to backend directly
   if (host.includes('localhost:3000')) {
-    return 'ws://localhost:8001/ws/quotes';
+    return 'ws://localhost:8001/api/ws/quotes';
   }
-  return `${protocol}//${host}/ws/quotes`;
+  return `${protocol}//${host}/api/ws/quotes`;
 };
 
 export default api;
