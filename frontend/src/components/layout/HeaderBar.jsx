@@ -328,46 +328,46 @@ const HeaderBar = ({
 
   return (
     <>
-      <div className="flex items-center justify-between p-4 rounded-2xl"
+      <div className="flex items-center justify-between p-3 rounded-xl"
            style={{
              background: 'rgba(21, 28, 36, 0.9)',
              backdropFilter: 'blur(24px)',
              WebkitBackdropFilter: 'blur(24px)',
              border: '1px solid rgba(255, 255, 255, 0.1)',
-             boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+             boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
              position: 'relative',
              overflow: 'hidden'
            }}>
         {/* Animated gradient border */}
         <div 
-          className="absolute inset-0 rounded-2xl pointer-events-none"
+          className="absolute inset-0 rounded-xl pointer-events-none"
           style={{
-            padding: '1.5px',
+            padding: '1px',
             background: 'linear-gradient(var(--gradient-angle, 135deg), var(--primary-main), var(--secondary-main), var(--accent-main), var(--primary-main))',
             WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
             mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
             WebkitMaskComposite: 'xor',
             maskComposite: 'exclude',
-            opacity: 0.6,
+            opacity: 0.5,
             animation: 'gradient-rotate 6s linear infinite'
           }}
         />
         
-        <div className="flex items-center gap-5">
+        <div className="flex items-center gap-4">
           {/* Logo and Title */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center"
                  style={{
                    background: 'linear-gradient(135deg, var(--primary-main), var(--secondary-main))',
-                   boxShadow: '0 4px 20px var(--primary-glow-strong)'
+                   boxShadow: '0 2px 12px var(--primary-glow-strong)'
                  }}>
-              <Target className="w-5 h-5 text-white" />
+              <Target className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold tracking-tight text-white">
+              <h1 className="text-base font-bold tracking-tight text-white">
                 Command <span className="neon-text">Center</span>
               </h1>
-              <p className="text-zinc-400 text-xs tracking-wide">Real-time trading intelligence hub</p>
+              <p className="text-zinc-500 text-[10px] tracking-wide">Real-time trading intelligence hub</p>
             </div>
           </div>
           
