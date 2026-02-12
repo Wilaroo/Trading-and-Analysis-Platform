@@ -168,53 +168,52 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation, height = 
       if (response.data.bars && response.data.bars.length > 0) {
         console.log('[Chart] Received', response.data.bars.length, 'bars');
         
-        // For line series, use close price
-        const lineData = response.data.bars.map(bar => ({
+        // Create candlestick data
+        const candleData = response.data.bars.map(bar => ({
           time: Math.floor(new Date(bar.time || bar.date || bar.timestamp).getTime() / 1000),
-          value: bar.close,
+          open: Number(bar.open),
+          high: Number(bar.high),
+          low: Number(bar.low),
+          close: Number(bar.close),
+        }));
+        
+        // Create volume data
+        const volumeData = response.data.bars.map(bar => ({
+          time: Math.floor(new Date(bar.time || bar.date || bar.timestamp).getTime() / 1000),
+          value: Number(bar.volume),
+          color: bar.close >= bar.open ? '#00FF9466' : '#FF2E2E66',
         }));
         
         // Sort data by time ascending (required by lightweight-charts)
-        lineData.sort((a, b) => a.time - b.time);
+        candleData.sort((a, b) => a.time - b.time);
+        volumeData.sort((a, b) => a.time - b.time);
+        
+        console.log('[Chart] Sample candle:', JSON.stringify(candleData[0]));
         
         // Set data on chart
         if (candleSeriesRef.current && chartRef.current) {
-          console.log('[Chart] Setting line data...', {
-            firstBar: lineData[0],
-            lastBar: lineData[lineData.length - 1],
-            total: lineData.length
-          });
-          
-          // Ensure data is valid
-          const validData = lineData.filter(d => 
-            d.time && !isNaN(d.value)
+          // Filter out any invalid data
+          const validData = candleData.filter(d => 
+            d.time && !isNaN(d.open) && !isNaN(d.high) && !isNaN(d.low) && !isNaN(d.close) &&
+            d.high >= d.low && d.open >= d.low && d.open <= d.high && d.close >= d.low && d.close <= d.high
           );
+          
+          console.log('[Chart] Valid candles:', validData.length);
           
           if (validData.length > 0) {
             candleSeriesRef.current.setData(validData);
             
-            // Set the visible range to include ALL data
-            const firstTime = validData[0].time;
-            const lastTime = validData[validData.length - 1].time;
-            console.log('[Chart] Setting time range:', firstTime, 'to', lastTime);
-            
-            chartRef.current.timeScale().setVisibleRange({
-              from: firstTime,
-              to: lastTime
-            });
-            
-            // Force price scale to auto-fit
-            chartRef.current.priceScale('right').applyOptions({ autoScale: true });
-            
-            // Trigger resize to force redraw
-            const rect = chartContainerRef.current?.getBoundingClientRect();
-            if (rect) {
-              chartRef.current.resize(Math.floor(rect.width), Math.floor(rect.height));
+            if (volumeSeriesRef.current) {
+              const validVolume = volumeData.filter(d => d.time && !isNaN(d.value) && d.value >= 0);
+              volumeSeriesRef.current.setData(validVolume);
             }
             
-            // Get visible range after setting data
+            // Fit content to show all data
+            chartRef.current.timeScale().fitContent();
+            
+            // Get visible range
             const range = chartRef.current.timeScale().getVisibleRange();
-            console.log('[Chart] Data set successfully, visible range:', range);
+            console.log('[Chart] Data set, visible range:', range);
           } else {
             console.error('[Chart] No valid data after filtering');
           }
