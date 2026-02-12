@@ -292,6 +292,178 @@ Format responses with clear sections. Cite specific rules from the playbook."""
             self._technical_service = get_technical_service()
         return self._technical_service
     
+    @property
+    def web_research(self):
+        """Get web research service for internet access"""
+        if not hasattr(self, '_web_research') or self._web_research is None:
+            from services.web_research_service import get_web_research_service
+            self._web_research = get_web_research_service()
+        return self._web_research
+    
+    async def _detect_research_intent(self, message: str) -> Optional[Dict]:
+        """
+        Detect if user wants to research something
+        Returns research params if detected, None otherwise
+        """
+        message_lower = message.lower()
+        
+        # Research command patterns
+        patterns = [
+            (r"(?:research|look up|search|find|what.?s (?:the )?latest|news on|news about)\s+([A-Z]{1,5})\b", "ticker"),
+            (r"(?:research|search|look up|find info on|tell me about)\s+(.+?)(?:\?|$)", "general"),
+            (r"(?:what.?s happening with|what.?s going on with)\s+(.+?)(?:\?|$)", "news"),
+            (r"(?:sec filings?|edgar|10-k|10-q|8-k)\s+(?:for\s+)?([A-Z]{1,5})\b", "sec"),
+            (r"(?:analyst|ratings?|price target|upgrade|downgrade)\s+(?:for\s+)?([A-Z]{1,5})\b", "analyst"),
+            (r"(?:breaking news|market news|latest news)", "breaking"),
+            (r"(?:deep dive|full analysis|comprehensive)\s+(?:on\s+)?([A-Z]{1,5})\b", "deep_dive"),
+        ]
+        
+        for pattern, research_type in patterns:
+            match = re.search(pattern, message, re.IGNORECASE)
+            if match:
+                query = match.group(1) if match.groups() else message
+                return {
+                    "type": research_type,
+                    "query": query.strip(),
+                    "original_message": message
+                }
+        
+        return None
+    
+    async def _perform_research(self, intent: Dict) -> str:
+        """Execute research based on detected intent"""
+        research_type = intent["type"]
+        query = intent["query"]
+        
+        try:
+            if research_type == "ticker":
+                # Research a specific ticker
+                research = await self.web_research.research_ticker(query)
+                return self._format_ticker_research(query, research)
+                
+            elif research_type == "deep_dive":
+                # Full deep dive on ticker
+                research = await self.web_research.deep_dive(query)
+                return self._format_deep_dive(query, research)
+                
+            elif research_type == "sec":
+                # SEC filings
+                result = await self.web_research.sec.search_filings(query)
+                return self._format_sec_results(query, result)
+                
+            elif research_type == "analyst":
+                # Analyst ratings
+                result = await self.web_research.yahoo.get_analyst_ratings(query)
+                return self._format_analyst_results(query, result)
+                
+            elif research_type == "breaking":
+                # Breaking news
+                result = await self.web_research.get_breaking_news()
+                return self._format_news_results(result)
+                
+            elif research_type == "news":
+                # News search
+                result = await self.web_research.search_news(query)
+                return self._format_news_results(result)
+                
+            else:
+                # General search
+                result = await self.web_research.search_financial_news(query)
+                return self._format_news_results(result)
+                
+        except Exception as e:
+            logger.error(f"Research failed: {e}")
+            return f"Research error: {str(e)}"
+    
+    def _format_ticker_research(self, ticker: str, research: Dict) -> str:
+        """Format ticker research results for AI context"""
+        lines = [f"\n=== WEB RESEARCH FOR {ticker} ===\n"]
+        
+        for source, data in research.items():
+            if hasattr(data, 'to_dict'):
+                data = data.to_dict()
+            
+            if data.get("answer"):
+                lines.append(f"**{source.upper()} Summary:**\n{data['answer']}\n")
+            
+            for result in data.get("results", [])[:3]:
+                lines.append(f"• [{result.get('source', 'Web')}] {result.get('title', 'No title')}")
+                if result.get('content'):
+                    lines.append(f"  {result['content'][:200]}...")
+                lines.append("")
+        
+        return "\n".join(lines)
+    
+    def _format_deep_dive(self, ticker: str, research: Dict) -> str:
+        """Format deep dive results"""
+        lines = [f"\n=== COMPREHENSIVE DEEP DIVE: {ticker} ===\n"]
+        
+        sources = research.get("sources", {})
+        
+        for source_name, data in sources.items():
+            if isinstance(data, dict) and not data.get("error"):
+                lines.append(f"**{source_name.replace('_', ' ').title()}:**")
+                
+                if data.get("answer"):
+                    lines.append(data["answer"][:500])
+                
+                for result in data.get("results", [])[:2]:
+                    lines.append(f"• {result.get('title', '')}")
+                
+                lines.append("")
+        
+        return "\n".join(lines)
+    
+    def _format_sec_results(self, ticker: str, result) -> str:
+        """Format SEC filing results"""
+        if hasattr(result, 'to_dict'):
+            result = result.to_dict()
+        
+        lines = [f"\n=== SEC FILINGS FOR {ticker} ===\n"]
+        for r in result.get("results", [])[:5]:
+            lines.append(f"• {r.get('title', 'Filing')}")
+            lines.append(f"  URL: {r.get('url', '')}")
+            if r.get('published_date'):
+                lines.append(f"  Date: {r['published_date']}")
+            lines.append("")
+        
+        return "\n".join(lines)
+    
+    def _format_analyst_results(self, ticker: str, result) -> str:
+        """Format analyst rating results"""
+        if hasattr(result, 'to_dict'):
+            result = result.to_dict()
+        
+        lines = [f"\n=== ANALYST RATINGS FOR {ticker} ===\n"]
+        for r in result.get("results", [])[:3]:
+            lines.append(f"• {r.get('title', '')}")
+            if r.get('content'):
+                lines.append(f"  {r['content'][:300]}")
+            lines.append("")
+        
+        return "\n".join(lines)
+    
+    def _format_news_results(self, result) -> str:
+        """Format news search results"""
+        if hasattr(result, 'to_dict'):
+            result = result.to_dict()
+        
+        lines = ["\n=== LATEST NEWS & RESEARCH ===\n"]
+        
+        if result.get("answer"):
+            lines.append(f"**Summary:** {result['answer']}\n")
+        
+        for r in result.get("results", [])[:5]:
+            lines.append(f"• **{r.get('title', 'No title')}**")
+            lines.append(f"  Source: {r.get('source', 'Web')}")
+            if r.get('content'):
+                lines.append(f"  {r['content'][:200]}...")
+            if r.get('url'):
+                lines.append(f"  Link: {r['url']}")
+            lines.append("")
+        
+        return "\n".join(lines)
+    
     async def get_trade_history_context(self, symbol: str = None) -> str:
         """Get trade history context for AI analysis"""
         try:
