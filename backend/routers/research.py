@@ -244,3 +244,46 @@ async def get_research_stats():
     except Exception as e:
         logger.error(f"Stats retrieval failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===================== CREDIT BUDGET ENDPOINTS =====================
+
+@router.get("/budget")
+async def get_credit_budget():
+    """
+    Get full Tavily credit budget status
+    
+    Returns:
+    - credits_used: Credits used this month
+    - credits_remaining: Credits left
+    - monthly_limit: Total monthly allowance (default: 1000 for free tier)
+    - usage_percent: Percentage of budget used
+    - status_level: ok, low, medium, high, critical
+    - daily_average: Average daily usage
+    - projected_monthly_usage: Projected usage by month end
+    - on_track: Whether projected usage is within budget
+    - recent_usage: Last 10 usage records
+    """
+    try:
+        service = get_web_research_service()
+        return service.get_credit_budget_status()
+    except Exception as e:
+        logger.error(f"Budget retrieval failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/budget/limit")
+async def set_credit_limit(new_limit: int = Query(..., ge=100, le=100000, description="New monthly credit limit")):
+    """
+    Update the monthly credit limit
+    
+    Use this when upgrading from free tier (1000) to paid tier.
+    
+    - **new_limit**: New monthly credit allowance (100-100000)
+    """
+    try:
+        service = get_web_research_service()
+        return service.set_credit_limit(new_limit)
+    except Exception as e:
+        logger.error(f"Set limit failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
