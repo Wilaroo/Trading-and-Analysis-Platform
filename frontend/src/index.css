@@ -445,36 +445,36 @@ body {
   color: var(--text-secondary);
 }
 
-/* Badge styles - VIBRANT */
+/* Badge styles - COMPACT */
 .badge {
-  @apply rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wide border;
+  @apply rounded-full px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wide border;
 }
 
 .badge-success {
   @apply text-emerald-400 bg-emerald-400/15 border-emerald-400/40;
-  box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.15);
 }
 
 .badge-warning {
   @apply text-amber-400 bg-amber-400/15 border-amber-400/40;
-  box-shadow: 0 0 10px rgba(245, 158, 11, 0.2);
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.15);
 }
 
 .badge-error {
   @apply text-red-400 bg-red-400/15 border-red-400/40;
-  box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.15);
 }
 
 .badge-info {
   @apply text-cyan-400 bg-cyan-400/15 border-cyan-400/40;
-  box-shadow: 0 0 10px rgba(0, 212, 255, 0.2);
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.15);
 }
 
-/* Button styles - VIBRANT WITH GLOW */
+/* Button styles - COMPACT */
 .btn-primary {
-  @apply font-bold px-4 py-2 rounded-lg uppercase tracking-wider text-white;
+  @apply font-semibold px-3 py-1.5 rounded-lg text-xs uppercase tracking-wider text-white;
   background: linear-gradient(135deg, var(--primary-main), var(--accent-main));
-  box-shadow: 0 4px 20px var(--primary-glow-strong), 0 0 30px var(--primary-glow);
+  box-shadow: 0 2px 12px var(--primary-glow-strong), 0 0 20px var(--primary-glow);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   overflow: hidden;
@@ -495,12 +495,12 @@ body {
 }
 
 .btn-primary:hover {
-  box-shadow: 0 6px 30px var(--primary-glow-intense), 0 0 50px var(--primary-glow);
-  transform: translateY(-2px);
+  box-shadow: 0 4px 20px var(--primary-glow-intense), 0 0 30px var(--primary-glow);
+  transform: translateY(-1px);
 }
 
 .btn-secondary {
-  @apply border px-4 py-2 rounded-lg uppercase tracking-wider text-white;
+  @apply border px-3 py-1.5 rounded-lg text-xs uppercase tracking-wider text-white;
   border-color: var(--primary-main);
   background: rgba(0, 212, 255, 0.1);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -508,11 +508,11 @@ body {
 
 .btn-secondary:hover {
   background: rgba(0, 212, 255, 0.2);
-  box-shadow: 0 0 25px var(--primary-glow), inset 0 0 20px var(--primary-glow);
+  box-shadow: 0 0 15px var(--primary-glow), inset 0 0 15px var(--primary-glow);
 }
 
 .btn-ghost {
-  @apply px-3 py-1.5 rounded-lg;
+  @apply px-2 py-1 rounded text-xs;
   color: var(--text-secondary);
   transition: all 0.2s ease-out;
   background: transparent;
@@ -524,7 +524,7 @@ body {
 }
 
 .btn-icon {
-  @apply p-2 rounded-xl;
+  @apply p-1.5 rounded-lg;
   color: var(--text-secondary);
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
@@ -536,6 +536,16 @@ body {
   box-shadow: var(--shadow-neon);
   border-color: var(--primary-main);
   background: rgba(0, 212, 255, 0.15);
+}
+
+/* Small button variant */
+.btn-sm {
+  @apply px-2 py-1 text-[10px] rounded;
+}
+
+/* Extra small button variant */
+.btn-xs {
+  @apply px-1.5 py-0.5 text-[9px] rounded;
 }
 
 /* Table styles - Dark mode */
