@@ -513,15 +513,22 @@ const StatsHeader = ({ status, account, marketContext, positions, onToggle, onMo
   };
   
   return (
-    <div className="bg-zinc-900/80 border-b border-white/5">
+    <div style={{
+      background: 'rgba(8, 8, 18, 0.6)',
+      borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
+    }}>
       {/* Top Row: Account Stats */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-white/5">
+      <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}>
         {/* Left: Net Liq + P&L + Positions */}
         <div className="flex items-center gap-6">
           {/* Net Liquidation */}
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-cyan-500/10 flex items-center justify-center">
-              <DollarSign className="w-4 h-4 text-cyan-400" />
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+                 style={{
+                   background: 'rgba(0, 229, 255, 0.15)',
+                   boxShadow: '0 0 12px rgba(0, 229, 255, 0.2)'
+                 }}>
+              <DollarSign className="w-4 h-4 text-cyan-400 drop-shadow-[0_0_6px_rgba(0,229,255,0.6)]" />
             </div>
             <div>
               <p className="text-[9px] text-zinc-500 uppercase">Net Liq</p>
@@ -532,12 +539,16 @@ const StatsHeader = ({ status, account, marketContext, positions, onToggle, onMo
           </div>
           
           {/* Divider */}
-          <div className="w-px h-8 bg-white/10" />
+          <div className="w-px h-8" style={{ background: 'linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.15), transparent)' }} />
           
           {/* Today's P&L */}
           <div className="flex items-center gap-2">
-            <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${totalPnl >= 0 ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
-              {totalPnl >= 0 ? <TrendingUp className="w-4 h-4 text-emerald-400" /> : <TrendingDown className="w-4 h-4 text-red-400" />}
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+                 style={{
+                   background: totalPnl >= 0 ? 'rgba(0, 255, 148, 0.15)' : 'rgba(255, 46, 99, 0.15)',
+                   boxShadow: totalPnl >= 0 ? '0 0 12px rgba(0, 255, 148, 0.2)' : '0 0 12px rgba(255, 46, 99, 0.2)'
+                 }}>
+              {totalPnl >= 0 ? <TrendingUp className="w-4 h-4 text-emerald-400 drop-shadow-[0_0_6px_rgba(0,255,148,0.6)]" /> : <TrendingDown className="w-4 h-4 text-red-400 drop-shadow-[0_0_6px_rgba(255,46,99,0.6)]" />}
             </div>
             <div>
               <p className="text-[9px] text-zinc-500 uppercase">Today P&L</p>
