@@ -4,7 +4,7 @@
 Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading coach, autonomous trading bot, and mutual learning loop.
 
 ## Tech Stack
-- **Frontend**: React, TailwindCSS, Framer Motion, Lightweight Charts
+- **Frontend**: React, TailwindCSS, Framer Motion, TradingView Widget (embedded charts)
 - **Backend**: FastAPI, Python
 - **Database**: MongoDB
 - **AI**: Smart Routing — Ollama (local/free) + GPT-4o (Emergent, deep tasks)
