@@ -2982,6 +2982,15 @@ async def startup_event():
     asyncio.create_task(stream_quotes())
     print("WebSocket streaming started")
     
+    # Initialize web research service with database for credit tracking
+    try:
+        from services.web_research_service import get_web_research_service
+        research_service = get_web_research_service(db)
+        budget = research_service.get_credit_budget_status()
+        print(f"✅ Web research service initialized - Tavily credits: {budget['credits_used']}/{budget['monthly_limit']} ({budget['usage_percent']}%)")
+    except Exception as e:
+        print(f"⚠️ Web research service init: {e}")
+    
     # Give services time to initialize before starting heavy background tasks
     # This prevents overwhelming IB Gateway on startup
     await asyncio.sleep(3)
