@@ -146,17 +146,19 @@ const MarketIntelPanel = ({ onTickerSelect }) => {
   }
 
   return (
-    <div className="bg-[#0A0A0A] border border-white/10 rounded-lg overflow-hidden" data-testid="market-intel-panel">
+    <div className="glass-card overflow-hidden" data-testid="market-intel-panel">
       {/* Header */}
       <div className="p-3 border-b border-white/5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-cyan-400" />
+            <div className="w-7 h-7 rounded-lg bg-cyan-400/10 border border-cyan-400/30 flex items-center justify-center">
+              <Sparkles className="w-4 h-4 text-cyan-400" />
+            </div>
             <h3 className="text-sm font-semibold uppercase tracking-wider text-white">Market Intelligence</h3>
           </div>
           <button
             onClick={() => setExpanded(!expanded)}
-            className="text-zinc-500 hover:text-white transition-colors"
+            className="text-zinc-500 hover:text-cyan-400 transition-colors"
             data-testid="toggle-intel-panel"
           >
             {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
