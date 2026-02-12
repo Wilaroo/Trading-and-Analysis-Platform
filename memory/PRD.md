@@ -205,6 +205,7 @@ Triggers AI Coaching Notification
 - ✅ Consolidated Stats Header (removed QuickStatsRow)
 - ✅ Tavily Agent Skills with intelligent caching
 - ✅ Charts Tab Integration (TradingView embedded, click-to-view from widgets)
+- ✅ Fixed service method bugs causing chatbot timeouts (Feb 12, 2026)
 
 ### P1 - Next Up
 - Remove old redundant ChartsPage.js and its route (now superseded by ChartsTab)
