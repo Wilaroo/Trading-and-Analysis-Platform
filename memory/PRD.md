@@ -658,10 +658,11 @@ Intelligence gathering timeout for CADE
 ### P0 - Critical
 - [x] WebSocket connection stability fix (DONE - Feb 12, 2026)
 - [x] My Positions display fix (DONE - Feb 12, 2026)
+- [x] Quick Actions for positions (DONE - Feb 12, 2026) - Close, Add, Alert, Chart buttons
 
 ### P1 - High Priority
 - [ ] Real-time RVOL in Market Intelligence (User approved)
-- [ ] Portfolio Awareness (Phase 3) - AI knows all open positions
+- [ ] Portfolio Awareness (Phase 3) - AI proactive suggestions based on positions
 - [ ] UI Focus Mode - Minimize all UI except chat and top opportunity
 - [ ] Custom scrapers for SEC filings and financial data sources
 
