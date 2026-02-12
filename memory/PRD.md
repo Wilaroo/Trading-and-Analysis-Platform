@@ -257,6 +257,7 @@ Triggers AI Coaching Notification
    - Auto-blocks searches when limit exceeded
    - Projects usage and warns if on track to exceed
    - Resets automatically on month rollover
+   - **Frontend indicator in header bar** showing remaining credits with color-coded status
 
 6. **AI Assistant Integration**:
    - Updated intent detection to route to Agent Skills
