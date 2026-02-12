@@ -183,16 +183,34 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation, height = 
         
         // Set data on chart
         if (candleSeriesRef.current && chartRef.current) {
-          console.log('[Chart] Setting candle data...');
-          candleSeriesRef.current.setData(candleData);
+          console.log('[Chart] Setting candle data...', {
+            firstBar: candleData[0],
+            lastBar: candleData[candleData.length - 1],
+            total: candleData.length
+          });
           
-          if (volumeSeriesRef.current) {
-            volumeSeriesRef.current.setData(volumeData);
+          // Ensure data is valid
+          const validData = candleData.filter(d => 
+            d.time && !isNaN(d.open) && !isNaN(d.high) && !isNaN(d.low) && !isNaN(d.close)
+          );
+          
+          if (validData.length > 0) {
+            candleSeriesRef.current.setData(validData);
+            
+            if (volumeSeriesRef.current) {
+              volumeSeriesRef.current.setData(volumeData);
+            }
+            
+            // Force chart to recalculate and fit content
+            chartRef.current.timeScale().fitContent();
+            chartRef.current.applyOptions({});
+            
+            // Get visible range after setting data
+            const range = chartRef.current.timeScale().getVisibleRange();
+            console.log('[Chart] Data set successfully, visible range:', range);
+          } else {
+            console.error('[Chart] No valid data after filtering');
           }
-          
-          // Fit content and resize
-          chartRef.current.timeScale().fitContent();
-          console.log('[Chart] Data set successfully');
         }
         
         setHasData(true);
