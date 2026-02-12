@@ -41,6 +41,19 @@ export function useCommandCenterData({
   const [activeMainTab, setActiveMainTab] = useState('coach');
   const [expandedStatCard, setExpandedStatCard] = useState(null);
 
+  // Charts state
+  const [chartSymbol, setChartSymbol] = useState(() => {
+    try {
+      return localStorage.getItem('tradecommand_chart_symbol') || 'SPY';
+    } catch { return 'SPY'; }
+  });
+  const [recentCharts, setRecentCharts] = useState(() => {
+    try {
+      const saved = localStorage.getItem('recentChartSymbols');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+
   // Ticker Search state
   const [tickerSearchQuery, setTickerSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
