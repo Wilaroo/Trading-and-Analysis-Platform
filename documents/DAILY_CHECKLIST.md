@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://ai-chart-connect.preview.emergentagent.com
+https://disconnect-debug.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://ai-chart-connect.preview.emergentagent.com
+https://disconnect-debug.preview.emergentagent.com
 ```
