@@ -606,7 +606,7 @@ body {
 
 .card:hover {
   box-shadow: var(--shadow-pop);
-  transform: translateY(-3px);
+  transform: translateY(-2px);
   background: var(--glass-bg-hover);
 }
 
@@ -615,17 +615,17 @@ body {
 }
 
 .card-header {
-  @apply flex items-center justify-between pb-3 mb-3;
+  @apply flex items-center justify-between pb-2 mb-2;
   border-bottom: 1px solid var(--border-subtle);
 }
 
 .card-title {
-  @apply text-sm font-semibold uppercase tracking-wider;
+  @apply text-xs font-semibold uppercase tracking-wider;
   color: var(--text-primary);
 }
 
 .card-subtitle {
-  @apply text-xs;
+  @apply text-[10px];
   color: var(--text-muted);
 }
 
