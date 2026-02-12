@@ -135,50 +135,65 @@ const MarketIntelPanel = ({ onTickerSelect }) => {
     return (
       <div className="rounded-2xl p-4" 
            style={{
-             background: 'rgba(13, 13, 26, 0.5)',
+             background: 'rgba(255, 255, 255, 0.7)',
              backdropFilter: 'blur(20px)',
              WebkitBackdropFilter: 'blur(20px)',
-             border: '1px solid rgba(255, 255, 255, 0.1)'
+             border: '1px solid rgba(0, 0, 0, 0.06)'
            }}
            data-testid="market-intel-panel">
         <div className="flex items-center gap-2 mb-4">
-          <Sparkles className="w-5 h-5 text-cyan-400 drop-shadow-[0_0_8px_rgba(0,229,255,0.6)]" />
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-white">Market <span className="text-cyan-400">Intelligence</span></h3>
+          <Sparkles className="w-5 h-5" style={{ color: 'var(--primary-dark)' }} />
+          <h3 className="text-sm font-semibold uppercase tracking-wider" style={{ color: 'var(--text-primary)' }}>Market <span style={{ color: 'var(--primary-dark)' }}>Intelligence</span></h3>
         </div>
         <div className="flex items-center justify-center py-8">
-          <Loader2 className="w-5 h-5 text-cyan-400 animate-spin" />
+          <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'var(--primary-main)' }} />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="rounded-2xl overflow-hidden" 
+    <div className="rounded-2xl overflow-hidden relative" 
          style={{
-           background: 'rgba(13, 13, 26, 0.5)',
+           background: 'rgba(255, 255, 255, 0.7)',
            backdropFilter: 'blur(20px)',
            WebkitBackdropFilter: 'blur(20px)',
-           border: '1px solid rgba(255, 255, 255, 0.1)',
-           boxShadow: '0 8px 32px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.05)'
+           border: '1px solid rgba(0, 0, 0, 0.06)',
+           boxShadow: '0 4px 20px rgba(0, 0, 0, 0.06)'
          }}
          data-testid="market-intel-panel">
+      {/* Animated gradient border */}
+      <div 
+        className="absolute inset-0 rounded-2xl pointer-events-none"
+        style={{
+          padding: '1.5px',
+          background: 'linear-gradient(var(--gradient-angle, 135deg), var(--primary-main), var(--secondary-main), var(--accent-main), var(--primary-main))',
+          WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+          mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+          WebkitMaskComposite: 'xor',
+          maskComposite: 'exclude',
+          opacity: 0.4,
+          animation: 'gradient-rotate 6s linear infinite'
+        }}
+      />
+      
       {/* Header */}
-      <div className="p-3" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+      <div className="p-3" style={{ borderBottom: '1px solid rgba(0, 0, 0, 0.06)' }}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center"
                  style={{
-                   background: 'rgba(0, 229, 255, 0.15)',
-                   border: '1px solid rgba(0, 229, 255, 0.4)',
-                   boxShadow: '0 0 15px rgba(0, 229, 255, 0.25)'
+                   background: 'linear-gradient(135deg, var(--primary-main), var(--accent-main))',
+                   boxShadow: '0 2px 10px var(--primary-glow)'
                  }}>
-              <Sparkles className="w-4 h-4 text-cyan-400 drop-shadow-[0_0_6px_rgba(0,229,255,0.6)]" />
+              <Sparkles className="w-4 h-4 text-white" />
             </div>
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-white">Market <span className="text-cyan-400 drop-shadow-[0_0_8px_rgba(0,229,255,0.4)]">Intelligence</span></h3>
+            <h3 className="text-sm font-semibold uppercase tracking-wider" style={{ color: 'var(--text-primary)' }}>Market <span style={{ color: 'var(--primary-dark)' }}>Intelligence</span></h3>
           </div>
           <button
             onClick={() => setExpanded(!expanded)}
-            className="text-zinc-500 hover:text-cyan-400 transition-colors"
+            className="hover:bg-gray-100 rounded-lg p-1 transition-colors"
+            style={{ color: 'var(--text-muted)' }}
             data-testid="toggle-intel-panel"
           >
             {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
