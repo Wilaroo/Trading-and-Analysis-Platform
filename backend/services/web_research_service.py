@@ -75,16 +75,88 @@ class ResearchResponse:
         }
 
 
+# ===================== INTELLIGENT CACHE =====================
+
+class IntelligentCache:
+    """
+    Smart cache with variable TTLs based on data type.
+    Minimizes API calls and Tavily credit usage.
+    """
+    
+    def __init__(self):
+        self._cache: Dict[str, Tuple[Any, float, str]] = {}  # key -> (result, timestamp, data_type)
+        self._hit_count = 0
+        self._miss_count = 0
+    
+    def _generate_key(self, *args) -> str:
+        """Generate a unique cache key from arguments"""
+        key_str = ":".join(str(arg) for arg in args)
+        return hashlib.md5(key_str.encode()).hexdigest()
+    
+    def get(self, data_type: str, *args) -> Optional[Any]:
+        """Get from cache if not expired"""
+        key = self._generate_key(data_type, *args)
+        
+        if key in self._cache:
+            result, timestamp, cached_type = self._cache[key]
+            ttl = CACHE_TTL.get(data_type, 300)
+            
+            if time.time() - timestamp < ttl:
+                self._hit_count += 1
+                logger.debug(f"Cache HIT for {data_type}: {args[:2]}...")
+                return result
+            else:
+                # Expired, remove
+                del self._cache[key]
+        
+        self._miss_count += 1
+        return None
+    
+    def set(self, data_type: str, result: Any, *args):
+        """Store result in cache"""
+        key = self._generate_key(data_type, *args)
+        self._cache[key] = (result, time.time(), data_type)
+        logger.debug(f"Cache SET for {data_type}: {args[:2]}...")
+    
+    def get_stats(self) -> Dict:
+        """Get cache statistics"""
+        total = self._hit_count + self._miss_count
+        return {
+            "hits": self._hit_count,
+            "misses": self._miss_count,
+            "hit_rate": f"{(self._hit_count / total * 100):.1f}%" if total > 0 else "N/A",
+            "entries": len(self._cache)
+        }
+    
+    def clear_expired(self):
+        """Remove expired entries"""
+        now = time.time()
+        expired_keys = []
+        
+        for key, (result, timestamp, data_type) in self._cache.items():
+            ttl = CACHE_TTL.get(data_type, 300)
+            if now - timestamp >= ttl:
+                expired_keys.append(key)
+        
+        for key in expired_keys:
+            del self._cache[key]
+        
+        return len(expired_keys)
+
+
+# Global intelligent cache instance
+_global_cache = IntelligentCache()
+
+
 # ===================== TAVILY SERVICE =====================
 
 class TavilySearchService:
-    """Tavily API integration for web search"""
+    """Tavily API integration for web search with intelligent caching"""
     
     def __init__(self):
         self.api_key = os.environ.get("TAVILY_API_KEY", "")
         self._client = None
-        self._cache: Dict[str, tuple] = {}  # query -> (result, timestamp)
-        self._cache_ttl = 300  # 5 minute cache
+        self._credit_used = 0  # Track credits used this session
         
     def _get_client(self):
         """Lazy initialization of Tavily client"""
@@ -96,6 +168,10 @@ class TavilySearchService:
             except Exception as e:
                 logger.error(f"Failed to initialize Tavily client: {e}")
         return self._client
+    
+    def get_credit_usage(self) -> int:
+        """Get estimated credits used this session"""
+        return self._credit_used
     
     async def search(
         self,
