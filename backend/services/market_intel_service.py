@@ -359,15 +359,16 @@ class MarketIntelService:
             if not self._alpaca_service:
                 return ""
             
-            # Get index data
+            # Get index data - returns dict keyed by symbol
             indices = await self._alpaca_service.get_quotes_batch(["SPY", "QQQ", "IWM", "VIX"])
             if not indices:
                 return ""
             
-            spy = next((q for q in indices if q.get("symbol") == "SPY"), {})
-            qqq = next((q for q in indices if q.get("symbol") == "QQQ"), {})
-            iwm = next((q for q in indices if q.get("symbol") == "IWM"), {})
-            vix = next((q for q in indices if q.get("symbol") == "VIX"), {})
+            # Access directly from dict by symbol key
+            spy = indices.get("SPY", {})
+            qqq = indices.get("QQQ", {})
+            iwm = indices.get("IWM", {})
+            vix = indices.get("VIX", {})
             
             spy_chg = spy.get("change_percent", 0)
             qqq_chg = qqq.get("change_percent", 0)
