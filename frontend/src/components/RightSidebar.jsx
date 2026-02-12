@@ -234,7 +234,7 @@ const EarningsItem = ({ item, onTickerSelect }) => (
 );
 
 // ===================== SMART WATCHLIST WIDGET =====================
-const WatchlistWidget = ({ onTickerSelect }) => {
+const WatchlistWidget = ({ onTickerSelect, onViewChart }) => {
   const [watchlist, setWatchlist] = useState([]);
   const [quotes, setQuotes] = useState({});
   const [loading, setLoading] = useState(true);
