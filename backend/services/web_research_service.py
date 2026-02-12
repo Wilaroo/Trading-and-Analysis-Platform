@@ -300,12 +300,26 @@ class IntelligentCache:
     """
     Smart cache with variable TTLs based on data type.
     Minimizes API calls and Tavily credit usage.
+    Tracks credits saved from cache hits.
     """
+    
+    # Estimated credits per data type (used for savings calculation)
+    CREDITS_PER_TYPE = {
+        "search": 2,          # Advanced search
+        "news": 2,            # News search (advanced)
+        "company_info": 1,    # Basic search for company
+        "stock_analysis": 2,  # Comprehensive analysis
+        "sec_filings": 1,     # Basic search
+        "analyst_ratings": 1, # Basic search
+        "deep_dive": 3,       # Multiple searches
+    }
     
     def __init__(self):
         self._cache: Dict[str, Tuple[Any, float, str]] = {}  # key -> (result, timestamp, data_type)
         self._hit_count = 0
         self._miss_count = 0
+        self._credits_saved = 0  # Track estimated credits saved by cache hits
+        self._savings_history: List[Dict] = []  # Track savings over time
     
     def _generate_key(self, *args) -> str:
         """Generate a unique cache key from arguments"""
@@ -322,7 +336,18 @@ class IntelligentCache:
             
             if time.time() - timestamp < ttl:
                 self._hit_count += 1
-                logger.debug(f"Cache HIT for {data_type}: {args[:2]}...")
+                # Calculate credits saved
+                credits_saved = self.CREDITS_PER_TYPE.get(data_type, 1)
+                self._credits_saved += credits_saved
+                self._savings_history.append({
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "data_type": data_type,
+                    "credits_saved": credits_saved
+                })
+                # Keep only last 50 savings records
+                if len(self._savings_history) > 50:
+                    self._savings_history = self._savings_history[-50:]
+                logger.debug(f"Cache HIT for {data_type}: saved {credits_saved} credit(s)")
                 return result
             else:
                 # Expired, remove
@@ -338,14 +363,20 @@ class IntelligentCache:
         logger.debug(f"Cache SET for {data_type}: {args[:2]}...")
     
     def get_stats(self) -> Dict:
-        """Get cache statistics"""
+        """Get cache statistics including credits saved"""
         total = self._hit_count + self._miss_count
         return {
             "hits": self._hit_count,
             "misses": self._miss_count,
             "hit_rate": f"{(self._hit_count / total * 100):.1f}%" if total > 0 else "N/A",
-            "entries": len(self._cache)
+            "entries": len(self._cache),
+            "credits_saved": self._credits_saved,
+            "recent_savings": self._savings_history[-10:] if self._savings_history else []
         }
+    
+    def get_credits_saved(self) -> int:
+        """Get total credits saved this session"""
+        return self._credits_saved
     
     def clear_expired(self):
         """Remove expired entries"""
