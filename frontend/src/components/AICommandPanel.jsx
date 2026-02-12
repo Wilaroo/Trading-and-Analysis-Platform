@@ -678,7 +678,6 @@ const ConfirmationDialog = ({ isOpen, trade, onConfirm, onCancel, loading }) => 
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ActionIcon className="w-4 h-4" />}
             {isCloseAction ? 'Close Position' : isAddAction ? 'Add Position' : 'Confirm Trade'}
           </button>
-          </button>
         </div>
       </motion.div>
     </div>
