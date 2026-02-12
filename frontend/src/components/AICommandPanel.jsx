@@ -1068,19 +1068,19 @@ const AICommandPanel = ({
       />
       
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-gradient-to-r from-cyan-900/20 via-zinc-900 to-amber-900/10">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-gradient-to-r from-cyan-500/5 via-transparent to-amber-500/5">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500 to-amber-500 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-            <Bot className="w-5 h-5 text-black" />
+          <div className="w-10 h-10 rounded-xl bg-cyan-400/10 border border-cyan-400/30 flex items-center justify-center shadow-[0_0_20px_rgba(0,229,255,0.2)]">
+            <Bot className="w-5 h-5 text-cyan-400" />
           </div>
           <div>
             <h2 className="text-base font-bold text-white">AI Trading Assistant</h2>
-            <p className="text-[10px] text-zinc-500">Scanner • AI • Bot — All-in-One</p>
+            <p className="text-[10px] text-zinc-500 tracking-wide">Scanner • AI • Bot — All-in-One</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-          <span className="text-xs text-zinc-400">{isConnected ? 'Live' : 'Offline'}</span>
+          <span className={`neon-dot${isConnected ? '-success' : '-error'}`} style={{width: '8px', height: '8px'}} />
+          <span className="text-xs text-zinc-400 font-medium">{isConnected ? 'Live' : 'Offline'}</span>
         </div>
       </div>
       
