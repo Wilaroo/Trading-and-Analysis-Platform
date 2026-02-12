@@ -407,6 +407,52 @@ Intelligence gathering timeout for CADE
 
 ---
 
+## Session Log - February 12, 2026 (WebSocket Disconnect Fix)
+
+### Issue: App disconnects after trading bot scan cycle completes
+
+**Root Causes Identified:**
+1. **Missing WebSocket heartbeat** - Proxies/ingress timeout idle connections
+2. **Event loop blocking** - Heavy scan operations don't yield, blocking WebSocket handling
+3. **MongoDB boolean check** - `if db:` causes warnings in PyMongo (use `if db is not None:`)
+4. **Missing AlpacaService.get_positions()** - Method didn't exist, causing repeated errors
+
+**Fixes Applied:**
+
+1. **WebSocket Heartbeat** (`frontend/src/hooks/useWebSocket.js`):
+   - Added ping/pong mechanism every 25 seconds
+   - Keeps connection alive through proxies (most timeout at 30-60s)
+   - Ignores pong responses in message handler
+
+2. **Event Loop Yields** (`backend/services/trading_bot_service.py`, `background_scanner.py`):
+   - Added `await asyncio.sleep(0)` after each symbol scan
+   - Prevents long-running scans from blocking WebSocket message handling
+
+3. **MongoDB Boolean Checks** (multiple files):
+   - Changed `if db:` to `if db is not None:` in:
+     - `background_scanner.py`
+     - `enhanced_scanner.py`
+     - `predictive_scanner.py`
+     - `alert_system.py`
+
+4. **AlpacaService.get_positions()** (`backend/services/alpaca_service.py`):
+   - Added missing method to fetch open positions from Alpaca paper trading account
+   - Returns list of positions with qty, avg_entry_price, unrealized_pl, etc.
+
+**Files Modified:**
+- `frontend/src/hooks/useWebSocket.js` - Added heartbeat mechanism
+- `backend/services/alpaca_service.py` - Added get_positions method
+- `backend/services/trading_bot_service.py` - Added event loop yield
+- `backend/services/background_scanner.py` - Added event loop yield, fixed db check
+- `backend/services/enhanced_scanner.py` - Fixed db check
+- `backend/services/predictive_scanner.py` - Fixed db check
+- `backend/services/alert_system.py` - Fixed db check
+
+**Future Enhancement Saved:**
+- RVOL (Relative Volume) calculation for better "in play" stock detection
+
+---
+
 ## Session Log - February 12, 2026 (Enhanced Market Intelligence)
 
 ### Feature: Market Intelligence Improvements
