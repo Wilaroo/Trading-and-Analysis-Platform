@@ -1079,15 +1079,30 @@ const AICommandPanel = ({
   const activeCoachingAlerts = coachingAlerts.filter(a => !dismissedAlerts.has(a.timestamp));
 
   return (
-    <div className="flex flex-col h-full overflow-hidden rounded-2xl" 
+    <div className="flex flex-col h-full overflow-hidden rounded-2xl relative" 
          style={{
-           background: 'rgba(13, 13, 26, 0.45)',
+           background: 'rgba(255, 255, 255, 0.7)',
            backdropFilter: 'blur(24px)',
            WebkitBackdropFilter: 'blur(24px)',
-           border: '1px solid rgba(255, 255, 255, 0.1)',
-           boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06)'
+           border: '1px solid rgba(0, 0, 0, 0.06)',
+           boxShadow: '0 4px 20px rgba(0, 0, 0, 0.06)'
          }}
          data-testid="ai-command-panel">
+      {/* Animated gradient border */}
+      <div 
+        className="absolute inset-0 rounded-2xl pointer-events-none"
+        style={{
+          padding: '1.5px',
+          background: 'linear-gradient(var(--gradient-angle, 135deg), var(--primary-main), var(--secondary-main), var(--accent-main), var(--primary-main))',
+          WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+          mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+          WebkitMaskComposite: 'xor',
+          maskComposite: 'exclude',
+          opacity: 0.4,
+          animation: 'gradient-rotate 6s linear infinite'
+        }}
+      />
+      
       {/* Confirmation Dialog */}
       <ConfirmationDialog
         isOpen={confirmDialog.isOpen}
@@ -1097,28 +1112,27 @@ const AICommandPanel = ({
         loading={executing}
       />
       
-      {/* Header - Glassy with neon accents */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.08]"
+      {/* Header - Light glass with gradient accents */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-black/[0.06]"
            style={{
-             background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.08) 0%, transparent 50%, rgba(255, 178, 0, 0.05) 100%)'
+             background: 'linear-gradient(135deg, rgba(0, 184, 217, 0.08) 0%, transparent 50%, rgba(124, 77, 255, 0.05) 100%)'
            }}>
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center"
                style={{
-                 background: 'rgba(0, 229, 255, 0.15)',
-                 border: '1px solid rgba(0, 229, 255, 0.4)',
-                 boxShadow: '0 0 25px rgba(0, 229, 255, 0.3), inset 0 0 15px rgba(0, 229, 255, 0.1)'
+                 background: 'linear-gradient(135deg, var(--primary-main), var(--accent-main))',
+                 boxShadow: '0 4px 15px var(--primary-glow)'
                }}>
-            <Bot className="w-5 h-5 text-cyan-400 drop-shadow-[0_0_8px_rgba(0,229,255,0.8)]" />
+            <Bot className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h2 className="text-base font-bold text-white">AI Trading <span className="text-cyan-400 drop-shadow-[0_0_10px_rgba(0,229,255,0.5)]">Assistant</span></h2>
-            <p className="text-[10px] text-zinc-500 tracking-wide">Scanner • AI • Bot — All-in-One</p>
+            <h2 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>AI Trading <span style={{ color: 'var(--primary-dark)' }}>Assistant</span></h2>
+            <p className="text-[10px] tracking-wide" style={{ color: 'var(--text-muted)' }}>Scanner • AI • Bot — All-in-One</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <span className={`neon-dot${isConnected ? '-success' : '-error'}`} style={{width: '8px', height: '8px'}} />
-          <span className="text-xs text-zinc-400 font-medium">{isConnected ? 'Live' : 'Offline'}</span>
+          <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>{isConnected ? 'Live' : 'Offline'}</span>
         </div>
       </div>
       
