@@ -1016,11 +1016,16 @@ class TradingBotService:
     
     def _score_to_grade(self, score: int) -> str:
         """Convert score to letter grade"""
-        if score >= 90: return "A+"
-        if score >= 80: return "A"
-        if score >= 70: return "B+"
-        if score >= 60: return "B"
-        if score >= 50: return "C"
+        if score >= 90:
+            return "A+"
+        if score >= 80:
+            return "A"
+        if score >= 70:
+            return "B+"
+        if score >= 60:
+            return "B"
+        if score >= 50:
+            return "C"
         return "F"
     
     def _estimate_duration(self, setup_type: str) -> str:
