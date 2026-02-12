@@ -775,93 +775,73 @@ Intelligence gathering timeout for CADE
 
 ---
 
-## Session Log - February 12, 2026 (Light Glass Theme + Animated Borders)
+## Session Log - February 12, 2026 (Vibrant Dark Theme with Pop)
 
 ### Enhancement Request
-User requested two improvements:
-1. Add animated gradient borders that shift between cyan and magenta
-2. Lighten the background - more white/gray or clear looking
+User wanted a middle ground: darker than the light theme but not as dark as pure black, with more color and contrast for visual "pop".
 
-### Implementation
+### Implementation - Balanced Vibrant Dark Theme
 
-**1. Light Background Theme** (`:root` in `index.css`):
-- Changed `--bg-default` from `#030308` (dark) to `#F0F4F8` (light gray)
-- Changed `--bg-paper` to `#FFFFFF` (white)
-- Adjusted all color variables for light mode visibility
-- Changed text colors to dark (`--text-primary: #1A1A2E`)
-- Adjusted status colors for light backgrounds
+**1. Color Palette** (`:root` in `index.css`):
+- **Background**: `#0F1419` (balanced dark blue-gray, not pure black)
+- **Paper**: `#151C24` (slightly lighter)
+- **Primary**: `#00D4FF` (electric cyan - more vibrant)
+- **Secondary**: `#FF2E93` (hot magenta/pink)
+- **Accent**: `#A855F7` (electric purple)
+- **Success**: `#10B981` with bright variant `#34D399`
+- **Shadows**: Enhanced with colorful glows (`--shadow-pop`)
 
-**2. Light Glass Effects**:
-- Changed `--glass-bg` from dark transparent to `rgba(255, 255, 255, 0.7)`
-- Glass panels now appear as frosted white
-- Adjusted blur and shadow values for light mode
-- Border colors changed to subtle black alpha instead of white alpha
-
-**3. Animated Gradient Borders**:
-- Added `@property --gradient-angle` CSS custom property for smooth animation
-- Created `@keyframes gradient-rotate` that animates the angle from 0 to 360deg
-- Applied gradient borders to:
-  - `.glass-card::before` - All glass cards get animated border
-  - `.glass-panel::before` - Panels get subtle animated border
-  - `.card::before` - Standard cards
-  - Header bar (inline style)
-  - AI Command Panel (inline style)
-  - Market Intel Panel (inline style)
-  - AI-Curated Opportunities widget
-
-**4. Gradient Border Implementation**:
+**2. Vibrant Gradient Background** (`body` in `index.css`):
 ```css
-.glass-card::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1.5px;
-  background: linear-gradient(
-    var(--gradient-angle, 135deg),
-    var(--primary-main),    /* cyan */
-    var(--secondary-main),  /* magenta */
-    var(--accent-main),     /* purple */
-    var(--primary-main)     /* back to cyan */
-  );
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask-composite: exclude;
-  opacity: 0.5;
-  animation: gradient-rotate 6s linear infinite;
-}
+background-image: 
+  radial-gradient(ellipse 80% 60% at 10% 0%, rgba(0, 212, 255, 0.15), transparent 50%),
+  radial-gradient(ellipse 60% 50% at 90% 10%, rgba(168, 85, 247, 0.12), transparent 50%),
+  radial-gradient(ellipse 70% 40% at 100% 50%, rgba(255, 46, 147, 0.1), transparent 50%),
+  ...
 ```
+Multiple colored gradient orbs at different positions for depth and visual interest.
 
-**5. Component Updates for Light Theme**:
-- `Sidebar.js`: White frosted glass with gradient edge border
-- `HeaderBar.jsx`: Light glass with animated gradient border
-- `AICommandPanel.jsx`: Light glass with animated border
-- `MarketIntelPanel.jsx`: Light glass with animated border
-- `App.js`: Light background with subtle color orbs
+**3. Glass Effects - Semi-transparent Dark**:
+- `--glass-bg: rgba(21, 28, 36, 0.85)` - visible but not solid
+- Enhanced blur (20-28px)
+- Glowing borders and shadows
 
-**6. Color Palette (Light Mode)**:
-- Primary: `#00B8D9` (cyan, adjusted for light bg)
-- Secondary: `#E040FB` (magenta)
-- Accent: `#7C4DFF` (purple)
-- Success: `#00C853`
-- Error: `#FF1744`
-- Warning: `#FFB300`
+**4. Animated Gradient Borders - MORE VISIBLE**:
+- Increased opacity from 0.4 to 0.6 (0.7 on featured cards)
+- Hover increases to full 1.0 opacity
+- 6-second rotation animation
+- Colors: cyan → magenta → purple → cyan
 
-### Visual Results
-1. ✅ Clean white/light gray background
-2. ✅ Frosted white glass panels
-3. ✅ Animated gradient borders rotating cyan → magenta → purple → cyan
-4. ✅ Dark readable text
-5. ✅ Gradient icon containers
-6. ✅ Light sidebar with gradient edge
-7. ✅ Status indicators visible on light background
+**5. Neon Effects - HIGH CONTRAST**:
+- Stronger text shadows on highlighted text
+- Glowing icons with drop shadows
+- Status indicators with colorful halos
+- Buttons with double-layered glow shadows
+
+**6. Component Updates**:
+- All components now use dark glass (rgba 21,28,36)
+- White text for high contrast
+- Cyan neon accents on titles
+- Vibrant gradient icons
+- Glowing active states
+
+### Visual Changes Achieved
+1. ✅ Balanced dark background (not pure black)
+2. ✅ Vibrant colorful gradient orbs in background
+3. ✅ High-contrast animated gradient borders
+4. ✅ Neon cyan text accents
+5. ✅ Glowing gradient icon containers
+6. ✅ High-visibility status indicators
+7. ✅ "Pop" effect on hover with lift and glow
 
 ### Files Modified
-- `frontend/src/index.css` - Complete color system overhaul for light mode + gradient animation
-- `frontend/src/App.js` - Light background
-- `frontend/src/components/Sidebar.js` - Light glass sidebar
-- `frontend/src/components/layout/HeaderBar.jsx` - Light glass header
-- `frontend/src/components/AICommandPanel.jsx` - Light glass panels
-- `frontend/src/components/MarketIntelPanel.jsx` - Light glass panel
+- `frontend/src/index.css` - Complete color system for vibrant dark theme
+- `frontend/src/App.js` - Vibrant gradient orbs
+- `frontend/src/components/Sidebar.js` - Dark glass with neon accents
+- `frontend/src/components/layout/HeaderBar.jsx` - Dark glass header
+- `frontend/src/components/AICommandPanel.jsx` - Dark glass with gradient borders
+- `frontend/src/components/MarketIntelPanel.jsx` - Dark glass panel
 
 ---
+
 
