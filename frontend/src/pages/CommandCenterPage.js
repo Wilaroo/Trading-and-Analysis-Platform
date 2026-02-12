@@ -4,7 +4,9 @@ import QuickTradeModal from '../components/QuickTradeModal';
 import HeaderBar from '../components/layout/HeaderBar';
 import AICoachTab from '../components/tabs/AICoachTab';
 import AnalyticsTab from '../components/tabs/AnalyticsTab';
+import ChartsTab from '../components/tabs/ChartsTab';
 import { useCommandCenterData } from '../hooks/useCommandCenterData';
+import { LineChart, Target, BarChart3 } from 'lucide-react';
 
 const CommandCenterPage = ({ 
   ibConnected, 
@@ -13,11 +15,19 @@ const CommandCenterPage = ({
   checkIbConnection, 
   isActiveTab = true,
   wsConnected = false,
-  wsLastUpdate = null
+  wsLastUpdate = null,
+  ibBusy = false,
+  ibBusyOperation = null
 }) => {
   const data = useCommandCenterData({
     ibConnected, ibConnectionChecked, connectToIb, checkIbConnection, isActiveTab,
   });
+
+  const tabs = [
+    { id: 'coach', label: 'Command', icon: Target },
+    { id: 'charts', label: 'Charts', icon: LineChart },
+    { id: 'analytics', label: 'Analytics', icon: BarChart3 }
+  ];
 
   return (
     <div className="space-y-3 pb-8" data-testid="command-center-page">
@@ -34,26 +44,26 @@ const CommandCenterPage = ({
         creditBudget={data.creditBudget}
       />
 
-      {/* Tab Navigation — 2 tabs */}
+      {/* Tab Navigation — 3 tabs */}
       <div className="flex items-center gap-1 bg-[#0A0A0A] border border-white/10 rounded-lg p-1 mt-1" data-testid="main-tabs">
-        {[
-          { id: 'coach', label: 'Command', icon: '\uD83C\uDFAF' },
-          { id: 'analytics', label: 'Analytics', icon: '\uD83D\uDCCA' }
-        ].map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => data.setActiveMainTab(tab.id)}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
-              data.activeMainTab === tab.id
-                ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
-                : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
-            }`}
-            data-testid={`tab-${tab.id}`}
-          >
-            <span className="text-base">{tab.icon}</span>
-            {tab.label}
-          </button>
-        ))}
+        {tabs.map(tab => {
+          const Icon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => data.setActiveMainTab(tab.id)}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                data.activeMainTab === tab.id
+                  ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
+                  : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+              }`}
+              data-testid={`tab-${tab.id}`}
+            >
+              <Icon className="w-4 h-4" />
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Tab Content */}
@@ -70,6 +80,20 @@ const CommandCenterPage = ({
           account={data.account}
           marketContext={data.marketContext}
           positions={data.positions}
+          viewChart={data.viewChart}
+        />
+      )}
+
+      {data.activeMainTab === 'charts' && (
+        <ChartsTab
+          isConnected={data.isConnected}
+          isBusy={ibBusy}
+          busyOperation={ibBusyOperation}
+          chartSymbol={data.chartSymbol}
+          setChartSymbol={data.setChartSymbol}
+          watchlist={data.watchlist}
+          recentCharts={data.recentCharts}
+          onAddToRecent={data.addToRecentCharts}
         />
       )}
 
