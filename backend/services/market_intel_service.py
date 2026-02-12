@@ -41,11 +41,15 @@ class MarketIntelService:
         self._alpaca_service = None
         self._news_service = None
         self._scanner_service = None
+        self._smart_watchlist = None
+        self._alert_system = None
+        self._earnings_service = None
         self._scheduler_running = False
         self._finnhub_key = os.environ.get("FINNHUB_API_KEY", "")
 
     def set_services(self, ai_assistant=None, trading_bot=None, perf_service=None,
-                     alpaca_service=None, news_service=None, scanner_service=None):
+                     alpaca_service=None, news_service=None, scanner_service=None,
+                     smart_watchlist=None, alert_system=None, earnings_service=None):
         if ai_assistant:
             self._ai_assistant = ai_assistant
         if trading_bot:
@@ -58,6 +62,12 @@ class MarketIntelService:
             self._news_service = news_service
         if scanner_service:
             self._scanner_service = scanner_service
+        if smart_watchlist:
+            self._smart_watchlist = smart_watchlist
+        if alert_system:
+            self._alert_system = alert_system
+        if earnings_service:
+            self._earnings_service = earnings_service
         logger.info("Market intel service wired")
 
     # ==================== CONTEXT GATHERING ====================
