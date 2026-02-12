@@ -175,21 +175,6 @@ perf_service.set_services(trading_bot=trading_bot, ai_assistant=assistant_servic
 trading_bot._perf_service = perf_service
 init_learning_dashboard(perf_service)
 
-# Initialize market intel service
-market_intel_service = get_market_intel_service()
-market_intel_service._db = db
-market_intel_service.set_services(
-    ai_assistant=assistant_service,
-    trading_bot=trading_bot,
-    perf_service=perf_service,
-    alpaca_service=alpaca_service,
-    news_service=news_service,
-    scanner_service=background_scanner,
-    smart_watchlist=smart_watchlist,
-    alert_system=alert_system
-)
-init_market_intel_router(market_intel_service)
-
 # Include routers
 app.include_router(notifications_router)
 app.include_router(market_context_router)
