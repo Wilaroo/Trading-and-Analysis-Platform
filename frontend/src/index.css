@@ -127,10 +127,10 @@ body {
 /* Selection styling */
 ::selection {
   background: var(--primary-main);
-  color: white;
+  color: var(--bg-default);
 }
 
-/* Glass morphism utility - LIGHT MODE GLASS */
+/* Glass morphism utility - BALANCED DARK GLASS */
 .glass {
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
@@ -188,7 +188,7 @@ body {
   backdrop-filter: blur(var(--glass-blur-strong));
   -webkit-backdrop-filter: blur(var(--glass-blur-strong));
   background: var(--glass-bg);
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
@@ -196,7 +196,7 @@ body {
   overflow: hidden;
 }
 
-/* Animated gradient border on cards */
+/* Animated gradient border on cards - MORE VISIBLE */
 .glass-card::before {
   content: '';
   position: absolute;
@@ -214,29 +214,27 @@ body {
   mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  opacity: 0.5;
+  opacity: 0.6;
   animation: gradient-rotate 6s linear infinite;
   pointer-events: none;
 }
 
 .glass-card:hover {
   background: var(--glass-bg-hover);
-  box-shadow: 
-    var(--shadow-neon),
-    var(--shadow-card);
-  transform: translateY(-2px);
+  box-shadow: var(--shadow-pop);
+  transform: translateY(-3px);
 }
 
 .glass-card:hover::before {
-  opacity: 0.9;
+  opacity: 1;
 }
 
-/* Glass panel - lighter variant with animated border */
+/* Glass panel - with visible gradient border */
 .glass-panel {
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
   background: var(--glass-bg-light);
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
   position: relative;
