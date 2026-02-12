@@ -269,6 +269,9 @@ Triggers AI Coaching Notification
 - `backend/services/ai_assistant_service.py` - Updated research intent detection & formatting
 - `backend/routers/research.py` - New Agent Skills and budget endpoints
 - `backend/server.py` - Initialize web research service with DB on startup
+- `frontend/src/hooks/useCommandCenterData.js` - Added creditBudget state and fetching
+- `frontend/src/pages/CommandCenterPage.js` - Pass creditBudget to HeaderBar
+- `frontend/src/components/layout/HeaderBar.jsx` - Added credit budget indicator UI
 
 ---
 
