@@ -184,7 +184,9 @@ market_intel_service.set_services(
     perf_service=perf_service,
     alpaca_service=alpaca_service,
     news_service=news_service,
-    scanner_service=background_scanner
+    scanner_service=background_scanner,
+    smart_watchlist=smart_watchlist,
+    alert_system=alert_system
 )
 init_market_intel_router(market_intel_service)
 
