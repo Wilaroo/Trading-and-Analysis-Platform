@@ -406,6 +406,62 @@ Intelligence gathering timeout for CADE
 
 ---
 
+## Session Log - February 12, 2026 (Enhanced Market Intelligence)
+
+### Feature: Market Intelligence Improvements
+**Goal**: Make Market Intel more accurate by using real data sources and proper context.
+
+**7 New Context Gathering Methods Added:**
+
+1. **`_gather_market_regime_context()`**
+   - Classifies day type: STRONG UPTREND, DOWNTREND, CHOPPY/RANGE, ROTATION, SMALL CAP RISK-ON
+   - Provides strategy recommendations based on regime
+   - Includes VIX assessment (HIGH/ELEVATED/LOW/NORMAL volatility)
+
+2. **`_gather_ticker_specific_news()`**
+   - Fetches Finnhub company-news for watchlist stocks
+   - Max 3 headlines per ticker, up to 8 tickers
+   - More relevant than general market news
+
+3. **`_gather_sector_heatmap()`**
+   - 11 sector ETFs: XLK, XLF, XLE, XLV, XLI, XLC, XLY, XLP, XLU, XLRE, XLB
+   - Sorted by performance with leaders/laggards marked
+   - Enables rotation analysis
+
+4. **`_gather_earnings_context()`**
+   - Checks Finnhub earnings calendar for next 14 days
+   - Filters for watchlist stocks only
+   - Adds ⚠️ warnings about earnings risk
+
+5. **`_gather_in_play_technical_context()`**
+   - Gets HOD, LOD, VWAP levels for active stocks
+   - Shows gap %, day range %
+   - Provides above/below VWAP bias
+
+6. **Enhanced `_gather_watchlist_context()`**
+   - Uses actual Smart Watchlist (not hardcoded symbols)
+   - Shows IN-PLAY vs ON-WATCH status
+   - Includes matched strategies from scanner
+
+7. **Wired Services**
+   - `smart_watchlist` service now connected to Market Intel
+   - `alert_system` service connected
+
+**Bug Fixed by Testing Agent:**
+- Alpaca's `get_quotes_batch` returns `Dict[str, Dict]` not `List[Dict]`
+- Fixed iteration in 5 methods from `for q in quotes` to `for sym, q in quotes.items()`
+
+**Files Modified:**
+- `backend/services/market_intel_service.py` - Added 7 new context methods, enhanced prompts
+- `backend/server.py` - Moved market_intel initialization, wired smart_watchlist
+
+**Test Results:**
+- 16/16 backend tests pass
+- All 7 new features verified working
+- Frontend displays enhanced report correctly
+
+---
+
 ## Session Log - February 12, 2026 (Click-to-Chart in AI Chat)
 
 ### Feature: Click-to-Chart Integration in AI Chat Messages
