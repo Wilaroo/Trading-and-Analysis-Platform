@@ -303,7 +303,14 @@ function App() {
       ibBusyOperation,
       // WebSocket status for quotes streaming
       wsConnected: isConnected,
-      wsLastUpdate: lastUpdate
+      wsLastUpdate: lastUpdate,
+      // WebSocket-pushed data (replaces polling in child components)
+      wsBotStatus,
+      wsBotTrades,
+      wsScannerAlerts,
+      wsScannerStatus,
+      wsSmartWatchlist,
+      wsCoachingNotifications,
     };
     
     switch (activeTab) {
