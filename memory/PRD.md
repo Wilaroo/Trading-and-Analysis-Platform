@@ -259,6 +259,7 @@ Triggers AI Coaching Notification
    - Resets automatically on month rollover
    - **Frontend indicator in header bar** showing remaining credits with color-coded status
    - **Clickable modal** with detailed usage breakdown: circular progress ring, stats grid (daily avg, projected, session, days left), on-track indicator, recent queries list
+   - **Credits Saved Banner**: Green gradient showing credits saved by caching, savings percentage, cache hit rate, and effective cost comparison
 
 6. **AI Assistant Integration**:
    - Updated intent detection to route to Agent Skills
