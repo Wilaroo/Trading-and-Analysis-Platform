@@ -284,7 +284,8 @@ class TavilySearchService:
             query=query,
             topic="news",
             max_results=max_results,
-            search_depth="advanced"
+            search_depth="advanced",
+            data_type="news"  # 3 min cache
         )
 
     async def search_financial(
@@ -303,7 +304,8 @@ class TavilySearchService:
             topic="news",
             max_results=max_results,
             include_domains=financial_domains,
-            search_depth="advanced"
+            search_depth="advanced",
+            data_type="news"  # 3 min cache
         )
 
 
