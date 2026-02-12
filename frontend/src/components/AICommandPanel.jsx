@@ -26,7 +26,8 @@ import {
   ArrowRight,
   Clock,
   DollarSign,
-  Briefcase
+  Briefcase,
+  LineChart
 } from 'lucide-react';
 import api from '../utils/api';
 import { toast } from 'sonner';
@@ -37,15 +38,28 @@ const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
 // ===================== TICKER UTILITIES =====================
 
-const TickerLink = ({ symbol, onClick, showBrackets = false }) => (
-  <button
-    onClick={() => onClick(symbol)}
-    className="inline-flex items-center gap-0.5 px-1 py-0.5 bg-cyan-500/10 border border-cyan-500/20 rounded text-cyan-400 font-mono font-semibold text-xs hover:bg-cyan-500/20 hover:border-cyan-500/40 transition-colors cursor-pointer"
-    data-testid={`ticker-link-${symbol}`}
-  >
-    {showBrackets ? `(${symbol})` : symbol}
-    <ArrowUpRight className="w-3 h-3" />
-  </button>
+const TickerLink = ({ symbol, onClick, onViewChart, showBrackets = false }) => (
+  <span className="inline-flex items-center gap-0.5">
+    <button
+      onClick={() => onClick(symbol)}
+      className="inline-flex items-center gap-0.5 px-1 py-0.5 bg-cyan-500/10 border border-cyan-500/20 rounded-l text-cyan-400 font-mono font-semibold text-xs hover:bg-cyan-500/20 hover:border-cyan-500/40 transition-colors cursor-pointer"
+      data-testid={`ticker-link-${symbol}`}
+      title={`View ${symbol} details`}
+    >
+      {showBrackets ? `(${symbol})` : symbol}
+      <ArrowUpRight className="w-3 h-3" />
+    </button>
+    {onViewChart && (
+      <button
+        onClick={() => onViewChart(symbol)}
+        className="inline-flex items-center px-1 py-0.5 bg-amber-500/10 border border-amber-500/20 border-l-0 rounded-r text-amber-400 text-xs hover:bg-amber-500/20 hover:border-amber-500/40 transition-colors cursor-pointer"
+        data-testid={`ticker-chart-${symbol}`}
+        title={`View ${symbol} chart`}
+      >
+        <LineChart className="w-3 h-3" />
+      </button>
+    )}
+  </span>
 );
 
 const TickerAwareText = ({ text, onTickerClick }) => {
