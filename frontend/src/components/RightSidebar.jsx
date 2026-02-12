@@ -234,7 +234,7 @@ const EarningsItem = ({ item, onTickerSelect }) => (
 );
 
 // ===================== SMART WATCHLIST WIDGET =====================
-const WatchlistWidget = ({ onTickerSelect, onViewChart }) => {
+const WatchlistWidget = ({ onTickerSelect, onViewChart, wsWatchlist = [] }) => {
   const [watchlist, setWatchlist] = useState([]);
   const [quotes, setQuotes] = useState({});
   const [loading, setLoading] = useState(true);
@@ -279,11 +279,21 @@ const WatchlistWidget = ({ onTickerSelect, onViewChart }) => {
     }
   }, []);
 
+  // Sync from WebSocket data when available
   useEffect(() => {
-    fetchWatchlist();
-    const interval = setInterval(fetchWatchlist, 30000); // Refresh every 30 seconds
-    return () => clearInterval(interval);
-  }, [fetchWatchlist]);
+    if (wsWatchlist && wsWatchlist.length >= 0) {
+      setWatchlist(wsWatchlist);
+      setLoading(false);
+    }
+  }, [wsWatchlist]);
+
+  // Initial fetch only (WebSocket handles updates)
+  useEffect(() => {
+    if (!wsWatchlist || wsWatchlist.length === 0) {
+      fetchWatchlist();
+    }
+    // No polling - WebSocket handles real-time updates
+  }, []); // Only on mount
 
   const handleAddSymbol = async () => {
     if (!newSymbol.trim()) return;
