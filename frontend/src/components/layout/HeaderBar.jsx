@@ -32,7 +32,10 @@ const CreditBudgetModal = ({ isOpen, onClose, creditBudget }) => {
     daily_average,
     projected_monthly_usage,
     on_track,
-    recent_usage
+    recent_usage,
+    credits_saved = 0,
+    cache_hit_rate = 'N/A',
+    savings_percent = 0
   } = creditBudget;
 
   const getStatusColor = (level) => {
@@ -60,11 +63,6 @@ const CreditBudgetModal = ({ isOpen, onClose, creditBudget }) => {
     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   };
 
-  const formatDate = (isoString) => {
-    const date = new Date(isoString);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
-
   // Calculate days remaining in month
   const now = new Date();
   const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
@@ -79,7 +77,7 @@ const CreditBudgetModal = ({ isOpen, onClose, creditBudget }) => {
       />
       
       {/* Modal */}
-      <div className="relative bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+      <div className="relative bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-zinc-700">
           <div className="flex items-center gap-3">
