@@ -1499,6 +1499,34 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                 
             except Exception as e:
                 logger.error(f"Emergent LLM error: {e}")
+                # Fall back to Ollama if Emergent fails (e.g., external access denied)
+                if "external access" in str(e).lower() or "access_denied" in str(e).lower():
+                    logger.warning("Emergent key not available externally, falling back to Ollama")
+                    try:
+                        import httpx
+                        ollama_cfg = self.llm_clients.get(LLMProvider.OLLAMA)
+                        if ollama_cfg:
+                            url = f"{ollama_cfg['url']}/api/chat"
+                            payload = {
+                                "model": ollama_cfg["model"],
+                                "messages": full_messages,
+                                "stream": False,
+                            }
+                            async with httpx.AsyncClient() as client:
+                                response = await client.post(
+                                    url,
+                                    json=payload,
+                                    timeout=90,
+                                    headers={"ngrok-skip-browser-warning": "true"}
+                                )
+                            if response.status_code == 200:
+                                result = response.json()
+                                content = result.get("message", {}).get("content", "")
+                                if content:
+                                    logger.info(f"Ollama fallback response OK ({len(content)} chars)")
+                                    return content
+                    except Exception as ollama_err:
+                        logger.error(f"Ollama fallback also failed: {ollama_err}")
                 raise
         
         # Last resort: OpenAI direct
