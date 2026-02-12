@@ -146,19 +146,19 @@ const TickerAwareText = ({ text, onTickerClick, onViewChart }) => {
     // Check if it's a ticker
     const clean = part.replace('$', '');
     if (knownTickers.has(clean) && part.length >= 2) {
-      return <TickerLink key={i} symbol={clean} onClick={onTickerClick} />;
+      return <TickerLink key={i} symbol={clean} onClick={onTickerClick} onViewChart={onViewChart} />;
     }
     
     return part;
   });
 };
 
-const createMarkdownComponents = (onTickerClick) => ({
-  p: ({ children }) => <p className="mb-2 last:mb-0">{typeof children === 'string' ? <TickerAwareText text={children} onTickerClick={onTickerClick} /> : children}</p>,
+const createMarkdownComponents = (onTickerClick, onViewChart) => ({
+  p: ({ children }) => <p className="mb-2 last:mb-0">{typeof children === 'string' ? <TickerAwareText text={children} onTickerClick={onTickerClick} onViewChart={onViewChart} /> : children}</p>,
   ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
   ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
-  li: ({ children }) => <li className="text-zinc-200">{typeof children === 'string' ? <TickerAwareText text={children} onTickerClick={onTickerClick} /> : children}</li>,
-  strong: ({ children }) => <strong className="text-cyan-400 font-semibold">{typeof children === 'string' ? <TickerAwareText text={children} onTickerClick={onTickerClick} /> : children}</strong>,
+  li: ({ children }) => <li className="text-zinc-200">{typeof children === 'string' ? <TickerAwareText text={children} onTickerClick={onTickerClick} onViewChart={onViewChart} /> : children}</li>,
+  strong: ({ children }) => <strong className="text-cyan-400 font-semibold">{typeof children === 'string' ? <TickerAwareText text={children} onTickerClick={onTickerClick} onViewChart={onViewChart} /> : children}</strong>,
   h3: ({ children }) => <h3 className="text-sm font-bold text-white mb-1">{children}</h3>,
   code: ({ children }) => <code className="bg-black/30 px-1 rounded text-amber-400">{children}</code>,
 });
