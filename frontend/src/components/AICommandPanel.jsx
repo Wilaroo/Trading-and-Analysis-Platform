@@ -184,8 +184,8 @@ const SectionHeader = ({ icon: Icon, title, count, isExpanded, onToggle, action,
   </div>
 );
 
-const ChatMessage = ({ message, isUser, onTickerClick }) => {
-  const mdComponents = createMarkdownComponents(onTickerClick);
+const ChatMessage = ({ message, isUser, onTickerClick, onViewChart }) => {
+  const mdComponents = createMarkdownComponents(onTickerClick, onViewChart);
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
       <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
