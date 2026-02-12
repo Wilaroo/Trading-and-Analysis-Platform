@@ -190,6 +190,12 @@ Triggers AI Coaching Notification
     - Top row: Net Liquidation, Today's P&L, Positions, Market Regime
     - Bottom row: Bot toggle, P&L, open count, Mode selector
     - Cleaner UI with more vertical space for content
+22. **Tavily Agent Skills** (Feb 2026): Credit-optimized research tools
+    - Intelligent caching with variable TTLs (3min-24hr based on data type)
+    - Agent Skills: `get_company_info`, `get_stock_analysis`, `get_market_context`
+    - Combines FREE sources (Finnhub, Finviz, Yahoo scrapers) before using Tavily
+    - Quick analysis mode (0 credits) for basic data
+    - Cache stats monitoring via `/api/research/stats`
 
 ## Prioritized Backlog
 ### P0 - Completed
@@ -197,6 +203,7 @@ Triggers AI Coaching Notification
 - ✅ AI Trading Assistant Phase 1 (integrated panel)
 - ✅ AI Trading Assistant Phase 2 (AI-curated opportunities widget)
 - ✅ Consolidated Stats Header (removed QuickStatsRow)
+- ✅ Tavily Agent Skills with intelligent caching
 
 ### P1 - Next Up
 - Portfolio awareness: Proactive suggestions ("Scale out of AMD?", "Heavy tech exposure")
@@ -209,6 +216,48 @@ Triggers AI Coaching Notification
 - Level 2 order book analysis (tape reading)
 - Full bot state persistence in MongoDB
 - Weekly performance digest
+
+---
+
+## Session Log - February 12, 2026
+
+### Tavily Agent Skills Implementation
+**Goal**: Integrate Tavily's Agent Skills with aggressive caching to minimize credit usage on free tier.
+
+**Implementation:**
+1. **Intelligent Cache System**: Variable TTLs based on data freshness requirements
+   - Company info: 1 hour (fundamentals don't change often)
+   - Stock analysis: 10 minutes
+   - News: 3 minutes
+   - SEC filings: 24 hours
+   - Deep dive/market context: 15 minutes
+
+2. **Agent Skills Created**:
+   - `get_company_info(ticker)`: Combines Finnhub + Finviz + Yahoo, uses Tavily only if gaps exist
+   - `get_stock_analysis(ticker, type)`: Quick (0 credits), News (1 credit), Comprehensive (1-2 credits)
+   - `get_market_context()`: Daily market overview (indices, regime, themes)
+
+3. **Credit Optimization Strategy**:
+   - Check FREE sources first (Finnhub, Finviz scrapers, Yahoo scrapers)
+   - Only call Tavily to fill data gaps
+   - Use "basic" search depth when possible (1 credit vs 2)
+   - Cache all results aggressively
+
+4. **New API Endpoints**:
+   - `GET /api/research/skills/company-info/{ticker}`
+   - `GET /api/research/skills/stock-analysis/{ticker}?analysis_type=quick|news|comprehensive`
+   - `GET /api/research/skills/market-context`
+   - `GET /api/research/stats` (cache monitoring)
+
+5. **AI Assistant Integration**:
+   - Updated intent detection to route to Agent Skills
+   - New research types: `company_info`, `stock_analysis`, `market_context`
+   - Rich formatting for Agent Skill results
+
+### Files Modified
+- `backend/services/web_research_service.py` - Added IntelligentCache, Agent Skills
+- `backend/services/ai_assistant_service.py` - Updated research intent detection & formatting
+- `backend/routers/research.py` - New Agent Skills endpoints
 
 ---
 
