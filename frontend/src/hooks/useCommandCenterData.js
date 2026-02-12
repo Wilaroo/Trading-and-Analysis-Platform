@@ -450,7 +450,7 @@ export function useCommandCenterData({
     // Data
     account, positions, opportunities, marketContext, alerts,
     watchlist, earnings, enhancedAlerts, priceAlerts,
-    systemHealth, totalPnL, smartWatchlist,
+    systemHealth, totalPnL, smartWatchlist, creditBudget,
     // UI state
     isScanning, selectedScanType, setSelectedScanType,
     selectedTicker, setSelectedTicker,
