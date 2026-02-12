@@ -762,6 +762,9 @@ class TradingBotService:
                 # Evaluate and create trade opportunity
                 trade = await self._evaluate_opportunity(alert)
                 
+                # Yield to event loop to prevent blocking (keeps WebSocket alive)
+                await asyncio.sleep(0)
+                
                 if trade:
                     if self._mode == BotMode.AUTONOMOUS:
                         # Execute immediately
