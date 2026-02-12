@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { LineChart, Loader2, Wifi, WifiOff } from 'lucide-react';
 import * as LightweightCharts from 'lightweight-charts';
 import api from '../../utils/api';
@@ -9,7 +9,6 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation, height = 
   const candleSeriesRef = useRef(null);
   const volumeSeriesRef = useRef(null);
   const chartVersionRef = useRef(0);
-  const chartReadyRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [hasData, setHasData] = useState(false);
@@ -17,6 +16,7 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation, height = 
   const [duration, setDuration] = useState('1 D');
   const [lastUpdate, setLastUpdate] = useState(null);
   const [dataSource, setDataSource] = useState(null);
+  const [chartReady, setChartReady] = useState(false);
 
   const timeframes = [
     { label: '1m', value: '1 min', dur: '1 D' },
@@ -29,20 +29,35 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation, height = 
     { label: 'W', value: '1 week', dur: '1 Y' },
   ];
 
-  // Create chart on mount
+  // Create chart on mount - use explicit dimensions
   useEffect(() => {
     if (!chartContainerRef.current || !symbol) return;
 
-    chartReadyRef.current = false;
+    setChartReady(false);
+    setHasData(false);
     const currentVersion = ++chartVersionRef.current;
 
-    const timer = setTimeout(() => {
+    // Cleanup previous chart
+    if (chartRef.current) {
+      try {
+        chartRef.current.remove();
+      } catch (e) {}
+      chartRef.current = null;
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+    }
+
+    const createChart = () => {
       if (chartVersionRef.current !== currentVersion) return;
       if (!chartContainerRef.current) return;
       
       try {
-        const containerWidth = chartContainerRef.current.clientWidth || 800;
-        const containerHeight = chartContainerRef.current.clientHeight || 400;
+        // Get dimensions - use getBoundingClientRect for accurate measurements
+        const rect = chartContainerRef.current.getBoundingClientRect();
+        const containerWidth = Math.floor(rect.width) || 800;
+        const containerHeight = Math.floor(rect.height) || 400;
+        
+        console.log('[Chart] Creating chart with dimensions:', containerWidth, 'x', containerHeight);
         
         const chart = LightweightCharts.createChart(chartContainerRef.current, {
           layout: {
@@ -82,7 +97,6 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation, height = 
           priceScaleId: 'right',
         });
         candleSeriesRef.current = candleSeries;
-        chartReadyRef.current = true;
         
         chart.priceScale('right').applyOptions({
           autoScale: true,
@@ -97,26 +111,34 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation, height = 
         });
         volumeSeriesRef.current = volumeSeries;
 
-        const handleResize = () => {
-          if (chartContainerRef.current && chartRef.current) {
-            chartRef.current.applyOptions({ 
-              width: chartContainerRef.current.clientWidth,
-              height: chartContainerRef.current.clientHeight
-            });
-          }
-        };
-        window.addEventListener('resize', handleResize);
-
-        return () => window.removeEventListener('resize', handleResize);
+        console.log('[Chart] Chart created successfully, series ready');
+        setChartReady(true);
       } catch (err) {
-        console.error('Error creating chart:', err);
+        console.error('[Chart] Error creating chart:', err);
       }
-    }, 100);
+    };
+
+    // Small delay to ensure container has dimensions
+    const timer = setTimeout(createChart, 150);
+
+    const handleResize = () => {
+      if (chartContainerRef.current && chartRef.current) {
+        const rect = chartContainerRef.current.getBoundingClientRect();
+        chartRef.current.applyOptions({ 
+          width: Math.floor(rect.width),
+          height: Math.floor(rect.height)
+        });
+      }
+    };
+    window.addEventListener('resize', handleResize);
 
     return () => {
       clearTimeout(timer);
+      window.removeEventListener('resize', handleResize);
       if (chartRef.current) {
-        chartRef.current.remove();
+        try {
+          chartRef.current.remove();
+        } catch (e) {}
         chartRef.current = null;
       }
     };
