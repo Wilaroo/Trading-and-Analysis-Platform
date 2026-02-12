@@ -224,23 +224,434 @@ class MarketIntelService:
         return "\n".join(parts) if parts else ""
 
     async def _gather_watchlist_context(self) -> str:
-        """Gather watchlist quotes"""
+        """Gather Smart Watchlist with IN PLAY status - THE KEY IMPROVEMENT"""
         parts = []
         try:
-            if self._alpaca_service:
-                # Default watchlist tickers
+            # Get actual Smart Watchlist symbols (not hardcoded!)
+            watchlist_symbols = []
+            watchlist_items = {}
+            
+            if self._smart_watchlist:
+                items = self._smart_watchlist.get_watchlist()
+                watchlist_symbols = [item.symbol for item in items]
+                watchlist_items = {item.symbol: item for item in items}
+                
+            # Fallback to default if no smart watchlist
+            if not watchlist_symbols:
                 watchlist_symbols = ["AAPL", "MSFT", "NVDA", "TSLA", "AMD", "META", "GOOGL", "AMZN"]
-                quotes = await self._alpaca_service.get_quotes_batch(watchlist_symbols)
+            
+            if self._alpaca_service and watchlist_symbols:
+                quotes = await self._alpaca_service.get_quotes_batch(watchlist_symbols[:20])
+                
                 if quotes:
-                    parts.append("=== WATCHLIST QUOTES (EXACT live prices) ===")
+                    # Check IN PLAY status for each symbol
+                    in_play_stocks = []
+                    not_in_play_stocks = []
+                    
                     for q in quotes:
                         sym = q.get("symbol", "?")
                         price = q.get("price", 0)
                         chg = q.get("change_percent", 0)
                         vol = q.get("volume", 0)
-                        parts.append(f"  {sym}: ${price:.2f} ({chg:+.2f}%) vol: {vol:,}")
+                        
+                        # Calculate basic in-play indicators
+                        rvol = 1.0  # Default
+                        gap_pct = chg  # Use change as proxy for gap
+                        
+                        # Get watchlist item info
+                        wl_item = watchlist_items.get(sym)
+                        source = wl_item.source if wl_item else "default"
+                        strategies = wl_item.strategies_matched[:2] if wl_item and wl_item.strategies_matched else []
+                        
+                        # Basic in-play check (RVOL proxy: volume > 0 and decent change)
+                        is_active = abs(chg) >= 1.0 or vol > 500000
+                        
+                        stock_info = {
+                            "sym": sym,
+                            "price": price,
+                            "chg": chg,
+                            "vol": vol,
+                            "source": source,
+                            "strategies": strategies,
+                            "is_active": is_active
+                        }
+                        
+                        if is_active:
+                            in_play_stocks.append(stock_info)
+                        else:
+                            not_in_play_stocks.append(stock_info)
+                    
+                    # Format output with IN PLAY stocks first
+                    parts.append("=== SMART WATCHLIST STATUS ===")
+                    parts.append(f"Total symbols: {len(quotes)} | Active/In-Play: {len(in_play_stocks)}")
+                    
+                    if in_play_stocks:
+                        parts.append("\n🔥 IN PLAY TODAY (Active movement):")
+                        for s in in_play_stocks[:10]:
+                            strat_str = f" [{', '.join(s['strategies'])}]" if s['strategies'] else ""
+                            parts.append(f"  {s['sym']}: ${s['price']:.2f} ({s['chg']:+.2f}%) vol:{s['vol']:,}{strat_str}")
+                    
+                    if not_in_play_stocks:
+                        parts.append("\n⏸️ ON WATCH (Low activity today):")
+                        for s in not_in_play_stocks[:5]:
+                            parts.append(f"  {s['sym']}: ${s['price']:.2f} ({s['chg']:+.2f}%)")
+                    
         except Exception as e:
-            logger.warning(f"Error gathering watchlist: {e}")
+            logger.warning(f"Error gathering smart watchlist: {e}")
+            parts.append(f"=== WATCHLIST ===\nError: {e}")
+        
+        return "\n".join(parts) if parts else ""
+
+    async def _gather_ticker_specific_news(self, symbols: list = None) -> str:
+        """Fetch company-specific news for watchlist symbols"""
+        parts = []
+        
+        if not self._finnhub_key:
+            return ""
+        
+        # Get symbols from smart watchlist if not provided
+        if not symbols and self._smart_watchlist:
+            items = self._smart_watchlist.get_watchlist()
+            symbols = [item.symbol for item in items[:10]]  # Top 10 watchlist items
+        
+        if not symbols:
+            symbols = ["NVDA", "TSLA", "AAPL", "AMD", "META"]  # Default fallback
+        
+        parts.append("=== TICKER-SPECIFIC NEWS (from Finnhub company-news) ===")
+        
+        news_found = False
+        for symbol in symbols[:8]:  # Limit to 8 to avoid rate limits
+            try:
+                # Finnhub company news endpoint
+                from_date = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+                to_date = datetime.now().strftime("%Y-%m-%d")
+                
+                resp = requests.get(
+                    "https://finnhub.io/api/v1/company-news",
+                    params={
+                        "symbol": symbol,
+                        "from": from_date,
+                        "to": to_date,
+                        "token": self._finnhub_key
+                    },
+                    timeout=5
+                )
+                
+                if resp.status_code == 200:
+                    news_items = resp.json()
+                    if news_items:
+                        news_found = True
+                        parts.append(f"\n**{symbol}**:")
+                        for item in news_items[:3]:  # Max 3 per ticker
+                            headline = item.get("headline", "")[:100]
+                            source = item.get("source", "")
+                            parts.append(f"  - [{source}] {headline}")
+            except Exception as e:
+                logger.debug(f"Error fetching news for {symbol}: {e}")
+                continue
+        
+        if not news_found:
+            parts.append("  No recent company-specific news found")
+        
+        return "\n".join(parts)
+
+    async def _gather_market_regime_context(self) -> str:
+        """Classify market regime based on SPY/QQQ behavior"""
+        parts = []
+        
+        try:
+            if not self._alpaca_service:
+                return ""
+            
+            # Get index data
+            indices = await self._alpaca_service.get_quotes_batch(["SPY", "QQQ", "IWM", "VIX"])
+            if not indices:
+                return ""
+            
+            spy = next((q for q in indices if q.get("symbol") == "SPY"), {})
+            qqq = next((q for q in indices if q.get("symbol") == "QQQ"), {})
+            iwm = next((q for q in indices if q.get("symbol") == "IWM"), {})
+            vix = next((q for q in indices if q.get("symbol") == "VIX"), {})
+            
+            spy_chg = spy.get("change_percent", 0)
+            qqq_chg = qqq.get("change_percent", 0)
+            iwm_chg = iwm.get("change_percent", 0)
+            vix_level = vix.get("price", 15)
+            
+            # Determine regime
+            regime = "UNKNOWN"
+            regime_detail = ""
+            strategy_recommendation = ""
+            
+            # Strong trend day
+            if spy_chg > 1.0 and qqq_chg > 1.0:
+                regime = "STRONG UPTREND DAY"
+                regime_detail = "Both SPY and QQQ up >1% - momentum is strong"
+                strategy_recommendation = "FAVOR: Breakouts, Gap & Go, Trend Continuation. AVOID: Fades, Mean Reversion"
+            elif spy_chg < -1.0 and qqq_chg < -1.0:
+                regime = "STRONG DOWNTREND DAY"
+                regime_detail = "Both SPY and QQQ down >1% - sellers in control"
+                strategy_recommendation = "FAVOR: Breakdowns, Short setups, Backside plays. AVOID: Long breakouts"
+            
+            # Rotation day (divergence)
+            elif abs(spy_chg - qqq_chg) > 1.0:
+                regime = "ROTATION DAY"
+                if qqq_chg > spy_chg:
+                    regime_detail = f"Tech leading (QQQ {qqq_chg:+.1f}% vs SPY {spy_chg:+.1f}%) - Growth > Value"
+                else:
+                    regime_detail = f"Value leading (SPY {spy_chg:+.1f}% vs QQQ {qqq_chg:+.1f}%) - Rotation out of tech"
+                strategy_recommendation = "FAVOR: Relative strength/weakness plays. Focus on sector leaders"
+            
+            # Small cap day
+            elif iwm_chg > spy_chg + 0.5:
+                regime = "SMALL CAP RISK-ON"
+                regime_detail = f"IWM outperforming (IWM {iwm_chg:+.1f}% vs SPY {spy_chg:+.1f}%)"
+                strategy_recommendation = "FAVOR: Small cap momentum, speculative names. Higher risk tolerance"
+            
+            # Choppy/Range day
+            elif abs(spy_chg) < 0.3 and abs(qqq_chg) < 0.3:
+                regime = "CHOPPY/RANGE DAY"
+                regime_detail = "Low directional conviction - indices flat"
+                strategy_recommendation = "FAVOR: Mean reversion (Rubber Band), range plays. REDUCE SIZE 50%. AVOID: Breakouts"
+            
+            # Moderate trend
+            elif spy_chg > 0.3:
+                regime = "MODERATE UPTREND"
+                regime_detail = "Grinding higher - steady buyers"
+                strategy_recommendation = "FAVOR: Pullback entries, Second Chance setups. Be patient with breakouts"
+            elif spy_chg < -0.3:
+                regime = "MODERATE DOWNTREND"
+                regime_detail = "Grinding lower - steady selling"
+                strategy_recommendation = "FAVOR: Short setups, failed bounces. Avoid catching falling knives"
+            else:
+                regime = "NEUTRAL/UNDECIDED"
+                regime_detail = "Market searching for direction"
+                strategy_recommendation = "WAIT for clearer signals. Focus on individual stock setups"
+            
+            # VIX assessment
+            vix_assessment = ""
+            if vix_level > 30:
+                vix_assessment = f"⚠️ HIGH VOLATILITY (VIX: {vix_level:.1f}) - Reduce position sizes, widen stops"
+            elif vix_level > 20:
+                vix_assessment = f"⚡ ELEVATED VOL (VIX: {vix_level:.1f}) - Good for scalping, respect stops"
+            elif vix_level < 13:
+                vix_assessment = f"😴 LOW VOL (VIX: {vix_level:.1f}) - Tight ranges expected, be patient"
+            else:
+                vix_assessment = f"✅ NORMAL VOL (VIX: {vix_level:.1f}) - Standard conditions"
+            
+            parts.append("=== MARKET REGIME CLASSIFICATION ===")
+            parts.append(f"**{regime}**")
+            parts.append(f"Detail: {regime_detail}")
+            parts.append(f"VIX: {vix_assessment}")
+            parts.append(f"\n📋 Strategy Recommendation: {strategy_recommendation}")
+            
+            # Add index summary
+            parts.append(f"\nIndex Snapshot: SPY {spy_chg:+.2f}% | QQQ {qqq_chg:+.2f}% | IWM {iwm_chg:+.2f}%")
+            
+        except Exception as e:
+            logger.warning(f"Error determining market regime: {e}")
+        
+        return "\n".join(parts) if parts else ""
+
+    async def _gather_sector_heatmap(self) -> str:
+        """Get sector ETF performance for rotation analysis"""
+        parts = []
+        
+        try:
+            if not self._alpaca_service:
+                return ""
+            
+            # Key sector ETFs
+            sector_etfs = ["XLK", "XLF", "XLE", "XLV", "XLI", "XLC", "XLY", "XLP", "XLU", "XLRE", "XLB"]
+            sector_names = {
+                "XLK": "Technology",
+                "XLF": "Financials", 
+                "XLE": "Energy",
+                "XLV": "Healthcare",
+                "XLI": "Industrials",
+                "XLC": "Comm Services",
+                "XLY": "Cons Discretionary",
+                "XLP": "Cons Staples",
+                "XLU": "Utilities",
+                "XLRE": "Real Estate",
+                "XLB": "Materials"
+            }
+            
+            quotes = await self._alpaca_service.get_quotes_batch(sector_etfs)
+            if not quotes:
+                return ""
+            
+            # Sort by performance
+            sorted_sectors = sorted(quotes, key=lambda x: x.get("change_percent", 0), reverse=True)
+            
+            parts.append("=== SECTOR PERFORMANCE (Leaders → Laggards) ===")
+            
+            for i, q in enumerate(sorted_sectors):
+                sym = q.get("symbol", "?")
+                chg = q.get("change_percent", 0)
+                name = sector_names.get(sym, sym)
+                
+                # Color code
+                if chg > 1.0:
+                    indicator = "🟢"
+                elif chg > 0:
+                    indicator = "🔵"
+                elif chg > -1.0:
+                    indicator = "🟡"
+                else:
+                    indicator = "🔴"
+                
+                # Mark top 3 and bottom 3
+                position = ""
+                if i < 3:
+                    position = " ⬆️ LEADING"
+                elif i >= len(sorted_sectors) - 3:
+                    position = " ⬇️ LAGGING"
+                
+                parts.append(f"  {indicator} {name} ({sym}): {chg:+.2f}%{position}")
+            
+        except Exception as e:
+            logger.warning(f"Error gathering sector data: {e}")
+        
+        return "\n".join(parts) if parts else ""
+
+    async def _gather_earnings_context(self) -> str:
+        """Flag watchlist stocks with upcoming earnings"""
+        parts = []
+        
+        try:
+            # Get watchlist symbols
+            watchlist_symbols = set()
+            if self._smart_watchlist:
+                items = self._smart_watchlist.get_watchlist()
+                watchlist_symbols = {item.symbol for item in items}
+            
+            if not watchlist_symbols:
+                watchlist_symbols = {"AAPL", "MSFT", "NVDA", "TSLA", "AMD", "META", "GOOGL", "AMZN"}
+            
+            # Fetch earnings calendar from Finnhub
+            if not self._finnhub_key:
+                return ""
+            
+            from_date = datetime.now().strftime("%Y-%m-%d")
+            to_date = (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d")
+            
+            resp = requests.get(
+                "https://finnhub.io/api/v1/calendar/earnings",
+                params={
+                    "from": from_date,
+                    "to": to_date,
+                    "token": self._finnhub_key
+                },
+                timeout=10
+            )
+            
+            if resp.status_code != 200:
+                return ""
+            
+            data = resp.json()
+            earnings_list = data.get("earningsCalendar", [])
+            
+            # Filter for watchlist stocks
+            watchlist_earnings = []
+            for e in earnings_list:
+                sym = e.get("symbol", "")
+                if sym in watchlist_symbols:
+                    watchlist_earnings.append({
+                        "symbol": sym,
+                        "date": e.get("date", ""),
+                        "hour": e.get("hour", ""),  # "bmo" or "amc"
+                        "eps_estimate": e.get("epsEstimate"),
+                        "revenue_estimate": e.get("revenueEstimate")
+                    })
+            
+            if watchlist_earnings:
+                parts.append("=== ⚠️ WATCHLIST EARNINGS ALERTS ===")
+                for e in watchlist_earnings[:10]:
+                    timing = "Before Open" if e["hour"] == "bmo" else "After Close" if e["hour"] == "amc" else ""
+                    eps_str = f"EPS Est: ${e['eps_estimate']:.2f}" if e['eps_estimate'] else ""
+                    parts.append(f"  📅 {e['symbol']}: {e['date']} {timing} {eps_str}")
+                    parts.append(f"     ⚠️ CAUTION: Avoid new positions or reduce size before earnings!")
+            else:
+                parts.append("=== EARNINGS ===\nNo watchlist stocks reporting in next 2 weeks")
+            
+        except Exception as e:
+            logger.warning(f"Error gathering earnings context: {e}")
+        
+        return "\n".join(parts) if parts else ""
+
+    async def _gather_in_play_technical_context(self) -> str:
+        """Get detailed technical context for IN PLAY stocks"""
+        parts = []
+        
+        try:
+            # Get stocks that are actually in play from scanner
+            in_play_symbols = []
+            
+            if self._scanner_service:
+                alerts = self._scanner_service.get_live_alerts()
+                if alerts:
+                    in_play_symbols = list(set(getattr(a, 'symbol', '') for a in alerts[:10]))
+            
+            # Also check watchlist for active movers
+            if self._smart_watchlist and self._alpaca_service:
+                items = self._smart_watchlist.get_watchlist()
+                wl_symbols = [item.symbol for item in items[:15]]
+                
+                if wl_symbols:
+                    quotes = await self._alpaca_service.get_quotes_batch(wl_symbols)
+                    for q in quotes or []:
+                        if abs(q.get("change_percent", 0)) >= 2.0:  # Moving 2%+
+                            if q["symbol"] not in in_play_symbols:
+                                in_play_symbols.append(q["symbol"])
+            
+            if not in_play_symbols:
+                return ""
+            
+            parts.append("=== IN-PLAY STOCKS - KEY LEVELS ===")
+            parts.append("(Stocks with significant movement today)")
+            
+            # Get technical data for in-play stocks
+            for symbol in in_play_symbols[:6]:  # Limit to 6 for context size
+                try:
+                    # Get bars data for technical levels
+                    bars = await self._alpaca_service.get_bars(symbol, timeframe="1Day", limit=2)
+                    if bars and len(bars) >= 1:
+                        today_bar = bars[-1] if bars else {}
+                        prev_bar = bars[-2] if len(bars) > 1 else {}
+                        
+                        high = today_bar.get("high", 0)
+                        low = today_bar.get("low", 0)
+                        close = today_bar.get("close", 0)
+                        open_price = today_bar.get("open", 0)
+                        volume = today_bar.get("volume", 0)
+                        prev_close = prev_bar.get("close", 0) if prev_bar else 0
+                        
+                        # Calculate key metrics
+                        gap_pct = ((open_price - prev_close) / prev_close * 100) if prev_close else 0
+                        range_pct = ((high - low) / low * 100) if low else 0
+                        
+                        # VWAP approximation (simplified: avg of H/L/C)
+                        vwap_approx = (high + low + close) / 3 if close else 0
+                        
+                        parts.append(f"\n**{symbol}**")
+                        parts.append(f"  Gap: {gap_pct:+.1f}% | Day Range: {range_pct:.1f}%")
+                        parts.append(f"  HOD: ${high:.2f} | LOD: ${low:.2f} | VWAP~: ${vwap_approx:.2f}")
+                        parts.append(f"  Volume: {volume:,}")
+                        
+                        # Add actionable levels
+                        if close > vwap_approx:
+                            parts.append(f"  📍 Above VWAP - bullish bias. Support at ${vwap_approx:.2f}")
+                        else:
+                            parts.append(f"  📍 Below VWAP - bearish bias. Resistance at ${vwap_approx:.2f}")
+                        
+                except Exception as e:
+                    logger.debug(f"Error getting technicals for {symbol}: {e}")
+                    continue
+            
+        except Exception as e:
+            logger.warning(f"Error gathering in-play technical context: {e}")
+        
         return "\n".join(parts) if parts else ""
 
 
