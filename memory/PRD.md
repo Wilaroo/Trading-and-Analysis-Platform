@@ -34,14 +34,19 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 ### Deep Keyword Triggers
 `should i buy`, `should i sell`, `analyze`, `evaluate`, `deep dive`, `strategy`, `backtest`, `risk`, `recommend`, `quality score`, `compare`, `portfolio`, `rebalance`, `hedge`, `options`, `earnings play`, `swing trade`, `position size`, `thesis`
 
-## Market Intel Data Sources (7 total)
-1. Finnhub News (100 live headlines, earnings & analyst actions filtered)
-2. Market Indices (SPY, QQQ, IWM, DIA, VIX)
-3. Watchlist Quotes (AAPL, MSFT, NVDA, TSLA, AMD, META, GOOGL, AMZN)
-4. Account/Positions (Alpaca)
-5. Trading Bot Status (exact state from service)
-6. Strategy Performance (exact from learning loop DB)
-7. Scanner Signals (live alerts from enhanced scanner)
+## Market Intel Data Sources (12 Enhanced - Feb 2026)
+1. **Market Regime Classification** - Day type (Trend/Chop/Rotation) with strategy implications
+2. **General News** - Finnhub 100 live headlines
+3. **Market Indices** - SPY, QQQ, IWM, DIA, VIX prices and changes
+4. **Smart Watchlist Status** - Actual watchlist symbols with IN-PLAY status
+5. **Ticker-Specific News** - Finnhub company-news for watchlist stocks
+6. **In-Play Technical Levels** - HOD, LOD, VWAP for active stocks
+7. **Sector Heatmap** - 11 sector ETFs (XLK, XLF, XLE, etc.) leaders/laggards
+8. **Earnings Calendar** - Watchlist stocks with upcoming earnings warnings
+9. **Account/Positions** - From Alpaca
+10. **Trading Bot Status** - Exact state from service
+11. **Strategy Performance** - Exact from learning loop DB
+12. **Scanner Signals** - Live alerts from enhanced scanner
 
 ## Enhanced Scanner (Feb 2026)
 **~1,083 symbols scanned via ETF-based wave scanning (SPY + QQQ + IWM) with 30+ SMB strategies**
