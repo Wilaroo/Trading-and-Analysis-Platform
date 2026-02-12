@@ -352,6 +352,14 @@ Format responses with clear sections. Cite specific rules from the playbook."""
         """
         research_type = intent["type"]
         query = intent["query"]
+        original_message = intent.get("original_message", "")
+        
+        # Validate ticker-based queries with context awareness
+        if research_type in ["company_info", "stock_analysis", "ticker", "sec", "analyst", "deep_dive"]:
+            from utils.ticker_validator import is_valid_ticker
+            if not is_valid_ticker(query.upper(), original_message):
+                logger.info(f"Skipping invalid/false-positive ticker: {query}")
+                return f"Note: '{query}' doesn't appear to be a valid stock ticker. If you meant to research a company, please use its stock symbol (e.g., AAPL for Apple, TGT for Target)."
         
         try:
             # ========== AGENT SKILLS (Optimized for credit efficiency) ==========
