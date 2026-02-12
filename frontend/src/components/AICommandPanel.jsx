@@ -50,7 +50,7 @@ const TickerLink = ({ symbol, onClick }) => (
 
 const TickerAwareText = ({ text, onTickerClick }) => {
   if (!text || typeof text !== 'string') return text;
-  const parts = text.split(/(\$?[A-Z]{1,5}(?=[\s,.:;!?)}\]"]|$))/g);
+  
   const knownTickers = new Set([
     'AAPL','MSFT','NVDA','TSLA','AMD','META','GOOGL','AMZN','GOOG','NFLX',
     'SPY','QQQ','IWM','DIA','VIX','SOFI','PLTR','RIVN','INTC','UBER',
@@ -61,14 +61,80 @@ const TickerAwareText = ({ text, onTickerClick }) => {
     'LLY','ABBV','BMY','GILD','AMGN','XOM','CVX','COP','SLB','OXY',
     'AVGO','QCOM','MU','AMAT','LRCX','KLAC','TXN','MRVL','ARM',
     'F','GM','TM','NIO','XPEV','LI','LCID','FSR','DIS','CMCSA','WBD',
-    'T','VZ','TMUS','KO','PEP','MCD','SBUX','NKE','LULU'
+    'T','VZ','TMUS','KO','PEP','MCD','SBUX','NKE','LULU','CROX','SIEGY'
   ]);
   
+  // Map company names to ticker symbols
+  const companyToTicker = {
+    'Apple': 'AAPL', 'Microsoft': 'MSFT', 'Nvidia': 'NVDA', 'NVIDIA': 'NVDA',
+    'Tesla': 'TSLA', 'Amazon': 'AMZN', 'Google': 'GOOGL', 'Alphabet': 'GOOGL',
+    'Meta': 'META', 'Facebook': 'META', 'Netflix': 'NFLX', 'Intel': 'INTC',
+    'AMD': 'AMD', 'Uber': 'UBER', 'Costco': 'COST', 'Walmart': 'WMT',
+    'Target': 'TGT', 'JPMorgan': 'JPM', 'Goldman': 'GS', 'Goldman Sachs': 'GS',
+    'Visa': 'V', 'Mastercard': 'MA', 'PayPal': 'PYPL', 'Shopify': 'SHOP',
+    'Salesforce': 'CRM', 'Oracle': 'ORCL', 'Adobe': 'ADBE', 'Snowflake': 'SNOW',
+    'Cloudflare': 'NET', 'CrowdStrike': 'CRWD', 'Datadog': 'DDOG', 'MongoDB': 'MDB',
+    'Coinbase': 'COIN', 'Robinhood': 'HOOD', 'Roblox': 'RBLX', 'Roku': 'ROKU',
+    'Snap': 'SNAP', 'Snapchat': 'SNAP', 'Pinterest': 'PINS', 'Spotify': 'SPOT',
+    'Boeing': 'BA', 'Lockheed': 'LMT', 'Lockheed Martin': 'LMT', 'GE': 'GE',
+    'General Electric': 'GE', 'Caterpillar': 'CAT', 'Deere': 'DE', 'John Deere': 'DE',
+    'Honeywell': 'HON', '3M': 'MMM', 'UnitedHealth': 'UNH', 'Johnson': 'JNJ',
+    'Pfizer': 'PFE', 'Moderna': 'MRNA', 'Lilly': 'LLY', 'Eli Lilly': 'LLY',
+    'AbbVie': 'ABBV', 'Bristol': 'BMY', 'Bristol-Myers': 'BMY', 'Gilead': 'GILD',
+    'Amgen': 'AMGN', 'Exxon': 'XOM', 'ExxonMobil': 'XOM', 'Chevron': 'CVX',
+    'ConocoPhillips': 'COP', 'Schlumberger': 'SLB', 'Occidental': 'OXY',
+    'Broadcom': 'AVGO', 'Qualcomm': 'QCOM', 'Micron': 'MU', 'Ford': 'F',
+    'GM': 'GM', 'General Motors': 'GM', 'Toyota': 'TM', 'NIO': 'NIO',
+    'Disney': 'DIS', 'Comcast': 'CMCSA', 'AT&T': 'T', 'Verizon': 'VZ',
+    'Coca-Cola': 'KO', 'Coke': 'KO', 'Pepsi': 'PEP', 'PepsiCo': 'PEP',
+    'McDonald': 'MCD', "McDonald's": 'MCD', 'Starbucks': 'SBUX', 'Nike': 'NKE',
+    'Lululemon': 'LULU', 'Palantir': 'PLTR', 'Rivian': 'RIVN', 'SoFi': 'SOFI',
+    'Crocs': 'CROX', "Crocs's": 'CROX', 'Siemens': 'SIEGY', "Siemens's": 'SIEGY',
+    'Square': 'SQ', 'Block': 'SQ', 'Arm': 'ARM', 'ARM': 'ARM', 'Marvell': 'MRVL'
+  };
+  
+  // First, replace company names with placeholders
+  let processedText = text;
+  const replacements = [];
+  
+  // Sort by length descending to match longer names first
+  const sortedCompanies = Object.keys(companyToTicker).sort((a, b) => b.length - a.length);
+  
+  for (const company of sortedCompanies) {
+    // Match company name with word boundaries (case insensitive)
+    const regex = new RegExp(`\\b${company.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:'s)?\\b`, 'gi');
+    processedText = processedText.replace(regex, (match) => {
+      const ticker = companyToTicker[company];
+      const placeholder = `__COMPANY_${replacements.length}__`;
+      replacements.push({ match, ticker });
+      return placeholder;
+    });
+  }
+  
+  // Now split by tickers
+  const parts = processedText.split(/(\$?[A-Z]{1,5}(?=[\s,.:;!?)}\]"]|$)|__COMPANY_\d+__)/g);
+  
   return parts.map((part, i) => {
+    // Check if it's a company placeholder
+    const companyMatch = part.match(/__COMPANY_(\d+)__/);
+    if (companyMatch) {
+      const idx = parseInt(companyMatch[1]);
+      const { match, ticker } = replacements[idx];
+      return (
+        <span key={i}>
+          <span className="text-zinc-300">{match}</span>
+          {' '}
+          <TickerLink symbol={ticker} onClick={onTickerClick} showBrackets />
+        </span>
+      );
+    }
+    
+    // Check if it's a ticker
     const clean = part.replace('$', '');
     if (knownTickers.has(clean) && part.length >= 2) {
       return <TickerLink key={i} symbol={clean} onClick={onTickerClick} />;
     }
+    
     return part;
   });
 };
