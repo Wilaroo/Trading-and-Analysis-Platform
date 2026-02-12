@@ -309,6 +309,36 @@ class AlpacaService:
             logger.error(f"Alpaca account error: {e}")
             return None
     
+    async def get_positions(self) -> List[Dict[str, Any]]:
+        """Get current open positions from Alpaca paper trading account"""
+        if not self._ensure_initialized():
+            return []
+        
+        try:
+            positions = _trading_client.get_all_positions()
+            
+            result = []
+            for pos in positions:
+                result.append({
+                    "symbol": pos.symbol,
+                    "qty": float(pos.qty),
+                    "avg_entry_price": float(pos.avg_entry_price),
+                    "market_value": float(pos.market_value),
+                    "cost_basis": float(pos.cost_basis),
+                    "unrealized_pl": float(pos.unrealized_pl),
+                    "unrealized_plpc": float(pos.unrealized_plpc),
+                    "current_price": float(pos.current_price),
+                    "side": pos.side.value if hasattr(pos.side, 'value') else str(pos.side),
+                    "change_today": float(pos.change_today) if pos.change_today else 0.0
+                })
+            
+            logger.debug(f"Retrieved {len(result)} positions from Alpaca")
+            return result
+            
+        except Exception as e:
+            logger.warning(f"Error fetching positions from Alpaca: {e}")
+            return []
+    
     def get_status(self) -> Dict[str, Any]:
         """Get service status"""
         initialized = self._ensure_initialized()
