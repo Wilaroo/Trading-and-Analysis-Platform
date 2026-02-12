@@ -341,12 +341,27 @@ class EnhancedBackgroundScanner:
         self._technical_service = None
         self._alpaca_service = None
         
-        # DB collections
+        # DB collections - always initialize to None first
+        self.alerts_collection = None
+        self.stats_collection = None
+        self.alert_outcomes_collection = None
+        
+        # Initialize collections if db is provided
         if db is not None:
-            self.alerts_collection = db["live_alerts"]
-            self.stats_collection = db["strategy_stats"]
-            self.alert_outcomes_collection = db["alert_outcomes"]
-            self._load_strategy_stats()
+            self._init_db_collections(db)
+    
+    def _init_db_collections(self, db):
+        """Initialize database collections"""
+        self.alerts_collection = db["live_alerts"]
+        self.stats_collection = db["strategy_stats"]
+        self.alert_outcomes_collection = db["alert_outcomes"]
+        self._load_strategy_stats()
+    
+    def set_db(self, db):
+        """Set database connection and initialize collections (used for late binding)"""
+        self.db = db
+        if db is not None:
+            self._init_db_collections(db)
     
     def _init_strategy_stats(self):
         """Initialize strategy stats for all setups"""
