@@ -351,49 +351,49 @@ const AICuratedWidget = ({ opportunities, onExecute, onPass, onTickerClick, onVi
   }
   
   return (
-    <div className="p-3 rounded-xl relative"
+    <div className="p-2 rounded-lg relative"
          style={{
            background: 'linear-gradient(135deg, rgba(21, 28, 36, 0.95) 0%, rgba(26, 35, 50, 0.9) 100%)',
            backdropFilter: 'blur(16px)',
            WebkitBackdropFilter: 'blur(16px)',
-           border: '1px solid rgba(0, 212, 255, 0.3)',
-           boxShadow: '0 4px 25px rgba(0, 0, 0, 0.3), 0 0 30px var(--primary-glow)'
+           border: '1px solid rgba(0, 212, 255, 0.25)',
+           boxShadow: '0 2px 15px rgba(0, 0, 0, 0.3), 0 0 20px var(--primary-glow)'
          }}>
       {/* Animated gradient border */}
       <div 
-        className="absolute inset-0 rounded-xl pointer-events-none"
+        className="absolute inset-0 rounded-lg pointer-events-none"
         style={{
-          padding: '1.5px',
+          padding: '1px',
           background: 'linear-gradient(var(--gradient-angle, 135deg), var(--primary-main), var(--secondary-main), var(--accent-main), var(--primary-main))',
           WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
           mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
           WebkitMaskComposite: 'xor',
           maskComposite: 'exclude',
-          opacity: 0.7,
+          opacity: 0.6,
           animation: 'gradient-rotate 6s linear infinite'
         }}
       />
       
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-lg flex items-center justify-center"
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-1.5">
+          <div className="w-5 h-5 rounded flex items-center justify-center"
                style={{
                  background: 'linear-gradient(135deg, var(--warning), var(--secondary-main))',
-                 boxShadow: '0 2px 15px var(--warning-glow)'
+                 boxShadow: '0 2px 8px var(--warning-glow)'
                }}>
-            <Star className="w-3 h-3 text-white" />
+            <Star className="w-2.5 h-2.5 text-white" />
           </div>
           <div>
-            <span className="text-sm font-semibold text-white">AI-Curated <span className="neon-text">Opportunities</span></span>
-            <span className="text-[10px] text-zinc-400 ml-2">Top {topOpportunities.length} setups</span>
+            <span className="text-xs font-semibold text-white">AI-Curated <span className="neon-text">Opportunities</span></span>
+            <span className="text-[9px] text-zinc-500 ml-1.5">Top {topOpportunities.length}</span>
           </div>
         </div>
-        <button onClick={onRefresh} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors">
-          <RefreshCw className={`w-3 h-3 text-zinc-400 ${loading ? 'animate-spin' : ''}`} />
+        <button onClick={onRefresh} className="p-1 hover:bg-white/10 rounded transition-colors">
+          <RefreshCw className={`w-2.5 h-2.5 text-zinc-400 ${loading ? 'animate-spin' : ''}`} />
         </button>
       </div>
       
-      <div className="space-y-3">
+      <div className="space-y-2">
         {topOpportunities.map((opp, idx) => (
           <CuratedOpportunityCard
             key={opp.timestamp || idx}
