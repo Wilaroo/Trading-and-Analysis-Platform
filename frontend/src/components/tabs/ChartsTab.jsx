@@ -139,8 +139,8 @@ const ChartsTab = ({
 
       {/* Chart Container */}
       <div 
-        className="bg-zinc-900/30 rounded-lg border border-zinc-800 overflow-hidden"
-        style={{ height: 'calc(100vh - 280px)', minHeight: '450px' }}
+        className="bg-zinc-900/30 rounded-lg border border-zinc-800 overflow-hidden flex-1"
+        style={{ height: 'calc(100vh - 280px)', minHeight: '500px' }}
       >
         {chartSymbol ? (
           <IBRealtimeChart 
@@ -148,6 +148,7 @@ const ChartsTab = ({
             isConnected={isConnected} 
             isBusy={isBusy}
             busyOperation={busyOperation}
+            height="100%"
           />
         ) : (
           <div className="h-full flex flex-col items-center justify-center text-zinc-500">
