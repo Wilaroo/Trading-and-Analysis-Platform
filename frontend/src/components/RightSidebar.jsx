@@ -12,48 +12,93 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   Star,
   Target,
   Clock,
   Plus,
-  X
+  X,
+  Sun,
+  Moon
 } from 'lucide-react';
 import MarketIntelPanel from './MarketIntelPanel';
 import api from '../utils/api';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
-// ===================== COMPACT EARNINGS WIDGET =====================
+// ===================== CALENDAR-STYLE EARNINGS WIDGET =====================
 const EarningsWidget = ({ onTickerSelect }) => {
-  const [earnings, setEarnings] = useState([]);
+  const [calendarData, setCalendarData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(true);
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [weekOffset, setWeekOffset] = useState(0);
 
   const fetchEarnings = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get('/api/earnings/today');
-      setEarnings(res.data.earnings || []);
+      // Calculate date range based on week offset
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() + (weekOffset * 7));
+      const endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + 13); // 2 weeks
+      
+      const res = await api.get('/api/earnings/calendar', {
+        params: {
+          start_date: startDate.toISOString().split('T')[0],
+          end_date: endDate.toISOString().split('T')[0]
+        }
+      });
+      setCalendarData(res.data);
+      
+      // Auto-select today if in range
+      const today = new Date().toISOString().split('T')[0];
+      const hasToday = res.data?.grouped_by_date?.some(g => g.date === today);
+      if (hasToday && !selectedDate) {
+        setSelectedDate(today);
+      }
     } catch (err) {
       console.error('Failed to load earnings:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [weekOffset, selectedDate]);
 
   useEffect(() => {
     fetchEarnings();
-    const interval = setInterval(fetchEarnings, 300000); // Refresh every 5 minutes
-    return () => clearInterval(interval);
   }, [fetchEarnings]);
 
-  const getRatingColor = (rating) => {
-    if (!rating) return 'text-zinc-500';
-    if (rating.startsWith('A')) return 'text-emerald-400';
-    if (rating.startsWith('B')) return 'text-cyan-400';
-    if (rating.startsWith('C')) return 'text-yellow-400';
-    return 'text-red-400';
+  const getWeekDays = () => {
+    const days = [];
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() + (weekOffset * 7));
+    
+    // Get Monday of the week
+    const day = startDate.getDay();
+    const diff = startDate.getDate() - day + (day === 0 ? -6 : 1);
+    startDate.setDate(diff);
+    
+    for (let i = 0; i < 5; i++) { // Mon-Fri
+      const d = new Date(startDate);
+      d.setDate(d.getDate() + i);
+      days.push({
+        date: d.toISOString().split('T')[0],
+        dayName: d.toLocaleDateString('en-US', { weekday: 'short' }),
+        dayNum: d.getDate(),
+        isToday: d.toISOString().split('T')[0] === new Date().toISOString().split('T')[0]
+      });
+    }
+    return days;
   };
+
+  const getEarningsForDate = (date) => {
+    if (!calendarData?.grouped_by_date) return null;
+    return calendarData.grouped_by_date.find(g => g.date === date);
+  };
+
+  const selectedDayData = selectedDate ? getEarningsForDate(selectedDate) : null;
+  const weekDays = getWeekDays();
 
   return (
     <div className="bg-zinc-900/60 rounded-lg border border-zinc-700/50" data-testid="earnings-widget">
@@ -63,51 +108,129 @@ const EarningsWidget = ({ onTickerSelect }) => {
       >
         <div className="flex items-center gap-2">
           <Calendar className="w-4 h-4 text-amber-400" />
-          <span className="text-sm font-medium text-zinc-200">Earnings Today</span>
-          <span className="text-xs text-zinc-500">({earnings.length})</span>
+          <span className="text-sm font-medium text-zinc-200">Earnings Calendar</span>
+          <span className="text-xs text-zinc-500">({calendarData?.total_count || 0})</span>
         </div>
         {expanded ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
       </button>
       
       {expanded && (
-        <div className="px-3 pb-3 space-y-1.5 max-h-48 overflow-y-auto">
+        <div className="px-3 pb-3">
           {loading ? (
             <div className="flex items-center justify-center py-4">
               <RefreshCw className="w-4 h-4 text-zinc-500 animate-spin" />
             </div>
-          ) : earnings.length === 0 ? (
-            <p className="text-xs text-zinc-500 text-center py-2">No earnings today</p>
           ) : (
-            earnings.slice(0, 8).map((item, idx) => (
-              <div
-                key={idx}
-                onClick={() => onTickerSelect?.(item.symbol)}
-                className="flex items-center justify-between p-2 bg-zinc-800/40 rounded hover:bg-zinc-800/70 cursor-pointer transition-colors"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-white">{item.symbol}</span>
-                  <span className={`text-[10px] px-1 py-0.5 rounded ${
-                    item.timing === 'BMO' ? 'bg-amber-500/20 text-amber-400' : 'bg-violet-500/20 text-violet-400'
-                  }`}>
-                    {item.timing || 'TBD'}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {item.catalyst_score && (
-                    <span className={`text-[10px] font-medium ${getRatingColor(item.rating)}`}>
-                      {item.rating}
-                    </span>
-                  )}
-                  <Clock className="w-3 h-3 text-zinc-500" />
-                </div>
+            <>
+              {/* Week Navigation */}
+              <div className="flex items-center justify-between mb-2">
+                <button 
+                  onClick={() => setWeekOffset(prev => prev - 1)}
+                  className="p-1 hover:bg-zinc-800 rounded"
+                >
+                  <ChevronLeft className="w-4 h-4 text-zinc-400" />
+                </button>
+                <span className="text-xs text-zinc-400">
+                  {weekOffset === 0 ? 'This Week' : weekOffset > 0 ? `+${weekOffset} weeks` : `${weekOffset} weeks`}
+                </span>
+                <button 
+                  onClick={() => setWeekOffset(prev => prev + 1)}
+                  className="p-1 hover:bg-zinc-800 rounded"
+                >
+                  <ChevronRight className="w-4 h-4 text-zinc-400" />
+                </button>
               </div>
-            ))
+
+              {/* Calendar Days */}
+              <div className="grid grid-cols-5 gap-1 mb-3">
+                {weekDays.map((day) => {
+                  const dayData = getEarningsForDate(day.date);
+                  const hasEarnings = dayData && dayData.count > 0;
+                  const isSelected = selectedDate === day.date;
+                  
+                  return (
+                    <button
+                      key={day.date}
+                      onClick={() => setSelectedDate(day.date)}
+                      className={`p-1.5 rounded text-center transition-all ${
+                        isSelected 
+                          ? 'bg-amber-500/20 border border-amber-500/50' 
+                          : day.isToday 
+                            ? 'bg-cyan-500/10 border border-cyan-500/30'
+                            : 'bg-zinc-800/50 border border-transparent hover:border-zinc-600'
+                      }`}
+                    >
+                      <div className="text-[9px] text-zinc-500">{day.dayName}</div>
+                      <div className={`text-sm font-bold ${isSelected ? 'text-amber-400' : day.isToday ? 'text-cyan-400' : 'text-white'}`}>
+                        {day.dayNum}
+                      </div>
+                      {hasEarnings && (
+                        <div className="flex justify-center gap-0.5 mt-0.5">
+                          <div className="w-1.5 h-1.5 rounded-full bg-amber-500" title={`${dayData.count} earnings`} />
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Selected Day Earnings */}
+              {selectedDate && (
+                <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                  {!selectedDayData || selectedDayData.count === 0 ? (
+                    <p className="text-xs text-zinc-500 text-center py-2">No earnings on this day</p>
+                  ) : (
+                    <>
+                      {/* Before Open */}
+                      {selectedDayData.before_open?.length > 0 && (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1 text-[10px] text-amber-400">
+                            <Sun className="w-3 h-3" />
+                            Before Open
+                          </div>
+                          {selectedDayData.before_open.map((item, idx) => (
+                            <EarningsItem key={idx} item={item} onTickerSelect={onTickerSelect} />
+                          ))}
+                        </div>
+                      )}
+                      {/* After Close */}
+                      {selectedDayData.after_close?.length > 0 && (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1 text-[10px] text-violet-400">
+                            <Moon className="w-3 h-3" />
+                            After Close
+                          </div>
+                          {selectedDayData.after_close.map((item, idx) => (
+                            <EarningsItem key={idx} item={item} onTickerSelect={onTickerSelect} />
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
     </div>
   );
 };
+
+const EarningsItem = ({ item, onTickerSelect }) => (
+  <div
+    onClick={() => onTickerSelect?.(item.symbol)}
+    className="flex items-center justify-between p-1.5 bg-zinc-800/40 rounded hover:bg-zinc-800/70 cursor-pointer transition-colors"
+  >
+    <div className="flex items-center gap-2">
+      <span className="text-xs font-bold text-white">{item.symbol}</span>
+      <span className="text-[10px] text-zinc-500 truncate max-w-[80px]">{item.company_name}</span>
+    </div>
+    <div className="flex items-center gap-1">
+      <span className="text-[10px] text-zinc-400">{item.expected_move?.percent?.toFixed(1)}%</span>
+    </div>
+  </div>
+);
 
 // ===================== SMART WATCHLIST WIDGET =====================
 const WatchlistWidget = ({ onTickerSelect }) => {
