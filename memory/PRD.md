@@ -248,16 +248,26 @@ Triggers AI Coaching Notification
    - `GET /api/research/skills/stock-analysis/{ticker}?analysis_type=quick|news|comprehensive`
    - `GET /api/research/skills/market-context`
    - `GET /api/research/stats` (cache monitoring)
+   - `GET /api/research/budget` (credit budget status)
+   - `POST /api/research/budget/limit` (update monthly limit)
 
-5. **AI Assistant Integration**:
+5. **Credit Budget Tracking**:
+   - Persistent monthly tracking in MongoDB (`tavily_credit_usage` collection)
+   - Warning thresholds: 50% (low), 75% (medium), 90% (high), 95% (critical)
+   - Auto-blocks searches when limit exceeded
+   - Projects usage and warns if on track to exceed
+   - Resets automatically on month rollover
+
+6. **AI Assistant Integration**:
    - Updated intent detection to route to Agent Skills
    - New research types: `company_info`, `stock_analysis`, `market_context`
    - Rich formatting for Agent Skill results
 
 ### Files Modified
-- `backend/services/web_research_service.py` - Added IntelligentCache, Agent Skills
+- `backend/services/web_research_service.py` - Added IntelligentCache, Agent Skills, CreditBudgetTracker
 - `backend/services/ai_assistant_service.py` - Updated research intent detection & formatting
-- `backend/routers/research.py` - New Agent Skills endpoints
+- `backend/routers/research.py` - New Agent Skills and budget endpoints
+- `backend/server.py` - Initialize web research service with DB on startup
 
 ---
 
