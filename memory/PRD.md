@@ -204,8 +204,10 @@ Triggers AI Coaching Notification
 - ✅ AI Trading Assistant Phase 2 (AI-curated opportunities widget)
 - ✅ Consolidated Stats Header (removed QuickStatsRow)
 - ✅ Tavily Agent Skills with intelligent caching
+- ✅ Charts Tab Integration (TradingView embedded, click-to-view from widgets)
 
 ### P1 - Next Up
+- Remove old redundant ChartsPage.js and its route (now superseded by ChartsTab)
 - Portfolio awareness: Proactive suggestions ("Scale out of AMD?", "Heavy tech exposure")
 - Audio alerts for high-priority setups
 - Focus Mode: Hide all sections except chat + top opportunity when actively trading
