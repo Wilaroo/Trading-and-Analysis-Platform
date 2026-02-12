@@ -20,7 +20,7 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 | **Ollama** | Free AI for chat, summaries, market intel | Via ngrok tunnel |
 
 ## Startup Modes
-- **Cloud Dev**: Ollama + ngrok → `https://broker-fix-1.preview.emergentagent.com`
+- **Cloud Dev**: Ollama + ngrok → `https://ai-chart-connect.preview.emergentagent.com`
 - **Full Local**: All services on PC → `http://localhost:3000`
 - See `/documents/STARTUP_GUIDE.md` for detailed instructions
 

@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://broker-fix-1.preview.emergentagent.com
+https://ai-chart-connect.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://broker-fix-1.preview.emergentagent.com
+https://ai-chart-connect.preview.emergentagent.com
 ```
