@@ -484,19 +484,15 @@ const HeaderBar = ({
               )}
             </div>
             
-            {/* Connect/Disconnect Button */}
-            {connectionChecked && (
+            {/* Connect/Disconnect Button - Shows "Reconnect" since auto-connect is enabled */}
+            {connectionChecked && !isConnected && (
               <button
-                onClick={isConnected ? handleDisconnectFromIB : handleConnectToIB}
+                onClick={handleConnectToIB}
                 disabled={connecting}
-                className={`px-3 py-1.5 rounded font-medium text-xs transition-colors ${
-                  isConnected 
-                    ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30' 
-                    : 'bg-cyan-500 text-black hover:bg-cyan-400'
-                } disabled:opacity-50`}
-                data-testid="connect-btn"
+                className="px-3 py-1.5 rounded font-medium text-xs transition-colors bg-cyan-500 text-black hover:bg-cyan-400 disabled:opacity-50"
+                data-testid="reconnect-btn"
               >
-                {connecting ? '...' : isConnected ? 'Disconnect' : 'Connect'}
+                {connecting ? 'Connecting...' : 'Reconnect'}
               </button>
             )}
           </div>
