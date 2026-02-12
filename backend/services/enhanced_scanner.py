@@ -2244,7 +2244,7 @@ class EnhancedBackgroundScanner:
             logger.debug(f"Could not add to smart watchlist: {e}")
         
         # Persist to database
-        if self.db:
+        if self.db is not None:
             try:
                 await self._save_alert_to_db(alert)
             except Exception as e:
