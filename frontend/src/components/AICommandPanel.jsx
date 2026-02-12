@@ -517,18 +517,18 @@ const StatsHeader = ({ status, account, marketContext, positions, onToggle, onMo
         
         {/* Right: Mode Selector */}
         <div className="flex items-center gap-1">
-          {['confirmation', 'auto', 'paused'].map(m => {
-            const icons = { confirmation: Shield, auto: Zap, paused: Pause };
+          {['confirmation', 'autonomous', 'paused'].map(m => {
+            const icons = { confirmation: Shield, autonomous: Zap, paused: Pause };
             const Icon = icons[m];
             const isActive = mode === m;
-            const labels = { confirmation: 'Confirm', auto: 'Auto', paused: 'Paused' };
+            const labels = { confirmation: 'Confirm', autonomous: 'Auto', paused: 'Paused' };
             return (
               <button
                 key={m}
                 onClick={() => onModeChange(m)}
                 className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
                   isActive
-                    ? m === 'auto' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                    ? m === 'autonomous' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
                       : m === 'confirmation' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
                       : 'bg-zinc-600 text-zinc-300 border border-zinc-500'
                     : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
