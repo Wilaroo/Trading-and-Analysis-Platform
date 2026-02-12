@@ -1188,6 +1188,92 @@ const AICommandPanel = ({
     onTickerSelect?.({ symbol, quote: {}, fromSearch: true });
   }, [onTickerSelect]);
 
+  // ===================== POSITION QUICK ACTIONS =====================
+  
+  const handleClosePosition = useCallback(async (position) => {
+    const { symbol, qty, quantity, side } = position;
+    const shares = Math.abs(qty || quantity || 0);
+    const direction = (qty || quantity || 0) > 0 ? 'long' : 'short';
+    
+    // Show confirmation dialog for close
+    setConfirmDialog({
+      isOpen: true,
+      trade: {
+        symbol,
+        direction: direction === 'long' ? 'short' : 'long', // Opposite to close
+        setup_type: 'position_close',
+        shares,
+        halfSize: false,
+        alert_data: {
+          trigger_price: position.current_price,
+          stop_loss: null,
+          target: null,
+        },
+        isClose: true
+      }
+    });
+  }, []);
+  
+  const handleAddToPosition = useCallback(async (position) => {
+    const { symbol, qty, quantity } = position;
+    const direction = (qty || quantity || 0) > 0 ? 'long' : 'short';
+    
+    // Open trade modal for adding to position
+    setConfirmDialog({
+      isOpen: true,
+      trade: {
+        symbol,
+        direction,
+        setup_type: 'position_add',
+        halfSize: true, // Default to half size for adds
+        alert_data: {
+          trigger_price: position.current_price,
+          stop_loss: position.avg_entry_price * (direction === 'long' ? 0.95 : 1.05), // 5% stop
+          target: position.current_price * (direction === 'long' ? 1.05 : 0.95), // 5% target
+        },
+        isAdd: true
+      }
+    });
+  }, []);
+  
+  const handleSetPriceAlert = useCallback(async (position) => {
+    const { symbol, current_price, avg_entry_price } = position;
+    
+    try {
+      // Set a price alert at 5% above and below current price
+      const abovePrice = current_price * 1.05;
+      const belowPrice = current_price * 0.95;
+      
+      await api.post('/api/ib/alerts/price/set', {
+        symbol,
+        target_price: abovePrice,
+        direction: 'above'
+      });
+      
+      await api.post('/api/ib/alerts/price/set', {
+        symbol,
+        target_price: belowPrice,
+        direction: 'below'
+      });
+      
+      toast.success(`Price alerts set for ${symbol}`, {
+        description: `Alert above $${abovePrice.toFixed(2)} and below $${belowPrice.toFixed(2)}`
+      });
+      
+      // Add confirmation message to chat
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `🔔 **Price Alerts Set for ${symbol}**\n\n` +
+          `• Alert when price goes **above** $${abovePrice.toFixed(2)} (+5%)\n` +
+          `• Alert when price goes **below** $${belowPrice.toFixed(2)} (-5%)\n\n` +
+          `Current price: $${current_price.toFixed(2)} | Avg cost: $${avg_entry_price.toFixed(2)}`,
+        timestamp: new Date().toISOString()
+      }]);
+    } catch (err) {
+      toast.error('Failed to set price alert');
+    }
+  }, []);
+
   // ===================== SYNC WEBSOCKET DATA =====================
   // Use WebSocket-pushed data when available, with fallback to API fetch
   
