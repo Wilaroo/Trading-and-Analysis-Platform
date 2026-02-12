@@ -399,9 +399,8 @@ const HeaderBar = ({
                 <span className="text-xs text-zinc-400 font-medium">AI Credits</span>
                 <div className="w-24 h-2 rounded-full overflow-hidden"
                      style={{
-                       background: 'rgba(0, 0, 0, 0.5)',
-                       border: '1px solid rgba(255, 255, 255, 0.08)',
-                       boxShadow: 'inset 0 1px 3px rgba(0, 0, 0, 0.3)'
+                       background: 'rgba(0, 0, 0, 0.08)',
+                       border: '1px solid rgba(0, 0, 0, 0.05)'
                      }}>
                   <div 
                     className={`h-full rounded-full transition-all ${
