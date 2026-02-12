@@ -381,7 +381,12 @@ const HeaderBar = ({
               }`} />
               <div className="flex items-center gap-2">
                 <span className="text-xs text-zinc-400 font-medium">AI Credits</span>
-                <div className="w-20 h-1.5 bg-black/50 rounded-full overflow-hidden border border-white/5">
+                <div className="w-24 h-2 rounded-full overflow-hidden"
+                     style={{
+                       background: 'rgba(0, 0, 0, 0.5)',
+                       border: '1px solid rgba(255, 255, 255, 0.08)',
+                       boxShadow: 'inset 0 1px 3px rgba(0, 0, 0, 0.3)'
+                     }}>
                   <div 
                     className={`h-full rounded-full transition-all ${
                       creditConfig.color === 'red' ? 'bg-red-500 shadow-[0_0_10px_rgba(255,46,46,0.5)]' :
