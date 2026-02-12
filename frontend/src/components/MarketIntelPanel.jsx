@@ -133,10 +133,17 @@ const MarketIntelPanel = ({ onTickerSelect }) => {
 
   if (loading) {
     return (
-      <div className="bg-[#0A0A0A] border border-white/10 rounded-lg p-4" data-testid="market-intel-panel">
+      <div className="rounded-2xl p-4" 
+           style={{
+             background: 'rgba(13, 13, 26, 0.5)',
+             backdropFilter: 'blur(20px)',
+             WebkitBackdropFilter: 'blur(20px)',
+             border: '1px solid rgba(255, 255, 255, 0.1)'
+           }}
+           data-testid="market-intel-panel">
         <div className="flex items-center gap-2 mb-4">
-          <Sparkles className="w-5 h-5 text-cyan-400" />
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-white">Market Intelligence</h3>
+          <Sparkles className="w-5 h-5 text-cyan-400 drop-shadow-[0_0_8px_rgba(0,229,255,0.6)]" />
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-white">Market <span className="text-cyan-400">Intelligence</span></h3>
         </div>
         <div className="flex items-center justify-center py-8">
           <Loader2 className="w-5 h-5 text-cyan-400 animate-spin" />
@@ -146,15 +153,28 @@ const MarketIntelPanel = ({ onTickerSelect }) => {
   }
 
   return (
-    <div className="glass-card overflow-hidden" data-testid="market-intel-panel">
+    <div className="rounded-2xl overflow-hidden" 
+         style={{
+           background: 'rgba(13, 13, 26, 0.5)',
+           backdropFilter: 'blur(20px)',
+           WebkitBackdropFilter: 'blur(20px)',
+           border: '1px solid rgba(255, 255, 255, 0.1)',
+           boxShadow: '0 8px 32px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.05)'
+         }}
+         data-testid="market-intel-panel">
       {/* Header */}
-      <div className="p-3 border-b border-white/5">
+      <div className="p-3" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-cyan-400/10 border border-cyan-400/30 flex items-center justify-center">
-              <Sparkles className="w-4 h-4 text-cyan-400" />
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+                 style={{
+                   background: 'rgba(0, 229, 255, 0.15)',
+                   border: '1px solid rgba(0, 229, 255, 0.4)',
+                   boxShadow: '0 0 15px rgba(0, 229, 255, 0.25)'
+                 }}>
+              <Sparkles className="w-4 h-4 text-cyan-400 drop-shadow-[0_0_6px_rgba(0,229,255,0.6)]" />
             </div>
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-white">Market Intelligence</h3>
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-white">Market <span className="text-cyan-400 drop-shadow-[0_0_8px_rgba(0,229,255,0.4)]">Intelligence</span></h3>
           </div>
           <button
             onClick={() => setExpanded(!expanded)}
