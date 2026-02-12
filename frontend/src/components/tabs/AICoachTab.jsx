@@ -14,6 +14,7 @@ const AICoachTab = ({
   account,
   marketContext,
   positions,
+  viewChart,
 }) => {
   return (
     <div className="grid lg:grid-cols-12 gap-4" data-testid="ai-coach-tab-content">
@@ -22,6 +23,7 @@ const AICoachTab = ({
         <div className="h-[calc(100vh-200px)] min-h-[650px]">
           <AICommandPanel
             onTickerSelect={(ticker) => setSelectedTicker(ticker)}
+            onViewChart={viewChart}
             watchlist={watchlist}
             alerts={[...enhancedAlerts, ...alerts]}
             opportunities={opportunities}
@@ -38,7 +40,10 @@ const AICoachTab = ({
 
       {/* RIGHT - Market Intel + Scanner */}
       <div className="lg:col-span-4">
-        <RightSidebar onTickerSelect={(ticker) => setSelectedTicker(ticker)} />
+        <RightSidebar 
+          onTickerSelect={(ticker) => setSelectedTicker(ticker)} 
+          onViewChart={viewChart}
+        />
       </div>
     </div>
   );
