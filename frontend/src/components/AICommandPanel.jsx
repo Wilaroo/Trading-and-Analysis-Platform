@@ -1514,46 +1514,18 @@ const AICommandPanel = ({
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="mt-2 space-y-1.5 max-h-[200px] overflow-y-auto">
+                  <div className="mt-2 space-y-1.5 max-h-[250px] overflow-y-auto">
                     {positions && positions.length > 0 ? (
                       positions.map((pos, idx) => (
-                        <div 
+                        <PositionCard
                           key={pos.symbol || idx}
-                          className="flex items-center justify-between p-2 rounded-lg hover:bg-cyan-500/10 cursor-pointer transition-colors border border-white/5 hover:border-cyan-500/30"
-                          style={{ background: 'rgba(21, 28, 36, 0.6)' }}
-                          onClick={() => handleTickerClick(pos.symbol)}
-                          data-testid={`position-${pos.symbol}`}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold ${
-                              (pos.qty || pos.quantity || 0) > 0 
-                                ? 'bg-emerald-500/20 text-emerald-400' 
-                                : 'bg-red-500/20 text-red-400'
-                            }`}>
-                              {(pos.qty || pos.quantity || 0) > 0 ? 'L' : 'S'}
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-bold text-white text-xs">{pos.symbol}</span>
-                                <ArrowUpRight className="w-2.5 h-2.5 text-cyan-400" />
-                              </div>
-                              <span className="text-[9px] text-zinc-500">
-                                {Math.abs(pos.qty || pos.quantity || 0)} shares @ ${(pos.avg_entry_price || pos.avg_cost || 0).toFixed(2)}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <p className={`text-xs font-bold font-mono ${
-                              (pos.unrealized_pnl || pos.unrealized_pl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'
-                            }`}>
-                              {(pos.unrealized_pnl || pos.unrealized_pl || 0) >= 0 ? '+' : ''}
-                              ${(pos.unrealized_pnl || pos.unrealized_pl || 0).toFixed(2)}
-                            </p>
-                            <p className="text-[9px] text-zinc-500">
-                              {((pos.unrealized_plpc || pos.unrealized_pnl_percent || 0) * 100).toFixed(2)}%
-                            </p>
-                          </div>
-                        </div>
+                          position={pos}
+                          onTickerClick={handleTickerClick}
+                          onViewChart={onViewChart}
+                          onClosePosition={handleClosePosition}
+                          onAddPosition={handleAddToPosition}
+                          onSetAlert={handleSetPriceAlert}
+                        />
                       ))
                     ) : (
                       <div className="text-center py-4">
