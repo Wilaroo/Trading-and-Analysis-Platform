@@ -1,20 +1,41 @@
 """
-Web Research Service - Tavily Search + Custom Financial Scrapers
+Web Research Service - Tavily Search + Custom Financial Scrapers + Agent Skills
 Provides internet access and research capabilities for the AI assistant
+
+Features:
+- Tavily web search with intelligent caching (minimize credit usage)
+- Agent Skills: Specialized tools for company info, stock analysis
+- Custom scrapers for SEC EDGAR, Yahoo Finance, Finviz
+- Smart caching with different TTLs based on data type
 """
 
 import os
 import asyncio
 import aiohttp
 import logging
-from typing import Optional, List, Dict, Any
+import time
+from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field, asdict
 from bs4 import BeautifulSoup
 import re
 import json
+import hashlib
 
 logger = logging.getLogger(__name__)
+
+# ===================== CACHE CONFIGURATION =====================
+
+# Different TTLs based on data freshness requirements
+CACHE_TTL = {
+    "search": 300,           # 5 min - general web search
+    "news": 180,             # 3 min - news is more time-sensitive
+    "company_info": 3600,    # 1 hour - company fundamentals don't change often
+    "stock_analysis": 600,   # 10 min - analysis/sentiment
+    "sec_filings": 86400,    # 24 hours - SEC filings are static
+    "analyst_ratings": 3600, # 1 hour - ratings don't change often
+    "deep_dive": 900,        # 15 min - comprehensive research
+}
 
 # ===================== DATA MODELS =====================
 
