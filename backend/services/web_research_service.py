@@ -934,7 +934,7 @@ class WebResearchService:
         # Check cache (15 min TTL)
         cached = _global_cache.get("deep_dive", "market_context")
         if cached:
-            logger.info(f"🎯 Agent Skill cache HIT: get_market_context()")
+            logger.info("🎯 Agent Skill cache HIT: get_market_context()")
             return cached
         
         result = {
