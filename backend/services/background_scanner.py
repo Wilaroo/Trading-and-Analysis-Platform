@@ -437,7 +437,7 @@ class BackgroundScannerService:
     
     async def _save_alert_to_db(self, alert: LiveAlert):
         """Save alert to MongoDB"""
-        if self.alerts_collection:
+        if self.alerts_collection is not None:
             await asyncio.to_thread(
                 self.alerts_collection.update_one,
                 {"id": alert.id},
