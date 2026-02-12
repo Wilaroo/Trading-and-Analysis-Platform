@@ -84,11 +84,13 @@ export const useWebSocket = (onMessage) => {
       };
 
       ws.onclose = (event) => {
-        console.log('WebSocket disconnected, code:', event.code, 'reason:', event.reason);
+        console.log('WebSocket disconnected, code:', event.code, 'reason:', event.reason, 'wasClean:', event.wasClean);
         setIsConnected(false);
         stopHeartbeat();
-        // Reconnect after 3 seconds
-        reconnectTimeoutRef.current = setTimeout(connect, 3000);
+        // Reconnect after 3 seconds (only if not a clean close from cleanup)
+        if (event.code !== 1000) {
+          reconnectTimeoutRef.current = setTimeout(connect, 3000);
+        }
       };
 
       ws.onerror = (error) => {
