@@ -1294,8 +1294,8 @@ class TradingBotService:
         
         return adjustment
     
-    def _generate_explanation(self, alert: Dict, shares: int, entry: float, stop: float, targets: List[float]) -> TradeExplanation:
-        """Generate detailed explanation for the trade"""
+    def _generate_explanation(self, alert: Dict, shares: int, entry: float, stop: float, targets: List[float], intelligence: Dict = None) -> TradeExplanation:
+        """Generate detailed explanation for the trade with intelligence data"""
         symbol = alert.get('symbol', '')
         setup_type = alert.get('setup_type', '')
         direction = alert.get('direction', 'long')
@@ -1304,6 +1304,50 @@ class TradingBotService:
         total_risk = shares * risk_per_share
         target_1_profit = abs(targets[0] - entry) * shares if targets else 0
         
+        # Build technical reasons from alert + intelligence
+        technical_reasons = alert.get('technical_reasons', [
+            f"Setup type: {setup_type}",
+            f"Score: {alert.get('score', 'N/A')}/100",
+            f"Trigger probability: {alert.get('trigger_probability', 0)*100:.0f}%"
+        ])
+        
+        # Add intelligence-based technical factors
+        if intelligence and intelligence.get('technicals'):
+            tech = intelligence['technicals']
+            if tech.get('trend'):
+                technical_reasons.append(f"Trend: {tech['trend']}")
+            if tech.get('momentum'):
+                technical_reasons.append(f"RSI: {tech['momentum']:.0f}")
+            if tech.get('volume_trend'):
+                technical_reasons.append(f"Volume: {tech['volume_trend']}")
+        
+        # Build fundamental reasons from intelligence
+        fundamental_reasons = alert.get('fundamental_reasons', [])
+        if intelligence and intelligence.get('news'):
+            news = intelligence['news']
+            if news.get('sentiment'):
+                fundamental_reasons.append(f"News sentiment: {news['sentiment']}")
+            if news.get('key_topics'):
+                fundamental_reasons.append(f"Key topics: {', '.join(news['key_topics'])}")
+            if news.get('summary'):
+                fundamental_reasons.append(f"Latest: {news['summary'][:100]}...")
+        
+        # Combine warnings from alert and intelligence
+        all_warnings = alert.get('warnings', []).copy()
+        if intelligence:
+            all_warnings.extend(intelligence.get('warnings', []))
+        
+        # Build confidence factors
+        confidence_factors = [
+            f"Quality score: {alert.get('score', 0)}/100",
+            f"Trigger probability: {alert.get('trigger_probability', 0)*100:.0f}%",
+            f"Risk/Reward: {abs(targets[0] - entry) / risk_per_share:.2f}:1" if targets and risk_per_share > 0 else "N/A"
+        ]
+        
+        # Add intelligence enhancements as confidence factors
+        if intelligence and intelligence.get('enhancements'):
+            confidence_factors.extend(intelligence['enhancements'])
+        
         return TradeExplanation(
             summary=f"{setup_type.replace('_', ' ').title()} setup identified on {symbol}. "
                     f"{'Buying' if direction == 'long' else 'Shorting'} {shares} shares at ${entry:.2f} "
@@ -1311,13 +1355,9 @@ class TradingBotService:
             
             setup_identified=alert.get('headline', f"{setup_type} pattern detected"),
             
-            technical_reasons=alert.get('technical_reasons', [
-                f"Setup type: {setup_type}",
-                f"Score: {alert.get('score', 'N/A')}/100",
-                f"Trigger probability: {alert.get('trigger_probability', 0)*100:.0f}%"
-            ]),
+            technical_reasons=technical_reasons,
             
-            fundamental_reasons=alert.get('fundamental_reasons', []),
+            fundamental_reasons=fundamental_reasons,
             
             risk_analysis={
                 "risk_per_share": f"${risk_per_share:.2f}",
@@ -1339,13 +1379,9 @@ class TradingBotService:
                                  f"÷ risk per share ${risk_per_share:.2f} = {int(self.risk_params.max_risk_per_trade/risk_per_share)} max shares. "
                                  f"Capped at {self.risk_params.max_position_pct}% of capital.",
             
-            confidence_factors=[
-                f"Quality score: {alert.get('score', 0)}/100",
-                f"Trigger probability: {alert.get('trigger_probability', 0)*100:.0f}%",
-                f"Risk/Reward: {abs(targets[0] - entry) / risk_per_share:.2f}:1" if targets and risk_per_share > 0 else "N/A"
-            ],
+            confidence_factors=confidence_factors,
             
-            warnings=alert.get('warnings', [])
+            warnings=all_warnings
         )
     
     # ==================== TRADE EXECUTION ====================
