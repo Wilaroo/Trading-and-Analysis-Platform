@@ -324,7 +324,7 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-background bg-gradient-radial" onClick={initializeAudio}>
+    <div className="min-h-screen bg-[#030308] bg-gradient-mesh" onClick={initializeAudio}>
       {/* Toast notifications */}
       <Toaster 
         position="top-right" 
