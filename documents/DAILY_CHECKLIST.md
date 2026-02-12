@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://disconnect-debug.preview.emergentagent.com
+https://glass-effect-rebuild.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://disconnect-debug.preview.emergentagent.com
+https://glass-effect-rebuild.preview.emergentagent.com
 ```
