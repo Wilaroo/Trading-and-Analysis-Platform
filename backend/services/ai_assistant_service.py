@@ -1553,6 +1553,47 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
             except Exception as e:
                 logger.warning(f"Error fetching trade history: {e}")
         
+        # 5b. Get CURRENT POSITIONS context (always include if positions exist)
+        position_keywords = ['position', 'positions', 'holding', 'portfolio', 'what do i have',
+                           'my trades', 'what am i in', 'open position', 'unrealized', 'p&l']
+        wants_position_info = any(keyword in user_message.lower() for keyword in position_keywords)
+        
+        # Always try to include positions context for trading relevance
+        try:
+            if self.alpaca_service:
+                positions = await self.alpaca_service.get_positions()
+                if positions:
+                    pos_lines = ["\n=== YOUR CURRENT POSITIONS ==="]
+                    total_unrealized = 0
+                    total_market_value = 0
+                    
+                    for pos in positions:
+                        symbol = pos.get('symbol', 'UNK')
+                        qty = float(pos.get('qty', 0))
+                        avg_price = float(pos.get('avg_entry_price', 0))
+                        current_price = float(pos.get('current_price', 0))
+                        market_value = float(pos.get('market_value', 0))
+                        unrealized = float(pos.get('unrealized_pnl', 0) or pos.get('unrealized_pl', 0) or 0)
+                        unrealized_pct = float(pos.get('unrealized_plpc', 0) or pos.get('unrealized_pnl_percent', 0) or 0) * 100
+                        side = 'LONG' if qty > 0 else 'SHORT'
+                        
+                        total_unrealized += unrealized
+                        total_market_value += abs(market_value)
+                        
+                        pos_lines.append(
+                            f"- **{symbol}** ({side}): {abs(qty):.0f} shares @ ${avg_price:.2f} avg | "
+                            f"Current: ${current_price:.2f} | P&L: ${unrealized:+.2f} ({unrealized_pct:+.2f}%)"
+                        )
+                    
+                    pos_lines.append(f"\n📊 TOTAL: {len(positions)} positions | Market Value: ${total_market_value:,.2f} | Unrealized P&L: ${total_unrealized:+.2f}")
+                    context_parts.append("\n".join(pos_lines))
+                elif wants_position_info:
+                    context_parts.append("\n=== YOUR CURRENT POSITIONS ===\nNo open positions currently.")
+        except Exception as e:
+            logger.warning(f"Error fetching positions context: {e}")
+            if wants_position_info:
+                context_parts.append("\n=== POSITIONS ===\nUnable to fetch positions - check broker connection.")
+        
         # 6. Knowledge base stats
         try:
             stats = self.knowledge_service.get_stats()
