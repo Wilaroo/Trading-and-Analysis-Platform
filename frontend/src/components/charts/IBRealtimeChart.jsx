@@ -95,12 +95,12 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation, height = 
         });
 
         const candleSeries = chart.addCandlestickSeries({
-          upColor: '#00FF94',
-          downColor: '#FF2E2E',
-          borderUpColor: '#00FF94',
-          borderDownColor: '#FF2E2E',
-          wickUpColor: '#00FF94',
-          wickDownColor: '#FF2E2E',
+          upColor: '#FFFF00',  // Bright yellow
+          downColor: '#FF00FF',  // Bright magenta
+          borderUpColor: '#FFFF00',
+          borderDownColor: '#FF00FF',
+          wickUpColor: '#FFFF00',
+          wickDownColor: '#FF00FF',
           priceScaleId: 'right',
         });
         candleSeriesRef.current = candleSeries;
