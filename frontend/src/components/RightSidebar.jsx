@@ -452,7 +452,7 @@ const WatchlistWidget = ({ onTickerSelect, onViewChart }) => {
 };
 
 // ===================== COMPACT SCANNER RESULTS WIDGET =====================
-const ScannerResultsWidget = ({ onTickerSelect, onViewChart }) => {
+const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsStatus = null }) => {
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(true);
@@ -474,11 +474,27 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart }) => {
     }
   }, []);
 
+  // Sync from WebSocket data when available
   useEffect(() => {
-    fetchAlerts();
-    const interval = setInterval(fetchAlerts, 30000); // Refresh every 30 seconds
-    return () => clearInterval(interval);
-  }, [fetchAlerts]);
+    if (wsAlerts && wsAlerts.length >= 0) {
+      setAlerts(wsAlerts);
+      setLoading(false);
+    }
+  }, [wsAlerts]);
+  
+  useEffect(() => {
+    if (wsStatus) {
+      setStats(wsStatus);
+    }
+  }, [wsStatus]);
+
+  // Initial fetch only (WebSocket handles updates)
+  useEffect(() => {
+    if (!wsAlerts || wsAlerts.length === 0) {
+      fetchAlerts();
+    }
+    // No polling - WebSocket handles real-time updates
+  }, []); // Only on mount
 
   const getPriorityColor = (priority) => {
     switch (priority) {
