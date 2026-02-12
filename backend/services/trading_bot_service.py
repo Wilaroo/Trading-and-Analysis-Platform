@@ -1131,15 +1131,38 @@ class TradingBotService:
     async def _get_technical_intelligence(self, symbol: str) -> Optional[Dict]:
         """Get real-time technical analysis"""
         try:
-            analysis = await self.technical_service.get_realtime_analysis(symbol)
+            snapshot = await self.technical_service.get_technical_snapshot(symbol)
+            
+            if not snapshot:
+                return None
+            
+            # Determine volume trend based on RVOL
+            volume_trend = "normal"
+            if snapshot.rvol >= 2.0:
+                volume_trend = "high"
+            elif snapshot.rvol < 0.5:
+                volume_trend = "low"
+            
+            # Generate signals based on technical conditions
+            signals = []
+            if snapshot.above_vwap and snapshot.above_ema9:
+                signals.append("bullish_structure")
+            if snapshot.rsi_14 > 70:
+                signals.append("overbought")
+            elif snapshot.rsi_14 < 30:
+                signals.append("oversold")
+            if snapshot.extended_from_ema9:
+                signals.append("extended")
+            if snapshot.holding_gap:
+                signals.append("gap_hold")
             
             return {
-                "trend": analysis.get("trend", {}).get("direction", "neutral"),
-                "momentum": analysis.get("momentum", {}).get("rsi", 50),
-                "support_levels": analysis.get("support_resistance", {}).get("supports", []),
-                "resistance_levels": analysis.get("support_resistance", {}).get("resistances", []),
-                "volume_trend": analysis.get("volume", {}).get("trend", "normal"),
-                "signals": analysis.get("signals", [])
+                "trend": snapshot.trend or "neutral",
+                "momentum": snapshot.rsi_14 or 50,
+                "support_levels": [snapshot.support] if snapshot.support else [],
+                "resistance_levels": [snapshot.resistance] if snapshot.resistance else [],
+                "volume_trend": volume_trend,
+                "signals": signals
             }
             
         except Exception as e:
@@ -1149,16 +1172,44 @@ class TradingBotService:
     async def _get_quality_intelligence(self, symbol: str) -> Optional[Dict]:
         """Get quality score and metrics"""
         try:
-            score_data = await self.quality_service.score_opportunity({
-                "symbol": symbol,
-                "setup_type": "general"
-            })
+            # Get quality metrics first
+            metrics = await self.quality_service.get_quality_metrics(symbol)
+            
+            if not metrics or metrics.data_quality == "low":
+                return None
+            
+            # Calculate the quality score
+            score = self.quality_service.calculate_quality_score(metrics)
+            
+            # Build strengths and weaknesses based on scores
+            strengths = []
+            weaknesses = []
+            
+            if score.accruals_score and score.accruals_score > 60:
+                strengths.append("Low earnings manipulation risk")
+            elif score.accruals_score and score.accruals_score < 40:
+                weaknesses.append("High accruals concern")
+                
+            if score.roe_score and score.roe_score > 60:
+                strengths.append("Strong return on equity")
+            elif score.roe_score and score.roe_score < 40:
+                weaknesses.append("Weak profitability")
+                
+            if score.cfa_score and score.cfa_score > 60:
+                strengths.append("Good cash flow generation")
+            elif score.cfa_score and score.cfa_score < 40:
+                weaknesses.append("Poor cash conversion")
+                
+            if score.da_score and score.da_score > 60:
+                strengths.append("Conservative leverage")
+            elif score.da_score and score.da_score < 40:
+                weaknesses.append("High debt levels")
             
             return {
-                "quality_score": score_data.get("score", 50),
-                "grade": score_data.get("grade", "C"),
-                "strengths": score_data.get("strengths", []),
-                "weaknesses": score_data.get("weaknesses", [])
+                "quality_score": score.percentile_rank or 50,
+                "grade": score.grade or "C",
+                "strengths": strengths,
+                "weaknesses": weaknesses
             }
             
         except Exception as e:
