@@ -351,30 +351,45 @@ const AICuratedWidget = ({ opportunities, onExecute, onPass, onTickerClick, onVi
   }
   
   return (
-    <div className="p-3 rounded-xl"
+    <div className="p-3 rounded-xl relative"
          style={{
-           background: 'linear-gradient(135deg, rgba(13, 13, 26, 0.6) 0%, rgba(20, 20, 40, 0.4) 100%)',
+           background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.6) 100%)',
            backdropFilter: 'blur(16px)',
            WebkitBackdropFilter: 'blur(16px)',
-           border: '1px solid rgba(0, 229, 255, 0.25)',
-           boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2), 0 0 30px rgba(0, 229, 255, 0.1)'
+           border: '1px solid rgba(0, 0, 0, 0.06)',
+           boxShadow: '0 4px 20px rgba(0, 0, 0, 0.06)'
          }}>
+      {/* Animated gradient border */}
+      <div 
+        className="absolute inset-0 rounded-xl pointer-events-none"
+        style={{
+          padding: '1.5px',
+          background: 'linear-gradient(var(--gradient-angle, 135deg), var(--primary-main), var(--secondary-main), var(--accent-main), var(--primary-main))',
+          WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+          mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+          WebkitMaskComposite: 'xor',
+          maskComposite: 'exclude',
+          opacity: 0.5,
+          animation: 'gradient-rotate 6s linear infinite'
+        }}
+      />
+      
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded-lg flex items-center justify-center"
                style={{
-                 background: 'linear-gradient(135deg, rgba(255, 178, 0, 0.8), rgba(0, 229, 255, 0.8))',
-                 boxShadow: '0 0 15px rgba(255, 178, 0, 0.4)'
+                 background: 'linear-gradient(135deg, var(--warning), var(--primary-main))',
+                 boxShadow: '0 2px 10px var(--warning-glow)'
                }}>
-            <Star className="w-3 h-3 text-black" />
+            <Star className="w-3 h-3 text-white" />
           </div>
           <div>
-            <span className="text-sm font-semibold text-white">AI-Curated <span className="text-cyan-400">Opportunities</span></span>
-            <span className="text-[10px] text-zinc-500 ml-2">Top {topOpportunities.length} setups</span>
+            <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>AI-Curated <span style={{ color: 'var(--primary-dark)' }}>Opportunities</span></span>
+            <span className="text-[10px] ml-2" style={{ color: 'var(--text-muted)' }}>Top {topOpportunities.length} setups</span>
           </div>
         </div>
-        <button onClick={onRefresh} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors">
-          <RefreshCw className={`w-3 h-3 text-zinc-400 ${loading ? 'animate-spin' : ''}`} />
+        <button onClick={onRefresh} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
+          <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} style={{ color: 'var(--text-secondary)' }} />
         </button>
       </div>
       
