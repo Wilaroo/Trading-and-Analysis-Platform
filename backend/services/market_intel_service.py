@@ -254,16 +254,12 @@ class MarketIntelService:
                         chg = q.get("change_percent", 0)
                         vol = q.get("volume", 0)
                         
-                        # Calculate basic in-play indicators
-                        rvol = 1.0  # Default
-                        gap_pct = chg  # Use change as proxy for gap
-                        
                         # Get watchlist item info
                         wl_item = watchlist_items.get(sym)
                         source = wl_item.source if wl_item else "default"
                         strategies = wl_item.strategies_matched[:2] if wl_item and wl_item.strategies_matched else []
                         
-                        # Basic in-play check (RVOL proxy: volume > 0 and decent change)
+                        # Basic in-play check: significant movement or high volume
                         is_active = abs(chg) >= 1.0 or vol > 500000
                         
                         stock_info = {
