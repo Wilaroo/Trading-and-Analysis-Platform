@@ -31,6 +31,7 @@ const CommandCenterPage = ({
         connecting={data.connecting}
         handleConnectToIB={data.handleConnectToIB}
         handleDisconnectFromIB={data.handleDisconnectFromIB}
+        creditBudget={data.creditBudget}
       />
 
       {/* Tab Navigation — 2 tabs */}
