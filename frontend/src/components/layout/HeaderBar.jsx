@@ -397,7 +397,7 @@ const HeaderBar = ({
               }`} />
               <div className="flex items-center gap-2">
                 <span className="text-xs text-zinc-400 font-medium">AI Credits</span>
-                <div className="w-24 h-2 rounded-full overflow-hidden"
+                <div className="w-20 h-1.5 rounded-full overflow-hidden"
                      style={{
                        background: 'rgba(0, 0, 0, 0.4)',
                        border: '1px solid rgba(255, 255, 255, 0.1)'
