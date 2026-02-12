@@ -328,16 +328,28 @@ const HeaderBar = ({
 
   return (
     <>
-      <div className="flex items-center justify-between glass-panel p-4 rounded-xl">
+      <div className="flex items-center justify-between p-4 rounded-2xl"
+           style={{
+             background: 'rgba(13, 13, 26, 0.5)',
+             backdropFilter: 'blur(24px)',
+             WebkitBackdropFilter: 'blur(24px)',
+             border: '1px solid rgba(255, 255, 255, 0.1)',
+             boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 0 0 1px rgba(0, 229, 255, 0.05)'
+           }}>
         <div className="flex items-center gap-5">
           {/* Logo and Title */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-cyan-400/10 border border-cyan-400/30 flex items-center justify-center neon-glow">
-              <Target className="w-5 h-5 text-cyan-400" />
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+                 style={{
+                   background: 'rgba(0, 229, 255, 0.15)',
+                   border: '1px solid rgba(0, 229, 255, 0.4)',
+                   boxShadow: '0 0 25px rgba(0, 229, 255, 0.35), inset 0 0 15px rgba(0, 229, 255, 0.15)'
+                 }}>
+              <Target className="w-5 h-5 text-cyan-400 drop-shadow-[0_0_8px_rgba(0,229,255,0.8)]" />
             </div>
             <div>
               <h1 className="text-xl font-bold text-white tracking-tight">
-                Command Center
+                Command <span className="text-cyan-400 drop-shadow-[0_0_10px_rgba(0,229,255,0.5)]">Center</span>
               </h1>
               <p className="text-zinc-500 text-xs tracking-wide">Real-time trading intelligence hub</p>
             </div>
