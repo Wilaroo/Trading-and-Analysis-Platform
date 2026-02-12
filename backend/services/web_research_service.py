@@ -370,12 +370,13 @@ _global_cache = IntelligentCache()
 # ===================== TAVILY SERVICE =====================
 
 class TavilySearchService:
-    """Tavily API integration for web search with intelligent caching"""
+    """Tavily API integration for web search with intelligent caching and credit budget tracking"""
     
-    def __init__(self):
+    def __init__(self, db=None):
         self.api_key = os.environ.get("TAVILY_API_KEY", "")
         self._client = None
         self._credit_used = 0  # Track credits used this session
+        self.db = db
         
     def _get_client(self):
         """Lazy initialization of Tavily client"""
@@ -402,9 +403,10 @@ class TavilySearchService:
         exclude_domains: Optional[List[str]] = None,
         include_answer: bool = True,
         data_type: str = "search",  # Used for cache TTL
+        enforce_budget: bool = True,  # Check budget before searching
     ) -> ResearchResponse:
         """
-        Execute search with Tavily API - uses intelligent caching
+        Execute search with Tavily API - uses intelligent caching and credit budget
         
         Args:
             query: Search query
@@ -415,6 +417,7 @@ class TavilySearchService:
             exclude_domains: Exclude these domains
             include_answer: Include Tavily's AI answer
             data_type: Cache category for TTL selection
+            enforce_budget: If True, check credit budget before searching
         """
         start_time = time.time()
         
@@ -422,8 +425,25 @@ class TavilySearchService:
         cache_key_args = (query, search_depth, topic, max_results)
         cached = _global_cache.get(data_type, *cache_key_args)
         if cached:
-            logger.info(f"🎯 Cache HIT for '{query[:50]}...' (saved 1 credit)")
+            logger.info(f"🎯 Cache HIT for '{query[:50]}...' (saved credits)")
             return cached
+        
+        # Check credit budget before making API call
+        credits_needed = 2 if search_depth == "advanced" else 1
+        credit_tracker = get_credit_tracker(self.db)
+        
+        if enforce_budget:
+            can_proceed, warning = credit_tracker.can_use_credits(credits_needed)
+            if not can_proceed:
+                logger.warning(f"🚫 Credit budget exceeded: {warning}")
+                return ResearchResponse(
+                    query=query,
+                    results=[],
+                    answer=f"⚠️ Monthly Tavily credit limit reached. {warning}. Try using cached data or 'quick' analysis mode.",
+                    source_type="tavily_budget_exceeded"
+                )
+            if warning:
+                logger.info(warning)
         
         client = self._get_client()
         if not client:
@@ -456,8 +476,9 @@ class TavilySearchService:
                 lambda: client.search(**search_params)
             )
             
-            # Track credit usage (basic=1, advanced=2)
-            self._credit_used += 2 if search_depth == "advanced" else 1
+            # Track credit usage with the budget tracker
+            self._credit_used += credits_needed
+            budget_warning = credit_tracker.record_usage(credits_needed, query, data_type)
             
             response_time = (time.time() - start_time) * 1000
             
@@ -473,10 +494,15 @@ class TavilySearchService:
                     score=item.get("score", 0.0)
                 ))
             
+            # Build answer with optional budget warning
+            answer = response.get("answer")
+            if budget_warning and budget_warning.get("level") in ["high", "critical"]:
+                answer = f"{answer}\n\n⚠️ {budget_warning['message']}" if answer else budget_warning['message']
+            
             research_response = ResearchResponse(
                 query=query,
                 results=results,
-                answer=response.get("answer"),
+                answer=answer,
                 response_time_ms=response_time,
                 source_type="tavily"
             )
@@ -484,7 +510,8 @@ class TavilySearchService:
             # Store in intelligent cache
             _global_cache.set(data_type, research_response, *cache_key_args)
             
-            logger.info(f"✅ Tavily search: '{query[:50]}...' ({len(results)} results, {response_time:.0f}ms, ~{self._credit_used} credits used)")
+            budget_status = credit_tracker.get_status()
+            logger.info(f"✅ Tavily search: '{query[:50]}...' ({len(results)} results, {response_time:.0f}ms, {budget_status['credits_used']}/{budget_status['monthly_limit']} monthly credits)")
             return research_response
             
         except Exception as e:
