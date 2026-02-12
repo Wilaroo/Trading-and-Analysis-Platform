@@ -674,6 +674,365 @@ class WebResearchService:
         
         query = f"breaking financial news {' '.join(topics[:3])}"
         return await self.tavily.search_news(query, max_results=10)
+    
+    # ===================== AGENT SKILLS =====================
+    # Specialized tools that combine Tavily with free data sources
+    # These are designed to minimize credit usage while maximizing value
+    
+    async def get_company_info(self, ticker: str) -> Dict[str, Any]:
+        """
+        AGENT SKILL: Get comprehensive company information
+        
+        Combines multiple FREE sources first, then uses Tavily only if needed.
+        This minimizes credit usage while providing rich context.
+        
+        Returns:
+            Company profile, fundamentals, recent news, and analyst sentiment
+        """
+        ticker = ticker.upper()
+        start_time = time.time()
+        
+        # Check cache first (1 hour TTL for company info)
+        cached = _global_cache.get("company_info", ticker)
+        if cached:
+            logger.info(f"🎯 Agent Skill cache HIT: get_company_info({ticker})")
+            return cached
+        
+        result = {
+            "ticker": ticker,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "profile": {},
+            "fundamentals": {},
+            "recent_news": [],
+            "analyst_sentiment": {},
+            "sources_used": [],
+            "tavily_credits_used": 0
+        }
+        
+        try:
+            # Step 1: Get fundamentals from Finnhub (FREE)
+            try:
+                from services.fundamental_data_service import get_fundamental_data_service
+                fund_service = get_fundamental_data_service()
+                fundamentals = await fund_service.get_fundamentals(ticker)
+                
+                if fundamentals and fundamentals.get("available"):
+                    result["fundamentals"] = fundamentals.get("data", {})
+                    result["profile"] = {
+                        "name": fundamentals.get("data", {}).get("name"),
+                        "industry": fundamentals.get("data", {}).get("industry"),
+                        "sector": fundamentals.get("data", {}).get("sector"),
+                        "market_cap": fundamentals.get("data", {}).get("market_cap")
+                    }
+                    result["sources_used"].append("finnhub_fundamentals")
+            except Exception as e:
+                logger.warning(f"Finnhub fundamentals failed: {e}")
+            
+            # Step 2: Get news from Finnhub (FREE)
+            try:
+                from services.news_service import get_news_service
+                news_service = get_news_service()
+                news = await news_service.get_stock_news(ticker, limit=5)
+                
+                if news:
+                    result["recent_news"] = [
+                        {"headline": n.get("headline"), "source": n.get("source"), "datetime": n.get("datetime")}
+                        for n in news[:5]
+                    ]
+                    result["sources_used"].append("finnhub_news")
+            except Exception as e:
+                logger.warning(f"Finnhub news failed: {e}")
+            
+            # Step 3: Get Finviz overview (FREE scraper)
+            try:
+                finviz_data = await self.finviz.get_stock_overview(ticker)
+                if finviz_data and finviz_data.results:
+                    for r in finviz_data.results:
+                        if "Key Metrics" in r.title:
+                            # Parse the metrics string
+                            metrics = {}
+                            for pair in r.content.split(" | "):
+                                if ":" in pair:
+                                    k, v = pair.split(":", 1)
+                                    metrics[k.strip()] = v.strip()
+                            result["fundamentals"].update(metrics)
+                    result["sources_used"].append("finviz")
+            except Exception as e:
+                logger.warning(f"Finviz scrape failed: {e}")
+            
+            # Step 4: Only use Tavily if we're missing critical data
+            needs_tavily = (
+                not result["profile"].get("name") or 
+                not result["recent_news"] or
+                len(result["fundamentals"]) < 3
+            )
+            
+            if needs_tavily:
+                # Single targeted search to fill gaps
+                tavily_result = await self.tavily.search(
+                    f"{ticker} company profile business overview",
+                    max_results=3,
+                    search_depth="basic",  # Use basic to save credits
+                    data_type="company_info"
+                )
+                result["tavily_credits_used"] = 1
+                
+                if tavily_result.answer:
+                    result["profile"]["description"] = tavily_result.answer[:500]
+                    result["sources_used"].append("tavily")
+            
+            # Step 5: Get analyst sentiment from Yahoo (FREE scraper)
+            try:
+                analyst_data = await self.yahoo.get_analyst_ratings(ticker)
+                if analyst_data and analyst_data.results:
+                    result["analyst_sentiment"]["summary"] = analyst_data.results[0].content[:300] if analyst_data.results[0].content else "N/A"
+                    result["sources_used"].append("yahoo_analyst")
+            except Exception as e:
+                logger.warning(f"Yahoo analyst scrape failed: {e}")
+            
+        except Exception as e:
+            logger.error(f"get_company_info failed for {ticker}: {e}")
+            result["error"] = str(e)
+        
+        result["response_time_ms"] = (time.time() - start_time) * 1000
+        
+        # Cache the result (1 hour TTL)
+        _global_cache.set("company_info", result, ticker)
+        
+        logger.info(f"✅ Agent Skill: get_company_info({ticker}) - {len(result['sources_used'])} sources, {result['tavily_credits_used']} Tavily credits")
+        return result
+    
+    async def get_stock_analysis(self, ticker: str, analysis_type: str = "comprehensive") -> Dict[str, Any]:
+        """
+        AGENT SKILL: Get stock analysis and trading context
+        
+        Analysis types:
+        - "quick": Just price context and basic news (0 credits)
+        - "news": News-focused analysis (1 credit)
+        - "comprehensive": Full analysis with all sources (1-2 credits)
+        
+        Returns:
+            Price action context, news sentiment, technical signals, and trading recommendations
+        """
+        ticker = ticker.upper()
+        start_time = time.time()
+        
+        # Check cache (10 min TTL for analysis)
+        cache_key = f"{ticker}:{analysis_type}"
+        cached = _global_cache.get("stock_analysis", cache_key)
+        if cached:
+            logger.info(f"🎯 Agent Skill cache HIT: get_stock_analysis({ticker}, {analysis_type})")
+            return cached
+        
+        result = {
+            "ticker": ticker,
+            "analysis_type": analysis_type,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "price_context": {},
+            "news_sentiment": {},
+            "technical_signals": {},
+            "trading_context": {},
+            "sources_used": [],
+            "tavily_credits_used": 0
+        }
+        
+        try:
+            # Step 1: Get real-time technicals (FREE - from our service)
+            try:
+                from services.realtime_technical_service import get_technical_service
+                tech_service = get_technical_service()
+                snapshot = await tech_service.get_technical_snapshot(ticker)
+                
+                if snapshot:
+                    result["price_context"] = {
+                        "current_price": snapshot.get("price"),
+                        "change_percent": snapshot.get("change_percent"),
+                        "volume": snapshot.get("volume"),
+                        "rvol": snapshot.get("rvol"),
+                        "vwap": snapshot.get("vwap"),
+                        "day_high": snapshot.get("high"),
+                        "day_low": snapshot.get("low")
+                    }
+                    result["technical_signals"] = {
+                        "rsi": snapshot.get("rsi"),
+                        "macd_signal": snapshot.get("macd_signal"),
+                        "above_vwap": snapshot.get("above_vwap"),
+                        "distance_from_hod": snapshot.get("distance_from_hod")
+                    }
+                    result["sources_used"].append("realtime_technicals")
+            except Exception as e:
+                logger.warning(f"Technical service failed: {e}")
+            
+            # Step 2: Get scanner context (FREE - from our enhanced scanner)
+            try:
+                from services.enhanced_scanner import get_enhanced_scanner
+                scanner = get_enhanced_scanner()
+                alerts = scanner.get_alerts_for_symbol(ticker)
+                
+                if alerts:
+                    result["trading_context"]["active_setups"] = [
+                        {"setup": a.setup_type, "direction": a.direction, "priority": a.priority.value}
+                        for a in alerts[:3]
+                    ]
+                    result["sources_used"].append("scanner")
+            except Exception as e:
+                logger.debug(f"Scanner context not available: {e}")
+            
+            # Step 3: Get news based on analysis type
+            if analysis_type in ["news", "comprehensive"]:
+                # Use Tavily for fresh news (1 credit)
+                news_result = await self.tavily.search_financial(
+                    f"{ticker} stock news today latest",
+                    max_results=5,
+                    search_depth="basic" if analysis_type == "news" else "advanced"
+                )
+                result["tavily_credits_used"] += 1 if analysis_type == "news" else 2
+                
+                if news_result.answer:
+                    result["news_sentiment"]["summary"] = news_result.answer
+                
+                result["news_sentiment"]["headlines"] = [
+                    {"title": r.title, "source": r.source}
+                    for r in news_result.results[:5]
+                ]
+                result["sources_used"].append("tavily_news")
+            
+            # Step 4: For comprehensive, add analyst context
+            if analysis_type == "comprehensive":
+                try:
+                    analyst_data = await self.yahoo.get_analyst_ratings(ticker)
+                    if analyst_data and analyst_data.results:
+                        result["trading_context"]["analyst_view"] = analyst_data.results[0].content[:200]
+                        result["sources_used"].append("yahoo_analyst")
+                except Exception as e:
+                    logger.debug(f"Analyst data not available: {e}")
+        
+        except Exception as e:
+            logger.error(f"get_stock_analysis failed for {ticker}: {e}")
+            result["error"] = str(e)
+        
+        result["response_time_ms"] = (time.time() - start_time) * 1000
+        
+        # Cache the result
+        _global_cache.set("stock_analysis", result, cache_key)
+        
+        logger.info(f"✅ Agent Skill: get_stock_analysis({ticker}, {analysis_type}) - {len(result['sources_used'])} sources, {result['tavily_credits_used']} credits")
+        return result
+    
+    async def get_market_context(self) -> Dict[str, Any]:
+        """
+        AGENT SKILL: Get current market context and sentiment
+        
+        This is designed to be called once at the start of a trading session.
+        Uses aggressive caching (15 min) to minimize credit usage.
+        
+        Returns:
+            Market indices, sector performance, major news themes, and trading environment
+        """
+        start_time = time.time()
+        
+        # Check cache (15 min TTL)
+        cached = _global_cache.get("deep_dive", "market_context")
+        if cached:
+            logger.info(f"🎯 Agent Skill cache HIT: get_market_context()")
+            return cached
+        
+        result = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "indices": {},
+            "sector_leaders": [],
+            "news_themes": [],
+            "market_regime": "unknown",
+            "trading_environment": {},
+            "sources_used": [],
+            "tavily_credits_used": 0
+        }
+        
+        try:
+            # Step 1: Get index data from Alpaca (FREE)
+            try:
+                from services.alpaca_service import get_alpaca_service
+                alpaca = get_alpaca_service()
+                
+                for symbol in ["SPY", "QQQ", "IWM", "DIA"]:
+                    quote = await alpaca.get_quote(symbol)
+                    if quote:
+                        result["indices"][symbol] = {
+                            "price": quote.get("price"),
+                            "change_percent": quote.get("change_percent")
+                        }
+                result["sources_used"].append("alpaca_indices")
+            except Exception as e:
+                logger.warning(f"Alpaca indices failed: {e}")
+            
+            # Step 2: Get market news summary (1 credit)
+            try:
+                news_result = await self.tavily.search(
+                    "stock market today major news Fed earnings economy",
+                    max_results=5,
+                    search_depth="basic",
+                    data_type="news"
+                )
+                result["tavily_credits_used"] = 1
+                
+                if news_result.answer:
+                    result["news_themes"].append(news_result.answer[:300])
+                
+                for r in news_result.results[:3]:
+                    result["news_themes"].append(r.title)
+                
+                result["sources_used"].append("tavily_market_news")
+            except Exception as e:
+                logger.warning(f"Market news search failed: {e}")
+            
+            # Step 3: Determine market regime from index data
+            spy_change = result["indices"].get("SPY", {}).get("change_percent", 0)
+            qqq_change = result["indices"].get("QQQ", {}).get("change_percent", 0)
+            
+            if spy_change > 1 and qqq_change > 1:
+                result["market_regime"] = "strong_uptrend"
+            elif spy_change < -1 and qqq_change < -1:
+                result["market_regime"] = "strong_downtrend"
+            elif abs(spy_change) < 0.3 and abs(qqq_change) < 0.3:
+                result["market_regime"] = "range_bound"
+            else:
+                result["market_regime"] = "mixed"
+            
+            result["trading_environment"] = {
+                "bias": "bullish" if spy_change > 0.5 else "bearish" if spy_change < -0.5 else "neutral",
+                "volatility": "high" if abs(spy_change) > 1.5 else "normal",
+                "recommendation": self._get_regime_recommendation(result["market_regime"])
+            }
+            
+        except Exception as e:
+            logger.error(f"get_market_context failed: {e}")
+            result["error"] = str(e)
+        
+        result["response_time_ms"] = (time.time() - start_time) * 1000
+        
+        # Cache for 15 minutes
+        _global_cache.set("deep_dive", result, "market_context")
+        
+        logger.info(f"✅ Agent Skill: get_market_context() - {result['market_regime']}, {result['tavily_credits_used']} credits")
+        return result
+    
+    def _get_regime_recommendation(self, regime: str) -> str:
+        """Get trading recommendation based on market regime"""
+        recommendations = {
+            "strong_uptrend": "Favor long setups (Spencer, HitchHiker, ORB). Avoid shorts.",
+            "strong_downtrend": "Favor short setups (Tidal Wave, Off Sides). Avoid longs.",
+            "range_bound": "Reduce size 50%. Focus on mean reversion (Rubber Band, VWAP fades).",
+            "mixed": "Be selective. Wait for clearer direction or trade both sides carefully.",
+            "unknown": "Gather more data before committing to directional trades."
+        }
+        return recommendations.get(regime, recommendations["unknown"])
+    
+    def get_cache_stats(self) -> Dict:
+        """Get cache statistics for monitoring"""
+        return {
+            "cache_stats": _global_cache.get_stats(),
+            "tavily_credits_used_session": self.tavily.get_credit_usage()
+        }
 
 
 # ===================== SINGLETON =====================
