@@ -861,6 +861,13 @@ class TradingBotService:
             if not current_price:
                 return None
             
+            # ==================== ENHANCED INTELLIGENCE GATHERING ====================
+            # Gather all available real-time data to make informed decision
+            intelligence = await self._gather_trade_intelligence(symbol, alert)
+            
+            # Apply intelligence adjustments to scoring
+            score_adjustment = self._calculate_intelligence_adjustment(intelligence)
+            
             # Get trade parameters from alert
             entry_price = alert.get('trigger_price', current_price)
             stop_price = alert.get('stop_price', 0)
@@ -895,8 +902,9 @@ class TradingBotService:
                 logger.debug(f"Skipping {symbol}: R:R {risk_reward_ratio:.2f} below minimum {self.risk_params.min_risk_reward}")
                 return None
             
-            # Get quality score
-            quality_score = alert.get('score', 70)
+            # Get quality score with intelligence adjustment
+            base_score = alert.get('score', 70)
+            quality_score = min(100, max(0, base_score + score_adjustment))
             quality_grade = self._score_to_grade(quality_score)
             
             # Generate explanation
