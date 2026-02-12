@@ -702,6 +702,7 @@ const AICommandPanel = ({
   
   // Section expansion state - collapsed by default for more chat space
   const [expandedSections, setExpandedSections] = useState({
+    positions: true,  // Show positions by default
     botTrades: false,
     earnings: false,
     watchlist: false
