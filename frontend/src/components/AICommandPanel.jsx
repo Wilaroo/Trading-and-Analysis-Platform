@@ -1057,7 +1057,15 @@ const AICommandPanel = ({
   const activeCoachingAlerts = coachingAlerts.filter(a => !dismissedAlerts.has(a.timestamp));
 
   return (
-    <div className="flex flex-col h-full glass-card overflow-hidden" data-testid="ai-command-panel">
+    <div className="flex flex-col h-full overflow-hidden rounded-2xl" 
+         style={{
+           background: 'rgba(13, 13, 26, 0.45)',
+           backdropFilter: 'blur(24px)',
+           WebkitBackdropFilter: 'blur(24px)',
+           border: '1px solid rgba(255, 255, 255, 0.1)',
+           boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06)'
+         }}
+         data-testid="ai-command-panel">
       {/* Confirmation Dialog */}
       <ConfirmationDialog
         isOpen={confirmDialog.isOpen}
@@ -1067,14 +1075,22 @@ const AICommandPanel = ({
         loading={executing}
       />
       
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-gradient-to-r from-cyan-500/5 via-transparent to-amber-500/5">
+      {/* Header - Glassy with neon accents */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.08]"
+           style={{
+             background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.08) 0%, transparent 50%, rgba(255, 178, 0, 0.05) 100%)'
+           }}>
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-cyan-400/10 border border-cyan-400/30 flex items-center justify-center shadow-[0_0_20px_rgba(0,229,255,0.2)]">
-            <Bot className="w-5 h-5 text-cyan-400" />
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+               style={{
+                 background: 'rgba(0, 229, 255, 0.15)',
+                 border: '1px solid rgba(0, 229, 255, 0.4)',
+                 boxShadow: '0 0 25px rgba(0, 229, 255, 0.3), inset 0 0 15px rgba(0, 229, 255, 0.1)'
+               }}>
+            <Bot className="w-5 h-5 text-cyan-400 drop-shadow-[0_0_8px_rgba(0,229,255,0.8)]" />
           </div>
           <div>
-            <h2 className="text-base font-bold text-white">AI Trading Assistant</h2>
+            <h2 className="text-base font-bold text-white">AI Trading <span className="text-cyan-400 drop-shadow-[0_0_10px_rgba(0,229,255,0.5)]">Assistant</span></h2>
             <p className="text-[10px] text-zinc-500 tracking-wide">Scanner • AI • Bot — All-in-One</p>
           </div>
         </div>
