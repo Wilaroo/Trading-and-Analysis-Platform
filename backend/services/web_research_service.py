@@ -7,6 +7,7 @@ Features:
 - Agent Skills: Specialized tools for company info, stock analysis
 - Custom scrapers for SEC EDGAR, Yahoo Finance, Finviz
 - Smart caching with different TTLs based on data type
+- Credit budget tracking with warnings for free tier limit
 """
 
 import os
@@ -23,6 +24,16 @@ import json
 import hashlib
 
 logger = logging.getLogger(__name__)
+
+# ===================== CREDIT BUDGET CONFIGURATION =====================
+
+TAVILY_FREE_TIER_LIMIT = 1000  # Monthly credit limit for free tier
+CREDIT_WARNING_THRESHOLDS = {
+    "low": 0.50,      # 50% - informational
+    "medium": 0.75,   # 75% - caution
+    "high": 0.90,     # 90% - warning
+    "critical": 0.95  # 95% - urgent
+}
 
 # ===================== CACHE CONFIGURATION =====================
 
@@ -73,6 +84,214 @@ class ResearchResponse:
             "source_type": self.source_type,
             "timestamp": self.timestamp
         }
+
+
+# ===================== CREDIT BUDGET TRACKER =====================
+
+class CreditBudgetTracker:
+    """
+    Tracks Tavily credit usage with monthly limits and warnings.
+    Persists to MongoDB for accurate monthly tracking.
+    """
+    
+    def __init__(self, db=None, monthly_limit: int = TAVILY_FREE_TIER_LIMIT):
+        self.db = db
+        self.monthly_limit = monthly_limit
+        self._session_credits = 0
+        self._monthly_credits = 0
+        self._last_reset_month = None
+        self._usage_history: List[Dict] = []
+        self._warnings_sent: set = set()
+        
+        # Load from DB on init
+        self._load_from_db()
+    
+    def _get_current_month_key(self) -> str:
+        """Get current month key for tracking (YYYY-MM)"""
+        return datetime.now(timezone.utc).strftime("%Y-%m")
+    
+    def _load_from_db(self):
+        """Load credit usage from MongoDB"""
+        if self.db is None:
+            return
+        
+        try:
+            collection = self.db["tavily_credit_usage"]
+            current_month = self._get_current_month_key()
+            
+            doc = collection.find_one({"month": current_month})
+            if doc:
+                self._monthly_credits = doc.get("credits_used", 0)
+                self._usage_history = doc.get("usage_history", [])[-100:]  # Keep last 100 entries
+                self._last_reset_month = current_month
+                logger.info(f"Loaded credit usage: {self._monthly_credits}/{self.monthly_limit} for {current_month}")
+            else:
+                # New month, reset counters
+                self._monthly_credits = 0
+                self._usage_history = []
+                self._last_reset_month = current_month
+                self._warnings_sent.clear()
+                logger.info(f"New month {current_month}, credit counter reset")
+                
+        except Exception as e:
+            logger.warning(f"Error loading credit usage from DB: {e}")
+    
+    def _save_to_db(self):
+        """Save credit usage to MongoDB"""
+        if self.db is None:
+            return
+        
+        try:
+            collection = self.db["tavily_credit_usage"]
+            current_month = self._get_current_month_key()
+            
+            collection.update_one(
+                {"month": current_month},
+                {"$set": {
+                    "month": current_month,
+                    "credits_used": self._monthly_credits,
+                    "monthly_limit": self.monthly_limit,
+                    "usage_history": self._usage_history[-100:],
+                    "last_updated": datetime.now(timezone.utc).isoformat()
+                }},
+                upsert=True
+            )
+        except Exception as e:
+            logger.warning(f"Error saving credit usage to DB: {e}")
+    
+    def record_usage(self, credits: int, query: str, source: str = "search"):
+        """Record credit usage and check for warnings"""
+        # Check for month rollover
+        current_month = self._get_current_month_key()
+        if self._last_reset_month != current_month:
+            logger.info(f"Month changed from {self._last_reset_month} to {current_month}, resetting credits")
+            self._monthly_credits = 0
+            self._usage_history = []
+            self._warnings_sent.clear()
+            self._last_reset_month = current_month
+        
+        # Record usage
+        self._session_credits += credits
+        self._monthly_credits += credits
+        
+        # Add to history
+        self._usage_history.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "credits": credits,
+            "query": query[:100],  # Truncate for storage
+            "source": source,
+            "monthly_total": self._monthly_credits
+        })
+        
+        # Save to DB
+        self._save_to_db()
+        
+        # Check warnings
+        warning = self._check_warning_threshold()
+        if warning:
+            logger.warning(f"⚠️ TAVILY CREDIT WARNING: {warning['level'].upper()} - {warning['message']}")
+        
+        return warning
+    
+    def _check_warning_threshold(self) -> Optional[Dict]:
+        """Check if usage has crossed a warning threshold"""
+        usage_ratio = self._monthly_credits / self.monthly_limit
+        
+        for level, threshold in sorted(CREDIT_WARNING_THRESHOLDS.items(), key=lambda x: x[1], reverse=True):
+            if usage_ratio >= threshold and level not in self._warnings_sent:
+                self._warnings_sent.add(level)
+                
+                remaining = self.monthly_limit - self._monthly_credits
+                
+                return {
+                    "level": level,
+                    "threshold_percent": int(threshold * 100),
+                    "credits_used": self._monthly_credits,
+                    "credits_remaining": remaining,
+                    "monthly_limit": self.monthly_limit,
+                    "usage_percent": round(usage_ratio * 100, 1),
+                    "message": self._get_warning_message(level, remaining)
+                }
+        
+        return None
+    
+    def _get_warning_message(self, level: str, remaining: int) -> str:
+        """Get human-readable warning message"""
+        messages = {
+            "low": f"You've used 50% of your monthly Tavily credits. {remaining} credits remaining.",
+            "medium": f"⚠️ 75% of monthly credits used. Only {remaining} credits left. Consider using 'quick' analysis mode.",
+            "high": f"🚨 90% of credits used! {remaining} credits remaining. Switching to cache-only mode recommended.",
+            "critical": f"🔴 CRITICAL: Only {remaining} credits left! Research queries may fail soon."
+        }
+        return messages.get(level, f"{remaining} credits remaining")
+    
+    def get_status(self) -> Dict:
+        """Get current credit budget status"""
+        # Check for month rollover
+        current_month = self._get_current_month_key()
+        if self._last_reset_month != current_month:
+            self._load_from_db()
+        
+        usage_ratio = self._monthly_credits / self.monthly_limit if self.monthly_limit > 0 else 0
+        remaining = self.monthly_limit - self._monthly_credits
+        
+        # Determine status level
+        status_level = "ok"
+        for level, threshold in sorted(CREDIT_WARNING_THRESHOLDS.items(), key=lambda x: x[1]):
+            if usage_ratio >= threshold:
+                status_level = level
+        
+        # Calculate daily average and projected usage
+        days_in_month = 30
+        current_day = datetime.now(timezone.utc).day
+        daily_average = self._monthly_credits / max(current_day, 1)
+        projected_monthly = daily_average * days_in_month
+        
+        return {
+            "month": current_month,
+            "credits_used": self._monthly_credits,
+            "credits_remaining": remaining,
+            "monthly_limit": self.monthly_limit,
+            "usage_percent": round(usage_ratio * 100, 1),
+            "status_level": status_level,
+            "session_credits": self._session_credits,
+            "daily_average": round(daily_average, 1),
+            "projected_monthly_usage": round(projected_monthly),
+            "on_track": projected_monthly <= self.monthly_limit,
+            "recent_usage": self._usage_history[-10:] if self._usage_history else []
+        }
+    
+    def can_use_credits(self, credits_needed: int = 1) -> Tuple[bool, Optional[str]]:
+        """Check if we can use credits without exceeding budget"""
+        if self._monthly_credits + credits_needed > self.monthly_limit:
+            return False, f"Would exceed monthly limit ({self._monthly_credits + credits_needed} > {self.monthly_limit})"
+        
+        # Warning if getting close
+        if self._monthly_credits + credits_needed > self.monthly_limit * 0.95:
+            return True, f"⚠️ Only {self.monthly_limit - self._monthly_credits - credits_needed} credits will remain after this query"
+        
+        return True, None
+    
+    def set_monthly_limit(self, new_limit: int):
+        """Update the monthly limit (e.g., if user upgrades)"""
+        old_limit = self.monthly_limit
+        self.monthly_limit = new_limit
+        self._warnings_sent.clear()  # Reset warnings for new limit
+        logger.info(f"Credit limit updated: {old_limit} → {new_limit}")
+
+
+# Global credit tracker (initialized later with DB)
+_credit_tracker: Optional[CreditBudgetTracker] = None
+
+def get_credit_tracker(db=None) -> CreditBudgetTracker:
+    """Get or create the global credit tracker"""
+    global _credit_tracker
+    if _credit_tracker is None:
+        _credit_tracker = CreditBudgetTracker(db=db)
+    elif db is not None and _credit_tracker.db is None:
+        _credit_tracker.db = db
+        _credit_tracker._load_from_db()
+    return _credit_tracker
 
 
 # ===================== INTELLIGENT CACHE =====================
