@@ -143,11 +143,9 @@ const ChartsTab = ({
         style={{ height: 'calc(100vh - 280px)', minHeight: '500px' }}
       >
         {chartSymbol ? (
-          <IBRealtimeChart 
-            symbol={chartSymbol} 
-            isConnected={isConnected} 
-            isBusy={isBusy}
-            busyOperation={busyOperation}
+          <TradingViewWidget 
+            symbol={chartSymbol}
+            theme="dark"
             height="100%"
           />
         ) : (
