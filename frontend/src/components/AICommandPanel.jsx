@@ -222,7 +222,7 @@ const QuickPill = ({ label, onClick, loading, icon: Icon }) => (
 
 // ===================== AI-CURATED OPPORTUNITIES WIDGET =====================
 
-const CuratedOpportunityCard = ({ opportunity, rank, onExecute, onPass, onTickerClick, executing }) => {
+const CuratedOpportunityCard = ({ opportunity, rank, onExecute, onPass, onTickerClick, onViewChart, executing }) => {
   const verdictConfig = {
     'TAKE': { bg: 'bg-emerald-500/20', border: 'border-emerald-500/40', text: 'text-emerald-400', icon: Check },
     'WAIT': { bg: 'bg-amber-500/20', border: 'border-amber-500/40', text: 'text-amber-400', icon: Clock },
@@ -251,9 +251,19 @@ const CuratedOpportunityCard = ({ opportunity, rank, onExecute, onPass, onTicker
           <button 
             onClick={() => onTickerClick(opportunity.symbol)}
             className="text-lg font-bold text-white hover:text-cyan-400 transition-colors"
+            title={`View ${opportunity.symbol} details`}
           >
             {opportunity.symbol}
           </button>
+          {onViewChart && (
+            <button
+              onClick={() => onViewChart(opportunity.symbol)}
+              className="p-1 rounded bg-amber-500/20 hover:bg-amber-500/30 transition-colors"
+              title={`View ${opportunity.symbol} chart`}
+            >
+              <LineChart className="w-3 h-3 text-amber-400" />
+            </button>
+          )}
           <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
             opportunity.direction === 'long' ? 'bg-emerald-500/30 text-emerald-400' : 'bg-red-500/30 text-red-400'
           }`}>
