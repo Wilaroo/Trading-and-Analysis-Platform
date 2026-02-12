@@ -3042,33 +3042,62 @@ async def websocket_quotes(websocket: WebSocket):
     """WebSocket endpoint for real-time quote streaming"""
     await manager.connect(websocket)
     
-    # Send initial data (use cached or simulated to avoid rate limits)
+    # Send immediate connected confirmation (critical for proxy keep-alive)
     try:
-        initial_quotes = []
-        for symbol in DEFAULT_STREAM_SYMBOLS[:8]:
-            try:
-                quote = await fetch_quote(symbol)
-                if quote:
-                    # Ensure all values are JSON serializable
-                    clean_quote = {k: v for k, v in quote.items() if not k.startswith('_')}
-                    initial_quotes.append(clean_quote)
-            except Exception as symbol_err:
-                print(f"Error fetching quote for {symbol}: {symbol_err}")
-            await asyncio.sleep(0.3)  # Stagger requests
-        
-        if initial_quotes:
-            await manager.send_personal_message({
-                "type": "initial",
-                "data": initial_quotes,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }, websocket)
-            print(f"Sent {len(initial_quotes)} initial quotes")
-        else:
-            print("No initial quotes available")
+        await websocket.send_json({
+            "type": "connected",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
     except Exception as e:
-        print(f"Error sending initial data: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"Failed to send connected message: {e}")
+        manager.disconnect(websocket)
+        return
+    
+    # Start a background task for server-side keepalive pings
+    async def server_keepalive():
+        """Send periodic pings from server to keep connection alive"""
+        try:
+            while websocket in manager.active_connections:
+                await asyncio.sleep(20)  # Ping every 20 seconds
+                if websocket in manager.active_connections:
+                    try:
+                        await websocket.send_json({"type": "server_ping", "ts": datetime.now(timezone.utc).isoformat()})
+                    except:
+                        break
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+    
+    keepalive_task = asyncio.create_task(server_keepalive())
+    
+    # Fetch initial data in background (non-blocking) to avoid connection timeout
+    async def send_initial_data():
+        try:
+            initial_quotes = []
+            # Limit to first 4 symbols for faster initial load
+            for symbol in DEFAULT_STREAM_SYMBOLS[:4]:
+                try:
+                    quote = await fetch_quote(symbol)
+                    if quote:
+                        clean_quote = {k: v for k, v in quote.items() if not k.startswith('_')}
+                        initial_quotes.append(clean_quote)
+                except Exception as symbol_err:
+                    print(f"Error fetching quote for {symbol}: {symbol_err}")
+                await asyncio.sleep(0.1)  # Reduced delay
+            
+            if initial_quotes and websocket in manager.active_connections:
+                await manager.send_personal_message({
+                    "type": "initial",
+                    "data": initial_quotes,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }, websocket)
+                print(f"Sent {len(initial_quotes)} initial quotes")
+        except Exception as e:
+            print(f"Error sending initial data: {e}")
+    
+    # Start initial data fetch as background task
+    asyncio.create_task(send_initial_data())
     
     try:
         while True:
@@ -3096,11 +3125,13 @@ async def websocket_quotes(websocket: WebSocket):
     
     except WebSocketDisconnect:
         print("WebSocket client disconnected gracefully")
+        keepalive_task.cancel()
         manager.disconnect(websocket)
     except Exception as e:
         print(f"WebSocket error: {e}")
         import traceback
         traceback.print_exc()
+        keepalive_task.cancel()
         manager.disconnect(websocket)
 
 @app.get("/api/stream/status")
