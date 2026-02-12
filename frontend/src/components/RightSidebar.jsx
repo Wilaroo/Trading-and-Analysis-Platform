@@ -20,7 +20,8 @@ import {
   Plus,
   X,
   Sun,
-  Moon
+  Moon,
+  LineChart
 } from 'lucide-react';
 import MarketIntelPanel from './MarketIntelPanel';
 import api from '../utils/api';
