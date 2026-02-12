@@ -279,6 +279,57 @@ Triggers AI Coaching Notification
 
 ---
 
+## Session Log - February 12, 2026 (Charts Tab Integration)
+
+### Charts Tab Integration into Command Center
+**Goal**: Integrate charting functionality directly into the Command Center as a third tab, enabling seamless navigation from any ticker to its chart.
+
+**Implementation:**
+1. **TradingView Widget Integration**: Replaced non-rendering lightweight-charts with TradingView embedded widget
+   - Created `/frontend/src/components/charts/TradingViewWidget.jsx`
+   - Full candlestick chart with volume, MA, and all TradingView tools
+   - Responsive and auto-resizes to container
+
+2. **ChartsTab Component**: New tab component at `/frontend/src/components/tabs/ChartsTab.jsx`
+   - Symbol search input with Load button
+   - Quick symbol buttons (SPY, QQQ, AAPL, NVDA, TSLA, MSFT, AMZN, META)
+   - Watchlist symbols section (from Smart Watchlist)
+   - Recent charts tracking
+
+3. **Click-to-View-Chart Functionality**:
+   - `viewChart(symbol)` function in `useCommandCenterData.js` (lines 338-344)
+   - Sets chart symbol, saves to localStorage, adds to recent charts, switches to 'charts' tab
+   - Chart icon buttons in Scanner Alerts widget trigger `onViewChart`
+   - Chart icon buttons in Watchlist widget trigger `onViewChart`
+   - Icons appear on hover (opacity-0 → opacity-100)
+
+4. **Tab Navigation**:
+   - Added "Charts" tab with LineChart icon to CommandCenterPage.js
+   - Tab IDs: 'coach', 'charts', 'analytics'
+   - State persisted in localStorage for tab selection
+
+5. **Recent Charts Feature**:
+   - Tracks last 10 viewed symbols
+   - Persisted in localStorage (`tradecommand_recent_charts`)
+   - Displayed as clickable badges below quick symbols
+
+**Note**: The old lightweight-charts based `IBRealtimeChart.jsx` had a rendering bug where the canvas was created but no candles were drawn (axes rendered correctly but main chart was blank). This bug also existed in the old `/pages/ChartsPage.js`. Switched to TradingView embedded widget which works flawlessly.
+
+### Files Modified/Created
+- `frontend/src/components/charts/TradingViewWidget.jsx` - NEW: TradingView widget wrapper
+- `frontend/src/components/tabs/ChartsTab.jsx` - Updated to use TradingView widget
+- `frontend/src/pages/CommandCenterPage.js` - Added Charts tab to navigation
+- `frontend/src/hooks/useCommandCenterData.js` - viewChart function, recent charts state
+- `frontend/package.json` - Added react-ts-tradingview-widgets
+
+### Testing Results
+- All 16 tests passed (100% success rate)
+- Charts tab renders correctly with TradingView candlestick charts
+- Symbol switching works via input, quick buttons, and sidebar icons
+- Tab navigation persists state correctly
+
+---
+
 ## Session Log - February 11, 2026
 
 ### P0 Bug Fix: IB Connection UI Issue
