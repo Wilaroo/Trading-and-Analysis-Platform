@@ -31,7 +31,7 @@ ollama serve
 
 ## Step 4: Open TradeCommand
 
-1. Go to: **https://command-charts.preview.emergentagent.com**
+1. Go to: **https://broker-fix-1.preview.emergentagent.com**
 2. Click **"Connect"** button (top right) to connect to IB Gateway
 3. The app will auto-generate your morning briefing if one doesn't exist yet
 
