@@ -43,6 +43,13 @@ export const useWebSocket = (onMessage) => {
 
   const connect = useCallback(() => {
     try {
+      // Clean up any existing connection first
+      if (wsRef.current) {
+        console.log('Cleaning up existing WebSocket connection');
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      
       const wsUrl = getWebSocketUrl();
       console.log('Connecting to WebSocket:', wsUrl);
       
@@ -50,7 +57,7 @@ export const useWebSocket = (onMessage) => {
       wsRef.current = ws;
 
       ws.onopen = () => {
-        console.log('WebSocket connected');
+        console.log('WebSocket connected successfully');
         setIsConnected(true);
         // Start heartbeat to keep connection alive
         startHeartbeat(ws);
