@@ -1096,11 +1096,11 @@ const AICommandPanel = ({
   return (
     <div className="flex flex-col h-full overflow-hidden rounded-2xl relative" 
          style={{
-           background: 'rgba(255, 255, 255, 0.7)',
+           background: 'rgba(21, 28, 36, 0.9)',
            backdropFilter: 'blur(24px)',
            WebkitBackdropFilter: 'blur(24px)',
-           border: '1px solid rgba(0, 0, 0, 0.06)',
-           boxShadow: '0 4px 20px rgba(0, 0, 0, 0.06)'
+           border: '1px solid rgba(255, 255, 255, 0.1)',
+           boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)'
          }}
          data-testid="ai-command-panel">
       {/* Animated gradient border */}
@@ -1113,7 +1113,7 @@ const AICommandPanel = ({
           mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
           WebkitMaskComposite: 'xor',
           maskComposite: 'exclude',
-          opacity: 0.4,
+          opacity: 0.5,
           animation: 'gradient-rotate 6s linear infinite'
         }}
       />
@@ -1127,27 +1127,27 @@ const AICommandPanel = ({
         loading={executing}
       />
       
-      {/* Header - Light glass with gradient accents */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-black/[0.06]"
+      {/* Header - with gradient accent */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.08]"
            style={{
-             background: 'linear-gradient(135deg, rgba(0, 184, 217, 0.08) 0%, transparent 50%, rgba(124, 77, 255, 0.05) 100%)'
+             background: 'linear-gradient(135deg, rgba(0, 212, 255, 0.1) 0%, transparent 50%, rgba(255, 46, 147, 0.05) 100%)'
            }}>
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center"
                style={{
-                 background: 'linear-gradient(135deg, var(--primary-main), var(--accent-main))',
-                 boxShadow: '0 4px 15px var(--primary-glow)'
+                 background: 'linear-gradient(135deg, var(--primary-main), var(--secondary-main))',
+                 boxShadow: '0 4px 20px var(--primary-glow-strong)'
                }}>
             <Bot className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h2 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>AI Trading <span style={{ color: 'var(--primary-dark)' }}>Assistant</span></h2>
-            <p className="text-[10px] tracking-wide" style={{ color: 'var(--text-muted)' }}>Scanner • AI • Bot — All-in-One</p>
+            <h2 className="text-base font-bold text-white">AI Trading <span className="neon-text">Assistant</span></h2>
+            <p className="text-[10px] text-zinc-400 tracking-wide">Scanner • AI • Bot — All-in-One</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <span className={`neon-dot${isConnected ? '-success' : '-error'}`} style={{width: '8px', height: '8px'}} />
-          <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>{isConnected ? 'Live' : 'Offline'}</span>
+          <span className="text-xs text-zinc-400 font-medium">{isConnected ? 'Live' : 'Offline'}</span>
         </div>
       </div>
       
