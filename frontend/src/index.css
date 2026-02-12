@@ -10,66 +10,72 @@
 @tailwind utilities;
 
 :root {
-  /* Light/Clear Background Theme */
-  --bg-default: #F0F4F8;
-  --bg-paper: #FFFFFF;
-  --bg-subtle: #E8EEF4;
-  --bg-elevated: #FFFFFF;
+  /* Balanced Dark Theme - Not too dark, not too light */
+  --bg-default: #0F1419;
+  --bg-paper: #151C24;
+  --bg-subtle: #1A2332;
+  --bg-elevated: #1F2937;
   
-  /* Primary neon cyan - adjusted for light bg */
-  --primary-main: #00B8D9;
-  --primary-hover: #00A3C4;
-  --primary-dark: #0097A7;
-  --primary-glow: rgba(0, 184, 217, 0.3);
-  --primary-glow-strong: rgba(0, 184, 217, 0.5);
-  --primary-glow-intense: rgba(0, 184, 217, 0.7);
+  /* Primary - Vibrant Electric Cyan */
+  --primary-main: #00D4FF;
+  --primary-hover: #33DDFF;
+  --primary-dark: #00A8CC;
+  --primary-glow: rgba(0, 212, 255, 0.35);
+  --primary-glow-strong: rgba(0, 212, 255, 0.55);
+  --primary-glow-intense: rgba(0, 212, 255, 0.75);
   
-  /* Secondary neon magenta - adjusted for light bg */
-  --secondary-main: #E040FB;
-  --secondary-dark: #AA00FF;
-  --secondary-glow: rgba(224, 64, 251, 0.3);
-  --secondary-glow-strong: rgba(224, 64, 251, 0.5);
+  /* Secondary - Hot Magenta/Pink */
+  --secondary-main: #FF2E93;
+  --secondary-dark: #E0197A;
+  --secondary-glow: rgba(255, 46, 147, 0.35);
+  --secondary-glow-strong: rgba(255, 46, 147, 0.55);
   
-  /* Accent purple */
-  --accent-main: #7C4DFF;
-  --accent-glow: rgba(124, 77, 255, 0.3);
+  /* Accent - Electric Purple */
+  --accent-main: #A855F7;
+  --accent-glow: rgba(168, 85, 247, 0.35);
   
-  /* Status colors - adjusted for light mode */
-  --success: #00C853;
-  --success-glow: rgba(0, 200, 83, 0.3);
-  --warning: #FFB300;
-  --warning-glow: rgba(255, 179, 0, 0.3);
-  --error: #FF1744;
-  --error-glow: rgba(255, 23, 68, 0.3);
-  --info: #2979FF;
+  /* Tertiary - Lime/Green for extra pop */
+  --tertiary-main: #22D3EE;
+  --tertiary-glow: rgba(34, 211, 238, 0.35);
   
-  /* Text - dark for light backgrounds */
-  --text-primary: #1A1A2E;
-  --text-secondary: #4A5568;
-  --text-muted: #718096;
+  /* Status colors - Vibrant and saturated */
+  --success: #10B981;
+  --success-bright: #34D399;
+  --success-glow: rgba(16, 185, 129, 0.4);
+  --warning: #F59E0B;
+  --warning-glow: rgba(245, 158, 11, 0.4);
+  --error: #EF4444;
+  --error-glow: rgba(239, 68, 68, 0.4);
+  --info: #3B82F6;
   
-  /* Borders - visible on light bg */
-  --border-default: rgba(0, 0, 0, 0.08);
-  --border-subtle: rgba(0, 0, 0, 0.05);
-  --border-active: rgba(0, 184, 217, 0.5);
-  --border-glow: rgba(0, 184, 217, 0.3);
+  /* Text - High contrast */
+  --text-primary: #FFFFFF;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
   
-  /* Glass effect - Light mode frosted glass */
-  --glass-bg: rgba(255, 255, 255, 0.7);
-  --glass-bg-hover: rgba(255, 255, 255, 0.85);
-  --glass-bg-light: rgba(255, 255, 255, 0.5);
-  --glass-bg-dark: rgba(255, 255, 255, 0.9);
+  /* Borders - More visible */
+  --border-default: rgba(255, 255, 255, 0.12);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-active: rgba(0, 212, 255, 0.6);
+  --border-glow: rgba(0, 212, 255, 0.4);
+  
+  /* Glass effect - Semi-transparent dark */
+  --glass-bg: rgba(21, 28, 36, 0.85);
+  --glass-bg-hover: rgba(26, 35, 50, 0.9);
+  --glass-bg-light: rgba(31, 41, 55, 0.75);
+  --glass-bg-dark: rgba(15, 20, 25, 0.95);
   --glass-blur: 20px;
   --glass-blur-strong: 28px;
-  --glass-border: rgba(255, 255, 255, 0.8);
-  --glass-border-colored: rgba(0, 184, 217, 0.2);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-border-colored: rgba(0, 212, 255, 0.25);
   
-  /* Shadows - softer for light mode */
+  /* Shadows - Colorful glows */
   --shadow-neon: 0 0 20px var(--primary-glow), 0 0 40px var(--primary-glow);
-  --shadow-neon-strong: 0 0 25px var(--primary-glow-strong), 0 0 50px var(--primary-glow);
+  --shadow-neon-strong: 0 0 30px var(--primary-glow-strong), 0 0 60px var(--primary-glow);
   --shadow-neon-magenta: 0 0 20px var(--secondary-glow), 0 0 40px var(--secondary-glow);
-  --shadow-ambient: 0 8px 32px rgba(0, 0, 0, 0.1);
-  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.08);
+  --shadow-ambient: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.3);
+  --shadow-pop: 0 8px 30px rgba(0, 212, 255, 0.2), 0 4px 15px rgba(0, 0, 0, 0.3);
   
   --radius: 0.75rem;
   --radius-lg: 1rem;
