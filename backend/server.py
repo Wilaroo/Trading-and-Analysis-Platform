@@ -162,7 +162,7 @@ trading_bot._ai_assistant = assistant_service
 
 # Wire Scanner ↔ Trading bot for auto-execution
 background_scanner.set_trading_bot(trading_bot)
-background_scanner.db = db
+background_scanner.set_db(db)
 
 # Wire Scanner ↔ AI assistant for proactive coaching notifications
 background_scanner.set_ai_assistant(assistant_service)
