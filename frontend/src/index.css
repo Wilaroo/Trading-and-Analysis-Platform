@@ -358,13 +358,39 @@ body {
 
 /* Card styles */
 .card {
-  @apply bg-[#0A0A0A] rounded-lg p-6;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  transition: border-color 0.2s ease-out;
+  @apply rounded-lg p-5;
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  transition: all 0.3s ease-out;
 }
 
 .card:hover {
-  border-color: rgba(0, 229, 255, 0.3);
+  border-color: var(--border-active);
+  box-shadow: var(--shadow-neon);
+}
+
+.card-header {
+  @apply flex items-center justify-between pb-3 mb-3;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.card-title {
+  @apply text-sm font-semibold uppercase tracking-wider text-zinc-300;
+}
+
+.card-subtitle {
+  @apply text-xs text-zinc-500;
+}
+
+/* Interactive card with hover lift */
+.card-interactive {
+  @apply cursor-pointer;
+}
+
+.card-interactive:hover {
+  transform: translateY(-2px);
 }
 
 /* Ticker tape animation */
