@@ -188,8 +188,8 @@ class MarketIntelService:
                 quotes = await self._alpaca_service.get_quotes_batch(["SPY", "QQQ", "IWM", "DIA", "VIX"])
                 if quotes:
                     parts.append("=== MARKET INDICES (EXACT live quotes) ===")
-                    for q in quotes:
-                        sym = q.get("symbol", "?")
+                    # quotes is a dict keyed by symbol, iterate over values
+                    for sym, q in quotes.items():
                         price = q.get("price", 0)
                         chg = q.get("change_percent", 0)
                         parts.append(f"  {sym}: ${price:.2f} ({chg:+.2f}%)")
