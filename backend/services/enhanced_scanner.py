@@ -2282,7 +2282,7 @@ class EnhancedBackgroundScanner:
         logger.info(f"🚨 {alert.headline} | WR: {alert.strategy_win_rate:.0%} {tape_indicator}")
     
     async def _save_alert_to_db(self, alert: LiveAlert):
-        if self.alerts_collection:
+        if self.alerts_collection is not None:
             await asyncio.to_thread(
                 self.alerts_collection.update_one,
                 {"id": alert.id},
