@@ -1320,9 +1320,29 @@ class WebResearchService:
         }
     
     def get_credit_budget_status(self) -> Dict:
-        """Get full credit budget status"""
+        """Get full credit budget status including credits saved from caching"""
         tracker = get_credit_tracker(self.db)
-        return tracker.get_status()
+        status = tracker.get_status()
+        
+        # Add cache savings information
+        cache_stats = _global_cache.get_stats()
+        status["credits_saved"] = cache_stats.get("credits_saved", 0)
+        status["cache_hit_rate"] = cache_stats.get("hit_rate", "N/A")
+        status["cache_hits"] = cache_stats.get("hits", 0)
+        status["cache_misses"] = cache_stats.get("misses", 0)
+        
+        # Calculate effective cost (what you would have spent without caching)
+        status["effective_credits_used"] = status["credits_used"] + status["credits_saved"]
+        
+        # Calculate savings percentage
+        if status["effective_credits_used"] > 0:
+            status["savings_percent"] = round(
+                (status["credits_saved"] / status["effective_credits_used"]) * 100, 1
+            )
+        else:
+            status["savings_percent"] = 0
+        
+        return status
     
     def set_credit_limit(self, new_limit: int) -> Dict:
         """Update the monthly credit limit (e.g., if user upgrades to paid tier)"""
