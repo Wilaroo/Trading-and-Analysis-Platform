@@ -23,78 +23,89 @@ export const Sidebar = ({ activeTab, setActiveTab }) => {
 
   return (
     <motion.aside
-      className="fixed left-0 top-0 h-full bg-paper border-r border-white/5 z-40 flex flex-col"
+      className="fixed left-0 top-0 h-full z-40 flex flex-col glass"
+      style={{ 
+        background: 'rgba(5, 5, 5, 0.85)',
+        borderRight: '1px solid rgba(255, 255, 255, 0.08)'
+      }}
       initial={{ width: 64 }}
       animate={{ width: isExpanded ? 220 : 64 }}
       onMouseEnter={() => setIsExpanded(true)}
       onMouseLeave={() => setIsExpanded(false)}
     >
+      {/* Logo */}
       <div className="p-4 border-b border-white/5">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center">
-            <Activity className="w-5 h-5 text-white" />
+          <div className="w-9 h-9 rounded-xl bg-cyan-400/10 border border-cyan-400/30 flex items-center justify-center shadow-[0_0_15px_rgba(0,229,255,0.2)]">
+            <Activity className="w-5 h-5 text-cyan-400" />
           </div>
           <AnimatePresence>
             {isExpanded && (
               <motion.span
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="font-bold text-lg text-gradient whitespace-nowrap"
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                className="font-bold text-lg text-white whitespace-nowrap"
               >
-                TradeCommand
+                Trade<span className="text-cyan-400">Command</span>
               </motion.span>
             )}
           </AnimatePresence>
         </div>
       </div>
 
-      <nav className="flex-1 py-4">
-        {navItems.map((item) => (
-          <button
-            key={item.id}
-            data-testid={`nav-${item.id}`}
-            onClick={() => setActiveTab(item.id)}
-            className={`w-full flex items-center gap-3 px-4 py-3 transition-all ${
-              activeTab === item.id
-                ? 'bg-primary/10 text-primary border-r-2 border-primary'
-                : item.highlight 
-                  ? 'text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10' 
-                  : 'text-zinc-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <item.icon className={`w-5 h-5 flex-shrink-0 ${item.highlight && activeTab !== item.id ? 'text-cyan-400' : ''}`} />
-            <AnimatePresence>
-              {isExpanded && (
-                <motion.span
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="whitespace-nowrap flex items-center gap-2"
-                >
-                  {item.label}
-                </motion.span>
+      {/* Navigation */}
+      <nav className="flex-1 py-4 px-2">
+        {navItems.map((item) => {
+          const isActive = activeTab === item.id;
+          return (
+            <button
+              key={item.id}
+              data-testid={`nav-${item.id}`}
+              onClick={() => setActiveTab(item.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 mb-1 rounded-lg transition-all duration-200 ${
+                isActive
+                  ? 'bg-cyan-400/10 text-cyan-400 border border-cyan-400/30 shadow-[0_0_15px_rgba(0,229,255,0.15)]'
+                  : item.highlight 
+                    ? 'text-cyan-400/70 hover:text-cyan-400 hover:bg-cyan-400/5' 
+                    : 'text-zinc-500 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <item.icon className={`w-5 h-5 flex-shrink-0 ${isActive ? 'drop-shadow-[0_0_8px_rgba(0,229,255,0.5)]' : ''}`} />
+              <AnimatePresence>
+                {isExpanded && (
+                  <motion.span
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="whitespace-nowrap flex items-center gap-2 text-sm font-medium"
+                  >
+                    {item.label}
+                  </motion.span>
+                )}
+              </AnimatePresence>
+              {isActive && isExpanded && (
+                <ChevronRight className="w-4 h-4 ml-auto" />
               )}
-            </AnimatePresence>
-            {activeTab === item.id && isExpanded && (
-              <ChevronRight className="w-4 h-4 ml-auto" />
-            )}
-          </button>
-        ))}
+            </button>
+          );
+        })}
       </nav>
       
-      {/* Minimalist footer */}
+      {/* Footer */}
       <div className="p-4 border-t border-white/5">
         <AnimatePresence>
           {isExpanded && (
-            <motion.p
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="text-[10px] text-zinc-600 text-center"
+              className="text-center"
             >
-              v2.0 • Command Center
-            </motion.p>
+              <p className="text-[10px] text-zinc-600 font-mono">
+                v2.0 • <span className="text-cyan-400/50">Glass Neon</span>
+              </p>
+            </motion.div>
           )}
         </AnimatePresence>
       </div>
