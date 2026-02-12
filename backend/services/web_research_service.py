@@ -1287,15 +1287,28 @@ class WebResearchService:
             "cache_stats": _global_cache.get_stats(),
             "tavily_credits_used_session": self.tavily.get_credit_usage()
         }
+    
+    def get_credit_budget_status(self) -> Dict:
+        """Get full credit budget status"""
+        tracker = get_credit_tracker(self.db)
+        return tracker.get_status()
+    
+    def set_credit_limit(self, new_limit: int) -> Dict:
+        """Update the monthly credit limit (e.g., if user upgrades to paid tier)"""
+        tracker = get_credit_tracker(self.db)
+        tracker.set_monthly_limit(new_limit)
+        return tracker.get_status()
 
 
 # ===================== SINGLETON =====================
 
 _web_research_service: Optional[WebResearchService] = None
 
-def get_web_research_service() -> WebResearchService:
+def get_web_research_service(db=None) -> WebResearchService:
     """Get singleton instance of web research service"""
     global _web_research_service
     if _web_research_service is None:
-        _web_research_service = WebResearchService()
+        _web_research_service = WebResearchService(db=db)
+    elif db is not None and _web_research_service.db is None:
+        _web_research_service.set_db(db)
     return _web_research_service
