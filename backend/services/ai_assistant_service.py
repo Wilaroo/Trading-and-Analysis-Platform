@@ -304,13 +304,28 @@ Format responses with clear sections. Cite specific rules from the playbook."""
         """
         Detect if user wants to research something
         Returns research params if detected, None otherwise
+        
+        Now routes to Agent Skills for more efficient credit usage.
         """
         message_lower = message.lower()
         
-        # Research command patterns
+        # Research command patterns - ordered by specificity
+        # Agent Skills patterns (most efficient)
         patterns = [
+            # Agent Skill: Company Info (1 hour cache, minimal credits)
+            (r"(?:company info|about|profile|fundamentals|overview)\s+(?:for\s+|on\s+)?([A-Z]{1,5})\b", "company_info"),
+            (r"(?:what (?:is|does)|who is|tell me about)\s+([A-Z]{1,5})\b", "company_info"),
+            
+            # Agent Skill: Stock Analysis (10 min cache)
+            (r"(?:analyze|analysis|evaluate|assess)\s+([A-Z]{1,5})\b", "stock_analysis"),
+            (r"(?:should i (?:buy|sell|trade)|is .* good)\s+([A-Z]{1,5})\b", "stock_analysis"),
+            
+            # Agent Skill: Market Context (15 min cache, called once per session)
+            (r"(?:market context|market conditions|how.?s the market|market today)", "market_context"),
+            
+            # Standard research patterns (use more credits)
             (r"(?:research|look up|search|find|what.?s (?:the )?latest|news on|news about)\s+([A-Z]{1,5})\b", "ticker"),
-            (r"(?:research|search|look up|find info on|tell me about)\s+(.+?)(?:\?|$)", "general"),
+            (r"(?:research|search|look up|find info on)\s+(.+?)(?:\?|$)", "general"),
             (r"(?:what.?s happening with|what.?s going on with)\s+(.+?)(?:\?|$)", "news"),
             (r"(?:sec filings?|edgar|10-k|10-q|8-k)\s+(?:for\s+)?([A-Z]{1,5})\b", "sec"),
             (r"(?:analyst|ratings?|price target|upgrade|downgrade)\s+(?:for\s+)?([A-Z]{1,5})\b", "analyst"),
@@ -331,12 +346,34 @@ Format responses with clear sections. Cite specific rules from the playbook."""
         return None
     
     async def _perform_research(self, intent: Dict) -> str:
-        """Execute research based on detected intent"""
+        """
+        Execute research based on detected intent
+        Routes to Agent Skills when possible for better caching and fewer credits
+        """
         research_type = intent["type"]
         query = intent["query"]
         
         try:
-            if research_type == "ticker":
+            # ========== AGENT SKILLS (Optimized for credit efficiency) ==========
+            
+            if research_type == "company_info":
+                # Use Agent Skill: Combines free sources, minimal Tavily usage
+                result = await self.web_research.get_company_info(query)
+                return self._format_company_info(query, result)
+            
+            elif research_type == "stock_analysis":
+                # Use Agent Skill: Comprehensive analysis with smart caching
+                result = await self.web_research.get_stock_analysis(query, "comprehensive")
+                return self._format_stock_analysis(query, result)
+            
+            elif research_type == "market_context":
+                # Use Agent Skill: Market overview (15 min cache)
+                result = await self.web_research.get_market_context()
+                return self._format_market_context(result)
+            
+            # ========== STANDARD RESEARCH (More credits, less caching) ==========
+            
+            elif research_type == "ticker":
                 # Research a specific ticker
                 research = await self.web_research.research_ticker(query)
                 return self._format_ticker_research(query, research)
@@ -374,6 +411,143 @@ Format responses with clear sections. Cite specific rules from the playbook."""
         except Exception as e:
             logger.error(f"Research failed: {e}")
             return f"Research error: {str(e)}"
+    
+    def _format_company_info(self, ticker: str, result: Dict) -> str:
+        """Format Agent Skill company info results"""
+        lines = [f"\n=== COMPANY INFO: {ticker} ===\n"]
+        
+        # Profile
+        profile = result.get("profile", {})
+        if profile.get("name"):
+            lines.append(f"**{profile.get('name')}**")
+            if profile.get("sector"):
+                lines.append(f"Sector: {profile.get('sector')} | Industry: {profile.get('industry', 'N/A')}")
+            if profile.get("description"):
+                lines.append(f"\n{profile.get('description')}\n")
+        
+        # Fundamentals
+        fundamentals = result.get("fundamentals", {})
+        if fundamentals:
+            fund_lines = []
+            for key in ["P/E", "Forward P/E", "PEG", "P/B", "EPS (ttm)", "Target Price", "RSI (14)"]:
+                if key in fundamentals:
+                    fund_lines.append(f"{key}: {fundamentals[key]}")
+            if fund_lines:
+                lines.append(f"**Key Metrics:** {' | '.join(fund_lines)}\n")
+        
+        # Recent News
+        news = result.get("recent_news", [])
+        if news:
+            lines.append("**Recent News:**")
+            for n in news[:3]:
+                lines.append(f"• {n.get('headline', 'N/A')}")
+            lines.append("")
+        
+        # Analyst sentiment
+        sentiment = result.get("analyst_sentiment", {})
+        if sentiment.get("summary"):
+            lines.append(f"**Analyst View:** {sentiment.get('summary')}\n")
+        
+        # Credit usage
+        credits = result.get("tavily_credits_used", 0)
+        sources = result.get("sources_used", [])
+        lines.append(f"_Sources: {', '.join(sources)} | Tavily credits: {credits}_")
+        
+        return "\n".join(lines)
+    
+    def _format_stock_analysis(self, ticker: str, result: Dict) -> str:
+        """Format Agent Skill stock analysis results"""
+        lines = [f"\n=== STOCK ANALYSIS: {ticker} ===\n"]
+        
+        # Price context
+        price = result.get("price_context", {})
+        if price.get("current_price"):
+            change = price.get("change_percent", 0)
+            emoji = "🟢" if change > 0 else "🔴" if change < 0 else "⚪"
+            lines.append(f"**Current:** ${price.get('current_price', 'N/A')} {emoji} {change:+.2f}%")
+            lines.append(f"Volume: {price.get('volume', 'N/A')} | RVOL: {price.get('rvol', 'N/A')} | VWAP: ${price.get('vwap', 'N/A')}")
+            lines.append("")
+        
+        # Technical signals
+        tech = result.get("technical_signals", {})
+        if tech:
+            tech_lines = []
+            if tech.get("rsi"):
+                rsi_status = "overbought" if tech["rsi"] > 70 else "oversold" if tech["rsi"] < 30 else "neutral"
+                tech_lines.append(f"RSI: {tech['rsi']:.1f} ({rsi_status})")
+            if tech.get("above_vwap") is not None:
+                tech_lines.append(f"{'Above' if tech['above_vwap'] else 'Below'} VWAP")
+            if tech_lines:
+                lines.append(f"**Technicals:** {' | '.join(tech_lines)}\n")
+        
+        # Active setups from scanner
+        trading = result.get("trading_context", {})
+        setups = trading.get("active_setups", [])
+        if setups:
+            lines.append("**Active Setups Detected:**")
+            for s in setups:
+                lines.append(f"• {s.get('setup', 'N/A')} ({s.get('direction', 'N/A').upper()}) - Priority: {s.get('priority', 'N/A')}")
+            lines.append("")
+        
+        # News sentiment
+        news = result.get("news_sentiment", {})
+        if news.get("summary"):
+            lines.append(f"**News Summary:** {news.get('summary')[:300]}...\n")
+        
+        headlines = news.get("headlines", [])
+        if headlines:
+            lines.append("**Headlines:**")
+            for h in headlines[:3]:
+                lines.append(f"• [{h.get('source', 'Web')}] {h.get('title', 'N/A')}")
+            lines.append("")
+        
+        # Credit usage
+        credits = result.get("tavily_credits_used", 0)
+        sources = result.get("sources_used", [])
+        lines.append(f"_Sources: {', '.join(sources)} | Tavily credits: {credits}_")
+        
+        return "\n".join(lines)
+    
+    def _format_market_context(self, result: Dict) -> str:
+        """Format Agent Skill market context results"""
+        lines = ["\n=== MARKET CONTEXT ===\n"]
+        
+        # Indices
+        indices = result.get("indices", {})
+        if indices:
+            index_lines = []
+            for symbol, data in indices.items():
+                if data.get("price"):
+                    change = data.get("change_percent", 0)
+                    emoji = "🟢" if change > 0 else "🔴" if change < 0 else "⚪"
+                    index_lines.append(f"{symbol}: ${data['price']:.2f} {emoji}{change:+.2f}%")
+            if index_lines:
+                lines.append("**Indices:** " + " | ".join(index_lines))
+                lines.append("")
+        
+        # Market regime
+        regime = result.get("market_regime", "unknown")
+        env = result.get("trading_environment", {})
+        lines.append(f"**Market Regime:** {regime.upper().replace('_', ' ')}")
+        lines.append(f"**Bias:** {env.get('bias', 'unknown').title()} | **Volatility:** {env.get('volatility', 'normal').title()}")
+        
+        if env.get("recommendation"):
+            lines.append(f"\n**Trading Recommendation:** {env.get('recommendation')}\n")
+        
+        # News themes
+        themes = result.get("news_themes", [])
+        if themes:
+            lines.append("**Key Themes:**")
+            for t in themes[:3]:
+                lines.append(f"• {t[:150]}...")
+            lines.append("")
+        
+        # Credit usage
+        credits = result.get("tavily_credits_used", 0)
+        sources = result.get("sources_used", [])
+        lines.append(f"_Sources: {', '.join(sources)} | Tavily credits: {credits}_")
+        
+        return "\n".join(lines)
     
     def _format_ticker_research(self, ticker: str, research: Dict) -> str:
         """Format ticker research results for AI context"""
