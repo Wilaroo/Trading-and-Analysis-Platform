@@ -478,13 +478,15 @@ class MarketIntelService:
             if not quotes:
                 return ""
             
-            # Sort by performance
-            sorted_sectors = sorted(quotes, key=lambda x: x.get("change_percent", 0), reverse=True)
+            # quotes is a dict keyed by symbol - convert to list of (symbol, data) for sorting
+            quote_list = [(sym, data) for sym, data in quotes.items()]
+            
+            # Sort by performance (change_percent)
+            sorted_sectors = sorted(quote_list, key=lambda x: x[1].get("change_percent", 0), reverse=True)
             
             parts.append("=== SECTOR PERFORMANCE (Leaders → Laggards) ===")
             
-            for i, q in enumerate(sorted_sectors):
-                sym = q.get("symbol", "?")
+            for i, (sym, q) in enumerate(sorted_sectors):
                 chg = q.get("change_percent", 0)
                 name = sector_names.get(sym, sym)
                 
