@@ -206,6 +206,8 @@ Triggers AI Coaching Notification
 - ✅ Tavily Agent Skills with intelligent caching
 - ✅ Charts Tab Integration (TradingView embedded, click-to-view from widgets)
 - ✅ Fixed service method bugs causing chatbot timeouts (Feb 12, 2026)
+- ✅ Click-to-Chart Feature in AI Chat (chart icon next to tickers in chat messages)
+- ✅ Code cleanup: Removed deprecated ChartsPage.js and IBRealtimeChart.jsx
 
 ### P1 - Next Up
 - Portfolio awareness: Proactive suggestions ("Scale out of AMD?", "Heavy tech exposure")
