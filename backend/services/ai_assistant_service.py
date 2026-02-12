@@ -1536,6 +1536,7 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
     async def chat(self, user_message: str, session_id: str = "default", user_id: str = "default") -> Dict:
         """
         Main chat interface. Processes user message and returns AI response.
+        Now with web research capabilities!
         """
         # Track request pattern
         self._track_request_pattern(user_message)
@@ -1547,8 +1548,24 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         user_msg = AssistantMessage(role="user", content=user_message)
         conv.messages.append(user_msg)
         
+        # Check for research intent first
+        research_context = ""
+        research_intent = await self._detect_research_intent(user_message)
+        if research_intent:
+            logger.info(f"Research intent detected: {research_intent}")
+            try:
+                research_context = await self._perform_research(research_intent)
+                logger.info(f"Research completed: {len(research_context)} chars")
+            except Exception as e:
+                logger.error(f"Research failed: {e}")
+                research_context = f"[Research attempt failed: {str(e)}]"
+        
         # Build context with relevant knowledge
         context = await self._build_context(user_message, session_id)
+        
+        # Add research results to context if available
+        if research_context:
+            context = f"{context}\n\n{research_context}"
         
         # Prepare messages for LLM (last 10 messages for context)
         recent_messages = conv.messages[-10:]
@@ -1561,9 +1578,14 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                 "should i buy", "should i sell", "analyze", "evaluate", "deep dive",
                 "strategy", "backtest", "risk", "recommend", "quality score",
                 "compare", "portfolio", "rebalance", "hedge", "options",
-                "earnings play", "swing trade", "position size", "thesis"
+                "earnings play", "swing trade", "position size", "thesis",
+                "research", "news", "what's happening", "latest"
             ]
             complexity = "deep" if any(kw in msg_lower for kw in deep_keywords) else "standard"
+            
+            # Force deep analysis if research was performed
+            if research_context:
+                complexity = "deep"
             
             # Call LLM with smart routing
             response_text = await self._call_llm(llm_messages, context, complexity=complexity)
@@ -1572,7 +1594,10 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
             assistant_msg = AssistantMessage(
                 role="assistant",
                 content=response_text,
-                metadata={"provider": "gpt-4o" if complexity == "deep" else "ollama"}
+                metadata={
+                    "provider": "gpt-4o" if complexity == "deep" else "ollama",
+                    "had_research": bool(research_context)
+                }
             )
             conv.messages.append(assistant_msg)
             
@@ -1585,7 +1610,8 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                 "session_id": session_id,
                 "message_count": len(conv.messages),
                 "provider": "gpt-4o" if complexity == "deep" else "ollama",
-                "complexity": complexity
+                "complexity": complexity,
+                "used_research": bool(research_context)
             }
             
         except Exception as e:
