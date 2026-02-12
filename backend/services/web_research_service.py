@@ -182,9 +182,10 @@ class TavilySearchService:
         include_domains: Optional[List[str]] = None,
         exclude_domains: Optional[List[str]] = None,
         include_answer: bool = True,
+        data_type: str = "search",  # Used for cache TTL
     ) -> ResearchResponse:
         """
-        Execute search with Tavily API
+        Execute search with Tavily API - uses intelligent caching
         
         Args:
             query: Search query
@@ -194,17 +195,16 @@ class TavilySearchService:
             include_domains: Prioritize these domains
             exclude_domains: Exclude these domains
             include_answer: Include Tavily's AI answer
+            data_type: Cache category for TTL selection
         """
-        import time
         start_time = time.time()
         
-        # Check cache
-        cache_key = f"{query}:{search_depth}:{topic}"
-        if cache_key in self._cache:
-            cached_result, cached_time = self._cache[cache_key]
-            if time.time() - cached_time < self._cache_ttl:
-                logger.info(f"Returning cached Tavily result for: {query}")
-                return cached_result
+        # Check intelligent cache first
+        cache_key_args = (query, search_depth, topic, max_results)
+        cached = _global_cache.get(data_type, *cache_key_args)
+        if cached:
+            logger.info(f"🎯 Cache HIT for '{query[:50]}...' (saved 1 credit)")
+            return cached
         
         client = self._get_client()
         if not client:
@@ -237,6 +237,9 @@ class TavilySearchService:
                 lambda: client.search(**search_params)
             )
             
+            # Track credit usage (basic=1, advanced=2)
+            self._credit_used += 2 if search_depth == "advanced" else 1
+            
             response_time = (time.time() - start_time) * 1000
             
             # Transform results
@@ -259,10 +262,10 @@ class TavilySearchService:
                 source_type="tavily"
             )
             
-            # Cache result
-            self._cache[cache_key] = (research_response, time.time())
+            # Store in intelligent cache
+            _global_cache.set(data_type, research_response, *cache_key_args)
             
-            logger.info(f"Tavily search completed: {query} ({len(results)} results, {response_time:.0f}ms)")
+            logger.info(f"✅ Tavily search: '{query[:50]}...' ({len(results)} results, {response_time:.0f}ms, ~{self._credit_used} credits used)")
             return research_response
             
         except Exception as e:
