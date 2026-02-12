@@ -1,0 +1,120 @@
+{
+  "summary": "Click-to-Chart Feature Testing. Code review confirms implementation is correct. Testing was limited due to AI assistant not responding (stays on 'Analyzing...') and intermittent data availability in Scanner Alerts/Watchlist widgets.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "/api/assistant/chat", "issue": "AI chat endpoint not responding - messages stay at 'Analyzing...' indefinitely", "priority": "HIGH"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "AI Chat Response", "issue": "Unable to verify ticker chart icons in AI responses because AI endpoint is not responding", "affected_selectors": ["[data-testid^='ticker-chart-']"]}
+    ],
+    "design_issues": [
+      {"screen": "WatchlistWidget", "issues": ["Console warning: validateDOMNesting - button cannot appear as descendant of button"]}
+    ]
+  },
+  "code_review_findings": {
+    "AICommandPanel_TickerLink": {
+      "file": "frontend/src/components/AICommandPanel.jsx",
+      "lines": "41-63",
+      "status": "CORRECT",
+      "details": "TickerLink component has chart icon button with data-testid='ticker-chart-{symbol}' and amber styling. Icon shows when onViewChart prop is passed."
+    },
+    "RightSidebar_WatchlistWidget": {
+      "file": "frontend/src/components/RightSidebar.jsx",
+      "lines": "429-436",
+      "status": "CORRECT",
+      "details": "Chart icon button appears on hover (opacity-0 group-hover:opacity-100) with title='View Chart'"
+    },
+    "RightSidebar_ScannerResultsWidget": {
+      "file": "frontend/src/components/RightSidebar.jsx",
+      "lines": "562-568",
+      "status": "CORRECT",
+      "details": "Chart icon button appears on hover with title='View Chart'"
+    },
+    "AICuratedOpportunityCard": {
+      "file": "frontend/src/components/AICommandPanel.jsx",
+      "lines": "257-266",
+      "status": "CORRECT",
+      "details": "Chart icon button with amber styling in curated opportunity cards"
+    },
+    "viewChart_function": {
+      "file": "frontend/src/hooks/useCommandCenterData.js",
+      "lines": "338-344",
+      "status": "CORRECT",
+      "details": "viewChart function correctly sets chartSymbol and switches to 'charts' tab"
+    }
+  },
+  "passed_tests": [
+    "Page loads with Command Center layout",
+    "AI Command Panel renders with data-testid='ai-command-panel'",
+    "AI chat input found (data-testid='ai-chat-input')",
+    "AI chat send button found (data-testid='ai-chat-send')",
+    "Command/Charts/Analytics tabs present and navigable",
+    "Right Sidebar renders with data-testid='right-sidebar'",
+    "Scanner Results Widget renders (data-testid='scanner-results-widget')",
+    "Watchlist Widget renders (data-testid='watchlist-widget')",
+    "Market Intelligence panel shows ticker links (AAL, AI) with data-testid='ticker-link-{symbol}'",
+    "Code review confirms chart icon implementation is correct in all components"
+  ],
+  "failed_tests": [
+    "AI chat response never loads - stays at 'Analyzing...'",
+    "Cannot verify ticker chart icons in AI responses due to no AI response"
+  ],
+  "test_report_links": [],
+  "action_items": [
+    "CRITICAL: Investigate why AI assistant (/api/assistant/chat) is not responding",
+    "Verify AI backend service is running and configured correctly",
+    "Once AI is working, retest ticker chart icons appearing in AI responses"
+  ],
+  "critical_code_review_comments": [
+    "Chart icon implementation is correct across all components",
+    "TickerLink in AICommandPanel.jsx correctly shows amber LineChart icon when onViewChart is provided",
+    "RightSidebar components correctly pass onViewChart prop to widgets",
+    "Chart icons use title='View Chart' and appear on hover in Scanner/Watchlist widgets",
+    "viewChart function correctly navigates to Charts tab with symbol",
+    "tickerUtils.jsx TickerLink does NOT have chart icon - this is by design (Market Intelligence only shows ticker links)"
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "Unable to test - AI endpoint not responding",
+    "frontend": "70% - UI elements render correctly, but unable to test AI chat flow"
+  },
+  "test_credentials": "No auth required",
+  "seed_data_creation": "Attempted to add AAPL to watchlist via UI",
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "mocked_apis_list": [],
+    "note": "All APIs are real - AI assistant endpoint appears to be non-responsive"
+  },
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Click-to-chart feature implementation is correct based on code review. Main blocking issue is AI assistant not responding. Chart icons should appear: 1) In AI chat responses next to ticker symbols (amber LineChart icon with data-testid='ticker-chart-{symbol}'), 2) In Scanner Alerts on hover, 3) In Smart Watchlist on hover, 4) In AI-Curated Opportunity cards. The viewChart function navigates to Charts tab with the clicked symbol.",
+  "features_tested": {
+    "ai_chat": {
+      "input_present": true,
+      "send_button_present": true,
+      "messages_area_present": true,
+      "ai_response_received": false,
+      "issue": "AI stays at 'Analyzing...' - backend not responding"
+    },
+    "ticker_links_in_market_intel": {
+      "present": true,
+      "symbols_found": ["AAL", "AI"],
+      "has_chart_icons": false,
+      "note": "Market Intelligence uses tickerUtils.jsx which intentionally does not have chart icons"
+    },
+    "chart_icons_implementation": {
+      "ai_command_panel": "Code correct - chart icon shown when onViewChart provided",
+      "scanner_alerts": "Code correct - chart icon on hover",
+      "watchlist": "Code correct - chart icon on hover",
+      "curated_opportunities": "Code correct - chart icon in cards"
+    },
+    "charts_tab_navigation": {
+      "tab_exists": true,
+      "viewChart_function": "Correctly sets symbol and switches to charts tab"
+    }
+  }
+}
