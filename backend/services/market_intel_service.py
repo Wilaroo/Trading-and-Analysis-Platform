@@ -245,11 +245,11 @@ class MarketIntelService:
                 
                 if quotes:
                     # Check IN PLAY status for each symbol
+                    # quotes is a dict keyed by symbol
                     in_play_stocks = []
                     not_in_play_stocks = []
                     
-                    for q in quotes:
-                        sym = q.get("symbol", "?")
+                    for sym, q in quotes.items():
                         price = q.get("price", 0)
                         chg = q.get("change_percent", 0)
                         vol = q.get("volume", 0)
