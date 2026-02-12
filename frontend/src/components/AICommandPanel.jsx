@@ -62,7 +62,7 @@ const TickerLink = ({ symbol, onClick, onViewChart, showBrackets = false }) => (
   </span>
 );
 
-const TickerAwareText = ({ text, onTickerClick }) => {
+const TickerAwareText = ({ text, onTickerClick, onViewChart }) => {
   if (!text || typeof text !== 'string') return text;
   
   const knownTickers = new Set([
@@ -138,7 +138,7 @@ const TickerAwareText = ({ text, onTickerClick }) => {
         <span key={i}>
           <span className="text-zinc-300">{match}</span>
           {' '}
-          <TickerLink symbol={ticker} onClick={onTickerClick} showBrackets />
+          <TickerLink symbol={ticker} onClick={onTickerClick} onViewChart={onViewChart} showBrackets />
         </span>
       );
     }
