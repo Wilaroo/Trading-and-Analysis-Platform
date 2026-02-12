@@ -143,19 +143,10 @@ class QualityService:
         Get quality metrics for a symbol.
         Tries multiple data sources in order of preference.
         """
-        # Validate symbol first - skip obviously invalid ones
+        # Use centralized ticker validation
         symbol = symbol.upper()
-        if len(symbol) > 5 or len(symbol) < 1:
-            return QualityMetrics(symbol=symbol, data_quality="low", data_source="invalid_symbol")
-        if not symbol.isalpha():
-            return QualityMetrics(symbol=symbol, data_quality="low", data_source="invalid_symbol")
-        # Skip common words that aren't stocks
-        invalid_symbols = {'SCALP', 'SETUP', 'TRADE', 'STOCK', 'ALERT', 'WATCH', 'TODAY', 
-                          'SWING', 'RIGHT', 'ABOUT', 'WHICH', 'WHERE', 'WOULD', 'COULD',
-                          'MIGHT', 'THINK', 'PRICE', 'LEVEL', 'TREND', 'CHART', 'WAYS',
-                          'DATA', 'PLAY', 'WHAT', 'WHEN', 'HELP', 'FIND', 'LOOK', 'TELL',
-                          'ALL', 'NOW', 'YOU', 'FOR', 'THE', 'AND', 'ARE', 'CAN', 'HOW'}
-        if symbol in invalid_symbols:
+        from utils.ticker_validator import is_valid_ticker
+        if not is_valid_ticker(symbol):
             return QualityMetrics(symbol=symbol, data_quality="low", data_source="invalid_symbol")
         
         # Check cache first
