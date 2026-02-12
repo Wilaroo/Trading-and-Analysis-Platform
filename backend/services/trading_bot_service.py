@@ -907,8 +907,8 @@ class TradingBotService:
             quality_score = min(100, max(0, base_score + score_adjustment))
             quality_grade = self._score_to_grade(quality_score)
             
-            # Generate explanation
-            explanation = self._generate_explanation(alert, shares, entry_price, stop_price, target_prices)
+            # Generate explanation with intelligence data
+            explanation = self._generate_explanation(alert, shares, entry_price, stop_price, target_prices, intelligence)
             
             # Get strategy config for this setup type
             strategy_cfg = STRATEGY_CONFIG.get(setup_type, DEFAULT_STRATEGY_CONFIG)
