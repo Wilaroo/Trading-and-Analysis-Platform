@@ -768,33 +768,65 @@ DATA CONTEXT:
 
         now_et = datetime.now(ZoneInfo("America/New_York"))
 
-        # Gather context from all real sources
+        # Gather context from all real sources (ENHANCED with new sources)
         context_parts = []
 
+        # 1. Market regime classification (NEW - determines day type)
+        regime_ctx = await self._gather_market_regime_context()
+        if regime_ctx:
+            context_parts.append(regime_ctx)
+
+        # 2. General news context
         news_ctx = await self._gather_news_context()
         context_parts.append(news_ctx)
 
+        # 3. Market indices data
         market_ctx = await self._gather_market_data_context()
         context_parts.append(market_ctx)
 
+        # 4. Smart Watchlist with IN PLAY status (ENHANCED)
         watchlist_ctx = await self._gather_watchlist_context()
         if watchlist_ctx:
             context_parts.append(watchlist_ctx)
 
+        # 5. Ticker-specific news for watchlist stocks (NEW)
+        ticker_news_ctx = await self._gather_ticker_specific_news()
+        if ticker_news_ctx:
+            context_parts.append(ticker_news_ctx)
+
+        # 6. In-play stocks technical levels (NEW)
+        in_play_ctx = await self._gather_in_play_technical_context()
+        if in_play_ctx:
+            context_parts.append(in_play_ctx)
+
+        # 7. Sector heatmap (NEW)
+        sector_ctx = await self._gather_sector_heatmap()
+        if sector_ctx:
+            context_parts.append(sector_ctx)
+
+        # 8. Earnings calendar for watchlist (NEW)
+        earnings_ctx = await self._gather_earnings_context()
+        if earnings_ctx:
+            context_parts.append(earnings_ctx)
+
+        # 9. Positions context
         positions_ctx = await self._gather_positions_context()
         context_parts.append(positions_ctx)
 
+        # 10. Bot status
         bot_ctx = self._gather_bot_context()
         context_parts.append(bot_ctx)
 
+        # 11. Learning loop performance
         learning_ctx = self._gather_learning_context()
         context_parts.append(learning_ctx)
 
+        # 12. Scanner alerts
         scanner_ctx = await self._gather_scanner_context()
         if scanner_ctx:
             context_parts.append(scanner_ctx)
 
-        full_context = "\n\n".join(context_parts)
+        full_context = "\n\n".join(filter(None, context_parts))
 
         # Get time-specific prompt with anti-hallucination rules
         prompt = self._get_report_prompt(report_type, full_context, now_et)
