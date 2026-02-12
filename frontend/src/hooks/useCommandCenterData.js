@@ -130,55 +130,49 @@ export function useCommandCenterData({
   };
 
   const fetchAccountData = async () => {
+    let positionsData = [];
+    
+    // First try trading-bot positions (Alpaca) - more reliable
     try {
-      // Try IB first, then fall back to trading-bot positions
-      let positionsData = [];
+      const botPositionsRes = await api.get('/api/trading-bot/positions');
+      console.log('Trading bot positions response:', botPositionsRes.data);
+      if (botPositionsRes.data?.success && botPositionsRes.data?.positions) {
+        positionsData = botPositionsRes.data.positions.map(p => ({
+          symbol: p.symbol,
+          qty: parseFloat(p.qty) || 0,
+          quantity: parseFloat(p.qty) || 0,
+          avg_entry_price: parseFloat(p.avg_entry_price) || 0,
+          avg_cost: parseFloat(p.avg_entry_price) || 0,
+          current_price: parseFloat(p.current_price) || 0,
+          market_value: (parseFloat(p.qty) || 0) * (parseFloat(p.current_price) || 0),
+          unrealized_pnl: parseFloat(p.unrealized_pnl) || 0,
+          unrealized_pl: parseFloat(p.unrealized_pnl) || 0,
+          unrealized_plpc: (parseFloat(p.unrealized_pnl_pct) || 0) / 100,
+          unrealized_pnl_percent: (parseFloat(p.unrealized_pnl_pct) || 0) / 100,
+          side: p.side || 'long'
+        }));
+        console.log('Mapped positions:', positionsData.length);
+      }
+    } catch (botErr) {
+      console.log('Trading bot positions error:', botErr.message);
       
+      // Fall back to IB positions
       try {
         const positionsRes = await api.get('/api/ib/account/positions');
         positionsData = positionsRes.data?.positions || [];
         console.log('IB positions loaded:', positionsData.length);
       } catch (ibErr) {
-        console.log('IB positions not available, trying trading-bot...');
-        // IB not connected, try trading-bot positions (Alpaca)
-        try {
-          const botPositionsRes = await api.get('/api/trading-bot/positions');
-          console.log('Trading bot positions response:', botPositionsRes.data);
-          if (botPositionsRes.data?.success && botPositionsRes.data?.positions) {
-            positionsData = botPositionsRes.data.positions.map(p => ({
-              symbol: p.symbol,
-              qty: parseFloat(p.qty) || 0,
-              quantity: parseFloat(p.qty) || 0,
-              avg_entry_price: parseFloat(p.avg_entry_price) || 0,
-              avg_cost: parseFloat(p.avg_entry_price) || 0,
-              current_price: parseFloat(p.current_price) || 0,
-              market_value: (parseFloat(p.qty) || 0) * (parseFloat(p.current_price) || 0),
-              unrealized_pnl: parseFloat(p.unrealized_pnl) || 0,
-              unrealized_pl: parseFloat(p.unrealized_pnl) || 0,
-              unrealized_plpc: (parseFloat(p.unrealized_pnl_pct) || 0) / 100,
-              unrealized_pnl_percent: (parseFloat(p.unrealized_pnl_pct) || 0) / 100,
-              side: p.side || 'long'
-            }));
-            console.log('Mapped positions:', positionsData);
-          }
-        } catch (botErr) {
-          console.log('Trading bot positions error:', botErr.message);
-        }
+        console.log('IB positions also not available');
       }
-      
-      console.log('Setting positions:', positionsData.length);
-      setPositions(positionsData);
-      
-      // Try to fetch account summary
-      try {
-        const accountRes = await api.get('/api/ib/account/summary');
-        setAccount(accountRes.data);
-      } catch (accErr) {
-        // console.log('Account summary not available');
-      }
-    } catch (err) {
-      console.error('Error fetching account:', err);
     }
+    
+    console.log('Setting positions state:', positionsData.length);
+    setPositions(positionsData);
+    
+    // Try to fetch account summary (non-blocking)
+    api.get('/api/ib/account/summary')
+      .then(res => setAccount(res.data))
+      .catch(() => {});
   };
 
   const runScanner = async () => {
