@@ -594,3 +594,83 @@ Intelligence gathering timeout for CADE
 - `frontend/src/hooks/useCommandCenterData.js` - Batch init, staggered loading
 - `frontend/src/components/AICommandPanel.jsx` - Optimized polling intervals
 - `frontend/src/components/layout/HeaderBar.jsx` - Safety check for systemHealth.services
+
+
+---
+
+## Session Log - February 12, 2026 (WebSocket Connection Stability Fix)
+
+### Issue: WebSocket Disconnection on Startup
+**Problem**: User reported persistent "Reconnecting" status on app startup and after trading bot scan cycles. The WebSocket connection would connect but immediately disconnect.
+
+**Root Causes Identified**:
+1. **Missing DB Collections Initialization**: `EnhancedBackgroundScanner` was initialized without `db`, then `db` was set after. The `alerts_collection`, `stats_collection`, and `alert_outcomes_collection` attributes were never created, causing `AttributeError` on first access.
+
+2. **MongoDB Truth Value Testing Bug**: PyMongo collections don't support boolean testing (`if self.collection:`). This caused `NotImplementedError` when checking collection existence.
+
+3. **WebSocket Route Not Matched by Ingress**: The WebSocket endpoint at `/ws/quotes` was not being routed through the Kubernetes ingress (only `/api/*` routes are forwarded to backend).
+
+4. **Connection Timeout on Initial Data Load**: The WebSocket handler was synchronously fetching 8 symbols (with 0.3s delays each = 2.4s) before responding, causing proxy timeouts.
+
+### Fixes Applied
+
+**1. Backend - EnhancedBackgroundScanner (`services/enhanced_scanner.py`)**:
+- Added explicit `None` initialization for all collection attributes in `__init__`
+- Created new `_init_db_collections(db)` method for collection setup
+- Created new `set_db(db)` method for late binding after construction
+- Changed all `if self.collection:` checks to `if self.collection is not None:`
+
+**2. Backend - Server Initialization (`server.py`)**:
+- Changed `background_scanner.db = db` to `background_scanner.set_db(db)` for proper initialization
+- Changed WebSocket route from `/ws/quotes` to `/api/ws/quotes` for ingress compatibility
+
+**3. Backend - WebSocket Handler (`server.py`)**:
+- Added immediate `{"type": "connected"}` message on WebSocket open
+- Created server-side keepalive ping task (every 20 seconds)
+- Made initial data fetch non-blocking (background task)
+- Reduced initial symbols from 8 to 4 and delay from 0.3s to 0.1s
+
+**4. Frontend - WebSocket Hook (`hooks/useWebSocket.js`)**:
+- Updated `getWebSocketUrl()` to use `/api/ws/quotes`
+- Added handling for `server_ping` and `connected` message types
+- Added cleanup of existing connection before reconnecting
+- Modified onclose handler to not auto-reconnect on clean closes (code 1000)
+
+**5. Background Scanner (`services/background_scanner.py`)**:
+- Fixed MongoDB truth value testing bug
+
+### Verification
+- Python WebSocket client test confirmed 50+ seconds stable connection
+- Frontend now shows "LIVE" status with active streaming quotes
+- Backend shows `active_connections: 1` in `/api/stream/status`
+
+### Files Modified
+- `backend/services/enhanced_scanner.py` - Collection initialization and truth value fixes
+- `backend/services/background_scanner.py` - Truth value fix
+- `backend/server.py` - WebSocket route change, handler improvements, set_db usage
+- `frontend/src/hooks/useWebSocket.js` - Route fix, message handling, cleanup
+- `frontend/src/utils/api.js` - WebSocket URL update
+
+---
+
+## Prioritized Backlog
+
+### P0 - Critical
+- [x] WebSocket connection stability fix (DONE - Feb 12, 2026)
+
+### P1 - High Priority
+- [ ] Real-time RVOL in Market Intelligence (User approved)
+- [ ] Portfolio Awareness (Phase 3) - AI knows all open positions
+- [ ] UI Focus Mode - Minimize all UI except chat and top opportunity
+- [ ] Custom scrapers for SEC filings and financial data sources
+
+### P2 - Medium Priority
+- [ ] Keyboard shortcuts for common trading actions
+- [ ] Full WebSocket Migration - Move remaining HTTP polling to WebSocket
+- [ ] Strategy backtesting integration
+- [ ] Alert sounds / browser push notifications
+
+### P3 - Low Priority / Future
+- [ ] Remove unused NewsletterPage.js and backend endpoints
+- [ ] Fix minor frontend race condition (watchlist shows "(0)" briefly)
+- [ ] Clean up pre-existing non-critical linting errors
