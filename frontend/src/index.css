@@ -438,36 +438,40 @@ body {
   color: var(--text-secondary);
 }
 
-/* Badge styles - Light mode */
+/* Badge styles - VIBRANT */
 .badge {
-  @apply rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wide border border-current;
+  @apply rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wide border;
 }
 
 .badge-success {
-  @apply text-emerald-600 bg-emerald-50 border-emerald-200;
+  @apply text-emerald-400 bg-emerald-400/15 border-emerald-400/40;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
 }
 
 .badge-warning {
-  @apply text-amber-600 bg-amber-50 border-amber-200;
+  @apply text-amber-400 bg-amber-400/15 border-amber-400/40;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.2);
 }
 
 .badge-error {
-  @apply text-rose-600 bg-rose-50 border-rose-200;
+  @apply text-red-400 bg-red-400/15 border-red-400/40;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
 }
 
 .badge-info {
-  @apply text-cyan-600 bg-cyan-50 border-cyan-200;
+  @apply text-cyan-400 bg-cyan-400/15 border-cyan-400/40;
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.2);
 }
 
-/* Button styles - Light mode with gradient */
+/* Button styles - VIBRANT WITH GLOW */
 .btn-primary {
   @apply font-bold px-4 py-2 rounded-lg uppercase tracking-wider text-white;
   background: linear-gradient(135deg, var(--primary-main), var(--accent-main));
-  box-shadow: 0 4px 15px var(--primary-glow);
+  box-shadow: 0 4px 20px var(--primary-glow-strong), 0 0 30px var(--primary-glow);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   overflow: hidden;
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .btn-primary::before {
@@ -484,21 +488,20 @@ body {
 }
 
 .btn-primary:hover {
-  box-shadow: 0 6px 25px var(--primary-glow-strong);
+  box-shadow: 0 6px 30px var(--primary-glow-intense), 0 0 50px var(--primary-glow);
   transform: translateY(-2px);
 }
 
 .btn-secondary {
-  @apply border px-4 py-2 rounded-lg uppercase tracking-wider;
+  @apply border px-4 py-2 rounded-lg uppercase tracking-wider text-white;
   border-color: var(--primary-main);
-  color: var(--primary-dark);
-  background: transparent;
+  background: rgba(0, 212, 255, 0.1);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .btn-secondary:hover {
-  background: var(--primary-glow);
-  box-shadow: 0 4px 15px var(--primary-glow);
+  background: rgba(0, 212, 255, 0.2);
+  box-shadow: 0 0 25px var(--primary-glow), inset 0 0 20px var(--primary-glow);
 }
 
 .btn-ghost {
@@ -509,22 +512,23 @@ body {
 }
 
 .btn-ghost:hover {
-  color: var(--primary-dark);
-  background: rgba(0, 184, 217, 0.08);
+  color: var(--primary-main);
+  background: rgba(0, 212, 255, 0.1);
 }
 
 .btn-icon {
   @apply p-2 rounded-xl;
   color: var(--text-secondary);
   background: var(--glass-bg);
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--glass-border);
   transition: all 0.2s ease-out;
 }
 
 .btn-icon:hover {
-  color: var(--primary-dark);
+  color: var(--primary-main);
   box-shadow: var(--shadow-neon);
   border-color: var(--primary-main);
+  background: rgba(0, 212, 255, 0.15);
 }
 
 /* Table styles - Light mode */
