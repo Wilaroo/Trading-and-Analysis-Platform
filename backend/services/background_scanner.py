@@ -192,6 +192,9 @@ class BackgroundScannerService:
                     await self._scan_symbol(symbol)
                 except Exception as e:
                     logger.warning(f"Error scanning {symbol}: {e}")
+                
+                # Yield to event loop to prevent blocking WebSocket connections
+                await asyncio.sleep(0)
             
             # Small delay between batches
             if i + self._symbols_per_batch < len(watchlist):
