@@ -771,3 +771,94 @@ Intelligence gathering timeout for CADE
 - Single WebSocket connection handles all real-time data
 - Better user experience with immediate status updates
 - Reduced server load from polling
+
+
+---
+
+## Session Log - February 12, 2026 (Glass Neon UI Enhancement)
+
+### Issue: Glass Effect Not Visible Enough
+**Problem**: User feedback indicated the initial Glass Neon UI implementation "barely looked different" and "doesn't look glassy at all". The glass panels weren't visibly showing the frosted effect.
+
+**Root Cause Analysis**:
+1. **Too opaque glass backgrounds** - Using `rgba(10, 10, 10, 0.75)` (75% opacity) made panels almost solid
+2. **No background contrast** - Main background was pure black (#030305), providing nothing to "see through"
+3. **Subtle glow effects** - Neon shadows were too faint to be noticeable
+4. **Low blur values** - 16px blur wasn't creating visible frosted effect
+
+### Fixes Applied
+
+**1. Enhanced Color System** (`index.css :root`):
+- Changed primary glow from 0.15 to 0.25 opacity for stronger neon
+- Added `--primary-glow-intense` (0.7 opacity) for maximum glow
+- Added `--accent-main` (purple #9D4EDD) for variety
+- Changed error color to more vibrant pink (#FF2E63)
+- Increased glass border visibility to 0.12 opacity
+
+**2. True Glassmorphism Background** (`body` in `index.css`):
+- Added multi-layer radial gradient background with cyan, purple, and magenta glows
+- Used `background-attachment: fixed` for parallax effect
+- Gradients positioned at corners/edges so glass effect is visible when overlaid
+
+**3. Enhanced Glass Classes** (`index.css`):
+- Reduced glass background opacity from 0.75 to 0.4 for true transparency
+- Increased blur from 16px to 20px (28px for strong variant)
+- Added ambient shadows (0 8px 32px rgba(0,0,0,0.4))
+- Added inset light reflection (inset 0 1px 0 rgba(255,255,255,0.06))
+- Added gradient border shine effect in `::before` pseudo-element
+- Enhanced hover states with `transform: translateY(-2px)` lift effect
+
+**4. Neon Effects Enhanced** (`index.css`):
+- Double-layered box shadows: `0 0 20px glow, 0 0 40px glow`
+- Stronger text-shadow for neon text: three layers of glow
+- Neon dots now pulse with visible animation
+- Added `.neon-ring` class for icon glow effects
+- Added `.neon-glow-pulse` animation class
+
+**5. Component-Level Glass Styling**:
+- `App.js`: Added background glow orbs (cyan, purple, magenta) using fixed positioned divs
+- `Sidebar.js`: Applied inline glass styles with 24px blur and proper shadow
+- `HeaderBar.jsx`: Glass panel with 24px blur and neon icon containers
+- `AICommandPanel.jsx`: Full glass treatment with gradient header accents
+- `MarketIntelPanel.jsx`: Glass panel with neon icon glow
+- `AICuratedWidget`: Cyan neon border glow with gradient background
+
+**6. New Utility Classes Added**:
+- `.frosted` - Maximum glassmorphism (32px blur, 0.35 opacity)
+- `.glow-box` - Gradient glow behind element
+- `.cyber-border` - Animated gradient border effect
+- `.holographic` - Shifting gradient shimmer
+- `.text-glow-*` - Text shadow utilities for cyan, magenta, success, error
+- `.icon-glow` / `.icon-glow-strong` - Drop shadow for icons
+- `.scanner-line` - Animated scanning line effect
+- `.grid-overlay` - Cyberpunk grid pattern
+- `.noise-overlay` - Film grain texture
+- `.pulse-dot` - Animated pulsing indicator
+- `.glass-dark` - Darker glass variant (0.85 opacity)
+- `.glass-modal` - High-blur glass for modals (40px blur)
+- `.btn-gradient` - Gradient border button style
+
+### Visual Changes Achieved
+1. ✅ Frosted glass panels now show visible blur behind content
+2. ✅ Cyan/purple/magenta gradient background provides contrast for glass
+3. ✅ Neon glows on text and icons are prominently visible
+4. ✅ Status indicators have animated glow halos
+5. ✅ Cards lift and glow on hover interaction
+6. ✅ Sidebar has visible frosted glass effect when expanded
+7. ✅ All panels have subtle shine/reflection on top edge
+
+### Files Modified
+- `frontend/src/index.css` - Complete design system overhaul
+- `frontend/src/App.js` - Added background glow orbs, changed main class
+- `frontend/src/components/Sidebar.js` - Enhanced glass styling
+- `frontend/src/components/layout/HeaderBar.jsx` - Glass panel with neon icons
+- `frontend/src/components/AICommandPanel.jsx` - Full glass treatment
+- `frontend/src/components/MarketIntelPanel.jsx` - Glass styling
+
+### Testing
+- Visual verification via screenshot tool confirmed glass effect is now prominent
+- Sidebar hover shows frosted glass with visible blur
+- All neon text has visible glow shadows
+- Status indicators animate with glow halos
+
+---
