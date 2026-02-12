@@ -544,7 +544,7 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart }) => {
               <div
                 key={idx}
                 onClick={() => onTickerSelect?.(alert.symbol)}
-                className="p-2 bg-zinc-800/40 rounded hover:bg-zinc-800/70 cursor-pointer transition-colors"
+                className="p-2 bg-zinc-800/40 rounded hover:bg-zinc-800/70 cursor-pointer transition-colors group"
               >
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-2">
@@ -554,9 +554,19 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart }) => {
                       {alert.priority?.toUpperCase()}
                     </span>
                   </div>
-                  {alert.tape_confirmation && (
-                    <span className="text-[9px] text-emerald-400">✓ TAPE</span>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {alert.tape_confirmation && (
+                      <span className="text-[9px] text-emerald-400">✓ TAPE</span>
+                    )}
+                    {/* Chart button */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onViewChart?.(alert.symbol); }}
+                      className="p-0.5 opacity-0 group-hover:opacity-100 hover:bg-cyan-500/20 rounded transition-all"
+                      title="View Chart"
+                    >
+                      <LineChart className="w-3 h-3 text-zinc-500 hover:text-cyan-400" />
+                    </button>
+                  </div>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] text-zinc-400 truncate max-w-[70%]">
