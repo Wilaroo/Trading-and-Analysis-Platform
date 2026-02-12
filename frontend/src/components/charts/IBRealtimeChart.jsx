@@ -144,104 +144,96 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation, height = 
     };
   }, [symbol]);
 
-  // Fetch data
-  useEffect(() => {
-    if (!symbol) return;
+  // Fetch data - only when chart is ready
+  const fetchData = useCallback(async () => {
+    if (!symbol || !chartReady || !candleSeriesRef.current || !chartRef.current) {
+      console.log('[Chart] Skipping fetch - not ready:', { symbol, chartReady, hasSeries: !!candleSeriesRef.current });
+      return;
+    }
     
-    const currentVersion = chartVersionRef.current;
-
-    const fetchData = async () => {
-      if (!chartReadyRef.current || !candleSeriesRef.current) {
-        setTimeout(fetchData, 200);
-        return;
-      }
-      if (!hasData) {
-        setLoading(true);
-      }
-      setError(null);
+    if (!hasData) {
+      setLoading(true);
+    }
+    setError(null);
+    
+    try {
+      console.log('[Chart] Fetching data for:', symbol, timeframe, duration);
+      const response = await api.get(`/api/ib/historical/${symbol}?duration=${encodeURIComponent(duration)}&bar_size=${encodeURIComponent(timeframe)}`);
       
-      try {
-        const response = await api.get(`/api/ib/historical/${symbol}?duration=${encodeURIComponent(duration)}&bar_size=${encodeURIComponent(timeframe)}`);
+      if (response.data.bars && response.data.bars.length > 0) {
+        console.log('[Chart] Received', response.data.bars.length, 'bars');
         
-        if (chartVersionRef.current !== currentVersion) return;
+        const candleData = response.data.bars.map(bar => ({
+          time: new Date(bar.time || bar.date || bar.timestamp).getTime() / 1000,
+          open: bar.open,
+          high: bar.high,
+          low: bar.low,
+          close: bar.close,
+        }));
         
-        if (response.data.bars && response.data.bars.length > 0) {
-          const candleData = response.data.bars.map(bar => ({
-            time: new Date(bar.time || bar.date || bar.timestamp).getTime() / 1000,
-            open: bar.open,
-            high: bar.high,
-            low: bar.low,
-            close: bar.close,
-          }));
+        const volumeData = response.data.bars.map(bar => ({
+          time: new Date(bar.time || bar.date || bar.timestamp).getTime() / 1000,
+          value: bar.volume,
+          color: bar.close >= bar.open ? '#00FF9433' : '#FF2E2E33',
+        }));
+        
+        // Sort data by time ascending (required by lightweight-charts)
+        candleData.sort((a, b) => a.time - b.time);
+        volumeData.sort((a, b) => a.time - b.time);
+        
+        // Set data on chart
+        if (candleSeriesRef.current && chartRef.current) {
+          console.log('[Chart] Setting candle data...');
+          candleSeriesRef.current.setData(candleData);
           
-          const volumeData = response.data.bars.map(bar => ({
-            time: new Date(bar.time || bar.date || bar.timestamp).getTime() / 1000,
-            value: bar.volume,
-            color: bar.close >= bar.open ? '#00FF9433' : '#FF2E2E33',
-          }));
-          
-          if (candleSeriesRef.current && chartRef.current) {
-            try {
-              candleData.sort((a, b) => a.time - b.time);
-              volumeData.sort((a, b) => a.time - b.time);
-              
-              candleSeriesRef.current.setData(candleData);
-              
-              if (volumeSeriesRef.current) {
-                volumeSeriesRef.current.setData(volumeData);
-              }
-              
-              chartRef.current.timeScale().fitContent();
-            } catch (setDataErr) {
-              console.error('Error setting candle data:', setDataErr);
-            }
+          if (volumeSeriesRef.current) {
+            volumeSeriesRef.current.setData(volumeData);
           }
           
-          if (chartRef.current && chartContainerRef.current) {
-            chartRef.current.timeScale().fitContent();
-            const w = chartContainerRef.current.clientWidth;
-            const h = chartContainerRef.current.clientHeight;
-            chartRef.current.applyOptions({ width: w, height: h });
-            chartRef.current.timeScale().scrollToPosition(0, false);
-          }
-          
-          setHasData(true);
-          setLastUpdate(new Date());
-          setDataSource(response.data.source || (response.data.is_cached ? 'cached' : 'unknown'));
-          setError(null);
-        } else {
-          if (!hasData) {
-            setHasData(false);
-            setError('No data available for this symbol');
-          }
+          // Fit content and resize
+          chartRef.current.timeScale().fitContent();
+          console.log('[Chart] Data set successfully');
         }
-      } catch (err) {
-        console.error('Error fetching chart data:', err);
+        
+        setHasData(true);
+        setLastUpdate(new Date());
+        setDataSource(response.data.source || (response.data.is_cached ? 'cached' : 'unknown'));
+        setError(null);
+      } else {
         if (!hasData) {
-          setHasData(false);
-          if (err.response?.status === 503) {
-            const detail = err.response?.data?.detail;
-            if (detail?.ib_busy) {
-              setError(`IB Gateway is busy (${detail.busy_operation}). Waiting...`);
-            } else {
-              setError('IB Gateway disconnected. Using Alpaca data.');
-            }
-          } else {
-            setError('Failed to load chart data');
-          }
+          setError('No data available for this symbol');
         }
       }
-      
-      setLoading(false);
-    };
+    } catch (err) {
+      console.error('[Chart] Error fetching data:', err);
+      if (!hasData) {
+        if (err.response?.status === 503) {
+          const detail = err.response?.data?.detail;
+          if (detail?.ib_busy) {
+            setError(`IB Gateway is busy (${detail.busy_operation}). Waiting...`);
+          } else {
+            setError('IB Gateway disconnected. Using Alpaca data.');
+          }
+        } else {
+          setError('Failed to load chart data');
+        }
+      }
+    }
+    
+    setLoading(false);
+  }, [symbol, timeframe, duration, chartReady, hasData]);
 
+  // Fetch data when chart becomes ready or params change
+  useEffect(() => {
+    if (!chartReady) return;
+    
     fetchData();
     
     const refreshInterval = isBusy ? 30000 : isConnected ? 10000 : 60000;
     const interval = setInterval(fetchData, refreshInterval);
     
     return () => clearInterval(interval);
-  }, [symbol, timeframe, duration, isConnected, isBusy, hasData]);
+  }, [chartReady, fetchData, isBusy, isConnected]);
 
   const displayError = (!hasData && !isConnected) ? 'Loading from Alpaca...' : error;
   const showLoading = loading && !hasData;
