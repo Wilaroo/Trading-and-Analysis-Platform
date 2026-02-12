@@ -344,7 +344,7 @@ class AdvancedAlertSystem:
         self._fundamental_service = None
         self._news_service = None
         
-        if db:
+        if db is not None:
             self.alerts_collection = db["organized_alerts"]
     
     @property

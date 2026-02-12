@@ -342,7 +342,7 @@ class EnhancedBackgroundScanner:
         self._alpaca_service = None
         
         # DB collections
-        if db:
+        if db is not None:
             self.alerts_collection = db["live_alerts"]
             self.stats_collection = db["strategy_stats"]
             self.alert_outcomes_collection = db["alert_outcomes"]

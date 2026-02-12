@@ -243,7 +243,7 @@ class PredictiveScannerService:
         self._trading_intelligence = None
         self._news_service = None
         
-        if db:
+        if db is not None:
             self.alerts_collection = db["predictive_alerts"]
             self.setups_collection = db["forming_setups"]
     
