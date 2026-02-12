@@ -529,41 +529,41 @@ const StatsHeader = ({ status, account, marketContext, positions, onToggle, onMo
   
   return (
     <div style={{
-      background: 'rgba(8, 8, 18, 0.6)',
-      borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
+      background: 'rgba(255, 255, 255, 0.6)',
+      borderBottom: '1px solid rgba(0, 0, 0, 0.06)'
     }}>
       {/* Top Row: Account Stats */}
-      <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}>
+      <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: '1px solid rgba(0, 0, 0, 0.04)' }}>
         {/* Left: Net Liq + P&L + Positions */}
         <div className="flex items-center gap-6">
           {/* Net Liquidation */}
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center"
                  style={{
-                   background: 'rgba(0, 229, 255, 0.15)',
-                   boxShadow: '0 0 12px rgba(0, 229, 255, 0.2)'
+                   background: 'linear-gradient(135deg, var(--primary-main), var(--accent-main))',
+                   boxShadow: '0 2px 10px var(--primary-glow)'
                  }}>
-              <DollarSign className="w-4 h-4 text-cyan-400 drop-shadow-[0_0_6px_rgba(0,229,255,0.6)]" />
+              <DollarSign className="w-4 h-4 text-white" />
             </div>
             <div>
-              <p className="text-[9px] text-zinc-500 uppercase">Net Liq</p>
-              <p className="text-sm font-bold font-mono text-white" data-testid="net-liquidation">
+              <p className="text-[9px] uppercase" style={{ color: 'var(--text-muted)' }}>Net Liq</p>
+              <p className="text-sm font-bold font-mono" style={{ color: 'var(--text-primary)' }} data-testid="net-liquidation">
                 {formatCurrency(netLiq)}
               </p>
             </div>
           </div>
           
           {/* Divider */}
-          <div className="w-px h-8" style={{ background: 'linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.15), transparent)' }} />
+          <div className="w-px h-8" style={{ background: 'linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.1), transparent)' }} />
           
           {/* Today's P&L */}
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center"
                  style={{
-                   background: totalPnl >= 0 ? 'rgba(0, 255, 148, 0.15)' : 'rgba(255, 46, 99, 0.15)',
-                   boxShadow: totalPnl >= 0 ? '0 0 12px rgba(0, 255, 148, 0.2)' : '0 0 12px rgba(255, 46, 99, 0.2)'
+                   background: totalPnl >= 0 ? 'rgba(0, 200, 83, 0.15)' : 'rgba(255, 23, 68, 0.15)',
+                   boxShadow: totalPnl >= 0 ? '0 2px 10px var(--success-glow)' : '0 2px 10px var(--error-glow)'
                  }}>
-              {totalPnl >= 0 ? <TrendingUp className="w-4 h-4 text-emerald-400 drop-shadow-[0_0_6px_rgba(0,255,148,0.6)]" /> : <TrendingDown className="w-4 h-4 text-red-400 drop-shadow-[0_0_6px_rgba(255,46,99,0.6)]" />}
+              {totalPnl >= 0 ? <TrendingUp className="w-4 h-4" style={{ color: 'var(--success)' }} /> : <TrendingDown className="w-4 h-4" style={{ color: 'var(--error)' }} />}
             </div>
             <div>
               <p className="text-[9px] text-zinc-500 uppercase">Today P&L</p>
