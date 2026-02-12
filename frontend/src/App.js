@@ -391,11 +391,11 @@ function App() {
       )}
       
       <main className="ml-16 min-h-screen relative">
-        {/* Background gradient layers for glass effect visibility */}
+        {/* Subtle gradient orbs for glass effect visibility */}
         <div className="fixed inset-0 ml-16 pointer-events-none overflow-hidden">
-          <div className="absolute -top-1/4 -right-1/4 w-1/2 h-1/2 bg-cyan-500/[0.07] rounded-full blur-[120px]" />
-          <div className="absolute top-1/3 -left-1/4 w-1/3 h-1/3 bg-purple-500/[0.05] rounded-full blur-[100px]" />
-          <div className="absolute -bottom-1/4 right-1/3 w-1/2 h-1/2 bg-magenta-500/[0.04] rounded-full blur-[120px]" />
+          <div className="absolute -top-1/4 -right-1/4 w-1/2 h-1/2 bg-cyan-400/[0.08] rounded-full blur-[150px]" />
+          <div className="absolute top-1/2 -left-1/4 w-1/3 h-1/3 bg-violet-400/[0.06] rounded-full blur-[120px]" />
+          <div className="absolute -bottom-1/4 right-1/4 w-1/2 h-1/2 bg-fuchsia-400/[0.05] rounded-full blur-[150px]" />
         </div>
         
         {/* Ticker Tape with glass effect */}
