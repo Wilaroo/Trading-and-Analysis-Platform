@@ -59,8 +59,12 @@ export const useWebSocket = (onMessage) => {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          // Ignore pong responses (heartbeat acknowledgments)
-          if (data.type === 'pong') {
+          // Ignore keepalive messages (pong and server_ping responses)
+          if (data.type === 'pong' || data.type === 'server_ping' || data.type === 'connected') {
+            // Update last update time for keepalives too (shows connection is active)
+            if (data.type === 'connected' || data.type === 'server_ping') {
+              setLastUpdate(new Date());
+            }
             return;
           }
           setLastUpdate(new Date());
