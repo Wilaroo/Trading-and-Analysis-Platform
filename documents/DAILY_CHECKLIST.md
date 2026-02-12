@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://glass-effect-rebuild.preview.emergentagent.com
+https://trading-dashboard-70.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://glass-effect-rebuild.preview.emergentagent.com
+https://trading-dashboard-70.preview.emergentagent.com
 ```
