@@ -465,19 +465,33 @@ body {
   @apply bg-white/[0.02];
 }
 
-/* Card styles */
+/* Card styles - GLASS ENHANCED */
 .card {
-  @apply rounded-lg p-5;
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
+  @apply rounded-xl p-5;
+  backdrop-filter: blur(var(--glass-blur-strong));
+  -webkit-backdrop-filter: blur(var(--glass-blur-strong));
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
-  transition: all 0.3s ease-out;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: var(--shadow-ambient);
+  position: relative;
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
 }
 
 .card:hover {
   border-color: var(--border-active);
-  box-shadow: var(--shadow-neon);
+  box-shadow: var(--shadow-neon), var(--shadow-ambient);
+  transform: translateY(-2px);
+  background: var(--glass-bg-hover);
 }
 
 .card-header {
