@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, TrendingUp, Search, Star, Clock } from 'lucide-react';
-import IBRealtimeChart from '../charts/IBRealtimeChart';
+import TradingViewWidget from '../charts/TradingViewWidget';
 
 const ChartsTab = ({ 
   isConnected, 
