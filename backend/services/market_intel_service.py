@@ -571,7 +571,7 @@ class MarketIntelService:
                     timing = "Before Open" if e["hour"] == "bmo" else "After Close" if e["hour"] == "amc" else ""
                     eps_str = f"EPS Est: ${e['eps_estimate']:.2f}" if e['eps_estimate'] else ""
                     parts.append(f"  📅 {e['symbol']}: {e['date']} {timing} {eps_str}")
-                    parts.append(f"     ⚠️ CAUTION: Avoid new positions or reduce size before earnings!")
+                    parts.append("     ⚠️ CAUTION: Avoid new positions or reduce size before earnings!")
             else:
                 parts.append("=== EARNINGS ===\nNo watchlist stocks reporting in next 2 weeks")
             
