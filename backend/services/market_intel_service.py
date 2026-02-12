@@ -599,10 +599,11 @@ class MarketIntelService:
                 
                 if wl_symbols:
                     quotes = await self._alpaca_service.get_quotes_batch(wl_symbols)
-                    for q in quotes or []:
+                    # quotes is a dict keyed by symbol
+                    for sym, q in (quotes or {}).items():
                         if abs(q.get("change_percent", 0)) >= 2.0:  # Moving 2%+
-                            if q["symbol"] not in in_play_symbols:
-                                in_play_symbols.append(q["symbol"])
+                            if sym not in in_play_symbols:
+                                in_play_symbols.append(sym)
             
             if not in_play_symbols:
                 return ""
