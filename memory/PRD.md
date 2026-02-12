@@ -279,6 +279,34 @@ Triggers AI Coaching Notification
 
 ---
 
+## Session Log - February 12, 2026 (Service Method Bug Fix)
+
+### Bug Fix: Missing Service Methods Causing "Disconnect" Feel
+**Problem**: User reported "disconnect issues" when using the chatbot. Investigation revealed the actual issue was **missing method calls** in `trading_bot_service.py`, not network disconnects. 
+
+**Root Cause**:
+- `_get_technical_intelligence()` was calling `self.technical_service.get_realtime_analysis()` which doesn't exist
+- `_get_quality_intelligence()` was calling `self.quality_service.score_opportunity()` which doesn't exist
+- These errors caused timeouts when the AI tried to gather intelligence on stocks, making the UI feel unresponsive
+
+**Error Messages in Logs**:
+```
+Technical intelligence error for CADE: 'RealTimeTechnicalService' object has no attribute 'get_realtime_analysis'
+Quality intelligence error for CADE: 'QualityService' object has no attribute 'score_opportunity'
+Intelligence gathering timeout for CADE
+```
+
+**Fixes Applied**:
+1. **Technical Intelligence**: Changed from non-existent `get_realtime_analysis()` to `get_technical_snapshot()` with proper response mapping
+2. **Quality Intelligence**: Changed from non-existent `score_opportunity()` to `get_quality_metrics()` + `calculate_quality_score()` combination
+
+**Files Modified**:
+- `backend/services/trading_bot_service.py` - Fixed both `_get_technical_intelligence()` and `_get_quality_intelligence()` methods
+
+**Result**: Chatbot now responds correctly without timeouts when analyzing stocks. The technical analysis and quality scores are properly fetched and formatted.
+
+---
+
 ## Session Log - February 12, 2026 (Charts Tab Integration)
 
 ### Charts Tab Integration into Command Center
