@@ -248,6 +248,7 @@ export function useCommandCenterData({
   const fetchCreditBudget = async () => {
     try {
       const res = await api.get('/api/research/budget');
+      console.log('Credit budget fetched:', res.data);
       setCreditBudget(res.data);
     } catch (err) {
       console.log('Credit budget fetch failed:', err.message);
