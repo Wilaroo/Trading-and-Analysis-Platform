@@ -359,9 +359,16 @@ const HeaderBar = ({
           {creditBudget && (
             <button
               onClick={() => setShowCreditModal(true)}
-              className={`glass-card flex items-center gap-2 px-3 py-2 transition-all hover:scale-[1.02] ${
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all hover:scale-[1.02] ${
                 creditConfig.pulse ? 'animate-pulse' : ''
               }`}
+              style={{
+                background: 'rgba(13, 13, 26, 0.6)',
+                backdropFilter: 'blur(16px)',
+                WebkitBackdropFilter: 'blur(16px)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.04)'
+              }}
               title="Click to view detailed credit usage"
               data-testid="credit-budget-indicator"
             >
