@@ -673,10 +673,11 @@ const ConfirmationDialog = ({ isOpen, trade, onConfirm, onCancel, loading }) => 
           <button
             onClick={onConfirm}
             disabled={loading}
-            className="flex-1 py-2.5 bg-cyan-500 text-black font-semibold rounded-lg hover:bg-cyan-400 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            className={`flex-1 py-2.5 ${buttonBg} text-black font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2`}
           >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-            Confirm Trade
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ActionIcon className="w-4 h-4" />}
+            {isCloseAction ? 'Close Position' : isAddAction ? 'Add Position' : 'Confirm Trade'}
+          </button>
           </button>
         </div>
       </motion.div>
