@@ -2975,7 +2975,200 @@ async def stream_quotes():
                 import traceback
                 traceback.print_exc()
         
-        await asyncio.sleep(15)  # 15s interval (was 10s)
+        await asyncio.sleep(15)  # 15s interval
+
+
+# ===================== SYSTEM STATUS STREAMING =====================
+
+async def stream_system_status():
+    """Background task to push system status updates via WebSocket"""
+    await asyncio.sleep(5)  # Wait for services to initialize
+    
+    # Cache for change detection
+    last_ib_status = None
+    last_bot_status = None
+    last_scanner_status = None
+    
+    while True:
+        if manager.active_connections:
+            try:
+                # IB Connection Status
+                try:
+                    ib_status = ib_service.get_connection_status()
+                    ib_data = {
+                        "connected": ib_status.get("connected", False),
+                        "busy": ib_status.get("busy", False),
+                        "error": ib_status.get("error")
+                    }
+                    # Only broadcast if changed
+                    if ib_data != last_ib_status:
+                        await manager.broadcast({
+                            "type": "ib_status",
+                            "data": ib_data,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+                        last_ib_status = ib_data
+                except Exception as e:
+                    print(f"IB status stream error: {e}")
+                
+                # Trading Bot Status
+                try:
+                    bot_status = trading_bot.get_status()
+                    bot_data = {
+                        "state": bot_status.get("state", "unknown"),
+                        "mode": bot_status.get("mode", "manual"),
+                        "open_positions": bot_status.get("open_positions", 0),
+                        "pending_orders": bot_status.get("pending_orders", 0),
+                        "daily_pnl": bot_status.get("daily_pnl", 0),
+                        "daily_trades": bot_status.get("daily_trades", 0),
+                        "last_scan": bot_status.get("last_scan"),
+                        "next_scan": bot_status.get("next_scan"),
+                        "error": bot_status.get("error")
+                    }
+                    if bot_data != last_bot_status:
+                        await manager.broadcast({
+                            "type": "bot_status",
+                            "data": bot_data,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+                        last_bot_status = bot_data
+                except Exception as e:
+                    print(f"Bot status stream error: {e}")
+                
+                # Scanner Status
+                try:
+                    scanner_status = background_scanner.get_status()
+                    scanner_data = {
+                        "running": scanner_status.get("running", False),
+                        "scan_count": scanner_status.get("scan_count", 0),
+                        "alerts_count": scanner_status.get("alerts_count", 0),
+                        "symbols_scanned": scanner_status.get("symbols_scanned_last", 0)
+                    }
+                    if scanner_data != last_scanner_status:
+                        await manager.broadcast({
+                            "type": "scanner_status",
+                            "data": scanner_data,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+                        last_scanner_status = scanner_data
+                except Exception as e:
+                    print(f"Scanner status stream error: {e}")
+                
+                # Yield control to event loop
+                await asyncio.sleep(0)
+                
+            except Exception as e:
+                print(f"System status stream error: {e}")
+        
+        await asyncio.sleep(10)  # Check every 10 seconds
+
+
+async def stream_bot_trades():
+    """Background task to push bot trades updates via WebSocket"""
+    await asyncio.sleep(8)
+    
+    last_trades_hash = None
+    
+    while True:
+        if manager.active_connections:
+            try:
+                trades = trading_bot.get_all_trades()
+                # Create hash of trade IDs to detect changes
+                trades_hash = hash(tuple(t.get("id", "") for t in trades[-20:]))  # Last 20 trades
+                
+                if trades_hash != last_trades_hash:
+                    await manager.broadcast({
+                        "type": "bot_trades",
+                        "data": trades[-50:],  # Send last 50 trades
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    last_trades_hash = trades_hash
+            except Exception as e:
+                print(f"Bot trades stream error: {e}")
+        
+        await asyncio.sleep(20)  # Check every 20 seconds
+
+
+async def stream_scanner_alerts():
+    """Background task to push scanner alerts via WebSocket"""
+    await asyncio.sleep(10)
+    
+    last_alerts_count = 0
+    
+    while True:
+        if manager.active_connections:
+            try:
+                alerts = background_scanner.get_live_alerts()
+                current_count = len(alerts)
+                
+                # Broadcast if alerts changed
+                if current_count != last_alerts_count or current_count > 0:
+                    await manager.broadcast({
+                        "type": "scanner_alerts",
+                        "data": alerts[:20],  # Top 20 alerts
+                        "count": current_count,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    last_alerts_count = current_count
+            except Exception as e:
+                print(f"Scanner alerts stream error: {e}")
+        
+        await asyncio.sleep(15)  # Check every 15 seconds
+
+
+async def stream_smart_watchlist():
+    """Background task to push smart watchlist updates via WebSocket"""
+    await asyncio.sleep(12)
+    
+    last_watchlist_hash = None
+    
+    while True:
+        if manager.active_connections:
+            try:
+                watchlist_service = get_smart_watchlist()
+                if watchlist_service:
+                    watchlist = watchlist_service.get_watchlist()
+                    # Hash based on symbols and their in-play status
+                    watchlist_hash = hash(tuple((w.get("symbol"), w.get("in_play", False)) for w in watchlist))
+                    
+                    if watchlist_hash != last_watchlist_hash:
+                        await manager.broadcast({
+                            "type": "smart_watchlist",
+                            "data": watchlist,
+                            "count": len(watchlist),
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+                        last_watchlist_hash = watchlist_hash
+            except Exception as e:
+                print(f"Smart watchlist stream error: {e}")
+        
+        await asyncio.sleep(25)  # Check every 25 seconds
+
+
+async def stream_coaching_notifications():
+    """Background task to push AI coaching notifications via WebSocket"""
+    await asyncio.sleep(15)
+    
+    last_notification_time = datetime.now(timezone.utc) - timedelta(hours=1)
+    
+    while True:
+        if manager.active_connections:
+            try:
+                notifications = assistant_service.get_scanner_notifications(since=last_notification_time)
+                
+                if notifications:
+                    await manager.broadcast({
+                        "type": "coaching_notifications",
+                        "data": notifications,
+                        "count": len(notifications),
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    # Update last check time
+                    last_notification_time = datetime.now(timezone.utc)
+            except Exception as e:
+                print(f"Coaching notifications stream error: {e}")
+        
+        await asyncio.sleep(12)  # Check every 12 seconds
 
 @app.on_event("startup")
 async def startup_event():
