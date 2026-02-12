@@ -203,8 +203,15 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation, height = 
               volumeSeriesRef.current.setData(volumeData);
             }
             
-            // Force chart to recalculate and fit content
-            chartRef.current.timeScale().fitContent();
+            // Set the visible range to include ALL data
+            const firstTime = validData[0].time;
+            const lastTime = validData[validData.length - 1].time;
+            console.log('[Chart] Setting time range:', firstTime, 'to', lastTime);
+            
+            chartRef.current.timeScale().setVisibleRange({
+              from: firstTime,
+              to: lastTime
+            });
             
             // Force price scale to auto-fit
             chartRef.current.priceScale('right').applyOptions({ autoScale: true });
