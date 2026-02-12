@@ -397,6 +397,9 @@ export function useCommandCenterData({
       // Phase 1: Batch init (system health, alerts, smart watchlist in ONE call)
       await fetchBatchInit();
       
+      // Phase 1b: Fetch credit budget (lightweight, runs in parallel)
+      fetchCreditBudget();
+      
       // Phase 2: IB-dependent data (only if connected)
       if (isConnected) {
         await Promise.all([fetchAccountData(), fetchWatchlist(isConnected)]);
@@ -422,6 +425,12 @@ export function useCommandCenterData({
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connectionChecked, isConnected, isActiveTab]);
+
+  // Refresh credit budget periodically (every 5 minutes)
+  useEffect(() => {
+    const budgetInterval = setInterval(fetchCreditBudget, 300000);
+    return () => clearInterval(budgetInterval);
+  }, []);
 
   // Polling for order fills and price alerts (30s is appropriate)
   useEffect(() => {
