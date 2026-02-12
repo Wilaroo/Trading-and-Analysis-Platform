@@ -94,15 +94,29 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation, height = 
           scaleMargins: { top: 0.1, bottom: 0.2 },
         });
 
-        // Try a line series first to debug
-        const lineSeries = chart.addLineSeries({
-          color: '#00FF94',
-          lineWidth: 2,
+        const candleSeries = chart.addCandlestickSeries({
+          upColor: '#00FF94',
+          downColor: '#FF2E2E',
+          borderUpColor: '#00FF94',
+          borderDownColor: '#FF2E2E',
+          wickUpColor: '#00FF94',
+          wickDownColor: '#FF2E2E',
           priceScaleId: 'right',
         });
-        candleSeriesRef.current = lineSeries;  // Re-use the ref for line series
+        candleSeriesRef.current = candleSeries;
 
-        console.log('[Chart] Chart created with LINE series');
+        // Also add volume
+        const volumeSeries = chart.addHistogramSeries({
+          color: '#26a69a',
+          priceFormat: { type: 'volume' },
+          priceScaleId: 'volume',
+        });
+        chart.priceScale('volume').applyOptions({
+          scaleMargins: { top: 0.85, bottom: 0 },
+        });
+        volumeSeriesRef.current = volumeSeries;
+
+        console.log('[Chart] Chart created with CANDLESTICK series');
         setChartReady(true);
       } catch (err) {
         console.error('[Chart] Error creating chart:', err);
