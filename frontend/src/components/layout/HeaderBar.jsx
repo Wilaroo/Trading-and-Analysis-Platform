@@ -158,6 +158,32 @@ const CreditBudgetModal = ({ isOpen, onClose, creditBudget }) => {
             </span>
           </div>
 
+          {/* Credits Saved Banner - Only show if there are savings */}
+          {credits_saved > 0 && (
+            <div className="bg-gradient-to-r from-emerald-500/10 via-emerald-500/5 to-transparent border border-emerald-500/20 rounded-lg p-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-emerald-500/20 rounded-lg">
+                    <TrendingDown className="w-5 h-5 text-emerald-400" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-emerald-400">Credits Saved by Caching</div>
+                    <div className="text-xs text-zinc-400">Smart caching reduced your API calls</div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-2xl font-bold text-emerald-400">+{credits_saved}</div>
+                  <div className="text-xs text-zinc-500">{savings_percent}% savings</div>
+                </div>
+              </div>
+              <div className="mt-2 flex items-center gap-2 text-xs text-zinc-400">
+                <span className="px-1.5 py-0.5 bg-zinc-800 rounded">Hit Rate: {cache_hit_rate}</span>
+                <span>•</span>
+                <span>Would have used {credits_used + credits_saved} credits without caching</span>
+              </div>
+            </div>
+          )}
+
           {/* Stats Grid */}
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-zinc-800/50 rounded-lg p-3 border border-zinc-700/50">
