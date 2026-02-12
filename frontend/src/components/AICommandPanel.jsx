@@ -1056,7 +1056,7 @@ const AICommandPanel = ({
             ) : (
               <>
                 {messages.map((msg, idx) => (
-                  <ChatMessage key={idx} message={msg} isUser={msg.role === 'user'} onTickerClick={handleTickerClick} />
+                  <ChatMessage key={idx} message={msg} isUser={msg.role === 'user'} onTickerClick={handleTickerClick} onViewChart={onViewChart} />
                 ))}
                 {isLoading && (
                   <div className="flex items-center gap-3 text-zinc-400">
