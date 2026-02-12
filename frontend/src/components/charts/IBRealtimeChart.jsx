@@ -114,6 +114,21 @@ const IBRealtimeChart = ({ symbol, isConnected, isBusy, busyOperation, height = 
         volumeSeriesRef.current = volumeSeries;
 
         console.log('[Chart] Chart created successfully, series ready');
+        
+        // TEST: Add some hardcoded test data immediately
+        try {
+          const testData = [
+            { time: 1770901500, open: 100, high: 110, low: 95, close: 105 },
+            { time: 1770901800, open: 105, high: 115, low: 100, close: 110 },
+            { time: 1770902100, open: 110, high: 120, low: 105, close: 115 },
+          ];
+          candleSeries.setData(testData);
+          chart.timeScale().fitContent();
+          console.log('[Chart] Test data set!');
+        } catch (e) {
+          console.error('[Chart] Test data error:', e);
+        }
+        
         setChartReady(true);
       } catch (err) {
         console.error('[Chart] Error creating chart:', err);
