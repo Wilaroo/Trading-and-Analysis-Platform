@@ -2603,6 +2603,37 @@ async def get_earnings_calendar(
         "total_count": len(calendar)
     }
 
+@app.get("/api/earnings/today")
+async def get_earnings_today():
+    """Get earnings for today and this week"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    week_end = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+    
+    # Get calendar data
+    calendar_data = await get_earnings_calendar(start_date=today, end_date=week_end)
+    
+    # Filter for today
+    today_earnings = [e for e in calendar_data["calendar"] if e["earnings_date"] == today]
+    
+    # Convert to simpler format for widget
+    earnings_list = []
+    for e in today_earnings:
+        earnings_list.append({
+            "symbol": e["symbol"],
+            "name": e.get("company_name", ""),
+            "timing": "BMO" if e.get("time") == "Before Open" else "AMC",
+            "time": e.get("time", ""),
+            "rating": e.get("earnings_play", {}).get("strategy", {}).get("quality", "B"),
+            "catalyst_score": e.get("iv_percentile", 50),
+            "expected_move": e.get("expected_move", {}).get("percent", 0)
+        })
+    
+    return {
+        "earnings": earnings_list,
+        "date": today,
+        "count": len(earnings_list)
+    }
+
 @app.get("/api/earnings/{symbol}")
 async def get_earnings_detail(symbol: str):
     """Get detailed earnings data for a specific symbol"""
