@@ -676,12 +676,14 @@ class MarketIntelService:
 Generate a PRE-MARKET INTELLIGENCE BRIEFING for {current_time_str}.
 
 Cover these sections (skip any with no data, do NOT fabricate):
-1. **NEWS RECAP**: Summarize ONLY the real headlines from the DATA CONTEXT below
-2. **EARNINGS & ANALYST ACTIONS**: ONLY mention if found in the news data
-3. **MARKET LEVELS**: Reference the EXACT index prices from the data
-4. **STRATEGY PLAYBOOK**: Based on the EXACT learning loop data, recommend strategies
-5. **RISK WARNINGS**: Based ONLY on real news headlines
-6. **GAME PLAN**: 3-5 bullet points for the day
+1. **MARKET REGIME**: What type of day is setting up? Reference the EXACT regime classification
+2. **NEWS RECAP**: Summarize ONLY the real headlines from the DATA CONTEXT below
+3. **WATCHLIST STATUS**: Which stocks are IN PLAY vs just on watch? Use the smart watchlist data
+4. **SECTOR ROTATION**: What sectors are leading/lagging? Use exact sector ETF data
+5. **EARNINGS WARNINGS**: Flag any watchlist stocks with upcoming earnings
+6. **IN-PLAY STOCKS**: Key levels (HOD, LOD, VWAP) for stocks that are moving
+7. **STRATEGY PLAYBOOK**: Based on market regime and learning loop data, recommend strategies
+8. **GAME PLAN**: 3-5 bullet points for the day based on all real data
 
 DATA CONTEXT:
 {context}""",
@@ -691,12 +693,15 @@ DATA CONTEXT:
 Generate an EARLY MARKET REPORT for {current_time_str}.
 
 Cover (using ONLY real data below):
-1. **MARKET STATUS**: Report EXACT index prices and changes from data
-2. **NEWS MOVERS**: Summarize ONLY real headlines that mention specific stocks
-3. **BOT ACTIVITY**: Report the EXACT bot status from the data below — do not guess
-4. **STRATEGY PERFORMANCE**: Use EXACT numbers from learning loop data
-5. **SETUPS**: Based on real market data and strategy configs
-6. **UPDATED PLAYBOOK**: Adjustments based on real data
+1. **MARKET REGIME**: Current day classification and strategy implications
+2. **MARKET STATUS**: Report EXACT index prices and changes from data
+3. **IN-PLAY STOCKS**: Which watchlist stocks are active with key levels
+4. **TICKER-SPECIFIC NEWS**: What headlines are driving individual stocks?
+5. **SECTOR ROTATION**: Which sectors leading/lagging
+6. **BOT ACTIVITY**: Report the EXACT bot status from the data below — do not guess
+7. **STRATEGY PERFORMANCE**: Use EXACT numbers from learning loop data
+8. **SETUPS**: Based on scanner alerts and in-play stocks
+9. **UPDATED PLAYBOOK**: Adjustments based on market regime
 
 DATA CONTEXT:
 {context}""",
@@ -706,12 +711,15 @@ DATA CONTEXT:
 Generate a MIDDAY MARKET REPORT for {current_time_str}.
 
 Cover (using ONLY real data below):
-1. **MARKET STATUS**: EXACT index prices and direction from data
-2. **P&L UPDATE**: EXACT bot stats and position data — report verbatim
-3. **STRATEGY SCORECARD**: EXACT performance numbers from learning loop
-4. **NEWS UPDATE**: Only real headlines from data
-5. **AFTERNOON OUTLOOK**: Based on real market data and strategy performance
-6. **POSITION MANAGEMENT**: Based on EXACT open positions
+1. **MARKET REGIME UPDATE**: Has the day type changed? Trend/chop/rotation?
+2. **MARKET STATUS**: EXACT index prices and direction from data
+3. **P&L UPDATE**: EXACT bot stats and position data — report verbatim
+4. **IN-PLAY STOCKS**: Which are still moving, key levels update
+5. **STRATEGY SCORECARD**: EXACT performance numbers from learning loop
+6. **SECTOR UPDATE**: Rotation shifts since open
+7. **TICKER NEWS**: Any new headlines for watchlist stocks
+8. **AFTERNOON OUTLOOK**: Based on market regime and momentum
+9. **POSITION MANAGEMENT**: Based on EXACT open positions
 
 DATA CONTEXT:
 {context}""",
@@ -721,12 +729,15 @@ DATA CONTEXT:
 Generate a POWER HOUR REPORT for {current_time_str}.
 
 Cover (using ONLY real data below):
-1. **MARKET POSITIONING**: EXACT index levels heading into close
-2. **EOD STRATEGY**: Based on real strategy configs and performance data
-3. **POSITION REVIEW**: EXACT open positions — close vs hold recommendations
-4. **BOT EOD SETTINGS**: Read EXACT EOD close settings from strategy configs
-5. **KEY LEVELS**: From EXACT market data
-6. **ACTION ITEMS**: 3-5 specific actions based on real data
+1. **MARKET REGIME**: Final hour classification - trend continuation or reversal likely?
+2. **MARKET POSITIONING**: EXACT index levels heading into close
+3. **IN-PLAY STOCKS**: End of day levels and expectations
+4. **EOD STRATEGY**: Based on market regime and strategy performance data
+5. **POSITION REVIEW**: EXACT open positions — close vs hold recommendations
+6. **TOMORROW SETUP**: Earnings warnings for next day
+7. **BOT EOD SETTINGS**: Read EXACT EOD close settings from strategy configs
+8. **KEY LEVELS**: From EXACT market data
+9. **ACTION ITEMS**: 3-5 specific actions based on real data
 
 DATA CONTEXT:
 {context}""",
