@@ -3037,7 +3037,7 @@ async def shutdown_event():
     print("Background services stopped")
 
 
-@app.websocket("/ws/quotes")
+@app.websocket("/api/ws/quotes")
 async def websocket_quotes(websocket: WebSocket):
     """WebSocket endpoint for real-time quote streaming"""
     await manager.connect(websocket)
