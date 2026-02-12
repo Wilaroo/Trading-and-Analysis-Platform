@@ -130,15 +130,11 @@ export function useCommandCenterData({
   };
 
   const fetchAccountData = async () => {
-    console.log('[fetchAccountData] Starting positions fetch...');
     let positionsData = [];
     
     // First try trading-bot positions (Alpaca) - more reliable
     try {
-      console.log('[fetchAccountData] Calling /api/trading-bot/positions');
       const botPositionsRes = await api.get('/api/trading-bot/positions');
-      console.log('[fetchAccountData] Raw response:', JSON.stringify(botPositionsRes.data));
-      
       if (botPositionsRes.data?.success && botPositionsRes.data?.positions) {
         positionsData = botPositionsRes.data.positions.map(p => ({
           symbol: p.symbol,
@@ -154,26 +150,17 @@ export function useCommandCenterData({
           unrealized_pnl_percent: (parseFloat(p.unrealized_pnl_pct) || 0) / 100,
           side: p.side || 'long'
         }));
-        console.log('[fetchAccountData] Mapped positions count:', positionsData.length);
-        console.log('[fetchAccountData] Mapped positions data:', JSON.stringify(positionsData));
-      } else {
-        console.log('[fetchAccountData] Response missing success or positions:', botPositionsRes.data);
       }
     } catch (botErr) {
-      console.log('[fetchAccountData] Trading bot positions error:', botErr.message);
-      
       // Fall back to IB positions
       try {
-        console.log('[fetchAccountData] Falling back to IB positions');
         const positionsRes = await api.get('/api/ib/account/positions');
         positionsData = positionsRes.data?.positions || [];
-        console.log('[fetchAccountData] IB positions loaded:', positionsData.length);
       } catch (ibErr) {
-        console.log('[fetchAccountData] IB positions also not available:', ibErr.message);
+        // Both APIs failed - positions will be empty
       }
     }
     
-    console.log('[fetchAccountData] Final positions to set:', positionsData.length, JSON.stringify(positionsData));
     setPositions(positionsData);
     
     // Try to fetch account summary (non-blocking)
