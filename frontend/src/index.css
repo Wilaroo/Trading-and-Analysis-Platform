@@ -94,13 +94,14 @@ body {
   color: var(--text-primary);
   min-height: 100vh;
   overflow-x: hidden;
-  /* Light gradient background with subtle color accents */
+  /* Rich gradient background with vibrant color spots */
   background-image: 
-    radial-gradient(ellipse 100% 80% at 20% 0%, rgba(0, 184, 217, 0.12), transparent 50%),
-    radial-gradient(ellipse 80% 60% at 80% 10%, rgba(124, 77, 255, 0.08), transparent 50%),
-    radial-gradient(ellipse 60% 50% at 0% 100%, rgba(224, 64, 251, 0.06), transparent 50%),
-    radial-gradient(ellipse 50% 40% at 100% 80%, rgba(0, 184, 217, 0.08), transparent 50%),
-    linear-gradient(180deg, #F0F4F8 0%, #E8EEF4 50%, #F5F7FA 100%);
+    radial-gradient(ellipse 80% 60% at 10% 0%, rgba(0, 212, 255, 0.15), transparent 50%),
+    radial-gradient(ellipse 60% 50% at 90% 10%, rgba(168, 85, 247, 0.12), transparent 50%),
+    radial-gradient(ellipse 70% 40% at 100% 50%, rgba(255, 46, 147, 0.1), transparent 50%),
+    radial-gradient(ellipse 50% 50% at 0% 80%, rgba(0, 212, 255, 0.08), transparent 50%),
+    radial-gradient(ellipse 60% 60% at 50% 100%, rgba(168, 85, 247, 0.1), transparent 50%),
+    linear-gradient(135deg, #0F1419 0%, #151C24 50%, #1A2332 100%);
   background-attachment: fixed;
 }
 
