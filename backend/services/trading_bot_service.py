@@ -501,6 +501,63 @@ class TradingBotService:
         self._db = db
         logger.info("TradingBotService services configured")
     
+    # ==================== INTELLIGENCE SERVICE PROPERTIES ====================
+    
+    @property
+    def web_research(self):
+        """Lazy load web research service"""
+        if self._web_research is None:
+            try:
+                from services.web_research_service import get_web_research_service
+                self._web_research = get_web_research_service()
+            except Exception as e:
+                logger.warning(f"Web research service not available: {e}")
+        return self._web_research
+    
+    @property
+    def market_intelligence(self):
+        """Lazy load market intelligence service"""
+        if self._market_intelligence is None:
+            try:
+                from services.ai_market_intelligence import get_ai_market_intelligence
+                self._market_intelligence = get_ai_market_intelligence()
+            except Exception as e:
+                logger.warning(f"Market intelligence service not available: {e}")
+        return self._market_intelligence
+    
+    @property
+    def technical_service(self):
+        """Lazy load technical analysis service"""
+        if self._technical_service is None:
+            try:
+                from services.realtime_technical_service import get_technical_service
+                self._technical_service = get_technical_service()
+            except Exception as e:
+                logger.warning(f"Technical service not available: {e}")
+        return self._technical_service
+    
+    @property
+    def quality_service(self):
+        """Lazy load quality scoring service"""
+        if self._quality_service is None:
+            try:
+                from services.quality_service import get_quality_service
+                self._quality_service = get_quality_service()
+            except Exception as e:
+                logger.warning(f"Quality service not available: {e}")
+        return self._quality_service
+    
+    @property
+    def news_service(self):
+        """Lazy load news service"""
+        if self._news_service is None:
+            try:
+                from services.news_service import get_news_service
+                self._news_service = get_news_service()
+            except Exception as e:
+                logger.warning(f"News service not available: {e}")
+        return self._news_service
+    
     def add_trade_callback(self, callback: callable):
         """Add callback for trade updates"""
         self._trade_callbacks.append(callback)
