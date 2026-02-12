@@ -3072,14 +3072,20 @@ async def stream_bot_trades():
     while True:
         if manager.active_connections:
             try:
-                trades = trading_bot.get_all_trades()
+                # Get all trades using the summary method
+                trades_data = trading_bot.get_all_trades_summary()
+                all_trades = []
+                all_trades.extend(trades_data.get("pending", []))
+                all_trades.extend(trades_data.get("open", []))
+                all_trades.extend(trades_data.get("closed", [])[:30])  # Limit closed trades
+                
                 # Create hash of trade IDs to detect changes
-                trades_hash = hash(tuple(t.get("id", "") for t in trades[-20:]))  # Last 20 trades
+                trades_hash = hash(tuple(t.get("id", "") for t in all_trades[-20:]))
                 
                 if trades_hash != last_trades_hash:
                     await manager.broadcast({
                         "type": "bot_trades",
-                        "data": trades[-50:],  # Send last 50 trades
+                        "data": all_trades,
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     })
                     last_trades_hash = trades_hash
@@ -3101,11 +3107,21 @@ async def stream_scanner_alerts():
                 alerts = background_scanner.get_live_alerts()
                 current_count = len(alerts)
                 
+                # Convert LiveAlert objects to dicts
+                alerts_data = []
+                for alert in alerts[:20]:  # Top 20 alerts
+                    if hasattr(alert, 'to_dict'):
+                        alerts_data.append(alert.to_dict())
+                    elif hasattr(alert, '__dict__'):
+                        alerts_data.append(dict(alert.__dict__))
+                    else:
+                        alerts_data.append(alert)
+                
                 # Broadcast if alerts changed
                 if current_count != last_alerts_count or current_count > 0:
                     await manager.broadcast({
                         "type": "scanner_alerts",
-                        "data": alerts[:20],  # Top 20 alerts
+                        "data": alerts_data,
                         "count": current_count,
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     })
@@ -3127,9 +3143,29 @@ async def stream_smart_watchlist():
             try:
                 watchlist_service = get_smart_watchlist()
                 if watchlist_service:
-                    watchlist = watchlist_service.get_watchlist()
-                    # Hash based on symbols and their in-play status
-                    watchlist_hash = hash(tuple((w.get("symbol"), w.get("in_play", False)) for w in watchlist))
+                    watchlist_items = watchlist_service.get_watchlist()
+                    
+                    # Convert WatchlistItem objects to dicts
+                    watchlist = []
+                    for item in watchlist_items:
+                        if hasattr(item, 'to_dict'):
+                            watchlist.append(item.to_dict())
+                        elif hasattr(item, '__dict__'):
+                            # Convert dataclass/object to dict
+                            item_dict = {}
+                            for key, val in item.__dict__.items():
+                                if not key.startswith('_'):
+                                    # Handle datetime objects
+                                    if hasattr(val, 'isoformat'):
+                                        item_dict[key] = val.isoformat()
+                                    else:
+                                        item_dict[key] = val
+                            watchlist.append(item_dict)
+                        else:
+                            watchlist.append(item)
+                    
+                    # Hash based on symbols
+                    watchlist_hash = hash(tuple(w.get("symbol", "") for w in watchlist if isinstance(w, dict)))
                     
                     if watchlist_hash != last_watchlist_hash:
                         await manager.broadcast({
@@ -3154,7 +3190,8 @@ async def stream_coaching_notifications():
     while True:
         if manager.active_connections:
             try:
-                notifications = assistant_service.get_scanner_notifications(since=last_notification_time)
+                # Use the correct method name
+                notifications = assistant_service.get_coaching_notifications(since=last_notification_time.isoformat())
                 
                 if notifications:
                     await manager.broadcast({
