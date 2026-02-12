@@ -245,6 +245,15 @@ export function useCommandCenterData({
     }
   };
 
+  const fetchCreditBudget = async () => {
+    try {
+      const res = await api.get('/api/research/budget');
+      setCreditBudget(res.data);
+    } catch (err) {
+      console.log('Credit budget fetch failed:', err.message);
+    }
+  };
+
   const checkPriceAlerts = async () => {
     if (!isConnected || priceAlerts.length === 0) return;
     try {
