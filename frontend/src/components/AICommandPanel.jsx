@@ -532,38 +532,38 @@ const StatsHeader = ({ status, account, marketContext, positions, onToggle, onMo
       background: 'rgba(21, 28, 36, 0.85)',
       borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
     }}>
-      {/* Top Row: Account Stats */}
-      <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}>
+      {/* Top Row: Account Stats - COMPACT */}
+      <div className="flex items-center justify-between px-3 py-1.5" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}>
         {/* Left: Net Liq + P&L + Positions */}
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-4">
           {/* Net Liquidation */}
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+          <div className="flex items-center gap-1.5">
+            <div className="w-5 h-5 rounded flex items-center justify-center"
                  style={{
                    background: 'linear-gradient(135deg, var(--primary-main), var(--accent-main))',
-                   boxShadow: '0 2px 15px var(--primary-glow)'
+                   boxShadow: '0 2px 8px var(--primary-glow)'
                  }}>
-              <DollarSign className="w-4 h-4 text-white" />
+              <DollarSign className="w-3 h-3 text-white" />
             </div>
             <div>
-              <p className="text-[9px] text-zinc-500 uppercase">Net Liq</p>
-              <p className="text-sm font-bold font-mono text-white" data-testid="net-liquidation">
+              <p className="text-[8px] text-zinc-500 uppercase leading-none">Net Liq</p>
+              <p className="text-xs font-bold font-mono text-white leading-tight" data-testid="net-liquidation">
                 {formatCurrency(netLiq)}
               </p>
             </div>
           </div>
           
           {/* Divider */}
-          <div className="w-px h-8" style={{ background: 'linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.15), transparent)' }} />
+          <div className="w-px h-6" style={{ background: 'linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.12), transparent)' }} />
           
           {/* Today's P&L */}
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+          <div className="flex items-center gap-1.5">
+            <div className="w-5 h-5 rounded flex items-center justify-center"
                  style={{
                    background: totalPnl >= 0 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-                   boxShadow: totalPnl >= 0 ? '0 2px 15px var(--success-glow)' : '0 2px 15px var(--error-glow)'
+                   boxShadow: totalPnl >= 0 ? '0 2px 8px var(--success-glow)' : '0 2px 8px var(--error-glow)'
                  }}>
-              {totalPnl >= 0 ? <TrendingUp className="w-4 h-4 text-emerald-400 drop-shadow-[0_0_8px_rgba(16,185,129,0.6)]" /> : <TrendingDown className="w-4 h-4 text-red-400 drop-shadow-[0_0_8px_rgba(239,68,68,0.6)]" />}
+              {totalPnl >= 0 ? <TrendingUp className="w-3 h-3 text-emerald-400" /> : <TrendingDown className="w-3 h-3 text-red-400" />}
             </div>
             <div>
               <p className="text-[9px] text-zinc-500 uppercase">Today P&L</p>
