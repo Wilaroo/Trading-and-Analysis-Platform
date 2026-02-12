@@ -538,10 +538,10 @@ body {
   animation: shimmer 1.5s infinite;
 }
 
-/* Tab styles */
+/* Tab styles - NEON ENHANCED */
 .tab {
   @apply px-4 py-2 text-sm uppercase tracking-wider text-zinc-500 border-b-2 border-transparent;
-  transition: all 0.2s ease-out;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .tab:hover {
@@ -550,23 +550,28 @@ body {
 
 .tab.active {
   @apply text-cyan-400 border-cyan-400;
-  text-shadow: 0 0 10px var(--primary-glow);
+  text-shadow: 0 0 15px var(--primary-glow-strong);
+  filter: drop-shadow(0 0 8px var(--primary-glow));
 }
 
-/* Glass tabs - pill style */
+/* Glass tabs - pill style - ENHANCED */
 .glass-tab {
-  @apply px-4 py-1.5 text-xs font-medium uppercase tracking-wider rounded-full;
-  @apply text-zinc-500 bg-transparent border border-transparent;
-  transition: all 0.2s ease-out;
+  @apply px-4 py-2 text-xs font-medium uppercase tracking-wider rounded-xl;
+  @apply text-zinc-500 border border-transparent;
+  background: transparent;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .glass-tab:hover {
-  @apply text-zinc-300 bg-white/5;
+  @apply text-zinc-300;
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .glass-tab.active {
-  @apply text-cyan-400 bg-cyan-400/10 border-cyan-400/30;
-  box-shadow: 0 0 10px var(--primary-glow);
+  @apply text-cyan-400;
+  background: rgba(0, 229, 255, 0.12);
+  border-color: rgba(0, 229, 255, 0.4);
+  box-shadow: 0 0 20px var(--primary-glow), inset 0 0 15px var(--primary-glow);
 }
 
 /* Input styles - GLASS ENHANCED */
