@@ -657,6 +657,7 @@ Intelligence gathering timeout for CADE
 
 ### P0 - Critical
 - [x] WebSocket connection stability fix (DONE - Feb 12, 2026)
+- [x] My Positions display fix (DONE - Feb 12, 2026)
 
 ### P1 - High Priority
 - [ ] Real-time RVOL in Market Intelligence (User approved)
@@ -674,6 +675,39 @@ Intelligence gathering timeout for CADE
 - [ ] Remove unused NewsletterPage.js and backend endpoints
 - [ ] Fix minor frontend race condition (watchlist shows "(0)" briefly)
 - [ ] Clean up pre-existing non-critical linting errors
+
+---
+
+## Session Log - February 12, 2026 (My Positions Bug Fix)
+
+### Bug Fix: My Positions Not Displaying Real Account Positions
+**Problem**: The "My Positions" section showed "No open positions" despite the user having real MSFT and NVDA positions in their Alpaca account. The API was returning correct data, but the frontend wasn't displaying it.
+
+**Root Cause**: The `fetchAccountData()` function in `useCommandCenterData.js` was only called when `connectionChecked` was true. However, `connectionChecked` starts as `false` and only becomes `true` after the IB status check completes. Since Alpaca positions don't depend on IB connection, this was causing the positions to never be fetched on initial load.
+
+**Fix Applied**:
+1. Added a separate `useEffect` hook that fetches positions immediately on component mount
+2. The new useEffect runs independently of IB connection status
+3. Added a 30-second refresh interval for positions
+
+**Code Changes** (`frontend/src/hooks/useCommandCenterData.js`):
+```javascript
+// Fetch positions immediately on mount - doesn't depend on IB connection
+useEffect(() => {
+  fetchAccountData();
+  const positionsInterval = setInterval(fetchAccountData, 30000);
+  return () => clearInterval(positionsInterval);
+}, []);
+```
+
+**Files Modified**:
+- `frontend/src/hooks/useCommandCenterData.js` - Added separate useEffect for positions
+
+**Testing Results**:
+- 100% frontend tests passed
+- My Positions section now correctly displays MSFT (242 shares) and NVDA (521 shares)
+- Total Unrealized P&L shows correct sum
+- Positions are clickable and open ticker detail modal
 
 ---
 
