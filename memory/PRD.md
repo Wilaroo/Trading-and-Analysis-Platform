@@ -679,6 +679,31 @@ Intelligence gathering timeout for CADE
 
 ---
 
+## Session Log - February 12, 2026 (Quick Actions Enhancement)
+
+### Feature: Quick Actions for Position Cards
+**Request**: User asked for quick action buttons on position cards to quickly close, add to position, or set price alerts.
+
+**Implementation**:
+1. Created new `PositionCard` component with hover-revealed action menu
+2. Added 4 action buttons:
+   - **Close** (red) - Opens confirmation dialog to close entire position at market
+   - **Add** (green) - Opens dialog to add shares to existing position
+   - **Alert** (amber) - Sets price alerts at ±5% from current price
+   - **Chart** (cyan) - Opens chart view for the ticker
+3. Enhanced `ConfirmationDialog` to support close and add position modes with appropriate styling
+4. Added handler functions: `handleClosePosition`, `handleAddToPosition`, `handleSetPriceAlert`
+
+**Files Modified**:
+- `frontend/src/components/AICommandPanel.jsx` - Added PositionCard component, action handlers, enhanced dialog
+
+**Testing Results**:
+- 100% frontend tests passed
+- All 7 features verified working
+- data-testids verified for automation
+
+---
+
 ## Session Log - February 12, 2026 (My Positions Bug Fix)
 
 ### Bug Fix: My Positions Not Displaying Real Account Positions
