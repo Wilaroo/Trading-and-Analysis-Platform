@@ -51,22 +51,23 @@ const CommandCenterPage = ({
         creditBudget={data.creditBudget}
       />
 
-      {/* Tab Navigation — 3 tabs */}
-      <div className="flex items-center gap-1 bg-[#0A0A0A] border border-white/10 rounded-lg p-1 mt-1" data-testid="main-tabs">
+      {/* Tab Navigation — Glass Style */}
+      <div className="flex items-center gap-1 glass-panel p-1.5 mt-1" data-testid="main-tabs">
         {tabs.map(tab => {
           const Icon = tab.icon;
+          const isActive = data.activeMainTab === tab.id;
           return (
             <button
               key={tab.id}
               onClick={() => data.setActiveMainTab(tab.id)}
-              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                data.activeMainTab === tab.id
-                  ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
-                  : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                isActive
+                  ? 'bg-cyan-400/10 text-cyan-400 border border-cyan-400/30 shadow-[0_0_15px_rgba(0,229,255,0.15)]'
+                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5 border border-transparent'
               }`}
               data-testid={`tab-${tab.id}`}
             >
-              <Icon className="w-4 h-4" />
+              <Icon className={`w-4 h-4 ${isActive ? 'drop-shadow-[0_0_6px_rgba(0,229,255,0.5)]' : ''}`} />
               {tab.label}
             </button>
           );
