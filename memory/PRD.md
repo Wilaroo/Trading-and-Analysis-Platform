@@ -213,6 +213,7 @@ Triggers AI Coaching Notification
 - ✅ Fixed service method bugs causing chatbot timeouts (Feb 12, 2026)
 - ✅ Click-to-Chart Feature in AI Chat (chart icon next to tickers in chat messages)
 - ✅ Code cleanup: Removed deprecated ChartsPage.js and IBRealtimeChart.jsx
+- ✅ Enhanced Market Intelligence (7 new data sources) - Feb 12, 2026
 
 ### P1 - Next Up
 - Portfolio awareness: Proactive suggestions ("Scale out of AMD?", "Heavy tech exposure")
