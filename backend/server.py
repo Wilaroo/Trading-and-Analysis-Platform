@@ -3173,9 +3173,14 @@ async def stream_coaching_notifications():
 @app.on_event("startup")
 async def startup_event():
     """Start background streaming task and background scanner"""
-    # Start WebSocket streaming first (lightweight)
+    # Start WebSocket streaming tasks
     asyncio.create_task(stream_quotes())
-    print("WebSocket streaming started")
+    asyncio.create_task(stream_system_status())
+    asyncio.create_task(stream_bot_trades())
+    asyncio.create_task(stream_scanner_alerts())
+    asyncio.create_task(stream_smart_watchlist())
+    asyncio.create_task(stream_coaching_notifications())
+    print("WebSocket streaming started (quotes + system status + bot + scanner + watchlist + coaching)")
     
     # Initialize web research service with database for credit tracking
     try:
