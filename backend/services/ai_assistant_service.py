@@ -318,8 +318,6 @@ Format responses with clear sections. Cite specific rules from the playbook."""
         
         Now routes to Agent Skills for more efficient credit usage.
         """
-        message_lower = message.lower()
-        
         # Research command patterns - ordered by specificity
         # Agent Skills patterns (most efficient)
         patterns = [
@@ -775,7 +773,7 @@ Total P&L on {symbol_upper}: ${total_pnl:,.2f}
             
             if pattern_name:
                 # First check if we have detailed analysis
-                pattern_id = pattern_name.lower().replace(' ', '_').replace('&', 'and')
+                # Convert pattern name to ID format (e.g., 'bull flag' -> 'bull_flag')
                 # Try common pattern ID mappings
                 pattern_mappings = {
                     'bull flag': 'bull_flag',
@@ -2334,7 +2332,7 @@ Keep it punchy and actionable - trader needs to act fast!"""
                 since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
                 return [n for n in self._coaching_notifications 
                        if datetime.fromisoformat(n['timestamp'].replace('Z', '+00:00')) > since_dt]
-            except:
+            except (ValueError, TypeError):
                 pass
         
         return self._coaching_notifications[-10:]  # Return last 10 by default
