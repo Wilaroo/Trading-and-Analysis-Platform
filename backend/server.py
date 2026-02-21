@@ -36,7 +36,6 @@ from routers.ib import router as ib_router, init_ib_service
 from routers.strategies import router as strategies_router, init_strategy_service
 from routers.scoring import router as scoring_router
 from routers.features import router as features_router
-from routers.newsletter import router as newsletter_router
 from routers.knowledge import router as knowledge_router
 from routers.learning import router as learning_router
 from routers.quality import router as quality_router, init_quality_router
@@ -54,7 +53,6 @@ from routers.market_intel import router as market_intel_router, init_market_inte
 from routers.research import router as research_router
 from services.market_intel_service import get_market_intel_service
 from services.ib_service import get_ib_service
-from services.newsletter_service import init_newsletter_service
 from services.news_service import init_news_service
 from services.strategy_service import get_strategy_service
 from services.scoring_engine import get_scoring_engine
