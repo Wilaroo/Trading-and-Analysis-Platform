@@ -1870,8 +1870,8 @@ const AICommandPanel = ({
           </div>
         </div>
 
-        {/* RIGHT: Trade Pipeline + Collapsible Sections */}
-        <div className="w-80 border-l border-white/5 bg-black/20 overflow-y-auto">
+        {/* RIGHT: Trade Pipeline + Collapsible Sections (60%) */}
+        <div className="w-[60%] bg-black/20 overflow-y-auto">
           {/* Unified Trade Pipeline Widget */}
           <div className="p-3">
             <TradePipelineWidget
