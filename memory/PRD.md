@@ -708,6 +708,57 @@ Intelligence gathering timeout for CADE
 
 ---
 
+## Session Log - February 21, 2026 (Full App Review & Bug Fixes)
+
+### Comprehensive Review & Debug Session
+**Goal**: Review entire app, codebase, API integrations, and AI assistant to ensure everything is working.
+
+### Critical Bug Fixed: AI Assistant Missing alpaca_service Attribute
+
+**Problem**: Backend logs showed `'AIAssistantService' object has no attribute 'alpaca_service'` causing positions context to fail in AI chat.
+
+**Root Cause**: The `alpaca_service` was never wired to `AIAssistantService` in server.py, even though the service tried to access `self.alpaca_service` to fetch positions for context.
+
+**Fix Applied**:
+1. Added `_alpaca_service` initialization in `AIAssistantService.__init__()`
+2. Added `set_alpaca_service(alpaca_service)` method
+3. Added `@property alpaca_service` getter
+4. Wired the service in server.py: `assistant_service.set_alpaca_service(alpaca_service)`
+
+**Files Modified**:
+- `backend/services/ai_assistant_service.py` - Added alpaca_service property and setter
+- `backend/server.py` (line 161) - Added `assistant_service.set_alpaca_service(alpaca_service)`
+
+### Minor Fixes
+
+**1. WatchlistWidget DOM Nesting Warning**
+- Changed button inside button to span with role="button" in `RightSidebar.jsx`
+- Eliminates React `validateDOMNesting` console warning
+
+**2. Python Linting Errors Fixed**
+- Removed unused `message_lower` variable
+- Removed unused `pattern_id` variable
+- Changed bare `except:` to `except (ValueError, TypeError):`
+
+### Testing Results (iteration_38.json)
+- **Backend**: 100% (15/15 tests passed)
+- **Frontend**: 100% (11 features verified)
+- All core features working:
+  - My Positions displays 2 real Alpaca positions (MSFT, NVDA)
+  - Quick Actions buttons work
+  - AI Chat responds with positions context
+  - WebSocket shows LIVE status
+  - Market Intel, Scanner Alerts, Smart Watchlist all functional
+  - Charts tab loads TradingView widget
+
+### Known Limitations
+- Ollama ngrok tunnel is offline (expected) - AI falls back to Emergent GPT-4o
+- IB Gateway not connected (expected in cloud environment)
+- Quick Actions handlers are frontend stubs - backend endpoints need implementation
+
+---
+
+
 ## Session Log - February 12, 2026 (My Positions Bug Fix)
 
 ### Bug Fix: My Positions Not Displaying Real Account Positions
