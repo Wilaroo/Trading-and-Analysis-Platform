@@ -1540,24 +1540,34 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
             context_parts.append("\nSTOCK DATA FOR MENTIONED SYMBOLS:")
             for symbol in symbols[:3]:
                 try:
-                    # Get quality score
-                    quality = await self.quality_service.get_quality_metrics(symbol)
-                    q_score = self.quality_service.calculate_quality_score(quality)
-                    context_parts.append(f"\n{symbol}:")
-                    context_parts.append(f"  Quality Grade: {q_score.grade} ({q_score.composite_score}/400)")
-                    context_parts.append(f"  Signal: {q_score.quality_signal}")
-                    if quality.roe:
-                        context_parts.append(f"  ROE: {quality.roe:.1%}, D/A: {quality.da:.1%}" if quality.da else f"  ROE: {quality.roe:.1%}")
+                    # Get quality score with timeout
+                    async def get_quality_data():
+                        quality = await self.quality_service.get_quality_metrics(symbol)
+                        q_score = self.quality_service.calculate_quality_score(quality)
+                        return quality, q_score
                     
-                    # Get ticker-specific news if mentioned
+                    try:
+                        quality, q_score = await asyncio.wait_for(get_quality_data(), timeout=5.0)
+                        context_parts.append(f"\n{symbol}:")
+                        context_parts.append(f"  Quality Grade: {q_score.grade} ({q_score.composite_score}/400)")
+                        context_parts.append(f"  Signal: {q_score.quality_signal}")
+                        if quality.roe:
+                            context_parts.append(f"  ROE: {quality.roe:.1%}, D/A: {quality.da:.1%}" if quality.da else f"  ROE: {quality.roe:.1%}")
+                    except asyncio.TimeoutError:
+                        context_parts.append(f"\n{symbol}: Quality data timeout - using cached or skipped")
+                    
+                    # Get ticker-specific news if mentioned (with timeout)
                     if wants_news:
                         try:
-                            ticker_news = await self.news_service.get_ticker_news(symbol, max_items=3)
+                            ticker_news = await asyncio.wait_for(
+                                self.news_service.get_ticker_news(symbol, max_items=3),
+                                timeout=3.0
+                            )
                             if ticker_news and not ticker_news[0].get("is_placeholder"):
                                 context_parts.append("  Recent News:")
                                 for news_item in ticker_news[:3]:
                                     context_parts.append(f"    - {news_item.get('headline', '')[:100]}")
-                        except Exception:
+                        except (asyncio.TimeoutError, Exception):
                             pass
                 except Exception as ex:
                     logger.warning(f"Error getting data for {symbol}: {ex}")
