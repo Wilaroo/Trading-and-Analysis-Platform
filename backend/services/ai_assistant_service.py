@@ -175,11 +175,22 @@ Format responses with clear sections. Cite specific rules from the playbook."""
         self._news_service = None
         self._trade_history_service = None
         self._trading_rules_engine = None
+        self._alpaca_service = None
     
     def set_trading_bot(self, trading_bot):
         """Wire the trading bot service for AI-bot integration"""
         self._trading_bot = trading_bot
         logger.info("Trading bot wired to AI assistant")
+    
+    def set_alpaca_service(self, alpaca_service):
+        """Wire the Alpaca service for position/account data"""
+        self._alpaca_service = alpaca_service
+        logger.info("Alpaca service wired to AI assistant")
+    
+    @property
+    def alpaca_service(self):
+        """Get the Alpaca service for positions/account data"""
+        return self._alpaca_service
         
     def _init_llm_clients(self):
         """Initialize available LLM clients"""
