@@ -568,7 +568,8 @@ class TavilySearchService:
     async def search_financial(
         self,
         query: str,
-        max_results: int = 5
+        max_results: int = 5,
+        search_depth: str = "advanced"
     ) -> ResearchResponse:
         """Search with financial domain focus"""
         financial_domains = [
@@ -581,7 +582,7 @@ class TavilySearchService:
             topic="news",
             max_results=max_results,
             include_domains=financial_domains,
-            search_depth="advanced",
+            search_depth=search_depth,
             data_type="news"  # 3 min cache
         )
 
