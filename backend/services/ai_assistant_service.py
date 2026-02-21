@@ -1677,11 +1677,10 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                     "stream": False,
                 }
                 
-                async with httpx.AsyncClient() as client:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=30.0)) as client:
                     response = await client.post(
                         url,
                         json=payload,
-                        timeout=120,  # Increased timeout for complex research synthesis
                         headers={"ngrok-skip-browser-warning": "true"}
                     )
                 
