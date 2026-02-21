@@ -158,6 +158,7 @@ init_trading_bot_router(trading_bot, trade_executor)
 
 # Wire AI assistant ↔ Trading bot integration
 assistant_service.set_trading_bot(trading_bot)
+assistant_service.set_alpaca_service(alpaca_service)  # Wire Alpaca for positions
 trading_bot._ai_assistant = assistant_service
 
 # Wire Scanner ↔ Trading bot for auto-execution
