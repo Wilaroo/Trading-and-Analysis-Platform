@@ -1130,20 +1130,21 @@ class WebResearchService:
                 snapshot = await tech_service.get_technical_snapshot(ticker)
                 
                 if snapshot:
+                    # TechnicalSnapshot is a dataclass, access attributes directly
                     result["price_context"] = {
-                        "current_price": snapshot.get("price"),
-                        "change_percent": snapshot.get("change_percent"),
-                        "volume": snapshot.get("volume"),
-                        "rvol": snapshot.get("rvol"),
-                        "vwap": snapshot.get("vwap"),
-                        "day_high": snapshot.get("high"),
-                        "day_low": snapshot.get("low")
+                        "current_price": snapshot.price,
+                        "change_percent": snapshot.change_percent,
+                        "volume": snapshot.volume,
+                        "rvol": snapshot.rvol,
+                        "vwap": snapshot.vwap,
+                        "day_high": snapshot.high,
+                        "day_low": snapshot.low
                     }
                     result["technical_signals"] = {
-                        "rsi": snapshot.get("rsi"),
-                        "macd_signal": snapshot.get("macd_signal"),
-                        "above_vwap": snapshot.get("above_vwap"),
-                        "distance_from_hod": snapshot.get("distance_from_hod")
+                        "rsi": snapshot.rsi,
+                        "macd_signal": snapshot.macd_signal,
+                        "above_vwap": snapshot.above_vwap,
+                        "distance_from_hod": snapshot.distance_from_hod
                     }
                     result["sources_used"].append("realtime_technicals")
             except Exception as e:
