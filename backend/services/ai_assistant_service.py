@@ -1067,6 +1067,18 @@ DECISION: {score_result['trade_or_skip']}
     
     async def _build_context(self, user_message: str, session_id: str) -> str:
         """Build context string with relevant knowledge and data"""
+        # Wrap context building in a timeout to prevent hanging
+        try:
+            return await asyncio.wait_for(
+                self._build_context_internal(user_message, session_id),
+                timeout=30.0  # 30 second timeout for all context gathering
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Context building timed out, using minimal context")
+            return self._get_base_system_prompt()
+    
+    async def _build_context_internal(self, user_message: str, session_id: str) -> str:
+        """Internal context building with no timeout"""
         context_parts = []
         
         # Check if user is asking about news/market
@@ -1076,7 +1088,10 @@ DECISION: {score_result['trade_or_skip']}
         # 1. Get market news if relevant
         if wants_news:
             try:
-                news_summary = await self.news_service.get_market_summary()
+                news_summary = await asyncio.wait_for(
+                    self.news_service.get_market_summary(),
+                    timeout=5.0
+                )
                 if news_summary.get("available"):
                     context_parts.append("TODAY'S MARKET NEWS:")
                     context_parts.append(f"Overall Sentiment: {news_summary.get('overall_sentiment', 'unknown').upper()}")
@@ -1095,9 +1110,9 @@ DECISION: {score_result['trade_or_skip']}
                     context_parts.append(f"\nSentiment: {sentiment.get('bullish', 0)} bullish, {sentiment.get('bearish', 0)} bearish, {sentiment.get('neutral', 0)} neutral")
                 else:
                     context_parts.append("MARKET NEWS: Unavailable - check Alpaca API connection")
-            except Exception as e:
+            except (asyncio.TimeoutError, Exception) as e:
                 logger.warning(f"Error fetching news: {e}")
-                context_parts.append("MARKET NEWS: Error fetching news data")
+                context_parts.append("MARKET NEWS: Unavailable")
         
         # 2. Check if user is asking about strategies
         strategy_keywords = ['strategy', 'strategies', 'setup', 'setups', 'scalp', 'rubberband', 'rubber band', 
