@@ -1808,18 +1808,18 @@ const AICommandPanel = ({
 
       {/* Main Content - Two Column Layout */}
       <div className="flex-1 flex overflow-hidden">
-        {/* LEFT: Chat Area (Expanded) */}
-        <div className="flex-1 flex flex-col min-w-0">
+        {/* LEFT: Chat Area (Compact - 40%) */}
+        <div className="w-[40%] flex flex-col min-w-0 border-r border-white/5">
           {/* Chat Messages - Above Input (Standard Chat Layout) */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4" data-testid="chat-messages">
+          <div className="flex-1 overflow-y-auto p-3 space-y-3" data-testid="chat-messages">
             {messages.length === 0 && !isLoading ? (
-              <div className="flex flex-col items-center justify-center h-full text-center py-8">
-                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-amber-500/20 flex items-center justify-center mb-4">
-                  <Sparkles className="w-8 h-8 text-amber-400" />
+              <div className="flex flex-col items-center justify-center h-full text-center py-4">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500/20 to-amber-500/20 flex items-center justify-center mb-3">
+                  <Sparkles className="w-6 h-6 text-amber-400" />
                 </div>
-                <h3 className="text-lg font-semibold text-white mb-2">Ready to assist</h3>
-                <p className="text-sm text-zinc-500 max-w-xs">
-                  Ask me anything about the market, analyze a ticker, or trade directly with commands like "take NVDA"
+                <h3 className="text-sm font-semibold text-white mb-1">Ready to assist</h3>
+                <p className="text-xs text-zinc-500 max-w-[200px]">
+                  Ask about tickers or type "take NVDA"
                 </p>
               </div>
             ) : (
