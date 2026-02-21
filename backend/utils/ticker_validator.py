@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 # Organized by category for maintainability
 
 FALSE_POSITIVE_WORDS = {
+    # Greetings and conversational words
+    "HI", "HELLO", "HEY", "YO", "BYE", "THANKS", "THANK", "PLEASE", "YES", "NO",
+    "OK", "OKAY", "SURE", "FINE", "GREAT", "GOOD", "BAD", "NICE", "COOL", "WOW",
+    "OMG", "LOL", "SORRY", "WELCOME", "MORNING", "NIGHT", "EVENING", "AFTERNOON",
+    
     # Common English words that are also tickers
     "ALL", "NOW", "IT", "ON", "BE", "SO", "GO", "DO", "AN", "AT", "BY",
     "FOR", "THE", "AND", "ARE", "CAN", "HOW", "HAS", "HAD", "YOU", "WAS",
