@@ -60,7 +60,7 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
             return { data: { bars: [] } };
           }),
           fetchWithRetry(() => api.get(`/api/quality/score/${ticker.symbol}`)).catch(() => ({ data: null })),
-          fetchWithRetry(() => api.get(`/api/newsletter/earnings/${ticker.symbol}`)).catch(() => ({ data: null }))
+          fetchWithRetry(() => api.get(`/api/earnings/${ticker.symbol}`)).catch(() => ({ data: null }))
         ]);
         
         setAnalysis(analysisRes.data);

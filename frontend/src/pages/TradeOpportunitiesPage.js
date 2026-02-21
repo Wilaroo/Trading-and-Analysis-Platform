@@ -1369,7 +1369,7 @@ const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
     const fetchNews = async () => {
       setNewsLoading(true);
       try {
-        const newsResponse = await api.get(`/api/newsletter/news/${symbol}?limit=10`);
+        const newsResponse = await api.get(`/api/ib/news/${symbol}?limit=10`);
         setTickerNews(newsResponse.data?.news || []);
       } catch (err) {
         console.error('Error fetching ticker news:', err);
