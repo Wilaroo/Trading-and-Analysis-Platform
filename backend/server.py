@@ -117,14 +117,10 @@ init_strategy_service(strategy_service)
 init_quality_router(quality_service, ib_service)
 assistant_service = init_assistant_service(db)
 init_assistant_router(assistant_service)
-newsletter_service = init_newsletter_service(ib_service)
-newsletter_service.set_stock_service(stock_service)
-newsletter_service.set_alpaca_service(alpaca_service)
-newsletter_service.set_ai_assistant(assistant_service)
 news_service = init_news_service(ib_service)
 scheduler_service = init_scheduler_service()
 scheduler_service.start()
-init_scheduler_router(scheduler_service, assistant_service, newsletter_service)
+init_scheduler_router(scheduler_service, assistant_service, None)  # Newsletter removed
 init_alpaca_router(alpaca_service)
 
 # Initialize predictive scanner
