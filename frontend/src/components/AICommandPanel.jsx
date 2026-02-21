@@ -1820,12 +1820,13 @@ const AICommandPanel = ({
           </div>
         </div>
 
-        {/* RIGHT: AI-Curated Opportunities + Collapsible Sections */}
+        {/* RIGHT: Trade Pipeline + Collapsible Sections */}
         <div className="w-80 border-l border-white/5 bg-black/20 overflow-y-auto">
-          {/* AI-Curated Opportunities Widget */}
+          {/* Unified Trade Pipeline Widget */}
           <div className="p-3">
-            <AICuratedWidget
+            <TradePipelineWidget
               opportunities={activeCoachingAlerts}
+              botTrades={botTrades}
               onExecute={(a) => executeFromAlert(a, false)}
               onPass={passOnAlert}
               onTickerClick={handleTickerClick}
@@ -1833,6 +1834,9 @@ const AICommandPanel = ({
               executing={executing}
               onRefresh={fetchCoachingAlerts}
               loading={coachingLoading}
+              onConfirmTrade={handleConfirmPendingTrade}
+              onRejectTrade={handleRejectPendingTrade}
+              onCloseTrade={handleCloseBotTrade}
             />
           </div>
           
