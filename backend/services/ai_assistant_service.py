@@ -1799,9 +1799,11 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         # ===== EARLY DETECTION: Simple conversational messages =====
         # Skip heavy context building for greetings and simple chat
         simple_patterns = [
-            r'^(hi|hello|hey|yo|sup|good\s*(morning|afternoon|evening|night))[\s\!\.\?]*$',
-            r'^(how\s*are\s*you|what\'?s\s*up|thanks|thank\s*you|please|bye|goodbye)[\s\!\.\?]*$',
-            r'^(yes|no|ok|okay|sure|fine|great|cool|nice|wow|awesome)[\s\!\.\?]*$',
+            r'^(hi+|hello+|hey+|yo|sup|hiya|howdy)(\s+there)?[\s\!\.\?\,]*$',
+            r'^good\s*(morning|afternoon|evening|night)[\s\!\.\?\,]*$',
+            r'^(how\s*are\s*you|what\'?s\s*up|thanks|thank\s*you|please|bye|goodbye)[\s\!\.\?\,]*$',
+            r'^(yes|no|ok|okay|sure|fine|great|cool|nice|wow|awesome|yep|nope|yup)[\s\!\.\?\,]*$',
+            r'^(greetings|salutations|whats\s*good|wassup)[\s\!\.\?\,]*$',
         ]
         
         msg_stripped = user_message.strip().lower()
