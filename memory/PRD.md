@@ -659,8 +659,11 @@ Intelligence gathering timeout for CADE
 - [x] WebSocket connection stability fix (DONE - Feb 12, 2026)
 - [x] My Positions display fix (DONE - Feb 12, 2026)
 - [x] Quick Actions for positions (DONE - Feb 12, 2026) - Close, Add, Alert, Chart buttons
+- [x] AI Assistant positions context fix (DONE - Feb 21, 2026) - Wired alpaca_service to AIAssistantService
 
 ### P1 - High Priority
+- [ ] Perplexity Finance API Integration (User interested)
+- [ ] Complete Quick Actions backend (Close, Add, Alert handlers are stubs)
 - [ ] Real-time RVOL in Market Intelligence (User approved)
 - [ ] Portfolio Awareness (Phase 3) - AI proactive suggestions based on positions
 - [ ] UI Focus Mode - Minimize all UI except chat and top opportunity
@@ -673,9 +676,10 @@ Intelligence gathering timeout for CADE
 - [ ] Alert sounds / browser push notifications
 
 ### P3 - Low Priority / Future
+- [x] Fix WatchlistWidget button-in-button DOM nesting warning (DONE - Feb 21, 2026)
+- [x] Clean up ai_assistant_service.py linting errors (DONE - Feb 21, 2026)
 - [ ] Remove unused NewsletterPage.js and backend endpoints
-- [ ] Fix minor frontend race condition (watchlist shows "(0)" briefly)
-- [ ] Clean up pre-existing non-critical linting errors
+- [ ] Extract PositionCard component to separate file
 
 ---
 
