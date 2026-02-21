@@ -387,110 +387,425 @@ const PositionCard = ({ position, onTickerClick, onViewChart, onClosePosition, o
   );
 };
 
-// ===================== AI-CURATED OPPORTUNITIES WIDGET =====================
+// ===================== UNIFIED TRADE PIPELINE WIDGET =====================
 
-const CuratedOpportunityCard = ({ opportunity, rank, onExecute, onPass, onTickerClick, onViewChart, executing }) => {
+const TradePipelineWidget = ({ 
+  opportunities, 
+  botTrades,
+  onExecute, 
+  onPass, 
+  onTickerClick, 
+  onViewChart, 
+  executing, 
+  onRefresh, 
+  loading,
+  onConfirmTrade,
+  onRejectTrade,
+  onCloseTrade
+}) => {
+  const [activeTab, setActiveTab] = useState('opportunities');
+  
+  const tabs = [
+    { id: 'opportunities', label: 'New', count: opportunities?.length || 0, color: 'text-amber-400' },
+    { id: 'pending', label: 'Pending', count: botTrades?.pending?.length || 0, color: 'text-cyan-400' },
+    { id: 'open', label: 'Open', count: botTrades?.open?.length || 0, color: 'text-emerald-400' },
+    { id: 'closed', label: 'Closed', count: botTrades?.closed?.length || 0, color: 'text-zinc-400' }
+  ];
+
+  const topOpportunities = (opportunities || [])
+    .filter(o => o.verdict === 'TAKE' || o.verdict === 'WAIT')
+    .slice(0, 5);
+
+  return (
+    <div className="p-2 rounded-lg relative"
+         style={{
+           background: 'linear-gradient(135deg, rgba(21, 28, 36, 0.95) 0%, rgba(26, 35, 50, 0.9) 100%)',
+           backdropFilter: 'blur(16px)',
+           WebkitBackdropFilter: 'blur(16px)',
+           border: '1px solid rgba(0, 212, 255, 0.25)',
+           boxShadow: '0 2px 15px rgba(0, 0, 0, 0.3), 0 0 20px var(--primary-glow)'
+         }}>
+      {/* Animated gradient border */}
+      <div 
+        className="absolute inset-0 rounded-lg pointer-events-none"
+        style={{
+          padding: '1px',
+          background: 'linear-gradient(var(--gradient-angle, 135deg), var(--primary-main), var(--secondary-main), var(--accent-main), var(--primary-main))',
+          WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+          mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+          WebkitMaskComposite: 'xor',
+          maskComposite: 'exclude',
+          opacity: 0.6,
+          animation: 'gradient-rotate 6s linear infinite'
+        }}
+      />
+      
+      {/* Header */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-1.5">
+          <div className="w-5 h-5 rounded flex items-center justify-center"
+               style={{
+                 background: 'linear-gradient(135deg, var(--primary-main), var(--secondary-main))',
+                 boxShadow: '0 2px 8px var(--primary-glow)'
+               }}>
+            <Zap className="w-2.5 h-2.5 text-white" />
+          </div>
+          <span className="text-xs font-semibold text-white">Trade <span className="neon-text">Pipeline</span></span>
+        </div>
+        <button onClick={onRefresh} className="p-1 hover:bg-white/10 rounded transition-colors">
+          <RefreshCw className={`w-2.5 h-2.5 text-zinc-400 ${loading ? 'animate-spin' : ''}`} />
+        </button>
+      </div>
+
+      {/* Tab Navigation */}
+      <div className="flex gap-0.5 mb-2 p-0.5 bg-black/30 rounded-lg">
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`flex-1 py-1.5 px-1 rounded-md text-[10px] font-medium transition-all ${
+              activeTab === tab.id
+                ? 'bg-cyan-500/20 text-cyan-400 shadow-sm'
+                : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
+            }`}
+            data-testid={`pipeline-tab-${tab.id}`}
+          >
+            <span>{tab.label}</span>
+            {tab.count > 0 && (
+              <span className={`ml-1 ${activeTab === tab.id ? tab.color : 'text-zinc-500'}`}>
+                ({tab.count})
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab Content */}
+      <div className="min-h-[120px] max-h-[280px] overflow-y-auto">
+        <AnimatePresence mode="wait">
+          {/* New Opportunities Tab */}
+          {activeTab === 'opportunities' && (
+            <motion.div
+              key="opportunities"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 10 }}
+              className="space-y-2"
+            >
+              {topOpportunities.length === 0 ? (
+                <div className="text-center py-6">
+                  <Target className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                  <p className="text-xs text-zinc-500">No new opportunities</p>
+                  <p className="text-[10px] text-zinc-600 mt-1">Scanner is analyzing...</p>
+                </div>
+              ) : (
+                topOpportunities.map((opp, idx) => (
+                  <PipelineOpportunityCard
+                    key={opp.timestamp || idx}
+                    opportunity={opp}
+                    rank={idx + 1}
+                    onExecute={onExecute}
+                    onPass={onPass}
+                    onTickerClick={onTickerClick}
+                    onViewChart={onViewChart}
+                    executing={executing}
+                  />
+                ))
+              )}
+            </motion.div>
+          )}
+
+          {/* Pending Trades Tab */}
+          {activeTab === 'pending' && (
+            <motion.div
+              key="pending"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 10 }}
+              className="space-y-2"
+            >
+              {(botTrades?.pending || []).length === 0 ? (
+                <div className="text-center py-6">
+                  <Clock className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                  <p className="text-xs text-zinc-500">No pending trades</p>
+                  <p className="text-[10px] text-zinc-600 mt-1">Execute an opportunity to see it here</p>
+                </div>
+              ) : (
+                (botTrades?.pending || []).map((trade, idx) => (
+                  <PendingTradeCard
+                    key={trade.id || idx}
+                    trade={trade}
+                    onConfirm={onConfirmTrade}
+                    onReject={onRejectTrade}
+                    onTickerClick={onTickerClick}
+                  />
+                ))
+              )}
+            </motion.div>
+          )}
+
+          {/* Open Trades Tab */}
+          {activeTab === 'open' && (
+            <motion.div
+              key="open"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 10 }}
+              className="space-y-2"
+            >
+              {(botTrades?.open || []).length === 0 ? (
+                <div className="text-center py-6">
+                  <Activity className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                  <p className="text-xs text-zinc-500">No open trades</p>
+                  <p className="text-[10px] text-zinc-600 mt-1">Active positions will appear here</p>
+                </div>
+              ) : (
+                (botTrades?.open || []).map((trade, idx) => (
+                  <OpenTradeCard
+                    key={trade.id || idx}
+                    trade={trade}
+                    onClose={onCloseTrade}
+                    onTickerClick={onTickerClick}
+                  />
+                ))
+              )}
+            </motion.div>
+          )}
+
+          {/* Closed Trades Tab */}
+          {activeTab === 'closed' && (
+            <motion.div
+              key="closed"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 10 }}
+              className="space-y-2"
+            >
+              {(botTrades?.closed || []).length === 0 ? (
+                <div className="text-center py-6">
+                  <DollarSign className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                  <p className="text-xs text-zinc-500">No closed trades</p>
+                  <p className="text-[10px] text-zinc-600 mt-1">Trade history will appear here</p>
+                </div>
+              ) : (
+                (botTrades?.closed || []).slice(0, 10).map((trade, idx) => (
+                  <ClosedTradeCard
+                    key={trade.id || idx}
+                    trade={trade}
+                    onTickerClick={onTickerClick}
+                  />
+                ))
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+};
+
+// Pipeline Opportunity Card (for New tab)
+const PipelineOpportunityCard = ({ opportunity, rank, onExecute, onPass, onTickerClick, onViewChart, executing }) => {
   const verdictConfig = {
-    'TAKE': { bg: 'bg-emerald-500/20', border: 'border-emerald-500/40', text: 'text-emerald-400', icon: Check },
-    'WAIT': { bg: 'bg-amber-500/20', border: 'border-amber-500/40', text: 'text-amber-400', icon: Clock },
-    'PASS': { bg: 'bg-red-500/20', border: 'border-red-500/40', text: 'text-red-400', icon: X }
+    'TAKE': { bg: 'bg-emerald-500/20', border: 'border-emerald-500/30', text: 'text-emerald-400', icon: Check },
+    'WAIT': { bg: 'bg-amber-500/20', border: 'border-amber-500/30', text: 'text-amber-400', icon: Clock },
+    'PASS': { bg: 'bg-red-500/20', border: 'border-red-500/30', text: 'text-red-400', icon: X }
   };
   
   const config = verdictConfig[opportunity.verdict] || verdictConfig.WAIT;
   const VerdictIcon = config.icon;
   
   return (
-    <motion.div
-      initial={{ opacity: 0, x: -10 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: rank * 0.1 }}
-      className={`relative p-3 rounded-xl ${config.bg} border ${config.border} hover:scale-[1.02] transition-transform cursor-pointer`}
-      data-testid={`curated-opportunity-${rank}`}
+    <div 
+      className={`relative p-2.5 rounded-lg ${config.bg} border ${config.border} hover:scale-[1.01] transition-transform`}
+      data-testid={`pipeline-opportunity-${rank}`}
     >
-      {/* Rank Badge */}
-      <div className="absolute -top-2 -left-2 w-6 h-6 rounded-full bg-zinc-900 border-2 border-cyan-500 flex items-center justify-center">
-        <span className="text-xs font-bold text-cyan-400">#{rank}</span>
-      </div>
-      
-      {/* Header */}
-      <div className="flex items-center justify-between mb-2 ml-4">
+      {/* Header Row */}
+      <div className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-2">
+          <span className="w-5 h-5 rounded-full bg-zinc-900/80 border border-cyan-500/50 flex items-center justify-center text-[10px] font-bold text-cyan-400">
+            {rank}
+          </span>
           <button 
             onClick={() => onTickerClick(opportunity.symbol)}
-            className="text-lg font-bold text-white hover:text-cyan-400 transition-colors"
-            title={`View ${opportunity.symbol} details`}
+            className="text-sm font-bold text-white hover:text-cyan-400 transition-colors"
           >
             {opportunity.symbol}
           </button>
-          {onViewChart && (
-            <button
-              onClick={() => onViewChart(opportunity.symbol)}
-              className="p-1 rounded bg-amber-500/20 hover:bg-amber-500/30 transition-colors"
-              title={`View ${opportunity.symbol} chart`}
-            >
-              <LineChart className="w-3 h-3 text-amber-400" />
-            </button>
-          )}
-          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+          <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
             opportunity.direction === 'long' ? 'bg-emerald-500/30 text-emerald-400' : 'bg-red-500/30 text-red-400'
           }`}>
             {opportunity.direction?.toUpperCase()}
           </span>
         </div>
-        <div className={`flex items-center gap-1 px-2 py-1 rounded-lg ${config.bg} ${config.text}`}>
-          <VerdictIcon className="w-3 h-3" />
-          <span className="text-xs font-bold">{opportunity.verdict}</span>
+        <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded ${config.bg} ${config.text}`}>
+          <VerdictIcon className="w-2.5 h-2.5" />
+          <span className="text-[10px] font-bold">{opportunity.verdict}</span>
         </div>
       </div>
       
-      {/* Setup & Stats */}
-      <div className="flex items-center gap-3 text-[11px] text-zinc-400 mb-2 ml-4">
+      {/* Setup Type & Stats */}
+      <div className="flex items-center gap-2 text-[10px] text-zinc-400 mb-1.5">
         <span>{opportunity.setup_type?.replace(/_/g, ' ')}</span>
-        {opportunity.alert_data?.win_rate > 0 && (
-          <span className="text-zinc-500">WR: {(opportunity.alert_data.win_rate * 100).toFixed(0)}%</span>
-        )}
         {opportunity.alert_data?.risk_reward > 0 && (
           <span className="text-zinc-500">R:R {opportunity.alert_data.risk_reward.toFixed(1)}:1</span>
         )}
       </div>
       
       {/* AI Summary */}
-      <p className="text-xs text-zinc-300 mb-3 ml-4 line-clamp-2">
-        {opportunity.summary || opportunity.coaching?.slice(0, 100)}
+      <p className="text-[10px] text-zinc-300 mb-2 line-clamp-2">
+        {opportunity.summary || opportunity.coaching?.slice(0, 80)}
       </p>
       
-      {/* Quick Actions */}
-      <div className="flex items-center gap-2 ml-4">
-        {opportunity.verdict === 'TAKE' && (
-          <button
-            onClick={() => onExecute(opportunity)}
-            disabled={executing}
-            className="flex items-center gap-1 px-3 py-1.5 bg-emerald-500 text-black rounded-lg text-xs font-semibold hover:bg-emerald-400 transition-colors disabled:opacity-50"
-          >
-            {executing ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowRight className="w-3 h-3" />}
-            Execute
-          </button>
-        )}
-        {opportunity.verdict === 'WAIT' && (
-          <button
-            onClick={() => onExecute(opportunity)}
-            disabled={executing}
-            className="flex items-center gap-1 px-3 py-1.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg text-xs font-medium hover:bg-amber-500/30 transition-colors disabled:opacity-50"
-          >
-            Execute Anyway
-          </button>
-        )}
+      {/* Actions */}
+      <div className="flex items-center gap-1.5">
+        <button
+          onClick={() => onExecute(opportunity)}
+          disabled={executing}
+          className={`flex items-center gap-1 px-2.5 py-1 rounded text-[10px] font-semibold transition-colors disabled:opacity-50 ${
+            opportunity.verdict === 'TAKE' 
+              ? 'bg-emerald-500 text-black hover:bg-emerald-400' 
+              : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30'
+          }`}
+        >
+          {executing ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <ArrowRight className="w-2.5 h-2.5" />}
+          Take
+        </button>
         <button
           onClick={() => onPass(opportunity)}
-          className="px-3 py-1.5 bg-zinc-700/50 text-zinc-400 rounded-lg text-xs hover:bg-zinc-700 transition-colors"
+          className="px-2.5 py-1 bg-zinc-700/50 text-zinc-400 rounded text-[10px] hover:bg-zinc-700 transition-colors"
         >
           Pass
         </button>
+        {onViewChart && (
+          <button
+            onClick={() => onViewChart(opportunity.symbol)}
+            className="p-1 rounded bg-zinc-700/50 hover:bg-zinc-700 transition-colors ml-auto"
+            title="View chart"
+          >
+            <LineChart className="w-3 h-3 text-zinc-400" />
+          </button>
+        )}
       </div>
-    </motion.div>
+    </div>
   );
 };
 
+// Pending Trade Card
+const PendingTradeCard = ({ trade, onConfirm, onReject, onTickerClick }) => (
+  <div className="p-2.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30">
+    <div className="flex items-center justify-between mb-1.5">
+      <div className="flex items-center gap-2">
+        <button 
+          onClick={() => onTickerClick(trade.symbol)}
+          className="text-sm font-bold text-white hover:text-cyan-400 transition-colors"
+        >
+          {trade.symbol}
+        </button>
+        <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
+          trade.direction === 'long' ? 'bg-emerald-500/30 text-emerald-400' : 'bg-red-500/30 text-red-400'
+        }`}>
+          {trade.direction?.toUpperCase()}
+        </span>
+      </div>
+      <span className="text-[10px] text-cyan-400 font-medium">
+        ${trade.entry_price?.toFixed(2)}
+      </span>
+    </div>
+    <p className="text-[10px] text-zinc-400 mb-2">
+      {trade.setup_type?.replace(/_/g, ' ')} • {trade.shares} shares
+    </p>
+    <div className="flex items-center gap-1.5">
+      <button
+        onClick={() => onConfirm(trade.id)}
+        className="flex items-center gap-1 px-2.5 py-1 bg-emerald-500 text-black rounded text-[10px] font-semibold hover:bg-emerald-400 transition-colors"
+      >
+        <Check className="w-2.5 h-2.5" />
+        Confirm
+      </button>
+      <button
+        onClick={() => onReject(trade.id)}
+        className="px-2.5 py-1 bg-red-500/20 text-red-400 border border-red-500/30 rounded text-[10px] hover:bg-red-500/30 transition-colors"
+      >
+        Reject
+      </button>
+    </div>
+  </div>
+);
+
+// Open Trade Card
+const OpenTradeCard = ({ trade, onClose, onTickerClick }) => {
+  const pnl = trade.unrealized_pnl || 0;
+  const pnlPercent = trade.unrealized_pnl_pct || 0;
+  const isProfit = pnl >= 0;
+  
+  return (
+    <div className={`p-2.5 rounded-lg ${isProfit ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-red-500/10 border-red-500/30'} border`}>
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={() => onTickerClick(trade.symbol)}
+            className="text-sm font-bold text-white hover:text-cyan-400 transition-colors"
+          >
+            {trade.symbol}
+          </button>
+          <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
+            trade.direction === 'long' ? 'bg-emerald-500/30 text-emerald-400' : 'bg-red-500/30 text-red-400'
+          }`}>
+            {trade.direction?.toUpperCase()}
+          </span>
+        </div>
+        <div className="text-right">
+          <span className={`text-xs font-mono font-bold ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
+            {isProfit ? '+' : ''}{pnl.toFixed(2)}
+          </span>
+          <span className={`text-[9px] ml-1 ${isProfit ? 'text-emerald-400/70' : 'text-red-400/70'}`}>
+            ({isProfit ? '+' : ''}{pnlPercent.toFixed(1)}%)
+          </span>
+        </div>
+      </div>
+      <div className="flex items-center justify-between text-[10px] text-zinc-400">
+        <span>{trade.shares} @ ${trade.entry_price?.toFixed(2)}</span>
+        <button
+          onClick={() => onClose(trade.id)}
+          className="px-2 py-0.5 bg-zinc-700/50 text-zinc-300 rounded hover:bg-zinc-700 transition-colors"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Closed Trade Card
+const ClosedTradeCard = ({ trade, onTickerClick }) => {
+  const pnl = trade.realized_pnl || 0;
+  const isProfit = pnl >= 0;
+  
+  return (
+    <div 
+      className="p-2 rounded-lg bg-zinc-800/50 hover:bg-zinc-800 cursor-pointer transition-colors"
+      onClick={() => onTickerClick(trade.symbol)}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium text-white">{trade.symbol}</span>
+          <span className={`text-[9px] ${trade.direction === 'long' ? 'text-emerald-400' : 'text-red-400'}`}>
+            {trade.direction?.toUpperCase()}
+          </span>
+        </div>
+        <span className={`text-xs font-mono font-bold ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
+          {isProfit ? '+' : ''}${pnl.toFixed(2)}
+        </span>
+      </div>
+      <div className="text-[9px] text-zinc-500 mt-0.5">
+        {new Date(trade.closed_at || trade.exit_time).toLocaleDateString()}
+      </div>
+    </div>
+  );
+};
+
+// Keep old AICuratedWidget for backwards compatibility but mark as deprecated
 const AICuratedWidget = ({ opportunities, onExecute, onPass, onTickerClick, onViewChart, executing, onRefresh, loading }) => {
   const topOpportunities = opportunities
     .filter(o => o.verdict === 'TAKE' || o.verdict === 'WAIT')
