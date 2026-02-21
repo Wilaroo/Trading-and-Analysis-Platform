@@ -1132,8 +1132,8 @@ class WebResearchService:
                 if snapshot:
                     # TechnicalSnapshot is a dataclass, access attributes directly
                     result["price_context"] = {
-                        "current_price": snapshot.price,
-                        "change_percent": snapshot.change_percent,
+                        "current_price": snapshot.current_price,
+                        "change_percent": ((snapshot.current_price - snapshot.prev_close) / snapshot.prev_close * 100) if snapshot.prev_close else 0,
                         "volume": snapshot.volume,
                         "rvol": snapshot.rvol,
                         "vwap": snapshot.vwap,
@@ -1141,10 +1141,10 @@ class WebResearchService:
                         "day_low": snapshot.low
                     }
                     result["technical_signals"] = {
-                        "rsi": snapshot.rsi,
-                        "macd_signal": snapshot.macd_signal,
+                        "rsi": snapshot.rsi_14,
+                        "macd_signal": snapshot.trend,
                         "above_vwap": snapshot.above_vwap,
-                        "distance_from_hod": snapshot.distance_from_hod
+                        "distance_from_hod": ((snapshot.high_of_day - snapshot.current_price) / snapshot.current_price * 100) if snapshot.current_price else 0
                     }
                     result["sources_used"].append("realtime_technicals")
             except Exception as e:
