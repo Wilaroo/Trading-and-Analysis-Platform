@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://trading-dashboard-70.preview.emergentagent.com
+https://position-manager-pro.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://trading-dashboard-70.preview.emergentagent.com
+https://position-manager-pro.preview.emergentagent.com
 ```

@@ -74,7 +74,7 @@ Forwarding                    https://pseudoaccidentally-linty-addie.ngrok-free.
 2. Go to this address:
 
 ```
-https://trading-dashboard-70.preview.emergentagent.com
+https://position-manager-pro.preview.emergentagent.com
 ```
 
 ✅ **Done!** TradeCommand is now running with AI enabled.
@@ -141,5 +141,5 @@ ollama serve
 
 **App URL:**
 ```
-https://trading-dashboard-70.preview.emergentagent.com
+https://position-manager-pro.preview.emergentagent.com
 ```
