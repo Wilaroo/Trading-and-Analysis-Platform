@@ -202,7 +202,6 @@ watchlists_col = db["watchlists"]
 smart_watchlist_col = db["smart_watchlist"]  # New: for hybrid auto/manual watchlist
 alerts_col = db["alerts"]
 portfolios_col = db["portfolios"]
-newsletters_col = db["newsletters"]
 scans_col = db["scans"]
 insider_col = db["insider_trades"]
 cot_col = db["cot_data"]
