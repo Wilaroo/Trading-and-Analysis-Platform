@@ -1827,11 +1827,12 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                     metadata={"provider": "ollama", "simple_greeting": True}
                 )
                 conv.messages.append(assistant_msg)
-                return {"response": response_text, "session_id": session_id}
+                return {"success": True, "response": response_text, "session_id": session_id}
             except Exception as e:
                 logger.error(f"Simple greeting LLM error: {e}")
                 # Fallback response
                 return {
+                    "success": True,
                     "response": "Hello! How can I help you with trading today?",
                     "session_id": session_id
                 }
