@@ -1614,6 +1614,56 @@ const AICommandPanel = ({
     }
   }, []);
 
+  // ===================== TRADE PIPELINE HANDLERS =====================
+  
+  const handleConfirmPendingTrade = useCallback(async (tradeId) => {
+    try {
+      const response = await api.post(`/api/trading-bot/trades/${tradeId}/confirm`);
+      if (response.data?.success) {
+        toast.success('Trade confirmed and executed');
+        // Refresh bot trades
+        const tradesRes = await api.get('/api/trading-bot/trades');
+        if (tradesRes.data) {
+          setBotTrades(tradesRes.data);
+        }
+      }
+    } catch (err) {
+      toast.error('Failed to confirm trade');
+    }
+  }, []);
+
+  const handleRejectPendingTrade = useCallback(async (tradeId) => {
+    try {
+      const response = await api.post(`/api/trading-bot/trades/${tradeId}/reject`);
+      if (response.data?.success) {
+        toast.success('Trade rejected');
+        // Refresh bot trades
+        const tradesRes = await api.get('/api/trading-bot/trades');
+        if (tradesRes.data) {
+          setBotTrades(tradesRes.data);
+        }
+      }
+    } catch (err) {
+      toast.error('Failed to reject trade');
+    }
+  }, []);
+
+  const handleCloseBotTrade = useCallback(async (tradeId) => {
+    try {
+      const response = await api.post(`/api/trading-bot/trades/${tradeId}/close`);
+      if (response.data?.success) {
+        toast.success('Trade closed');
+        // Refresh bot trades
+        const tradesRes = await api.get('/api/trading-bot/trades');
+        if (tradesRes.data) {
+          setBotTrades(tradesRes.data);
+        }
+      }
+    } catch (err) {
+      toast.error('Failed to close trade');
+    }
+  }, []);
+
   // ===================== SYNC WEBSOCKET DATA =====================
   // Use WebSocket-pushed data when available, with fallback to API fetch
   
