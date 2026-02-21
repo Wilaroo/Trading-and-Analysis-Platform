@@ -353,13 +353,16 @@ const WatchlistWidget = ({ onTickerSelect, onViewChart, wsWatchlist = [] }) => {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <button
+          <span
+            role="button"
+            tabIndex={0}
             onClick={(e) => { e.stopPropagation(); setShowAddInput(!showAddInput); }}
-            className="p-1 hover:bg-zinc-700 rounded transition-colors"
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); setShowAddInput(!showAddInput); } }}
+            className="p-1 hover:bg-zinc-700 rounded transition-colors cursor-pointer"
             title="Add symbol"
           >
             <Plus className="w-3 h-3 text-zinc-400" />
-          </button>
+          </span>
           {expanded ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
         </div>
       </button>
