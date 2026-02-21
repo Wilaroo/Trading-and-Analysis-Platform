@@ -2742,59 +2742,6 @@ async def get_earnings_iv(symbol: str):
         ])
     }
 
-# ----- Newsletter -----
-@app.get("/api/newsletter/latest")
-async def get_latest_newsletter():
-    """Get latest newsletter"""
-    newsletter = newsletters_col.find_one({}, {"_id": 0}, sort=[("created_at", -1)])
-    return newsletter or {"message": "No newsletter available"}
-
-@app.post("/api/newsletter/generate")
-async def generate_newsletter():
-    """Generate morning newsletter with AI"""
-    overview = await get_market_overview()
-    news = await fetch_market_news()
-    watchlist_response = await generate_morning_watchlist()
-    
-    market_summary_data = f"""
-    Market Overview:
-    - SPY: {next((i for i in overview['indices'] if i['symbol'] == 'SPY'), {}).get('change_percent', 0):.2f}%
-    - QQQ: {next((i for i in overview['indices'] if i['symbol'] == 'QQQ'), {}).get('change_percent', 0):.2f}%
-    
-    Top Movers: {', '.join([f"{m['symbol']} ({m['change_percent']:+.2f}%)" for m in overview['top_movers'][:3]])}
-    
-    Top News Headlines:
-    {chr(10).join([f"- {n['title']}" for n in news[:5]])}
-    
-    Top Watchlist:
-    {', '.join([f"{w['symbol']} (Score: {w['score']})" for w in watchlist_response['watchlist'][:5]])}
-    """
-    
-    ai_summary = await generate_ai_analysis(
-        f"Write a professional 3-paragraph morning market briefing based on this data:\n{market_summary_data}\n"
-        f"Include: 1) Market sentiment overview, 2) Key stories to watch, 3) Trading opportunities for the day."
-    )
-    
-    newsletter = {
-        "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-        "title": f"TradeCommand Morning Briefing - {datetime.now(timezone.utc).strftime('%B %d, %Y')}",
-        "market_summary": ai_summary,
-        "indices": overview["indices"],
-        "top_news": news[:5],
-        "watchlist": watchlist_response["watchlist"][:10],
-        "strategy_highlights": [
-            "Gap-and-Go opportunities in premarket movers",
-            "VWAP bounce setups in trending stocks",
-            "Swing breakout candidates forming bases"
-        ],
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    
-    newsletter_doc = newsletter.copy()
-    newsletters_col.insert_one(newsletter_doc)
-    
-    return newsletter
-
 # ----- Dashboard Stats -----
 @app.get("/api/dashboard/stats")
 async def get_dashboard_stats():
