@@ -1796,6 +1796,46 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         user_msg = AssistantMessage(role="user", content=user_message)
         conv.messages.append(user_msg)
         
+        # ===== EARLY DETECTION: Simple conversational messages =====
+        # Skip heavy context building for greetings and simple chat
+        simple_patterns = [
+            r'^(hi|hello|hey|yo|sup|good\s*(morning|afternoon|evening|night))[\s\!\.\?]*$',
+            r'^(how\s*are\s*you|what\'?s\s*up|thanks|thank\s*you|please|bye|goodbye)[\s\!\.\?]*$',
+            r'^(yes|no|ok|okay|sure|fine|great|cool|nice|wow|awesome)[\s\!\.\?]*$',
+        ]
+        
+        msg_stripped = user_message.strip().lower()
+        is_simple_greeting = any(re.match(pattern, msg_stripped, re.IGNORECASE) for pattern in simple_patterns)
+        
+        if is_simple_greeting:
+            logger.info(f"Simple greeting detected, skipping heavy context: {user_message[:30]}")
+            # Minimal context for simple greetings
+            context = """You are a friendly trading assistant. Respond briefly and warmly to the user's greeting, 
+            then offer to help with trading analysis, stock research, or position management."""
+            
+            # Prepare messages for LLM (last 5 messages for simple context)
+            recent_messages = conv.messages[-5:]
+            llm_messages = [{"role": m.role, "content": m.content} for m in recent_messages]
+            
+            try:
+                response_text = await self._call_llm(llm_messages, context, complexity="light")
+                assistant_msg = AssistantMessage(
+                    role="assistant",
+                    content=response_text,
+                    metadata={"provider": "ollama", "simple_greeting": True}
+                )
+                conv.messages.append(assistant_msg)
+                return {"response": response_text, "session_id": session_id}
+            except Exception as e:
+                logger.error(f"Simple greeting LLM error: {e}")
+                # Fallback response
+                return {
+                    "response": "Hello! How can I help you with trading today?",
+                    "session_id": session_id
+                }
+        
+        # ===== REGULAR FLOW: Complex messages =====
+        
         # Check for research intent first
         research_context = ""
         research_intent = await self._detect_research_intent(user_message)
