@@ -1897,68 +1897,6 @@ const AICommandPanel = ({
               )}
             </AnimatePresence>
           </div>
-          
-          {/* Bot Trades Section */}
-          <div className="p-3 pt-0">
-            <SectionHeader 
-              icon={Bot} 
-              title="Bot Trades" 
-              count={(botTrades.pending?.length || 0) + (botTrades.open?.length || 0)}
-              isExpanded={expandedSections.botTrades}
-              onToggle={() => toggleSection('botTrades')}
-              compact
-            />
-            <AnimatePresence>
-              {expandedSections.botTrades && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="overflow-hidden"
-                >
-                  <div className="mt-2 space-y-1">
-                    <div className="flex gap-1 mb-2">
-                      {['pending', 'open', 'closed'].map(tab => (
-                        <button
-                          key={tab}
-                          onClick={() => setBotTradesTab(tab)}
-                          className={`flex-1 py-1 px-2 rounded text-[10px] font-medium ${
-                            botTradesTab === tab
-                              ? 'bg-cyan-500/20 text-cyan-400'
-                              : 'text-zinc-500 hover:text-zinc-300'
-                          }`}
-                        >
-                          {tab.charAt(0).toUpperCase() + tab.slice(1)} ({botTrades[tab]?.length || 0})
-                        </button>
-                      ))}
-                    </div>
-                    <div className="space-y-1 max-h-[150px] overflow-y-auto">
-                      {(botTrades[botTradesTab] || []).slice(0, 5).map((trade, idx) => (
-                        <div 
-                          key={trade.id || idx}
-                          className="flex items-center justify-between p-2 bg-zinc-800/50 rounded-lg hover:bg-zinc-800 cursor-pointer text-xs"
-                          onClick={() => handleTickerClick(trade.symbol)}
-                        >
-                          <div>
-                            <span className="font-medium text-white">{trade.symbol}</span>
-                            <span className={`ml-1 text-[9px] ${trade.direction === 'long' ? 'text-emerald-400' : 'text-red-400'}`}>
-                              {trade.direction?.toUpperCase()}
-                            </span>
-                          </div>
-                          <span className={`font-mono ${(trade.realized_pnl || trade.unrealized_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                            ${(trade.realized_pnl || trade.unrealized_pnl || 0).toFixed(2)}
-                          </span>
-                        </div>
-                      ))}
-                      {(botTrades[botTradesTab] || []).length === 0 && (
-                        <p className="text-[10px] text-zinc-600 text-center py-2">No {botTradesTab} trades</p>
-                      )}
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
 
           {/* Earnings Section */}
           <div className="p-3 pt-0">
