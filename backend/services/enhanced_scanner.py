@@ -1655,14 +1655,48 @@ class EnhancedBackgroundScanner:
         if snapshot.rvol >= 2.0:
             dist_from_hod = ((snapshot.high_of_day - snapshot.current_price) / snapshot.current_price) * 100
             
-            if dist_from_hod < 0.5 and snapshot.above_vwap:
+            # CONFIRMED ORB: Price broke above opening range high
+            if dist_from_hod < -0.1 and dist_from_hod > -1.5 and snapshot.above_vwap:
                 priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
+                breakout_pct = abs(dist_from_hod)
                 
                 return LiveAlert(
-                    id=f"orb_long_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                    id=f"orb_long_confirmed_{symbol}_{datetime.now().strftime('%H%M%S')}",
                     symbol=symbol,
-                    setup_type="orb_long",
-                    strategy_name="Opening Range Breakout (INT-03)",
+                    setup_type="orb_long_confirmed",
+                    strategy_name="ORB CONFIRMED (INT-03)",
+                    direction="long",
+                    priority=priority,
+                    current_price=snapshot.current_price,
+                    trigger_price=snapshot.high_of_day,
+                    stop_loss=round(snapshot.low_of_day - 0.02, 2),
+                    target=round(snapshot.current_price + (snapshot.high_of_day - snapshot.low_of_day) * 2, 2),
+                    risk_reward=2.0,
+                    trigger_probability=0.65,
+                    win_probability=0.58,
+                    minutes_to_trigger=0,
+                    headline=f"🚀 {symbol} ORB BREAKOUT CONFIRMED - Broke ${snapshot.high_of_day:.2f} {'✓ TAPE' if tape.confirmation_for_long else ''}",
+                    reasoning=[
+                        f"Price ABOVE opening range high by {breakout_pct:.2f}%",
+                        f"ORH was ${snapshot.high_of_day:.2f}, now ${snapshot.current_price:.2f}",
+                        f"Range: ${snapshot.low_of_day:.2f} - ${snapshot.high_of_day:.2f}",
+                        f"RVOL: {snapshot.rvol:.1f}x",
+                        f"Tape: {tape.overall_signal.value}"
+                    ],
+                    time_window=current_window.value,
+                    market_regime=self._market_regime.value,
+                    expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+                )
+            
+            # APPROACHING ORB: Price near opening range high
+            if 0 < dist_from_hod < 0.5 and snapshot.above_vwap:
+                priority = AlertPriority.MEDIUM
+                
+                return LiveAlert(
+                    id=f"orb_long_approaching_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                    symbol=symbol,
+                    setup_type="approaching_orb",
+                    strategy_name="Approaching ORB (INT-03)",
                     direction="long",
                     priority=priority,
                     current_price=snapshot.current_price,
@@ -1670,19 +1704,19 @@ class EnhancedBackgroundScanner:
                     stop_loss=round(snapshot.low_of_day - 0.02, 2),
                     target=round(snapshot.high_of_day + (snapshot.high_of_day - snapshot.low_of_day) * 2, 2),
                     risk_reward=2.0,
-                    trigger_probability=0.60,
-                    win_probability=0.55,
+                    trigger_probability=0.50,
+                    win_probability=0.52,
                     minutes_to_trigger=10,
-                    headline=f"📈 {symbol} ORB LONG {'✓ TAPE' if tape.confirmation_for_long else ''}",
+                    headline=f"👀 {symbol} Approaching ORB - {dist_from_hod:.2f}% to ${snapshot.high_of_day:.2f} {'✓ TAPE' if tape.confirmation_for_long else ''}",
                     reasoning=[
-                        f"Testing ORH ${snapshot.high_of_day:.2f}",
+                        f"Price {dist_from_hod:.2f}% below ORH ${snapshot.high_of_day:.2f}",
                         f"Range: ${snapshot.low_of_day:.2f} - ${snapshot.high_of_day:.2f}",
                         f"RVOL: {snapshot.rvol:.1f}x",
-                        f"Tape: {tape.overall_signal.value}"
+                        f"⚠️ Wait for confirmed break above ${snapshot.high_of_day:.2f}"
                     ],
                     time_window=current_window.value,
                     market_regime=self._market_regime.value,
-                    expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+                    expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
                 )
         return None
     
