@@ -25,10 +25,17 @@ from data.index_symbols import (
     ETF_SYMBOLS,
     VOLUME_FILTERS,
     UNIVERSE_METADATA,
+    # Cached helper functions
+    get_spy_symbols,
+    get_qqq_symbols,
+    get_nasdaq_extended,
+    get_etf_symbols,
     get_tier1_symbols,
     get_tier2_symbols,
     get_tier3_symbols,
-    get_nasdaq_extended,
+    get_all_symbols,
+    get_all_symbols_set,
+    is_valid_symbol,
     get_universe_stats,
     is_rebalance_due,
     get_next_rebalance_date
