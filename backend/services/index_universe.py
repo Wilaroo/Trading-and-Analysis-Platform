@@ -106,6 +106,14 @@ class IndexUniverseManager:
             priority=1
         )
         
+        # NASDAQ Extended - Tier 2 (quality screened)
+        self._indices[IndexType.NASDAQ] = IndexUniverse(
+            index_type=IndexType.NASDAQ,
+            symbols=list(set(NASDAQ_EXTENDED)),
+            last_updated=now,
+            priority=2
+        )
+        
         # IWM (Russell 2000) - Tier 3
         self._indices[IndexType.IWM] = IndexUniverse(
             index_type=IndexType.IWM,
@@ -130,7 +138,15 @@ class IndexUniverseManager:
             priority=1
         )
         
-        # Tier 3 (IWM excluding Tier 1)
+        # Tier 2 (NASDAQ Extended excluding Tier 1)
+        self._indices[IndexType.TIER2] = IndexUniverse(
+            index_type=IndexType.TIER2,
+            symbols=get_tier2_symbols(),
+            last_updated=now,
+            priority=2
+        )
+        
+        # Tier 3 (IWM excluding Tier 1 & 2)
         self._indices[IndexType.TIER3] = IndexUniverse(
             index_type=IndexType.TIER3,
             symbols=get_tier3_symbols(),
