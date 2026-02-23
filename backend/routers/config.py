@@ -45,15 +45,8 @@ async def test_ollama_connection():
     
     import httpx
     try:
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "TradeCommand/1.0",
-            "Accept": "application/json",
-            "ngrok-skip-browser-warning": "true",
-            "Host": "localhost",
-        }
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(f"{ollama_url}/api/tags", headers=headers)
+            response = await client.get(f"{ollama_url}/api/tags")
             if response.status_code == 200:
                 data = response.json()
                 models = [m.get("name", "unknown") for m in data.get("models", [])]
