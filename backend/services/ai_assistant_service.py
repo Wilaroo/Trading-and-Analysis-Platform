@@ -1735,7 +1735,9 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                         json=payload,
                         headers={
                             "Content-Type": "application/json",
-                            "Accept": "application/json"
+                            "Accept": "application/json",
+                            "ngrok-skip-browser-warning": "true",
+                            "User-Agent": "TradeCommand/1.0"
                         }
                     )
                 
