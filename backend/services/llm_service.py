@@ -186,8 +186,7 @@ class OllamaProvider(LLMProvider):
             resp = req.post(
                 f"{self.url.rstrip('/')}/api/chat",
                 json={"model": self.model, "messages": messages, "stream": False},
-                timeout=90,
-                headers={"ngrok-skip-browser-warning": "true"}
+                timeout=90
             )
             resp.raise_for_status()
             return resp.json()["message"]["content"]
