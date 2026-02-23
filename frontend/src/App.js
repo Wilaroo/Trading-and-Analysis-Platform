@@ -16,6 +16,7 @@ import {
 } from './pages';
 import CommandCenterPage from './pages/CommandCenterPage';
 import GlossaryPage from './pages/GlossaryPage';
+import SettingsPage from './pages/SettingsPage';
 
 import './App.css';
 
