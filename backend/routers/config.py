@@ -27,12 +27,12 @@ async def get_config():
     ollama_url = os.environ.get("OLLAMA_URL", "")
     ollama_model = os.environ.get("OLLAMA_MODEL", "deepseek-r1:8b")
     
-    # Test connection to Ollama
+    # Quick connection test with short timeout
     ollama_connected = False
     if ollama_url:
         import httpx
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=3.0) as client:
                 response = await client.get(f"{ollama_url}/api/tags")
                 ollama_connected = response.status_code == 200
         except Exception as e:
