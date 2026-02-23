@@ -1205,6 +1205,202 @@ const ConfirmationDialog = ({ isOpen, trade, onConfirm, onCancel, loading }) => 
   );
 };
 
+// ===================== BOT MODE DROPDOWN =====================
+
+const BotModeDropdown = ({ mode, isRunning, onModeChange, onToggle, loading, botPnl, openCount, pendingCount }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [showTooltip, setShowTooltip] = useState(null);
+  const dropdownRef = useRef(null);
+  
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+        setShowTooltip(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+  
+  const modes = [
+    { 
+      id: 'autonomous', 
+      label: 'Auto', 
+      icon: Zap, 
+      color: 'amber',
+      tooltip: 'Autonomous Mode: Bot executes trades automatically based on scanner signals. Best for active market hours with confirmed setups.'
+    },
+    { 
+      id: 'confirmation', 
+      label: 'Confirm', 
+      icon: Shield, 
+      color: 'cyan',
+      tooltip: 'Confirmation Mode: Bot identifies opportunities but waits for your approval before executing. Recommended for learning.'
+    },
+    { 
+      id: 'paused', 
+      label: 'Paused', 
+      icon: Pause, 
+      color: 'zinc',
+      tooltip: 'Paused Mode: Bot is completely stopped. No scanning or trading. Use during low-volume periods or when away.'
+    }
+  ];
+  
+  const currentMode = modes.find(m => m.id === mode) || modes[1];
+  const CurrentIcon = currentMode.icon;
+  
+  const getButtonStyles = () => {
+    if (!isRunning) {
+      return 'bg-zinc-700/80 text-zinc-400 border-zinc-600';
+    }
+    switch (mode) {
+      case 'autonomous':
+        return 'bg-amber-500/20 text-amber-400 border-amber-500/40';
+      case 'confirmation':
+        return 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40';
+      case 'paused':
+        return 'bg-zinc-600 text-zinc-300 border-zinc-500';
+      default:
+        return 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40';
+    }
+  };
+  
+  const handleModeSelect = (modeId) => {
+    if (modeId === 'paused' && isRunning) {
+      onToggle(); // Stop the bot
+    } else if (!isRunning && modeId !== 'paused') {
+      onModeChange(modeId);
+      onToggle(); // Start the bot
+    } else {
+      onModeChange(modeId);
+    }
+    setIsOpen(false);
+  };
+  
+  return (
+    <div className="relative" ref={dropdownRef}>
+      {/* Main Dropdown Button */}
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        disabled={loading}
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${getButtonStyles()} hover:brightness-110`}
+        data-testid="bot-mode-dropdown"
+      >
+        {loading ? (
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        ) : (
+          <CurrentIcon className="w-3.5 h-3.5" />
+        )}
+        <span>{isRunning ? currentMode.label : 'Bot Off'}</span>
+        <ChevronDown className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      
+      {/* Stats Badge */}
+      <div className="absolute -bottom-4 left-0 right-0 flex items-center justify-center gap-1.5 text-[9px] text-zinc-500 whitespace-nowrap">
+        <span className={`font-mono font-semibold ${botPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+          {botPnl >= 0 ? '+' : ''}${botPnl.toFixed(0)}
+        </span>
+        <span>•</span>
+        <span>{openCount} open</span>
+        {pendingCount > 0 && (
+          <>
+            <span>•</span>
+            <span className="text-amber-400">{pendingCount} pend</span>
+          </>
+        )}
+      </div>
+      
+      {/* Dropdown Menu */}
+      {isOpen && (
+        <div 
+          className="absolute left-0 top-full mt-2 w-52 rounded-xl overflow-hidden z-50"
+          style={{
+            background: 'rgba(21, 28, 36, 0.95)',
+            backdropFilter: 'blur(20px)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)'
+          }}
+        >
+          <div className="p-1.5 space-y-0.5">
+            {modes.map((m) => {
+              const Icon = m.icon;
+              const isActive = mode === m.id;
+              const isCurrentlyRunning = isRunning && mode === m.id;
+              
+              return (
+                <div key={m.id} className="relative">
+                  <button
+                    onClick={() => handleModeSelect(m.id)}
+                    onMouseEnter={() => setShowTooltip(m.id)}
+                    onMouseLeave={() => setShowTooltip(null)}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                      isActive 
+                        ? m.color === 'amber' ? 'bg-amber-500/20 text-amber-400'
+                          : m.color === 'cyan' ? 'bg-cyan-500/20 text-cyan-400'
+                          : 'bg-zinc-600 text-zinc-300'
+                        : 'text-zinc-400 hover:text-white hover:bg-white/5'
+                    }`}
+                    data-testid={`bot-mode-option-${m.id}`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    <span className="flex-1 text-left">{m.label}</span>
+                    {isCurrentlyRunning && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    )}
+                    {isActive && !isCurrentlyRunning && (
+                      <Check className="w-3.5 h-3.5 text-current opacity-60" />
+                    )}
+                  </button>
+                  
+                  {/* Tooltip */}
+                  {showTooltip === m.id && (
+                    <div 
+                      className="absolute left-full top-0 ml-2 w-56 p-3 rounded-lg text-[10px] text-zinc-300 z-50"
+                      style={{
+                        background: 'rgba(10, 10, 10, 0.95)',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.4)'
+                      }}
+                    >
+                      <div className="flex items-center gap-1.5 mb-1.5 font-semibold text-white">
+                        <Icon className={`w-3 h-3 ${
+                          m.color === 'amber' ? 'text-amber-400' :
+                          m.color === 'cyan' ? 'text-cyan-400' : 'text-zinc-400'
+                        }`} />
+                        {m.label} Mode
+                      </div>
+                      <p className="leading-relaxed">{m.tooltip}</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          
+          {/* Power Toggle at Bottom */}
+          <div className="border-t border-white/10 p-2">
+            <button
+              onClick={() => { onToggle(); setIsOpen(false); }}
+              disabled={loading}
+              className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                isRunning 
+                  ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' 
+                  : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+              }`}
+              data-testid="bot-power-toggle"
+            >
+              <Power className="w-3.5 h-3.5" />
+              {isRunning ? 'Stop Bot' : 'Start Bot'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ===================== COMPREHENSIVE STATS HEADER =====================
 
 const StatsHeader = ({ status, account, marketContext, positions, onToggle, onModeChange, loading }) => {
