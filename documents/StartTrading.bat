@@ -7,8 +7,8 @@ echo    TradeCommand Trading Platform Startup
 echo ============================================
 echo.
 
-:: Configuration - UPDATE THIS with your GitHub raw URL after first save
-set CONFIG_URL=https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/documents/current_deployment.txt
+:: Configuration - Fetches latest deployment URL from your GitHub repo
+set CONFIG_URL=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents/current_deployment.txt
 set DEFAULT_URL=https://system-dashboard-4.preview.emergentagent.com
 set PLATFORM_URL=%DEFAULT_URL%
 
