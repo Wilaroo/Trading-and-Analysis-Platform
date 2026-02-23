@@ -236,10 +236,9 @@ Triggers AI Coaching Notification
     - Pipeline cards, Scanner Alerts, and LiveAlertsPanel all updated with timestamps
 
 ### P1 - Next Up
-- **Quick Actions**: Implement backend API for close/add/alert position actions (frontend stubs exist)
 - Integrate Perplexity Finance API for enhanced market research
 - Real-time RVOL in Market Intelligence report
-- Portfolio awareness: Proactive suggestions ("Scale out of AMD?", "Heavy tech exposure")
+- **Quick Actions**: Implement backend API for close/add/alert position actions (frontend stubs exist)
 - Audio alerts for high-priority setups
 - Focus Mode: Hide all sections except chat + top opportunity when actively trading
 - Full index population (Russell 2000 needs ~1,600 more, Nasdaq 1000 needs ~400 more)
