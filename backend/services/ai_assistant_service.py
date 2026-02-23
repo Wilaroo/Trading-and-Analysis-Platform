@@ -1707,7 +1707,11 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                     response = await client.post(
                         url,
                         json=payload,
-                        headers={"ngrok-skip-browser-warning": "true"}
+                        headers={
+                            "Content-Type": "application/json",
+                            "User-Agent": "TradeCommand/1.0",
+                            "Accept": "application/json",
+                        }
                     )
                 
                 if response.status_code == 200:
