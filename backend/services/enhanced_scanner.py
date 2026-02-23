@@ -1487,25 +1487,59 @@ class EnhancedBackgroundScanner:
         return None
     
     async def _check_breakout(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Breakout - Price near resistance with volume"""
+        """Breakout - Price breaking or about to break resistance with volume"""
         dist_to_resistance = ((snapshot.resistance - snapshot.current_price) / snapshot.current_price) * 100
         
-        if 0 < dist_to_resistance < 1.0 and snapshot.rvol >= 2.0:
+        # CONFIRMED BREAKOUT: Price above resistance (dist_to_resistance < 0)
+        if dist_to_resistance < 0 and dist_to_resistance > -1.5 and snapshot.rvol >= 1.8:
+            breakout_pct = abs(dist_to_resistance)
+            priority = AlertPriority.CRITICAL if tape.confirmation_for_long else AlertPriority.HIGH
+            
+            return LiveAlert(
+                id=f"breakout_confirmed_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                symbol=symbol,
+                setup_type="breakout_confirmed",
+                strategy_name="Breakout CONFIRMED (INT-02)",
+                direction="long",
+                priority=priority,
+                current_price=snapshot.current_price,
+                trigger_price=snapshot.resistance,
+                stop_loss=round(snapshot.resistance - snapshot.atr, 2),
+                target=round(snapshot.current_price + (snapshot.atr * 2), 2),
+                risk_reward=2.0,
+                trigger_probability=0.70,
+                win_probability=0.58,
+                minutes_to_trigger=0,
+                headline=f"🚀 {symbol} BREAKOUT CONFIRMED - Broke ${snapshot.resistance:.2f} by {breakout_pct:.2f}% {'✓ TAPE' if tape.confirmation_for_long else ''}",
+                reasoning=[
+                    f"Price ABOVE resistance by {breakout_pct:.2f}%",
+                    f"Resistance was ${snapshot.resistance:.2f}, now ${snapshot.current_price:.2f}",
+                    f"Strong volume: {snapshot.rvol:.1f}x RVOL",
+                    f"Tape: {tape.overall_signal.value}",
+                    f"⚠️ Entry now or on pullback to ${snapshot.resistance:.2f}"
+                ],
+                time_window=self._get_current_time_window().value,
+                market_regime=self._market_regime.value,
+                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+            )
+        
+        # APPROACHING BREAKOUT: Price below but near resistance
+        if 0 < dist_to_resistance < 0.8 and snapshot.rvol >= 2.0:
             if dist_to_resistance < 0.3 and tape.confirmation_for_long:
-                priority = AlertPriority.CRITICAL
-                minutes = 2
-            elif dist_to_resistance < 0.6:
                 priority = AlertPriority.HIGH
+                minutes = 2
+            elif dist_to_resistance < 0.5:
+                priority = AlertPriority.MEDIUM
                 minutes = 5
             else:
                 priority = AlertPriority.MEDIUM
                 minutes = 10
             
             return LiveAlert(
-                id=f"breakout_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                id=f"breakout_approaching_{symbol}_{datetime.now().strftime('%H%M%S')}",
                 symbol=symbol,
-                setup_type="breakout",
-                strategy_name="Intraday Breakout (INT-02)",
+                setup_type="approaching_breakout",
+                strategy_name="Approaching Breakout (INT-02)",
                 direction="long",
                 priority=priority,
                 current_price=snapshot.current_price,
@@ -1513,19 +1547,19 @@ class EnhancedBackgroundScanner:
                 stop_loss=round(snapshot.resistance - snapshot.atr, 2),
                 target=round(snapshot.resistance + (snapshot.atr * 2), 2),
                 risk_reward=2.0,
-                trigger_probability=0.70 if priority == AlertPriority.CRITICAL else 0.55,
-                win_probability=0.55,
+                trigger_probability=0.55,
+                win_probability=0.52,
                 minutes_to_trigger=minutes,
-                headline=f"🚀 {symbol} BREAKOUT - {dist_to_resistance:.1f}% to ${snapshot.resistance:.2f} {'✓ TAPE' if tape.confirmation_for_long else ''}",
+                headline=f"👀 {symbol} Approaching Breakout - {dist_to_resistance:.2f}% to ${snapshot.resistance:.2f} {'✓ TAPE' if tape.confirmation_for_long else ''}",
                 reasoning=[
-                    f"Price {dist_to_resistance:.1f}% below resistance",
-                    f"Strong volume: {snapshot.rvol:.1f}x RVOL",
-                    f"Tape: {tape.overall_signal.value} (score: {tape.tape_score:.2f})",
-                    f"Entry: Break above ${snapshot.resistance:.2f} with volume"
+                    f"Price {dist_to_resistance:.2f}% below resistance ${snapshot.resistance:.2f}",
+                    f"Strong volume building: {snapshot.rvol:.1f}x RVOL",
+                    f"Tape: {tape.overall_signal.value}",
+                    f"⚠️ Wait for confirmed break above ${snapshot.resistance:.2f}"
                 ],
                 time_window=self._get_current_time_window().value,
                 market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
             )
         return None
     
