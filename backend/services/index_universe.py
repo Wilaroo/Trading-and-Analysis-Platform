@@ -276,6 +276,7 @@ class IndexUniverseManager:
         
         return {
             "tier1_count": len(self.get_tier1_symbols()),
+            "tier2_count": len(self.get_tier2_symbols()),
             "tier3_count": tier3_count,
             "total_symbols": self.get_universe_count(),
             "wave_size": wave_size,
@@ -323,8 +324,13 @@ class IndexUniverseManager:
         return self._indices[IndexType.SPY].count
     
     @property
+    def nasdaq_extended_count(self) -> int:
+        return self._indices[IndexType.NASDAQ].count
+    
+    @property
     def nasdaq1000_count(self) -> int:
-        return self._indices[IndexType.QQQ].count
+        """Legacy compatibility - now returns NASDAQ Extended count"""
+        return self._indices[IndexType.NASDAQ].count
     
     @property
     def russell2000_count(self) -> int:
