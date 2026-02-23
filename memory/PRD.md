@@ -216,6 +216,11 @@ Triggers AI Coaching Notification
 - ✅ Code cleanup: Removed deprecated ChartsPage.js and IBRealtimeChart.jsx
 - ✅ Enhanced Market Intelligence (7 new data sources) - Feb 12, 2026
 - ✅ WebSocket Heartbeat & Event Loop Fixes - Feb 12, 2026
+- ✅ **Ollama ngrok Connection (Feb 23, 2026)**: Stable local Ollama via paid ngrok tunnel
+    - Removed debug headers (`ngrok-skip-browser-warning`) from backend
+    - Updated Settings page with ngrok instructions (was Cloudflare Tunnel)
+    - Static URL: `pseudoaccidentally-linty-addie.ngrok-free.dev`
+    - Available models: deepseek-r1:8b, gpt-oss:120b-cloud, gemma3:4b, llama3:8b, qwen2.5:7b
 
 ### P1 - Next Up
 - Portfolio awareness: Proactive suggestions ("Scale out of AMD?", "Heavy tech exposure")
