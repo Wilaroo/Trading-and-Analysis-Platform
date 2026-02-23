@@ -33,7 +33,7 @@ echo [3/4] Opening Trading Platform...
 timeout /t 2 /nobreak >nul
 
 :: Open browser to trading platform
-start "" "https://ai-assistant-config-1.preview.emergentagent.com"
+start "" "https://system-dashboard-4.preview.emergentagent.com"
 
 echo.
 echo [4/4] Startup Complete!

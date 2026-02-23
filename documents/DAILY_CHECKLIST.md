@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://ai-assistant-config-1.preview.emergentagent.com
+https://system-dashboard-4.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://ai-assistant-config-1.preview.emergentagent.com
+https://system-dashboard-4.preview.emergentagent.com
 ```
