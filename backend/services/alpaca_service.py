@@ -206,14 +206,22 @@ class AlpacaService:
             logger.error(f"Alpaca batch quote error: {e}")
             return {}
     
-    async def get_bars(self, symbol: str, timeframe: str = "1Day", limit: int = 100) -> List[Dict[str, Any]]:
-        """Get historical bars with caching."""
+    async def get_bars(self, symbol: str, timeframe: str = "1Day", limit: int = 100, force_refresh: bool = False) -> List[Dict[str, Any]]:
+        """
+        Get historical bars with caching.
+        
+        Args:
+            symbol: Stock symbol
+            timeframe: Bar timeframe (1Min, 5Min, 1Hour, 1Day)
+            limit: Number of bars to fetch
+            force_refresh: If True, bypass cache and fetch fresh data
+        """
         if not self._ensure_initialized():
             return []
         
-        # Check bars cache
+        # Check bars cache (unless force_refresh)
         cache_key = f"{symbol.upper()}_{timeframe}_{limit}"
-        if cache_key in self._bars_cache:
+        if not force_refresh and cache_key in self._bars_cache:
             cached = self._bars_cache[cache_key]
             cached_at_str = cached.get('_cached_at', '')
             try:
