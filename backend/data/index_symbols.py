@@ -342,56 +342,92 @@ def get_qqq_symbols() -> List[str]:
     """Get QQQ constituents (Tier 1 priority)"""
     return list(set(QQQ_SYMBOLS))
 
-def get_nasdaq_extended() -> List[str]:
-    """Get NASDAQ Extended universe (Tier 2 - ~500 quality screened)"""
-    return list(set(NASDAQ_EXTENDED))
+# ===================== HELPER FUNCTIONS (CACHED) =====================
+# All functions use lru_cache for O(1) repeated access during scans
 
-def get_iwm_symbols() -> List[str]:
-    """Get IWM constituents (Tier 3 rotating)"""
-    return list(set(IWM_SYMBOLS))
+@lru_cache(maxsize=1)
+def get_spy_symbols() -> tuple:
+    """Get SPY constituents (Tier 1 priority) - CACHED"""
+    return tuple(set(SPY_SYMBOLS))
 
-def get_etf_symbols() -> List[str]:
-    """Get key ETFs (always scanned)"""
-    return list(set(ETF_SYMBOLS))
+@lru_cache(maxsize=1)
+def get_qqq_symbols() -> tuple:
+    """Get QQQ constituents (Tier 1 priority) - CACHED"""
+    return tuple(set(QQQ_SYMBOLS))
 
-def get_tier1_symbols() -> List[str]:
+@lru_cache(maxsize=1)
+def get_nasdaq_extended() -> tuple:
+    """Get NASDAQ Extended universe (Tier 2 - ~500 quality screened) - CACHED"""
+    return tuple(set(NASDAQ_EXTENDED))
+
+@lru_cache(maxsize=1)
+def get_iwm_symbols() -> tuple:
+    """Get IWM constituents (Tier 3 rotating) - CACHED"""
+    return tuple(set(IWM_SYMBOLS))
+
+@lru_cache(maxsize=1)
+def get_etf_symbols() -> tuple:
+    """Get key ETFs (always scanned) - CACHED"""
+    return tuple(set(ETF_SYMBOLS))
+
+@lru_cache(maxsize=1)
+def get_tier1_symbols() -> tuple:
     """
-    Get Tier 1 symbols (SPY + QQQ + ETFs)
+    Get Tier 1 symbols (SPY + QQQ + ETFs) - CACHED
     These are scanned every cycle
     """
     tier1 = set(SPY_SYMBOLS)
     tier1.update(QQQ_SYMBOLS)
     tier1.update(ETF_SYMBOLS)
-    return list(tier1)
+    return tuple(tier1)
 
-def get_tier2_symbols() -> List[str]:
+@lru_cache(maxsize=1)
+def get_tier2_symbols() -> tuple:
     """
-    Get Tier 2 symbols (NASDAQ Extended, excluding those in Tier 1)
+    Get Tier 2 symbols (NASDAQ Extended, excluding those in Tier 1) - CACHED
     Quality-screened NASDAQ stocks for swing trades
     """
     tier1 = set(get_tier1_symbols())
     tier2 = set(NASDAQ_EXTENDED) - tier1
-    return list(tier2)
+    return tuple(tier2)
 
-def get_tier3_symbols() -> List[str]:
+@lru_cache(maxsize=1)
+def get_tier3_symbols() -> tuple:
     """
-    Get Tier 3 symbols (IWM only, excluding those in Tier 1 & 2)
+    Get Tier 3 symbols (IWM only, excluding those in Tier 1 & 2) - CACHED
     These are scanned in rotating batches
     """
     tier1 = set(get_tier1_symbols())
     tier2 = set(NASDAQ_EXTENDED)
     tier3 = set(IWM_SYMBOLS) - tier1 - tier2
-    return list(tier3)
+    return tuple(tier3)
 
-def get_all_symbols() -> List[str]:
-    """Get all unique symbols across all tiers"""
+@lru_cache(maxsize=1)
+def get_all_symbols() -> tuple:
+    """Get all unique symbols across all tiers - CACHED"""
     all_syms = set()
     all_syms.update(SPY_SYMBOLS)
     all_syms.update(QQQ_SYMBOLS)
     all_syms.update(NASDAQ_EXTENDED)
     all_syms.update(IWM_SYMBOLS)
     all_syms.update(ETF_SYMBOLS)
-    return list(all_syms)
+    return tuple(all_syms)
+
+@lru_cache(maxsize=1)
+def get_all_symbols_set() -> frozenset:
+    """Get all symbols as a frozenset for O(1) membership checks - CACHED"""
+    all_syms = set()
+    all_syms.update(SPY_SYMBOLS)
+    all_syms.update(QQQ_SYMBOLS)
+    all_syms.update(NASDAQ_EXTENDED)
+    all_syms.update(IWM_SYMBOLS)
+    all_syms.update(ETF_SYMBOLS)
+    return frozenset(all_syms)
+
+def is_valid_symbol(symbol: str) -> bool:
+    """Fast O(1) check if symbol is in universe - uses cached frozenset"""
+    return symbol in get_all_symbols_set()
+
 
 def get_universe_stats() -> Dict:
     """Get statistics about the symbol universe"""
