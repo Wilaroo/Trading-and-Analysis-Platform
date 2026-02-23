@@ -53,14 +53,17 @@ export default function SettingsPage() {
     setTesting(true);
     setMessage(null);
     try {
-      await fetchConfig();
-      if (config?.ollama_connected) {
-        setMessage({ type: 'success', text: 'Connection successful!' });
+      const res = await api.get('/api/config/test-connection');
+      if (res.data?.connected) {
+        setConfig(prev => ({ ...prev, ollama_connected: true }));
+        const models = res.data.models?.join(', ') || 'unknown';
+        setMessage({ type: 'success', text: `Connected! Available models: ${models}` });
       } else {
-        setMessage({ type: 'error', text: 'Connection failed. Check if Ollama is running and tunnel is active.' });
+        setConfig(prev => ({ ...prev, ollama_connected: false }));
+        setMessage({ type: 'error', text: res.data?.error || 'Connection failed' });
       }
     } catch (err) {
-      setMessage({ type: 'error', text: 'Connection test failed' });
+      setMessage({ type: 'error', text: 'Connection test failed - check if tunnel is running' });
     } finally {
       setTesting(false);
     }
