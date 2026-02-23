@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://position-manager-pro.preview.emergentagent.com
+https://deepseek-trader-3.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://position-manager-pro.preview.emergentagent.com
+https://deepseek-trader-3.preview.emergentagent.com
 ```
