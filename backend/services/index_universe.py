@@ -4,6 +4,7 @@ Index Universe Manager
 Manages symbol lists based on ETF constituents:
 - SPY (S&P 500) - Tier 1 Priority
 - QQQ (Nasdaq-100) - Tier 1 Priority  
+- NASDAQ Extended - Tier 2 (Quality screened NASDAQ)
 - IWM (Russell 2000) - Tier 3 Rotating
 
 Supports wave-based scanning with volume filtering.
@@ -18,13 +19,16 @@ import logging
 # Import ETF-based symbol lists
 from data.index_symbols import (
     SPY_SYMBOLS,
-    QQQ_SYMBOLS, 
+    QQQ_SYMBOLS,
+    NASDAQ_EXTENDED,
     IWM_SYMBOLS,
     ETF_SYMBOLS,
     VOLUME_FILTERS,
     UNIVERSE_METADATA,
     get_tier1_symbols,
+    get_tier2_symbols,
     get_tier3_symbols,
+    get_nasdaq_extended,
     get_universe_stats,
     is_rebalance_due,
     get_next_rebalance_date
@@ -36,9 +40,11 @@ logger = logging.getLogger(__name__)
 class IndexType(str, Enum):
     SPY = "spy"           # S&P 500 large caps (Tier 1)
     QQQ = "qqq"           # Nasdaq-100 tech (Tier 1)
+    NASDAQ = "nasdaq"     # NASDAQ Extended (Tier 2)
     IWM = "iwm"           # Russell 2000 small caps (Tier 3)
     ETF = "etf"           # Key ETFs (always scanned)
     TIER1 = "tier1"       # Combined SPY + QQQ + ETFs
+    TIER2 = "tier2"       # NASDAQ Extended (quality screened)
     TIER3 = "tier3"       # IWM only (rotating)
     CUSTOM = "custom"
 
