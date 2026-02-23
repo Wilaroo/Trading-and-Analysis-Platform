@@ -2094,6 +2094,12 @@ const AICommandPanel = ({
               onRejectTrade={handleRejectPendingTrade}
               onCloseTrade={handleCloseBotTrade}
             />
+            
+            {/* Portfolio Insights Widget */}
+            <PortfolioInsightsWidget 
+              onTickerClick={handleTickerClick}
+              onViewChart={onViewChart}
+            />
           </div>
           
           {/* My Positions Section */}
