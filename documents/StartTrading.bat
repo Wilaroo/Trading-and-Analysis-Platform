@@ -57,54 +57,41 @@ if %errorlevel%==0 (
     start "" "C:\Users\%USERNAME%\AppData\Local\Programs\Ollama\ollama app.exe"
     timeout /t 5 /nobreak >nul
 )
-
-echo.
-echo [3/5] Starting ngrok tunnel...
-echo       Tunnel: https://pseudoaccidentally-linty-addie.ngrok-free.dev
 echo.
 
-:: Start ngrok in a new window
-start "ngrok Tunnel" cmd /k "ngrok http 11434"
-
-:: Wait for ngrok to initialize
-timeout /t 3 /nobreak >nul
-
-echo [4/5] Starting IB Gateway...
-:: Start IB Gateway
+:: START IB GATEWAY FIRST (before ngrok to avoid focus issues)
+echo [3/5] Starting IB Gateway...
 start "" "C:\Jts\ibgateway\1037\ibgateway.exe"
-timeout /t 10 /nobreak >nul
+echo       Waiting for IB Gateway to load...
+timeout /t 12 /nobreak >nul
 
 :: Auto-login using VBScript (sends keystrokes)
-echo       Attempting auto-login...
+echo       Sending login credentials...
 (
 echo Set WshShell = CreateObject^("WScript.Shell"^)
-echo WScript.Sleep 3000
-echo.
-echo ' Activate IBKR Gateway window
-echo Dim activated
-echo activated = WshShell.AppActivate^("IBKR Gateway"^)
-echo.
-echo If activated Then
-echo     WScript.Sleep 1000
-echo     WshShell.SendKeys "esw100000"
-echo     WScript.Sleep 500
-echo     WshShell.SendKeys "{TAB}"
-echo     WScript.Sleep 500
-echo     WshShell.SendKeys "Socr1025!"
-echo     WScript.Sleep 500
-echo     WshShell.SendKeys "{TAB}"
-echo     WScript.Sleep 200
-echo     WshShell.SendKeys "{TAB}"
-echo     WScript.Sleep 200
-echo     WshShell.SendKeys "{ENTER}"
-echo End If
+echo WScript.Sleep 2000
+echo WshShell.AppActivate "IBKR Gateway"
+echo WScript.Sleep 1500
+echo WshShell.SendKeys "esw100000"
+echo WScript.Sleep 500
+echo WshShell.SendKeys "{TAB}"
+echo WScript.Sleep 500
+echo WshShell.SendKeys "Socr1025!"
+echo WScript.Sleep 500
+echo WshShell.SendKeys "{TAB}"
+echo WScript.Sleep 300
+echo WshShell.SendKeys "{TAB}"
+echo WScript.Sleep 300
+echo WshShell.SendKeys "{ENTER}"
 ) > "%TEMP%\ib_login.vbs"
 cscript //nologo "%TEMP%\ib_login.vbs"
 del "%TEMP%\ib_login.vbs" 2>nul
+echo       Login submitted!
 
-:: Wait for login and dismiss any warnings
-timeout /t 8 /nobreak >nul
-echo       Dismissing warnings...
+:: Wait for login to process and dismiss warnings
+echo       Waiting for login to complete...
+timeout /t 10 /nobreak >nul
+echo       Dismissing any warnings...
 (
 echo Set WshShell = CreateObject^("WScript.Shell"^)
 echo WScript.Sleep 1000
@@ -116,13 +103,18 @@ echo WshShell.SendKeys "{ENTER}"
 ) > "%TEMP%\ib_dismiss.vbs"
 cscript //nologo "%TEMP%\ib_dismiss.vbs"
 del "%TEMP%\ib_dismiss.vbs" 2>nul
-echo       IB Gateway started!
+echo       IB Gateway ready!
+echo.
+
+:: NOW start ngrok (after IB Gateway is logged in)
+echo [4/5] Starting ngrok tunnel...
+echo       Tunnel: https://pseudoaccidentally-linty-addie.ngrok-free.dev
+start "ngrok Tunnel" cmd /k "ngrok http 11434"
+timeout /t 3 /nobreak >nul
 echo.
 
 echo [5/5] Opening Trading Platform...
 timeout /t 2 /nobreak >nul
-
-:: Open browser to trading platform
 start "" "%PLATFORM_URL%"
 
 echo.
