@@ -1876,20 +1876,26 @@ class EnhancedBackgroundScanner:
         return None
     
     async def _check_hod_breakout(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """HOD Breakout - Afternoon break of high of day"""
+        """HOD Breakout - Afternoon break of high of day (confirmed breakout)"""
         current_window = self._get_current_time_window()
         
         if current_window not in [TimeWindow.AFTERNOON, TimeWindow.CLOSE]:
             return None
         
+        # Calculate if price is ABOVE HOD (actual breakout)
+        # dist_from_hod > 0 means price is BELOW HOD
+        # dist_from_hod < 0 means price is ABOVE HOD (breakout!)
         dist_from_hod = ((snapshot.high_of_day - snapshot.current_price) / snapshot.current_price) * 100
         
-        if (dist_from_hod < 0.5 and
+        # Only alert on CONFIRMED breakout (price > HOD) with strong conditions
+        # Price must be 0.1% to 1.5% above HOD (confirmed but not extended)
+        if (dist_from_hod < -0.1 and dist_from_hod > -1.5 and
             snapshot.above_vwap and
             snapshot.above_ema9 and
             snapshot.rvol >= 1.5):
             
             priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
+            breakout_pct = abs(dist_from_hod)
             
             return LiveAlert(
                 id=f"hod_breakout_{symbol}_{datetime.now().strftime('%H%M%S')}",
@@ -1901,20 +1907,22 @@ class EnhancedBackgroundScanner:
                 current_price=snapshot.current_price,
                 trigger_price=snapshot.high_of_day,
                 stop_loss=round(snapshot.ema_9, 2),
-                target=round(snapshot.high_of_day + (snapshot.atr * 2), 2),
+                target=round(snapshot.current_price + (snapshot.atr * 2), 2),
                 risk_reward=2.0,
-                trigger_probability=0.55,
-                win_probability=0.55,
-                minutes_to_trigger=15,
-                headline=f"☁️ {symbol} HOD Breakout - Afternoon {'✓ TAPE' if tape.confirmation_for_long else ''}",
+                trigger_probability=0.60,
+                win_probability=0.58,
+                minutes_to_trigger=0,
+                headline=f"🚀 {symbol} HOD BREAKOUT CONFIRMED {'✓ TAPE' if tape.confirmation_for_long else ''}",
                 reasoning=[
-                    f"Price {dist_from_hod:.1f}% from HOD",
-                    f"Afternoon session",
+                    f"Price broke HOD by {breakout_pct:.2f}%",
+                    f"HOD was ${snapshot.high_of_day:.2f}, now ${snapshot.current_price:.2f}",
+                    f"Afternoon session - momentum often continues",
+                    f"RVOL: {snapshot.rvol:.1f}x",
                     f"Tape: {tape.overall_signal.value}"
                 ],
                 time_window=current_window.value,
                 market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
             )
         return None
     
