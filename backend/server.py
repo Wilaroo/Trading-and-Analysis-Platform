@@ -1525,8 +1525,7 @@ async def llm_status():
                 async with httpx.AsyncClient() as client:
                     resp = await client.get(
                         f"{cfg['url']}/api/tags",
-                        timeout=5,
-                        headers={"ngrok-skip-browser-warning": "true"}
+                        timeout=5
                     )
                 info["connected"] = resp.status_code == 200
                 if resp.status_code == 200:
