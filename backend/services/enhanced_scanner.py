@@ -2083,12 +2083,42 @@ class EnhancedBackgroundScanner:
         if daily_range < 2.0 and daily_range > 0.5 and snapshot.rvol >= 1.5:
             dist_from_hod = ((snapshot.high_of_day - snapshot.current_price) / snapshot.current_price) * 100
             
-            if dist_from_hod < 0.5:
+            # CONFIRMED: Price broke above range
+            if dist_from_hod < -0.1 and dist_from_hod > -1.0:
+                breakout_pct = abs(dist_from_hod)
                 return LiveAlert(
-                    id=f"range_break_long_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                    id=f"range_break_confirmed_{symbol}_{datetime.now().strftime('%H%M%S')}",
                     symbol=symbol,
-                    setup_type="range_break_long",
-                    strategy_name="Range Break (INT-21)",
+                    setup_type="range_break_confirmed",
+                    strategy_name="Range Break CONFIRMED (INT-21)",
+                    direction="long",
+                    priority=AlertPriority.HIGH,
+                    current_price=snapshot.current_price,
+                    trigger_price=snapshot.high_of_day,
+                    stop_loss=round(snapshot.low_of_day - 0.02, 2),
+                    target=round(snapshot.current_price + (snapshot.high_of_day - snapshot.low_of_day), 2),
+                    risk_reward=1.5,
+                    trigger_probability=0.60,
+                    win_probability=0.55,
+                    minutes_to_trigger=0,
+                    headline=f"🚀 {symbol} Range Break CONFIRMED - Broke ${snapshot.high_of_day:.2f} by {breakout_pct:.2f}%",
+                    reasoning=[
+                        f"Price ABOVE range high by {breakout_pct:.2f}%",
+                        f"Range was ${snapshot.low_of_day:.2f} - ${snapshot.high_of_day:.2f}",
+                        f"Tape: {tape.overall_signal.value}"
+                    ],
+                    time_window=self._get_current_time_window().value,
+                    market_regime=self._market_regime.value,
+                    expires_at=(datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+                )
+            
+            # APPROACHING: Near range high
+            if 0 < dist_from_hod < 0.5:
+                return LiveAlert(
+                    id=f"range_break_approaching_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                    symbol=symbol,
+                    setup_type="approaching_range_break",
+                    strategy_name="Approaching Range Break (INT-21)",
                     direction="long",
                     priority=AlertPriority.MEDIUM,
                     current_price=snapshot.current_price,
@@ -2096,17 +2126,18 @@ class EnhancedBackgroundScanner:
                     stop_loss=round(snapshot.low_of_day - 0.02, 2),
                     target=round(snapshot.high_of_day + (snapshot.high_of_day - snapshot.low_of_day), 2),
                     risk_reward=1.5,
-                    trigger_probability=0.50,
-                    win_probability=0.50,
+                    trigger_probability=0.45,
+                    win_probability=0.48,
                     minutes_to_trigger=20,
-                    headline=f"📊 {symbol} Range Break - Near resistance",
+                    headline=f"👀 {symbol} Approaching Range Break - {dist_from_hod:.2f}% to ${snapshot.high_of_day:.2f}",
                     reasoning=[
+                        f"Price {dist_from_hod:.2f}% below range high",
                         f"Range: ${snapshot.low_of_day:.2f} - ${snapshot.high_of_day:.2f}",
-                        f"Tape: {tape.overall_signal.value}"
+                        f"⚠️ Wait for break above ${snapshot.high_of_day:.2f}"
                     ],
                     time_window=self._get_current_time_window().value,
                     market_regime=self._market_regime.value,
-                    expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+                    expires_at=(datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
                 )
         return None
     
