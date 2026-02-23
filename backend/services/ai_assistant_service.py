@@ -1711,6 +1711,8 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                             "Content-Type": "application/json",
                             "User-Agent": "TradeCommand/1.0",
                             "Accept": "application/json",
+                            "ngrok-skip-browser-warning": "true",
+                            "Host": "localhost",
                         }
                     )
                 
