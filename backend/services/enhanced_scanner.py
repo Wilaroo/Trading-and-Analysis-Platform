@@ -1927,6 +1927,54 @@ class EnhancedBackgroundScanner:
             )
         return None
     
+
+    async def _check_approaching_hod(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
+        """Approaching HOD - Price near high of day, setting up for potential breakout"""
+        current_window = self._get_current_time_window()
+        
+        if current_window not in [TimeWindow.AFTERNOON, TimeWindow.CLOSE]:
+            return None
+        
+        # dist_from_hod > 0 means price is BELOW HOD
+        dist_from_hod = ((snapshot.high_of_day - snapshot.current_price) / snapshot.current_price) * 100
+        
+        # Alert when within 0.3% to 0.8% of HOD (approaching but not there yet)
+        if (dist_from_hod > 0.1 and dist_from_hod < 0.8 and
+            snapshot.above_vwap and
+            snapshot.above_ema9 and
+            snapshot.rvol >= 1.2):
+            
+            priority = AlertPriority.MEDIUM
+            
+            return LiveAlert(
+                id=f"approaching_hod_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                symbol=symbol,
+                setup_type="approaching_hod",
+                strategy_name="Approaching HOD",
+                direction="long",
+                priority=priority,
+                current_price=snapshot.current_price,
+                trigger_price=snapshot.high_of_day,
+                stop_loss=round(snapshot.ema_9, 2),
+                target=round(snapshot.high_of_day + (snapshot.atr * 1.5), 2),
+                risk_reward=2.0,
+                trigger_probability=0.45,
+                win_probability=0.50,
+                minutes_to_trigger=10,
+                headline=f"👀 {symbol} Approaching HOD - Watch for breakout",
+                reasoning=[
+                    f"Price {dist_from_hod:.2f}% below HOD ${snapshot.high_of_day:.2f}",
+                    f"Current: ${snapshot.current_price:.2f}",
+                    f"Above VWAP and EMA9",
+                    f"RVOL: {snapshot.rvol:.1f}x",
+                    f"⚠️ Wait for confirmed break above ${snapshot.high_of_day:.2f}"
+                ],
+                time_window=current_window.value,
+                market_regime=self._market_regime.value,
+                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=20)).isoformat()
+            )
+        return None
+
     async def _check_volume_capitulation(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
         """Volume Capitulation - Exhaustion on extreme volume"""
         if snapshot.rvol >= 5.0:
