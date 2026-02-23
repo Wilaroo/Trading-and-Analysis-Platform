@@ -39,13 +39,13 @@ CREDIT_WARNING_THRESHOLDS = {
 
 # Different TTLs based on data freshness requirements
 CACHE_TTL = {
-    "search": 300,           # 5 min - general web search
-    "news": 180,             # 3 min - news is more time-sensitive
+    "search": 180,           # 3 min - general web search (reduced from 5)
+    "news": 120,             # 2 min - news is time-sensitive (reduced from 3)
     "company_info": 3600,    # 1 hour - company fundamentals don't change often
-    "stock_analysis": 600,   # 10 min - analysis/sentiment
+    "stock_analysis": 300,   # 5 min - analysis/sentiment (reduced from 10)
     "sec_filings": 86400,    # 24 hours - SEC filings are static
-    "analyst_ratings": 3600, # 1 hour - ratings don't change often
-    "deep_dive": 900,        # 15 min - comprehensive research
+    "analyst_ratings": 1800, # 30 min - ratings don't change often (reduced from 1 hour)
+    "deep_dive": 600,        # 10 min - comprehensive research (reduced from 15)
 }
 
 # ===================== DATA MODELS =====================
