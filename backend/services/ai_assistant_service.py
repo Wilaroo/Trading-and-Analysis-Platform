@@ -1536,10 +1536,37 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         common_words = {'I', 'A', 'THE', 'AND', 'OR', 'FOR', 'TO', 'IS', 'IT', 'IN', 'ON', 'AT', 'BY', 'BE', 'AS', 'AN', 'ARE', 'WAS', 'IF', 'MY', 'ME', 'DO', 'SO', 'UP', 'AM', 'CAN', 'HOW', 'WHAT', 'BUY', 'SELL', 'LONG', 'SHORT', 'NEWS', 'TODAY', 'MARKET', 'BOT', 'DOES', 'HAVE', 'SHOW', 'TRADE', 'RIGHT', 'NOW', 'PENDING', 'OPEN', 'CLOSE', 'STATUS', 'THIS'}
         symbols = [s for s in symbols if s not in common_words and len(s) >= 2]
         
+        # Check if this is a trading decision that needs fresh data
+        trading_decision_keywords = ['should i', 'buy', 'sell', 'enter', 'exit', 'trade', 'long', 'short', 
+                                     'is it', 'good entry', 'take profit', 'stop loss', 'setup', 'breakout']
+        needs_fresh_data = any(kw in user_message.lower() for kw in trading_decision_keywords)
+        
         if symbols:
-            context_parts.append("\nSTOCK DATA FOR MENTIONED SYMBOLS:")
+            context_parts.append("\n📊 REAL-TIME STOCK DATA:")
             for symbol in symbols[:3]:
                 try:
+                    # ALWAYS get fresh real-time quote when discussing specific stocks
+                    if self.alpaca_service:
+                        # Force refresh for trading decisions, otherwise use cache
+                        quote = await self.alpaca_service.get_quote(symbol, force_refresh=needs_fresh_data)
+                        if quote:
+                            price = quote.get('price', 0)
+                            change = quote.get('change_percent', 0)
+                            bid = quote.get('bid', 0)
+                            ask = quote.get('ask', 0)
+                            volume = quote.get('volume', 0)
+                            emoji = "🟢" if change >= 0 else "🔴"
+                            
+                            context_parts.append(f"\n**{symbol}** (LIVE):")
+                            context_parts.append(f"  💰 Price: ${price:.2f} {emoji} {change:+.2f}%")
+                            if bid and ask:
+                                spread = ((ask - bid) / price * 100) if price else 0
+                                context_parts.append(f"  📈 Bid/Ask: ${bid:.2f} / ${ask:.2f} (spread: {spread:.2f}%)")
+                            if volume:
+                                context_parts.append(f"  📊 Volume: {volume:,}")
+                        else:
+                            context_parts.append(f"\n**{symbol}**: Quote unavailable")
+                    
                     # Get quality score with timeout
                     async def get_quality_data():
                         quality = await self.quality_service.get_quality_metrics(symbol)
@@ -1548,13 +1575,12 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                     
                     try:
                         quality, q_score = await asyncio.wait_for(get_quality_data(), timeout=5.0)
-                        context_parts.append(f"\n{symbol}:")
-                        context_parts.append(f"  Quality Grade: {q_score.grade} ({q_score.composite_score}/400)")
-                        context_parts.append(f"  Signal: {q_score.quality_signal}")
+                        context_parts.append(f"  ⭐ Quality Grade: {q_score.grade} ({q_score.composite_score}/400)")
+                        context_parts.append(f"  📍 Signal: {q_score.quality_signal}")
                         if quality.roe:
-                            context_parts.append(f"  ROE: {quality.roe:.1%}, D/A: {quality.da:.1%}" if quality.da else f"  ROE: {quality.roe:.1%}")
+                            context_parts.append(f"  📈 ROE: {quality.roe:.1%}, D/A: {quality.da:.1%}" if quality.da else f"  📈 ROE: {quality.roe:.1%}")
                     except asyncio.TimeoutError:
-                        context_parts.append(f"\n{symbol}: Quality data timeout - using cached or skipped")
+                        context_parts.append(f"  ⚠️ Quality data timeout")
                     
                     # Get ticker-specific news if mentioned (with timeout)
                     if wants_news:
