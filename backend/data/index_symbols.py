@@ -158,6 +158,65 @@ QQQ_SYMBOLS = [
     "PTON", "SNOW", "UBER", "LYFT", "SPOT", "PINS", "SNAP", "SQ",
 ]
 
+# ===================== NASDAQ EXTENDED UNIVERSE =====================
+# ~500 quality-screened NASDAQ stocks - PRIORITY TIER 2
+# Criteria: Price >= $5, Volume >= 100K, Tradeable
+# Use for swing trades and broader market scanning
+# For intraday: Filter to ADV >= 500K at runtime
+NASDAQ_EXTENDED = [
+    # High Volume (>= 500K daily volume)
+    "AAL", "AAOI", "AAPL", "ABNB", "ACLX", "ACWI", "ADBE", "ADI", "ADP", "ADSK",
+    "AEP", "AFRM", "AGNC", "AKAM", "AMAT", "AMD", "AMGN", "AMZN", "ANSS", "AVGO",
+    "BKR", "BKNG", "CEG", "CFLT", "CHTR", "CLSK", "CMCSA", "COIN", "CORZ", "COST",
+    "CPRT", "CRWD", "CSCO", "CSGP", "CSX", "CTAS", "CTSH", "DASH", "DDOG", "DKNG",
+    "DXCM", "EA", "EBAY", "ENPH", "EXC", "EXAS", "FANG", "FAST", "FITB", "FROG",
+    "FTNT", "GEHC", "GILD", "GOOG", "GOOGL", "GRAB", "GTLB", "HBAN", "HON", "HOOD",
+    "HST", "IBIT", "IDXX", "ILMN", "INTC", "INTU", "IREN", "ISRG", "KDP", "KHC",
+    "KLAC", "LRCX", "LULU", "LYFT", "MAR", "MARA", "MCHP", "MDB", "MDLZ", "MELI",
+    "META", "MNST", "MRNA", "MRVL", "MSFT", "MSTR", "MU", "NFLX", "NVDA", "NXPI",
+    "ODFL", "OKTA", "ON", "OPEN", "ORLY", "PANW", "PAYX", "PCAR", "PDD", "PEP",
+    "PLTR", "PYPL", "QCOM", "QQQ", "REGN", "RGTI", "RIOT", "RIVN", "ROST", "SBUX",
+    "SHOP", "SMCI", "SNPS", "SOFI", "SOUN", "TEAM", "TMUS", "TQQQ", "TSLA", "TTD",
+    "TXN", "UBER", "VRSK", "VRTX", "WBD", "WDAY", "WMT", "XEL", "ZM", "ZS",
+    
+    # Medium-High Volume (200K-500K)
+    "ACAD", "ACHC", "ADMA", "ALGM", "ALHC", "ALKS", "ALKT", "AMPL", "AMRX", "ANGL",
+    "APLD", "APLS", "APP", "APPN", "ARCC", "ARDX", "ARHS", "ARM", "ARQT", "ARRY",
+    "ASO", "ASPI", "ASTS", "ATEC", "ATOM", "AVPT", "AXTI", "BBIO", "BCRX", "BGC",
+    "BL", "BLMN", "BMRN", "BND", "BNDX", "BOTZ", "BRZE", "BSY", "BUG", "BULL",
+    "BZ", "CAI", "CAKE", "CARG", "CART", "CCOI", "CDNS", "CELH", "CENX", "CERT",
+    "CG", "CGNX", "CHDN", "CHKP", "CHYM", "CLBT", "CME", "CMPS", "CNXC", "COGT",
+    "COLB", "CONL", "CORT", "CPB", "CRDO", "CRML", "CROX", "CRWV", "CYTK", "DAWN",
+    "DBX", "DJT", "DNLI", "DPZ", "DRH", "DYN", "EBC", "EMB", "EMXC", "ENTG",
+    "ENVX", "EOSE", "ERAS", "ERIC", "ETHA", "EUFN", "EXE", "EXLS", "EXPE", "EXPI",
+    "FALN", "FISV", "FIVN", "FLEX", "FLNC", "FOLD", "FOXA", "FRMI", "FRPT", "FRSH",
+    "FSLY", "FTRE", "FULT", "FWONK", "FWRG", "GBDC", "GEN", "GFS", "GGLS", "GH",
+    "GLBE", "GLDD", "GLPI", "GLXY", "GMAB", "GNTX", "GO", "GPRE", "GRAL", "GT",
+    "GTM", "GTX", "HLIT", "HLMN", "HLNE", "HOLX", "HRMY", "HSAI", "HSIC", "HTFL",
+    "HUT", "HYMC", "IBB", "IBRX", "ICLN", "IEF", "IGIB", "IGSB", "INSM", "IONS",
+    "IRTC", "ITRI", "IUSB", "IXUS", "JD", "JEPQ", "KBWB", "KC", "KMB", "KTOS",
+    "LBTYA", "LBTYK", "LCID", "LEGN", "LGN", "LI", "LIN", "LINE", "LITE", "LKQ",
+    "LNT", "LPLA", "LPTH", "LZ", "MASI", "MAT", "MBB", "MBLY", "MCHI", "MDLN",
+    "MGNI", "MKSI", "MLCO", "MLTX", "MNDY", "MNKD", "MTCH", "NB", "NBIS", "NCNO",
+    "NDAQ", "NEOG", "NTAP", "NTNX", "NTSK", "NVAX", "NVD", "NVDL", "NVTS", "NWSA",
+    "OCUL", "ODD", "OLED", "OMDA", "ONB", "ONDS", "OPCH", "OS", "OTEX", "OXLC",
+    "PAA", "PAGP", "PCT", "PDBC", "PEGA", "PENN", "PFF", "PFG", "PGNY", "PGY",
+    "PLTD", "PODD", "POET", "PONY", "POOL", "PRCH", "PRGS", "PSKY", "PTCT", "PTEN",
+    "PTLO", "PZZA", "QDEL", "QQQI", "QQQM", "QS", "QUBT", "QYLD", "RAPT", "RARE",
+    "RCAT", "REAL", "RELY", "RKLB", "RMBS", "RNA", "ROIV", "ROP", "RPD", "RPRX",
+    "RUM", "RUN", "RVMD", "SAIL", "SATS", "SBET", "SBLK", "SBRA", "SEDG", "SERV",
+    "SFM", "SGML", "SHC", "SHLS", "SHY", "SIRI", "SLM", "SMH", "SMMT", "SMPL",
+    "SNDK", "SNY", "SOLS", "SOLZ", "SONO", "SOXX", "SQQQ", "SRAD", "SSNC", "SSRM",
+    "STAA", "STEP", "STKL", "STNE", "STX", "SVRA", "SYRE", "TCOM", "TECH", "TEM",
+    "TENB", "TGTX", "TLRY", "TLT", "TMC", "TNDM", "TNGX", "TPG", "TRI", "TRIP",
+    "TSCO", "TSDD", "TSEM", "TSLG", "TSLL", "TSLQ", "TSLS", "TTAN", "TTEK", "TTMI",
+    "TVTX", "TXG", "TXRH", "UAL", "UPB", "UPST", "UPWK", "URBN", "USIG", "VBIL",
+    "VCIT", "VCLT", "VCSH", "VERX", "VGIT", "VGSH", "VIAV", "VISN", "VKTX", "VLY",
+    "VMBS", "VNDA", "VNET", "VNOM", "VNQI", "VOD", "VONG", "VRDN", "VRNS", "VRRM",
+    "VSNT", "VTRS", "VTWO", "VTYX", "VXUS", "WAY", "WDC", "WEN", "WIX", "WMG",
+    "WRD", "WSC", "WULF", "WVE", "WYNN", "XERS", "XP", "XRAY", "Z", "ZION",
+]
+
 # ===================== IWM CONSTITUENTS (RUSSELL 2000) =====================
 # Small caps - PRIORITY TIER 3 (rotating batches)
 IWM_SYMBOLS = [
