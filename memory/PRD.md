@@ -221,6 +221,19 @@ Triggers AI Coaching Notification
     - Updated Settings page with ngrok instructions (was Cloudflare Tunnel)
     - Static URL: `pseudoaccidentally-linty-addie.ngrok-free.dev`
     - Available models: deepseek-r1:8b, gpt-oss:120b-cloud, gemma3:4b, llama3:8b, qwen2.5:7b
+- ✅ **One-Click Startup Script (Feb 23, 2026)**: `StartTrading.bat` auto-launches:
+    - Ollama (with permanent OLLAMA_ORIGINS and OLLAMA_HOST env vars)
+    - IB Gateway with auto-login and warning dismissal
+    - ngrok tunnel
+    - Trading platform in browser
+- ✅ **Alert Logic Fix (Feb 23, 2026)**: Distinguished Approaching vs Confirmed alerts
+    - HOD Breakout: Now only fires when price ABOVE HOD (confirmed breakout)
+    - Added new "Approaching HOD" alert for stocks near HOD but not broken
+    - Fixed ORB (Opening Range Breakout): Approaching vs Confirmed
+    - Fixed Range Break: Approaching vs Confirmed
+    - Fixed general Breakout: Approaching vs Confirmed
+    - All alerts now show timestamps (HH:MM:SS) and WATCH/CONFIRMED badges
+    - Pipeline cards, Scanner Alerts, and LiveAlertsPanel all updated with timestamps
 
 ### P1 - Next Up
 - **Quick Actions**: Implement backend API for close/add/alert position actions (frontend stubs exist)
