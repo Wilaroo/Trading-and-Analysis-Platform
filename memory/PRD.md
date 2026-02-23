@@ -226,14 +226,13 @@ Triggers AI Coaching Notification
     - IB Gateway with auto-login and warning dismissal
     - ngrok tunnel
     - Trading platform in browser
-- ✅ **Alert Logic Fix (Feb 23, 2026)**: Distinguished Approaching vs Confirmed alerts
-    - HOD Breakout: Now only fires when price ABOVE HOD (confirmed breakout)
-    - Added new "Approaching HOD" alert for stocks near HOD but not broken
-    - Fixed ORB (Opening Range Breakout): Approaching vs Confirmed
-    - Fixed Range Break: Approaching vs Confirmed
-    - Fixed general Breakout: Approaching vs Confirmed
-    - All alerts now show timestamps (HH:MM:SS) and WATCH/CONFIRMED badges
-    - Pipeline cards, Scanner Alerts, and LiveAlertsPanel all updated with timestamps
+- ✅ **Portfolio Awareness Phase 3 (Feb 23, 2026)**: Proactive AI suggestions
+    - Created PortfolioAwarenessService that monitors positions
+    - Alerts for: profit taking, stop loss, sector concentration, position size, correlation risk
+    - New Portfolio Insights widget in AI panel
+    - Suggestions show timestamp, priority, reasoning, and suggested actions
+    - Dismissible suggestions with auto-refresh every 2 minutes
+    - Example alerts: "MSFT down 6.9% - Monitor closely", "Heavy Technology exposure (100%)"
 
 ### P1 - Next Up
 - Integrate Perplexity Finance API for enhanced market research
