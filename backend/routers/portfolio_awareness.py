@@ -9,7 +9,6 @@ import logging
 
 from services.portfolio_awareness_service import get_portfolio_awareness_service, PortfolioAwarenessService
 from services.alpaca_service import get_alpaca_service
-from services.finnhub_service import get_finnhub_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/portfolio-awareness", tags=["Portfolio Awareness"])
@@ -22,8 +21,7 @@ async def _get_service() -> PortfolioAwarenessService:
     if _service is None:
         _service = get_portfolio_awareness_service()
         alpaca = get_alpaca_service()
-        finnhub = get_finnhub_service()
-        await _service.initialize(alpaca_service=alpaca, finnhub_service=finnhub)
+        await _service.initialize(alpaca_service=alpaca)
     return _service
 
 
