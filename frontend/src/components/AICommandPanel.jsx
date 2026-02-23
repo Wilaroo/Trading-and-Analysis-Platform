@@ -2141,10 +2141,6 @@ const AICommandPanel = ({
             <p className="text-[9px] text-zinc-500 tracking-wide">Scanner • AI • Bot</p>
           </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className={`neon-dot${isConnected ? '-success' : '-error'}`} style={{width: '6px', height: '6px'}} />
-          <span className="text-[10px] text-zinc-500 font-medium">{isConnected ? 'Live' : 'Offline'}</span>
-        </div>
       </div>
       
       {/* Comprehensive Stats Header */}
