@@ -198,6 +198,7 @@ app.include_router(learning_dashboard_router)
 app.include_router(market_intel_router)
 app.include_router(research_router)
 app.include_router(config_router)
+app.include_router(portfolio_awareness_router)
 
 # Collections
 strategies_col = db["strategies"]
