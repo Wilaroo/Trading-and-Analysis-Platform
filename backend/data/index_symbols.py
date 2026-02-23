@@ -341,6 +341,10 @@ def get_qqq_symbols() -> List[str]:
     """Get QQQ constituents (Tier 1 priority)"""
     return list(set(QQQ_SYMBOLS))
 
+def get_nasdaq_extended() -> List[str]:
+    """Get NASDAQ Extended universe (Tier 2 - ~500 quality screened)"""
+    return list(set(NASDAQ_EXTENDED))
+
 def get_iwm_symbols() -> List[str]:
     """Get IWM constituents (Tier 3 rotating)"""
     return list(set(IWM_SYMBOLS))
@@ -359,13 +363,23 @@ def get_tier1_symbols() -> List[str]:
     tier1.update(ETF_SYMBOLS)
     return list(tier1)
 
+def get_tier2_symbols() -> List[str]:
+    """
+    Get Tier 2 symbols (NASDAQ Extended, excluding those in Tier 1)
+    Quality-screened NASDAQ stocks for swing trades
+    """
+    tier1 = set(get_tier1_symbols())
+    tier2 = set(NASDAQ_EXTENDED) - tier1
+    return list(tier2)
+
 def get_tier3_symbols() -> List[str]:
     """
-    Get Tier 3 symbols (IWM only, excluding those in Tier 1)
+    Get Tier 3 symbols (IWM only, excluding those in Tier 1 & 2)
     These are scanned in rotating batches
     """
     tier1 = set(get_tier1_symbols())
-    tier3 = set(IWM_SYMBOLS) - tier1
+    tier2 = set(NASDAQ_EXTENDED)
+    tier3 = set(IWM_SYMBOLS) - tier1 - tier2
     return list(tier3)
 
 def get_all_symbols() -> List[str]:
@@ -373,6 +387,7 @@ def get_all_symbols() -> List[str]:
     all_syms = set()
     all_syms.update(SPY_SYMBOLS)
     all_syms.update(QQQ_SYMBOLS)
+    all_syms.update(NASDAQ_EXTENDED)
     all_syms.update(IWM_SYMBOLS)
     all_syms.update(ETF_SYMBOLS)
     return list(all_syms)
@@ -381,20 +396,24 @@ def get_universe_stats() -> Dict:
     """Get statistics about the symbol universe"""
     spy = set(SPY_SYMBOLS)
     qqq = set(QQQ_SYMBOLS)
+    nasdaq_ext = set(NASDAQ_EXTENDED)
     iwm = set(IWM_SYMBOLS)
     etfs = set(ETF_SYMBOLS)
     
     tier1 = spy | qqq | etfs
-    tier3 = iwm - tier1
+    tier2 = nasdaq_ext - tier1
+    tier3 = iwm - tier1 - nasdaq_ext
     
     return {
         "spy_count": len(spy),
         "qqq_count": len(qqq),
+        "nasdaq_extended_count": len(nasdaq_ext),
         "iwm_count": len(iwm),
         "etf_count": len(etfs),
         "tier1_count": len(tier1),
+        "tier2_count": len(tier2),
         "tier3_count": len(tier3),
-        "total_unique": len(spy | qqq | iwm | etfs),
+        "total_unique": len(spy | qqq | nasdaq_ext | iwm | etfs),
         "overlap_spy_qqq": len(spy & qqq),
         "metadata": UNIVERSE_METADATA
     }
