@@ -58,9 +58,9 @@ SPY_SYMBOLS = [
     "HPQ", "HPE", "DELL", "ANET", "MPWR", "SWKS", "QRVO", "TER",
     "ON", "NXPI", "MRVL", "GEN", "ENPH", "SEDG", "FSLR", "GLW",
     
-    # Financials (70)
-    "JPM", "BAC", "WFC", "C", "GS", "MS", "SCHW", "BLK", "AXP",
-    "SPGI", "CME", "ICE", "MCO", "CB", "PGR", "MMC", "AON", "TRV",
+    # Financials (73)
+    "JPM", "BAC", "WFC", "C", "GS", "MS", "SCHW", "BLK", "AXP", "V", "MA",
+    "SPGI", "CME", "ICE", "MCO", "CB", "PGR", "MMC", "AON", "TRV", "BRK.B",
     "AIG", "ALL", "MET", "PRU", "AFL", "HIG", "CINF", "L", "BRO",
     "USB", "PNC", "TFC", "COF", "DFS", "SYF", "KEY", "CFG", "FITB",
     "HBAN", "RF", "ZION", "MTB", "NTRS", "STT", "BK", "NDAQ", "CBOE",
