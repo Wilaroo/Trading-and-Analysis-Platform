@@ -93,7 +93,7 @@ class IndexUniverseManager:
         # SPY (S&P 500) - Tier 1
         self._indices[IndexType.SPY] = IndexUniverse(
             index_type=IndexType.SPY,
-            symbols=list(set(SPY_SYMBOLS)),
+            symbols=list(get_tier1_symbols()),  # Uses cached function
             last_updated=now,
             priority=1
         )
@@ -101,7 +101,7 @@ class IndexUniverseManager:
         # QQQ (Nasdaq-100) - Tier 1
         self._indices[IndexType.QQQ] = IndexUniverse(
             index_type=IndexType.QQQ,
-            symbols=list(set(QQQ_SYMBOLS)),
+            symbols=list(get_qqq_symbols()),  # Uses cached function
             last_updated=now,
             priority=1
         )
@@ -109,7 +109,7 @@ class IndexUniverseManager:
         # NASDAQ Extended - Tier 2 (quality screened)
         self._indices[IndexType.NASDAQ] = IndexUniverse(
             index_type=IndexType.NASDAQ,
-            symbols=list(set(NASDAQ_EXTENDED)),
+            symbols=list(get_nasdaq_extended()),  # Uses cached function
             last_updated=now,
             priority=2
         )
@@ -117,7 +117,7 @@ class IndexUniverseManager:
         # IWM (Russell 2000) - Tier 3
         self._indices[IndexType.IWM] = IndexUniverse(
             index_type=IndexType.IWM,
-            symbols=list(set(IWM_SYMBOLS)),
+            symbols=list(get_tier3_symbols()),  # Uses cached function
             last_updated=now,
             priority=3
         )
@@ -125,7 +125,7 @@ class IndexUniverseManager:
         # ETFs - Always scanned
         self._indices[IndexType.ETF] = IndexUniverse(
             index_type=IndexType.ETF,
-            symbols=list(set(ETF_SYMBOLS)),
+            symbols=list(get_etf_symbols()),  # Uses cached function
             last_updated=now,
             priority=1
         )
@@ -133,7 +133,7 @@ class IndexUniverseManager:
         # Tier 1 Combined (SPY + QQQ + ETFs)
         self._indices[IndexType.TIER1] = IndexUniverse(
             index_type=IndexType.TIER1,
-            symbols=get_tier1_symbols(),
+            symbols=list(get_tier1_symbols()),  # Uses cached function
             last_updated=now,
             priority=1
         )
@@ -141,7 +141,7 @@ class IndexUniverseManager:
         # Tier 2 (NASDAQ Extended excluding Tier 1)
         self._indices[IndexType.TIER2] = IndexUniverse(
             index_type=IndexType.TIER2,
-            symbols=get_tier2_symbols(),
+            symbols=list(get_tier2_symbols()),  # Uses cached function
             last_updated=now,
             priority=2
         )
@@ -149,7 +149,7 @@ class IndexUniverseManager:
         # Tier 3 (IWM excluding Tier 1 & 2)
         self._indices[IndexType.TIER3] = IndexUniverse(
             index_type=IndexType.TIER3,
-            symbols=get_tier3_symbols(),
+            symbols=list(get_tier3_symbols()),  # Uses cached function
             last_updated=now,
             priority=3
         )
