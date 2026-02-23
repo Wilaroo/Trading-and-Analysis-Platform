@@ -71,7 +71,7 @@ timeout /t 3 /nobreak >nul
 
 echo [4/5] Starting IB Gateway...
 :: Start IB Gateway
-start "" "C:\Jts\ibgateway\1028\ibgateway.exe"
+start "" "C:\Jts\ibgateway\1037\ibgateway.exe"
 timeout /t 8 /nobreak >nul
 
 :: Auto-login using VBScript (sends keystrokes)
