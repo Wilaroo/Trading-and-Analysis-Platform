@@ -1286,6 +1286,7 @@ class EnhancedBackgroundScanner:
             
             # Afternoon
             "hod_breakout": self._check_hod_breakout,
+            "approaching_hod": self._check_approaching_hod,
             
             # Special
             "volume_capitulation": self._check_volume_capitulation,
