@@ -49,17 +49,21 @@ async def test_ollama_connection():
             "Content-Type": "application/json",
             "User-Agent": "TradeCommand/1.0",
             "Accept": "application/json",
+            "ngrok-skip-browser-warning": "true",
+            "Host": "localhost",
         }
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(f"{ollama_url}/api/tags", headers=headers)
             if response.status_code == 200:
                 data = response.json()
                 models = [m.get("name", "unknown") for m in data.get("models", [])]
                 return {"connected": True, "models": models}
             elif response.status_code == 403:
-                return {"connected": False, "error": "403 Forbidden - Cloudflare may be blocking. Try restarting tunnel."}
+                return {"connected": False, "error": "403 Forbidden - Check ngrok/tunnel settings"}
             else:
                 return {"connected": False, "error": f"HTTP {response.status_code}"}
+    except httpx.TimeoutException:
+        return {"connected": False, "error": "Connection timed out - server cannot reach ngrok"}
     except Exception as e:
         return {"connected": False, "error": str(e)}
 
