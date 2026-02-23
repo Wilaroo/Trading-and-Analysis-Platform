@@ -296,6 +296,170 @@ const CreditBudgetModal = ({ isOpen, onClose, creditBudget }) => {
   );
 };
 
+// System Status Popover Component
+const SystemStatusPopover = ({ 
+  wsConnected, 
+  wsLastUpdate, 
+  connectionChecked, 
+  isConnected, 
+  connecting,
+  handleConnectToIB,
+  ollamaStatus
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const popoverRef = useRef(null);
+  
+  // Close popover when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (popoverRef.current && !popoverRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+  
+  // Calculate overall system status
+  const getOverallStatus = () => {
+    const quotesOk = wsConnected;
+    const ibOk = isConnected;
+    // If all services are up
+    if (quotesOk && ibOk) return { status: 'online', label: 'All Systems Online', color: 'emerald' };
+    // If some services are up
+    if (quotesOk || ibOk) return { status: 'partial', label: 'Partial', color: 'amber' };
+    // If nothing is connected
+    return { status: 'offline', label: 'Systems Offline', color: 'red' };
+  };
+  
+  const overall = getOverallStatus();
+  
+  const services = [
+    {
+      name: 'Quotes Stream',
+      description: 'Real-time market data via WebSocket',
+      connected: wsConnected,
+      lastUpdate: wsLastUpdate,
+      icon: Activity
+    },
+    {
+      name: 'IB Gateway',
+      description: 'Trading & historical data',
+      connected: isConnected,
+      checking: !connectionChecked,
+      icon: Database,
+      action: !isConnected && connectionChecked ? {
+        label: connecting ? 'Connecting...' : 'Reconnect',
+        onClick: handleConnectToIB,
+        disabled: connecting
+      } : null
+    },
+    {
+      name: 'Ollama AI',
+      description: 'Local AI via ngrok tunnel',
+      connected: ollamaStatus === 'online',
+      checking: ollamaStatus === 'checking',
+      icon: Zap
+    }
+  ];
+  
+  return (
+    <div className="relative" ref={popoverRef}>
+      {/* Trigger Button */}
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all hover:scale-[1.02] ${
+          overall.color === 'emerald' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
+          overall.color === 'amber' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' :
+          'bg-red-500/10 border-red-500/30 text-red-400'
+        } border`}
+        data-testid="system-status-trigger"
+      >
+        <Server className="w-4 h-4" />
+        <span className="text-xs font-medium hidden md:inline">{overall.label}</span>
+        <ChevronDown className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      
+      {/* Popover Content */}
+      {isOpen && (
+        <div 
+          className="absolute right-0 top-full mt-2 w-72 rounded-xl overflow-hidden z-50"
+          style={{
+            background: 'rgba(21, 28, 36, 0.95)',
+            backdropFilter: 'blur(20px)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)'
+          }}
+        >
+          {/* Header */}
+          <div className="px-4 py-3 border-b border-white/10">
+            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+              <Server className="w-4 h-4 text-cyan-400" />
+              System Status
+            </h3>
+            <p className="text-[10px] text-zinc-500 mt-0.5">Connection status for all services</p>
+          </div>
+          
+          {/* Service List */}
+          <div className="p-2 space-y-1">
+            {services.map((service) => {
+              const Icon = service.icon;
+              return (
+                <div 
+                  key={service.name}
+                  className="flex items-center justify-between p-2.5 rounded-lg hover:bg-white/5 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                      service.connected ? 'bg-emerald-500/20' : 
+                      service.checking ? 'bg-amber-500/20' : 'bg-red-500/20'
+                    }`}>
+                      <Icon className={`w-4 h-4 ${
+                        service.connected ? 'text-emerald-400' : 
+                        service.checking ? 'text-amber-400' : 'text-red-400'
+                      }`} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-white">{service.name}</p>
+                      <p className="text-[10px] text-zinc-500">{service.description}</p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    {service.action ? (
+                      <button
+                        onClick={service.action.onClick}
+                        disabled={service.action.disabled}
+                        className="px-2 py-1 text-[10px] font-medium rounded bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors disabled:opacity-50"
+                      >
+                        {service.action.label}
+                      </button>
+                    ) : service.checking ? (
+                      <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />
+                    ) : service.connected ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    ) : (
+                      <XCircle className="w-4 h-4 text-red-400" />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          
+          {/* Footer with last update */}
+          {wsLastUpdate && (
+            <div className="px-4 py-2 border-t border-white/5 text-[10px] text-zinc-500 flex items-center gap-1.5">
+              <Clock className="w-3 h-3" />
+              Last quote: {new Date(wsLastUpdate).toLocaleTimeString()}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const HeaderBar = ({
   systemHealth,
   wsConnected,
@@ -306,6 +470,7 @@ const HeaderBar = ({
   handleConnectToIB,
   handleDisconnectFromIB,
   creditBudget,
+  ollamaStatus = 'unknown' // New prop for Ollama status
 }) => {
   const [showCreditModal, setShowCreditModal] = useState(false);
 
