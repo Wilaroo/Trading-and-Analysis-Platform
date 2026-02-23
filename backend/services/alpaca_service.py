@@ -65,8 +65,8 @@ class AlpacaService:
         self._initialized = False
         self._quote_cache: Dict[str, Dict] = {}
         self._bars_cache: Dict[str, Dict] = {}
-        self._cache_ttl = 15  # seconds for quotes
-        self._bars_cache_ttl = 120  # seconds for bars
+        self._cache_ttl = 10  # seconds for quotes (reduced from 15)
+        self._bars_cache_ttl = 60  # seconds for bars (reduced from 120)
         
     def _ensure_initialized(self) -> bool:
         """Ensure clients are initialized"""
@@ -74,10 +74,15 @@ class AlpacaService:
             self._initialized = _init_clients()
         return self._initialized
     
-    async def get_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
+    async def get_quote(self, symbol: str, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
         """
         Get real-time quote for a symbol.
         Returns latest quote data including bid, ask, and last price.
+        
+        Args:
+            symbol: Stock symbol
+            force_refresh: If True, bypass cache and fetch fresh data
+        
         Note: Alpaca only supports stocks, not indices like VIX.
         """
         if not self._ensure_initialized():
@@ -88,9 +93,9 @@ class AlpacaService:
         if symbol_upper in ["VIX", "^VIX", "$VIX"]:
             return None  # Let fallback handle VIX
             
-        # Check cache first
+        # Check cache first (unless force_refresh)
         cache_key = symbol_upper
-        if cache_key in self._quote_cache:
+        if not force_refresh and cache_key in self._quote_cache:
             cached = self._quote_cache[cache_key]
             cached_at_str = cached.get('_cached_at', '')
             try:
