@@ -157,7 +157,7 @@ export default function SettingsPage() {
       <div className="glass-panel p-6 space-y-4">
         <div className="flex items-center gap-3">
           <Terminal className="w-5 h-5 text-purple-400" />
-          <h2 className="text-lg font-semibold text-white">Daily Startup Guide</h2>
+          <h2 className="text-lg font-semibold text-white">Daily Startup Guide (ngrok)</h2>
         </div>
 
         <div className="space-y-4 text-sm">
@@ -172,10 +172,10 @@ export default function SettingsPage() {
           <div className="flex gap-4">
             <div className="flex-shrink-0 w-8 h-8 rounded-full bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 font-bold">2</div>
             <div>
-              <p className="text-white font-medium">Start Cloudflare Tunnel</p>
+              <p className="text-white font-medium">Start ngrok Tunnel</p>
               <p className="text-zinc-500 mb-2">Open PowerShell and run:</p>
               <code className="block bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-cyan-400 font-mono text-xs">
-                cloudflared tunnel --url http://localhost:11434
+                ngrok http 11434
               </code>
             </div>
           </div>
@@ -183,23 +183,24 @@ export default function SettingsPage() {
           <div className="flex gap-4">
             <div className="flex-shrink-0 w-8 h-8 rounded-full bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 font-bold">3</div>
             <div>
-              <p className="text-white font-medium">Copy the Tunnel URL</p>
-              <p className="text-zinc-500">Look for a URL like <code className="text-purple-400">https://something-random.trycloudflare.com</code> in the terminal output</p>
+              <p className="text-white font-medium">Your URL is Static (Paid Plan)</p>
+              <p className="text-zinc-500">With ngrok Hobby plan, your URL stays the same! No need to update it daily.</p>
+              <p className="text-zinc-500 mt-1">Current URL: <code className="text-green-400">pseudoaccidentally-linty-addie.ngrok-free.dev</code></p>
             </div>
           </div>
 
           <div className="flex gap-4">
             <div className="flex-shrink-0 w-8 h-8 rounded-full bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 font-bold">4</div>
             <div>
-              <p className="text-white font-medium">Update the URL Above</p>
-              <p className="text-zinc-500">Paste the new tunnel URL in the input field above and click Save</p>
+              <p className="text-white font-medium">Click Test to Verify</p>
+              <p className="text-zinc-500">Click the Test button above to confirm the connection is working</p>
             </div>
           </div>
         </div>
 
-        <div className="mt-4 p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
-          <p className="text-xs text-purple-300">
-            <strong>Tip:</strong> Keep the PowerShell window open while using the app. The tunnel will close when you close the terminal.
+        <div className="mt-4 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+          <p className="text-xs text-green-300">
+            <strong>Pro Tip:</strong> With ngrok paid plan, your tunnel URL is permanent! Just start ngrok each session and you're good to go.
           </p>
         </div>
       </div>
@@ -218,13 +219,13 @@ export default function SettingsPage() {
             Ollama Website
           </a>
           <a
-            href="https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/"
+            href="https://ngrok.com/docs"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 transition-colors"
           >
             <ExternalLink className="w-4 h-4" />
-            Cloudflare Tunnel Docs
+            ngrok Docs
           </a>
         </div>
       </div>
