@@ -223,6 +223,9 @@ Triggers AI Coaching Notification
     - Available models: deepseek-r1:8b, gpt-oss:120b-cloud, gemma3:4b, llama3:8b, qwen2.5:7b
 
 ### P1 - Next Up
+- **Quick Actions**: Implement backend API for close/add/alert position actions (frontend stubs exist)
+- Integrate Perplexity Finance API for enhanced market research
+- Real-time RVOL in Market Intelligence report
 - Portfolio awareness: Proactive suggestions ("Scale out of AMD?", "Heavy tech exposure")
 - Audio alerts for high-priority setups
 - Focus Mode: Hide all sections except chat + top opportunity when actively trading
