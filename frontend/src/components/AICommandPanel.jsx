@@ -615,11 +615,37 @@ const PipelineOpportunityCard = ({ opportunity, rank, onExecute, onPass, onTicke
   const config = verdictConfig[opportunity.verdict] || verdictConfig.WAIT;
   const VerdictIcon = config.icon;
   
+  // Format timestamp
+  const formatTimestamp = (isoString) => {
+    if (!isoString) return '';
+    const date = new Date(isoString);
+    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  };
+  
+  // Determine approaching vs confirmed
+  const isApproaching = opportunity.setup_type?.includes('approaching') || 
+                        opportunity.alert_data?.headline?.toLowerCase().includes('approaching') ||
+                        opportunity.alert_data?.headline?.toLowerCase().includes('watch for');
+  const isConfirmed = opportunity.alert_data?.headline?.toLowerCase().includes('confirmed') ||
+                      (opportunity.alert_data?.headline?.toLowerCase().includes('breakout') && !isApproaching);
+  
   return (
     <div 
       className={`relative p-2.5 rounded-lg ${config.bg} border ${config.border} hover:scale-[1.01] transition-transform`}
       data-testid={`pipeline-opportunity-${rank}`}
     >
+      {/* Timestamp Row */}
+      <div className="flex items-center gap-2 mb-1 text-[9px] text-zinc-500">
+        <Clock className="w-2.5 h-2.5" />
+        <span>{formatTimestamp(opportunity.alert_data?.created_at || opportunity.created_at)}</span>
+        {isApproaching && (
+          <span className="px-1 py-0.5 rounded bg-yellow-500/20 text-yellow-400 font-medium">WATCH</span>
+        )}
+        {isConfirmed && (
+          <span className="px-1 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-medium">CONFIRMED</span>
+        )}
+      </div>
+      
       {/* Header Row */}
       <div className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-2">
