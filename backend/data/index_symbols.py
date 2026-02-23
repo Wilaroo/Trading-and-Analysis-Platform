@@ -21,6 +21,7 @@ Next refresh due: March 2026
 
 from datetime import datetime, timezone
 from typing import List, Dict, Set
+from functools import lru_cache
 
 # ===================== METADATA =====================
 UNIVERSE_METADATA = {
