@@ -1762,6 +1762,7 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         
         # Fallback: Try Emergent (GPT-4o) if Ollama failed or unavailable
         logger.info("🔄 Using Emergent GPT-4o fallback...")
+        logger.debug(f"Context being sent to GPT-4o ({len(context)} chars): {context[:500]}...")
         if LLMProvider.EMERGENT in self.llm_clients:
             try:
                 from emergentintegrations.llm.chat import LlmChat, UserMessage
