@@ -80,19 +80,9 @@ echo       Attempting auto-login...
 echo Set WshShell = CreateObject^("WScript.Shell"^)
 echo WScript.Sleep 3000
 echo.
-echo ' Try different window titles
+echo ' Activate IBKR Gateway window
 echo Dim activated
-echo activated = False
-echo.
-echo If WshShell.AppActivate^("IB Gateway"^) Then activated = True
-echo If Not activated Then
-echo     WScript.Sleep 500
-echo     If WshShell.AppActivate^("Login"^) Then activated = True
-echo End If
-echo If Not activated Then
-echo     WScript.Sleep 500
-echo     activated = WshShell.AppActivate^("Interactive Brokers"^)
-echo End If
+echo activated = WshShell.AppActivate^("IBKR Gateway"^)
 echo.
 echo If activated Then
 echo     WScript.Sleep 1000
@@ -118,7 +108,7 @@ echo       Dismissing warnings...
 (
 echo Set WshShell = CreateObject^("WScript.Shell"^)
 echo WScript.Sleep 1000
-echo WshShell.AppActivate "IB"
+echo WshShell.AppActivate "IBKR"
 echo WScript.Sleep 500
 echo WshShell.SendKeys "{ENTER}"
 echo WScript.Sleep 2000
