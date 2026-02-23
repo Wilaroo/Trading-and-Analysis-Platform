@@ -7,8 +7,9 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 - **Frontend**: React, TailwindCSS, Framer Motion, TradingView Widget (embedded charts)
 - **Backend**: FastAPI, Python
 - **Database**: MongoDB
-- **AI**: Smart Routing — Ollama (local/free) + GPT-4o (Emergent, deep tasks)
+- **AI**: Smart Routing — Ollama (local/free via ngrok tunnel) + GPT-4o (Emergent, deep tasks)
 - **Integrations**: Alpaca, Finnhub, IB Gateway (see Data Sources below)
+- **Tunneling**: ngrok (Hobby paid plan - static URL: `pseudoaccidentally-linty-addie.ngrok-free.dev`)
 
 ## Data Sources
 
