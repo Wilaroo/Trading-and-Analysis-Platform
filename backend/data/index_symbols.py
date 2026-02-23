@@ -332,16 +332,6 @@ ETF_SYMBOLS = [
 ]
 
 
-# ===================== HELPER FUNCTIONS =====================
-
-def get_spy_symbols() -> List[str]:
-    """Get SPY constituents (Tier 1 priority)"""
-    return list(set(SPY_SYMBOLS))
-
-def get_qqq_symbols() -> List[str]:
-    """Get QQQ constituents (Tier 1 priority)"""
-    return list(set(QQQ_SYMBOLS))
-
 # ===================== HELPER FUNCTIONS (CACHED) =====================
 # All functions use lru_cache for O(1) repeated access during scans
 
