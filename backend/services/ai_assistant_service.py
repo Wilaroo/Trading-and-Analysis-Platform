@@ -1750,17 +1750,18 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                     raise Exception(f"Ollama HTTP {response.status_code}: {response.text[:200]}")
                     
             except httpx.TimeoutException as e:
-                logger.warning(f"Ollama call timed out: {e}")
+                logger.warning(f"⚠️ Ollama timed out after 15s - falling back to cloud AI: {e}")
             except httpx.ConnectError as e:
-                logger.warning(f"Ollama connection failed: {e}")
+                logger.warning(f"⚠️ Ollama not reachable (is ngrok running?) - falling back to cloud AI: {e}")
             except Exception as e:
-                logger.warning(f"Ollama call failed: {type(e).__name__}: {e}")
+                logger.warning(f"⚠️ Ollama error: {type(e).__name__}: {e}")
                 # Only continue to fallback if not a light task
                 if complexity == "light":
                     # For light tasks, return a simple error message instead of failing
-                    return "I'm having trouble connecting to my local AI. Please try again."
+                    return "I'm having trouble connecting to my local AI. Please check that Ollama and ngrok are running."
         
         # Fallback: Try Emergent (GPT-4o) if Ollama failed or unavailable
+        logger.info("🔄 Using Emergent GPT-4o fallback...")
         if LLMProvider.EMERGENT in self.llm_clients:
             try:
                 from emergentintegrations.llm.chat import LlmChat, UserMessage
