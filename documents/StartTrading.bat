@@ -7,26 +7,48 @@ echo    TradeCommand Trading Platform Startup
 echo ============================================
 echo.
 
-:: Configuration - Fetches latest deployment URL from your GitHub repo
-set CONFIG_URL=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents/current_deployment.txt
+:: GitHub repo info
+set GITHUB_RAW=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents
 set DEFAULT_URL=https://system-dashboard-4.preview.emergentagent.com
 set PLATFORM_URL=%DEFAULT_URL%
 
-:: Try to fetch latest deployment URL from GitHub
-echo [0/4] Checking for latest deployment URL...
-curl -s -f "%CONFIG_URL%" > "%TEMP%\deployment_url.tmp" 2>nul
+:: Self-update check (downloads latest bat file if changed)
+echo [0/5] Checking for script updates...
+curl -s -f "%GITHUB_RAW%/StartTrading.bat" > "%TEMP%\StartTrading_new.bat" 2>nul
+if %errorlevel%==0 (
+    fc /b "%~f0" "%TEMP%\StartTrading_new.bat" >nul 2>&1
+    if errorlevel 1 (
+        echo       New version found! Updating...
+        copy /y "%TEMP%\StartTrading_new.bat" "%~f0" >nul
+        del "%TEMP%\StartTrading_new.bat" 2>nul
+        echo       Restarting with updated script...
+        timeout /t 2 /nobreak >nul
+        start "" "%~f0"
+        exit
+    ) else (
+        echo       Script is up to date!
+    )
+) else (
+    echo       Could not check for updates (offline?)
+)
+del "%TEMP%\StartTrading_new.bat" 2>nul
+echo.
+
+:: Fetch latest deployment URL from GitHub
+echo [1/5] Fetching latest deployment URL...
+curl -s -f "%GITHUB_RAW%/current_deployment.txt" > "%TEMP%\deployment_url.tmp" 2>nul
 if %errorlevel%==0 (
     set /p PLATFORM_URL=<"%TEMP%\deployment_url.tmp"
-    echo       Found latest URL from config!
+    echo       URL: %PLATFORM_URL%
 ) else (
-    echo       Using default URL (update CONFIG_URL in bat file for auto-updates)
+    echo       Using default URL (GitHub unreachable)
+    echo       URL: %DEFAULT_URL%
 )
 del "%TEMP%\deployment_url.tmp" 2>nul
-echo       URL: %PLATFORM_URL%
 echo.
 
 :: Check if Ollama is running
-echo [1/4] Checking Ollama...
+echo [2/5] Checking Ollama...
 curl -s http://localhost:11434/api/tags >nul 2>&1
 if %errorlevel%==0 (
     echo       Ollama is running!
@@ -37,8 +59,8 @@ if %errorlevel%==0 (
 )
 
 echo.
-echo [2/4] Starting ngrok tunnel...
-echo       Your tunnel URL: https://pseudoaccidentally-linty-addie.ngrok-free.dev
+echo [3/5] Starting ngrok tunnel...
+echo       Tunnel: https://pseudoaccidentally-linty-addie.ngrok-free.dev
 echo.
 
 :: Start ngrok in a new window
@@ -47,19 +69,18 @@ start "ngrok Tunnel" cmd /k "ngrok http 11434"
 :: Wait for ngrok to initialize
 timeout /t 3 /nobreak >nul
 
-echo [3/4] Opening Trading Platform...
+echo [4/5] Opening Trading Platform...
 timeout /t 2 /nobreak >nul
 
-:: Open browser to trading platform (uses fetched or default URL)
+:: Open browser to trading platform
 start "" "%PLATFORM_URL%"
 
 echo.
-echo [4/4] Startup Complete!
+echo [5/5] Startup Complete!
 echo.
 echo ============================================
 echo    Platform: %PLATFORM_URL%
 echo    IMPORTANT: Keep the ngrok window open!
-echo    Close it when you're done trading.
 echo ============================================
 echo.
 echo Press any key to close this window...
