@@ -320,6 +320,7 @@ function App() {
       case 'trade-journal': return <TradeJournalPage />;
       case 'ib-trading': return <IBTradingPage {...ibProps} />;
       case 'glossary': return <GlossaryPage />;
+      case 'settings': return <SettingsPage />;
       default: return <CommandCenterPage {...ibProps} isActiveTab={activeTab === 'command-center'} />;
     }
   };
