@@ -101,6 +101,28 @@ const AlertCard = ({ alert, onDismiss, onSelect }) => {
     return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
   };
   
+  // Format timestamp to readable time
+  const formatTimestamp = (isoString) => {
+    if (!isoString) return '';
+    const date = new Date(isoString);
+    return date.toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit',
+      hour12: true 
+    });
+  };
+  
+  // Determine if this is an "approaching" alert vs "confirmed"
+  const isApproaching = alert.setup_type?.includes('approaching') || 
+                        alert.headline?.toLowerCase().includes('approaching') ||
+                        alert.headline?.toLowerCase().includes('watch for') ||
+                        alert.headline?.toLowerCase().includes('near ');
+  
+  const isConfirmed = alert.headline?.toLowerCase().includes('confirmed') ||
+                      alert.headline?.toLowerCase().includes('broke') ||
+                      alert.headline?.toLowerCase().includes('breakout') && !isApproaching;
+  
   return (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
@@ -112,6 +134,22 @@ const AlertCard = ({ alert, onDismiss, onSelect }) => {
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
+          {/* Timestamp */}
+          <div className="flex items-center gap-2 mb-1 text-xs text-zinc-500">
+            <Clock className="w-3 h-3" />
+            <span>{formatTimestamp(alert.created_at)}</span>
+            {isApproaching && (
+              <span className="px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400 font-medium">
+                WATCH
+              </span>
+            )}
+            {isConfirmed && (
+              <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-medium">
+                CONFIRMED
+              </span>
+            )}
+          </div>
+          
           {/* Header: Symbol + Direction */}
           <div className="flex items-center gap-2 mb-1">
             <span className="font-bold text-white text-lg">{alert.symbol}</span>
