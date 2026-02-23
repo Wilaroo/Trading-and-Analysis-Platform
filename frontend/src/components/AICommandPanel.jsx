@@ -387,6 +387,186 @@ const PositionCard = ({ position, onTickerClick, onViewChart, onClosePosition, o
   );
 };
 
+// ===================== PORTFOLIO INSIGHTS WIDGET =====================
+
+const PortfolioInsightsWidget = ({ onTickerClick, onViewChart }) => {
+  const [suggestions, setSuggestions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+  const [lastUpdate, setLastUpdate] = useState(null);
+  
+  const fetchSuggestions = async () => {
+    setLoading(true);
+    try {
+      const response = await api.post('/api/portfolio-awareness/analyze');
+      if (response.data.success) {
+        setSuggestions(response.data.suggestions || []);
+        setLastUpdate(new Date());
+      }
+    } catch (error) {
+      console.error('Error fetching portfolio suggestions:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const dismissSuggestion = async (suggestionId) => {
+    try {
+      await api.post('/api/portfolio-awareness/dismiss', { suggestion_id: suggestionId });
+      setSuggestions(prev => prev.filter(s => s.id !== suggestionId));
+    } catch (error) {
+      console.error('Error dismissing suggestion:', error);
+    }
+  };
+  
+  useEffect(() => {
+    fetchSuggestions();
+    // Refresh every 2 minutes
+    const interval = setInterval(fetchSuggestions, 120000);
+    return () => clearInterval(interval);
+  }, []);
+  
+  const getPriorityConfig = (priority) => {
+    const configs = {
+      critical: { bg: 'bg-red-500/20', border: 'border-red-500/40', text: 'text-red-400', icon: '🚨' },
+      high: { bg: 'bg-amber-500/20', border: 'border-amber-500/40', text: 'text-amber-400', icon: '⚠️' },
+      medium: { bg: 'bg-blue-500/20', border: 'border-blue-500/40', text: 'text-blue-400', icon: '💡' },
+      low: { bg: 'bg-zinc-500/20', border: 'border-zinc-500/40', text: 'text-zinc-400', icon: '📝' }
+    };
+    return configs[priority] || configs.medium;
+  };
+  
+  const formatTime = (isoString) => {
+    if (!isoString) return '';
+    return new Date(isoString).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  };
+
+  if (suggestions.length === 0 && !loading) {
+    return null; // Don't show widget if no suggestions
+  }
+
+  return (
+    <div className="glass-panel p-3 mb-3" data-testid="portfolio-insights-widget">
+      <div 
+        className="flex items-center justify-between mb-2 cursor-pointer"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-purple-400" />
+          <h3 className="text-sm font-semibold text-white">Portfolio Insights</h3>
+          {suggestions.length > 0 && (
+            <span className="px-1.5 py-0.5 text-[10px] font-medium bg-purple-500/30 text-purple-300 rounded">
+              {suggestions.length}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={(e) => { e.stopPropagation(); fetchSuggestions(); }}
+            className="p-1 hover:bg-zinc-700 rounded transition-colors"
+            disabled={loading}
+          >
+            <RefreshCw className={`w-3 h-3 text-zinc-500 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+          {expanded ? <ChevronDown className="w-4 h-4 text-zinc-500" /> : <ChevronRight className="w-4 h-4 text-zinc-500" />}
+        </div>
+      </div>
+      
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="space-y-2 overflow-hidden"
+          >
+            {loading && suggestions.length === 0 ? (
+              <div className="flex items-center justify-center py-3">
+                <Loader2 className="w-4 h-4 text-zinc-500 animate-spin" />
+              </div>
+            ) : suggestions.length === 0 ? (
+              <p className="text-xs text-zinc-500 text-center py-2">No suggestions - portfolio looks good!</p>
+            ) : (
+              suggestions.slice(0, 5).map((suggestion, idx) => {
+                const config = getPriorityConfig(suggestion.priority);
+                return (
+                  <motion.div
+                    key={suggestion.id || idx}
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, x: 20 }}
+                    className={`p-2.5 rounded-lg ${config.bg} border ${config.border}`}
+                  >
+                    {/* Timestamp */}
+                    <div className="flex items-center gap-2 mb-1 text-[9px] text-zinc-500">
+                      <Clock className="w-2.5 h-2.5" />
+                      <span>{formatTime(suggestion.created_at)}</span>
+                      <span className={`px-1 py-0.5 rounded ${config.bg} ${config.text} font-medium uppercase`}>
+                        {suggestion.priority}
+                      </span>
+                    </div>
+                    
+                    {/* Title */}
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="flex-1">
+                        <span className="text-xs font-semibold text-white">
+                          {suggestion.title}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => dismissSuggestion(suggestion.id)}
+                        className="p-0.5 hover:bg-zinc-600 rounded opacity-50 hover:opacity-100 transition-opacity"
+                        title="Dismiss"
+                      >
+                        <X className="w-3 h-3 text-zinc-400" />
+                      </button>
+                    </div>
+                    
+                    {/* Message */}
+                    <p className="text-[10px] text-zinc-400 mb-1.5 line-clamp-2">
+                      {suggestion.message}
+                    </p>
+                    
+                    {/* Reasoning bullets */}
+                    {suggestion.reasoning && suggestion.reasoning.length > 0 && (
+                      <div className="text-[9px] text-zinc-500 space-y-0.5 mb-1.5">
+                        {suggestion.reasoning.slice(0, 2).map((reason, i) => (
+                          <div key={i} className="flex items-start gap-1">
+                            <span className="text-zinc-600">•</span>
+                            <span>{reason}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {/* Action row */}
+                    <div className="flex items-center justify-between">
+                      {suggestion.symbol && (
+                        <button
+                          onClick={() => onTickerClick?.(suggestion.symbol)}
+                          className="flex items-center gap-1 px-1.5 py-0.5 bg-cyan-500/20 text-cyan-400 rounded text-[10px] font-medium hover:bg-cyan-500/30 transition-colors"
+                        >
+                          {suggestion.symbol}
+                          <LineChart className="w-2.5 h-2.5" />
+                        </button>
+                      )}
+                      {suggestion.suggested_action && (
+                        <span className="text-[9px] text-zinc-500 italic truncate max-w-[60%]">
+                          {suggestion.suggested_action}
+                        </span>
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
 // ===================== UNIFIED TRADE PIPELINE WIDGET =====================
 
 const TradePipelineWidget = ({ 
