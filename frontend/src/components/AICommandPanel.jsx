@@ -1441,8 +1441,8 @@ const StatsHeader = ({ status, account, marketContext, positions, onToggle, onMo
       background: 'rgba(21, 28, 36, 0.85)',
       borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
     }}>
-      {/* Top Row: Account Stats - COMPACT */}
-      <div className="flex items-center justify-between px-3 py-1.5" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}>
+      {/* Single Row: Account Stats + Bot Control */}
+      <div className="flex items-center justify-between px-3 py-2">
         {/* Left: Net Liq + P&L + Positions */}
         <div className="flex items-center gap-4">
           {/* Net Liquidation */}
@@ -1483,100 +1483,50 @@ const StatsHeader = ({ status, account, marketContext, positions, onToggle, onMo
           </div>
           
           {/* Divider */}
-          <div className="w-px h-8 bg-white/10" />
+          <div className="w-px h-6 bg-white/10" />
           
           {/* Positions */}
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-purple-500/10 flex items-center justify-center">
-              <Briefcase className="w-4 h-4 text-purple-400" />
+          <div className="flex items-center gap-1.5">
+            <div className="w-5 h-5 rounded-lg bg-purple-500/10 flex items-center justify-center">
+              <Briefcase className="w-3 h-3 text-purple-400" />
             </div>
             <div>
-              <p className="text-[9px] text-zinc-500 uppercase">Positions</p>
-              <p className="text-sm font-bold font-mono text-white" data-testid="positions-count">
+              <p className="text-[8px] text-zinc-500 uppercase">Positions</p>
+              <p className="text-xs font-bold font-mono text-white" data-testid="positions-count">
                 {positions?.length || 0}
+              </p>
+            </div>
+          </div>
+          
+          {/* Divider */}
+          <div className="w-px h-6 bg-white/10" />
+          
+          {/* Market Regime */}
+          <div className="flex items-center gap-1.5">
+            <div className={`w-5 h-5 rounded-lg ${regimeStyle.bg} flex items-center justify-center`}>
+              <Activity className={`w-3 h-3 ${regimeStyle.color}`} />
+            </div>
+            <div>
+              <p className="text-[8px] text-zinc-500 uppercase">Market</p>
+              <p className={`text-xs font-semibold ${regimeStyle.color}`} data-testid="market-regime">
+                {regime.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
               </p>
             </div>
           </div>
         </div>
         
-        {/* Right: Market Regime */}
-        <div className="flex items-center gap-2">
-          <div className={`w-7 h-7 rounded-lg ${regimeStyle.bg} flex items-center justify-center`}>
-            <Activity className={`w-4 h-4 ${regimeStyle.color}`} />
-          </div>
-          <div>
-            <p className="text-[9px] text-zinc-500 uppercase">Market</p>
-            <p className={`text-sm font-semibold ${regimeStyle.color}`} data-testid="market-regime">
-              {regime.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-            </p>
-          </div>
-        </div>
-      </div>
-      
-      {/* Bottom Row: Bot Controls */}
-      <div className="flex items-center justify-between px-4 py-1.5">
-        {/* Left: Bot Status */}
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onToggle}
-            disabled={loading}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
-              isRunning 
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30' 
-                : 'bg-zinc-700 text-zinc-300 border border-zinc-600 hover:bg-zinc-600'
-            }`}
-            data-testid="bot-toggle"
-          >
-            {loading ? (
-              <Loader2 className="w-3 h-3 animate-spin" />
-            ) : isRunning ? (
-              <Activity className="w-3 h-3" />
-            ) : (
-              <Power className="w-3 h-3" />
-            )}
-            Bot {isRunning ? 'ON' : 'OFF'}
-          </button>
-          
-          <div className="flex items-center gap-2 text-[11px] text-zinc-500">
-            <span className={`font-mono font-semibold ${botPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              {botPnl >= 0 ? '+' : ''}${botPnl.toFixed(0)}
-            </span>
-            <span>•</span>
-            <span>{openCount} open</span>
-            {pendingCount > 0 && (
-              <>
-                <span>•</span>
-                <span className="text-amber-400">{pendingCount} pending</span>
-              </>
-            )}
-          </div>
-        </div>
-        
-        {/* Right: Mode Selector */}
-        <div className="flex items-center gap-1">
-          {['confirmation', 'autonomous', 'paused'].map(m => {
-            const icons = { confirmation: Shield, autonomous: Zap, paused: Pause };
-            const Icon = icons[m];
-            const isActive = mode === m;
-            const labels = { confirmation: 'Confirm', autonomous: 'Auto', paused: 'Paused' };
-            return (
-              <button
-                key={m}
-                onClick={() => onModeChange(m)}
-                className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
-                  isActive
-                    ? m === 'autonomous' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                      : m === 'confirmation' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
-                      : 'bg-zinc-600 text-zinc-300 border border-zinc-500'
-                    : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
-                }`}
-                data-testid={`mode-${m}`}
-              >
-                <Icon className="w-3 h-3" />
-                {labels[m]}
-              </button>
-            );
-          })}
+        {/* Right: Bot Mode Dropdown */}
+        <div className="pb-3">
+          <BotModeDropdown
+            mode={mode}
+            isRunning={isRunning}
+            onModeChange={onModeChange}
+            onToggle={onToggle}
+            loading={loading}
+            botPnl={botPnl}
+            openCount={openCount}
+            pendingCount={pendingCount}
+          />
         </div>
       </div>
     </div>
