@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Target,
   Activity,
@@ -14,7 +14,12 @@ import {
   Clock,
   Calendar,
   BarChart3,
-  Search
+  Search,
+  ChevronDown,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  Server
 } from 'lucide-react';
 
 // Credit Budget Detail Modal Component
