@@ -215,6 +215,7 @@ class IndexUniverseManager:
         all_symbols: Set[str] = set()
         all_symbols.update(self._indices[IndexType.SPY].symbols)
         all_symbols.update(self._indices[IndexType.QQQ].symbols)
+        all_symbols.update(self._indices[IndexType.NASDAQ].symbols)
         all_symbols.update(self._indices[IndexType.IWM].symbols)
         all_symbols.update(self._indices[IndexType.ETF].symbols)
         return list(all_symbols)
@@ -228,6 +229,10 @@ class IndexUniverseManager:
     def get_tier1_symbols(self) -> List[str]:
         """Get Tier 1 symbols (SPY + QQQ + ETFs) - always scanned"""
         return self._indices[IndexType.TIER1].symbols
+    
+    def get_tier2_symbols(self) -> List[str]:
+        """Get Tier 2 symbols (NASDAQ Extended) - quality screened"""
+        return self._indices[IndexType.TIER2].symbols
     
     def get_tier3_symbols(self) -> List[str]:
         """Get Tier 3 symbols (IWM only) - rotating batches"""
