@@ -593,73 +593,16 @@ const HeaderBar = ({
         
         {/* Right Side - Status Indicators */}
         <div className="flex items-center gap-3">
-          {/* WebSocket Status - Neon Style */}
-          <div 
-            className={`status-indicator ${wsConnected ? 'online' : 'connecting'}`}
-            title={wsConnected 
-              ? `Quotes streaming active${wsLastUpdate ? ` (Last: ${new Date(wsLastUpdate).toLocaleTimeString()})` : ''}`
-              : 'Quotes streaming reconnecting...'
-            }
-            data-testid="ws-status"
-          >
-            {wsConnected ? (
-              <>
-                <Activity className="w-3.5 h-3.5" />
-                <span className="hidden md:inline font-medium">Quotes</span>
-                <span className="neon-dot-success" style={{width: '6px', height: '6px'}} />
-              </>
-            ) : (
-              <>
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span className="hidden md:inline font-medium">Reconnecting</span>
-              </>
-            )}
-          </div>
-          
-          {/* IB Gateway Status - Neon Style */}
-          <div 
-            className={`status-indicator ${
-              !connectionChecked ? '' :
-              isConnected ? 'online' : 'offline'
-            }`}
-            title={
-              !connectionChecked ? 'Checking IB Gateway connection...' :
-              isConnected ? 'IB Gateway connected - Trading & scanners available' : 
-              'IB Gateway disconnected - Connect to enable trading'
-            }
-            data-testid="ib-status"
-          >
-            {!connectionChecked ? (
-              <>
-                <div className="w-3.5 h-3.5 border-2 border-zinc-400 border-t-transparent rounded-full animate-spin" />
-                <span className="hidden md:inline font-medium">Checking</span>
-              </>
-            ) : isConnected ? (
-              <>
-                <Database className="w-3.5 h-3.5" />
-                <span className="hidden md:inline font-medium">IB Gateway</span>
-                <span className="neon-dot-success" style={{width: '6px', height: '6px'}} />
-              </>
-            ) : (
-              <>
-                <WifiOff className="w-3.5 h-3.5" />
-                <span className="hidden md:inline font-medium">IB Gateway</span>
-                <span className="neon-dot-error" style={{width: '6px', height: '6px'}} />
-              </>
-            )}
-          </div>
-          
-          {/* Reconnect Button - Neon Style */}
-          {connectionChecked && !isConnected && (
-            <button
-              onClick={handleConnectToIB}
-              disabled={connecting}
-              className="btn-primary text-xs py-1.5 px-4"
-              data-testid="reconnect-btn"
-            >
-              {connecting ? 'Connecting...' : 'Reconnect'}
-            </button>
-          )}
+          {/* Consolidated System Status Popover */}
+          <SystemStatusPopover
+            wsConnected={wsConnected}
+            wsLastUpdate={wsLastUpdate}
+            connectionChecked={connectionChecked}
+            isConnected={isConnected}
+            connecting={connecting}
+            handleConnectToIB={handleConnectToIB}
+            ollamaStatus={ollamaStatus}
+          />
           
           {/* Live Time Indicator */}
           <div className="hidden lg:flex items-center gap-2 text-zinc-400 text-xs font-mono">
