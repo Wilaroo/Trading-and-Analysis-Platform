@@ -435,6 +435,7 @@ class TavilySearchService:
         include_answer: bool = True,
         data_type: str = "search",  # Used for cache TTL
         enforce_budget: bool = True,  # Check budget before searching
+        force_refresh: bool = False,  # Bypass cache for fresh data
     ) -> ResearchResponse:
         """
         Execute search with Tavily API - uses intelligent caching and credit budget
@@ -449,15 +450,19 @@ class TavilySearchService:
             include_answer: Include Tavily's AI answer
             data_type: Cache category for TTL selection
             enforce_budget: If True, check credit budget before searching
+            force_refresh: If True, bypass cache and fetch fresh data
         """
         start_time = time.time()
         
-        # Check intelligent cache first
+        # Check intelligent cache first (unless force_refresh)
         cache_key_args = (query, search_depth, topic, max_results)
-        cached = _global_cache.get(data_type, *cache_key_args)
-        if cached:
-            logger.info(f"🎯 Cache HIT for '{query[:50]}...' (saved credits)")
-            return cached
+        if not force_refresh:
+            cached = _global_cache.get(data_type, *cache_key_args)
+            if cached:
+                logger.info(f"🎯 Cache HIT for '{query[:50]}...' (saved credits)")
+                return cached
+        else:
+            logger.info(f"🔄 Force refresh requested for '{query[:50]}...'")
         
         # Check credit budget before making API call
         credits_needed = 2 if search_depth == "advanced" else 1
