@@ -250,6 +250,15 @@ Triggers AI Coaching Notification
     - Shows bot stats (P&L, open count, pending) below the dropdown button
     - Power toggle (Start/Stop Bot) at bottom of dropdown menu
     - **Removed redundant Live/Offline dot** from AI Trading Assistant header
+- ✅ **NASDAQ Ticker Index Expansion (Feb 23, 2026)**:
+    - Added NASDAQ_EXTENDED list with ~480 quality-screened symbols
+    - Criteria: Price >= $5, Volume >= 100K (based on snapshot data), tradeable
+    - New Tier 2 system: 334 unique symbols (NASDAQ ext minus Tier 1 overlap)
+    - Total universe expanded: **1,353 unique symbols** across all tiers
+    - Tier 1: 567 (SPY + QQQ + ETFs)
+    - Tier 2: 334 (NASDAQ Extended)
+    - Tier 3: 452 (Russell 2000)
+    - API endpoints updated: `/api/universe/symbols/nasdaq`, `/api/universe/symbols/tier2`
 
 ### P1 - Next Up
 - Integrate Perplexity Finance API for enhanced market research
@@ -257,7 +266,7 @@ Triggers AI Coaching Notification
 - **Quick Actions**: Implement backend API for close/add/alert position actions (frontend stubs exist)
 - Audio alerts for high-priority setups
 - Focus Mode: Hide all sections except chat + top opportunity when actively trading
-- Full index population (Russell 2000 needs ~1,600 more, Nasdaq 1000 needs ~400 more)
+- Russell 2000 expansion (currently ~542, could add more quality small caps)
 
 ### P2 - Future
 - Strategy backtesting integration
