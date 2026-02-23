@@ -241,6 +241,15 @@ Triggers AI Coaching Notification
     - Suggestions show timestamp, priority, reasoning, and suggested actions
     - Dismissible suggestions with auto-refresh every 2 minutes
     - Example alerts: "MSFT down 6.9% - Monitor closely", "Heavy Technology exposure (100%)"
+- ✅ **UI Cleanup - Status Indicators (Feb 23, 2026)**:
+    - **System Status Popover**: Consolidated WS/IB Gateway/Ollama into single "System Status" button in header
+    - Shows overall status (All Online/Partial/Offline) with color-coded indicator
+    - Click opens popover with individual service status, icons, and Reconnect action for IB Gateway
+    - **Bot Mode Dropdown**: Replaced toggle+mode buttons with single dropdown showing Auto/Confirm/Paused
+    - Each mode has descriptive hover tooltip explaining when to use it
+    - Shows bot stats (P&L, open count, pending) below the dropdown button
+    - Power toggle (Start/Stop Bot) at bottom of dropdown menu
+    - **Removed redundant Live/Offline dot** from AI Trading Assistant header
 
 ### P1 - Next Up
 - Integrate Perplexity Finance API for enhanced market research
@@ -255,6 +264,7 @@ Triggers AI Coaching Notification
 - Level 2 order book analysis (tape reading)
 - Full bot state persistence in MongoDB
 - Weekly performance digest
+- Fix watchlist widget race condition showing "(0)" briefly on load
 
 ---
 
