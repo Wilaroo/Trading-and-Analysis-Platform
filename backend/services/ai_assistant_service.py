@@ -1790,8 +1790,9 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                 if asyncio.iscoroutine(response):
                     response = await response
                 
-                logger.info(f"Emergent GPT-4o response OK ({len(response)} chars, complexity={complexity})")
-                return response
+                logger.info(f"✅ Emergent GPT-4o response OK ({len(response)} chars, complexity={complexity})")
+                # Add indicator that fallback was used
+                return f"[Cloud AI - Ollama unavailable]\n\n{response}"
                 
             except Exception as e:
                 error_msg = str(e).lower()
