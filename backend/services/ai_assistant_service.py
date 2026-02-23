@@ -1580,7 +1580,7 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                         if quality.roe:
                             context_parts.append(f"  📈 ROE: {quality.roe:.1%}, D/A: {quality.da:.1%}" if quality.da else f"  📈 ROE: {quality.roe:.1%}")
                     except asyncio.TimeoutError:
-                        context_parts.append(f"  ⚠️ Quality data timeout")
+                        context_parts.append("  ⚠️ Quality data timeout")
                     
                     # Get ticker-specific news if mentioned (with timeout)
                     if wants_news:
