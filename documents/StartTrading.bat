@@ -72,33 +72,58 @@ timeout /t 3 /nobreak >nul
 echo [4/5] Starting IB Gateway...
 :: Start IB Gateway
 start "" "C:\Jts\ibgateway\1037\ibgateway.exe"
-timeout /t 8 /nobreak >nul
+timeout /t 10 /nobreak >nul
 
 :: Auto-login using VBScript (sends keystrokes)
 echo       Attempting auto-login...
-echo Set WshShell = CreateObject("WScript.Shell") > "%TEMP%\ib_login.vbs"
-echo WScript.Sleep 2000 >> "%TEMP%\ib_login.vbs"
-echo WshShell.AppActivate "IB Gateway" >> "%TEMP%\ib_login.vbs"
-echo WScript.Sleep 500 >> "%TEMP%\ib_login.vbs"
-echo WshShell.SendKeys "esw100000" >> "%TEMP%\ib_login.vbs"
-echo WScript.Sleep 300 >> "%TEMP%\ib_login.vbs"
-echo WshShell.SendKeys "{TAB}" >> "%TEMP%\ib_login.vbs"
-echo WScript.Sleep 300 >> "%TEMP%\ib_login.vbs"
-echo WshShell.SendKeys "Socr1025!" >> "%TEMP%\ib_login.vbs"
-echo WScript.Sleep 300 >> "%TEMP%\ib_login.vbs"
-echo WshShell.SendKeys "{ENTER}" >> "%TEMP%\ib_login.vbs"
+(
+echo Set WshShell = CreateObject^("WScript.Shell"^)
+echo WScript.Sleep 3000
+echo.
+echo ' Try different window titles
+echo Dim activated
+echo activated = False
+echo.
+echo If WshShell.AppActivate^("IB Gateway"^) Then activated = True
+echo If Not activated Then
+echo     WScript.Sleep 500
+echo     If WshShell.AppActivate^("Login"^) Then activated = True
+echo End If
+echo If Not activated Then
+echo     WScript.Sleep 500
+echo     activated = WshShell.AppActivate^("Interactive Brokers"^)
+echo End If
+echo.
+echo If activated Then
+echo     WScript.Sleep 1000
+echo     WshShell.SendKeys "esw100000"
+echo     WScript.Sleep 500
+echo     WshShell.SendKeys "{TAB}"
+echo     WScript.Sleep 500
+echo     WshShell.SendKeys "Socr1025!"
+echo     WScript.Sleep 500
+echo     WshShell.SendKeys "{TAB}"
+echo     WScript.Sleep 200
+echo     WshShell.SendKeys "{TAB}"
+echo     WScript.Sleep 200
+echo     WshShell.SendKeys "{ENTER}"
+echo End If
+) > "%TEMP%\ib_login.vbs"
 cscript //nologo "%TEMP%\ib_login.vbs"
 del "%TEMP%\ib_login.vbs" 2>nul
 
 :: Wait for login and dismiss any warnings
-timeout /t 5 /nobreak >nul
+timeout /t 8 /nobreak >nul
 echo       Dismissing warnings...
-echo Set WshShell = CreateObject("WScript.Shell") > "%TEMP%\ib_dismiss.vbs"
-echo WshShell.AppActivate "IB Gateway" >> "%TEMP%\ib_dismiss.vbs"
-echo WScript.Sleep 500 >> "%TEMP%\ib_dismiss.vbs"
-echo WshShell.SendKeys "{ENTER}" >> "%TEMP%\ib_dismiss.vbs"
-echo WScript.Sleep 1000 >> "%TEMP%\ib_dismiss.vbs"
-echo WshShell.SendKeys "{ENTER}" >> "%TEMP%\ib_dismiss.vbs"
+(
+echo Set WshShell = CreateObject^("WScript.Shell"^)
+echo WScript.Sleep 1000
+echo WshShell.AppActivate "IB"
+echo WScript.Sleep 500
+echo WshShell.SendKeys "{ENTER}"
+echo WScript.Sleep 2000
+echo WshShell.SendKeys "{ENTER}"
+) > "%TEMP%\ib_dismiss.vbs"
 cscript //nologo "%TEMP%\ib_dismiss.vbs"
 del "%TEMP%\ib_dismiss.vbs" 2>nul
 echo       IB Gateway started!
