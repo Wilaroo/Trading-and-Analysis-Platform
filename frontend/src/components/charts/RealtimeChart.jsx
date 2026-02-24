@@ -56,6 +56,11 @@ const RealtimeChart = memo(({ symbol = 'SPY', height = 400 }) => {
         volumeSeriesRef.current.setData(volumes);
       }
       
+      // Fit chart to content after data is set
+      if (chartRef.current) {
+        chartRef.current.timeScale().fitContent();
+      }
+      
       // Set current price from latest bar
       if (candles.length > 0) {
         setCurrentPrice(candles[candles.length - 1].close);
