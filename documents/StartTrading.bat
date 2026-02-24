@@ -9,7 +9,7 @@ echo.
 
 :: GitHub repo info
 set GITHUB_RAW=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents
-set DEFAULT_URL=https://system-dashboard-4.preview.emergentagent.com
+set DEFAULT_URL=https://market-intel-bot-8.preview.emergentagent.com
 set PLATFORM_URL=%DEFAULT_URL%
 
 :: Self-update check (downloads latest bat file if changed)
