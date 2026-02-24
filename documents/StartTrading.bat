@@ -107,10 +107,26 @@ echo       IB Gateway ready!
 echo.
 
 :: NOW start ngrok (after IB Gateway is logged in)
-echo [4/5] Starting ngrok tunnel...
-echo       Tunnel: https://pseudoaccidentally-linty-addie.ngrok-free.dev
-start "ngrok Tunnel" cmd /k "ngrok http 11434"
-timeout /t 3 /nobreak >nul
+echo [4/5] Starting ngrok tunnels...
+
+:: Create ngrok config for both tunnels
+echo       Creating ngrok config...
+(
+echo version: "2"
+echo tunnels:
+echo   ollama:
+echo     addr: 11434
+echo     proto: http
+echo     hostname: pseudoaccidentally-linty-addie.ngrok-free.dev
+echo   ib-gateway:
+echo     addr: 4002
+echo     proto: tcp
+) > "%TEMP%\ngrok_trading.yml"
+
+echo       Starting Ollama tunnel: https://pseudoaccidentally-linty-addie.ngrok-free.dev
+echo       Starting IB Gateway tunnel: (check ngrok window for TCP address)
+start "ngrok Tunnels" cmd /k "ngrok start --all --config=%TEMP%\ngrok_trading.yml"
+timeout /t 5 /nobreak >nul
 echo.
 
 echo [5/5] Opening Trading Platform...
