@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, memo, useCallback } from 'react';
-import { createChart, ColorType, CrosshairMode, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
+import { createChart, ColorType, CrosshairMode } from 'lightweight-charts';
 import { Loader2, RefreshCw, Clock, Wifi, WifiOff } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
