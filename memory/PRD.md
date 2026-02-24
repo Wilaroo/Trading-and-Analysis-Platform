@@ -268,6 +268,21 @@ Triggers AI Coaching Notification
 
 ### Recently Completed
 - ✅ **Chart Timezone Fix (Feb 24, 2026)**: Changed TradingView widget timezone from 'Etc/UTC' to 'America/New_York' (Eastern Time) to show correct US market hours
+- ✅ **Exchange Prefix Mapping (Feb 24, 2026)**: Added exchange prefixes (AMEX, NASDAQ, NYSE) to symbol mapping for potential real-time data
+- ✅ **RealtimeChart Component (Feb 24, 2026)**: Created new component using lightweight-charts + Alpaca real-time data (available at `/app/frontend/src/components/charts/RealtimeChart.jsx` but not currently active due to rendering issues during pre-market)
+
+### Data Source Clarification
+| Component | Data Source | Latency |
+|-----------|-------------|---------|
+| Price Ticker Bar (top) | Alpaca Real-Time | ~0 sec |
+| AI Assistant | Alpaca Real-Time | ~0 sec |
+| Scanner Alerts | Alpaca Real-Time | ~0 sec |
+| Market Intel Reports | Alpaca Real-Time | ~0 sec |
+| Trading Bot | Alpaca Real-Time | ~0 sec |
+| Positions/P&L | Alpaca Real-Time | ~0 sec |
+| TradingView Chart | TradingView Feed | ~15 min delayed |
+
+**Note**: All trading decisions use real-time Alpaca data. Only the chart visualization shows delayed data.
 
 ### P2 - Future
 - Strategy backtesting integration
