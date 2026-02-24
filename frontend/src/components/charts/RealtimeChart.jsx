@@ -49,6 +49,7 @@ const RealtimeChart = memo(({ symbol = 'SPY', height = 400 }) => {
       }));
       
       if (candleSeriesRef.current) {
+        console.log('Setting candle data:', candles.length, 'candles', candles.slice(0, 2));
         candleSeriesRef.current.setData(candles);
       }
       if (volumeSeriesRef.current) {
