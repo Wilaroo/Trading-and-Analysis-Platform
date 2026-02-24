@@ -2305,7 +2305,7 @@ const AICommandPanel = ({
               </div>
             </div>
             <div className="h-[280px]">
-              <TradingViewWidget symbol={chartSymbol || 'SPY'} />
+              <RealtimeChart symbol={chartSymbol || 'SPY'} height={280} />
             </div>
           </div>
         </div>
