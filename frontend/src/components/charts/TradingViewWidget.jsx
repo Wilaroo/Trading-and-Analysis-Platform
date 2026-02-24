@@ -19,7 +19,7 @@ const TradingViewWidget = memo(({ symbol = 'SPY', theme = 'dark', height = '100%
       autosize: true,
       symbol: symbol,
       interval: '5',
-      timezone: 'Etc/UTC',
+      timezone: 'America/New_York',
       theme: theme,
       style: '1',
       locale: 'en',
