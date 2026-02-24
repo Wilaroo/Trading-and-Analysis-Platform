@@ -109,11 +109,10 @@ echo.
 :: NOW start ngrok (after IB Gateway is logged in)
 echo [4/5] Starting ngrok tunnels...
 
-:: Create ngrok config for both tunnels with authtoken
-echo       Creating ngrok config...
+:: Create ngrok config for tunnels (authtoken already saved via ngrok config)
+echo       Creating tunnel config...
 (
 echo version: "2"
-echo authtoken: 39UE8Z32wPHHm0yUEO2TpZmjfWR_6qEwKdv5VCWygEPeBdK5k
 echo tunnels:
 echo   ollama:
 echo     addr: 11434
@@ -127,7 +126,7 @@ echo     remote_addr: 5.tcp.ngrok.io:29573
 
 echo       Ollama tunnel: https://pseudoaccidentally-linty-addie.ngrok-free.dev
 echo       IB Gateway tunnel: tcp://5.tcp.ngrok.io:29573
-start "ngrok Tunnels" cmd /k "ngrok start --all --config=%TEMP%\ngrok_trading.yml"
+start "ngrok Tunnels" cmd /k "ngrok start --all --config=%USERPROFILE%\AppData\Local\ngrok\ngrok.yml --config=%TEMP%\ngrok_trading.yml"
 timeout /t 5 /nobreak >nul
 echo.
 
