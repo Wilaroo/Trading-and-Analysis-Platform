@@ -38,6 +38,7 @@ import api from '../utils/api';
 import { toast } from 'sonner';
 import ReactMarkdown from 'react-markdown';
 import { formatPrice, formatPercent } from '../utils/tradingUtils';
+import TradingViewWidget from './TradingViewWidget';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
