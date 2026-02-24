@@ -292,7 +292,7 @@ const RealtimeChart = memo(({ symbol = 'SPY', height = 400 }) => {
       </div>
       
       {/* Chart container */}
-      <div ref={chartContainerRef} style={{ height: height }} data-testid="realtime-chart">
+      <div ref={chartContainerRef} style={{ height: height, minHeight: height, width: '100%' }} data-testid="realtime-chart">
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
             <div className="flex items-center gap-2 text-cyan-400">
