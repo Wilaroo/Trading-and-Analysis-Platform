@@ -1729,7 +1729,7 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                     "stream": False,
                 }
                 
-                async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=10.0)) as client:
                     response = await client.post(
                         url,
                         json=payload,
