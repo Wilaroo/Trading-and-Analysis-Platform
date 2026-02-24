@@ -113,7 +113,7 @@ echo [4/5] Starting ngrok tunnels...
 echo       Creating ngrok config...
 (
 echo version: "2"
-echo authtoken: 2vUE8Z32wPHHm0yUEO2TpZmjfWR_6qEwKdv5VCWygEPeBdK5k
+echo authtoken: 39UE8Z32wPHHm0yUEO2TpZmjfWR_6qEwKdv5VCWygEPeBdK5k
 echo tunnels:
 echo   ollama:
 echo     addr: 11434
