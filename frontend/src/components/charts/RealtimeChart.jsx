@@ -126,8 +126,8 @@ const RealtimeChart = memo(({ symbol = 'SPY', height = 400 }) => {
       },
     });
 
-    // Add candlestick series
-    const candleSeries = chart.addCandlestickSeries({
+    // Add candlestick series (v5 syntax)
+    const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: '#10B981',
       downColor: '#EF4444',
       borderUpColor: '#10B981',
@@ -136,13 +136,17 @@ const RealtimeChart = memo(({ symbol = 'SPY', height = 400 }) => {
       wickDownColor: '#EF4444',
     });
 
-    // Add volume series
-    const volumeSeries = chart.addHistogramSeries({
+    // Add volume series (v5 syntax)
+    const volumeSeries = chart.addSeries(HistogramSeries, {
       color: 'rgba(0, 212, 255, 0.3)',
       priceFormat: {
         type: 'volume',
       },
-      priceScaleId: '',
+      priceScaleId: 'volume',
+    });
+    
+    // Configure volume scale
+    chart.priceScale('volume').applyOptions({
       scaleMargins: {
         top: 0.85,
         bottom: 0,
