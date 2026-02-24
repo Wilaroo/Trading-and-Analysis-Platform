@@ -1550,6 +1550,8 @@ const AICommandPanel = ({
   account = {},
   marketContext = {},
   positions = [],
+  chartSymbol = 'SPY',
+  setChartSymbol,
   // WebSocket-pushed data (replaces polling)
   wsBotStatus = null,
   wsBotTrades = [],
