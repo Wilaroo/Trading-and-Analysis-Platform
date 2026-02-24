@@ -196,7 +196,8 @@ const RealtimeChart = memo(({ symbol = 'SPY', height = 400 }) => {
         const response = await fetch(`${API_URL}/api/alpaca/quote/${symbol}`);
         if (!response.ok) return;
         
-        const quote = await response.json();
+        const data = await response.json();
+        const quote = data.data;
         if (quote && quote.price) {
           setCurrentPrice(quote.price);
           setIsLive(true);
