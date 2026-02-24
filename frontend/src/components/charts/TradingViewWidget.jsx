@@ -79,7 +79,7 @@ const TradingViewWidget = memo(({ symbol = 'SPY', theme = 'dark', height = '100%
         }
       }
     };
-  }, [symbol, theme]);
+  }, [fullSymbol, theme]);
 
   return (
     <div 
