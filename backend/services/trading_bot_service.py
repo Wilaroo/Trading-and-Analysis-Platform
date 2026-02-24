@@ -500,6 +500,51 @@ class TradingBotService:
         self._trade_executor = trade_executor
         self._db = db
         logger.info("TradingBotService services configured")
+        
+        # Restore bot state from database on startup
+        asyncio.create_task(self._restore_state())
+    
+    async def _restore_state(self):
+        """Restore bot state from MongoDB on startup"""
+        try:
+            if not self._db:
+                return
+            
+            state = await self._db.bot_state.find_one({"_id": "bot_state"})
+            if state:
+                was_running = state.get("running", False)
+                saved_mode = state.get("mode", "confirmation")
+                
+                # Restore mode
+                if saved_mode in ["autonomous", "confirmation", "paused"]:
+                    self._mode = BotMode(saved_mode)
+                
+                # Auto-restart if bot was running before
+                if was_running:
+                    logger.info("🔄 Bot was running before restart - auto-resuming...")
+                    await self.start()
+                
+                logger.info(f"✅ Bot state restored: mode={self._mode.value}, running={self._running}")
+        except Exception as e:
+            logger.warning(f"Could not restore bot state: {e}")
+    
+    async def _save_state(self):
+        """Save bot state to MongoDB"""
+        try:
+            if not self._db:
+                return
+            
+            await self._db.bot_state.update_one(
+                {"_id": "bot_state"},
+                {"$set": {
+                    "running": self._running,
+                    "mode": self._mode.value,
+                    "last_updated": datetime.now(timezone.utc)
+                }},
+                upsert=True
+            )
+        except Exception as e:
+            logger.warning(f"Could not save bot state: {e}")
     
     # ==================== INTELLIGENCE SERVICE PROPERTIES ====================
     
