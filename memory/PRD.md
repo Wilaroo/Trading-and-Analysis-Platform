@@ -261,12 +261,13 @@ Triggers AI Coaching Notification
     - API endpoints updated: `/api/universe/symbols/nasdaq`, `/api/universe/symbols/tier2`
 
 ### P1 - Next Up
-- Integrate Perplexity Finance API for enhanced market research
-- Real-time RVOL in Market Intelligence report
 - **Quick Actions**: Implement backend API for close/add/alert position actions (frontend stubs exist)
 - Audio alerts for high-priority setups
 - Focus Mode: Hide all sections except chat + top opportunity when actively trading
 - Russell 2000 expansion (currently ~542, could add more quality small caps)
+
+### Recently Completed
+- ✅ **Chart Timezone Fix (Feb 24, 2026)**: Changed TradingView widget timezone from 'Etc/UTC' to 'America/New_York' (Eastern Time) to show correct US market hours
 
 ### P2 - Future
 - Strategy backtesting integration
