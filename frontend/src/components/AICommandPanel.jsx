@@ -31,7 +31,8 @@ import {
   Plus,
   Minus,
   Bell,
-  MoreHorizontal
+  MoreHorizontal,
+  Trash2
 } from 'lucide-react';
 import api from '../utils/api';
 import { toast } from 'sonner';
