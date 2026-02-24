@@ -241,7 +241,8 @@ class MarketIntelService:
                 watchlist_symbols = ["AAPL", "MSFT", "NVDA", "TSLA", "AMD", "META", "GOOGL", "AMZN"]
             
             if self._alpaca_service and watchlist_symbols:
-                quotes = await self._alpaca_service.get_quotes_batch(watchlist_symbols[:20])
+                # Get quotes WITH RVOL for top symbols
+                quotes = await self._alpaca_service.get_quotes_with_rvol(watchlist_symbols[:15])
                 
                 if quotes:
                     # Check IN PLAY status for each symbol
@@ -253,20 +254,24 @@ class MarketIntelService:
                         price = q.get("price", 0)
                         chg = q.get("change_percent", 0)
                         vol = q.get("volume", 0)
+                        rvol = q.get("rvol", 0)
+                        rvol_status = q.get("rvol_status", "normal")
                         
                         # Get watchlist item info
                         wl_item = watchlist_items.get(sym)
                         source = wl_item.source if wl_item else "default"
                         strategies = wl_item.strategies_matched[:2] if wl_item and wl_item.strategies_matched else []
                         
-                        # Basic in-play check: significant movement or high volume
-                        is_active = abs(chg) >= 1.0 or vol > 500000
+                        # Enhanced in-play check: significant movement, high volume, or high RVOL
+                        is_active = abs(chg) >= 1.0 or vol > 500000 or rvol >= 1.5
                         
                         stock_info = {
                             "sym": sym,
                             "price": price,
                             "chg": chg,
                             "vol": vol,
+                            "rvol": rvol,
+                            "rvol_status": rvol_status,
                             "source": source,
                             "strategies": strategies,
                             "is_active": is_active
@@ -277,20 +282,32 @@ class MarketIntelService:
                         else:
                             not_in_play_stocks.append(stock_info)
                     
+                    # Sort in-play stocks by RVOL (highest first)
+                    in_play_stocks.sort(key=lambda x: x['rvol'] or 0, reverse=True)
+                    
                     # Format output with IN PLAY stocks first
-                    parts.append("=== SMART WATCHLIST STATUS ===")
+                    parts.append("=== SMART WATCHLIST STATUS (with RVOL) ===")
                     parts.append(f"Total symbols: {len(quotes)} | Active/In-Play: {len(in_play_stocks)}")
                     
                     if in_play_stocks:
-                        parts.append("\n🔥 IN PLAY TODAY (Active movement):")
+                        parts.append("\n🔥 IN PLAY TODAY (Active movement + RVOL):")
                         for s in in_play_stocks[:10]:
                             strat_str = f" [{', '.join(s['strategies'])}]" if s['strategies'] else ""
-                            parts.append(f"  {s['sym']}: ${s['price']:.2f} ({s['chg']:+.2f}%) vol:{s['vol']:,}{strat_str}")
+                            rvol_str = f" RVOL:{s['rvol']:.1f}x" if s['rvol'] else ""
+                            rvol_tag = ""
+                            if s['rvol_status'] == 'exceptional':
+                                rvol_tag = " 🚀"
+                            elif s['rvol_status'] == 'high':
+                                rvol_tag = " 📈"
+                            elif s['rvol_status'] == 'strong':
+                                rvol_tag = " ⚡"
+                            parts.append(f"  {s['sym']}: ${s['price']:.2f} ({s['chg']:+.2f}%){rvol_str}{rvol_tag}{strat_str}")
                     
                     if not_in_play_stocks:
                         parts.append("\n⏸️ ON WATCH (Low activity today):")
                         for s in not_in_play_stocks[:5]:
-                            parts.append(f"  {s['sym']}: ${s['price']:.2f} ({s['chg']:+.2f}%)")
+                            rvol_str = f" RVOL:{s['rvol']:.1f}x" if s.get('rvol') else ""
+                            parts.append(f"  {s['sym']}: ${s['price']:.2f} ({s['chg']:+.2f}%){rvol_str}")
                     
         except Exception as e:
             logger.warning(f"Error gathering smart watchlist: {e}")
