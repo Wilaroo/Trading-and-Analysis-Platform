@@ -358,6 +358,7 @@ class AlpacaService:
             result = []
             # Access bars through .data attribute for BarSet
             bars_data = bars.data if hasattr(bars, 'data') else bars
+            logger.info(f"Got bars for {symbol}: {len(bars_data.get(symbol.upper(), []))} bars")
             if symbol.upper() in bars_data:
                 for bar in bars_data[symbol.upper()]:
                     result.append({
