@@ -49,7 +49,9 @@ const RealtimeChart = memo(({ symbol = 'SPY', height = 400 }) => {
       })).sort((a, b) => a.time - b.time);  // Ensure ascending time order
       
       if (candleSeriesRef.current) {
-        console.log('Setting candle data:', candles.length, 'candles', candles.slice(0, 2));
+        console.log('Setting candle data:', candles.length, 'candles');
+        console.log('First candle:', JSON.stringify(candles[0]));
+        console.log('Last candle:', JSON.stringify(candles[candles.length - 1]));
         candleSeriesRef.current.setData(candles);
       }
       if (volumeSeriesRef.current) {
