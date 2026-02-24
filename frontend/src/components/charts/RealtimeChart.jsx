@@ -40,13 +40,13 @@ const RealtimeChart = memo(({ symbol = 'SPY', height = 400 }) => {
         high: bar.high,
         low: bar.low,
         close: bar.close,
-      }));
+      })).sort((a, b) => a.time - b.time);  // Ensure ascending time order
       
       const volumes = data.data.map(bar => ({
         time: Math.floor(new Date(bar.timestamp).getTime() / 1000),
         value: bar.volume,
         color: bar.close >= bar.open ? 'rgba(16, 185, 129, 0.5)' : 'rgba(239, 68, 68, 0.5)',
-      }));
+      })).sort((a, b) => a.time - b.time);  // Ensure ascending time order
       
       if (candleSeriesRef.current) {
         console.log('Setting candle data:', candles.length, 'candles', candles.slice(0, 2));
