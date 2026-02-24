@@ -1918,8 +1918,12 @@ const AICommandPanel = ({
   }, [input, isLoading, sessionId, botTrades, botStatus, coachingAlerts]);
 
   const handleTickerClick = useCallback((symbol) => {
+    // Update chart to show clicked ticker
+    if (setChartSymbol) {
+      setChartSymbol(symbol);
+    }
     onTickerSelect?.({ symbol, quote: {}, fromSearch: true });
-  }, [onTickerSelect]);
+  }, [onTickerSelect, setChartSymbol]);
 
   // ===================== POSITION QUICK ACTIONS =====================
   
