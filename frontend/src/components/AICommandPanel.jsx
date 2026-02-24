@@ -2272,6 +2272,35 @@ const AICommandPanel = ({
               </button>
             </div>
           </div>
+          
+          {/* Live Chart - Below Chat */}
+          <div className="border-t border-white/5" data-testid="inline-chart">
+            <div className="flex items-center justify-between px-3 py-2 bg-black/40">
+              <div className="flex items-center gap-2">
+                <LineChart className="w-4 h-4 text-cyan-400" />
+                <span className="text-xs font-semibold text-white">{chartSymbol || 'SPY'}</span>
+                <span className="text-[10px] text-zinc-500">• Click any ticker to view</span>
+              </div>
+              <div className="flex items-center gap-1">
+                {['SPY', 'QQQ', 'NVDA'].map(sym => (
+                  <button
+                    key={sym}
+                    onClick={() => setChartSymbol(sym)}
+                    className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
+                      chartSymbol === sym 
+                        ? 'bg-cyan-500/20 text-cyan-400' 
+                        : 'text-zinc-500 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    {sym}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="h-[280px]">
+              <TradingViewWidget symbol={chartSymbol || 'SPY'} />
+            </div>
+          </div>
         </div>
 
         {/* RIGHT: Trade Pipeline + Collapsible Sections (60%) */}
