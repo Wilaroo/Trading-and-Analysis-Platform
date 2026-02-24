@@ -206,6 +206,93 @@ class AlpacaService:
             logger.error(f"Alpaca batch quote error: {e}")
             return {}
     
+    async def calculate_rvol(self, symbol: str) -> Optional[float]:
+        """
+        Calculate Relative Volume (RVOL) for a symbol.
+        RVOL = Current Volume / 20-day Average Volume at this time of day
+        
+        Returns:
+            Float representing RVOL (e.g., 2.5 means 2.5x normal volume)
+            None if calculation fails
+        """
+        try:
+            # Get current day's volume from snapshot
+            quote = await self.get_quote(symbol, force_refresh=True)
+            if not quote:
+                return None
+            
+            current_volume = quote.get('volume', 0)
+            if not current_volume:
+                return None
+            
+            # Get 20-day historical bars to calculate average volume
+            bars = await self.get_bars(symbol, timeframe="1Day", limit=20)
+            if not bars or len(bars) < 5:
+                return None
+            
+            # Calculate average daily volume
+            volumes = [bar.get('volume', 0) for bar in bars if bar.get('volume', 0) > 0]
+            if not volumes:
+                return None
+            
+            avg_volume = sum(volumes) / len(volumes)
+            if avg_volume == 0:
+                return None
+            
+            # Calculate time-of-day adjustment
+            # Market is open 9:30 AM - 4:00 PM ET (6.5 hours = 390 minutes)
+            from datetime import datetime
+            import pytz
+            
+            et = pytz.timezone('US/Eastern')
+            now_et = datetime.now(et)
+            market_open = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+            
+            if now_et < market_open:
+                # Pre-market - use full day comparison
+                time_fraction = 1.0
+            else:
+                minutes_since_open = (now_et - market_open).total_seconds() / 60
+                time_fraction = min(minutes_since_open / 390, 1.0)  # Cap at 1.0
+            
+            # Adjusted average volume for time of day
+            expected_volume = avg_volume * time_fraction if time_fraction > 0 else avg_volume
+            
+            # Calculate RVOL
+            rvol = current_volume / expected_volume if expected_volume > 0 else 0
+            
+            return round(rvol, 2)
+            
+        except Exception as e:
+            logger.warning(f"RVOL calculation error for {symbol}: {e}")
+            return None
+    
+    async def get_quotes_with_rvol(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+        """
+        Get quotes for multiple symbols with RVOL calculated.
+        More expensive than get_quotes_batch but includes relative volume.
+        """
+        # First get basic quotes
+        quotes = await self.get_quotes_batch(symbols)
+        
+        # Then calculate RVOL for each (in parallel)
+        async def add_rvol(symbol: str):
+            rvol = await self.calculate_rvol(symbol)
+            if symbol in quotes and rvol is not None:
+                quotes[symbol]['rvol'] = rvol
+                quotes[symbol]['rvol_status'] = (
+                    'exceptional' if rvol >= 5 else
+                    'high' if rvol >= 3 else
+                    'strong' if rvol >= 2 else
+                    'in_play' if rvol >= 1.5 else
+                    'normal'
+                )
+        
+        # Calculate RVOL in parallel for efficiency
+        await asyncio.gather(*[add_rvol(s) for s in symbols[:10]])  # Limit to 10 to avoid rate limits
+        
+        return quotes
+    
     async def get_bars(self, symbol: str, timeframe: str = "1Day", limit: int = 100, force_refresh: bool = False) -> List[Dict[str, Any]]:
         """
         Get historical bars with caching.
