@@ -83,10 +83,14 @@ const RealtimeChart = memo(({ symbol = 'SPY', height = 400 }) => {
   // Initialize chart
   useEffect(() => {
     if (!chartContainerRef.current) return;
+    
+    // Ensure container has dimensions
+    const containerWidth = chartContainerRef.current.clientWidth || 400;
+    console.log('Chart container dimensions:', containerWidth, height);
 
     // Create chart
     const chart = createChart(chartContainerRef.current, {
-      width: chartContainerRef.current.clientWidth,
+      width: containerWidth,
       height: height,
       layout: {
         background: { type: ColorType.Solid, color: 'rgba(10, 10, 10, 1)' },
