@@ -737,6 +737,9 @@ class TradingBotService:
         self._mode = BotMode.CONFIRMATION if self._mode == BotMode.PAUSED else self._mode
         self._scan_task = asyncio.create_task(self._scan_loop())
         logger.info(f"Trading bot started in {self._mode.value} mode")
+        
+        # Persist state
+        await self._save_state()
     
     async def stop(self):
         """Stop the trading bot"""
@@ -748,6 +751,9 @@ class TradingBotService:
             except asyncio.CancelledError:
                 pass
         logger.info("Trading bot stopped")
+        
+        # Persist state
+        await self._save_state()
     
     async def _scan_loop(self):
         """Main scanning loop"""
