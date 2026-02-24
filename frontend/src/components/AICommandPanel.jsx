@@ -1553,11 +1553,44 @@ const AICommandPanel = ({
   wsBotTrades = [],
   wsCoachingNotifications = []
 }) => {
-  // Chat state
-  const [messages, setMessages] = useState([]);
+  // Chat state - persist to localStorage
+  const [messages, setMessages] = useState(() => {
+    try {
+      const saved = localStorage.getItem('tradecommand_chat_history');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Only restore messages from last 24 hours
+        const dayAgo = Date.now() - (24 * 60 * 60 * 1000);
+        return parsed.filter(msg => msg.timestamp && msg.timestamp > dayAgo);
+      }
+    } catch (e) {
+      console.warn('Could not restore chat history:', e);
+    }
+    return [];
+  });
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [sessionId] = useState(`session_${Date.now()}`);
+  const [sessionId] = useState(() => {
+    // Persist session ID too so AI has context
+    const saved = localStorage.getItem('tradecommand_session_id');
+    if (saved) return saved;
+    const newId = `session_${Date.now()}`;
+    localStorage.setItem('tradecommand_session_id', newId);
+    return newId;
+  });
+  
+  // Save messages to localStorage whenever they change
+  useEffect(() => {
+    try {
+      if (messages.length > 0) {
+        // Keep only last 50 messages to avoid storage bloat
+        const toSave = messages.slice(-50);
+        localStorage.setItem('tradecommand_chat_history', JSON.stringify(toSave));
+      }
+    } catch (e) {
+      console.warn('Could not save chat history:', e);
+    }
+  }, [messages]);
   
   // Section expansion state - collapsed by default for more chat space
   const [expandedSections, setExpandedSections] = useState({
