@@ -89,6 +89,8 @@ const CommandCenterPage = ({
           marketContext={data.marketContext}
           positions={data.positions}
           viewChart={data.viewChart}
+          chartSymbol={data.chartSymbol}
+          setChartSymbol={data.setChartSymbol}
           // WebSocket-pushed data
           wsBotStatus={wsBotStatus}
           wsBotTrades={wsBotTrades}
