@@ -2195,6 +2195,24 @@ const AICommandPanel = ({
       <div className="flex-1 flex overflow-hidden">
         {/* LEFT: Chat Area (Compact - 40%) */}
         <div className="w-[40%] flex flex-col min-w-0 border-r border-white/5">
+          {/* Chat Header with Clear Button */}
+          {messages.length > 0 && (
+            <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-black/20">
+              <span className="text-[10px] text-zinc-500">{messages.length} messages</span>
+              <button
+                onClick={() => {
+                  setMessages([]);
+                  localStorage.removeItem('tradecommand_chat_history');
+                  localStorage.removeItem('tradecommand_session_id');
+                }}
+                className="text-[10px] text-zinc-500 hover:text-red-400 transition-colors flex items-center gap-1"
+                data-testid="clear-chat-btn"
+              >
+                <Trash2 className="w-3 h-3" />
+                Clear
+              </button>
+            </div>
+          )}
           {/* Chat Messages - Above Input (Standard Chat Layout) */}
           <div className="flex-1 overflow-y-auto p-3 space-y-3" data-testid="chat-messages">
             {messages.length === 0 && !isLoading ? (
