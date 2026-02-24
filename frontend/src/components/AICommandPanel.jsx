@@ -1561,7 +1561,11 @@ const AICommandPanel = ({
         const parsed = JSON.parse(saved);
         // Only restore messages from last 24 hours
         const dayAgo = Date.now() - (24 * 60 * 60 * 1000);
-        return parsed.filter(msg => msg.timestamp && msg.timestamp > dayAgo);
+        return parsed.filter(msg => {
+          if (!msg.timestamp) return false;
+          const msgTime = new Date(msg.timestamp).getTime();
+          return msgTime > dayAgo;
+        });
       }
     } catch (e) {
       console.warn('Could not restore chat history:', e);
