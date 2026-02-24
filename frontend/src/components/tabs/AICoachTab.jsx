@@ -15,6 +15,8 @@ const AICoachTab = ({
   marketContext,
   positions,
   viewChart,
+  chartSymbol,
+  setChartSymbol,
   // WebSocket-pushed data (replaces polling)
   wsBotStatus = null,
   wsBotTrades = [],
@@ -23,14 +25,20 @@ const AICoachTab = ({
   wsSmartWatchlist = [],
   wsCoachingNotifications = []
 }) => {
+  // Handle ticker click - updates chart and optionally opens detail modal
+  const handleTickerClick = (ticker) => {
+    setChartSymbol(ticker); // Update chart
+    // setSelectedTicker(ticker); // Uncomment to also open modal
+  };
+
   return (
     <div className="grid lg:grid-cols-12 gap-4" data-testid="ai-coach-tab-content">
       {/* LEFT - AI Trading Assistant (Bot + AI integrated) - Takes more space */}
       <div className="lg:col-span-8">
         <div className="h-[calc(100vh-200px)] min-h-[650px]">
           <AICommandPanel
-            onTickerSelect={(ticker) => setSelectedTicker(ticker)}
-            onViewChart={viewChart}
+            onTickerSelect={handleTickerClick}
+            onViewChart={(ticker) => setChartSymbol(ticker)}
             watchlist={watchlist}
             alerts={[...enhancedAlerts, ...alerts]}
             opportunities={opportunities}
@@ -41,6 +49,8 @@ const AICoachTab = ({
             account={account}
             marketContext={marketContext}
             positions={positions}
+            chartSymbol={chartSymbol}
+            setChartSymbol={setChartSymbol}
             // WebSocket-pushed data
             wsBotStatus={wsBotStatus}
             wsBotTrades={wsBotTrades}
@@ -52,8 +62,8 @@ const AICoachTab = ({
       {/* RIGHT - Market Intel + Scanner */}
       <div className="lg:col-span-4">
         <RightSidebar 
-          onTickerSelect={(ticker) => setSelectedTicker(ticker)} 
-          onViewChart={viewChart}
+          onTickerSelect={handleTickerClick}
+          onViewChart={(ticker) => setChartSymbol(ticker)}
           // WebSocket-pushed data
           wsScannerAlerts={wsScannerAlerts}
           wsScannerStatus={wsScannerStatus}
