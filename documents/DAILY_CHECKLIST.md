@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://system-dashboard-4.preview.emergentagent.com
+https://market-intel-bot-8.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://system-dashboard-4.preview.emergentagent.com
+https://market-intel-bot-8.preview.emergentagent.com
 ```
