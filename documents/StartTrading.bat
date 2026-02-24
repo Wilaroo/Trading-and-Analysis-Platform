@@ -140,11 +140,11 @@ echo.
 echo ============================================
 echo    Platform: %PLATFORM_URL%
 echo    
-echo    IMPORTANT: 
-echo    1. Keep the ngrok window open!
-echo    2. Check ngrok window for IB Gateway TCP address
-echo       (looks like: tcp://X.tcp.ngrok.io:XXXXX)
-echo    3. Update the app with IB Gateway address if needed
+echo    Tunnels Active:
+echo    - Ollama: https://pseudoaccidentally-linty-addie.ngrok-free.dev
+echo    - IB Gateway: tcp://5.tcp.ngrok.io:29573
+echo    
+echo    IMPORTANT: Keep the ngrok window open!
 echo ============================================
 echo.
 echo Press any key to close this window...
