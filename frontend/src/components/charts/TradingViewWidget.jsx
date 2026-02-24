@@ -1,8 +1,36 @@
 import React, { useEffect, useRef, memo } from 'react';
 
+// Map common symbols to their exchange prefix for real-time data
+const getFullSymbol = (ticker) => {
+  if (!ticker) return 'AMEX:SPY';
+  
+  // Already has exchange prefix
+  if (ticker.includes(':')) return ticker;
+  
+  const upper = ticker.toUpperCase();
+  
+  // ETFs on AMEX/ARCA
+  const etfs = ['SPY', 'QQQ', 'IWM', 'DIA', 'VIX', 'GLD', 'SLV', 'TLT', 'XLF', 'XLK', 'XLE', 'XLV', 'XLI', 'XLC', 'XLY', 'XLP', 'XLU', 'XLRE', 'XLB', 'VXX', 'UVXY', 'SQQQ', 'TQQQ', 'ARKK'];
+  if (etfs.includes(upper)) return `AMEX:${upper}`;
+  
+  // Major NASDAQ stocks
+  const nasdaq = ['AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'META', 'NVDA', 'TSLA', 'AMD', 'INTC', 'NFLX', 'COST', 'PYPL', 'ADBE', 'CMCSA', 'PEP', 'CSCO', 'AVGO', 'TXN', 'QCOM', 'TMUS', 'SBUX', 'GILD', 'MDLZ', 'ISRG', 'VRTX', 'REGN', 'ATVI', 'ADP', 'BKNG', 'FISV', 'ILMN', 'MU', 'LRCX', 'AMAT', 'KLAC', 'MRVL', 'SNPS', 'CDNS', 'ASML', 'MELI', 'ABNB', 'PANW', 'CRWD', 'DDOG', 'ZS', 'SNOW', 'MDB', 'NET', 'COIN', 'HOOD', 'RIVN', 'LCID', 'SOFI', 'PLTR', 'RBLX', 'ROKU', 'ZM', 'DOCU', 'OKTA', 'TWLO', 'SQ', 'SHOP', 'SE', 'SPOT', 'PINS', 'SNAP', 'UBER', 'LYFT', 'DASH', 'ABNB', 'DKNG'];
+  if (nasdaq.includes(upper)) return `NASDAQ:${upper}`;
+  
+  // NYSE stocks (most others)
+  const nyse = ['JPM', 'BAC', 'WFC', 'C', 'GS', 'MS', 'V', 'MA', 'AXP', 'BRK.A', 'BRK.B', 'JNJ', 'UNH', 'PFE', 'MRK', 'ABBV', 'BMY', 'LLY', 'TMO', 'ABT', 'DHR', 'CVS', 'MCK', 'CAH', 'WMT', 'TGT', 'HD', 'LOW', 'NKE', 'LULU', 'MCD', 'YUM', 'SBUX', 'KO', 'DIS', 'T', 'VZ', 'XOM', 'CVX', 'COP', 'SLB', 'OXY', 'BA', 'LMT', 'RTX', 'GE', 'HON', 'CAT', 'DE', 'MMM', 'UPS', 'FDX', 'F', 'GM', 'TM', 'NIO', 'XPEV', 'LI', 'CRM', 'NOW', 'ORCL', 'IBM', 'ACN', 'SAP'];
+  if (nyse.includes(upper)) return `NYSE:${upper}`;
+  
+  // Default to NYSE for unknown symbols
+  return `NYSE:${upper}`;
+};
+
 const TradingViewWidget = memo(({ symbol = 'SPY', theme = 'dark', height = '100%' }) => {
   const container = useRef(null);
   const scriptRef = useRef(null);
+  
+  // Get the full symbol with exchange prefix for real-time data
+  const fullSymbol = getFullSymbol(symbol);
 
   useEffect(() => {
     // Clear previous widget
@@ -17,7 +45,7 @@ const TradingViewWidget = memo(({ symbol = 'SPY', theme = 'dark', height = '100%
     script.async = true;
     script.innerHTML = JSON.stringify({
       autosize: true,
-      symbol: symbol,
+      symbol: fullSymbol,
       interval: '5',
       timezone: 'America/New_York',
       theme: theme,
