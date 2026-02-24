@@ -107,6 +107,70 @@ async def get_quotes_batch(request: BatchQuoteRequest):
     }
 
 
+@router.get("/rvol/{symbol}")
+async def get_rvol(symbol: str):
+    """
+    Get Relative Volume (RVOL) for a symbol.
+    
+    RVOL = Current Volume / 20-day Average Volume (time-adjusted)
+    
+    Returns:
+        rvol: Float (e.g., 2.5 means 2.5x normal volume)
+        rvol_status: exceptional (5x+), high (3x+), strong (2x+), in_play (1.5x+), normal
+    """
+    if not _alpaca_service:
+        raise HTTPException(status_code=500, detail="Alpaca service not initialized")
+    
+    rvol = await _alpaca_service.calculate_rvol(symbol.upper())
+    
+    if rvol is None:
+        raise HTTPException(status_code=404, detail=f"Could not calculate RVOL for {symbol}")
+    
+    rvol_status = (
+        'exceptional' if rvol >= 5 else
+        'high' if rvol >= 3 else
+        'strong' if rvol >= 2 else
+        'in_play' if rvol >= 1.5 else
+        'normal'
+    )
+    
+    return {
+        "success": True,
+        "data": {
+            "symbol": symbol.upper(),
+            "rvol": rvol,
+            "rvol_status": rvol_status,
+            "description": f"{rvol}x average volume"
+        }
+    }
+
+
+@router.post("/quotes/with-rvol")
+async def get_quotes_with_rvol(request: BatchQuoteRequest):
+    """
+    Get quotes with RVOL for multiple symbols.
+    
+    More expensive than /quotes but includes relative volume analysis.
+    Limited to 10 symbols per request to avoid rate limits.
+    """
+    if not _alpaca_service:
+        raise HTTPException(status_code=500, detail="Alpaca service not initialized")
+    
+    if not request.symbols:
+        raise HTTPException(status_code=400, detail="No symbols provided")
+    
+    if len(request.symbols) > 10:
+        raise HTTPException(status_code=400, detail="Maximum 10 symbols per request for RVOL calculation")
+    
+    quotes = await _alpaca_service.get_quotes_with_rvol(request.symbols)
+    
+    return {
+        "success": True,
+        "count": len(quotes),
+        "data": quotes
+    }
+
+
 @router.get("/bars/{symbol}")
 async def get_bars(
     symbol: str,
