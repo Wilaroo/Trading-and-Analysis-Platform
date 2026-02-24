@@ -23,8 +23,8 @@ const RealtimeChart = memo(({ symbol = 'SPY', height = 400 }) => {
       setLoading(true);
       setError(null);
       
-      // Fetch 5-minute bars for intraday chart
-      const response = await fetch(`${API_URL}/api/alpaca/bars/${symbol}?timeframe=5Min&limit=78`);
+      // Fetch 5-minute bars for intraday chart - force refresh to get latest data
+      const response = await fetch(`${API_URL}/api/alpaca/bars/${symbol}?timeframe=5Min&limit=78&force_refresh=true`);
       if (!response.ok) throw new Error('Failed to fetch historical data');
       
       const data = await response.json();
