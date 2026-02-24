@@ -29,12 +29,12 @@ const RealtimeChart = memo(({ symbol = 'SPY', height = 400 }) => {
       
       const data = await response.json();
       
-      if (!data.bars || data.bars.length === 0) {
+      if (!data.data || data.data.length === 0) {
         throw new Error('No data available');
       }
       
       // Transform to lightweight-charts format
-      const candles = data.bars.map(bar => ({
+      const candles = data.data.map(bar => ({
         time: Math.floor(new Date(bar.timestamp).getTime() / 1000),
         open: bar.open,
         high: bar.high,
