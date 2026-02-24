@@ -621,6 +621,8 @@ class TradingBotService:
         """Set operating mode"""
         self._mode = mode
         logger.info(f"Bot mode changed to: {mode.value}")
+        # Persist state asynchronously
+        asyncio.create_task(self._save_state())
     
     def get_mode(self) -> BotMode:
         return self._mode
