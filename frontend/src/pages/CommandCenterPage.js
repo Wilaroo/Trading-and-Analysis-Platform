@@ -32,6 +32,32 @@ const CommandCenterPage = ({
     ibConnected, ibConnectionChecked, connectToIb, checkIbConnection, isActiveTab,
   });
 
+  // Check Ollama status
+  const [ollamaStatus, setOllamaStatus] = useState('unknown');
+  
+  useEffect(() => {
+    const checkOllama = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/assistant/check-ollama`, { 
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setOllamaStatus(data.available ? 'online' : 'offline');
+        } else {
+          setOllamaStatus('offline');
+        }
+      } catch (e) {
+        setOllamaStatus('offline');
+      }
+    };
+    
+    checkOllama();
+    const interval = setInterval(checkOllama, 30000); // Check every 30s
+    return () => clearInterval(interval);
+  }, []);
+
   const tabs = [
     { id: 'coach', label: 'Command', icon: Target },
     { id: 'charts', label: 'Charts', icon: LineChart },
