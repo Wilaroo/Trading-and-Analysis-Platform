@@ -275,7 +275,7 @@ const PositionCard = ({ position, onTickerClick, onViewChart, onClosePosition, o
       {/* Main Position Info */}
       <div 
         className="flex items-center justify-between p-2 cursor-pointer hover:bg-cyan-500/10 rounded-lg transition-colors"
-        onClick={() => onTickerClick(pos.symbol)}
+        onClick={() => onTickerClick({ symbol: pos.symbol, quote: {}, fromPosition: true })}
       >
         <div className="flex items-center gap-2">
           <div className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold ${
