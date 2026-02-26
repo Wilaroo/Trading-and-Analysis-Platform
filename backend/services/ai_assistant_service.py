@@ -1723,10 +1723,22 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                 ollama_cfg = self.llm_clients[LLMProvider.OLLAMA]
                 url = f"{ollama_cfg['url']}/api/chat"
                 
+                # Reduce context for Ollama to prevent timeouts on limited GPU
+                # Truncate context to ~2000 chars max for faster inference
+                truncated_context = context[:2000] if len(context) > 2000 else context
+                ollama_messages = [
+                    {"role": "system", "content": "You are an expert trading assistant. Be concise.\n\n" + truncated_context}
+                ]
+                # Only include last 3 messages for context
+                ollama_messages.extend(messages[-3:] if len(messages) > 3 else messages)
+                
                 payload = {
                     "model": ollama_cfg["model"],
-                    "messages": full_messages,
+                    "messages": ollama_messages,
                     "stream": False,
+                    "options": {
+                        "num_ctx": 2048,  # Smaller context window for faster inference
+                    }
                 }
                 
                 async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=10.0)) as client:
