@@ -1764,7 +1764,7 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                     raise Exception(f"Ollama HTTP {response.status_code}: {response.text[:200]}")
                     
             except httpx.TimeoutException as e:
-                logger.warning(f"⚠️ Ollama timed out after 90s - falling back to cloud AI: {e}")
+                logger.warning(f"⚠️ Ollama timed out after 180s - falling back to cloud AI: {e}")
             except httpx.ConnectError as e:
                 logger.warning(f"⚠️ Ollama not reachable (is ngrok running?) - falling back to cloud AI: {e}")
             except Exception as e:
