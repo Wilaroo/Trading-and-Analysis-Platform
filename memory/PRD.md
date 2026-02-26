@@ -1022,4 +1022,74 @@ Multiple colored gradient orbs at different positions for depth and visual inter
 
 ---
 
+## Session Log - February 26, 2026 (P0 Blank Page Bug Fix)
+
+### Bug Fix: Clicking Position Leads to Blank Page
+**Problem**: User reported that clicking on a position (e.g., "MSFT") in the Positions tab or Portfolio Insights section caused the application to navigate to a blank page.
+
+**Root Cause Analysis**:
+1. **Type Mismatch**: In `AICoachTab.jsx`, the `handleTickerClick` function expected a **string** ticker parameter
+2. However, `AICommandPanel.jsx` was calling `onTickerSelect` with an **object** `{ symbol, quote: {}, fromSearch: true }`
+3. When `handleTickerClick(objectParam)` was called, `setChartSymbol(objectParam)` received an object instead of a string, causing unexpected behavior
+
+**Fix Applied**:
+1. Updated `handleTickerClick` in `AICoachTab.jsx` (lines 29-37) to handle both string and object parameters:
+```javascript
+const handleTickerClick = (tickerOrObject) => {
+  const symbol = typeof tickerOrObject === 'string' 
+    ? tickerOrObject 
+    : tickerOrObject?.symbol;
+  if (symbol) setChartSymbol(symbol);
+};
+```
+
+2. Fixed undefined `CuratedOpportunityCard` component by changing it to `PipelineOpportunityCard` in `AICommandPanel.jsx` line 1088
+
+**Files Modified**:
+- `frontend/src/components/tabs/AICoachTab.jsx` - Fixed handleTickerClick to handle both string and object params
+- `frontend/src/components/AICommandPanel.jsx` - Fixed CuratedOpportunityCard -> PipelineOpportunityCard
+
+**Testing Results**:
+- ✅ Clicking MSFT/NVDA badges in Portfolio Insights updates chart correctly
+- ✅ My Positions expand/collapse works without blank page
+- ✅ Trade Pipeline ticker buttons work correctly
+- ✅ 100% frontend tests passed (iteration_40.json)
+
+---
+
+## Session Log - February 26, 2026 (P1 Ollama Stability Enhancement)
+
+### Enhancement: Ollama Connection Retry Logic
+**Problem**: Local Ollama connection via ngrok was intermittent, causing frequent timeouts and fallbacks to cloud AI.
+
+**Fix Applied**:
+Added retry mechanism with exponential backoff in `ai_assistant_service.py` (lines 1716-1810):
+1. **3 retry attempts** before falling back to cloud AI
+2. **Exponential backoff**: 1s, 2s, 4s delays between retries
+3. **Increased timeout**: Base 180s + 30s per retry attempt
+4. **Smart retry logic**:
+   - Retries on: timeouts, connection errors, 5xx server errors, empty responses
+   - No retry on: 4xx client errors
+5. **Better logging**: Includes attempt number and specific error types
+
+**Files Modified**:
+- `backend/services/ai_assistant_service.py` - Added retry logic with exponential backoff
+
+---
+
+### Prioritized Backlog Update
+
+### P0 - Critical (Completed)
+- [x] **Blank page bug fix** (DONE - Feb 26, 2026) - Fixed handleTickerClick type handling
+
+### P1 - High Priority
+- [x] **Ollama retry logic** (DONE - Feb 26, 2026) - Added 3-retry mechanism with backoff
+- [ ] Perplexity Finance API Integration (User interested)
+- [ ] Complete Quick Actions backend (Close, Add, Alert handlers are stubs)
+- [ ] Real-time RVOL in Market Intelligence
+
+### P2 - Medium Priority
+- [ ] Fix watchlist "(0)" flicker on load
+- [ ] Remove dead code: RealtimeChart.jsx
+- [ ] Keyboard shortcuts for common trading actions
 
