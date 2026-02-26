@@ -77,6 +77,7 @@ const CommandCenterPage = ({
         handleConnectToIB={data.handleConnectToIB}
         handleDisconnectFromIB={data.handleDisconnectFromIB}
         creditBudget={data.creditBudget}
+        ollamaStatus={ollamaStatus}
       />
 
       {/* Tab Navigation — Glass Style */}
