@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://market-intel-bot-8.preview.emergentagent.com
+https://trader-nexus-2.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://market-intel-bot-8.preview.emergentagent.com
+https://trader-nexus-2.preview.emergentagent.com
 ```
