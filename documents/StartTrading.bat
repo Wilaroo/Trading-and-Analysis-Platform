@@ -66,20 +66,34 @@ echo       Waiting for IB Gateway to load...
 timeout /t 12 /nobreak >nul
 
 :: Auto-login using VBScript (sends keystrokes)
-echo       Sending login credentials...
+echo       Selecting IB API and Paper Trading...
 (
 echo Set WshShell = CreateObject^("WScript.Shell"^)
 echo WScript.Sleep 2000
 echo WshShell.AppActivate "IBKR Gateway"
 echo WScript.Sleep 1500
+echo ' Click IB API tab - use Tab to navigate from FIX CTCI to IB API
+echo WshShell.SendKeys "{TAB}"
+echo WScript.Sleep 300
+echo WshShell.SendKeys " "
+echo WScript.Sleep 500
+echo ' Now click Paper Trading - Tab to Trading Mode then Tab to Paper Trading
+echo WshShell.SendKeys "{TAB}"
+echo WScript.Sleep 300
+echo WshShell.SendKeys "{TAB}"
+echo WScript.Sleep 300
+echo WshShell.SendKeys " "
+echo WScript.Sleep 500
+echo ' Now enter credentials - Tab to username field
+echo WshShell.SendKeys "{TAB}"
+echo WScript.Sleep 300
 echo WshShell.SendKeys "esw100000"
 echo WScript.Sleep 500
 echo WshShell.SendKeys "{TAB}"
 echo WScript.Sleep 500
 echo WshShell.SendKeys "Socr1025!"
 echo WScript.Sleep 500
-echo WshShell.SendKeys "{TAB}"
-echo WScript.Sleep 300
+echo ' Tab to Log In button and press Enter
 echo WshShell.SendKeys "{TAB}"
 echo WScript.Sleep 300
 echo WshShell.SendKeys "{ENTER}"
