@@ -42,6 +42,26 @@ class ProviderRequest(BaseModel):
 
 # ===================== Endpoints =====================
 
+@router.get("/check-ollama")
+async def check_ollama():
+    """Check if Ollama is available"""
+    import httpx
+    import os
+    
+    ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+    
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(
+                f"{ollama_url}/api/tags",
+                headers={"ngrok-skip-browser-warning": "true"}
+            )
+            if response.status_code == 200:
+                return {"available": True, "url": ollama_url}
+            return {"available": False, "error": f"Status {response.status_code}"}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
 @router.post("/chat")
 async def chat(request: ChatRequest):
     """
