@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import TickerDetailModal from '../components/TickerDetailModal';
 import QuickTradeModal from '../components/QuickTradeModal';
 import HeaderBar from '../components/layout/HeaderBar';
@@ -7,6 +7,8 @@ import AnalyticsTab from '../components/tabs/AnalyticsTab';
 import ChartsTab from '../components/tabs/ChartsTab';
 import { useCommandCenterData } from '../hooks/useCommandCenterData';
 import { LineChart, Target, BarChart3 } from 'lucide-react';
+
+const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
 const CommandCenterPage = ({ 
   ibConnected, 
