@@ -26,9 +26,16 @@ const AICoachTab = ({
   wsCoachingNotifications = []
 }) => {
   // Handle ticker click - updates chart and optionally opens detail modal
-  const handleTickerClick = (ticker) => {
-    setChartSymbol(ticker); // Update chart
-    // setSelectedTicker(ticker); // Uncomment to also open modal
+  // Can receive either a string ticker or an object { symbol, quote, ... }
+  const handleTickerClick = (tickerOrObject) => {
+    const symbol = typeof tickerOrObject === 'string' 
+      ? tickerOrObject 
+      : tickerOrObject?.symbol;
+    
+    if (symbol) {
+      setChartSymbol(symbol); // Update chart
+      // setSelectedTicker(symbol); // Uncomment to also open modal
+    }
   };
 
   return (
