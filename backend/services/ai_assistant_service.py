@@ -1714,72 +1714,111 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         full_messages.extend(messages)
         
         # ALWAYS try Ollama first (local, free, no API limits)
+        # With retry mechanism for better stability
         ollama_available = LLMProvider.OLLAMA in self.llm_clients
         
         if ollama_available:
-            try:
-                import httpx
-                
-                ollama_cfg = self.llm_clients[LLMProvider.OLLAMA]
-                url = f"{ollama_cfg['url']}/api/chat"
-                
-                # Reduce context for Ollama to prevent timeouts on limited GPU
-                # Truncate context to ~2000 chars max for faster inference
-                truncated_context = context[:2000] if len(context) > 2000 else context
-                
-                ollama_system = """You are an expert trading assistant with REAL-TIME market data access. 
+            import httpx
+            import asyncio
+            
+            ollama_cfg = self.llm_clients[LLMProvider.OLLAMA]
+            url = f"{ollama_cfg['url']}/api/chat"
+            
+            # Reduce context for Ollama to prevent timeouts on limited GPU
+            # Truncate context to ~2000 chars max for faster inference
+            truncated_context = context[:2000] if len(context) > 2000 else context
+            
+            ollama_system = """You are an expert trading assistant with REAL-TIME market data access. 
 You CAN see live stock prices, quotes, and market data - it's provided in the context below.
 Answer questions using the real-time data provided. Be concise and direct.
 
 """ + truncated_context
-                
-                ollama_messages = [
-                    {"role": "system", "content": ollama_system}
-                ]
-                # Only include last 3 messages for context
-                ollama_messages.extend(messages[-3:] if len(messages) > 3 else messages)
-                
-                payload = {
-                    "model": ollama_cfg["model"],
-                    "messages": ollama_messages,
-                    "stream": False,
-                    "options": {
-                        "num_ctx": 2048,  # Smaller context window for faster inference
-                    }
+            
+            ollama_messages = [
+                {"role": "system", "content": ollama_system}
+            ]
+            # Only include last 3 messages for context
+            ollama_messages.extend(messages[-3:] if len(messages) > 3 else messages)
+            
+            payload = {
+                "model": ollama_cfg["model"],
+                "messages": ollama_messages,
+                "stream": False,
+                "options": {
+                    "num_ctx": 2048,  # Smaller context window for faster inference
                 }
-                
-                async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=10.0)) as client:
-                    response = await client.post(
-                        url,
-                        json=payload,
-                        headers={
-                            "Content-Type": "application/json",
-                            "Accept": "application/json",
-                            "ngrok-skip-browser-warning": "true",
-                            "User-Agent": "TradeCommand/1.0"
-                        }
-                    )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    content = result.get("message", {}).get("content", "")
-                    if content:
-                        logger.info(f"Ollama response OK ({ollama_cfg['model']}, {len(content)} chars, complexity={complexity})")
-                        return content
-                    raise Exception("Empty Ollama response")
-                else:
-                    raise Exception(f"Ollama HTTP {response.status_code}: {response.text[:200]}")
+            }
+            
+            # Retry logic: try up to 3 times with exponential backoff
+            max_retries = 3
+            last_error = None
+            
+            for attempt in range(max_retries):
+                try:
+                    # Increase timeout slightly with each retry
+                    timeout_seconds = 180 + (attempt * 30)
                     
-            except httpx.TimeoutException as e:
-                logger.warning(f"⚠️ Ollama timed out after 180s - falling back to cloud AI: {e}")
-            except httpx.ConnectError as e:
-                logger.warning(f"⚠️ Ollama not reachable (is ngrok running?) - falling back to cloud AI: {e}")
-            except Exception as e:
-                logger.warning(f"⚠️ Ollama error: {type(e).__name__}: {e}")
-                # Only continue to fallback if not a light task
-                if complexity == "light":
-                    # For light tasks, return a simple error message instead of failing
-                    return "I'm having trouble connecting to my local AI. Please check that Ollama and ngrok are running."
+                    async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_seconds, connect=15.0)) as client:
+                        response = await client.post(
+                            url,
+                            json=payload,
+                            headers={
+                                "Content-Type": "application/json",
+                                "Accept": "application/json",
+                                "ngrok-skip-browser-warning": "true",
+                                "User-Agent": "TradeCommand/1.0"
+                            }
+                        )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        content = result.get("message", {}).get("content", "")
+                        if content:
+                            logger.info(f"Ollama response OK ({ollama_cfg['model']}, {len(content)} chars, complexity={complexity}, attempt={attempt+1})")
+                            return content
+                        raise Exception("Empty Ollama response")
+                    elif response.status_code >= 500:
+                        # Server error (OOM, overloaded) - worth retrying
+                        raise Exception(f"Ollama HTTP {response.status_code} (server error): {response.text[:200]}")
+                    else:
+                        # Client error (4xx) - don't retry
+                        raise Exception(f"Ollama HTTP {response.status_code}: {response.text[:200]}")
+                        
+                except httpx.TimeoutException as e:
+                    last_error = e
+                    logger.warning(f"⚠️ Ollama timeout (attempt {attempt+1}/{max_retries}): {e}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+                        continue
+                        
+                except httpx.ConnectError as e:
+                    last_error = e
+                    logger.warning(f"⚠️ Ollama connect error (attempt {attempt+1}/{max_retries}): {e}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2 ** attempt)
+                        continue
+                        
+                except Exception as e:
+                    last_error = e
+                    error_msg = str(e)
+                    # Retry on server errors (5xx) or empty responses
+                    if "500" in error_msg or "502" in error_msg or "503" in error_msg or "Empty Ollama" in error_msg:
+                        logger.warning(f"⚠️ Ollama server error (attempt {attempt+1}/{max_retries}): {e}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(2 ** attempt)
+                            continue
+                    else:
+                        # Don't retry on client errors
+                        logger.warning(f"⚠️ Ollama error (not retrying): {type(e).__name__}: {e}")
+                        break
+            
+            # All retries exhausted
+            logger.warning(f"⚠️ Ollama failed after {max_retries} attempts - falling back to cloud AI. Last error: {last_error}")
+            
+            # Only continue to fallback if not a light task
+            if complexity == "light":
+                # For light tasks, return a simple error message instead of failing
+                return "I'm having trouble connecting to my local AI. Please check that Ollama and ngrok are running."
         
         # Fallback: Try Emergent (GPT-4o) if Ollama failed or unavailable
         logger.info("🔄 Using Emergent GPT-4o fallback...")
