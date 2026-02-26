@@ -63,63 +63,21 @@ echo.
 echo [3/5] Starting IB Gateway...
 start "" "C:\Jts\ibgateway\1037\ibgateway.exe"
 echo       Waiting for IB Gateway to load...
-timeout /t 14 /nobreak >nul
+timeout /t 12 /nobreak >nul
 
-:: Auto-login using PowerShell for mouse clicks
-echo       Clicking IB API and Paper Trading...
-powershell -Command ^
-  "Add-Type -AssemblyName System.Windows.Forms; ^
-   Start-Sleep -Milliseconds 2000; ^
-   Add-Type @' ^
-   using System; ^
-   using System.Runtime.InteropServices; ^
-   public class Mouse { ^
-     [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x, int y); ^
-     [DllImport(\"user32.dll\")] public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo); ^
-     public static void Click(int x, int y) { ^
-       SetCursorPos(x, y); ^
-       mouse_event(0x02, 0, 0, 0, 0); ^
-       mouse_event(0x04, 0, 0, 0, 0); ^
-     } ^
-   } ^
-'@; ^
-   $ibWindow = Get-Process | Where-Object {$_.MainWindowTitle -like '*IBKR*' -or $_.MainWindowTitle -like '*Gateway*'} | Select-Object -First 1; ^
-   if ($ibWindow) { ^
-     Add-Type @' ^
-     using System; ^
-     using System.Runtime.InteropServices; ^
-     public class Win { ^
-       [DllImport(\"user32.dll\")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect); ^
-       public struct RECT { public int Left; public int Top; public int Right; public int Bottom; } ^
-     } ^
-'@; ^
-     $rect = New-Object Win+RECT; ^
-     [Win]::GetWindowRect($ibWindow.MainWindowHandle, [ref]$rect); ^
-     $winX = $rect.Left; $winY = $rect.Top; ^
-     Write-Host \"Window at: $winX, $winY\"; ^
-     [Mouse]::Click($winX + 530, $winY + 175); ^
-     Start-Sleep -Milliseconds 800; ^
-     [Mouse]::Click($winX + 580, $winY + 225); ^
-     Start-Sleep -Milliseconds 800; ^
-   }"
-
-echo       Entering credentials...
-timeout /t 2 /nobreak >nul
+:: Auto-login using VBScript (IB API and Paper Trading should already be selected)
+echo       Entering login credentials...
 (
 echo Set WshShell = CreateObject^("WScript.Shell"^)
-echo WScript.Sleep 500
-echo WshShell.AppActivate "IBKR"
-echo WScript.Sleep 500
-echo WshShell.SendKeys "{TAB}{TAB}{TAB}"
-echo WScript.Sleep 300
+echo WScript.Sleep 2000
+echo WshShell.AppActivate "IBKR Gateway"
+echo WScript.Sleep 1000
 echo WshShell.SendKeys "esw100000"
 echo WScript.Sleep 500
 echo WshShell.SendKeys "{TAB}"
-echo WScript.Sleep 300
+echo WScript.Sleep 400
 echo WshShell.SendKeys "Socr1025!"
 echo WScript.Sleep 500
-echo WshShell.SendKeys "{TAB}"
-echo WScript.Sleep 300
 echo WshShell.SendKeys "{ENTER}"
 ) > "%TEMP%\ib_login.vbs"
 cscript //nologo "%TEMP%\ib_login.vbs"
