@@ -1741,7 +1741,7 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                     }
                 }
                 
-                async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=10.0)) as client:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=10.0)) as client:
                     response = await client.post(
                         url,
                         json=payload,
