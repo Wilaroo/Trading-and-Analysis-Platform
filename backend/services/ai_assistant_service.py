@@ -1726,8 +1726,15 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                 # Reduce context for Ollama to prevent timeouts on limited GPU
                 # Truncate context to ~2000 chars max for faster inference
                 truncated_context = context[:2000] if len(context) > 2000 else context
+                
+                ollama_system = """You are an expert trading assistant with REAL-TIME market data access. 
+You CAN see live stock prices, quotes, and market data - it's provided in the context below.
+Answer questions using the real-time data provided. Be concise and direct.
+
+""" + truncated_context
+                
                 ollama_messages = [
-                    {"role": "system", "content": "You are an expert trading assistant. Be concise.\n\n" + truncated_context}
+                    {"role": "system", "content": ollama_system}
                 ]
                 # Only include last 3 messages for context
                 ollama_messages.extend(messages[-3:] if len(messages) > 3 else messages)
