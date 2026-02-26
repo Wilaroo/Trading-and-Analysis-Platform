@@ -53,8 +53,8 @@ curl -s http://localhost:11434/api/tags >nul 2>&1
 if %errorlevel%==0 (
     echo       Ollama is running!
 ) else (
-    echo       Starting Ollama...
-    start "" "C:\Users\%USERNAME%\AppData\Local\Programs\Ollama\ollama app.exe"
+    echo       Starting Ollama with remote access enabled...
+    start "Ollama Server" cmd /k "set OLLAMA_HOST=0.0.0.0 && set OLLAMA_ORIGINS=* && ollama serve"
     timeout /t 5 /nobreak >nul
 )
 echo.
