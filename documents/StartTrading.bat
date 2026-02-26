@@ -63,39 +63,40 @@ echo.
 echo [3/5] Starting IB Gateway...
 start "" "C:\Jts\ibgateway\1037\ibgateway.exe"
 echo       Waiting for IB Gateway to load...
-timeout /t 12 /nobreak >nul
+timeout /t 14 /nobreak >nul
 
 :: Auto-login using VBScript (sends keystrokes)
-echo       Selecting IB API and Paper Trading...
+echo       Selecting IB API and Paper Trading mode...
 (
 echo Set WshShell = CreateObject^("WScript.Shell"^)
-echo WScript.Sleep 2000
+echo WScript.Sleep 2500
 echo WshShell.AppActivate "IBKR Gateway"
-echo WScript.Sleep 1500
-echo ' Click IB API tab - use Tab to navigate from FIX CTCI to IB API
+echo WScript.Sleep 1000
+echo ' Step 1: Click IB API tab (Tab once from FIX CTCI, then Space to select)
 echo WshShell.SendKeys "{TAB}"
-echo WScript.Sleep 300
+echo WScript.Sleep 400
 echo WshShell.SendKeys " "
-echo WScript.Sleep 500
-echo ' Now click Paper Trading - Tab to Trading Mode then Tab to Paper Trading
+echo WScript.Sleep 800
+echo ' Step 2: Click Paper Trading (Tab to Trading Mode area, Tab again to Paper Trading, Space to select)
 echo WshShell.SendKeys "{TAB}"
-echo WScript.Sleep 300
+echo WScript.Sleep 400
 echo WshShell.SendKeys "{TAB}"
-echo WScript.Sleep 300
+echo WScript.Sleep 400
 echo WshShell.SendKeys " "
-echo WScript.Sleep 500
-echo ' Now enter credentials - Tab to username field
+echo WScript.Sleep 800
+echo ' Step 3: Tab to Username field and enter credentials
 echo WshShell.SendKeys "{TAB}"
-echo WScript.Sleep 300
+echo WScript.Sleep 400
 echo WshShell.SendKeys "esw100000"
-echo WScript.Sleep 500
+echo WScript.Sleep 600
+echo ' Step 4: Tab to Password field
 echo WshShell.SendKeys "{TAB}"
-echo WScript.Sleep 500
+echo WScript.Sleep 400
 echo WshShell.SendKeys "Socr1025!"
-echo WScript.Sleep 500
-echo ' Tab to Log In button and press Enter
+echo WScript.Sleep 600
+echo ' Step 5: Tab to Log In button and click
 echo WshShell.SendKeys "{TAB}"
-echo WScript.Sleep 300
+echo WScript.Sleep 400
 echo WshShell.SendKeys "{ENTER}"
 ) > "%TEMP%\ib_login.vbs"
 cscript //nologo "%TEMP%\ib_login.vbs"
