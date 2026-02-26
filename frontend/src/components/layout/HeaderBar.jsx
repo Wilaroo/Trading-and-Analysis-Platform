@@ -383,7 +383,7 @@ const SystemStatusPopover = ({
       {/* Popover Content */}
       {isOpen && (
         <div 
-          className="absolute right-0 top-full mt-2 w-72 rounded-xl overflow-hidden z-50"
+          className="absolute right-0 top-full mt-2 w-72 rounded-xl overflow-hidden z-[100]"
           style={{
             background: 'rgba(21, 28, 36, 0.95)',
             backdropFilter: 'blur(20px)',
