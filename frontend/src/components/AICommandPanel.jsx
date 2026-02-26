@@ -1085,7 +1085,7 @@ const AICuratedWidget = ({ opportunities, onExecute, onPass, onTickerClick, onVi
       
       <div className="space-y-2">
         {topOpportunities.map((opp, idx) => (
-          <CuratedOpportunityCard
+          <PipelineOpportunityCard
             key={opp.timestamp || idx}
             opportunity={opp}
             rank={idx + 1}
