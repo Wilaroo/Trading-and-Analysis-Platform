@@ -1238,3 +1238,37 @@ LLM Response → Validation → High-severity issue found?
 - Fixed false positive on "any" being detected as a stock symbol
 - Improved percentage validation to exclude portfolio allocation percentages
 - Tightened regex patterns to reduce false positives
+
+
+### UI Components Added (COMPLETE)
+
+**AI Accuracy Indicator in Header:**
+- Shows real-time accuracy percentage (color-coded: green ≥70%, yellow ≥50%, red <50%)
+- Click to expand detailed stats popover
+- Auto-refreshes after each chat query
+
+**Accuracy Stats Popover:**
+- Overall accuracy rate, query count, average confidence
+- Breakdown by query type (price_check, trade_decision, etc.)
+- Common issues list
+- Dismissible with X button
+
+**Per-Message Validation Indicator:**
+- Shows confidence percentage (Shield icon + %) on each AI response
+- Color-coded by confidence level
+- Shows regeneration count if auto-regeneration was triggered (↻1)
+- Tooltip shows validation status
+
+**Files Modified:**
+- `frontend/src/components/AICommandPanel.jsx`:
+  - Added `accuracyStats` state and `fetchAccuracyStats()` function
+  - Added accuracy indicator button in header
+  - Added animated popover with stats breakdown
+  - Modified `ChatMessage` component to show validation confidence
+  - Messages now include validation data from API response
+
+**Test Results:**
+- Accuracy indicator visible in header: ✅
+- Popover opens with stats: ✅
+- Stats update after queries: ✅
+- Per-message confidence shown: ✅
