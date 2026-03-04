@@ -93,6 +93,25 @@ class SubscribeRequest(BaseModel):
     symbol: str = Field(..., description="Stock symbol to subscribe")
 
 
+class IBPushDataRequest(BaseModel):
+    """Data pushed from local IB Data Pusher"""
+    timestamp: str = Field(..., description="Timestamp of the data")
+    source: str = Field(default="ib_gateway", description="Data source identifier")
+    quotes: dict = Field(default={}, description="Quote data by symbol")
+    account: dict = Field(default={}, description="Account data")
+    positions: list = Field(default=[], description="Position data")
+
+
+# In-memory storage for pushed IB data
+_pushed_ib_data = {
+    "last_update": None,
+    "quotes": {},
+    "account": {},
+    "positions": [],
+    "connected": False
+}
+
+
 # ===================== Connection Endpoints =====================
 
 @router.get("/status")
@@ -137,6 +156,105 @@ async def disconnect_from_ib():
     
     await _ib_service.disconnect()
     return {"status": "disconnected", "message": "Disconnected from IB"}
+
+
+# ===================== IB Data Pusher Endpoints =====================
+
+@router.post("/push-data")
+async def receive_pushed_ib_data(request: IBPushDataRequest):
+    """
+    Receive data pushed from local IB Data Pusher.
+    This endpoint allows the local script to push IB data to the cloud.
+    """
+    global _pushed_ib_data
+    
+    try:
+        # Update stored data
+        _pushed_ib_data["last_update"] = request.timestamp
+        _pushed_ib_data["connected"] = True
+        
+        # Merge quotes
+        if request.quotes:
+            _pushed_ib_data["quotes"].update(request.quotes)
+        
+        # Update account data
+        if request.account:
+            _pushed_ib_data["account"].update(request.account)
+        
+        # Update positions
+        if request.positions:
+            _pushed_ib_data["positions"] = request.positions
+        
+        quote_count = len(request.quotes) if request.quotes else 0
+        pos_count = len(request.positions) if request.positions else 0
+        
+        return {
+            "success": True,
+            "received": {
+                "quotes": quote_count,
+                "positions": pos_count,
+                "account_fields": len(request.account) if request.account else 0
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/pushed-data")
+async def get_pushed_ib_data():
+    """
+    Get the latest data pushed from local IB Data Pusher.
+    Returns quotes, account info, and positions.
+    """
+    global _pushed_ib_data
+    
+    # Check if data is stale (more than 30 seconds old)
+    is_connected = _pushed_ib_data.get("connected", False)
+    last_update = _pushed_ib_data.get("last_update")
+    
+    if last_update:
+        try:
+            from datetime import datetime
+            last_dt = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
+            age_seconds = (datetime.now(timezone.utc) - last_dt).total_seconds()
+            if age_seconds > 30:
+                is_connected = False
+        except:
+            pass
+    
+    return {
+        "connected": is_connected,
+        "last_update": _pushed_ib_data.get("last_update"),
+        "quotes": _pushed_ib_data.get("quotes", {}),
+        "account": _pushed_ib_data.get("account", {}),
+        "positions": _pushed_ib_data.get("positions", [])
+    }
+
+
+@router.get("/pushed-quote/{symbol}")
+async def get_pushed_quote(symbol: str):
+    """Get a specific quote from pushed IB data"""
+    global _pushed_ib_data
+    
+    symbol_upper = symbol.upper()
+    quotes = _pushed_ib_data.get("quotes", {})
+    
+    if symbol_upper in quotes:
+        return {
+            "success": True,
+            "symbol": symbol_upper,
+            "quote": quotes[symbol_upper],
+            "source": "ib_pusher"
+        }
+    else:
+        return {
+            "success": False,
+            "symbol": symbol_upper,
+            "error": "Quote not available",
+            "available_symbols": list(quotes.keys())
+        }
 
 
 # ===================== Account Endpoints =====================
