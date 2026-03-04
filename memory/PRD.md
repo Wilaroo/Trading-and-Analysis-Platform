@@ -1428,6 +1428,58 @@ Each card now shows:
 - Frontend: 100% (all UI features verified)
 - Test Report: `/app/test_reports/iteration_43.json`
 
+---
+
+## Session Update - March 4, 2026 (Part 4)
+
+### Scanner Universe Expansion - COMPLETE
+
+**Before**: ~1,000 symbols scanned
+**After**: ~1,473 unique symbols scanned (47% increase!)
+
+**Expanded Coverage**:
+- **SPY**: 495 symbols (S&P 500)
+- **QQQ**: 120 symbols (NASDAQ 100)
+- **NASDAQ Extended**: 480 symbols (mid-cap tech)
+- **Russell 2000**: 542 symbols (expanded from ~300)
+- **ETFs**: 45 key ETFs
+
+**NEW: Sector-Specific Lists**:
+| Sector | Symbols | Examples |
+|--------|---------|----------|
+| Biotech | 71 | CRSP, EDIT, NTLA, BEAM, XBI |
+| Cannabis | 25 | TLRY, CGC, ACB, CRON, MSOS |
+| EV/CleanTech | 57 | RIVN, LCID, CHPT, ENPH, TAN |
+| Crypto | 38 | COIN, MARA, RIOT, MSTR, IBIT |
+| Quantum/AI | 34 | IONQ, RGTI, QUBT, PLTR, AI |
+| SPAC/IPO | 30 | ARM, CART, RBLX, JOBY, RKLB |
+
+**NEW: User Viewed Symbol Tracking**:
+- Symbols user interacts with (AI chat, watchlist, charts) are automatically tracked
+- Tracked symbols get added to **Tier 1 scanning** (scanned every cycle)
+- 7-day TTL with view count tracking
+- Storage: MongoDB `user_viewed_symbols` collection
+
+**Tier Structure**:
+- **Tier 1**: ~579 symbols (SPY + QQQ + ETFs + Watchlist + User Viewed) - every cycle
+- **Tier 2**: ~332 symbols (NASDAQ Extended) - every cycle  
+- **Tier 3**: ~562 symbols (Russell 2000 + Sectors) - rotating batches
+
+**Files Created**:
+- `backend/services/user_viewed_tracker.py` - Symbol tracking service
+- `backend/tests/test_scanner_universe_expansion.py` - Test coverage
+
+**Files Modified**:
+- `backend/data/index_symbols.py` - Expanded IWM, added sector lists
+- `backend/services/wave_scanner.py` - Include user viewed in Tier 1
+- `backend/services/smart_context_engine.py` - Track symbols from AI chat
+- `backend/routers/scanner.py` - Added /universe-stats endpoint
+- `backend/routers/quick_actions.py` - Track symbols on watchlist add
+
+### Testing Results
+- Backend: 100% (23/23 tests passed)
+- Test Report: `/app/test_reports/iteration_44.json`
+
 ### Final Remaining Backlog
 1. **Perplexity Search API** - Replace Tavily for market research
 2. **CrewAI Multi-Agent** - Advanced trading analysis
