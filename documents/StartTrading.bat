@@ -126,7 +126,20 @@ start "ngrok Tunnels" cmd /k "ngrok start --all --config=%USERPROFILE%\AppData\L
 timeout /t 5 /nobreak >nul
 echo.
 
-echo [5/5] Opening Trading Platform...
+echo [5/6] Starting IB Data Pusher...
+:: Check if ib_data_pusher.py exists in same directory
+if exist "%~dp0ib_data_pusher.py" (
+    echo       Starting IB Data Pusher to send IB data to cloud...
+    start "IB Data Pusher" cmd /k "python "%~dp0ib_data_pusher.py" --cloud-url %PLATFORM_URL% --symbols VIX SPY QQQ IWM DIA"
+    timeout /t 3 /nobreak >nul
+    echo       IB Data Pusher started!
+) else (
+    echo       [SKIP] ib_data_pusher.py not found in %~dp0
+    echo       Download it from the platform to enable IB data sync
+)
+echo.
+
+echo [6/6] Opening Trading Platform...
 timeout /t 2 /nobreak >nul
 start "" "%PLATFORM_URL%"
 
@@ -136,11 +149,12 @@ echo.
 echo ============================================
 echo    Platform: %PLATFORM_URL%
 echo    
-echo    Tunnels Active:
-echo    - Ollama: https://pseudoaccidentally-linty-addie.ngrok-free.dev
-echo    - IB Gateway: tcp://5.tcp.ngrok.io:29573
+echo    Services Running:
+echo    - Ollama: Local AI (tunnel: https://pseudoaccidentally-linty-addie.ngrok-free.dev)
+echo    - IB Gateway: Local connection via IB Data Pusher
+echo    - ngrok: Ollama tunnel active
 echo    
-echo    IMPORTANT: Keep the ngrok window open!
+echo    IMPORTANT: Keep all windows open!
 echo ============================================
 echo.
 echo Press any key to close this window...
