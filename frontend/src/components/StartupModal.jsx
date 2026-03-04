@@ -22,37 +22,49 @@ import {
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
-// Feature explanations for the app
+// Feature explanations for the app - detailed with what makes each special
 const FEATURES = [
   {
     icon: Bot,
     title: "AI Trading Assistant",
-    description: "Get real-time market insights, trade recommendations, and portfolio analysis powered by advanced AI."
+    description: "Your personal market analyst powered by local Ollama AI.",
+    details: "Unlike cloud-only AI, your data stays private. The assistant understands 30+ trading strategies, analyzes your portfolio in real-time, and provides actionable insights—not generic advice.",
+    highlight: "Privacy-first AI"
   },
   {
     icon: LineChart,
     title: "Real-Time Charts",
-    description: "Interactive TradingView charts with technical indicators and support/resistance levels."
+    description: "Professional TradingView charts with auto-detected levels.",
+    details: "Support/resistance levels are calculated using multiple algorithms (pivot points, volume profile, price action). The chart automatically highlights key zones where price is likely to react.",
+    highlight: "Auto S/R detection"
   },
   {
     icon: Eye,
     title: "Smart Watchlist",
-    description: "Auto-curated watchlist that tracks high-potential stocks based on your strategies."
+    description: "Self-curating watchlist that learns your trading style.",
+    details: "Not just a list of tickers—it tracks momentum, relative strength, and upcoming catalysts. Stocks are auto-added when scanner alerts fire and auto-removed after 7 days of inactivity.",
+    highlight: "Auto-curated"
   },
   {
     icon: Zap,
     title: "Live Scanner",
-    description: "Scans 1,000+ stocks in real-time to find setups matching 30+ trading strategies."
+    description: "Real-time pattern detection across 1,000+ stocks.",
+    details: "Scans for breakouts, squeezes, VWAP plays, gap fills, and more. Each alert includes entry/exit zones, risk/reward ratios, and historical win rates for that specific pattern.",
+    highlight: "30+ strategies"
   },
   {
     icon: Target,
     title: "Trade Pipeline",
-    description: "Organize your trade ideas from discovery to execution with built-in journaling."
+    description: "From idea to execution with full accountability.",
+    details: "Every trade flows through stages: Discovery → Research → Planning → Execution → Review. Built-in journaling captures your reasoning, so you learn from both wins and losses.",
+    highlight: "Built-in journaling"
   },
   {
     icon: Shield,
-    title: "AI Validation",
-    description: "Every AI response is fact-checked against real market data for accuracy."
+    title: "AI Validation Engine",
+    description: "Every AI response is fact-checked against live data.",
+    details: "The validation layer catches hallucinations before you see them. If the AI says 'NVDA is up 5%' but it's actually down, the system auto-corrects or flags the discrepancy. You see the confidence score on each message.",
+    highlight: "Anti-hallucination"
   }
 ];
 
@@ -61,6 +73,7 @@ const STARTUP_PROCESSES = [
   { id: 'backend', label: 'Connecting to backend...', successLabel: 'Backend connected' },
   { id: 'alpaca', label: 'Connecting to Alpaca for real-time data...', successLabel: 'Alpaca connected' },
   { id: 'ollama', label: 'Connecting to AI Trading Assistant...', successLabel: 'AI Assistant ready' },
+  { id: 'ibpusher', label: 'Checking IB Gateway connection...', successLabel: 'IB Gateway data available' },
   { id: 'market', label: 'Fetching market status...', successLabel: 'Market data loaded' },
   { id: 'portfolio', label: 'Loading portfolio...', successLabel: 'Portfolio loaded' },
   { id: 'watchlist', label: 'Loading smart watchlist...', successLabel: 'Watchlist ready' }
@@ -128,6 +141,23 @@ const StartupModal = ({ onComplete }) => {
       })
       .catch(() => {
         setProcesses(prev => ({ ...prev, ollama: 'warning' }));
+      });
+
+    // Check IB Gateway via Pusher
+    setProcesses(prev => ({ ...prev, ibpusher: 'loading' }));
+    fetch(`${API_URL}/api/ib/pushed-data`)
+      .then(res => res.json())
+      .then(data => {
+        // Check if pusher is connected and has recent data
+        const isConnected = data.connected === true;
+        const hasPositions = data.positions && data.positions.length > 0;
+        setProcesses(prev => ({ 
+          ...prev, 
+          ibpusher: isConnected || hasPositions ? 'success' : 'warning' 
+        }));
+      })
+      .catch(() => {
+        setProcesses(prev => ({ ...prev, ibpusher: 'warning' }));
       });
 
     // Fetch market status
@@ -217,7 +247,8 @@ const StartupModal = ({ onComplete }) => {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+        className="fixed inset-0 flex items-center justify-center bg-black/90 backdrop-blur-md"
+        style={{ zIndex: 9999 }}
         data-testid="startup-modal"
       >
         <motion.div
@@ -250,11 +281,21 @@ const StartupModal = ({ onComplete }) => {
                 {FEATURES.map((feature, idx) => (
                   <div
                     key={idx}
-                    className="p-4 rounded-lg bg-zinc-800/50 border border-zinc-700/50 hover:border-cyan-500/30 transition-colors"
+                    className="p-4 rounded-lg bg-zinc-800/50 border border-zinc-700/50 hover:border-cyan-500/30 transition-all hover:bg-zinc-800/80 group"
                   >
-                    <feature.icon className="w-6 h-6 text-cyan-400 mb-2" />
+                    <div className="flex items-start justify-between mb-2">
+                      <feature.icon className="w-5 h-5 text-cyan-400" />
+                      {feature.highlight && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400 font-medium">
+                          {feature.highlight}
+                        </span>
+                      )}
+                    </div>
                     <h3 className="text-sm font-semibold text-white mb-1">{feature.title}</h3>
-                    <p className="text-xs text-zinc-400 leading-relaxed">{feature.description}</p>
+                    <p className="text-xs text-zinc-400 leading-relaxed mb-2">{feature.description}</p>
+                    <p className="text-[10px] text-zinc-500 leading-relaxed group-hover:text-zinc-400 transition-colors">
+                      {feature.details}
+                    </p>
                   </div>
                 ))}
               </div>

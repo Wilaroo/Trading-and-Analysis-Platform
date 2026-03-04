@@ -448,13 +448,24 @@ const IBTradingPage = ({ ibConnected, ibConnectionChecked, connectToIb, checkIbC
     }
   };
   
-  // Fetch account data
+  // Fetch account data - prioritize pushed data from local script
   const fetchAccountData = async () => {
     if (!isConnected) return;
     setLoading(prev => ({...prev, account: true}));
     try {
-      const res = await api.get('/api/ib/account/summary');
-      setAccountSummary(res.data);
+      // First try pushed data from local IB pusher
+      const pushedRes = await api.get('/api/ib/pushed-data');
+      if (pushedRes.data?.connected && pushedRes.data?.account && Object.keys(pushedRes.data.account).length > 0) {
+        setAccountSummary({
+          ...pushedRes.data.account,
+          source: 'ib_pusher',
+          last_update: pushedRes.data.last_update
+        });
+      } else {
+        // Fall back to direct IB connection
+        const res = await api.get('/api/ib/account/summary');
+        setAccountSummary(res.data);
+      }
     } catch (err) {
       console.error('Failed to fetch account summary:', err);
     } finally {
@@ -462,13 +473,28 @@ const IBTradingPage = ({ ibConnected, ibConnectionChecked, connectToIb, checkIbC
     }
   };
   
-  // Fetch positions
+  // Fetch positions - prioritize pushed data from local script
   const fetchPositions = async () => {
     if (!isConnected) return;
     setLoading(prev => ({...prev, positions: true}));
     try {
-      const res = await api.get('/api/ib/account/positions');
-      setPositions(res.data.positions || []);
+      // First try pushed data from local IB pusher
+      const pushedRes = await api.get('/api/ib/pushed-data');
+      if (pushedRes.data?.connected && pushedRes.data?.positions?.length > 0) {
+        setPositions(pushedRes.data.positions.map(p => ({
+          symbol: p.symbol || p.contract?.symbol,
+          position: parseFloat(p.position) || parseFloat(p.qty) || 0,
+          marketValue: parseFloat(p.market_value) || parseFloat(p.marketValue) || 0,
+          averageCost: parseFloat(p.avg_cost) || parseFloat(p.averageCost) || 0,
+          marketPrice: parseFloat(p.market_price) || parseFloat(p.marketPrice) || 0,
+          unrealizedPNL: parseFloat(p.unrealized_pnl) || parseFloat(p.unrealizedPNL) || 0,
+          source: 'ib_pusher'
+        })));
+      } else {
+        // Fall back to direct IB connection
+        const res = await api.get('/api/ib/account/positions');
+        setPositions(res.data.positions || []);
+      }
     } catch (err) {
       console.error('Failed to fetch positions:', err);
     } finally {

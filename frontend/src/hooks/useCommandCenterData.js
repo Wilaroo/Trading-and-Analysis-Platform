@@ -152,10 +152,26 @@ export function useCommandCenterData({
         }));
       }
     } catch (botErr) {
-      // Fall back to IB positions
+      // Fall back to IB pushed data first (from local pusher script)
       try {
-        const positionsRes = await api.get('/api/ib/account/positions');
-        positionsData = positionsRes.data?.positions || [];
+        const pushedRes = await api.get('/api/ib/pushed-data');
+        if (pushedRes.data?.connected && pushedRes.data?.positions?.length > 0) {
+          positionsData = pushedRes.data.positions.map(p => ({
+            symbol: p.symbol || p.contract?.symbol,
+            qty: parseFloat(p.position) || parseFloat(p.qty) || 0,
+            market_value: parseFloat(p.market_value) || parseFloat(p.marketValue) || 0,
+            avg_entry_price: parseFloat(p.avg_cost) || parseFloat(p.averageCost) || 0,
+            current_price: parseFloat(p.market_price) || parseFloat(p.marketPrice) || 0,
+            unrealized_pnl: parseFloat(p.unrealized_pnl) || parseFloat(p.unrealizedPNL) || 0,
+            unrealized_pnl_percent: parseFloat(p.unrealized_pnl_pct) || 0,
+            side: parseFloat(p.position || p.qty) >= 0 ? 'long' : 'short',
+            source: 'ib_pusher'
+          }));
+        } else {
+          // Fall back to direct IB positions
+          const positionsRes = await api.get('/api/ib/account/positions');
+          positionsData = positionsRes.data?.positions || [];
+        }
       } catch (ibErr) {
         // Both APIs failed - positions will be empty
       }
@@ -163,10 +179,22 @@ export function useCommandCenterData({
     
     setPositions(positionsData);
     
-    // Try to fetch account summary (non-blocking)
-    api.get('/api/ib/account/summary')
-      .then(res => setAccount(res.data))
-      .catch(() => {});
+    // Try to fetch account summary - first from pushed data, then direct IB
+    try {
+      const pushedRes = await api.get('/api/ib/pushed-data');
+      if (pushedRes.data?.connected && pushedRes.data?.account && Object.keys(pushedRes.data.account).length > 0) {
+        setAccount({
+          ...pushedRes.data.account,
+          source: 'ib_pusher'
+        });
+      } else {
+        // Fall back to direct IB
+        const res = await api.get('/api/ib/account/summary');
+        setAccount(res.data);
+      }
+    } catch (err) {
+      // Non-blocking, account will be empty
+    }
   };
 
   const runScanner = async () => {
