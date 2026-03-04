@@ -238,6 +238,7 @@ const WatchlistWidget = ({ onTickerSelect, onViewChart, wsWatchlist = [] }) => {
   const [watchlist, setWatchlist] = useState([]);
   const [quotes, setQuotes] = useState({});
   const [loading, setLoading] = useState(true);
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false); // Prevents "(0)" flicker
   const [expanded, setExpanded] = useState(true);
   const [stats, setStats] = useState(null);
   const [newSymbol, setNewSymbol] = useState('');
@@ -251,6 +252,7 @@ const WatchlistWidget = ({ onTickerSelect, onViewChart, wsWatchlist = [] }) => {
       const items = res.data.watchlist || [];
       setWatchlist(items);
       setStats(res.data.stats);
+      setInitialLoadComplete(true); // Mark initial load as complete
       
       // Fetch quotes for symbols
       if (items.length > 0) {
@@ -266,6 +268,7 @@ const WatchlistWidget = ({ onTickerSelect, onViewChart, wsWatchlist = [] }) => {
       }
     } catch (err) {
       console.error('Failed to load smart watchlist:', err);
+      setInitialLoadComplete(true); // Mark as complete even on error
       // Fallback to old watchlist
       try {
         const res = await api.get('/api/watchlist');
@@ -284,6 +287,7 @@ const WatchlistWidget = ({ onTickerSelect, onViewChart, wsWatchlist = [] }) => {
     if (wsWatchlist && wsWatchlist.length >= 0) {
       setWatchlist(wsWatchlist);
       setLoading(false);
+      setInitialLoadComplete(true); // WebSocket data marks initial load complete
     }
   }, [wsWatchlist]);
 
@@ -348,9 +352,15 @@ const WatchlistWidget = ({ onTickerSelect, onViewChart, wsWatchlist = [] }) => {
         <div className="flex items-center gap-2">
           <Eye className="w-4 h-4 text-cyan-400" />
           <span className="text-sm font-medium text-zinc-200">Smart Watchlist</span>
-          <span className="text-xs text-zinc-500">
-            ({watchlist.length}/{stats?.max_size || 50})
-          </span>
+          {/* Only show count after initial load to prevent "(0)" flicker */}
+          {initialLoadComplete && (
+            <span className="text-xs text-zinc-500">
+              ({watchlist.length}/{stats?.max_size || 50})
+            </span>
+          )}
+          {!initialLoadComplete && loading && (
+            <RefreshCw className="w-3 h-3 text-zinc-500 animate-spin" />
+          )}
         </div>
         <div className="flex items-center gap-2">
           <span
