@@ -53,6 +53,7 @@ from routers.market_intel import router as market_intel_router, init_market_inte
 from routers.research import router as research_router
 from routers.config import router as config_router
 from routers.portfolio_awareness import router as portfolio_awareness_router
+from routers.quick_actions import router as quick_actions_router, init_quick_actions_router
 from services.market_intel_service import get_market_intel_service
 from services.ib_service import get_ib_service
 from services.news_service import init_news_service
@@ -124,6 +125,9 @@ scheduler_service = init_scheduler_service()
 scheduler_service.start()
 init_scheduler_router(scheduler_service, assistant_service, None)  # Newsletter removed
 init_alpaca_router(alpaca_service)
+
+# Initialize quick actions router
+init_quick_actions_router(alpaca_service, db)
 
 # Initialize predictive scanner
 predictive_scanner = get_predictive_scanner()
@@ -199,6 +203,7 @@ app.include_router(market_intel_router)
 app.include_router(research_router)
 app.include_router(config_router)
 app.include_router(portfolio_awareness_router)
+app.include_router(quick_actions_router)
 
 # Collections
 strategies_col = db["strategies"]

@@ -7,6 +7,7 @@ import { Toaster } from 'sonner';
 import { Sidebar, TickerTape, PriceAlertNotification, AlertSettingsPanel } from './components';
 import { useWebSocket, usePriceAlerts } from './hooks';
 import api from './utils/api';
+import StartupModal from './components/StartupModal';
 
 // Import pages
 import {
@@ -86,6 +87,9 @@ if (typeof window !== 'undefined') {
 
 // ===================== MAIN APP =====================
 function App() {
+  // Startup modal state
+  const [showStartupModal, setShowStartupModal] = useState(true);
+  
   // Persist activeTab in localStorage so it survives page refresh
   const [activeTab, setActiveTab] = useState(() => {
     const saved = localStorage.getItem('tradecommand_activeTab');
@@ -327,6 +331,11 @@ function App() {
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg-default)' }} onClick={initializeAudio}>
+      {/* Startup Modal */}
+      {showStartupModal && (
+        <StartupModal onComplete={() => setShowStartupModal(false)} />
+      )}
+      
       {/* Toast notifications */}
       <Toaster 
         position="top-right" 
