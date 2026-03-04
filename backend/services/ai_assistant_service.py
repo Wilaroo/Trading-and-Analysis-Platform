@@ -1131,6 +1131,13 @@ DECISION: {score_result['trade_or_skip']}
             except:
                 pass
             
+            # Try to get earnings service
+            try:
+                from services.earnings_service import EarningsService
+                services["earnings"] = EarningsService()
+            except:
+                pass
+            
             # Gather context based on intent (also stores data for validation)
             smart_context, context_data = await engine.gather_context_with_data(intent_result, services)
             
@@ -2095,23 +2102,60 @@ Answer questions using the real-time data provided. Be concise and direct.
             # Call LLM with smart routing
             response_text = await self._call_llm(llm_messages, context, complexity=complexity)
             
-            # ===== VALIDATION LAYER =====
+            # ===== VALIDATION LAYER WITH AUTO-REGENERATION =====
             # Validate AI response against real-time data (if smart context was used)
             validation_result = None
+            regeneration_count = 0
+            max_regenerations = 1  # Max 1 retry to avoid infinite loops
+            
             if USE_SMART_CONTEXT and hasattr(self, '_last_context_data') and self._last_context_data:
                 try:
                     from services.smart_context_engine import get_response_validator
                     validator = get_response_validator()
                     validation_result = validator.validate_response(response_text, self._last_context_data)
                     
-                    if validation_result and not validation_result.get('validated'):
-                        logger.warning(f"Response validation issues: {validation_result.get('issues', [])}")
+                    # Auto-regeneration for high-severity issues
+                    while (validation_result and 
+                           not validation_result.get('validated') and 
+                           regeneration_count < max_regenerations):
                         
-                        # If high-severity issues found, add a disclaimer
-                        if any(e.get('severity') == 'high' for e in validation_result.get('issues', [])):
+                        high_severity_issues = [e for e in validation_result.get('issues', []) 
+                                               if e.get('severity') == 'high']
+                        
+                        if high_severity_issues:
+                            logger.warning(f"High-severity validation issues - attempting regeneration ({regeneration_count + 1}/{max_regenerations})")
+                            
+                            # Get correction prompt
                             correction_prompt = validator.get_correction_prompt()
+                            
                             if correction_prompt:
-                                response_text += f"\n\n⚠️ *Note: Some information may need verification.*"
+                                # Add correction context and regenerate
+                                corrected_context = f"{context}\n\n=== CORRECTION REQUIRED ===\n{correction_prompt}\n\nPlease provide an accurate response using the corrected data above."
+                                
+                                # Regenerate response
+                                response_text = await self._call_llm(llm_messages, corrected_context, complexity=complexity)
+                                
+                                # Re-validate
+                                validation_result = validator.validate_response(response_text, self._last_context_data)
+                                regeneration_count += 1
+                            else:
+                                break
+                        else:
+                            # Only low/medium severity - don't regenerate
+                            break
+                    
+                    # Log final validation result
+                    if validation_result and not validation_result.get('validated'):
+                        logger.warning(f"Response validation issues after {regeneration_count} regenerations: {validation_result.get('issues', [])}")
+                        
+                        # Add disclaimer for remaining issues
+                        if any(e.get('severity') in ['high', 'medium'] for e in validation_result.get('issues', [])):
+                            response_text += f"\n\n⚠️ *Note: Some information may need verification.*"
+                    
+                    # Add regeneration info to validation result
+                    if validation_result:
+                        validation_result['regeneration_count'] = regeneration_count
+                        
                 except Exception as e:
                     logger.warning(f"Validation error: {e}")
             
@@ -2129,6 +2173,32 @@ Answer questions using the real-time data provided. Be concise and direct.
             
             # Save to DB
             self._save_conversation_to_db(session_id)
+            
+            # ===== ACCURACY TRACKING =====
+            # Record validation result for historical accuracy analysis
+            if validation_result:
+                try:
+                    from services.accuracy_tracker import get_accuracy_tracker
+                    tracker = get_accuracy_tracker()
+                    
+                    # Get intent info if available
+                    intent_name = "unknown"
+                    symbols = []
+                    if hasattr(self, '_last_intent') and self._last_intent:
+                        intent_name = self._last_intent.primary_intent.value
+                        symbols = self._last_intent.symbols
+                    
+                    tracker.record_validation(
+                        user_message=user_message,
+                        intent=intent_name,
+                        symbols=symbols,
+                        validation_result=validation_result,
+                        response_length=len(response_text),
+                        provider="gpt-4o" if complexity == "deep" else "ollama",
+                        regeneration_count=regeneration_count
+                    )
+                except Exception as e:
+                    logger.debug(f"Accuracy tracking error (non-critical): {e}")
             
             return {
                 "success": True,
