@@ -1314,7 +1314,67 @@ LLM Response → Validation → High-severity issue found?
 
 ### Pending Tasks (Backlog)
 1. **Integrate IB Pushed Data into App Logic (P1)** - Refactor `ib_service.py` to consume data from push endpoint
-2. **Wire up Quick Actions buttons** - Implement close, add, alert actions
-3. **Ollama Model Toggle** - UI to switch between qwen2.5:3b and 7b models
+2. ~~**Wire up Quick Actions buttons** - Implement close, add, alert actions~~ ✅ DONE
+3. ~~**Ollama Model Toggle** - UI to switch between qwen2.5:3b and 7b models~~ ✅ DONE
 4. **Perplexity Search API Integration** - Replace Tavily for market research
 5. **CrewAI Multi-Agent System** - Advanced trading analysis
+
+---
+
+## Session Update - March 4, 2026 (Part 2)
+
+### New Features Implemented
+
+**1. Startup Explainer Modal**
+- Opens on every fresh page load
+- **Key Features Section**: 6 feature cards explaining the app:
+  - AI Trading Assistant, Real-Time Charts, Smart Watchlist
+  - Live Scanner, Trade Pipeline, AI Validation
+- **System Status Section**: Real-time startup status with 6 indicators:
+  - Backend, Alpaca, AI Assistant, Market Data, Portfolio, Watchlist
+- "Don't show this again" checkbox (stores in localStorage: `tradecommand_skip_startup`)
+- "Get Started" button enables when all systems connect (or after 10s fallback)
+
+**2. Quick Actions System**
+- **Backend API** (`/api/quick-actions/`):
+  - `POST /add-to-watchlist` - Add symbol to smart watchlist
+  - `POST /create-alert` - Create price/percent/volume alerts
+  - `GET /alerts` - List active alerts
+  - `DELETE /alerts/{symbol}` - Delete alerts for symbol
+  - `DELETE /remove-from-watchlist/{symbol}` - Remove from watchlist
+- **Frontend Component** (`QuickActionsMenu.jsx`):
+  - 3 variants: `icon` (dropdown), `buttons` (inline), `compact` (small text links)
+  - Integrated into: TickerDetailModal, Smart Watchlist, Scanner Alerts
+
+**3. Ollama Model Toggle**
+- **Backend API**: `POST /api/config/ollama-model`
+- **Settings Page UI**: 3 model options with descriptions and speed indicators:
+  - Qwen 2.5 3B (Fast)
+  - Qwen 2.5 7B (Balanced)
+  - Llama 3 8B (Balanced)
+- Selection persists to `.env` for restart persistence
+
+### Files Created
+- `frontend/src/components/StartupModal.jsx`
+- `frontend/src/components/QuickActionsMenu.jsx`
+- `backend/routers/quick_actions.py`
+- `backend/tests/test_quick_actions_and_config.py`
+
+### Files Modified
+- `backend/server.py` - Registered quick_actions router
+- `backend/routers/config.py` - Added ollama-model endpoint
+- `frontend/src/App.js` - Added StartupModal
+- `frontend/src/components/TickerDetailModal.jsx` - Added QuickActionsMenu
+- `frontend/src/components/RightSidebar.jsx` - Added QuickActionsMenu to watchlist/scanner
+- `frontend/src/pages/SettingsPage.js` - Added model selection UI
+
+### Testing Results
+- Backend: 100% (19/19 tests passed)
+- Frontend: 100% (all UI features verified)
+- Test Report: `/app/test_reports/iteration_42.json`
+
+### Remaining Backlog
+1. **Integrate IB Pushed Data** - Connect `ib_service.py` to push endpoint data
+2. **Perplexity Search API** - Replace Tavily for market research
+3. **CrewAI Multi-Agent** - Advanced trading analysis
+
