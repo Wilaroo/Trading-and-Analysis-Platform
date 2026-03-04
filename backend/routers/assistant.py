@@ -124,6 +124,8 @@ async def chat(request: ChatRequest):
     - Your trading history
     
     It will provide analytical responses and enforce your trading rules.
+    
+    Response includes validation data when smart context is enabled.
     """
     if not _assistant_service:
         raise HTTPException(status_code=500, detail="Assistant service not initialized")
@@ -140,6 +142,75 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail=result.get("error", "Chat failed"))
     
     return result
+
+
+class ValidateResponseRequest(BaseModel):
+    response_text: str = Field(..., description="AI response text to validate")
+    symbols: List[str] = Field(default=[], description="Symbols mentioned in the query")
+
+
+@router.post("/validate-response")
+async def validate_response(request: ValidateResponseRequest):
+    """
+    PROOF OF CONCEPT: Validate an AI response against real-time data.
+    
+    This endpoint lets you test the validation layer independently.
+    It checks for:
+    - Price accuracy
+    - Position claims
+    - Directional claims
+    - Percentage reasonableness
+    """
+    try:
+        from services.smart_context_engine import get_response_validator, ContextData
+        
+        # Get real-time data to validate against
+        context_data = ContextData()
+        
+        # Fetch quotes for mentioned symbols
+        if request.symbols and _assistant_service and hasattr(_assistant_service, 'alpaca_service'):
+            try:
+                quotes = await _assistant_service.alpaca_service.get_quotes_batch(request.symbols)
+                if quotes:
+                    context_data.quotes = {
+                        symbol: {"price": q.get("price", 0), "change_percent": q.get("change_percent", 0)}
+                        for symbol, q in quotes.items()
+                    }
+            except Exception as e:
+                logger.warning(f"Quote fetch for validation failed: {e}")
+        
+        # Fetch positions
+        if _assistant_service and hasattr(_assistant_service, 'alpaca_service'):
+            try:
+                positions = await _assistant_service.alpaca_service.get_positions()
+                if positions:
+                    context_data.positions = [
+                        {"symbol": p.get("symbol"), "qty": float(p.get("qty", 0))}
+                        for p in positions
+                    ]
+            except Exception as e:
+                logger.warning(f"Position fetch for validation failed: {e}")
+        
+        # Validate
+        validator = get_response_validator()
+        result = validator.validate_response(request.response_text, context_data)
+        
+        return {
+            "success": True,
+            "validation": result,
+            "context_used": {
+                "quotes": list(context_data.quotes.keys()),
+                "positions": [p.get("symbol") for p in context_data.positions]
+            },
+            "correction_prompt": validator.get_correction_prompt()
+        }
+        
+    except Exception as e:
+        logger.error(f"Validation endpoint error: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 
 @router.post("/analyze-trade")

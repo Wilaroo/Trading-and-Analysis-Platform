@@ -1093,3 +1093,76 @@ Added retry mechanism with exponential backoff in `ai_assistant_service.py` (lin
 - [ ] Remove dead code: RealtimeChart.jsx
 - [ ] Keyboard shortcuts for common trading actions
 
+
+
+---
+
+## Session Log - March 4, 2026 (Smart Context Engine v2 + Validation Layer)
+
+### Smart Context Engine v2 Enhancements
+
+**New Features:**
+1. **New Intent Categories** (12 total):
+   - `news_check` - "Any news on NVDA?" → Fetches news + quote only
+   - `technical_analysis` - "NVDA technicals" → Fetches technicals + quote only
+
+2. **Structured Context Data** (`ContextData` class):
+   - Stores quotes, positions, market indices for validation
+   - Enables fact-checking of AI responses
+
+3. **Intent-Specific Instructions**:
+   - Each intent type now has tailored instructions for the LLM
+   - Results in more focused, relevant responses
+
+### Response Validation Layer
+
+**New Class: `ResponseValidator`**
+Validates AI responses against real-time data before returning to user.
+
+**Validation Checks:**
+1. **Price Validation**: Detects when AI claims a price that differs >2% from actual
+2. **Position Validation**: Catches "no position" claims when user actually holds the stock
+3. **Direction Validation**: Flags "breaking out" claims when stock is actually down
+4. **Percentage Validation**: Warns on extreme percentage claims (>20% daily moves)
+
+**Validation Output:**
+```json
+{
+  "validated": true/false,
+  "confidence": 0.0-1.0,
+  "issues": [...],
+  "recommendation": "Response validated successfully"
+}
+```
+
+### New API Endpoints
+
+1. **`POST /api/assistant/detect-intent`** - Test intent detection
+2. **`POST /api/assistant/validate-response`** - Test validation independently
+3. **`POST /api/assistant/chat`** - Now includes validation results
+
+### Files Created/Modified
+- `backend/services/smart_context_engine.py` - Added v2 features + ResponseValidator class
+- `backend/services/ai_assistant_service.py` - Integrated validation layer, USE_SMART_CONTEXT flag
+- `backend/routers/assistant.py` - Added validate-response endpoint
+
+### Test Results
+- Intent detection: 12 categories, 50-92% context reduction
+- Validation: Correctly catches wrong prices, position claims, direction mismatches
+- Chat responses now include validation confidence scores
+
+### Updated Backlog
+
+### P1 - High Priority (Completed)
+- [x] **Smart Context Engine v2** (DONE - Mar 4, 2026)
+- [x] **Response Validation Layer** (DONE - Mar 4, 2026)
+
+### P1 - High Priority (Remaining)
+- [ ] Perplexity Finance API Integration
+- [ ] Complete Quick Actions backend
+- [ ] Real-time RVOL in Market Intelligence
+
+### P2 - Medium Priority
+- [ ] Fix watchlist "(0)" flicker on load
+- [ ] Remove dead code: RealtimeChart.jsx
+- [ ] CrewAI multi-agent integration (future consideration)

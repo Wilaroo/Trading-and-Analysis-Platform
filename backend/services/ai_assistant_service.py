@@ -1131,8 +1131,12 @@ DECISION: {score_result['trade_or_skip']}
             except:
                 pass
             
-            # Gather context based on intent
-            smart_context = await engine.gather_context(intent_result, services)
+            # Gather context based on intent (also stores data for validation)
+            smart_context, context_data = await engine.gather_context_with_data(intent_result, services)
+            
+            # Store context data for validation after LLM response
+            self._last_context_data = context_data
+            self._last_intent = intent_result
             
             # Add base system prompt (use class attribute)
             base_prompt = self.SYSTEM_PROMPT
@@ -1148,6 +1152,8 @@ DECISION: {score_result['trade_or_skip']}
                 "bot_status": "User is checking on the trading bot. Show status, P&L, and any open trades.",
                 "strategy_info": "User is asking about a trading strategy. Explain it clearly with entry/exit rules.",
                 "risk_check": "User wants to understand their risk. Show concentration, exposure, and any warnings.",
+                "news_check": "User wants news on a stock. Provide recent headlines and sentiment.",
+                "technical_analysis": "User wants technical analysis. Show key levels, indicators, and patterns.",
                 "general_chat": "General trading chat. Be helpful and offer relevant trading assistance.",
             }
             
@@ -2089,13 +2095,34 @@ Answer questions using the real-time data provided. Be concise and direct.
             # Call LLM with smart routing
             response_text = await self._call_llm(llm_messages, context, complexity=complexity)
             
+            # ===== VALIDATION LAYER =====
+            # Validate AI response against real-time data (if smart context was used)
+            validation_result = None
+            if USE_SMART_CONTEXT and hasattr(self, '_last_context_data') and self._last_context_data:
+                try:
+                    from services.smart_context_engine import get_response_validator
+                    validator = get_response_validator()
+                    validation_result = validator.validate_response(response_text, self._last_context_data)
+                    
+                    if validation_result and not validation_result.get('validated'):
+                        logger.warning(f"Response validation issues: {validation_result.get('issues', [])}")
+                        
+                        # If high-severity issues found, add a disclaimer
+                        if any(e.get('severity') == 'high' for e in validation_result.get('issues', [])):
+                            correction_prompt = validator.get_correction_prompt()
+                            if correction_prompt:
+                                response_text += f"\n\n⚠️ *Note: Some information may need verification.*"
+                except Exception as e:
+                    logger.warning(f"Validation error: {e}")
+            
             # Add assistant response
             assistant_msg = AssistantMessage(
                 role="assistant",
                 content=response_text,
                 metadata={
                     "provider": "gpt-4o" if complexity == "deep" else "ollama",
-                    "had_research": bool(research_context)
+                    "had_research": bool(research_context),
+                    "validation": validation_result
                 }
             )
             conv.messages.append(assistant_msg)
@@ -2110,7 +2137,8 @@ Answer questions using the real-time data provided. Be concise and direct.
                 "message_count": len(conv.messages),
                 "provider": "gpt-4o" if complexity == "deep" else "ollama",
                 "complexity": complexity,
-                "used_research": bool(research_context)
+                "used_research": bool(research_context),
+                "validation": validation_result
             }
             
         except Exception as e:
