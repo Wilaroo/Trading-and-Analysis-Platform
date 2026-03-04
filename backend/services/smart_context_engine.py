@@ -1,13 +1,20 @@
 """
-Smart Context Engine - Proof of Concept
+Smart Context Engine v2
 Intelligent intent detection and selective context gathering for AI assistant.
-Reduces context size by 50-70% while improving relevance.
+Reduces context size by 50-90% while improving relevance.
+
+Features:
+- Intent detection with 10+ categories
+- Dynamic context source selection
+- Structured output formatting
+- Response validation hooks
 """
 import re
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +30,8 @@ class QueryIntent(Enum):
     BOT_STATUS = "bot_status"            # "How's the bot doing?"
     STRATEGY_INFO = "strategy_info"      # "Explain rubber band"
     RISK_CHECK = "risk_check"            # "What's my exposure?"
+    NEWS_CHECK = "news_check"            # "Any news on NVDA?"
+    TECHNICAL_ANALYSIS = "technical_analysis"  # "NVDA technicals?"
     GENERAL_CHAT = "general_chat"        # Everything else
 
 
@@ -34,6 +43,21 @@ class IntentResult:
     symbols: List[str]
     sub_intents: List[QueryIntent]
     keywords_matched: List[str]
+    requires_realtime_data: bool = True
+    complexity: str = "standard"  # light, standard, deep
+
+
+@dataclass 
+class ContextData:
+    """Structured context data for validation"""
+    quotes: Dict[str, Dict] = field(default_factory=dict)
+    positions: List[Dict] = field(default_factory=list)
+    portfolio_value: float = 0.0
+    portfolio_risk: Dict = field(default_factory=dict)
+    market_indices: Dict[str, Dict] = field(default_factory=dict)
+    scanner_alerts: List[Dict] = field(default_factory=list)
+    bot_status: Dict = field(default_factory=dict)
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
 class SmartContextEngine:
@@ -130,6 +154,26 @@ class SmartContextEngine:
             ],
             "keywords": ["risk", "exposure", "concentration", "position size", "max loss", "stop loss"],
             "weight": 1.1
+        },
+        QueryIntent.NEWS_CHECK: {
+            "patterns": [
+                r"(?:any|what|latest) news (?:on|for|about) (\$?[A-Z]{1,5})",
+                r"(\$?[A-Z]{1,5}) news",
+                r"what(?:'s| is) (?:the )?news",
+                r"headlines (?:for|on|about)",
+            ],
+            "keywords": ["news", "headlines", "catalyst", "announcement", "earnings news", "breaking"],
+            "weight": 0.9
+        },
+        QueryIntent.TECHNICAL_ANALYSIS: {
+            "patterns": [
+                r"(\$?[A-Z]{1,5}) (?:technicals?|levels?|support|resistance)",
+                r"(?:technical|technicals) (?:on|for) (\$?[A-Z]{1,5})",
+                r"(?:vwap|hod|lod|atr|rsi|macd) (?:on|for|of)",
+                r"key levels (?:for|on)",
+            ],
+            "keywords": ["technical", "technicals", "vwap", "support", "resistance", "hod", "lod", "levels", "atr"],
+            "weight": 1.0
         },
     }
     
@@ -315,6 +359,18 @@ class SmartContextEngine:
             sources["positions"] = True
             sources["portfolio_risk"] = True
         
+        elif intent == QueryIntent.NEWS_CHECK:
+            sources["news"] = bool(symbols)
+            sources["quote"] = bool(symbols)  # Price context with news
+        
+        elif intent == QueryIntent.TECHNICAL_ANALYSIS:
+            sources["technicals"] = bool(symbols)
+            sources["quote"] = bool(symbols)
+        
+        elif intent == QueryIntent.GENERAL_CHAT:
+            # Minimal context for general chat
+            sources["market_indices"] = True  # Basic market awareness
+        
         # Add sub-intent sources
         for sub_intent in intent_result.sub_intents:
             sub_sources = self.get_context_sources_for_intent(
@@ -331,10 +387,18 @@ class SmartContextEngine:
         Gather only the relevant context based on detected intent.
         Returns a structured, compact context string.
         """
+        context_str, _ = await self.gather_context_with_data(intent_result, services)
+        return context_str
+    
+    async def gather_context_with_data(self, intent_result: IntentResult, services: Dict) -> Tuple[str, ContextData]:
+        """
+        Gather context and return both the string and structured data for validation.
+        """
         sources = self.get_context_sources_for_intent(intent_result)
         symbols = intent_result.symbols
         
         context_parts = []
+        context_data = ContextData()
         
         # Header with intent info (helps LLM understand focus)
         context_parts.append(f"=== QUERY FOCUS: {intent_result.primary_intent.value.upper().replace('_', ' ')} ===")
@@ -346,19 +410,21 @@ class SmartContextEngine:
         try:
             # QUOTES
             if sources["quote"] and symbols and services.get("alpaca"):
-                quotes = await self._get_quotes(symbols, services["alpaca"])
-                if quotes:
+                quotes_str, quotes_data = await self._get_quotes_with_data(symbols, services["alpaca"])
+                if quotes_str:
                     context_parts.append("=== REAL-TIME QUOTES ===")
-                    context_parts.append(quotes)
+                    context_parts.append(quotes_str)
                     context_parts.append("")
+                    context_data.quotes = quotes_data
             
             # POSITIONS
             if sources["positions"] and services.get("alpaca"):
-                positions = await self._get_positions(services["alpaca"])
-                if positions:
+                positions_str, positions_data = await self._get_positions_with_data(services["alpaca"])
+                if positions_str:
                     context_parts.append("=== YOUR POSITIONS ===")
-                    context_parts.append(positions)
+                    context_parts.append(positions_str)
                     context_parts.append("")
+                    context_data.positions = positions_data
             
             # PORTFOLIO RISK
             if sources["portfolio_risk"] and services.get("alpaca"):
@@ -378,11 +444,12 @@ class SmartContextEngine:
             
             # MARKET INDICES
             if sources["market_indices"] and services.get("alpaca"):
-                indices = await self._get_market_indices(services["alpaca"])
-                if indices:
+                indices_str, indices_data = await self._get_market_indices_with_data(services["alpaca"])
+                if indices_str:
                     context_parts.append("=== MARKET STATUS ===")
-                    context_parts.append(indices)
+                    context_parts.append(indices_str)
                     context_parts.append("")
+                    context_data.market_indices = indices_data
             
             # SCANNER ALERTS
             if sources["scanner_alerts"] and services.get("scanner"):
@@ -404,35 +471,51 @@ class SmartContextEngine:
             logger.error(f"Error gathering context: {e}")
             context_parts.append(f"[Some context unavailable: {str(e)[:50]}]")
         
-        return "\n".join(context_parts)
+        return "\n".join(context_parts), context_data
     
     async def _get_quotes(self, symbols: List[str], alpaca) -> str:
         """Get compact quote summary"""
+        quote_str, _ = await self._get_quotes_with_data(symbols, alpaca)
+        return quote_str
+    
+    async def _get_quotes_with_data(self, symbols: List[str], alpaca) -> Tuple[str, Dict]:
+        """Get compact quote summary with raw data"""
         try:
             quotes = await alpaca.get_quotes_batch(symbols)
             if not quotes:
-                return ""
+                return "", {}
             
             lines = []
+            quotes_data = {}
             for symbol, quote in quotes.items():
                 price = quote.get("price", 0)
                 change_pct = quote.get("change_percent", 0)
                 direction = "+" if change_pct >= 0 else ""
                 lines.append(f"{symbol}: ${price:.2f} ({direction}{change_pct:.2f}%)")
+                quotes_data[symbol] = {
+                    "price": price,
+                    "change_percent": change_pct
+                }
             
-            return " | ".join(lines)
+            return " | ".join(lines), quotes_data
         except Exception as e:
             logger.warning(f"Quote fetch error: {e}")
-            return ""
+            return "", {}
     
     async def _get_positions(self, alpaca) -> str:
         """Get compact positions summary"""
+        positions_str, _ = await self._get_positions_with_data(alpaca)
+        return positions_str
+    
+    async def _get_positions_with_data(self, alpaca) -> Tuple[str, List[Dict]]:
+        """Get compact positions summary with raw data"""
         try:
             positions = await alpaca.get_positions()
             if not positions:
-                return "No open positions"
+                return "No open positions", []
             
             lines = []
+            positions_data = []
             total_pnl = 0
             for pos in positions:
                 symbol = pos.get("symbol", "")
@@ -444,12 +527,66 @@ class SmartContextEngine:
                 direction = "LONG" if qty > 0 else "SHORT"
                 pnl_sign = "+" if pnl >= 0 else ""
                 lines.append(f"{symbol}: {direction} {abs(qty):.0f} | P&L: {pnl_sign}${pnl:.2f} ({pnl_sign}{pnl_pct:.1f}%)")
+                
+                positions_data.append({
+                    "symbol": symbol,
+                    "qty": qty,
+                    "unrealized_pl": pnl,
+                    "unrealized_plpc": pnl_pct,
+                    "direction": direction
+                })
             
             lines.append(f"TOTAL UNREALIZED: {'+'if total_pnl >= 0 else ''}${total_pnl:.2f}")
-            return "\n".join(lines)
+            return "\n".join(lines), positions_data
         except Exception as e:
             logger.warning(f"Positions fetch error: {e}")
-            return ""
+            return "", []
+    
+    async def _get_market_indices(self, alpaca) -> str:
+        """Get compact market overview"""
+        indices_str, _ = await self._get_market_indices_with_data(alpaca)
+        return indices_str
+    
+    async def _get_market_indices_with_data(self, alpaca) -> Tuple[str, Dict]:
+        """Get compact market overview with raw data"""
+        try:
+            indices = ["SPY", "QQQ", "IWM", "DIA"]
+            quotes = await alpaca.get_quotes_batch(indices)
+            
+            if not quotes:
+                return "", {}
+            
+            lines = []
+            indices_data = {}
+            for symbol in indices:
+                if symbol in quotes:
+                    q = quotes[symbol]
+                    price = q.get("price", 0)
+                    change = q.get("change_percent", 0)
+                    direction = "+" if change >= 0 else ""
+                    emoji = "🟢" if change >= 0 else "🔴"
+                    lines.append(f"{emoji} {symbol}: ${price:.2f} ({direction}{change:.2f}%)")
+                    indices_data[symbol] = {
+                        "price": price,
+                        "change_percent": change
+                    }
+            
+            # Determine regime
+            spy_change = quotes.get("SPY", {}).get("change_percent", 0)
+            if spy_change > 0.5:
+                regime = "BULLISH"
+            elif spy_change < -0.5:
+                regime = "BEARISH"
+            else:
+                regime = "CHOPPY/RANGE"
+            
+            lines.append(f"Regime: {regime}")
+            indices_data["regime"] = regime
+            
+            return " | ".join(lines[:4]) + f"\n{lines[-1]}", indices_data
+        except Exception as e:
+            logger.warning(f"Indices fetch error: {e}")
+            return "", {}
     
     async def _get_portfolio_risk(self, alpaca, query_symbols: List[str]) -> str:
         """Get risk warnings for current portfolio"""
@@ -514,40 +651,6 @@ class SmartContextEngine:
             logger.warning(f"Technicals fetch error: {e}")
             return ""
     
-    async def _get_market_indices(self, alpaca) -> str:
-        """Get compact market overview"""
-        try:
-            indices = ["SPY", "QQQ", "IWM", "DIA"]
-            quotes = await alpaca.get_quotes_batch(indices)
-            
-            if not quotes:
-                return ""
-            
-            lines = []
-            for symbol in indices:
-                if symbol in quotes:
-                    q = quotes[symbol]
-                    price = q.get("price", 0)
-                    change = q.get("change_percent", 0)
-                    direction = "+" if change >= 0 else ""
-                    emoji = "🟢" if change >= 0 else "🔴"
-                    lines.append(f"{emoji} {symbol}: ${price:.2f} ({direction}{change:.2f}%)")
-            
-            # Determine regime
-            spy_change = quotes.get("SPY", {}).get("change_percent", 0)
-            if spy_change > 0.5:
-                regime = "BULLISH"
-            elif spy_change < -0.5:
-                regime = "BEARISH"
-            else:
-                regime = "CHOPPY/RANGE"
-            
-            lines.append(f"Regime: {regime}")
-            return " | ".join(lines[:4]) + f"\n{lines[-1]}"
-        except Exception as e:
-            logger.warning(f"Indices fetch error: {e}")
-            return ""
-    
     def _get_scanner_alerts(self, scanner) -> str:
         """Get compact scanner alerts"""
         try:
@@ -588,10 +691,221 @@ class SmartContextEngine:
         except Exception as e:
             logger.warning(f"Bot status error: {e}")
             return ""
+    
+    def store_context_data(self, context_data: ContextData):
+        """Store context data for later validation"""
+        self._last_context_data = context_data
+    
+    def get_last_context_data(self) -> Optional[ContextData]:
+        """Get the last context data for validation"""
+        return getattr(self, '_last_context_data', None)
 
 
-# Singleton instance
+class ResponseValidator:
+    """
+    Validates AI responses against real-time data.
+    Catches hallucinations and incorrect claims before they reach the user.
+    """
+    
+    def __init__(self):
+        self.validation_errors = []
+        self.confidence_score = 1.0
+    
+    def validate_response(self, response: str, context_data: ContextData) -> Dict[str, Any]:
+        """
+        Validate AI response against known context data.
+        Returns validation result with confidence score and any issues found.
+        """
+        self.validation_errors = []
+        self.confidence_score = 1.0
+        
+        # Run all validation checks
+        self._validate_price_claims(response, context_data)
+        self._validate_position_claims(response, context_data)
+        self._validate_direction_claims(response, context_data)
+        self._validate_percentage_claims(response, context_data)
+        
+        # Calculate final confidence
+        error_penalty = len(self.validation_errors) * 0.15
+        self.confidence_score = max(0.1, 1.0 - error_penalty)
+        
+        return {
+            "validated": len(self.validation_errors) == 0,
+            "confidence": round(self.confidence_score, 2),
+            "issues": self.validation_errors,
+            "issue_count": len(self.validation_errors),
+            "recommendation": self._get_recommendation()
+        }
+    
+    def _validate_price_claims(self, response: str, context_data: ContextData):
+        """Check if price claims match real data"""
+        # Extract price mentions like "$123.45" or "123.45"
+        price_patterns = [
+            r'\$(\d+\.?\d*)',  # $123.45
+            r'(?:price|trading|at)\s*(?:of|is|at)?\s*\$?(\d+\.?\d*)',  # price of 123
+            r'(\d+\.\d{2})\s*(?:per share|/share)',  # 123.45 per share
+        ]
+        
+        for pattern in price_patterns:
+            matches = re.findall(pattern, response, re.IGNORECASE)
+            for match in matches:
+                try:
+                    claimed_price = float(match)
+                    if claimed_price < 1 or claimed_price > 10000:
+                        continue  # Skip unrealistic prices (likely percentages or other numbers)
+                    
+                    # Check against known quotes
+                    for symbol, quote_data in context_data.quotes.items():
+                        real_price = quote_data.get('price', 0)
+                        if real_price > 0:
+                            # Allow 2% tolerance for price differences
+                            tolerance = real_price * 0.02
+                            if abs(claimed_price - real_price) > tolerance:
+                                # Only flag if the claimed price is close enough to be a mistake
+                                if 0.5 < claimed_price / real_price < 2.0:
+                                    self.validation_errors.append({
+                                        "type": "price_mismatch",
+                                        "severity": "medium",
+                                        "message": f"Price claim ${claimed_price:.2f} differs from actual {symbol} price ${real_price:.2f}",
+                                        "symbol": symbol,
+                                        "claimed": claimed_price,
+                                        "actual": real_price
+                                    })
+                except (ValueError, TypeError):
+                    continue
+    
+    def _validate_position_claims(self, response: str, context_data: ContextData):
+        """Check if position claims match reality"""
+        response_lower = response.lower()
+        
+        # Get symbols user actually holds
+        held_symbols = {pos.get('symbol', '').upper() for pos in context_data.positions}
+        
+        # Check for "no position" claims
+        no_position_patterns = [
+            r"(?:don't|do not|doesn't|no|not)\s+(?:have|hold|own)\s+(?:any\s+)?(?:position|shares|stock)?\s*(?:in|of)?\s*([A-Z]{1,5})",
+            r"no\s+(?:open\s+)?position\s+(?:in|on)\s+([A-Z]{1,5})",
+        ]
+        
+        for pattern in no_position_patterns:
+            matches = re.findall(pattern, response, re.IGNORECASE)
+            for symbol in matches:
+                if symbol.upper() in held_symbols:
+                    self.validation_errors.append({
+                        "type": "position_claim_error",
+                        "severity": "high",
+                        "message": f"Incorrectly claimed no position in {symbol}, but user holds {symbol}",
+                        "symbol": symbol
+                    })
+        
+        # Check for "holding" claims
+        holding_patterns = [
+            r"(?:you|user)\s+(?:have|hold|own)\s+(?:\d+\s+)?(?:shares?\s+(?:of|in)\s+)?([A-Z]{1,5})",
+            r"(?:position|holding)\s+(?:in|of)\s+([A-Z]{1,5})",
+        ]
+        
+        for pattern in holding_patterns:
+            matches = re.findall(pattern, response, re.IGNORECASE)
+            for symbol in matches:
+                if symbol.upper() not in held_symbols and symbol.upper() not in ['SPY', 'QQQ', 'IWM', 'DIA']:
+                    # Don't flag common index references
+                    self.validation_errors.append({
+                        "type": "position_claim_error", 
+                        "severity": "medium",
+                        "message": f"Claimed user holds {symbol}, but no position found",
+                        "symbol": symbol
+                    })
+    
+    def _validate_direction_claims(self, response: str, context_data: ContextData):
+        """Check if directional claims (up/down, breaking out) are accurate"""
+        response_lower = response.lower()
+        
+        # Direction keywords with their implications
+        bullish_claims = ["breaking out", "breaking higher", "above resistance", "bullish", "rallying", "surging", "at highs"]
+        bearish_claims = ["breaking down", "below support", "bearish", "selling off", "crashing", "at lows"]
+        
+        for symbol, quote_data in context_data.quotes.items():
+            change_pct = quote_data.get('change_percent', 0)
+            symbol_lower = symbol.lower()
+            
+            # Check if symbol is mentioned with contradictory direction
+            if symbol_lower in response_lower or f"${symbol_lower}" in response_lower:
+                # Check bullish claims on negative day
+                for claim in bullish_claims:
+                    if claim in response_lower and change_pct < -1.0:
+                        self.validation_errors.append({
+                            "type": "direction_mismatch",
+                            "severity": "medium",
+                            "message": f"Claimed '{claim}' for {symbol} but it's down {change_pct:.1f}%",
+                            "symbol": symbol
+                        })
+                
+                # Check bearish claims on positive day
+                for claim in bearish_claims:
+                    if claim in response_lower and change_pct > 1.0:
+                        self.validation_errors.append({
+                            "type": "direction_mismatch",
+                            "severity": "medium", 
+                            "message": f"Claimed '{claim}' for {symbol} but it's up {change_pct:.1f}%",
+                            "symbol": symbol
+                        })
+    
+    def _validate_percentage_claims(self, response: str, context_data: ContextData):
+        """Check if percentage claims are reasonable"""
+        # Extract percentage mentions
+        pct_pattern = r'(\-?\d+\.?\d*)\s*%'
+        matches = re.findall(pct_pattern, response)
+        
+        for match in matches:
+            try:
+                claimed_pct = float(match)
+                # Flag extreme claims that seem unlikely for daily moves
+                if abs(claimed_pct) > 20 and "year" not in response.lower() and "all time" not in response.lower():
+                    self.validation_errors.append({
+                        "type": "extreme_percentage",
+                        "severity": "low",
+                        "message": f"Claimed {claimed_pct}% move - verify this is accurate",
+                        "claimed": claimed_pct
+                    })
+            except (ValueError, TypeError):
+                continue
+    
+    def _get_recommendation(self) -> str:
+        """Get recommendation based on validation results"""
+        if not self.validation_errors:
+            return "Response validated successfully"
+        
+        high_severity = sum(1 for e in self.validation_errors if e.get('severity') == 'high')
+        
+        if high_severity > 0:
+            return "WARNING: High-severity issues found - recommend re-checking response"
+        elif len(self.validation_errors) > 2:
+            return "CAUTION: Multiple issues found - response may contain inaccuracies"
+        else:
+            return "Minor issues found - response generally acceptable"
+    
+    def get_correction_prompt(self) -> Optional[str]:
+        """Generate a prompt to help correct identified issues"""
+        if not self.validation_errors:
+            return None
+        
+        corrections = []
+        for error in self.validation_errors:
+            if error['type'] == 'price_mismatch':
+                corrections.append(f"Correct {error['symbol']} price: actual is ${error['actual']:.2f}")
+            elif error['type'] == 'position_claim_error':
+                corrections.append(f"Position error for {error['symbol']}: {error['message']}")
+            elif error['type'] == 'direction_mismatch':
+                corrections.append(f"Direction error: {error['message']}")
+        
+        if corrections:
+            return "CORRECTIONS NEEDED:\n" + "\n".join(f"- {c}" for c in corrections)
+        return None
+
+
+# Singleton instances
 _smart_context_engine = None
+_response_validator = None
 
 def get_smart_context_engine() -> SmartContextEngine:
     """Get singleton instance"""
@@ -599,3 +913,10 @@ def get_smart_context_engine() -> SmartContextEngine:
     if _smart_context_engine is None:
         _smart_context_engine = SmartContextEngine()
     return _smart_context_engine
+
+def get_response_validator() -> ResponseValidator:
+    """Get singleton validator instance"""
+    global _response_validator
+    if _response_validator is None:
+        _response_validator = ResponseValidator()
+    return _response_validator
