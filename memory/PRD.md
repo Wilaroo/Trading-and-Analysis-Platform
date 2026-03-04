@@ -1156,6 +1156,9 @@ Validates AI responses against real-time data before returning to user.
 ### P1 - High Priority (Completed)
 - [x] **Smart Context Engine v2** (DONE - Mar 4, 2026)
 - [x] **Response Validation Layer** (DONE - Mar 4, 2026)
+- [x] **Phase 5: Earnings Proximity** (DONE - Mar 4, 2026)
+- [x] **Auto-regeneration on validation failure** (DONE - Mar 4, 2026)
+- [x] **Historical Accuracy Tracking** (DONE - Mar 4, 2026)
 
 ### P1 - High Priority (Remaining)
 - [ ] Perplexity Finance API Integration
@@ -1166,3 +1169,72 @@ Validates AI responses against real-time data before returning to user.
 - [ ] Fix watchlist "(0)" flicker on load
 - [ ] Remove dead code: RealtimeChart.jsx
 - [ ] CrewAI multi-agent integration (future consideration)
+
+---
+
+## Session Log - March 4, 2026 (Phase 5 + Auto-Regeneration + Accuracy Tracking)
+
+### Phase 5: Earnings Proximity Warnings (COMPLETE)
+
+**Implementation:**
+- Added `_get_earnings_proximity()` method to SmartContextEngine
+- Checks Finnhub calendar for upcoming earnings on queried symbols
+- Generates warnings based on proximity:
+  - 🚨 EARNINGS TODAY - Extreme volatility
+  - ⚠️ Within 2 days - HIGH RISK
+  - ⚠️ Within 5 days - Elevated risk
+  - 📅 Within 10 days - FYI notice
+- Also shows historical beat/miss rates
+
+**Files Modified:**
+- `backend/services/smart_context_engine.py` - Added earnings proximity check
+
+### Auto-Regeneration (COMPLETE)
+
+**Implementation:**
+- When validation finds HIGH-severity issues, automatically re-prompts the LLM
+- Includes correction prompt with accurate data
+- Max 1 retry to prevent infinite loops
+- Tracks regeneration count in validation result
+
+**Flow:**
+```
+LLM Response → Validation → High-severity issue found?
+    ↓ YES
+    Add correction prompt → Re-generate response → Re-validate
+    ↓
+    Return corrected response with regeneration_count
+```
+
+**Files Modified:**
+- `backend/services/ai_assistant_service.py` - Added regeneration loop
+
+### Historical Accuracy Tracking (COMPLETE)
+
+**New Service:** `backend/services/accuracy_tracker.py`
+
+**Features:**
+- Records every chat validation result to MongoDB
+- Tracks: intent, symbols, issues, confidence, provider, regeneration count
+- Provides accuracy statistics over time
+
+**New API Endpoints:**
+- `GET /api/assistant/accuracy-stats` - Overall accuracy statistics
+- `GET /api/assistant/accuracy-issues` - Recent validation issues
+- `GET /api/assistant/accuracy-symbol/{symbol}` - Symbol-specific accuracy
+
+**Example Statistics:**
+```json
+{
+  "total_queries": 5,
+  "validation_rate": 60.0,
+  "average_confidence": 0.76,
+  "by_intent": {"trade_decision": {"accuracy_rate": 60.0}},
+  "by_provider": {"gpt-4o": {"accuracy_rate": 60.0}}
+}
+```
+
+### Validation Improvements
+- Fixed false positive on "any" being detected as a stock symbol
+- Improved percentage validation to exclude portfolio allocation percentages
+- Tightened regex patterns to reduce false positives

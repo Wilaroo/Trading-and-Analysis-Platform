@@ -213,6 +213,67 @@ async def validate_response(request: ValidateResponseRequest):
         }
 
 
+@router.get("/accuracy-stats")
+async def get_accuracy_stats(
+    days: int = 7,
+    intent: Optional[str] = None,
+    symbol: Optional[str] = None
+):
+    """
+    Get AI accuracy statistics over time.
+    
+    Shows validation rates, common issues, and performance by intent type.
+    
+    Query params:
+    - days: Number of days to look back (default: 7)
+    - intent: Filter by intent type (e.g., "trade_decision")
+    - symbol: Filter by specific stock symbol
+    """
+    try:
+        from services.accuracy_tracker import get_accuracy_tracker
+        tracker = get_accuracy_tracker()
+        return tracker.get_accuracy_stats(days=days, intent=intent, symbol=symbol)
+    except Exception as e:
+        logger.error(f"Accuracy stats error: {e}")
+        return {"available": False, "error": str(e)}
+
+
+@router.get("/accuracy-issues")
+async def get_recent_issues(limit: int = 10):
+    """
+    Get recent validation issues for debugging.
+    
+    Shows the most recent AI responses that had validation problems.
+    Useful for identifying patterns in AI errors.
+    """
+    try:
+        from services.accuracy_tracker import get_accuracy_tracker
+        tracker = get_accuracy_tracker()
+        return {
+            "success": True,
+            "issues": tracker.get_recent_issues(limit=limit)
+        }
+    except Exception as e:
+        logger.error(f"Recent issues error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/accuracy-symbol/{symbol}")
+async def get_symbol_accuracy(symbol: str, days: int = 30):
+    """
+    Get accuracy statistics for a specific stock symbol.
+    
+    Shows how accurate the AI has been when discussing this particular stock.
+    """
+    try:
+        from services.accuracy_tracker import get_accuracy_tracker
+        tracker = get_accuracy_tracker()
+        return tracker.get_symbol_accuracy(symbol=symbol, days=days)
+    except Exception as e:
+        logger.error(f"Symbol accuracy error: {e}")
+        return {"available": False, "error": str(e)}
+
+
 @router.post("/analyze-trade")
 async def analyze_trade(request: AnalyzeTradeRequest):
     """

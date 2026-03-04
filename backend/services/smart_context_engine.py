@@ -57,6 +57,7 @@ class ContextData:
     market_indices: Dict[str, Dict] = field(default_factory=dict)
     scanner_alerts: List[Dict] = field(default_factory=list)
     bot_status: Dict = field(default_factory=dict)
+    earnings_proximity: Dict[str, Dict] = field(default_factory=dict)  # Symbol -> earnings info
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
@@ -467,6 +468,15 @@ class SmartContextEngine:
                     context_parts.append(bot)
                     context_parts.append("")
             
+            # EARNINGS PROXIMITY (for trade decisions and stock analysis)
+            if sources.get("earnings") and symbols and services.get("earnings"):
+                earnings_str, earnings_data = await self._get_earnings_proximity(symbols, services["earnings"])
+                if earnings_str:
+                    context_parts.append("=== EARNINGS WARNINGS ===")
+                    context_parts.append(earnings_str)
+                    context_parts.append("")
+                    context_data.earnings_proximity = earnings_data
+            
         except Exception as e:
             logger.error(f"Error gathering context: {e}")
             context_parts.append(f"[Some context unavailable: {str(e)[:50]}]")
@@ -692,6 +702,75 @@ class SmartContextEngine:
             logger.warning(f"Bot status error: {e}")
             return ""
     
+    async def _get_earnings_proximity(self, symbols: List[str], earnings_service) -> Tuple[str, Dict]:
+        """
+        Check if any symbols have earnings coming up soon.
+        Returns warnings and data for validation.
+        """
+        try:
+            from datetime import datetime, timedelta
+            
+            warnings = []
+            earnings_data = {}
+            
+            for symbol in symbols[:3]:  # Limit to 3 to avoid slowdown
+                try:
+                    calendar = await earnings_service.get_earnings_calendar(symbol)
+                    
+                    if calendar.get("available") and calendar.get("next_earnings"):
+                        next_earnings = calendar["next_earnings"]
+                        earnings_date_str = next_earnings.get("date")
+                        
+                        if earnings_date_str:
+                            # Parse the earnings date
+                            earnings_date = datetime.strptime(earnings_date_str, "%Y-%m-%d")
+                            today = datetime.now()
+                            days_until = (earnings_date - today).days
+                            
+                            # Store data for validation
+                            earnings_data[symbol] = {
+                                "date": earnings_date_str,
+                                "days_until": days_until,
+                                "eps_estimate": next_earnings.get("eps_estimate"),
+                                "revenue_estimate": next_earnings.get("revenue_estimate")
+                            }
+                            
+                            # Generate warnings based on proximity
+                            if days_until < 0:
+                                # Earnings already happened (might be today)
+                                if days_until >= -1:
+                                    warnings.append(f"🚨 {symbol}: EARNINGS TODAY/YESTERDAY - Extreme volatility expected!")
+                            elif days_until == 0:
+                                warnings.append(f"🚨 {symbol}: EARNINGS TODAY - Extreme volatility expected!")
+                            elif days_until <= 2:
+                                warnings.append(f"⚠️ {symbol}: Earnings in {days_until} day(s) ({earnings_date_str}) - HIGH RISK")
+                            elif days_until <= 5:
+                                warnings.append(f"⚠️ {symbol}: Earnings in {days_until} days ({earnings_date_str}) - Elevated risk")
+                            elif days_until <= 10:
+                                warnings.append(f"📅 {symbol}: Earnings in {days_until} days ({earnings_date_str})")
+                            
+                            # Add beat/miss history if available
+                            trends = calendar.get("trends", {})
+                            if trends.get("total_quarters", 0) >= 4:
+                                beat_rate = trends.get("eps_beat_rate", 0)
+                                if beat_rate >= 75:
+                                    warnings.append(f"   └ {symbol} beats {beat_rate:.0f}% of the time (historically)")
+                                elif beat_rate <= 50:
+                                    warnings.append(f"   └ {symbol} misses {100-beat_rate:.0f}% of the time (historically)")
+                                    
+                except Exception as e:
+                    logger.debug(f"Earnings check failed for {symbol}: {e}")
+                    continue
+            
+            if not warnings:
+                return "", earnings_data
+            
+            return "\n".join(warnings), earnings_data
+            
+        except Exception as e:
+            logger.warning(f"Earnings proximity check error: {e}")
+            return "", {}
+    
     def store_context_data(self, context_data: ContextData):
         """Store context data for later validation"""
         self._last_context_data = context_data
@@ -781,16 +860,21 @@ class ResponseValidator:
         # Get symbols user actually holds
         held_symbols = {pos.get('symbol', '').upper() for pos in context_data.positions}
         
+        # Common words to exclude from symbol detection
+        excluded_words = {'ANY', 'THE', 'ALL', 'FOR', 'ARE', 'YOU', 'YOUR', 'HAVE', 'HOLD', 'OWN', 
+                         'NOT', 'DON', 'STOCK', 'SHARE', 'SHARES', 'POSITION', 'POSITIONS'}
+        
         # Check for "no position" claims
         no_position_patterns = [
-            r"(?:don't|do not|doesn't|no|not)\s+(?:have|hold|own)\s+(?:any\s+)?(?:position|shares|stock)?\s*(?:in|of)?\s*([A-Z]{1,5})",
-            r"no\s+(?:open\s+)?position\s+(?:in|on)\s+([A-Z]{1,5})",
+            r"(?:don't|do not|doesn't|no|not)\s+(?:have|hold|own)\s+(?:any\s+)?(?:position|shares|stock)\s+(?:in|of)\s+([A-Z]{2,5})\b",
+            r"no\s+(?:open\s+)?position\s+(?:in|on)\s+([A-Z]{2,5})\b",
         ]
         
         for pattern in no_position_patterns:
             matches = re.findall(pattern, response, re.IGNORECASE)
             for symbol in matches:
-                if symbol.upper() in held_symbols:
+                symbol_upper = symbol.upper()
+                if symbol_upper in held_symbols and symbol_upper not in excluded_words:
                     self.validation_errors.append({
                         "type": "position_claim_error",
                         "severity": "high",
@@ -798,17 +882,20 @@ class ResponseValidator:
                         "symbol": symbol
                     })
         
-        # Check for "holding" claims
+        # Check for "holding" claims - be more specific to avoid false positives
         holding_patterns = [
-            r"(?:you|user)\s+(?:have|hold|own)\s+(?:\d+\s+)?(?:shares?\s+(?:of|in)\s+)?([A-Z]{1,5})",
-            r"(?:position|holding)\s+(?:in|of)\s+([A-Z]{1,5})",
+            r"(?:you|user)\s+(?:have|hold|own)\s+(?:\d+\s+)?shares?\s+(?:of|in)\s+([A-Z]{2,5})\b",
+            r"(?:your\s+)?position\s+(?:in|of)\s+([A-Z]{2,5})\b",
+            r"holding\s+([A-Z]{2,5})\b",
         ]
         
         for pattern in holding_patterns:
             matches = re.findall(pattern, response, re.IGNORECASE)
             for symbol in matches:
-                if symbol.upper() not in held_symbols and symbol.upper() not in ['SPY', 'QQQ', 'IWM', 'DIA']:
-                    # Don't flag common index references
+                symbol_upper = symbol.upper()
+                if (symbol_upper not in held_symbols and 
+                    symbol_upper not in excluded_words and
+                    symbol_upper not in ['SPY', 'QQQ', 'IWM', 'DIA', 'VIX']):
                     self.validation_errors.append({
                         "type": "position_claim_error", 
                         "severity": "medium",
@@ -852,6 +939,12 @@ class ResponseValidator:
     
     def _validate_percentage_claims(self, response: str, context_data: ContextData):
         """Check if percentage claims are reasonable"""
+        response_lower = response.lower()
+        
+        # Skip validation if response is discussing portfolio allocation
+        portfolio_context_words = ["portfolio", "allocation", "exposure", "position", "holdings", "weight"]
+        is_portfolio_discussion = any(word in response_lower for word in portfolio_context_words)
+        
         # Extract percentage mentions
         pct_pattern = r'(\-?\d+\.?\d*)\s*%'
         matches = re.findall(pct_pattern, response)
@@ -859,14 +952,33 @@ class ResponseValidator:
         for match in matches:
             try:
                 claimed_pct = float(match)
+                
+                # Skip if it's a portfolio allocation discussion (0-100% is normal)
+                if is_portfolio_discussion and 0 <= claimed_pct <= 100:
+                    continue
+                
+                # Skip common percentage values that are often valid
+                # (beat rates, win rates, etc.)
+                if claimed_pct in [25, 50, 75, 100]:
+                    continue
+                
                 # Flag extreme claims that seem unlikely for daily moves
-                if abs(claimed_pct) > 20 and "year" not in response.lower() and "all time" not in response.lower():
-                    self.validation_errors.append({
-                        "type": "extreme_percentage",
-                        "severity": "low",
-                        "message": f"Claimed {claimed_pct}% move - verify this is accurate",
-                        "claimed": claimed_pct
-                    })
+                # Only flag if it looks like a price/move claim, not allocation
+                if abs(claimed_pct) > 20:
+                    # Check if this is near a percentage symbol in a price context
+                    if "year" not in response_lower and "all time" not in response_lower:
+                        # Additional context check - is this near words like "up", "down", "move"?
+                        move_context = ["up", "down", "move", "gain", "loss", "change", "drop", "rise"]
+                        # Find the percentage in context
+                        pct_str = f"{claimed_pct}%"
+                        if any(f"{word} {claimed_pct}" in response_lower or 
+                               f"{claimed_pct}% {word}" in response_lower for word in move_context):
+                            self.validation_errors.append({
+                                "type": "extreme_percentage",
+                                "severity": "low",
+                                "message": f"Claimed {claimed_pct}% move - verify this is accurate",
+                                "claimed": claimed_pct
+                            })
             except (ValueError, TypeError):
                 continue
     
