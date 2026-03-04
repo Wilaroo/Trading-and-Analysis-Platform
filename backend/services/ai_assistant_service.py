@@ -26,6 +26,9 @@ from dataclasses import dataclass, field
 import json
 import re
 
+# Feature flag for smart context engine (proof of concept)
+USE_SMART_CONTEXT = os.environ.get("USE_SMART_CONTEXT", "true").lower() == "true"
+
 logger = logging.getLogger(__name__)
 
 
@@ -1068,7 +1071,22 @@ DECISION: {score_result['trade_or_skip']}
     
     async def _build_context(self, user_message: str, session_id: str) -> str:
         """Build context string with relevant knowledge and data"""
-        # Wrap context building in a timeout to prevent hanging
+        # Try smart context engine first if enabled (proof of concept)
+        if USE_SMART_CONTEXT:
+            try:
+                smart_context = await asyncio.wait_for(
+                    self._build_smart_context(user_message, session_id),
+                    timeout=15.0  # Faster timeout for smart context
+                )
+                if smart_context and len(smart_context) > 100:
+                    logger.info(f"Smart context: {len(smart_context)} chars (vs traditional ~2000)")
+                    return smart_context
+            except asyncio.TimeoutError:
+                logger.warning("Smart context timed out, falling back to traditional")
+            except Exception as e:
+                logger.warning(f"Smart context error: {e}, falling back to traditional")
+        
+        # Fall back to traditional context building
         try:
             return await asyncio.wait_for(
                 self._build_context_internal(user_message, session_id),
@@ -1077,6 +1095,76 @@ DECISION: {score_result['trade_or_skip']}
         except asyncio.TimeoutError:
             logger.warning("Context building timed out, using minimal context")
             return self._get_base_system_prompt()
+    
+    async def _build_smart_context(self, user_message: str, session_id: str) -> str:
+        """
+        Build context using smart intent detection (PROOF OF CONCEPT).
+        Fetches only relevant data based on what the user is asking.
+        """
+        try:
+            from services.smart_context_engine import get_smart_context_engine
+            
+            engine = get_smart_context_engine()
+            
+            # Detect intent
+            intent_result = engine.detect_intent(user_message)
+            logger.info(f"Detected intent: {intent_result.primary_intent.value} "
+                       f"(confidence: {intent_result.confidence:.2f}, symbols: {intent_result.symbols})")
+            
+            # Prepare services dict
+            services = {
+                "alpaca": self.alpaca_service if hasattr(self, 'alpaca_service') else None,
+                "technical": self.technical_service if hasattr(self, 'technical_service') else None,
+            }
+            
+            # Try to get scanner
+            try:
+                from services.enhanced_scanner import get_enhanced_scanner
+                services["scanner"] = get_enhanced_scanner()
+            except:
+                pass
+            
+            # Try to get bot service
+            try:
+                from services.trading_bot_service import get_trading_bot_service
+                services["bot"] = get_trading_bot_service()
+            except:
+                pass
+            
+            # Gather context based on intent
+            smart_context = await engine.gather_context(intent_result, services)
+            
+            # Add base system prompt (use class attribute)
+            base_prompt = self.SYSTEM_PROMPT
+            
+            # Combine with intent-specific instruction
+            intent_instructions = {
+                "price_check": "User wants a quick price update. Be concise - just the price and a brief note on direction.",
+                "trade_decision": "User is considering a trade. Evaluate setup quality, check their risk exposure, and give a clear recommendation.",
+                "position_review": "User wants to review their positions. Summarize P&L, highlight any concerns, suggest actions if needed.",
+                "market_overview": "User wants market context. Give a brief overview of indices, regime, and notable moves.",
+                "stock_analysis": "User wants analysis on a stock. Cover technicals, news, and any relevant setups.",
+                "scanner_alerts": "User wants to see setups. Show top alerts with win rates and priorities.",
+                "bot_status": "User is checking on the trading bot. Show status, P&L, and any open trades.",
+                "strategy_info": "User is asking about a trading strategy. Explain it clearly with entry/exit rules.",
+                "risk_check": "User wants to understand their risk. Show concentration, exposure, and any warnings.",
+                "general_chat": "General trading chat. Be helpful and offer relevant trading assistance.",
+            }
+            
+            intent_instruction = intent_instructions.get(intent_result.primary_intent.value, "")
+            
+            full_context = f"""{base_prompt}
+
+=== INTENT DETECTED ===
+{intent_instruction}
+
+{smart_context}"""
+            
+            return full_context
+            
+        except Exception as e:
+            logger.error(f"Smart context build failed: {e}")
+            raise
     
     async def _build_context_internal(self, user_message: str, session_id: str) -> str:
         """Internal context building with no timeout"""
