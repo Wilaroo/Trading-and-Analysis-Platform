@@ -15,6 +15,7 @@ import api from '../utils/api';
 import { HelpTooltip } from './HelpTooltip';
 import { formatPrice, formatPercent, formatVolume } from '../utils/tradingUtils';
 import { TickerAwareText } from '../utils/tickerUtils';
+import QuickActionsMenu from './QuickActionsMenu';
 
 const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
   const [analysis, setAnalysis] = useState(null);
@@ -618,6 +619,14 @@ const TickerDetailModal = ({ ticker, onClose, onTrade, onAskAI }) => {
 
           {/* Footer */}
           <div className="flex gap-3 p-4 border-t border-white/10">
+            {/* Quick Actions */}
+            <QuickActionsMenu 
+              symbol={ticker.symbol} 
+              hasPosition={false}
+              currentPrice={analysis?.quote?.price}
+              variant="buttons"
+              className="mr-auto"
+            />
             <button onClick={() => onTrade(ticker, 'BUY')} className="flex-1 py-2.5 text-sm font-bold bg-green-500 text-black rounded-lg hover:bg-green-400 transition-colors">Buy {ticker.symbol}</button>
             <button onClick={() => onTrade(ticker, 'SELL')} className="flex-1 py-2.5 text-sm font-bold bg-red-500 text-white rounded-lg hover:bg-red-400 transition-colors">Short {ticker.symbol}</button>
           </div>

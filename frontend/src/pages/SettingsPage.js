@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Wifi, WifiOff, RefreshCw, Check, AlertCircle, ExternalLink, Terminal } from 'lucide-react';
+import { Settings, Wifi, WifiOff, RefreshCw, Check, AlertCircle, ExternalLink, Terminal, Cpu } from 'lucide-react';
 import api from '../utils/api';
 
 export default function SettingsPage() {
@@ -7,8 +7,16 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [newOllamaUrl, setNewOllamaUrl] = useState('');
+  const [selectedModel, setSelectedModel] = useState('qwen2.5:3b');
+  const [modelSaving, setModelSaving] = useState(false);
   const [message, setMessage] = useState(null);
   const [testing, setTesting] = useState(false);
+
+  const OLLAMA_MODELS = [
+    { id: 'qwen2.5:3b', name: 'Qwen 2.5 3B', description: 'Faster responses, lower memory', speed: 'Fast' },
+    { id: 'qwen2.5:7b', name: 'Qwen 2.5 7B', description: 'Smarter responses, more detailed', speed: 'Balanced' },
+    { id: 'llama3:8b', name: 'Llama 3 8B', description: 'General purpose, good quality', speed: 'Balanced' },
+  ];
 
   const fetchConfig = async () => {
     setLoading(true);
@@ -16,6 +24,7 @@ export default function SettingsPage() {
       const res = await api.get('/api/config');
       setConfig(res.data);
       setNewOllamaUrl(res.data.ollama_url || '');
+      setSelectedModel(res.data.ollama_model || 'qwen2.5:3b');
     } catch (err) {
       console.error('Failed to fetch config:', err);
       setMessage({ type: 'error', text: 'Failed to load configuration' });
@@ -66,6 +75,20 @@ export default function SettingsPage() {
       setMessage({ type: 'error', text: 'Connection test failed - check if tunnel is running' });
     } finally {
       setTesting(false);
+    }
+  };
+
+  const handleModelChange = async (modelId) => {
+    setModelSaving(true);
+    try {
+      await api.post('/api/config/ollama-model', { model: modelId });
+      setSelectedModel(modelId);
+      setConfig(prev => ({ ...prev, ollama_model: modelId }));
+      setMessage({ type: 'success', text: `Switched to ${modelId}` });
+    } catch (err) {
+      setMessage({ type: 'error', text: 'Failed to change model' });
+    } finally {
+      setModelSaving(false);
     }
   };
 
@@ -150,6 +173,54 @@ export default function SettingsPage() {
           <p className="text-xs text-zinc-500">
             Current model: <span className="text-cyan-400 font-mono">{config?.ollama_model || 'Not set'}</span>
           </p>
+        </div>
+      </div>
+
+      {/* Ollama Model Selection */}
+      <div className="glass-panel p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <Cpu className="w-5 h-5 text-purple-400" />
+          <h2 className="text-lg font-semibold text-white">AI Model Selection</h2>
+        </div>
+        <p className="text-sm text-zinc-400">Choose the Ollama model for AI responses. Faster models use less memory but may be less detailed.</p>
+        
+        <div className="grid gap-3">
+          {OLLAMA_MODELS.map((model) => (
+            <button
+              key={model.id}
+              onClick={() => handleModelChange(model.id)}
+              disabled={modelSaving}
+              className={`p-4 rounded-lg border text-left transition-all ${
+                selectedModel === model.id
+                  ? 'bg-cyan-500/10 border-cyan-500/50 ring-1 ring-cyan-500/30'
+                  : 'bg-zinc-800/50 border-zinc-700 hover:border-zinc-600'
+              }`}
+              data-testid={`model-option-${model.id}`}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm font-semibold ${selectedModel === model.id ? 'text-cyan-400' : 'text-white'}`}>
+                      {model.name}
+                    </span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                      model.speed === 'Fast' ? 'bg-green-500/20 text-green-400' :
+                      'bg-yellow-500/20 text-yellow-400'
+                    }`}>
+                      {model.speed}
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-500 mt-1">{model.description}</p>
+                </div>
+                {selectedModel === model.id && (
+                  <Check className="w-5 h-5 text-cyan-400" />
+                )}
+                {modelSaving && selectedModel !== model.id && (
+                  <RefreshCw className="w-4 h-4 text-zinc-500 animate-spin" />
+                )}
+              </div>
+            </button>
+          ))}
         </div>
       </div>
 

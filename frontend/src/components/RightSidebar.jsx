@@ -24,6 +24,7 @@ import {
   LineChart
 } from 'lucide-react';
 import MarketIntelPanel from './MarketIntelPanel';
+import QuickActionsMenu from './QuickActionsMenu';
 import api from '../utils/api';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
@@ -448,6 +449,12 @@ const WatchlistWidget = ({ onTickerSelect, onViewChart, wsWatchlist = [] }) => {
                       {isPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                       {isPositive ? '+' : ''}{changePercent.toFixed(2)}%
                     </div>
+                    {/* Quick Actions */}
+                    <QuickActionsMenu 
+                      symbol={item.symbol} 
+                      currentPrice={quote?.price}
+                      variant="compact"
+                    />
                     {/* Chart button */}
                     <button
                       onClick={(e) => { e.stopPropagation(); onViewChart?.(item.symbol); }}
@@ -624,6 +631,12 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
                       {alert.tape_confirmation && (
                         <span className="text-[9px] text-emerald-400">✓ TAPE</span>
                       )}
+                      {/* Quick Actions */}
+                      <QuickActionsMenu 
+                        symbol={alert.symbol} 
+                        currentPrice={alert.current_price}
+                        variant="compact"
+                      />
                       {/* Chart button */}
                       <button
                         onClick={(e) => { e.stopPropagation(); onViewChart?.(alert.symbol); }}

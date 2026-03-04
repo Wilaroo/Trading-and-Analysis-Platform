@@ -113,3 +113,49 @@ async def update_ollama_url(config: OllamaConfig):
         # Still return success since runtime env was updated
     
     return {"success": True, "message": f"Ollama URL updated to {new_url}", "url": new_url}
+
+
+class OllamaModelConfig(BaseModel):
+    model: str
+
+
+@router.post("/ollama-model")
+async def update_ollama_model(config: OllamaModelConfig):
+    """Update the Ollama model at runtime."""
+    new_model = config.model.strip()
+    
+    # List of supported models
+    supported_models = ["qwen2.5:3b", "qwen2.5:7b", "llama3:8b", "deepseek-r1:8b", "mistral:7b"]
+    
+    if new_model not in supported_models:
+        # Allow it anyway but warn
+        logger.warning(f"Model {new_model} is not in standard list, proceeding anyway")
+    
+    # Update the environment variable
+    os.environ["OLLAMA_MODEL"] = new_model
+    
+    # Also update the .env file for persistence across restarts
+    env_path = "/app/backend/.env"
+    try:
+        with open(env_path, 'r') as f:
+            lines = f.readlines()
+        
+        updated = False
+        for i, line in enumerate(lines):
+            if line.startswith('OLLAMA_MODEL='):
+                lines[i] = f'OLLAMA_MODEL={new_model}\n'
+                updated = True
+                break
+        
+        if not updated:
+            lines.append(f'OLLAMA_MODEL={new_model}\n')
+        
+        with open(env_path, 'w') as f:
+            f.writelines(lines)
+        
+        logger.info(f"Updated OLLAMA_MODEL to {new_model}")
+    except Exception as e:
+        logger.error(f"Failed to update .env file: {e}")
+        # Still return success since runtime env was updated
+    
+    return {"success": True, "message": f"Ollama model updated to {new_model}", "model": new_model}
