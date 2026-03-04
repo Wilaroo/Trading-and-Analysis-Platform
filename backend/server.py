@@ -129,6 +129,10 @@ init_alpaca_router(alpaca_service)
 # Initialize quick actions router
 init_quick_actions_router(alpaca_service, db)
 
+# Initialize user viewed symbols tracker
+from services.user_viewed_tracker import init_user_viewed_tracker
+init_user_viewed_tracker(db)
+
 # Initialize predictive scanner
 predictive_scanner = get_predictive_scanner()
 init_scanner_router(predictive_scanner)
