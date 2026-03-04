@@ -1272,3 +1272,49 @@ LLM Response → Validation → High-severity issue found?
 - Popover opens with stats: ✅
 - Stats update after queries: ✅
 - Per-message confidence shown: ✅
+
+
+---
+
+## Session Update - March 4, 2026
+
+### P0-P3 Bug Fixes Completed
+
+**P0 - IB Data Pusher Endpoint Verification**
+- Status: ✅ VERIFIED
+- Endpoint `GET /api/ib/pushed-data` returns valid JSON structure
+- Returns `{connected: false, positions: [], quotes: {}, account: {}}` when local script not running
+- Ready to receive data when user runs `ib_data_pusher.py` locally
+
+**P1 - Ticker Modal Not Appearing**
+- Status: ✅ FIXED
+- Root Cause: `setSelectedTicker` was receiving a string instead of object
+- Fix: Updated `handleTickerClick` in `AICoachTab.jsx` to pass `{ symbol, quote: {}, fromClick: true }`
+- TickerDetailModal now opens correctly when clicking tickers in watchlist or chat
+
+**P2 - Watchlist "(0)" Flicker on Load**
+- Status: ✅ FIXED
+- Root Cause: Watchlist count was rendering before data loaded
+- Fix: Added `initialLoadComplete` state flag in `RightSidebar.jsx`
+- Count only shows after initial data fetch completes; spinner shown during load
+
+**P3 - Accuracy Indicator "--" on Load**
+- Status: ✅ FIXED
+- Root Cause: Accuracy indicator rendered with placeholder before data loaded
+- Fix: Added `accuracyLoading` state in `AICommandPanel.jsx`
+- Indicator hidden until fetch completes, then shows actual percentage (e.g., "80% accuracy")
+
+### Files Modified This Session
+- `frontend/src/components/tabs/AICoachTab.jsx` - Fixed ticker click handler
+- `frontend/src/components/RightSidebar.jsx` - Added initialLoadComplete flag
+- `frontend/src/components/AICommandPanel.jsx` - Added accuracyLoading state
+
+### Files Deleted This Session
+- `frontend/src/components/charts/RealtimeChart.jsx` - Dead code cleanup
+
+### Pending Tasks (Backlog)
+1. **Integrate IB Pushed Data into App Logic (P1)** - Refactor `ib_service.py` to consume data from push endpoint
+2. **Wire up Quick Actions buttons** - Implement close, add, alert actions
+3. **Ollama Model Toggle** - UI to switch between qwen2.5:3b and 7b models
+4. **Perplexity Search API Integration** - Replace Tavily for market research
+5. **CrewAI Multi-Agent System** - Advanced trading analysis
