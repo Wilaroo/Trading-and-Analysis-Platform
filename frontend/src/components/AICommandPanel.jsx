@@ -192,6 +192,16 @@ const SectionHeader = ({ icon: Icon, title, count, isExpanded, onToggle, action,
 
 const ChatMessage = ({ message, isUser, onTickerClick, onViewChart }) => {
   const mdComponents = createMarkdownComponents(onTickerClick, onViewChart);
+  const validation = message.validation;
+  
+  // Determine confidence color
+  const getConfidenceColor = (confidence) => {
+    if (!confidence) return 'text-zinc-500';
+    if (confidence >= 0.8) return 'text-emerald-400';
+    if (confidence >= 0.6) return 'text-amber-400';
+    return 'text-red-400';
+  };
+  
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
       <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
@@ -207,8 +217,21 @@ const ChatMessage = ({ message, isUser, onTickerClick, onViewChart }) => {
             <ReactMarkdown components={mdComponents}>{message.content}</ReactMarkdown>
           )}
         </div>
-        <div className="text-[10px] text-zinc-600 mt-1">
-          {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        <div className="flex items-center gap-2 mt-1">
+          <span className="text-[10px] text-zinc-600">
+            {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+          {/* Validation confidence indicator for AI messages */}
+          {!isUser && validation && (
+            <span className={`text-[9px] flex items-center gap-0.5 ${getConfidenceColor(validation.confidence)}`}
+                  title={validation.validated ? 'Response validated successfully' : `${validation.issue_count || 0} issues found`}>
+              <Shield className="w-2.5 h-2.5" />
+              {Math.round((validation.confidence || 0) * 100)}%
+              {validation.regeneration_count > 0 && (
+                <span className="text-cyan-400 ml-1">↻{validation.regeneration_count}</span>
+              )}
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -1620,6 +1643,10 @@ const AICommandPanel = ({
   const [lastCoachingFetch, setLastCoachingFetch] = useState(null);
   const [coachingLoading, setCoachingLoading] = useState(false);
   
+  // AI Accuracy Stats state
+  const [accuracyStats, setAccuracyStats] = useState(null);
+  const [showAccuracyPopover, setShowAccuracyPopover] = useState(false);
+  
   // Confirmation dialog
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, trade: null });
   const [executing, setExecuting] = useState(false);
@@ -1654,6 +1681,19 @@ const AICommandPanel = ({
       }
     } catch (err) {
       // Silent fail
+    }
+  }, []);
+  
+  // Fetch AI Accuracy Stats
+  const fetchAccuracyStats = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/assistant/accuracy-stats?days=7`);
+      const data = await res.json();
+      if (data.available) {
+        setAccuracyStats(data);
+      }
+    } catch (err) {
+      console.debug('Accuracy stats fetch failed:', err);
     }
   }, []);
   
@@ -1903,8 +1943,11 @@ const AICommandPanel = ({
         setMessages(prev => [...prev, {
           role: 'assistant',
           content: response.data.response,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          validation: response.data.validation
         }]);
+        // Refresh accuracy stats after each response
+        fetchAccuracyStats();
       }
     } catch (err) {
       toast.error('Failed to get response');
@@ -2121,6 +2164,8 @@ const AICommandPanel = ({
     if (!wsCoachingNotifications || wsCoachingNotifications.length === 0) {
       fetchCoachingAlerts();
     }
+    // Fetch accuracy stats on mount
+    fetchAccuracyStats();
     // No polling intervals - WebSocket handles real-time updates
   }, []); // Only on mount
 
@@ -2185,6 +2230,145 @@ const AICommandPanel = ({
             <h2 className="text-xs font-bold text-white">AI Trading <span className="neon-text">Assistant</span></h2>
             <p className="text-[9px] text-zinc-500 tracking-wide">Scanner • AI • Bot</p>
           </div>
+        </div>
+        
+        {/* AI Accuracy Indicator */}
+        <div className="relative">
+          <button 
+            onClick={() => {
+              fetchAccuracyStats();
+              setShowAccuracyPopover(!showAccuracyPopover);
+            }}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] transition-all hover:bg-white/5"
+            style={{
+              background: accuracyStats?.summary?.validation_rate >= 70 
+                ? 'rgba(16, 185, 129, 0.15)' 
+                : accuracyStats?.summary?.validation_rate >= 50
+                  ? 'rgba(251, 191, 36, 0.15)'
+                  : 'rgba(239, 68, 68, 0.15)',
+              border: '1px solid',
+              borderColor: accuracyStats?.summary?.validation_rate >= 70
+                ? 'rgba(16, 185, 129, 0.3)'
+                : accuracyStats?.summary?.validation_rate >= 50
+                  ? 'rgba(251, 191, 36, 0.3)'
+                  : 'rgba(239, 68, 68, 0.3)'
+            }}
+            data-testid="accuracy-indicator"
+          >
+            <Shield className="w-3 h-3" style={{
+              color: accuracyStats?.summary?.validation_rate >= 70
+                ? '#10b981'
+                : accuracyStats?.summary?.validation_rate >= 50
+                  ? '#fbbf24'
+                  : '#ef4444'
+            }} />
+            <span style={{
+              color: accuracyStats?.summary?.validation_rate >= 70
+                ? '#10b981'
+                : accuracyStats?.summary?.validation_rate >= 50
+                  ? '#fbbf24'
+                  : '#ef4444'
+            }}>
+              {accuracyStats?.summary?.validation_rate 
+                ? `${accuracyStats.summary.validation_rate}%`
+                : '--'}
+            </span>
+            <span className="text-zinc-500">accuracy</span>
+          </button>
+          
+          {/* Accuracy Popover */}
+          <AnimatePresence>
+            {showAccuracyPopover && accuracyStats && (
+              <motion.div
+                initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                transition={{ duration: 0.15 }}
+                className="absolute right-0 top-full mt-2 w-72 rounded-lg shadow-2xl overflow-hidden z-50"
+                style={{
+                  background: 'rgba(21, 28, 36, 0.98)',
+                  backdropFilter: 'blur(24px)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)'
+                }}
+              >
+                <div className="p-3 border-b border-white/10">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Shield className="w-3.5 h-3.5 text-cyan-400" />
+                      AI Accuracy Stats
+                    </h3>
+                    <span className="text-[9px] text-zinc-500">Last 7 days</span>
+                  </div>
+                  
+                  {/* Main Stats */}
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    <div className="text-center p-2 rounded-lg bg-white/5">
+                      <div className="text-lg font-bold" style={{
+                        color: accuracyStats.summary?.validation_rate >= 70 ? '#10b981' 
+                             : accuracyStats.summary?.validation_rate >= 50 ? '#fbbf24' : '#ef4444'
+                      }}>
+                        {accuracyStats.summary?.validation_rate || 0}%
+                      </div>
+                      <div className="text-[9px] text-zinc-500">Accuracy</div>
+                    </div>
+                    <div className="text-center p-2 rounded-lg bg-white/5">
+                      <div className="text-lg font-bold text-white">
+                        {accuracyStats.summary?.total_queries || 0}
+                      </div>
+                      <div className="text-[9px] text-zinc-500">Queries</div>
+                    </div>
+                    <div className="text-center p-2 rounded-lg bg-white/5">
+                      <div className="text-lg font-bold text-cyan-400">
+                        {(accuracyStats.summary?.average_confidence * 100 || 0).toFixed(0)}%
+                      </div>
+                      <div className="text-[9px] text-zinc-500">Confidence</div>
+                    </div>
+                  </div>
+                  
+                  {/* By Intent */}
+                  {accuracyStats.by_intent && Object.keys(accuracyStats.by_intent).length > 0 && (
+                    <div className="mb-2">
+                      <div className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">By Query Type</div>
+                      <div className="space-y-1">
+                        {Object.entries(accuracyStats.by_intent).slice(0, 4).map(([intent, stats]) => (
+                          <div key={intent} className="flex items-center justify-between text-[10px]">
+                            <span className="text-zinc-400 capitalize">{intent.replace('_', ' ')}</span>
+                            <span className={stats.accuracy_rate >= 70 ? 'text-emerald-400' : stats.accuracy_rate >= 50 ? 'text-amber-400' : 'text-red-400'}>
+                              {stats.accuracy_rate}% ({stats.total})
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Issue Breakdown */}
+                  {accuracyStats.issue_breakdown && Object.keys(accuracyStats.issue_breakdown).length > 0 && (
+                    <div>
+                      <div className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1">Common Issues</div>
+                      <div className="flex flex-wrap gap-1">
+                        {Object.entries(accuracyStats.issue_breakdown).slice(0, 3).map(([type, count]) => (
+                          <span key={type} className="px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 text-[9px]">
+                            {type.replace('_', ' ')}: {count}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
+                <div className="px-3 py-2 bg-black/20 text-[9px] text-zinc-500 flex items-center justify-between">
+                  <span>Auto-validated responses</span>
+                  <button 
+                    onClick={() => setShowAccuracyPopover(false)}
+                    className="text-zinc-400 hover:text-white"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
       
