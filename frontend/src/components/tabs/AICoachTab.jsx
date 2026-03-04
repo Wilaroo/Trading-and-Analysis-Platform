@@ -25,7 +25,7 @@ const AICoachTab = ({
   wsSmartWatchlist = [],
   wsCoachingNotifications = []
 }) => {
-  // Handle ticker click - updates chart and optionally opens detail modal
+  // Handle ticker click - updates chart and opens detail modal
   // Can receive either a string ticker or an object { symbol, quote, ... }
   const handleTickerClick = (tickerOrObject) => {
     const symbol = typeof tickerOrObject === 'string' 
@@ -34,7 +34,7 @@ const AICoachTab = ({
     
     if (symbol) {
       setChartSymbol(symbol); // Update chart
-      // setSelectedTicker(symbol); // Uncomment to also open modal
+      setSelectedTicker(symbol); // Open ticker detail modal
     }
   };
 
