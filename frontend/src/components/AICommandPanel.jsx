@@ -1645,6 +1645,7 @@ const AICommandPanel = ({
   
   // AI Accuracy Stats state
   const [accuracyStats, setAccuracyStats] = useState(null);
+  const [accuracyLoading, setAccuracyLoading] = useState(true); // Track loading state
   const [showAccuracyPopover, setShowAccuracyPopover] = useState(false);
   
   // Confirmation dialog
@@ -1694,6 +1695,8 @@ const AICommandPanel = ({
       }
     } catch (err) {
       console.debug('Accuracy stats fetch failed:', err);
+    } finally {
+      setAccuracyLoading(false);
     }
   }, []);
   
@@ -2232,7 +2235,8 @@ const AICommandPanel = ({
           </div>
         </div>
         
-        {/* AI Accuracy Indicator */}
+        {/* AI Accuracy Indicator - Only show after loading */}
+        {!accuracyLoading && (
         <div className="relative">
           <button 
             onClick={() => {
@@ -2271,7 +2275,7 @@ const AICommandPanel = ({
             }}>
               {accuracyStats?.summary?.validation_rate 
                 ? `${accuracyStats.summary.validation_rate}%`
-                : '--'}
+                : 'N/A'}
             </span>
             <span className="text-zinc-500">accuracy</span>
           </button>
@@ -2370,6 +2374,7 @@ const AICommandPanel = ({
             )}
           </AnimatePresence>
         </div>
+        )}
       </div>
       
       {/* Comprehensive Stats Header */}

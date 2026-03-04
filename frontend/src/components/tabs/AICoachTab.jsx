@@ -34,7 +34,8 @@ const AICoachTab = ({
     
     if (symbol) {
       setChartSymbol(symbol); // Update chart
-      setSelectedTicker(symbol); // Open ticker detail modal
+      // Pass object to setSelectedTicker for modal compatibility
+      setSelectedTicker({ symbol, quote: {}, fromClick: true });
     }
   };
 
