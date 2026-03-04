@@ -220,6 +220,7 @@ NASDAQ_EXTENDED = [
 
 # ===================== IWM CONSTITUENTS (RUSSELL 2000) =====================
 # Small caps - PRIORITY TIER 3 (rotating batches)
+# EXPANDED: ~600+ symbols for broader small-cap coverage
 IWM_SYMBOLS = [
     # Small Cap Technology (High Volume)
     "SMCI", "IONQ", "SOUN", "RGTI", "BIGC", "DUOL", "GLBE", "DOCS",
@@ -310,6 +311,91 @@ IWM_SYMBOLS = [
     "ATLO", "ATNF", "ATNI", "ATNM", "ATOM", "ATOS", "ATRA",
 ]
 
+# ===================== SECTOR-SPECIFIC EXPANSIONS =====================
+# NEW: Thematic and sector-focused lists for targeted scanning
+
+# Biotech/Pharma - High volatility potential
+BIOTECH_SYMBOLS = [
+    # Large Cap Biotech
+    "AMGN", "GILD", "BIIB", "REGN", "VRTX", "MRNA", "BNTX", "SGEN",
+    # Mid Cap Biotech
+    "ALNY", "BMRN", "SRPT", "EXEL", "NBIX", "INCY", "JAZZ", "UTHR",
+    "RARE", "HZNP", "IONS", "ICPT", "MDGL", "FOLD", "CYTK", "XENE",
+    # Small Cap / Clinical Stage
+    "CRSP", "EDIT", "NTLA", "BEAM", "VERV", "PRME", "BLUE", "SGMO",
+    "FATE", "IOVA", "ALLO", "ADAP", "KYMR", "RCKT", "IMVT", "SANA",
+    "VKTX", "TGTX", "RVMD", "PCVX", "AKRO", "APLS", "LEGN", "TVTX",
+    "IMCR", "DAWN", "DNLI", "VERU", "ARQT", "ALEC", "KRYS", "RCUS",
+    "BCYC", "GOSS", "CGEM", "AFMD", "STOK", "AUTL", "ADCT", "KALV",
+    # Biotech ETFs
+    "XBI", "IBB", "LABU", "LABD", "ARKG", "BBH", "PBE",
+]
+
+# Cannabis - High volatility, regulatory catalysts
+CANNABIS_SYMBOLS = [
+    # Major Cannabis
+    "TLRY", "CGC", "ACB", "CRON", "HEXO", "SNDL", "OGI", "VFF",
+    "CURLF", "GTBIF", "TCNNF", "TRSSF", "CRLBF", "GRWG", "AYRWF",
+    # Cannabis-Adjacent
+    "SMG", "IIPR", "GWPH", "HYFM", "CLVR",
+    # Cannabis ETFs
+    "MJ", "MSOS", "YOLO", "POTX", "THCX",
+]
+
+# Electric Vehicles / Clean Energy
+EV_CLEANTECH_SYMBOLS = [
+    # EV Manufacturers
+    "TSLA", "RIVN", "LCID", "NIO", "XPEV", "LI", "FSR", "GOEV",
+    "PSNY", "FFIE", "MULN", "RIDE", "WKHS", "NKLA", "HYLN", "ARVL",
+    # EV Infrastructure / Charging
+    "CHPT", "BLNK", "EVGO", "VLTA", "DCFC", "PTRA",
+    # Battery / Components
+    "QS", "MVST", "SLDP", "ENVX", "FREYR", "ALTM", "DCRC",
+    "ALB", "LAC", "LTHM", "PLL", "SGML", "SQM", "LIVENT",
+    # Solar / Renewables
+    "ENPH", "SEDG", "FSLR", "RUN", "NOVA", "MAXN", "ARRY",
+    "NEE", "PLUG", "BE", "FCEL", "BLDP", "BLOOM", "CLNE",
+    # Clean Tech ETFs
+    "TAN", "QCLN", "ICLN", "LIT", "DRIV", "IDRV", "KARS",
+]
+
+# Crypto-Related / Blockchain
+CRYPTO_SYMBOLS = [
+    # Crypto Exchanges / Fintech
+    "COIN", "HOOD", "SQ", "PYPL", "MARA", "RIOT", "CLSK", "BITF",
+    "HUT", "HIVE", "BTBT", "CAN", "GREE", "CIFR", "IREN", "WULF",
+    # Blockchain / Web3
+    "MSTR", "GLXY", "ARBK", "SI", "BKKT", "BTCM", "BTCS", "DGHI",
+    # Bitcoin Miners / Infrastructure
+    "CORZ", "APLD", "SDIG", "EBON", "SOS", "NCTY",
+    # Crypto ETFs / Trusts
+    "IBIT", "FBTC", "GBTC", "ETHE", "ARKB", "BITO", "BTF", "BITI",
+]
+
+# Quantum Computing / AI Infrastructure
+QUANTUM_AI_SYMBOLS = [
+    # Quantum Computing
+    "IONQ", "RGTI", "QUBT", "QBTS", "ARQQ",
+    # AI Infrastructure / Chips
+    "NVDA", "AMD", "INTC", "AVGO", "MRVL", "ANET", "SMCI", "DELL",
+    # AI Software / Services
+    "PLTR", "AI", "SOUN", "BBAI", "PRCT", "PATH", "SNOW", "MDB",
+    "ESTC", "DDOG", "CFLT", "NET", "CRWD", "ZS",
+    # Robotics / Automation
+    "IRBT", "ISRG", "NNDM", "MKFG", "RKLB", "LUNR", "RDW",
+]
+
+# SPACs and Recent IPOs (High volatility)
+SPAC_IPO_SYMBOLS = [
+    # Active SPACs
+    "DWAC", "PSNY", "GOEV", "MVST", "DNA", "JOBY", "LILM", "EVTL",
+    "RKLB", "ASTR", "SPIR", "ASTS", "LUNR", "RDW", "VORB", "MNTS",
+    # Recent High-Profile IPOs (2024-2026)
+    "ARM", "CART", "BIRK", "ONON", "KVYO", "SOUN", "RDDT",
+    "ASPR", "DUOL", "RBLX", "COIN", "HOOD", "RIVN", "LCID",
+]
+
+
 # ===================== KEY ETFs (Always Scanned) =====================
 ETF_SYMBOLS = [
     # Major Index ETFs
@@ -329,6 +415,9 @@ ETF_SYMBOLS = [
     
     # Commodities
     "GLD", "SLV", "USO", "GDX",
+    
+    # Sector-Specific ETFs (NEW)
+    "XBI", "IBB", "TAN", "QCLN", "LIT", "MJ", "MSOS", "IBIT", "BITO",
 ]
 
 
@@ -384,23 +473,69 @@ def get_tier2_symbols() -> tuple:
 @lru_cache(maxsize=1)
 def get_tier3_symbols() -> tuple:
     """
-    Get Tier 3 symbols (IWM only, excluding those in Tier 1 & 2) - CACHED
+    Get Tier 3 symbols (IWM + Sector Expansions, excluding Tier 1 & 2) - CACHED
     These are scanned in rotating batches
     """
     tier1 = set(get_tier1_symbols())
     tier2 = set(NASDAQ_EXTENDED)
-    tier3 = set(IWM_SYMBOLS) - tier1 - tier2
+    
+    # Combine IWM with sector expansions
+    tier3_base = set(IWM_SYMBOLS)
+    tier3_base.update(BIOTECH_SYMBOLS)
+    tier3_base.update(CANNABIS_SYMBOLS)
+    tier3_base.update(EV_CLEANTECH_SYMBOLS)
+    tier3_base.update(CRYPTO_SYMBOLS)
+    tier3_base.update(QUANTUM_AI_SYMBOLS)
+    tier3_base.update(SPAC_IPO_SYMBOLS)
+    
+    # Remove symbols already in Tier 1 & 2
+    tier3 = tier3_base - tier1 - tier2
     return tuple(tier3)
 
 @lru_cache(maxsize=1)
+def get_sector_symbols(sector: str) -> tuple:
+    """Get symbols for a specific sector"""
+    sector_map = {
+        "biotech": BIOTECH_SYMBOLS,
+        "cannabis": CANNABIS_SYMBOLS,
+        "ev": EV_CLEANTECH_SYMBOLS,
+        "cleantech": EV_CLEANTECH_SYMBOLS,
+        "crypto": CRYPTO_SYMBOLS,
+        "quantum": QUANTUM_AI_SYMBOLS,
+        "ai": QUANTUM_AI_SYMBOLS,
+        "spac": SPAC_IPO_SYMBOLS,
+        "ipo": SPAC_IPO_SYMBOLS,
+    }
+    return tuple(set(sector_map.get(sector.lower(), [])))
+
+@lru_cache(maxsize=1)
+def get_all_sector_symbols() -> tuple:
+    """Get all sector-specific symbols combined"""
+    all_sector = set()
+    all_sector.update(BIOTECH_SYMBOLS)
+    all_sector.update(CANNABIS_SYMBOLS)
+    all_sector.update(EV_CLEANTECH_SYMBOLS)
+    all_sector.update(CRYPTO_SYMBOLS)
+    all_sector.update(QUANTUM_AI_SYMBOLS)
+    all_sector.update(SPAC_IPO_SYMBOLS)
+    return tuple(all_sector)
+
+@lru_cache(maxsize=1)
 def get_all_symbols() -> tuple:
-    """Get all unique symbols across all tiers - CACHED"""
+    """Get all unique symbols across all tiers including sector expansions - CACHED"""
     all_syms = set()
     all_syms.update(SPY_SYMBOLS)
     all_syms.update(QQQ_SYMBOLS)
     all_syms.update(NASDAQ_EXTENDED)
     all_syms.update(IWM_SYMBOLS)
     all_syms.update(ETF_SYMBOLS)
+    # Add sector expansions
+    all_syms.update(BIOTECH_SYMBOLS)
+    all_syms.update(CANNABIS_SYMBOLS)
+    all_syms.update(EV_CLEANTECH_SYMBOLS)
+    all_syms.update(CRYPTO_SYMBOLS)
+    all_syms.update(QUANTUM_AI_SYMBOLS)
+    all_syms.update(SPAC_IPO_SYMBOLS)
     return tuple(all_syms)
 
 @lru_cache(maxsize=1)
@@ -412,6 +547,13 @@ def get_all_symbols_set() -> frozenset:
     all_syms.update(NASDAQ_EXTENDED)
     all_syms.update(IWM_SYMBOLS)
     all_syms.update(ETF_SYMBOLS)
+    # Add sector expansions
+    all_syms.update(BIOTECH_SYMBOLS)
+    all_syms.update(CANNABIS_SYMBOLS)
+    all_syms.update(EV_CLEANTECH_SYMBOLS)
+    all_syms.update(CRYPTO_SYMBOLS)
+    all_syms.update(QUANTUM_AI_SYMBOLS)
+    all_syms.update(SPAC_IPO_SYMBOLS)
     return frozenset(all_syms)
 
 def is_valid_symbol(symbol: str) -> bool:
@@ -427,9 +569,22 @@ def get_universe_stats() -> Dict:
     iwm = set(IWM_SYMBOLS)
     etfs = set(ETF_SYMBOLS)
     
+    # Sector expansions
+    biotech = set(BIOTECH_SYMBOLS)
+    cannabis = set(CANNABIS_SYMBOLS)
+    ev = set(EV_CLEANTECH_SYMBOLS)
+    crypto = set(CRYPTO_SYMBOLS)
+    quantum_ai = set(QUANTUM_AI_SYMBOLS)
+    spac_ipo = set(SPAC_IPO_SYMBOLS)
+    
     tier1 = spy | qqq | etfs
     tier2 = nasdaq_ext - tier1
-    tier3 = iwm - tier1 - nasdaq_ext
+    
+    # Tier 3 includes IWM + all sector expansions
+    tier3_base = iwm | biotech | cannabis | ev | crypto | quantum_ai | spac_ipo
+    tier3 = tier3_base - tier1 - nasdaq_ext
+    
+    all_symbols = spy | qqq | nasdaq_ext | iwm | etfs | biotech | cannabis | ev | crypto | quantum_ai | spac_ipo
     
     return {
         "spy_count": len(spy),
@@ -437,10 +592,18 @@ def get_universe_stats() -> Dict:
         "nasdaq_extended_count": len(nasdaq_ext),
         "iwm_count": len(iwm),
         "etf_count": len(etfs),
+        "sector_expansions": {
+            "biotech": len(biotech),
+            "cannabis": len(cannabis),
+            "ev_cleantech": len(ev),
+            "crypto": len(crypto),
+            "quantum_ai": len(quantum_ai),
+            "spac_ipo": len(spac_ipo),
+        },
         "tier1_count": len(tier1),
         "tier2_count": len(tier2),
         "tier3_count": len(tier3),
-        "total_unique": len(spy | qqq | nasdaq_ext | iwm | etfs),
+        "total_unique": len(all_symbols),
         "overlap_spy_qqq": len(spy & qqq),
         "metadata": UNIVERSE_METADATA
     }

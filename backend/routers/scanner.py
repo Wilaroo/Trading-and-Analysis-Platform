@@ -347,3 +347,42 @@ async def get_ai_context():
         "context": context,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
+
+
+
+@router.get("/universe-stats")
+async def get_universe_stats():
+    """
+    Get statistics about the scanner symbol universe.
+    Shows total symbols being scanned across all tiers.
+    """
+    from data.index_symbols import get_universe_stats as get_stats
+    from services.user_viewed_tracker import get_view_stats, get_viewed_symbols
+    
+    try:
+        universe_stats = get_stats()
+        
+        # Add viewed symbols stats
+        viewed_stats = get_view_stats()
+        viewed_symbols = get_viewed_symbols(max_count=100)
+        
+        return {
+            "success": True,
+            "universe": universe_stats,
+            "user_viewed": {
+                "count": len(viewed_symbols),
+                "symbols": viewed_symbols[:20],  # Top 20 for display
+                "stats": viewed_stats
+            },
+            "summary": {
+                "tier1": f"~{universe_stats['tier1_count']} (SPY + QQQ + ETFs + Watchlist + Viewed)",
+                "tier2": f"~{universe_stats['tier2_count']} (NASDAQ Extended)",
+                "tier3": f"~{universe_stats['tier3_count']} (Russell 2000 + Sectors)",
+                "total_unique": universe_stats['total_unique'],
+                "sectors_included": list(universe_stats.get('sector_expansions', {}).keys())
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting universe stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

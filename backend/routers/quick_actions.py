@@ -107,6 +107,13 @@ async def add_to_watchlist(request: AddToWatchlistRequest):
     
     symbol = request.symbol.upper()
     
+    # Also track as viewed symbol for Tier 1 scanning
+    try:
+        from services.user_viewed_tracker import track_symbol_view
+        track_symbol_view(symbol, source="watchlist_add")
+    except Exception:
+        pass  # Non-blocking
+    
     try:
         # Check if already in watchlist
         existing = _db["smart_watchlist"].find_one({"symbol": symbol})

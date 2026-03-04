@@ -8,6 +8,7 @@ Features:
 - Dynamic context source selection
 - Structured output formatting
 - Response validation hooks
+- Automatic symbol tracking for personalized scanning
 """
 import re
 import logging
@@ -17,6 +18,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
+
+# Import user viewed tracker for symbol tracking
+try:
+    from services.user_viewed_tracker import track_multiple_symbols
+except ImportError:
+    track_multiple_symbols = None  # Graceful fallback
 
 
 class QueryIntent(Enum):
@@ -275,7 +282,7 @@ class SmartContextEngine:
         )
     
     def _extract_symbols(self, message: str) -> List[str]:
-        """Extract stock symbols from message"""
+        """Extract stock symbols from message and track them for personalized scanning"""
         symbols = set()
         
         # Pattern 1: $SYMBOL format
@@ -289,7 +296,17 @@ class SmartContextEngine:
             if clean_word in self.KNOWN_SYMBOLS and clean_word not in self.EXCLUDED_WORDS:
                 symbols.add(clean_word)
         
-        return list(symbols)
+        symbol_list = list(symbols)
+        
+        # Track symbols for personalized scanning (adds to Tier 1)
+        if symbol_list and track_multiple_symbols:
+            try:
+                track_multiple_symbols(symbol_list, source="ai_chat")
+                logger.debug(f"Tracked {len(symbol_list)} symbols from AI chat: {symbol_list}")
+            except Exception as e:
+                logger.debug(f"Symbol tracking failed: {e}")
+        
+        return symbol_list
     
     def get_context_sources_for_intent(self, intent_result: IntentResult) -> Dict[str, bool]:
         """

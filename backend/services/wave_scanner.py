@@ -3,7 +3,7 @@ Wave-Based Scanner
 Tiered scanning system for large symbol universes
 
 Tier Structure:
-- Tier 1: User Watchlist (always scanned every cycle)
+- Tier 1: User Watchlist + Recently Viewed (always scanned every cycle)
 - Tier 2: High RVOL filtered symbols (~200, scanned every cycle)
 - Tier 3: Full universe in rotating waves (200 per cycle)
 
@@ -20,6 +20,7 @@ import logging
 from services.smart_watchlist_service import get_smart_watchlist, SmartWatchlistService
 from services.index_universe import get_index_universe, IndexUniverseManager
 from services.alpaca_service import get_alpaca_service
+from services.user_viewed_tracker import get_viewed_symbols, get_viewed_symbols_set
 
 logger = logging.getLogger(__name__)
 
@@ -66,15 +67,25 @@ class WaveScanner:
         
         Returns:
             {
-                "tier1_watchlist": [...],  # User watchlist (always included)
+                "tier1_watchlist": [...],  # User watchlist + recently viewed (always included)
                 "tier2_high_rvol": [...],  # High RVOL symbols
                 "tier3_wave": [...],       # Current wave from full universe
                 "wave_number": int,
                 "total_symbols": int
             }
         """
-        # Tier 1: User Watchlist (always scan)
-        tier1 = self._watchlist.get_symbols()
+        # Tier 1: User Watchlist + Recently Viewed (always scan)
+        tier1 = list(self._watchlist.get_symbols())
+        
+        # Add recently viewed symbols to Tier 1 (max 50 to avoid bloat)
+        try:
+            viewed = get_viewed_symbols(max_count=50)
+            tier1.extend(viewed)
+            # Dedupe while preserving order
+            seen = set()
+            tier1 = [s for s in tier1 if not (s in seen or seen.add(s))]
+        except Exception as e:
+            logger.debug(f"Could not load viewed symbols: {e}")
         
         # Tier 2: High RVOL pool (refresh periodically)
         await self._refresh_rvol_pool_if_needed()
