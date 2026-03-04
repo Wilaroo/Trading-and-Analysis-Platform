@@ -62,6 +62,57 @@ async def check_ollama():
     except Exception as e:
         return {"available": False, "error": str(e)}
 
+
+class IntentDetectRequest(BaseModel):
+    message: str = Field(..., description="User message to analyze")
+
+
+@router.post("/detect-intent")
+async def detect_intent(request: IntentDetectRequest):
+    """
+    PROOF OF CONCEPT: Detect intent from user message.
+    Shows what context sources would be fetched for a given query.
+    
+    This demonstrates the smart context engine without making a full chat request.
+    """
+    try:
+        from services.smart_context_engine import get_smart_context_engine
+        
+        engine = get_smart_context_engine()
+        result = engine.detect_intent(request.message)
+        sources = engine.get_context_sources_for_intent(result)
+        
+        # Count active sources
+        active_sources = [k for k, v in sources.items() if v]
+        
+        return {
+            "success": True,
+            "message": request.message,
+            "intent": {
+                "primary": result.primary_intent.value,
+                "confidence": round(result.confidence, 2),
+                "symbols_detected": result.symbols,
+                "sub_intents": [i.value for i in result.sub_intents],
+                "keywords_matched": result.keywords_matched[:5]  # Top 5
+            },
+            "context_sources": {
+                "will_fetch": active_sources,
+                "will_skip": [k for k, v in sources.items() if not v],
+                "efficiency": f"{len(active_sources)}/{len(sources)} sources ({round(len(active_sources)/len(sources)*100)}%)"
+            },
+            "comparison": {
+                "traditional": "Fetches ALL sources (~2000 chars)",
+                "smart": f"Fetches {len(active_sources)} sources (~{len(active_sources) * 150} chars estimated)",
+                "reduction": f"~{round((1 - len(active_sources)/len(sources)) * 100)}% less context"
+            }
+        }
+    except Exception as e:
+        logger.error(f"Intent detection error: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
 @router.post("/chat")
 async def chat(request: ChatRequest):
     """
