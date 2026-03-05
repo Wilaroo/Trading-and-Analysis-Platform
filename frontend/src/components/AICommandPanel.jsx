@@ -172,6 +172,168 @@ const createMarkdownComponents = (onTickerClick, onViewChart) => ({
 
 // ===================== UI COMPONENTS =====================
 
+// Audio alert for trade opportunities
+const playTradeAlert = () => {
+  try {
+    // Create a simple beep using Web Audio API
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    oscillator.frequency.value = 880; // A5 note
+    oscillator.type = 'sine';
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+    
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 0.3);
+    
+    // Second beep
+    setTimeout(() => {
+      const osc2 = audioContext.createOscillator();
+      const gain2 = audioContext.createGain();
+      osc2.connect(gain2);
+      gain2.connect(audioContext.destination);
+      osc2.frequency.value = 1100; // C6 note
+      osc2.type = 'sine';
+      gain2.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gain2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+      osc2.start(audioContext.currentTime);
+      osc2.stop(audioContext.currentTime + 0.3);
+    }, 150);
+  } catch (e) {
+    console.debug('Audio alert failed:', e);
+  }
+};
+
+// Trade Alert Message Component - appears in chat with distinct styling
+const TradeAlertMessage = ({ alert, onExecute, onPass, onTickerClick, onViewChart, executing }) => {
+  const isPending = !alert.executed && !alert.passed;
+  const direction = alert.direction || 'LONG';
+  const isLong = direction.toUpperCase() === 'LONG';
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.95, y: 10 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      className="relative"
+    >
+      {/* Glowing border effect */}
+      <div className={`absolute inset-0 rounded-xl ${
+        isLong ? 'bg-emerald-500/20' : 'bg-red-500/20'
+      } blur-sm`} />
+      
+      <div className={`relative p-4 rounded-xl border-2 ${
+        isLong 
+          ? 'bg-gradient-to-br from-emerald-900/40 to-emerald-950/60 border-emerald-500/50' 
+          : 'bg-gradient-to-br from-red-900/40 to-red-950/60 border-red-500/50'
+      }`}>
+        {/* Header with Alert Badge */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div className={`px-2 py-1 rounded-md text-xs font-bold uppercase ${
+              isLong ? 'bg-emerald-500 text-black' : 'bg-red-500 text-white'
+            }`}>
+              <Zap className="w-3 h-3 inline mr-1" />
+              {direction} ALERT
+            </div>
+            <button
+              onClick={() => onTickerClick?.(alert.symbol)}
+              className="px-2 py-1 bg-white/10 rounded text-sm font-bold text-white hover:bg-white/20 transition-colors"
+            >
+              {alert.symbol}
+            </button>
+          </div>
+          <span className="text-[10px] text-zinc-500">
+            {new Date(alert.timestamp).toLocaleTimeString()}
+          </span>
+        </div>
+        
+        {/* Strategy & Reasoning */}
+        <div className="mb-3">
+          <p className="text-sm font-semibold text-white mb-1">{alert.strategy || 'Trade Opportunity'}</p>
+          <p className="text-xs text-zinc-300">{alert.reasoning || alert.description}</p>
+        </div>
+        
+        {/* Key Levels */}
+        <div className="grid grid-cols-3 gap-2 mb-3 text-center">
+          <div className="bg-black/30 rounded-lg p-2">
+            <p className="text-[9px] text-zinc-500 uppercase">Entry</p>
+            <p className="text-sm font-bold text-white">${alert.entry?.toFixed(2) || '--'}</p>
+          </div>
+          <div className="bg-black/30 rounded-lg p-2">
+            <p className="text-[9px] text-zinc-500 uppercase">Target</p>
+            <p className="text-sm font-bold text-emerald-400">${alert.target?.toFixed(2) || '--'}</p>
+          </div>
+          <div className="bg-black/30 rounded-lg p-2">
+            <p className="text-[9px] text-zinc-500 uppercase">Stop</p>
+            <p className="text-sm font-bold text-red-400">${alert.stop?.toFixed(2) || '--'}</p>
+          </div>
+        </div>
+        
+        {/* Confidence & R/R */}
+        {(alert.confidence || alert.risk_reward) && (
+          <div className="flex items-center gap-3 mb-3 text-xs">
+            {alert.confidence && (
+              <span className="text-zinc-400">
+                Confidence: <span className="text-cyan-400 font-semibold">{alert.confidence}%</span>
+              </span>
+            )}
+            {alert.risk_reward && (
+              <span className="text-zinc-400">
+                R/R: <span className="text-amber-400 font-semibold">{alert.risk_reward}</span>
+              </span>
+            )}
+          </div>
+        )}
+        
+        {/* Action Buttons */}
+        {isPending && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => onExecute?.(alert)}
+              disabled={executing}
+              className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
+                isLong 
+                  ? 'bg-emerald-500 text-black hover:bg-emerald-400' 
+                  : 'bg-red-500 text-white hover:bg-red-400'
+              } disabled:opacity-50`}
+            >
+              {executing ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : `Execute ${direction}`}
+            </button>
+            <button
+              onClick={() => onPass?.(alert)}
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
+            >
+              Pass
+            </button>
+            <button
+              onClick={() => onViewChart?.(alert.symbol)}
+              className="px-3 py-2 rounded-lg text-sm bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors"
+            >
+              <LineChart className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+        
+        {/* Executed/Passed Status */}
+        {!isPending && (
+          <div className={`text-center py-2 rounded-lg text-sm font-medium ${
+            alert.executed 
+              ? 'bg-emerald-500/20 text-emerald-400' 
+              : 'bg-zinc-700/50 text-zinc-400'
+          }`}>
+            {alert.executed ? '✓ Executed' : '○ Passed'}
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+};
+
 const SectionHeader = ({ icon: Icon, title, count, isExpanded, onToggle, action, compact = false }) => (
   <div 
     className={`flex items-center justify-between ${compact ? 'py-1.5 px-2' : 'py-2 px-3'} bg-zinc-900/50 rounded-lg cursor-pointer hover:bg-zinc-800/50 transition-colors`}
@@ -1655,6 +1817,39 @@ const AICommandPanel = ({
   
   const chatMinHeight = getChatMinHeight();
 
+  // Track seen trade alerts to avoid duplicate audio
+  const seenAlertIds = useRef(new Set());
+  
+  // Inject trade alerts into chat messages with audio alerts
+  useEffect(() => {
+    const activeAlerts = coachingAlerts.filter(a => !dismissedAlerts.has(a.timestamp));
+    
+    // Check for new alerts and play audio
+    activeAlerts.forEach(alert => {
+      const alertId = alert.timestamp || alert.id;
+      if (!seenAlertIds.current.has(alertId)) {
+        seenAlertIds.current.add(alertId);
+        // Play audio for new alerts
+        playTradeAlert();
+        
+        // Add as a special message in chat
+        setMessages(prev => {
+          // Check if this alert is already in messages
+          const exists = prev.some(m => m.type === 'trade_alert' && m.alertId === alertId);
+          if (exists) return prev;
+          
+          return [...prev, {
+            role: 'system',
+            type: 'trade_alert',
+            alertId,
+            alert,
+            timestamp: new Date().toISOString()
+          }];
+        });
+      }
+    });
+  }, [coachingAlerts, dismissedAlerts]);
+
   // Toggle section
   const toggleSection = (section) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
@@ -2433,7 +2628,19 @@ const AICommandPanel = ({
             ) : (
               <>
                 {messages.map((msg, idx) => (
-                  <ChatMessage key={idx} message={msg} isUser={msg.role === 'user'} onTickerClick={handleTickerClick} onViewChart={onViewChart} />
+                  msg.type === 'trade_alert' ? (
+                    <TradeAlertMessage 
+                      key={msg.alertId || idx}
+                      alert={msg.alert}
+                      onExecute={(a) => executeFromAlert(a, false)}
+                      onPass={passOnAlert}
+                      onTickerClick={handleTickerClick}
+                      onViewChart={onViewChart}
+                      executing={executing}
+                    />
+                  ) : (
+                    <ChatMessage key={idx} message={msg} isUser={msg.role === 'user'} onTickerClick={handleTickerClick} onViewChart={onViewChart} />
+                  )
                 ))}
                 {isLoading && (
                   <div className="flex items-center gap-3 text-zinc-400">
@@ -2486,24 +2693,9 @@ const AICommandPanel = ({
 
         {/* BOTTOM: Trade Pipeline + Chart Side by Side */}
         <div className="flex-1 flex overflow-hidden">
-          {/* LEFT: Trade Pipeline + Portfolio Insights */}
+          {/* LEFT: Portfolio Insights + Positions */}
           <div className="w-[45%] overflow-y-auto border-r border-white/5 bg-black/20">
             <div className="p-3">
-              <TradePipelineWidget
-                opportunities={activeCoachingAlerts}
-                botTrades={botTrades}
-                onExecute={(a) => executeFromAlert(a, false)}
-                onPass={passOnAlert}
-                onTickerClick={handleTickerClick}
-                onViewChart={onViewChart}
-                executing={executing}
-                onRefresh={fetchCoachingAlerts}
-                loading={coachingLoading}
-                onConfirmTrade={handleConfirmPendingTrade}
-                onRejectTrade={handleRejectPendingTrade}
-                onCloseTrade={handleCloseBotTrade}
-              />
-              
               {/* Portfolio Insights Widget */}
               <PortfolioInsightsWidget 
                 onTickerClick={handleTickerClick}
