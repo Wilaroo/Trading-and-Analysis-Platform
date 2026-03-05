@@ -1533,10 +1533,10 @@ Each card now shows:
 - No critical issues remaining
 
 #### P1 - High Priority
+- [x] IB Data Pusher integrated into StartTrading.bat (auto-download, auto-install deps, connection verification)
 - [ ] Quick Actions Integration in Chat (Buy, Sell, Alert buttons in chat messages)
-- [ ] IB Pushed Data Integration (BLOCKED - user must run local script)
+- [ ] IB Pushed Data Integration end-to-end verification (user must run pusher)
 - [ ] Perplexity Search API integration
-- [ ] Earnings Calendar heat indicator (color-code weeks by density) - user approved for future
 
 #### P2 - Future
 - [ ] CrewAI multi-agent system
