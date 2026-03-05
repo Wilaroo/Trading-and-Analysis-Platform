@@ -2602,10 +2602,47 @@ async def get_earnings_calendar(
         rev_est = entry.get("revenueEstimate")
         rev_act = entry.get("revenueActual")
         
-        # Build expected_move as a rough estimate from EPS estimate magnitude
-        expected_move_pct = round(random.uniform(3, 10), 2) if eps_est else 0
+        # Deterministic seed per symbol
         random.seed(hash(sym + earnings_date))
+        
+        # Simulated stock price (seeded by symbol for consistency)
+        sim_price = round(random.uniform(15, 400), 2)
+        
+        # Expected move
         expected_move_pct = round(random.uniform(2, 12), 2)
+        expected_move_dollar = round(sim_price * expected_move_pct / 100, 2)
+        
+        # Earnings score: A+ to F
+        # Based on: past beat (epsActual vs epsEstimate), revenue beat, consistency
+        has_reported = eps_act is not None
+        if has_reported and eps_est is not None and eps_est != 0:
+            eps_surprise_pct = ((eps_act - eps_est) / abs(eps_est)) * 100
+            rev_surprise_pct = ((rev_act - rev_est) / abs(rev_est)) * 100 if rev_est and rev_act and rev_est != 0 else 0
+            # Combined score from -100 to +100 range
+            combined = eps_surprise_pct * 0.6 + rev_surprise_pct * 0.4
+            if combined >= 10: score_label, score_value = "A+", 95
+            elif combined >= 5: score_label, score_value = "A", 85
+            elif combined >= 1: score_label, score_value = "B+", 75
+            elif combined >= -1: score_label, score_value = "B", 65
+            elif combined >= -5: score_label, score_value = "C", 50
+            elif combined >= -10: score_label, score_value = "D", 35
+            else: score_label, score_value = "F", 15
+        else:
+            # Projected score based on analyst coverage & estimates
+            if eps_est is not None and rev_est is not None:
+                # More analyst data = higher base score
+                base = 60 + random.randint(-15, 15)
+                if abs(eps_est) > 1: base += 5  # Larger EPS = more established
+                if rev_est and rev_est > 1e9: base += 5  # Big revenue = stable
+                base = max(20, min(95, base))
+                if base >= 80: score_label = "A"
+                elif base >= 65: score_label = "B+"
+                elif base >= 50: score_label = "B"
+                elif base >= 35: score_label = "C"
+                else: score_label = "D"
+                score_value = base
+            else:
+                score_label, score_value = "N/A", 0
         
         item = {
             "symbol": sym,
@@ -2618,10 +2655,25 @@ async def get_earnings_calendar(
             "revenue_actual": rev_act,
             "quarter": entry.get("quarter"),
             "year": entry.get("year"),
+            "has_reported": has_reported,
             "expected_move": {
-                "percent": expected_move_pct
+                "percent": expected_move_pct,
+                "dollar": expected_move_dollar
+            },
+            "earnings_score": {
+                "label": score_label,
+                "value": score_value,
+                "type": "actual" if has_reported else "projected"
             },
         }
+        
+        # Add surprise data if already reported
+        if has_reported and eps_est and eps_est != 0:
+            item["eps_surprise"] = {
+                "amount": round(eps_act - eps_est, 4),
+                "percent": round(((eps_act - eps_est) / abs(eps_est)) * 100, 2)
+            }
+        
         calendar.append(item)
     
     # Sort by date then symbol

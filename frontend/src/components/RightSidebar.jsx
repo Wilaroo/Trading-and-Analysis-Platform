@@ -96,14 +96,24 @@ const EarningsWidget = ({ onTickerSelect }) => {
     return Math.max(max, d?.count || 0);
   }, 0);
 
-  // Heat color based on density
-  const getHeatColor = (count) => {
-    if (!count || count === 0) return { bg: 'bg-zinc-800/30', text: 'text-zinc-600', border: 'border-zinc-700/30' };
+  // Heat color based on density — returns inline styles for gradient columns
+  const getHeatStyle = (count) => {
+    if (!count || count === 0) return { bg: 'rgba(39,39,42,0.2)', border: 'rgba(63,63,70,0.3)', text: 'text-zinc-600' };
     const ratio = maxCount > 0 ? count / maxCount : 0;
-    if (ratio >= 0.8) return { bg: 'bg-red-500/15', text: 'text-red-400', border: 'border-red-500/40', glow: 'shadow-[0_0_8px_rgba(239,68,68,0.15)]' };
-    if (ratio >= 0.5) return { bg: 'bg-orange-500/12', text: 'text-orange-400', border: 'border-orange-500/30' };
-    if (ratio >= 0.25) return { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/25' };
-    return { bg: 'bg-emerald-500/8', text: 'text-emerald-400', border: 'border-emerald-500/20' };
+    if (ratio >= 0.8) return { bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.4)', text: 'text-red-400', grad: 'from-red-500/15 to-red-900/5' };
+    if (ratio >= 0.5) return { bg: 'rgba(249,115,22,0.10)', border: 'rgba(249,115,22,0.35)', text: 'text-orange-400', grad: 'from-orange-500/12 to-orange-900/5' };
+    if (ratio >= 0.25) return { bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.25)', text: 'text-amber-400', grad: 'from-amber-500/10 to-amber-900/5' };
+    return { bg: 'rgba(16,185,129,0.06)', border: 'rgba(16,185,129,0.2)', text: 'text-emerald-400', grad: 'from-emerald-500/8 to-emerald-900/5' };
+  };
+
+  // Score badge color
+  const getScoreColor = (label) => {
+    if (label === 'A+' || label === 'A') return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
+    if (label === 'B+') return 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30';
+    if (label === 'B') return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+    if (label === 'C') return 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+    if (label === 'D' || label === 'F') return 'bg-red-500/20 text-red-400 border-red-500/30';
+    return 'bg-zinc-700/30 text-zinc-500 border-zinc-600/30';
   };
 
   return (
@@ -164,46 +174,80 @@ const EarningsWidget = ({ onTickerSelect }) => {
                 {weekDays.map((day) => {
                   const dayData = getEarningsForDate(day.date);
                   const count = dayData?.count || 0;
-                  const heat = getHeatColor(count);
+                  const heat = getHeatStyle(count);
                   const allItems = [...(dayData?.before_open || []), ...(dayData?.after_close || [])];
                   
                   return (
-                    <div key={day.date} className="flex flex-col" data-testid={`earnings-col-${day.date}`}>
-                      {/* Day Header with heat color */}
-                      <div className={`rounded-t p-1.5 text-center border ${heat.border} ${heat.bg} ${heat.glow || ''} transition-all`}>
+                    <div 
+                      key={day.date} 
+                      className={`flex flex-col rounded-lg overflow-hidden ${count > 0 ? `bg-gradient-to-b ${heat.grad}` : ''}`}
+                      style={{ 
+                        border: `1px solid ${heat.border}`,
+                        background: count === 0 ? heat.bg : undefined
+                      }}
+                      data-testid={`earnings-col-${day.date}`}
+                    >
+                      {/* Day Header */}
+                      <div className="p-1.5 text-center" style={{ backgroundColor: heat.bg }}>
                         <div className="text-[9px] text-zinc-500 leading-none">{day.dayName}</div>
                         <div className={`text-sm font-bold leading-tight ${day.isToday ? 'text-cyan-400' : 'text-white'}`}>
                           {day.dayNum}
                         </div>
                         {count > 0 && (
-                          <div className={`text-[9px] font-medium leading-none mt-0.5 ${heat.text}`}>
-                            {count}
+                          <div className={`text-[9px] font-semibold leading-none mt-0.5 ${heat.text}`}>
+                            {count} report{count !== 1 ? 's' : ''}
                           </div>
                         )}
                       </div>
                       
-                      {/* Company list under each day */}
-                      <div className="flex-1 space-y-0.5 pt-1 max-h-40 overflow-y-auto scrollbar-thin">
+                      {/* Company list */}
+                      <div className="flex-1 px-0.5 pb-1 max-h-48 overflow-y-auto scrollbar-thin space-y-0.5">
                         {allItems.length === 0 ? (
-                          <div className="text-[9px] text-zinc-600 text-center py-1">—</div>
+                          <div className="text-[9px] text-zinc-600 text-center py-2">—</div>
                         ) : (
                           allItems.map((item, idx) => (
                             <button
                               key={idx}
                               onClick={() => onTickerSelect?.(item.symbol)}
-                              className="w-full text-left px-1 py-0.5 rounded hover:bg-zinc-700/50 transition-colors group"
-                              title={`${item.company_name} — ${item.time}`}
+                              className="w-full text-left px-1 py-1 rounded hover:bg-white/5 transition-colors group"
+                              title={`${item.company_name} — ${item.time}\nExp Move: ${item.expected_move?.percent?.toFixed(1)}% / $${item.expected_move?.dollar?.toFixed(2)}\nScore: ${item.earnings_score?.label} (${item.earnings_score?.type})`}
                               data-testid={`earnings-item-${item.symbol}`}
                             >
+                              {/* Symbol + timing icon */}
                               <div className="flex items-center gap-0.5">
                                 {item.time === 'Before Open' 
-                                  ? <Sun className="w-2 h-2 text-amber-500/60 flex-shrink-0" /> 
-                                  : <Moon className="w-2 h-2 text-violet-400/60 flex-shrink-0" />
+                                  ? <Sun className="w-2.5 h-2.5 text-amber-500/70 flex-shrink-0" /> 
+                                  : <Moon className="w-2.5 h-2.5 text-violet-400/70 flex-shrink-0" />
                                 }
-                                <span className="text-[10px] font-semibold text-zinc-200 group-hover:text-cyan-400 transition-colors truncate">
+                                <span className="text-[10px] font-bold text-zinc-200 group-hover:text-cyan-400 transition-colors truncate">
                                   {item.symbol}
                                 </span>
                               </div>
+                              {/* Expected Move */}
+                              <div className="flex items-center justify-between mt-0.5">
+                                <span className="text-[8px] text-zinc-500">Exp</span>
+                                <span className="text-[8px] text-zinc-400">
+                                  {item.expected_move?.percent?.toFixed(1)}% <span className="text-zinc-500">${item.expected_move?.dollar?.toFixed(2)}</span>
+                                </span>
+                              </div>
+                              {/* Earnings Score */}
+                              <div className="flex items-center justify-between mt-0.5">
+                                <span className="text-[8px] text-zinc-500">
+                                  {item.has_reported ? 'Result' : 'Proj'}
+                                </span>
+                                <span className={`text-[8px] font-bold px-1 rounded border ${getScoreColor(item.earnings_score?.label)}`}>
+                                  {item.earnings_score?.label || '—'}
+                                </span>
+                              </div>
+                              {/* EPS surprise if reported */}
+                              {item.has_reported && item.eps_surprise && (
+                                <div className="flex items-center justify-between mt-0.5">
+                                  <span className="text-[8px] text-zinc-500">EPS</span>
+                                  <span className={`text-[8px] font-medium ${item.eps_surprise.percent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                    {item.eps_surprise.percent >= 0 ? '+' : ''}{item.eps_surprise.percent?.toFixed(1)}%
+                                  </span>
+                                </div>
+                              )}
                             </button>
                           ))
                         )}
