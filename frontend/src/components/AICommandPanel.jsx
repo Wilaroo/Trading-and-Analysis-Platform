@@ -1636,21 +1636,24 @@ const AICommandPanel = ({
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   
-  // Dynamic chat expansion - expands when there's content
-  const [chatExpanded, setChatExpanded] = useState(false);
+  // Dynamic chat height based on content
+  const getChatMinHeight = () => {
+    if (messages.length === 0) return 200;
+    
+    // Calculate total content length
+    const totalContentLength = messages.reduce((acc, msg) => {
+      return acc + (msg.content?.length || 0);
+    }, 0);
+    
+    // Scale height based on content (min 200, max 600)
+    if (totalContentLength > 2000) return 550;
+    if (totalContentLength > 1000) return 450;
+    if (totalContentLength > 500) return 350;
+    if (totalContentLength > 200) return 280;
+    return 220;
+  };
   
-  // Auto-expand chat when there are messages with substantial content
-  useEffect(() => {
-    if (messages.length > 0) {
-      const lastMessage = messages[messages.length - 1];
-      // Expand if last message is from assistant and has substantial content
-      if (lastMessage?.role === 'assistant' && lastMessage?.content?.length > 200) {
-        setChatExpanded(true);
-      }
-    } else {
-      setChatExpanded(false);
-    }
-  }, [messages]);
+  const chatMinHeight = getChatMinHeight();
 
   // Toggle section
   const toggleSection = (section) => {
@@ -2388,42 +2391,17 @@ const AICommandPanel = ({
         loading={botLoading}
       />
 
-      {/* Main Content - Two Column Layout with Dynamic Chat Width */}
+      {/* Main Content - Two Column Layout */}
       <div className="flex-1 flex overflow-hidden">
-        {/* LEFT: Chat Area - Dynamic width based on content */}
-        <div 
-          className={`flex flex-col min-w-0 border-r border-white/5 transition-all duration-300 ${
-            chatExpanded ? 'w-[55%]' : 'w-[40%]'
-          }`}
-        >
+        {/* LEFT: Chat Area - Fixed width, dynamic height */}
+        <div className="w-[40%] flex flex-col min-w-0 border-r border-white/5">
           {/* Chat Header with Clear Button */}
           {messages.length > 0 && (
             <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-black/20">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] text-zinc-500">{messages.length} messages</span>
-                {/* Expand/Collapse toggle */}
-                <button
-                  onClick={() => setChatExpanded(!chatExpanded)}
-                  className="text-[10px] text-zinc-500 hover:text-cyan-400 transition-colors flex items-center gap-1"
-                  title={chatExpanded ? "Collapse chat" : "Expand chat"}
-                >
-                  {chatExpanded ? (
-                    <>
-                      <ChevronLeft className="w-3 h-3" />
-                      <span>Compact</span>
-                    </>
-                  ) : (
-                    <>
-                      <ChevronRight className="w-3 h-3" />
-                      <span>Expand</span>
-                    </>
-                  )}
-                </button>
-              </div>
+              <span className="text-[10px] text-zinc-500">{messages.length} messages</span>
               <button
                 onClick={() => {
                   setMessages([]);
-                  setChatExpanded(false);
                   localStorage.removeItem('tradecommand_chat_history');
                   localStorage.removeItem('tradecommand_session_id');
                 }}
@@ -2435,8 +2413,13 @@ const AICommandPanel = ({
               </button>
             </div>
           )}
-          {/* Chat Messages - Above Input (Standard Chat Layout) */}
-          <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-3 space-y-3" data-testid="chat-messages">
+          {/* Chat Messages - Dynamic height based on content */}
+          <div 
+            ref={messagesContainerRef} 
+            className="overflow-y-auto p-3 space-y-3 transition-all duration-300"
+            style={{ minHeight: `${chatMinHeight}px`, maxHeight: '600px' }}
+            data-testid="chat-messages"
+          >
             {messages.length === 0 && !isLoading ? (
               <div className="flex flex-col items-center justify-center h-full text-center py-4">
                 <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500/20 to-amber-500/20 flex items-center justify-center mb-3">
@@ -2530,10 +2513,8 @@ const AICommandPanel = ({
           </div>
         </div>
 
-        {/* RIGHT: Trade Pipeline + Collapsible Sections - Dynamic width */}
-        <div className={`bg-black/20 overflow-y-auto transition-all duration-300 ${
-          chatExpanded ? 'w-[45%]' : 'w-[60%]'
-        }`}>
+        {/* RIGHT: Trade Pipeline + Collapsible Sections */}
+        <div className="w-[60%] bg-black/20 overflow-y-auto">
           {/* Unified Trade Pipeline Widget */}
           <div className="p-3">
             <TradePipelineWidget
