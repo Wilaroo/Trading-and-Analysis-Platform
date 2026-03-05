@@ -9,7 +9,7 @@ echo.
 
 :: GitHub repo info
 set GITHUB_RAW=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents
-set DEFAULT_URL=https://alpaca-ai-command.preview.emergentagent.com
+set DEFAULT_URL=https://scanner-expansion.preview.emergentagent.com
 set PLATFORM_URL=%DEFAULT_URL%
 
 :: Self-update check (downloads latest bat file if changed)

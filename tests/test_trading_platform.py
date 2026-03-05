@@ -7,7 +7,7 @@ import requests
 import os
 import time
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://alpaca-ai-command.preview.emergentagent.com')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://scanner-expansion.preview.emergentagent.com')
 
 class TestHealthAndBasics:
     """Health check and basic API tests"""

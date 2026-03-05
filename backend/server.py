@@ -2538,29 +2538,29 @@ async def get_earnings_calendar(
     if not end_date:
         end_date = (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d")
     
-    # Major companies with actual Q4 2025 earnings dates (late Jan/early Feb 2026)
-    # These are the confirmed/projected dates from financial calendars
+    # Major companies with Q1 2026 earnings dates (March 2026)
+    # These are projected/estimated dates based on typical reporting schedules
     earnings_companies = [
-        {"symbol": "MSFT", "name": "Microsoft Corp.", "sector": "Technology", "date": "2026-01-28", "time": "After Close"},
-        {"symbol": "META", "name": "Meta Platforms Inc.", "sector": "Technology", "date": "2026-01-28", "time": "After Close"},
-        {"symbol": "TSLA", "name": "Tesla Inc.", "sector": "Consumer Cyclical", "date": "2026-01-28", "time": "After Close"},
-        {"symbol": "AAPL", "name": "Apple Inc.", "sector": "Technology", "date": "2026-01-29", "time": "After Close"},
-        {"symbol": "V", "name": "Visa Inc.", "sector": "Financial", "date": "2026-01-29", "time": "After Close"},
-        {"symbol": "MA", "name": "Mastercard Inc.", "sector": "Financial", "date": "2026-01-30", "time": "Before Open"},
-        {"symbol": "UNH", "name": "UnitedHealth Group", "sector": "Healthcare", "date": "2026-01-30", "time": "Before Open"},
-        {"symbol": "AMZN", "name": "Amazon.com Inc.", "sector": "Consumer Cyclical", "date": "2026-02-04", "time": "After Close"},
-        {"symbol": "GOOGL", "name": "Alphabet Inc.", "sector": "Technology", "date": "2026-02-04", "time": "After Close"},
-        {"symbol": "AMD", "name": "Advanced Micro Devices", "sector": "Technology", "date": "2026-02-04", "time": "After Close"},
-        {"symbol": "DIS", "name": "Walt Disney Co.", "sector": "Communication", "date": "2026-02-05", "time": "After Close"},
-        {"symbol": "JPM", "name": "JPMorgan Chase", "sector": "Financial", "date": "2026-02-07", "time": "Before Open"},
-        {"symbol": "PG", "name": "Procter & Gamble", "sector": "Consumer Defensive", "date": "2026-02-11", "time": "Before Open"},
-        {"symbol": "NFLX", "name": "Netflix Inc.", "sector": "Communication", "date": "2026-02-12", "time": "After Close"},
-        {"symbol": "CRM", "name": "Salesforce Inc.", "sector": "Technology", "date": "2026-02-19", "time": "After Close"},
-        {"symbol": "HD", "name": "Home Depot Inc.", "sector": "Consumer Cyclical", "date": "2026-02-20", "time": "Before Open"},
-        {"symbol": "NVDA", "name": "NVIDIA Corp.", "sector": "Technology", "date": "2026-02-25", "time": "After Close"},
-        {"symbol": "INTC", "name": "Intel Corp.", "sector": "Technology", "date": "2026-02-26", "time": "After Close"},
-        {"symbol": "BA", "name": "Boeing Co.", "sector": "Industrials", "date": "2026-02-27", "time": "Before Open"},
-        {"symbol": "JNJ", "name": "Johnson & Johnson", "sector": "Healthcare", "date": "2026-02-28", "time": "Before Open"},
+        {"symbol": "NKE", "name": "Nike Inc.", "sector": "Consumer Cyclical", "date": "2026-03-05", "time": "After Close"},
+        {"symbol": "COST", "name": "Costco Wholesale", "sector": "Consumer Defensive", "date": "2026-03-06", "time": "After Close"},
+        {"symbol": "ORCL", "name": "Oracle Corp.", "sector": "Technology", "date": "2026-03-10", "time": "After Close"},
+        {"symbol": "ADBE", "name": "Adobe Inc.", "sector": "Technology", "date": "2026-03-11", "time": "After Close"},
+        {"symbol": "AVGO", "name": "Broadcom Inc.", "sector": "Technology", "date": "2026-03-12", "time": "After Close"},
+        {"symbol": "DG", "name": "Dollar General Corp.", "sector": "Consumer Defensive", "date": "2026-03-13", "time": "Before Open"},
+        {"symbol": "FDX", "name": "FedEx Corp.", "sector": "Industrials", "date": "2026-03-18", "time": "After Close"},
+        {"symbol": "MU", "name": "Micron Technology", "sector": "Technology", "date": "2026-03-19", "time": "After Close"},
+        {"symbol": "LEN", "name": "Lennar Corp.", "sector": "Consumer Cyclical", "date": "2026-03-20", "time": "Before Open"},
+        {"symbol": "LULU", "name": "Lululemon Athletica", "sector": "Consumer Cyclical", "date": "2026-03-21", "time": "After Close"},
+        {"symbol": "ACN", "name": "Accenture plc", "sector": "Technology", "date": "2026-03-25", "time": "Before Open"},
+        {"symbol": "CCL", "name": "Carnival Corp.", "sector": "Consumer Cyclical", "date": "2026-03-26", "time": "Before Open"},
+        {"symbol": "GME", "name": "GameStop Corp.", "sector": "Consumer Cyclical", "date": "2026-03-26", "time": "After Close"},
+        {"symbol": "PAYX", "name": "Paychex Inc.", "sector": "Industrials", "date": "2026-03-27", "time": "Before Open"},
+        {"symbol": "BB", "name": "BlackBerry Limited", "sector": "Technology", "date": "2026-03-27", "time": "After Close"},
+        {"symbol": "WBA", "name": "Walgreens Boots Alliance", "sector": "Healthcare", "date": "2026-03-28", "time": "Before Open"},
+        {"symbol": "CAG", "name": "Conagra Brands", "sector": "Consumer Defensive", "date": "2026-03-31", "time": "Before Open"},
+        {"symbol": "PVH", "name": "PVH Corp.", "sector": "Consumer Cyclical", "date": "2026-03-31", "time": "After Close"},
+        {"symbol": "KMX", "name": "CarMax Inc.", "sector": "Consumer Cyclical", "date": "2026-04-01", "time": "Before Open"},
+        {"symbol": "CALM", "name": "Cal-Maine Foods", "sector": "Consumer Defensive", "date": "2026-04-02", "time": "Before Open"},
     ]
     
     # Filter by symbols if provided
