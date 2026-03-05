@@ -1513,6 +1513,20 @@ Each card now shows:
 **Files Modified**: `backend/server.py` (earnings calendar endpoint + import), `frontend/src/components/RightSidebar.jsx` (EarningsWidget column layout + heat)
 **Status**: ✅ COMPLETE & VERIFIED (iteration_46.json - 100% pass)
 
+### Enhancement: Full Gradient Columns + Expected Move + Earnings Score
+**Request**: Make the calendar more fully color-coded with gradient columns, add expected move in % and $, and earnings score for past/projected.
+
+**Changes**:
+1. **Full gradient columns** — entire column background is color-coded (green→amber→orange→red) based on density
+2. **Expected move** — shows both percentage and dollar amount (e.g., "Exp 11.7% $27.94")
+3. **Earnings score** — A+/A/B+/B/C/D/F with colored badges; based on EPS/revenue surprise for reported, analyst coverage for projected
+4. **Proj vs Result labels** — distinguishes projected (upcoming) from actual (reported) scores
+5. **EPS surprise** — for already-reported earnings, shows surprise % in green/red (e.g., "+18.0%")
+6. **Column headers** — show day count (e.g., "14 reports")
+
+**Files Modified**: `backend/server.py`, `frontend/src/components/RightSidebar.jsx`
+**Status**: ✅ COMPLETE & VERIFIED (iteration_47.json - 100% pass, 10/10 backend, all frontend features)
+
 ### Updated Backlog
 
 #### P0 - All Clear
