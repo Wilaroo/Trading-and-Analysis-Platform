@@ -336,11 +336,7 @@ function App() {
     <div className="min-h-screen" style={{ background: 'var(--bg-default)' }} onClick={initializeAudio}>
       {/* Startup Modal */}
       {showStartupModal && (
-        <StartupModal 
-          onComplete={() => setShowStartupModal(false)} 
-          ibPusherStatus={ibPusherStatus}
-          checkIbConnection={checkIbConnection}
-        />
+        <StartupModal onComplete={() => setShowStartupModal(false)} />
       )}
       
       {/* Toast notifications */}
