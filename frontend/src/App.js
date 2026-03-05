@@ -121,6 +121,7 @@ function App() {
   // Global IB busy state
   const [ibBusy, setIbBusy] = useState(false);
   const [ibBusyOperation, setIbBusyOperation] = useState(null);
+  const [ibPusherStatus, setIbPusherStatus] = useState(null);
 
   const checkIbConnection = useCallback(async () => {
     try {
@@ -128,13 +129,13 @@ function App() {
       const connected = res.data?.connected || false;
       const busy = res.data?.is_busy || false;
       const busyOp = res.data?.busy_operation || null;
-      
-      console.log('[IB Check] API returned:', { connected, busy, busyOp });
+      const pusher = res.data?.pusher || null;
       
       setIbConnected(connected);
       setIbConnectionChecked(true);
       setIbBusy(busy);
       setIbBusyOperation(busyOp);
+      setIbPusherStatus(pusher);
       
       return connected;
     } catch (err) {
@@ -142,6 +143,7 @@ function App() {
       setIbConnected(false);
       setIbConnectionChecked(true);
       setIbBusy(false);
+      setIbPusherStatus(null);
       return false;
     }
   }, []);
@@ -306,6 +308,7 @@ function App() {
       checkIbConnection,
       ibBusy,
       ibBusyOperation,
+      ibPusherStatus,
       // WebSocket status for quotes streaming
       wsConnected: isConnected,
       wsLastUpdate: lastUpdate,
@@ -333,7 +336,11 @@ function App() {
     <div className="min-h-screen" style={{ background: 'var(--bg-default)' }} onClick={initializeAudio}>
       {/* Startup Modal */}
       {showStartupModal && (
-        <StartupModal onComplete={() => setShowStartupModal(false)} />
+        <StartupModal 
+          onComplete={() => setShowStartupModal(false)} 
+          ibPusherStatus={ibPusherStatus}
+          checkIbConnection={checkIbConnection}
+        />
       )}
       
       {/* Toast notifications */}
