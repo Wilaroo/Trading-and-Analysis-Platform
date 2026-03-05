@@ -1489,24 +1489,25 @@ Each card now shows:
 
 ## Session Log - March 5, 2026 (Earnings Calendar UI Verification)
 
-### Verification: Earnings Calendar Display - CONFIRMED WORKING
-**Issue**: Earnings Calendar widget was not displaying any tickers.
+### Fix: Earnings Calendar - Switched to Real Finnhub Data
+**Issue**: Earnings Calendar had hardcoded/incorrect dates (e.g., NKE listed March 5 but actually reports March 18).
 
-**Previous Fix (Applied in prior session)**:
-- Backend `server.py` had hardcoded earnings dates that were in the past
-- Updated to current dates (March 2026): NKE, COST, ORCL, ADBE, AVGO, DG, FDX, MU, LEN, LULU, ACN, CCL, GME, PAYX, BB, WBA, CAG, PVH, KMX, CALM
+**Root Cause**: The `/api/earnings/calendar` endpoint used a hardcoded list of ~20 companies with guessed dates.
 
-**Verification Results**:
-- Backend API `/api/earnings/calendar` returns 8 companies within the 2-week window
-- Frontend "Earnings Calendar (7)" widget renders correctly
-- Today (March 5) is highlighted, showing NKE - Nike Inc. "After Close"
-- Day dots indicate which days have earnings
-- Week navigation (prev/next) functional
+**Fix Applied**:
+1. Replaced hardcoded data with real Finnhub `earnings_calendar` API
+2. Filtered results to app's scanning universe (~1,500 symbols) for relevance
+3. Added company name lookup for ~70 well-known symbols (COST→Costco, ADBE→Adobe, etc.)
+4. Maintained same response shape so frontend works unchanged
 
-**Status**: ✅ VERIFIED & CLOSED
+**Results**:
+- 93 real earnings entries across 2-week window (was 8 fake ones)
+- March 5 correctly shows COST (Costco), MRVL (Marvell), ATHM etc.
+- NKE (Nike) correctly placed on March 18
+- `/api/earnings/today` also returns real data
 
-### Cleanup
-- Confirmed `RealtimeChart.jsx` already deleted in prior session
+**Files Modified**: `backend/server.py` (earnings calendar endpoint + import)
+**Status**: ✅ COMPLETE & VERIFIED
 
 ### Updated Backlog
 
@@ -1517,6 +1518,7 @@ Each card now shows:
 - [ ] Quick Actions Integration in Chat (Buy, Sell, Alert buttons in chat messages)
 - [ ] IB Pushed Data Integration (BLOCKED - user must run local script)
 - [ ] Perplexity Search API integration
+- [ ] Earnings Calendar heat indicator (color-code weeks by density) - user approved for future
 
 #### P2 - Future
 - [ ] CrewAI multi-agent system
