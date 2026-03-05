@@ -8,6 +8,7 @@ import {
   User,
   ChevronDown,
   ChevronRight,
+  ChevronLeft,
   TrendingUp,
   TrendingDown,
   Calendar,
@@ -1634,6 +1635,22 @@ const AICommandPanel = ({
   const messagesContainerRef = useRef(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  
+  // Dynamic chat expansion - expands when there's content
+  const [chatExpanded, setChatExpanded] = useState(false);
+  
+  // Auto-expand chat when there are messages with substantial content
+  useEffect(() => {
+    if (messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      // Expand if last message is from assistant and has substantial content
+      if (lastMessage?.role === 'assistant' && lastMessage?.content?.length > 200) {
+        setChatExpanded(true);
+      }
+    } else {
+      setChatExpanded(false);
+    }
+  }, [messages]);
 
   // Toggle section
   const toggleSection = (section) => {
@@ -2371,17 +2388,42 @@ const AICommandPanel = ({
         loading={botLoading}
       />
 
-      {/* Main Content - Two Column Layout */}
+      {/* Main Content - Two Column Layout with Dynamic Chat Width */}
       <div className="flex-1 flex overflow-hidden">
-        {/* LEFT: Chat Area (Compact - 40%) */}
-        <div className="w-[40%] flex flex-col min-w-0 border-r border-white/5">
+        {/* LEFT: Chat Area - Dynamic width based on content */}
+        <div 
+          className={`flex flex-col min-w-0 border-r border-white/5 transition-all duration-300 ${
+            chatExpanded ? 'w-[55%]' : 'w-[40%]'
+          }`}
+        >
           {/* Chat Header with Clear Button */}
           {messages.length > 0 && (
             <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-black/20">
-              <span className="text-[10px] text-zinc-500">{messages.length} messages</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-zinc-500">{messages.length} messages</span>
+                {/* Expand/Collapse toggle */}
+                <button
+                  onClick={() => setChatExpanded(!chatExpanded)}
+                  className="text-[10px] text-zinc-500 hover:text-cyan-400 transition-colors flex items-center gap-1"
+                  title={chatExpanded ? "Collapse chat" : "Expand chat"}
+                >
+                  {chatExpanded ? (
+                    <>
+                      <ChevronLeft className="w-3 h-3" />
+                      <span>Compact</span>
+                    </>
+                  ) : (
+                    <>
+                      <ChevronRight className="w-3 h-3" />
+                      <span>Expand</span>
+                    </>
+                  )}
+                </button>
+              </div>
               <button
                 onClick={() => {
                   setMessages([]);
+                  setChatExpanded(false);
                   localStorage.removeItem('tradecommand_chat_history');
                   localStorage.removeItem('tradecommand_session_id');
                 }}
@@ -2488,8 +2530,10 @@ const AICommandPanel = ({
           </div>
         </div>
 
-        {/* RIGHT: Trade Pipeline + Collapsible Sections (60%) */}
-        <div className="w-[60%] bg-black/20 overflow-y-auto">
+        {/* RIGHT: Trade Pipeline + Collapsible Sections - Dynamic width */}
+        <div className={`bg-black/20 overflow-y-auto transition-all duration-300 ${
+          chatExpanded ? 'w-[45%]' : 'w-[60%]'
+        }`}>
           {/* Unified Trade Pipeline Widget */}
           <div className="p-3">
             <TradePipelineWidget
