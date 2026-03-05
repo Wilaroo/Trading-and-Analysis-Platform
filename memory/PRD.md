@@ -1166,8 +1166,8 @@ Validates AI responses against real-time data before returning to user.
 - [ ] Real-time RVOL in Market Intelligence
 
 ### P2 - Medium Priority
-- [ ] Fix watchlist "(0)" flicker on load
-- [ ] Remove dead code: RealtimeChart.jsx
+- [x] Fix watchlist "(0)" flicker on load (DONE - Mar 4, 2026)
+- [x] Remove dead code: RealtimeChart.jsx (DONE - already deleted)
 - [ ] CrewAI multi-agent integration (future consideration)
 
 ---
@@ -1483,3 +1483,42 @@ Each card now shows:
 ### Final Remaining Backlog
 1. **Perplexity Search API** - Replace Tavily for market research
 2. **CrewAI Multi-Agent** - Advanced trading analysis
+
+
+---
+
+## Session Log - March 5, 2026 (Earnings Calendar UI Verification)
+
+### Verification: Earnings Calendar Display - CONFIRMED WORKING
+**Issue**: Earnings Calendar widget was not displaying any tickers.
+
+**Previous Fix (Applied in prior session)**:
+- Backend `server.py` had hardcoded earnings dates that were in the past
+- Updated to current dates (March 2026): NKE, COST, ORCL, ADBE, AVGO, DG, FDX, MU, LEN, LULU, ACN, CCL, GME, PAYX, BB, WBA, CAG, PVH, KMX, CALM
+
+**Verification Results**:
+- Backend API `/api/earnings/calendar` returns 8 companies within the 2-week window
+- Frontend "Earnings Calendar (7)" widget renders correctly
+- Today (March 5) is highlighted, showing NKE - Nike Inc. "After Close"
+- Day dots indicate which days have earnings
+- Week navigation (prev/next) functional
+
+**Status**: ✅ VERIFIED & CLOSED
+
+### Cleanup
+- Confirmed `RealtimeChart.jsx` already deleted in prior session
+
+### Updated Backlog
+
+#### P0 - All Clear
+- No critical issues remaining
+
+#### P1 - High Priority
+- [ ] Quick Actions Integration in Chat (Buy, Sell, Alert buttons in chat messages)
+- [ ] IB Pushed Data Integration (BLOCKED - user must run local script)
+- [ ] Perplexity Search API integration
+
+#### P2 - Future
+- [ ] CrewAI multi-agent system
+- [ ] Strategy backtesting
+- [ ] Remove unused NewsletterPage.js and backend endpoints
