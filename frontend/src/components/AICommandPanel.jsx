@@ -2588,11 +2588,11 @@ const AICommandPanel = ({
 
       {/* Main Content - New Layout: Chat on top, Pipeline + Chart below */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* TOP: AI Chat - Full width, dynamic height */}
-        <div className="flex flex-col border-b border-white/5">
+        {/* TOP: AI Chat - Full width, constrained height */}
+        <div className="flex flex-col border-b border-white/5" style={{ maxHeight: '45%', minHeight: '200px' }}>
           {/* Chat Header with Clear Button */}
           {messages.length > 0 && (
-            <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-black/20">
+            <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-black/20 shrink-0">
               <span className="text-[10px] text-zinc-500">{messages.length} messages</span>
               <button
                 onClick={() => {
@@ -2608,11 +2608,10 @@ const AICommandPanel = ({
               </button>
             </div>
           )}
-          {/* Chat Messages - Dynamic height based on content */}
+          {/* Chat Messages - Scrollable area */}
           <div 
             ref={messagesContainerRef} 
-            className="overflow-y-auto p-3 space-y-3 transition-all duration-300"
-            style={{ minHeight: `${chatMinHeight}px`, maxHeight: '500px' }}
+            className="flex-1 overflow-y-auto p-3 space-y-3"
             data-testid="chat-messages"
           >
             {messages.length === 0 && !isLoading ? (
@@ -2655,8 +2654,8 @@ const AICommandPanel = ({
             )}
           </div>
 
-          {/* Chat Input */}
-          <div className="p-3 border-t border-white/5 bg-black/30">
+          {/* Chat Input - Always visible */}
+          <div className="p-3 border-t border-white/5 bg-black/30 shrink-0">
             <div className="flex items-center gap-2 mb-2 flex-wrap">
               {quickActions.map((qa, idx) => (
                 <QuickPill key={idx} label={qa.label} onClick={qa.action} loading={isLoading} icon={qa.icon} />
