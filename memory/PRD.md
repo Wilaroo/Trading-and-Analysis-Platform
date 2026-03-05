@@ -1499,15 +1499,19 @@ Each card now shows:
 2. Filtered results to app's scanning universe (~1,500 symbols) for relevance
 3. Added company name lookup for ~70 well-known symbols (COST→Costco, ADBE→Adobe, etc.)
 4. Maintained same response shape so frontend works unchanged
+5. **Column Layout**: Redesigned widget to 5-column grid (Mon-Fri) with companies listed vertically under each day
+6. **Heat Indicators**: Days color-coded by earnings density (green=light, amber, orange, red=heavy) with a legend bar
 
 **Results**:
 - 93 real earnings entries across 2-week window (was 8 fake ones)
 - March 5 correctly shows COST (Costco), MRVL (Marvell), ATHM etc.
 - NKE (Nike) correctly placed on March 18
 - `/api/earnings/today` also returns real data
+- Sun/Moon icons distinguish Before Open vs After Close
+- Week navigation loads fresh data per week
 
-**Files Modified**: `backend/server.py` (earnings calendar endpoint + import)
-**Status**: ✅ COMPLETE & VERIFIED
+**Files Modified**: `backend/server.py` (earnings calendar endpoint + import), `frontend/src/components/RightSidebar.jsx` (EarningsWidget column layout + heat)
+**Status**: ✅ COMPLETE & VERIFIED (iteration_46.json - 100% pass)
 
 ### Updated Backlog
 
