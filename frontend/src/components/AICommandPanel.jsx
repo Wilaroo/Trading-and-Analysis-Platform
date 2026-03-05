@@ -2391,10 +2391,10 @@ const AICommandPanel = ({
         loading={botLoading}
       />
 
-      {/* Main Content - Two Column Layout */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* LEFT: Chat Area - Fixed width, dynamic height */}
-        <div className="w-[40%] flex flex-col min-w-0 border-r border-white/5">
+      {/* Main Content - New Layout: Chat on top, Pipeline + Chart below */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* TOP: AI Chat - Full width, dynamic height */}
+        <div className="flex flex-col border-b border-white/5">
           {/* Chat Header with Clear Button */}
           {messages.length > 0 && (
             <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-black/20">
@@ -2417,7 +2417,7 @@ const AICommandPanel = ({
           <div 
             ref={messagesContainerRef} 
             className="overflow-y-auto p-3 space-y-3 transition-all duration-300"
-            style={{ minHeight: `${chatMinHeight}px`, maxHeight: '600px' }}
+            style={{ minHeight: `${chatMinHeight}px`, maxHeight: '500px' }}
             data-testid="chat-messages"
           >
             {messages.length === 0 && !isLoading ? (
@@ -2448,7 +2448,7 @@ const AICommandPanel = ({
             )}
           </div>
 
-          {/* Chat Input at Bottom */}
+          {/* Chat Input */}
           <div className="p-3 border-t border-white/5 bg-black/30">
             <div className="flex items-center gap-2 mb-2 flex-wrap">
               {quickActions.map((qa, idx) => (
@@ -2482,72 +2482,44 @@ const AICommandPanel = ({
               </button>
             </div>
           </div>
-          
-          {/* Live Chart - Below Chat */}
-          <div className="border-t border-white/5" data-testid="inline-chart">
-            <div className="flex items-center justify-between px-3 py-2 bg-black/40">
-              <div className="flex items-center gap-2">
-                <LineChart className="w-4 h-4 text-cyan-400" />
-                <span className="text-xs font-semibold text-white">{chartSymbol || 'SPY'}</span>
-                <span className="text-[10px] text-zinc-500">• Click any ticker to view</span>
-              </div>
-              <div className="flex items-center gap-1">
-                {['SPY', 'QQQ', 'NVDA'].map(sym => (
-                  <button
-                    key={sym}
-                    onClick={() => setChartSymbol(sym)}
-                    className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
-                      chartSymbol === sym 
-                        ? 'bg-cyan-500/20 text-cyan-400' 
-                        : 'text-zinc-500 hover:text-white hover:bg-white/5'
-                    }`}
-                  >
-                    {sym}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="h-[280px]">
-              <TradingViewWidget symbol={chartSymbol || 'SPY'} />
-            </div>
-          </div>
         </div>
 
-        {/* RIGHT: Trade Pipeline + Collapsible Sections */}
-        <div className="w-[60%] bg-black/20 overflow-y-auto">
-          {/* Unified Trade Pipeline Widget */}
-          <div className="p-3">
-            <TradePipelineWidget
-              opportunities={activeCoachingAlerts}
-              botTrades={botTrades}
-              onExecute={(a) => executeFromAlert(a, false)}
-              onPass={passOnAlert}
-              onTickerClick={handleTickerClick}
-              onViewChart={onViewChart}
-              executing={executing}
-              onRefresh={fetchCoachingAlerts}
-              loading={coachingLoading}
-              onConfirmTrade={handleConfirmPendingTrade}
-              onRejectTrade={handleRejectPendingTrade}
-              onCloseTrade={handleCloseBotTrade}
-            />
+        {/* BOTTOM: Trade Pipeline + Chart Side by Side */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* LEFT: Trade Pipeline + Portfolio Insights */}
+          <div className="w-[45%] overflow-y-auto border-r border-white/5 bg-black/20">
+            <div className="p-3">
+              <TradePipelineWidget
+                opportunities={activeCoachingAlerts}
+                botTrades={botTrades}
+                onExecute={(a) => executeFromAlert(a, false)}
+                onPass={passOnAlert}
+                onTickerClick={handleTickerClick}
+                onViewChart={onViewChart}
+                executing={executing}
+                onRefresh={fetchCoachingAlerts}
+                loading={coachingLoading}
+                onConfirmTrade={handleConfirmPendingTrade}
+                onRejectTrade={handleRejectPendingTrade}
+                onCloseTrade={handleCloseBotTrade}
+              />
+              
+              {/* Portfolio Insights Widget */}
+              <PortfolioInsightsWidget 
+                onTickerClick={handleTickerClick}
+                onViewChart={onViewChart}
+              />
+            </div>
             
-            {/* Portfolio Insights Widget */}
-            <PortfolioInsightsWidget 
-              onTickerClick={handleTickerClick}
-              onViewChart={onViewChart}
-            />
-          </div>
-          
-          {/* My Positions Section */}
-          <div className="p-3 pt-0">
-            <SectionHeader 
-              icon={Briefcase} 
-              title="My Positions" 
-              count={positions?.length || 0}
-              isExpanded={expandedSections.positions}
-              onToggle={() => toggleSection('positions')}
-              compact
+            {/* My Positions Section */}
+            <div className="p-3 pt-0">
+              <SectionHeader 
+                icon={Briefcase} 
+                title="My Positions" 
+                count={positions?.length || 0}
+                isExpanded={expandedSections.positions}
+                onToggle={() => toggleSection('positions')}
+                compact
             />
             <AnimatePresence>
               {expandedSections.positions && (
@@ -2676,6 +2648,36 @@ const AICommandPanel = ({
                 </motion.div>
               )}
             </AnimatePresence>
+          </div>
+        </div>
+
+          {/* RIGHT: Live Chart */}
+          <div className="w-[55%] flex flex-col bg-black/10">
+            <div className="flex items-center justify-between px-3 py-2 bg-black/40 border-b border-white/5">
+              <div className="flex items-center gap-2">
+                <LineChart className="w-4 h-4 text-cyan-400" />
+                <span className="text-xs font-semibold text-white">{chartSymbol || 'SPY'}</span>
+                <span className="text-[10px] text-zinc-500">• Click any ticker to view</span>
+              </div>
+              <div className="flex items-center gap-1">
+                {['SPY', 'QQQ', 'NVDA', 'AAPL', 'TSLA'].map(sym => (
+                  <button
+                    key={sym}
+                    onClick={() => setChartSymbol(sym)}
+                    className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
+                      chartSymbol === sym 
+                        ? 'bg-cyan-500/20 text-cyan-400' 
+                        : 'text-zinc-500 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    {sym}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex-1 min-h-[350px]">
+              <TradingViewWidget symbol={chartSymbol || 'SPY'} />
+            </div>
           </div>
         </div>
       </div>
