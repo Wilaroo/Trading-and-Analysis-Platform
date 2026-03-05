@@ -17,7 +17,12 @@ import {
   Zap,
   Target,
   BarChart3,
-  Bell
+  Bell,
+  Upload,
+  Copy,
+  Terminal,
+  RefreshCw,
+  ExternalLink
 } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
@@ -79,7 +84,7 @@ const STARTUP_PROCESSES = [
   { id: 'watchlist', label: 'Loading smart watchlist...', successLabel: 'Watchlist ready' }
 ];
 
-const StartupModal = ({ onComplete }) => {
+const StartupModal = ({ onComplete, ibPusherStatus, checkIbConnection }) => {
   const [visible, setVisible] = useState(true);
   const [dontShowAgain, setDontShowAgain] = useState(false);
   const [processes, setProcesses] = useState(
@@ -87,6 +92,9 @@ const StartupModal = ({ onComplete }) => {
   );
   const [allReady, setAllReady] = useState(false);
   const [error, setError] = useState(null);
+  const [ibSetupData, setIbSetupData] = useState(null);
+  const [copiedField, setCopiedField] = useState(null);
+  const [ibChecking, setIbChecking] = useState(false);
 
   // Check if user has opted out
   useEffect(() => {
@@ -99,6 +107,15 @@ const StartupModal = ({ onComplete }) => {
 
   // Run startup checks
   const runStartupChecks = useCallback(async () => {
+    // Fetch IB pusher setup info
+    try {
+      const setupRes = await fetch(`${API_URL}/api/ib/pusher-setup`);
+      if (setupRes.ok) {
+        const setupData = await setupRes.json();
+        setIbSetupData(setupData);
+      }
+    } catch { /* non-blocking */ }
+
     // Check backend with proper timeout
     setProcesses(prev => ({ ...prev, backend: 'loading' }));
     try {
@@ -216,6 +233,32 @@ const StartupModal = ({ onComplete }) => {
     }
   }, [processes]);
 
+  const handleCopy = (text, field) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(null), 2000);
+    });
+  };
+
+  const handleRecheckIB = async () => {
+    setIbChecking(true);
+    setProcesses(prev => ({ ...prev, ibpusher: 'loading' }));
+    try {
+      if (checkIbConnection) await checkIbConnection();
+      const res = await fetch(`${API_URL}/api/ib/pushed-data`);
+      const data = await res.json();
+      const isConnected = data.connected === true;
+      setProcesses(prev => ({ ...prev, ibpusher: isConnected ? 'success' : 'warning' }));
+      // Refresh setup data too
+      const setupRes = await fetch(`${API_URL}/api/ib/pusher-setup`);
+      if (setupRes.ok) setIbSetupData(await setupRes.json());
+    } catch {
+      setProcesses(prev => ({ ...prev, ibpusher: 'warning' }));
+    } finally {
+      setIbChecking(false);
+    }
+  };
+
   const handleGetStarted = () => {
     if (dontShowAgain) {
       localStorage.setItem('tradecommand_skip_startup', 'true');
@@ -302,7 +345,7 @@ const StartupModal = ({ onComplete }) => {
             </div>
 
             {/* Startup Status */}
-            <div>
+            <div className="mb-6">
               <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wide mb-4">
                 System Status
               </h2>
@@ -335,6 +378,127 @@ const StartupModal = ({ onComplete }) => {
               {error && (
                 <div className="mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30">
                   <p className="text-sm text-red-400">{error}</p>
+                </div>
+              )}
+            </div>
+
+            {/* IB Data Pusher Setup */}
+            <div data-testid="ib-setup-section">
+              <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wide mb-4 flex items-center gap-2">
+                <Upload className="w-4 h-4" />
+                IB Data Pusher Setup
+              </h2>
+              
+              {/* Connection Status Banner */}
+              <div className={`p-3 rounded-lg border mb-4 flex items-center justify-between ${
+                ibPusherStatus?.connected || ibSetupData?.pusher_connected
+                  ? 'bg-emerald-500/10 border-emerald-500/30'
+                  : 'bg-amber-500/10 border-amber-500/30'
+              }`}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-2.5 h-2.5 rounded-full ${
+                    ibPusherStatus?.connected || ibSetupData?.pusher_connected
+                      ? 'bg-emerald-400 animate-pulse' 
+                      : 'bg-amber-400'
+                  }`} />
+                  <div>
+                    <p className={`text-sm font-medium ${
+                      ibPusherStatus?.connected || ibSetupData?.pusher_connected
+                        ? 'text-emerald-400' : 'text-amber-400'
+                    }`}>
+                      {ibPusherStatus?.connected || ibSetupData?.pusher_connected
+                        ? `IB Data Pusher Connected`
+                        : 'IB Data Pusher Not Connected'}
+                    </p>
+                    {(ibPusherStatus?.connected || ibSetupData?.pusher_connected) && (
+                      <p className="text-[11px] text-zinc-400">
+                        {ibSetupData?.positions_count || ibPusherStatus?.positions_count || 0} positions, {ibSetupData?.quotes_count || ibPusherStatus?.quotes_count || 0} quotes streaming
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={handleRecheckIB}
+                  disabled={ibChecking}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 transition-colors disabled:opacity-50"
+                  data-testid="ib-recheck-btn"
+                >
+                  <RefreshCw className={`w-3 h-3 ${ibChecking ? 'animate-spin' : ''}`} />
+                  {ibChecking ? 'Checking...' : 'Re-check'}
+                </button>
+              </div>
+
+              {/* Setup Instructions */}
+              {!(ibPusherStatus?.connected || ibSetupData?.pusher_connected) && (
+                <div className="space-y-3 bg-zinc-800/30 rounded-lg p-4 border border-zinc-700/50">
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    The IB Data Pusher is a lightweight script that runs on your local machine alongside IB Gateway/TWS. 
+                    It pushes real-time positions, account data, and quotes to your cloud dashboard.
+                  </p>
+
+                  {/* Cloud URL */}
+                  <div>
+                    <label className="text-[10px] text-zinc-500 uppercase tracking-wide font-semibold">Cloud URL (for script config)</label>
+                    <div className="flex items-center gap-2 mt-1">
+                      <code className="flex-1 text-xs bg-black/40 text-cyan-400 px-3 py-2 rounded font-mono border border-zinc-700/50 truncate" data-testid="ib-cloud-url">
+                        {API_URL}
+                      </code>
+                      <button
+                        onClick={() => handleCopy(API_URL, 'url')}
+                        className="p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
+                        title="Copy URL"
+                        data-testid="ib-copy-url"
+                      >
+                        {copiedField === 'url' 
+                          ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                          : <Copy className="w-3.5 h-3.5 text-zinc-400" />
+                        }
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Quick Start Steps */}
+                  <div>
+                    <label className="text-[10px] text-zinc-500 uppercase tracking-wide font-semibold">Quick Start</label>
+                    <div className="mt-1.5 space-y-1.5">
+                      {[
+                        { step: '1', text: 'Install deps:', cmd: 'pip install ib_insync aiohttp' },
+                        { step: '2', text: 'Start IB Gateway or TWS (port 4002)' },
+                        { step: '3', text: 'Set CLOUD_URL in ib_data_pusher.py' },
+                        { step: '4', text: 'Run:', cmd: 'python ib_data_pusher.py' },
+                      ].map((item) => (
+                        <div key={item.step} className="flex items-start gap-2">
+                          <span className="text-[10px] w-4 h-4 rounded bg-cyan-500/20 text-cyan-400 flex items-center justify-center flex-shrink-0 mt-0.5 font-bold">
+                            {item.step}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-xs text-zinc-300">{item.text}</span>
+                            {item.cmd && (
+                              <div className="flex items-center gap-1 mt-0.5">
+                                <code className="text-[10px] bg-black/40 text-amber-400 px-2 py-0.5 rounded font-mono border border-zinc-700/50">
+                                  {item.cmd}
+                                </code>
+                                <button
+                                  onClick={() => handleCopy(item.cmd, `cmd-${item.step}`)}
+                                  className="p-0.5 hover:bg-white/10 rounded transition-colors"
+                                >
+                                  {copiedField === `cmd-${item.step}`
+                                    ? <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                    : <Copy className="w-3 h-3 text-zinc-500" />
+                                  }
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-zinc-500 flex items-center gap-1">
+                    <Terminal className="w-3 h-3" />
+                    The script is in your project: <code className="text-cyan-400/80">documents/ib_data_pusher.py</code>
+                  </p>
                 </div>
               )}
             </div>

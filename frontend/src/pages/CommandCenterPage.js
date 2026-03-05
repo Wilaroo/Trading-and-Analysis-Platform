@@ -20,6 +20,7 @@ const CommandCenterPage = ({
   wsLastUpdate = null,
   ibBusy = false,
   ibBusyOperation = null,
+  ibPusherStatus = null,
   // WebSocket-pushed data (replaces polling)
   wsBotStatus = null,
   wsBotTrades = [],
@@ -78,6 +79,7 @@ const CommandCenterPage = ({
         handleDisconnectFromIB={data.handleDisconnectFromIB}
         creditBudget={data.creditBudget}
         ollamaStatus={ollamaStatus}
+        ibPusherStatus={ibPusherStatus}
       />
 
       {/* Tab Navigation — Glass Style */}

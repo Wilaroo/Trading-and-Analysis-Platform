@@ -116,7 +116,7 @@ _pushed_ib_data = {
 
 @router.get("/status")
 async def get_connection_status():
-    """Get IB connection status"""
+    """Get IB connection status — checks both direct IB and data pusher"""
     if not _ib_service:
         raise HTTPException(status_code=500, detail="IB service not initialized")
     
@@ -127,8 +127,78 @@ async def get_connection_status():
     status["is_busy"] = is_busy
     status["busy_operation"] = busy_operation
     
-    print(f"[IB STATUS] Returning: connected={status.get('connected')}, busy={is_busy}")
+    # Also check pusher status
+    pusher_connected = False
+    pusher_last_update = _pushed_ib_data.get("last_update")
+    pusher_positions = len(_pushed_ib_data.get("positions", []))
+    pusher_quotes = len(_pushed_ib_data.get("quotes", {}))
+    
+    if pusher_last_update:
+        try:
+            last_dt = datetime.fromisoformat(pusher_last_update.replace('Z', '+00:00'))
+            age_seconds = (datetime.now(timezone.utc) - last_dt).total_seconds()
+            pusher_connected = age_seconds <= 30
+        except:
+            pass
+    
+    status["pusher"] = {
+        "connected": pusher_connected,
+        "last_update": pusher_last_update,
+        "positions_count": pusher_positions,
+        "quotes_count": pusher_quotes,
+        "stale": not pusher_connected and pusher_last_update is not None
+    }
+    
+    # If pusher is active, consider the system connected
+    if pusher_connected and not status.get("connected"):
+        status["connected"] = True
+        status["connection_source"] = "pusher"
+    elif status.get("connected"):
+        status["connection_source"] = "direct"
+    else:
+        status["connection_source"] = "none"
+    
     return status
+
+
+@router.get("/pusher-setup")
+async def get_pusher_setup_info():
+    """Get setup info for the IB Data Pusher script"""
+    import os
+    cloud_url = os.environ.get("REACT_APP_BACKEND_URL", "")
+    if not cloud_url:
+        # Try to infer from request or env
+        cloud_url = os.environ.get("APP_URL", "https://your-app.preview.emergentagent.com")
+    
+    pusher_connected = False
+    last_update = _pushed_ib_data.get("last_update")
+    if last_update:
+        try:
+            last_dt = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
+            age_seconds = (datetime.now(timezone.utc) - last_dt).total_seconds()
+            pusher_connected = age_seconds <= 30
+        except:
+            pass
+    
+    return {
+        "cloud_url": cloud_url,
+        "push_endpoint": f"{cloud_url}/api/ib/push-data",
+        "status_endpoint": f"{cloud_url}/api/ib/pushed-data",
+        "pusher_connected": pusher_connected,
+        "last_update": last_update,
+        "positions_count": len(_pushed_ib_data.get("positions", [])),
+        "quotes_count": len(_pushed_ib_data.get("quotes", {})),
+        "setup_steps": [
+            "Install Python 3.8+ and pip",
+            "Install dependencies: pip install ib_insync aiohttp",
+            "Start IB Gateway or TWS (port 4002 for Gateway, 7497 for TWS)",
+            f"Set CLOUD_URL={cloud_url} in the script",
+            "Run: python ib_data_pusher.py",
+            "Verify connection in the app header status panel"
+        ],
+        "script_name": "ib_data_pusher.py",
+        "requirements": ["ib_insync", "aiohttp"]
+    }
 
 
 @router.post("/connect")

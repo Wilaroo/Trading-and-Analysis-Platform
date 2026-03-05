@@ -19,7 +19,8 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
-  Server
+  Server,
+  Upload
 } from 'lucide-react';
 
 // Credit Budget Detail Modal Component
@@ -304,7 +305,8 @@ const SystemStatusPopover = ({
   isConnected, 
   connecting,
   handleConnectToIB,
-  ollamaStatus
+  ollamaStatus,
+  ibPusherStatus
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const popoverRef = useRef(null);
@@ -323,7 +325,7 @@ const SystemStatusPopover = ({
   // Calculate overall system status
   const getOverallStatus = () => {
     const quotesOk = wsConnected;
-    const ibOk = isConnected;
+    const ibOk = isConnected || (ibPusherStatus?.connected);
     // If all services are up
     if (quotesOk && ibOk) return { status: 'online', label: 'All Systems Online', color: 'emerald' };
     // If some services are up
@@ -344,8 +346,8 @@ const SystemStatusPopover = ({
     },
     {
       name: 'IB Gateway',
-      description: 'Trading & historical data',
-      connected: isConnected,
+      description: 'Direct trading & historical data',
+      connected: isConnected && (!ibPusherStatus || !ibPusherStatus.connected),
       checking: !connectionChecked,
       icon: Database,
       action: !isConnected && connectionChecked ? {
@@ -353,6 +355,16 @@ const SystemStatusPopover = ({
         onClick: handleConnectToIB,
         disabled: connecting
       } : null
+    },
+    {
+      name: 'IB Data Pusher',
+      description: ibPusherStatus?.connected 
+        ? `${ibPusherStatus.positions_count || 0} positions, ${ibPusherStatus.quotes_count || 0} quotes` 
+        : 'Local script pushes IB data to cloud',
+      connected: ibPusherStatus?.connected || false,
+      checking: false,
+      icon: Upload,
+      stale: ibPusherStatus?.stale || false
     },
     {
       name: 'Ollama AI',
@@ -412,16 +424,20 @@ const SystemStatusPopover = ({
                   <div className="flex items-center gap-3">
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
                       service.connected ? 'bg-emerald-500/20' : 
+                      service.stale ? 'bg-amber-500/20' :
                       service.checking ? 'bg-amber-500/20' : 'bg-red-500/20'
                     }`}>
                       <Icon className={`w-4 h-4 ${
                         service.connected ? 'text-emerald-400' : 
+                        service.stale ? 'text-amber-400' :
                         service.checking ? 'text-amber-400' : 'text-red-400'
                       }`} />
                     </div>
                     <div>
                       <p className="text-xs font-medium text-white">{service.name}</p>
-                      <p className="text-[10px] text-zinc-500">{service.description}</p>
+                      <p className="text-[10px] text-zinc-500">
+                        {service.stale ? 'Data stale — reconnect pusher' : service.description}
+                      </p>
                     </div>
                   </div>
                   
@@ -438,6 +454,8 @@ const SystemStatusPopover = ({
                       <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />
                     ) : service.connected ? (
                       <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    ) : service.stale ? (
+                      <AlertTriangle className="w-4 h-4 text-amber-400" />
                     ) : (
                       <XCircle className="w-4 h-4 text-red-400" />
                     )}
@@ -470,7 +488,8 @@ const HeaderBar = ({
   handleConnectToIB,
   handleDisconnectFromIB,
   creditBudget,
-  ollamaStatus = 'unknown' // New prop for Ollama status
+  ollamaStatus = 'unknown',
+  ibPusherStatus = null
 }) => {
   const [showCreditModal, setShowCreditModal] = useState(false);
 
@@ -602,6 +621,7 @@ const HeaderBar = ({
             connecting={connecting}
             handleConnectToIB={handleConnectToIB}
             ollamaStatus={ollamaStatus}
+            ibPusherStatus={ibPusherStatus}
           />
           
           {/* Live Time Indicator */}
