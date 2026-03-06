@@ -57,6 +57,8 @@ from routers.portfolio_awareness import router as portfolio_awareness_router
 from routers.quick_actions import router as quick_actions_router, init_quick_actions_router
 from routers.sectors import router as sectors_router
 from routers.patterns import router as patterns_router
+from routers.sentiment import router as sentiment_router
+from routers.simulator import router as simulator_router
 from services.market_intel_service import get_market_intel_service
 from services.ib_service import get_ib_service
 from services.news_service import init_news_service
@@ -220,6 +222,8 @@ app.include_router(portfolio_awareness_router)
 app.include_router(quick_actions_router)
 app.include_router(sectors_router)
 app.include_router(patterns_router)
+app.include_router(sentiment_router)
+app.include_router(simulator_router)
 
 # Collections
 strategies_col = db["strategies"]

@@ -2895,6 +2895,30 @@ class EnhancedBackgroundScanner:
         except Exception as e:
             logger.debug(f"Could not add sector context: {e}")
         
+        # === SENTIMENT ANALYSIS ENHANCEMENT ===
+        # Add news sentiment to alert for high-priority setups
+        if alert.priority.value in ["critical", "high"]:
+            try:
+                from services.sentiment_analysis_service import get_sentiment_service
+                sentiment_service = get_sentiment_service()
+                sentiment = await sentiment_service.analyze_sentiment(alert.symbol, use_ai=False)
+                
+                if sentiment:
+                    sentiment_desc = f"Sentiment: {sentiment.overall_sentiment.value} ({sentiment.sentiment_score:+.2f})"
+                    alert.reasoning.append(sentiment_desc)
+                    
+                    # Confirm or warn based on sentiment vs direction alignment
+                    if alert.direction == "long" and sentiment.sentiment_score > 0.3:
+                        alert.reasoning.append("News sentiment supports bullish thesis")
+                    elif alert.direction == "short" and sentiment.sentiment_score < -0.3:
+                        alert.reasoning.append("News sentiment supports bearish thesis")
+                    elif alert.direction == "long" and sentiment.sentiment_score < -0.3:
+                        alert.reasoning.append("WARNING: Bearish news sentiment - proceed with caution")
+                    elif alert.direction == "short" and sentiment.sentiment_score > 0.3:
+                        alert.reasoning.append("WARNING: Bullish news sentiment - proceed with caution")
+            except Exception as e:
+                logger.debug(f"Could not add sentiment context: {e}")
+        
         # Persist to database
         if self.db is not None:
             try:
