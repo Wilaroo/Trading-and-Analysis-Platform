@@ -21,7 +21,7 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 | **Ollama** | Free AI for chat, summaries, market intel | Via ngrok tunnel |
 
 ## Startup Modes
-- **Cloud Dev**: Ollama + ngrok → `https://scanner-expansion.preview.emergentagent.com`
+- **Cloud Dev**: Ollama + ngrok → `https://earnings-ai-hub.preview.emergentagent.com`
 - **Full Local**: All services on PC → `http://localhost:3000`
 - See `/documents/STARTUP_GUIDE.md` for detailed instructions
 
@@ -270,6 +270,21 @@ Triggers AI Coaching Notification
 - ✅ **Chart Timezone Fix (Feb 24, 2026)**: Changed TradingView widget timezone from 'Etc/UTC' to 'America/New_York' (Eastern Time) to show correct US market hours
 - ✅ **Exchange Prefix Mapping (Feb 24, 2026)**: Added exchange prefixes (AMEX, NASDAQ, NYSE) to symbol mapping for potential real-time data
 - ✅ **RealtimeChart Component (Feb 24, 2026)**: Created new component using lightweight-charts + Alpaca real-time data (available at `/app/frontend/src/components/charts/RealtimeChart.jsx` but not currently active due to rendering issues during pre-market)
+- ✅ **Scanner Expansion Phase 1 - New AI Setups (Mar 2026)**: Added 4 new trade setup types + advanced technical indicators
+    - **New Setups**: TTM Squeeze, Relative Strength vs SPY, Mean Reversion, Gap Fade
+    - **New Indicators**: Bollinger Bands, Keltner Channels, Squeeze detection (BB inside KC), Opening Range Breakout, Relative Strength vs SPY
+    - **Backend Implementation**: `/app/backend/services/enhanced_scanner.py` with `_check_squeeze`, `_check_mean_reversion`, `_check_relative_strength`, `_check_gap_fade` methods
+    - **Technical Snapshot API**: `/api/technicals/{symbol}` returns bollinger_bands, keltner_channels, squeeze (on/fire), opening_range (high/low/breakout), relative_strength.vs_spy
+    - **34 enabled setups** in scanner including all new setup types
+    - Verified via pytest (26/26 tests passed) and Playwright UI testing
+- ✅ **Earnings Calendar Live Data (Mar 2026)**: Switched from mock data to real Finnhub API feed
+    - 5-day column layout with color-coded "heat map"
+    - Full-column gradients, Expected Move data (% and $), Earnings Score
+    - Backend endpoint: `/api/earnings/calendar`
+- ✅ **IB Data Pusher Integration (Mar 2026)**: Fixed user's local `ib_data_pusher.py` script
+    - Converted from asyncio to synchronous `requests` library to fix event loop conflicts
+    - Script reliably pushes account/position data from IB Gateway to cloud app
+    - Updated `StartTrading.bat` for automated startup
 
 ### Data Source Clarification
 | Component | Data Source | Latency |
