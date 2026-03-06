@@ -67,7 +67,7 @@ const INTERVAL_PRESETS = [
   { value: 120, label: '2m', description: 'Slow' }
 ];
 
-const SimulatorControl = ({ onAlertGenerated, className = '' }) => {
+const SimulatorControl = ({ onAlertGenerated, onAlertsUpdated, className = '' }) => {
   const [status, setStatus] = useState({
     running: false,
     scenario: 'range_bound',
@@ -79,6 +79,7 @@ const SimulatorControl = ({ onAlertGenerated, className = '' }) => {
   const [selectedScenario, setSelectedScenario] = useState('range_bound');
   const [selectedInterval, setSelectedInterval] = useState(30);
   const [error, setError] = useState(null);
+  const [lastAlertCount, setLastAlertCount] = useState(0);
 
   // Fetch simulator status
   const fetchStatus = useCallback(async () => {
@@ -95,6 +96,24 @@ const SimulatorControl = ({ onAlertGenerated, className = '' }) => {
       console.error('Failed to fetch simulator status:', err);
     }
   }, []);
+
+  // Fetch simulator alerts and update parent
+  const fetchAlerts = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/simulator/alerts`);
+      if (res.ok) {
+        const data = await res.json();
+        const alerts = data.alerts || [];
+        // Notify parent of all simulated alerts
+        if (onAlertsUpdated && alerts.length > 0) {
+          onAlertsUpdated(alerts);
+        }
+        setLastAlertCount(alerts.length);
+      }
+    } catch (err) {
+      console.error('Failed to fetch simulator alerts:', err);
+    }
+  }, [onAlertsUpdated]);
 
   // Start simulator
   const startSimulator = async () => {
@@ -152,19 +171,26 @@ const SimulatorControl = ({ onAlertGenerated, className = '' }) => {
     setLoading(false);
   };
 
-  // Poll status when running
+  // Poll status and alerts when running
   useEffect(() => {
     fetchStatus();
     
-    let interval;
+    let statusInterval;
+    let alertsInterval;
+    
     if (status.running) {
-      interval = setInterval(fetchStatus, 5000);
+      // Poll status every 5 seconds
+      statusInterval = setInterval(fetchStatus, 5000);
+      // Poll alerts more frequently (every 3 seconds) to catch new ones
+      fetchAlerts(); // Initial fetch
+      alertsInterval = setInterval(fetchAlerts, 3000);
     }
     
     return () => {
-      if (interval) clearInterval(interval);
+      if (statusInterval) clearInterval(statusInterval);
+      if (alertsInterval) clearInterval(alertsInterval);
     };
-  }, [status.running, fetchStatus]);
+  }, [status.running, fetchStatus, fetchAlerts]);
 
   const currentScenario = SCENARIO_CONFIG[status.scenario] || SCENARIO_CONFIG.range_bound;
   const ScenarioIcon = currentScenario.icon;
