@@ -15,9 +15,13 @@ import time
 from datetime import datetime
 from typing import Dict, List, Optional
 
-# Python 3.10+ requires an event loop to exist before importing ib_insync
-# because eventkit grabs the loop at import time
-asyncio.set_event_loop(asyncio.new_event_loop())
+# ---- Python 3.10+ / 3.14 compatibility ----
+# eventkit (ib_insync dependency) calls asyncio.get_event_loop() at import time.
+# Python 3.10+ raises RuntimeError if no loop exists. Fix: create one first.
+try:
+    asyncio.get_running_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
 
 import aiohttp
 from ib_insync import IB, Stock, Index, Contract, util
