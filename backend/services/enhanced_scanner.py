@@ -3040,7 +3040,7 @@ class EnhancedBackgroundScanner:
             "scan_count": self._scan_count,
             "alerts_generated": self._alerts_generated,
             "active_alerts": len(self._live_alerts),
-            "watchlist_size": len(self._watchlist),
+            "watchlist_size": wave_info.get("universe_stats", {}).get("total_unique", len(self._watchlist)),
             "symbols_scanned_last": self._symbols_scanned_last,
             "symbols_skipped_adv": self._symbols_skipped_adv,
             "symbols_skipped_rvol": self._symbols_skipped_rvol,
