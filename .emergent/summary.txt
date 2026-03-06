@@ -1,126 +1,171 @@
-<analysis>**original_problem_statement**: The user wants to fix the earnings calendar, which is not displaying any tickers. The user also reported that the Portfolio Insights section takes up too much screen space and that the page scrolls down every time they submit a message in the chat. In subsequent messages, the user requested a major layout reorganization to make the AI chat wider and more central, and to integrate the Trade Pipeline directly into the AI chat feed. The user also requested an expansion of the tickers the AI analyzes.
+<analysis>**original_problem_statement**: The user initially wanted to fix the earnings calendar. This evolved into a series of feature requests: a major layout reorganization to center the AI chat, integrating the Trade Pipeline into the chat feed, and expanding the AI's universe of scanned stocks. The user then requested that the earnings calendar pull live data, which led to multiple UI/UX enhancement cycles.
+
+This was followed by a request to integrate local Interactive Brokers (IB) data. Most recently, the user requested a major upgrade to the AI's intelligence by adding new rules and trade setups (Volatility-Adjusted Sizing, Sector Analysis, Chart Patterns, Sentiment Analysis). After these were implemented, the user asked for a way to test these new features when the market is closed, leading to the creation of a Market Hours Simulator. The current task is to build a UI control for this simulator.
 
 PRODUCT REQUIREMENTS:
-- A responsive UI that uses screen space effectively.
-- A seamless chat experience without unexpected scrolling.
-- An AI chat interface that serves as the central hub for information, including trade alerts.
-- A comprehensive and dynamic scanning universe for the AI to analyze.
-- A functional Earnings Calendar that displays relevant upcoming earnings reports.
+- A functional Earnings Calendar with real-time, actionable data.
+- A stable, automated integration with Interactive Brokers for real-time position and account data.
+- A smarter AI trading bot capable of identifying a wider variety of trade setups and patterns, including sector strength, chart patterns, and sentiment.
+- A responsive and intuitive UI that surfaces these new opportunities effectively.
+- A way to test the AI scanner during off-market hours via a UI toggle.
 
 **User's preferred language**: English
 
 **what currently exists?**
-The application is a full-stack trading platform. A major layout refactor has been completed, making the AI chat component full-width at the top of the command center. The Trade Pipeline widget has been removed and its functionality is now integrated directly into the AI chat; new trades appear as special, visually distinct messages with audio alerts and action buttons. The bottom section of the UI is now split between Portfolio Insights / My Positions on the left and the TradingView Chart on the right.
-
-The AI's scanning universe has been significantly expanded to ~1,500 symbols, including new sector-specific lists (Biotech, EV, Crypto, etc.). It now features a dynamic tier where symbols the user views in charts or mentions in chat are automatically added to the high-priority scanning queue.
-
-Several UI/UX issues have been fixed, including a compact redesign of the Portfolio Insights alerts, a fix for the chat input causing page scroll, and a fix for the chat input box disappearing. The AI chat's height is now dynamic, growing to accommodate longer conversations.
-
-The backend service for the Earnings Calendar was fixed by updating its hardcoded data to the current time frame.
+The application is a full-stack trading platform with a heavily customized UI centered around an AI assistant. The backend has been significantly enhanced with multiple new AI-driven analysis services.
+- **AI Scanner Engine**: The scanner can detect setups like TTM Squeeze, Relative Strength, Mean Reversion, and Gap Fades.
+- **IB Integration**: A synchronous Python script () allows the user to push local IB Gateway data to the application.
+- **Volatility-Adjusted Position Sizing**: The trading bot and alert system now calculate position sizes based on the Average True Range (ATR) of a stock, providing dynamic risk management.
+- **Sector/Industry Analysis**: A new service ranks sectors by performance, identifies hot/cold sectors, and enriches trade alerts with this context.
+- **Chart Pattern Detection**: A service that can identify patterns like double top on stock charts. Alerts are created when patterns are detected.
+- **Sentiment Analysis**: A new service performs both fast keyword-based sentiment analysis and deeper LLM-based analysis on news articles related to alerts.
+- **Market Hours Simulator**: A backend service () and corresponding API endpoints () can generate simulated market data and trigger scanner alerts based on various scenarios (e.g., , ) for testing purposes.
 
 **Last working item**:
--   **Last item agent was working**: Fixing the Earnings Calendar, which was not displaying any data. The agent identified that the hardcoded earnings data in  had dates that were in the past. The agent updated the dates to be current.
--   **Status**: USER VERIFICATION PENDING
--   **Agent Testing Done**: Y (The agent tested the backend API endpoint  via  and confirmed it now returns a list of 8 companies.)
--   **Which testing method agent to use?**: Frontend testing agent or Screenshot tool. The agent needs to verify that the Earnings Calendar widget on the main dashboard is now populated with the data being returned by the API.
+-   **Last item agent was working**: Adding a UI toggle to the frontend to control the Market Hours Simulator. The agent created a new component  and was in the process of integrating it into the  panel.
+-   **Status**: IN PROGRESS
+-   **Agent Testing Done**: N
+-   **Which testing method agent to use?**: Frontend testing agent. After implementation, the agent should test starting/stopping the simulator from the new UI control and verify that simulated alerts appear in the Scanner Alerts widget.
 -   **User Testing Done**: N
 
 **All Pending/In progress Issue list**:
--   **Issue 1**: Verify Earnings Calendar data appears in the UI (P0)
+-   **Issue 1**: Complete the Market Hours Simulator UI control (P0)
 
 **Issues Detail**:
--   **Issue 1: Verify Earnings Calendar data appears in the UI (P0)**
-    -   **Attempted fixes**: The backend data source  was updated with current dates. The API endpoint  was confirmed to be returning data.
+-   **Issue 1: Complete the Market Hours Simulator UI control (P0)**
+    -   **Attempted fixes**: A new component file  was created.
     -   **Next debug checklist**:
-        1.  Take a screenshot of the main application page ().
-        2.  Inspect the Earnings Calendar widget in the .
-        3.  Confirm that it is no longer empty and displays the company tickers (e.g., ADBE, NKE, FDX) returned by the API.
-    -   **Why fix this issue and what will be achieved with the fix?**: A core data widget is currently non-functional for the user. Fixing it will restore visibility into upcoming market events.
-    -   **Status**: USER VERIFICATION PENDING
+        1.  Modify  to import and render the new  component within its header.
+        2.  Implement the state management (e.g., selected scenario, running status) and API call logic within  to interact with the  and  endpoints.
+        3.  Use a dropdown for scenario selection (, , etc.) and a toggle/button to start/stop the simulation.
+        4.  Ensure the UI provides feedback on the simulator's status.
+    -   **Why fix this issue and what will be achieved with the fix?**: This will fulfill the user's request for an in-app method to test all the newly added AI scanning features during off-market hours, making the platform more robust and easier to validate.
+    -   **Status**: IN PROGRESS
     -   **Is recurring issue?**: N
     -   **Should Test frontend/backend/both after fix?**: Frontend
-    -   **Blocked on other issue**: None.
+    -   **Blocked on other issue**: None
 
 **In progress Task List**:
--   **Task 1: Integrate IB Pushed Data into Application Logic (P1)**
-    -   **Where to resume**: The frontend  hook and various UI components have been modified to use the  endpoint. The next step is to coordinate with the user to have them run their local  script. Once the script is running, the agent must verify that the user's position and account data appear correctly in the My Positions widget and other relevant UI elements.
-    -   **What will be achieved with this?**: This will complete the long-standing effort to establish a stable connection to Interactive Brokers, enabling real-time portfolio tracking within the app.
-    -   **Status**: BLOCKED (Waiting for user to run local script).
-    -   **Should Test frontend/backend/both after fix?**: Both
-    -   **Blocked on something**: User action is required.
+-   **Task 1**: Integrate  into  (P0)
+    -   **Where to resume**: .
+    -   **What will be achieved with this?**: A UI control for the market simulator will be visible in the app.
+    -   **Status**: NOT STARTED
+    -   **Should Test frontend/backend/both after fix?**: Frontend
+    -   **Blocked on something**: None
 
 **Upcoming and Future Tasks**
 -   **Upcoming Tasks**:
-    -   **(P1) Finish Quick Actions Integration in Chat**: The user requested that the Quick Actions (Buy, Sell, Alert) be available directly within the AI chat. While the menu component exists, it needs to be integrated into the  and  components.
-    -   **(P2) Setup  on Desktop**: The user mentioned wanting to set up the data pusher script on their second machine (desktop). This will involve guiding them to copy the script, install dependencies, and run it.
+    -   **(P1) Sentiment Heatmap**: Create a UI widget to visualize the sentiment data, as suggested by the agent.
 -   **Future Tasks**:
+    -   Setup  on Desktop: Guide the user on copying the script to their second machine.
+    -   Create a dedicated Pattern Alert Feed widget.
     -   Integrate Perplexity Search API.
-    -   Integrate CrewAI to create a multi-agent system.
-    -   Implement strategy backtesting.
+    -   Integrate CrewAI for a multi-agent system.
+    -   A comprehensive Strategy Backtesting module.
 
 **Completed work in this session**
--   **UI Layout Rework**: The main  layout was completely reorganized. The AI Chat is now full-width at the top, and the Trade Pipeline and Chart are positioned side-by-side at the bottom.
--   **Trade Pipeline Integration**: The standalone Trade Pipeline widget was removed. Trade alerts are now injected directly into the AI chat feed as a special message type with distinct styling, audio alerts, and action buttons ().
--   **AI Scanner Universe Expansion**: The number of symbols scanned by the AI was expanded from ~1000 to ~1500. New sector-specific lists were added (Biotech, EV, Crypto, Quantum, etc.). A dynamic tracking system was implemented to automatically add symbols viewed by the user to the high-priority scanning tier ().
--   **Portfolio Insights Compaction**: The UI for Portfolio Insights alerts was redesigned to be a compact, single-line format, saving significant screen space.
--   **Chat UX Fixes**:
-    -   Resolved the bug where submitting a chat message caused the entire page to scroll down.
-    -   Fixed an issue where the chat input box would disappear.
-    -   Implemented dynamic vertical resizing of the chat area based on content length.
--   **Startup Modal Enhancements**: Added more detailed explanations of the app's features to the explainer cards and fixed a z-index bug where the main app header was visible on top of the modal.
+-   **AI Scanner Intelligence Verification**: Confirmed the backend implementation for new trade setups (, , etc.) was complete and the scanner was running as expected (but idle due to closed market).
+-   **Quick Actions & Volatility Sizing (DONE)**:
+    -   Implemented Buy and Sell quick actions that integrate with the backend .
+    -   Enhanced  to use ATR for volatility-adjusted position sizing.
+-   **Sector Strength Analysis (DONE)**:
+    -   Created  to rank sector ETFs and provide context.
+    -   Integrated sector data into scanner alerts and the AI assistant's context.
+-   **Advanced Chart Pattern Detection (DONE)**:
+    -   Created  to detect patterns like double top.
+    -   Integrated pattern detection into the  to generate new alerts.
+-   **Sentiment Analysis Integration (DONE)**:
+    -   Created  with both fast keyword-based and deep LLM-based analysis.
+    -   Integrated sentiment scores into high-priority scanner alerts.
+-   **Market Hours Simulator (Backend DONE)**:
+    -   Created  to generate mock data and trigger alerts on demand.
+    -   Exposed control endpoints at .
+
+**Earlier issues found/mentioned but not fixed**
+-   None.
+
+**Known issue recurrence from previous fork**
+-   None.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **Dynamic Component Injection**: The Trade Pipeline was integrated into the chat by adding a new message  and conditionally rendering a  component within the chat message loop. This allows system events to appear alongside user/AI messages.
--   **Layout Refactoring with Flexbox**: The main application layout in  was refactored from a multi-column design to a stacked flexbox design to achieve the user's desired layout (wide chat on top, other components below).
--   **DOM Ref for Scroll Control**: The chat's scroll-on-submit bug was fixed by moving away from  and instead using a  on the scrollable container and directly manipulating its  property.
+-   **Volatility-Adjusted Position Sizing**: Using Average True Range (ATR) to determine trade size based on market volatility instead of a fixed risk amount.
+-   **Sector Rotation Analysis**: Calculating relative strength of sector ETFs (XLE, XLF, etc.) to identify market trends and enrich alerts with sector context.
+-   **Programmatic Chart Pattern Detection**: Using algorithms to identify technical patterns (e.g., double top) from historical price data.
+-   **Hybrid Sentiment Analysis**: Combining fast, efficient keyword-based sentiment scoring with more nuanced, but slower, LLM-based analysis for high-priority news.
+-   **Market Data Simulation**: A backend service to generate realistic fake market data ticks to allow for robust testing of the real-time scanner engine during off-market hours.
+-   **Singleton Service Pattern**: Used for stateful services like  to ensure a single instance is shared across requests, maintaining cache and state correctly.
+
+**key DB schema**
+-   No database schema changes were made.
+
+**changes in tech stack**
+-   No changes to the core tech stack.
 
 **All files of reference**
--   : This file contained the outdated earnings data that was just fixed.
--   : The primary file for the main application layout. It was heavily modified in this session.
--   : The core component for the AI chat. It now contains the logic for rendering messages, handling the dynamic height, and injecting trade alerts.
--   : The new component that renders trade pipeline events within the chat.
--   : The service that defines the expanded list of symbols for the AI scanner.
+-   : **New file** for the simulator UI control.
+-   : **Target for modification** to include the new UI control.
+-   : **New file**, contains the logic for the market simulator.
+-   : **New file**, exposes API endpoints for the simulator.
+-   : Modified for ATR-based position sizing.
+-   : Heavily modified to integrate sector, pattern, and sentiment analysis.
+-   : **New file** for sector performance logic.
+-   : **New file** for pattern detection logic.
+-   : **New file** for sentiment logic.
+-   : Modified to include all the new service routers.
 
 **Areas that need refactoring**:
--   The abandoned component  should be deleted.
+-   The new service routers (, , etc.) were created without the robust singleton initialization pattern that was later added to  to fix a bug. It would be prudent to apply the same pattern () to the other new routers to prevent similar state/caching issues.
+
+**key api endpoints**
+-   :  - Submits a buy order via the trading bot with ATR-based sizing.
+-   :  - Closes an existing position.
+-   :  - Returns a ranked list of sector performance.
+-   :  - Detects chart patterns for a given symbol.
+-   :  - Analyzes sentiment for a given text.
+-   :  - Starts the market simulator with a given scenario.
+-   :  - Stops the market simulator.
+-   :  - Retrieves alerts generated by the simulator.
 
 **Critical Info for New Agent**
--   The immediate task is to verify the Earnings Calendar fix in the UI. The backend API is confirmed to be working.
--   The main application layout has changed significantly. The AI Chat is now the top, full-width component. Do not look for a separate Trade Pipeline widget; it is now part of the chat.
--   The IB data integration task is blocked on the user. Do not attempt to debug it further until the user confirms they are running their local  script.
+-   Your immediate and highest priority task is to complete the UI for the Market Hours Simulator. The user explicitly asked for a UI toggle to control it. The backend is fully implemented and tested via curl. You need to build the frontend component to call the existing  endpoints.
+-   A new file  was already created. You need to finish its implementation and add it to .
+-   The application's intelligence has been massively upgraded. Once the simulator UI is done, the user will be able to test all the new features (sectors, patterns, sentiment) in a controlled environment.
 
 **documents and test reports created in this job**
--   All test reports from this session were successful, verifying the UI fixes and backend symbol expansion. The latest report is .
+-    (updated with completed work)
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User**:  (Fixed)
-2.  **User**:  (In Progress - Backend fixed, UI verification pending)
-3.  **User**:  (Implemented)
-4.  **User**:  (Initial width-based implementation, later clarified by user)
-5.  **User**:  (Both fixed)
-6.  **User**:  (Regarding symbol universe expansion options)
-7.  **User**:  (Implemented)
-8.  **User**:  (All three implemented)
-9.  **User**:  (Regarding setting up IB pusher on his other machine)
-10. **User**:  (Agent provided instructions)
+1.  **User**:  - **Status: COMPLETED**. User set the priority for implementing the new AI features.
+2.  **User**:  - **Status: COMPLETED**. User confirmed the plan and requested deep integration rather than new UI.
+3.  **User**:  - **Status: COMPLETED**. User approved the plan to work on Sentiment Analysis and the Market Simulator next.
+4.  **User**:  - **Status: COMPLETED**. User chose the hybrid approach for sentiment analysis (fast keyword-based + deep LLM).
+5.  **User**:  - **Status: IN PROGRESS**. User asked for instructions on how to use the newly-created Market Simulator.
+6.  **User**:  - **Status: IN PROGRESS**. User requested a UI control for the simulator, which became the current active task.
+7.  **User**:  - **Status: PENDING**. User is waiting for the agent to continue working on the simulator UI after a pause.
 
 **Project Health Check:**
--   **Broken**:
-    -   Earnings Calendar UI is likely still empty, pending verification of the backend fix.
+-   **Broken**: None.
 -   **Mocked**:
-    -   Quick Actions are not yet fully integrated into the AI chat messages.
+    -   Quick Actions (Buy/Sell buttons) are backend-complete but may need UI enhancements for displaying position sizing info.
+    -   The UI for the Market Simulator is currently being built.
 
 **3rd Party Integrations**
--   **Ollama**: Stable, with graceful fallback to a cloud AI.
--   **Interactive Brokers (IB Gateway)**: Connection relies on the new  script which the user runs locally. Integration into the app's UI is still pending end-to-end verification.
+-   **Finnhub**: Live earnings calendar data.
+-   **Interactive Brokers (IB Gateway)**: User-managed connection for live account/position data.
+-   **Ollama**: Used for deep AI analysis in the sentiment service and general AI assistant capabilities.
+-   **Alpaca**: Primary source for market data (quotes, bars, news).
 
 **Testing status**
--   **Testing agent used after significant changes**: YES. The agent was used multiple times to verify the layout changes, UI fixes, and backend feature additions. All recent test runs passed.
--   **Test files created**: None in this session.
+-   **Testing agent used after significant changes**: NO. The agent self-tested all new backend features using  commands.
+-   **Troubleshoot agent used after agent stuck in loop**: NO.
+-   **Test files created**: None.
 -   **Known regressions**: None.
 
+**Credentials to test flow:**
+-   N/A
+
 **What agent forgot to execute**
--   The agent did not remove the dead code file  as noted in a previous handover.</analysis>
+-   The agent was interrupted while implementing the UI for the market simulator toggle. It created the component file but did not integrate it into the main UI or add the control logic before the session ended.</analysis>

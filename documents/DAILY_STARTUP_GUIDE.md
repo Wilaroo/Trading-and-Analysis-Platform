@@ -40,7 +40,7 @@ Forwarding                    https://pseudoaccidentally-linty-addie.ngrok-free.
 ### Step 3: Open Trading Platform
 Open your browser and go to:
 ```
-https://earnings-ai-hub.preview.emergentagent.com
+https://ai-scanner-sim.preview.emergentagent.com
 ```
 
 ### Step 4: Verify Connection
@@ -96,7 +96,7 @@ echo [3/4] Opening Trading Platform...
 timeout /t 2 /nobreak >nul
 
 :: Open browser to trading platform
-start "" "https://earnings-ai-hub.preview.emergentagent.com"
+start "" "https://ai-scanner-sim.preview.emergentagent.com"
 
 echo.
 echo [4/4] Startup Complete!
@@ -190,7 +190,7 @@ When you're done trading:
 
 | Component | URL/Location |
 |-----------|-------------|
-| Trading Platform | https://earnings-ai-hub.preview.emergentagent.com |
+| Trading Platform | https://ai-scanner-sim.preview.emergentagent.com |
 | ngrok Tunnel | https://pseudoaccidentally-linty-addie.ngrok-free.dev |
 | Local Ollama | http://localhost:11434 |
 | Default AI Model | deepseek-r1:8b |
