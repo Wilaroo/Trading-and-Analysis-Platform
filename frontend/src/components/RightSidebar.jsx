@@ -598,7 +598,22 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
           <SimulatorControl 
             className="mb-3"
             onAlertGenerated={(alert) => {
-              setAlerts(prev => [alert, ...prev].slice(0, 20));
+              // Single alert generated on demand
+              setAlerts(prev => [alert, ...prev.filter(a => a.id !== alert.id)].slice(0, 20));
+            }}
+            onAlertsUpdated={(simAlerts) => {
+              // Batch update from simulator - merge with existing alerts
+              setAlerts(prev => {
+                // Get non-simulated alerts
+                const realAlerts = prev.filter(a => !a.simulated);
+                // Combine simulated alerts (newest first) with real alerts
+                const combined = [...simAlerts, ...realAlerts];
+                // Remove duplicates by id
+                const unique = combined.filter((alert, idx, self) => 
+                  idx === self.findIndex(a => a.id === alert.id)
+                );
+                return unique.slice(0, 20);
+              });
             }}
           />
           
