@@ -153,10 +153,7 @@ class IBDataPusher:
             logger.warning(f"IB Error [{errorCode}]: {errorString}")
     
     def subscribe_market_data(self, symbols: List[str]):
-        """Subscribe to real-time market data"""
-        # Request delayed data if real-time not available (paper accounts)
-        self.ib.reqMarketDataType(3)  # 3 = delayed, 4 = delayed-frozen
-        
+        """Subscribe to real-time market data (skips symbols without live subscriptions)"""
         for symbol in symbols:
             try:
                 if symbol == "VIX":
