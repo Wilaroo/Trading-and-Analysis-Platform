@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://scanner-expansion.preview.emergentagent.com
+https://earnings-ai-hub.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://scanner-expansion.preview.emergentagent.com
+https://earnings-ai-hub.preview.emergentagent.com
 ```
