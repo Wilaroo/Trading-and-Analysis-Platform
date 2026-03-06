@@ -21,10 +21,12 @@ import {
   X,
   Sun,
   Moon,
-  LineChart
+  LineChart,
+  FlaskConical
 } from 'lucide-react';
 import MarketIntelPanel from './MarketIntelPanel';
 import QuickActionsMenu from './QuickActionsMenu';
+import SimulatorControl from './SimulatorControl';
 import api from '../utils/api';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
@@ -591,7 +593,15 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
       </button>
       
       {expanded && (
-        <div className="px-3 pb-3 space-y-1.5 max-h-64 overflow-y-auto">
+        <div className="px-3 pb-3 space-y-1.5 max-h-80 overflow-y-auto">
+          {/* Market Simulator Control */}
+          <SimulatorControl 
+            className="mb-3"
+            onAlertGenerated={(alert) => {
+              setAlerts(prev => [alert, ...prev].slice(0, 20));
+            }}
+          />
+          
           {/* Scanner Stats */}
           {stats && (
             <div className="flex items-center justify-between text-[10px] text-zinc-500 pb-2 border-b border-zinc-700/50 mb-2">
@@ -641,6 +651,12 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
                   <div className="flex items-center gap-2 mb-1 text-[9px] text-zinc-500">
                     <Clock className="w-2.5 h-2.5" />
                     <span>{formatTime(alert.created_at)}</span>
+                    {alert.simulated && (
+                      <span className="flex items-center gap-0.5 px-1 py-0.5 rounded bg-purple-500/20 text-purple-400 font-medium">
+                        <FlaskConical className="w-2.5 h-2.5" />
+                        SIM
+                      </span>
+                    )}
                     {isApproaching && (
                       <span className="px-1 py-0.5 rounded bg-yellow-500/20 text-yellow-400 font-medium">WATCH</span>
                     )}

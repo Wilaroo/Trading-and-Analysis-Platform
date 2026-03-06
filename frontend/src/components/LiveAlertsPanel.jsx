@@ -32,8 +32,10 @@ import {
   List,
   Timer,
   Eye,
-  EyeOff
+  EyeOff,
+  FlaskConical
 } from 'lucide-react';
+import SimulatorControl from './SimulatorControl';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -138,6 +140,12 @@ const AlertCard = ({ alert, onDismiss, onSelect }) => {
           <div className="flex items-center gap-2 mb-1 text-xs text-zinc-500">
             <Clock className="w-3 h-3" />
             <span>{formatTimestamp(alert.created_at)}</span>
+            {alert.simulated && (
+              <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 font-medium flex items-center gap-1">
+                <FlaskConical className="w-3 h-3" />
+                SIM
+              </span>
+            )}
             {isApproaching && (
               <span className="px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400 font-medium">
                 WATCH
@@ -816,6 +824,18 @@ const LiveAlertsPanel = ({
           />
         )}
       </AnimatePresence>
+      
+      {/* Market Simulator Control */}
+      <div className="px-4 py-3 border-b border-zinc-700/50">
+        <SimulatorControl 
+          onAlertGenerated={(alert) => {
+            setAlerts(prev => [alert, ...prev].slice(0, 50));
+            if (alertsContainerRef.current) {
+              alertsContainerRef.current.scrollTop = 0;
+            }
+          }}
+        />
+      </div>
       
       {/* Alerts List */}
       <div 
