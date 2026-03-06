@@ -317,6 +317,14 @@ Triggers AI Coaching Notification
     - **API Endpoints**: `/api/simulator/start`, `/api/simulator/stop`, `/api/simulator/generate`, `/api/simulator/alerts`
     - **WebSocket**: `/api/simulator/ws/alerts` for real-time simulated alert stream
     - Backend: `/app/backend/services/market_simulator_service.py`, `/app/backend/routers/simulator.py`
+    - **UI Control (Mar 6, 2026)**: SimulatorControl.jsx component integrated into Scanner Alerts widget
+      - Start/Stop buttons with visual status indicators
+      - Scenario selection (4 market scenarios with icons and descriptions)
+      - Interval selection (10s, 30s, 1m, 2m presets)
+      - Single alert generation button (lightning bolt)
+      - Settings panel with collapsible configuration
+      - 'SIM' badge on simulated alerts in feed
+      - Frontend: `/app/frontend/src/components/SimulatorControl.jsx`, integrated into `RightSidebar.jsx`
 
 ### Data Source Clarification
 | Component | Data Source | Latency |
