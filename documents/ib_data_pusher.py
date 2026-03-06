@@ -145,13 +145,18 @@ class IBDataPusher:
     def on_error(self, reqId, errorCode, errorString, contract):
         """Handle IB errors"""
         # Filter out common non-critical messages
-        if errorCode in [2104, 2106, 2158, 2119]:  # Market data, connection info
+        if errorCode in [2104, 2106, 2158, 2119]:  # Connection status info
             logger.debug(f"IB Info [{errorCode}]: {errorString}")
+        elif errorCode in [10089, 354, 10090]:  # Market data subscription — using delayed data
+            logger.debug(f"IB Market Data [{errorCode}]: Using delayed data for {contract.symbol if contract else 'unknown'}")
         else:
             logger.warning(f"IB Error [{errorCode}]: {errorString}")
     
     def subscribe_market_data(self, symbols: List[str]):
         """Subscribe to real-time market data"""
+        # Request delayed data if real-time not available (paper accounts)
+        self.ib.reqMarketDataType(3)  # 3 = delayed, 4 = delayed-frozen
+        
         for symbol in symbols:
             try:
                 if symbol == "VIX":
@@ -204,7 +209,7 @@ class IBDataPusher:
         try:
             accounts = self.ib.managedAccounts()
             if accounts:
-                self.ib.reqAccountUpdates(True, accounts[0])
+                self.ib.reqAccountUpdates(accounts[0])
                 logger.info(f"  Requested account updates for {accounts[0]}")
         except Exception as e:
             logger.error(f"Account update request error: {e}")
