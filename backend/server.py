@@ -55,6 +55,8 @@ from routers.research import router as research_router
 from routers.config import router as config_router
 from routers.portfolio_awareness import router as portfolio_awareness_router
 from routers.quick_actions import router as quick_actions_router, init_quick_actions_router
+from routers.sectors import router as sectors_router
+from routers.patterns import router as patterns_router
 from services.market_intel_service import get_market_intel_service
 from services.ib_service import get_ib_service
 from services.news_service import init_news_service
@@ -72,6 +74,7 @@ from services.trade_executor_service import get_trade_executor
 from services.smart_watchlist_service import init_smart_watchlist, get_smart_watchlist
 from services.index_universe import get_index_universe
 from services.wave_scanner import init_wave_scanner, get_wave_scanner
+from services.sector_analysis_service import get_sector_analysis_service
 from data.strategies_data import ALL_STRATEGIES_DATA
 
 app = FastAPI(title="TradeCommand API")
@@ -127,8 +130,14 @@ scheduler_service.start()
 init_scheduler_router(scheduler_service, assistant_service, None)  # Newsletter removed
 init_alpaca_router(alpaca_service)
 
-# Initialize quick actions router
-init_quick_actions_router(alpaca_service, db)
+# Initialize sector analysis service
+sector_service = get_sector_analysis_service()
+sector_service.set_alpaca_service(alpaca_service)
+
+# Initialize quick actions router with technical service for volatility-adjusted sizing
+from services.realtime_technical_service import get_technical_service
+realtime_tech_service = get_technical_service()
+init_quick_actions_router(alpaca_service, db, trading_bot=None, technical_service=realtime_tech_service)
 
 # Initialize user viewed symbols tracker
 from services.user_viewed_tracker import init_user_viewed_tracker
@@ -209,6 +218,8 @@ app.include_router(research_router)
 app.include_router(config_router)
 app.include_router(portfolio_awareness_router)
 app.include_router(quick_actions_router)
+app.include_router(sectors_router)
+app.include_router(patterns_router)
 
 # Collections
 strategies_col = db["strategies"]

@@ -197,7 +197,7 @@ class StrategyStats:
 
 @dataclass
 class LiveAlert:
-    """Real-time trading alert with tape confirmation"""
+    """Real-time trading alert with tape confirmation and position sizing data"""
     id: str
     symbol: str
     setup_type: str
@@ -228,6 +228,13 @@ class LiveAlert:
     # Strategy stats
     strategy_win_rate: float = 0.0
     strategy_profit_factor: float = 0.0
+    
+    # Volatility-adjusted position sizing data
+    atr: float = 0.0                    # Average True Range in dollars
+    atr_percent: float = 0.0            # ATR as % of price
+    suggested_shares: int = 0           # Pre-calculated position size
+    suggested_risk: float = 0.0         # Pre-calculated risk amount
+    volatility_regime: str = "normal"   # "low", "normal", "high", "extreme"
     
     # Auto-execution
     auto_execute_eligible: bool = False
@@ -308,6 +315,8 @@ class EnhancedBackgroundScanner:
             # NEW: Relative strength & gap plays
             "relative_strength",  # Leaders/laggards vs SPY
             "gap_fade",  # Fade failing gaps
+            # Chart patterns
+            "chart_pattern",  # Flags, pennants, triangles, H&S, wedges
         }
         
         # Alert management
@@ -543,6 +552,73 @@ class EnhancedBackgroundScanner:
                 
         except Exception as e:
             logger.error(f"Auto-execute failed: {e}")
+    
+    # ==================== POSITION SIZING HELPER ====================
+    
+    def _calculate_position_sizing(self, current_price: float, stop_loss: float, 
+                                   direction: str, atr: float = 0, atr_percent: float = 0) -> Dict:
+        """
+        Calculate volatility-adjusted position sizing for an alert.
+        
+        Args:
+            current_price: Current stock price
+            stop_loss: Stop loss price
+            direction: 'long' or 'short'
+            atr: Average True Range in dollars
+            atr_percent: ATR as percentage of price
+        
+        Returns:
+            Dict with suggested_shares, suggested_risk, volatility_regime
+        """
+        # Default ATR if not provided
+        if not atr or atr <= 0:
+            atr = current_price * 0.02  # Default 2% ATR
+            atr_percent = 2.0
+        
+        # Determine volatility regime
+        if atr_percent < 1.5:
+            volatility_regime = "low"
+            vol_multiplier = 1.3
+        elif atr_percent < 2.5:
+            volatility_regime = "normal"
+            vol_multiplier = 1.0
+        elif atr_percent < 4.0:
+            volatility_regime = "high"
+            vol_multiplier = 0.75
+        else:
+            volatility_regime = "extreme"
+            vol_multiplier = 0.5
+        
+        # Calculate risk per share
+        risk_per_share = abs(current_price - stop_loss)
+        if risk_per_share <= 0:
+            risk_per_share = atr  # Fallback to ATR
+        
+        # Base max risk per trade
+        base_max_risk = 2500.0
+        adjusted_max_risk = base_max_risk * vol_multiplier
+        
+        # Calculate shares
+        shares = int(adjusted_max_risk / risk_per_share) if risk_per_share > 0 else 0
+        shares = max(shares, 1)
+        
+        # Cap based on position value (10% of capital)
+        max_capital = 1_000_000  # Assumed capital
+        max_position_value = max_capital * 0.10
+        max_shares_by_capital = int(max_position_value / current_price)
+        shares = min(shares, max_shares_by_capital)
+        
+        # Calculate actual risk
+        risk_amount = shares * risk_per_share
+        
+        return {
+            "suggested_shares": shares,
+            "suggested_risk": round(risk_amount, 2),
+            "volatility_regime": volatility_regime,
+            "atr": round(atr, 2),
+            "atr_percent": round(atr_percent, 2),
+            "vol_multiplier": vol_multiplier
+        }
     
     # ==================== EXPANDED WATCHLIST ====================
     
@@ -1303,6 +1379,7 @@ class EnhancedBackgroundScanner:
             "mean_reversion": self._check_mean_reversion,
             "relative_strength": self._check_relative_strength,
             "gap_fade": self._check_gap_fade,
+            "chart_pattern": self._check_chart_pattern,
         }
         
         checker = checkers.get(setup_type)
@@ -2448,6 +2525,68 @@ class EnhancedBackgroundScanner:
         
         return None
     
+    async def _check_chart_pattern(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
+        """Chart Pattern Detection - Flags, pennants, triangles, H&S, wedges"""
+        try:
+            from services.chart_pattern_service import get_chart_pattern_service
+            pattern_service = get_chart_pattern_service()
+            
+            if not pattern_service._initialized:
+                return None
+            
+            # Detect patterns for this symbol
+            patterns = await pattern_service.detect_patterns(symbol)
+            
+            if not patterns:
+                return None
+            
+            # Get the best pattern (highest score)
+            best_pattern = patterns[0]
+            
+            # Only alert on strong patterns with good R:R
+            if best_pattern.pattern_score < 60 or best_pattern.risk_reward < 1.5:
+                return None
+            
+            # Determine priority based on pattern strength and breakout status
+            if best_pattern.strength.value == "strong" and not best_pattern.breakout_pending:
+                priority = AlertPriority.CRITICAL
+            elif best_pattern.strength.value == "strong":
+                priority = AlertPriority.HIGH
+            elif best_pattern.strength.value == "moderate":
+                priority = AlertPriority.MEDIUM
+            else:
+                priority = AlertPriority.LOW
+            
+            direction = best_pattern.direction if best_pattern.direction != "neutral" else "long"
+            
+            return LiveAlert(
+                id=f"pattern_{best_pattern.pattern_type.value}_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                symbol=symbol,
+                setup_type="chart_pattern",
+                strategy_name=best_pattern.pattern_type.value.replace('_', ' ').title(),
+                direction=direction,
+                priority=priority,
+                current_price=snapshot.current_price,
+                trigger_price=best_pattern.entry_price,
+                stop_loss=best_pattern.stop_loss,
+                target=best_pattern.target_price,
+                risk_reward=best_pattern.risk_reward,
+                trigger_probability=0.55,
+                win_probability=0.58,
+                minutes_to_trigger=30,
+                headline=f"CHART PATTERN: {best_pattern.pattern_type.value.replace('_', ' ').upper()} on {symbol}",
+                reasoning=best_pattern.reasoning + [
+                    f"Pattern Score: {best_pattern.pattern_score}/100",
+                    f"Volume Confirmed: {best_pattern.volume_confirmation}"
+                ],
+                time_window=self._get_current_time_window().value,
+                market_regime=self._market_regime.value,
+                expires_at=(datetime.now(timezone.utc) + timedelta(hours=4)).isoformat()
+            )
+        except Exception as e:
+            logger.debug(f"Chart pattern check failed for {symbol}: {e}")
+            return None
+    
     async def _check_first_vwap_pullback(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
         """First VWAP Pullback - Opening pullback to VWAP"""
         current_window = self._get_current_time_window()
@@ -2720,6 +2859,41 @@ class EnhancedBackgroundScanner:
                 )
         except Exception as e:
             logger.debug(f"Could not add to smart watchlist: {e}")
+        
+        # === SECTOR CONTEXT ENHANCEMENT ===
+        # Add sector strength context to alert
+        try:
+            from services.sector_analysis_service import get_sector_analysis_service
+            sector_service = get_sector_analysis_service()
+            sector_context = await sector_service.get_stock_sector_context(alert.symbol)
+            
+            if sector_context:
+                # Add sector context to reasoning
+                sector_note = f"Sector: {sector_context.sector} (Rank #{sector_context.sector_rank}, {sector_context.sector_strength.value})"
+                if sector_context.is_sector_leader:
+                    sector_note += " - SECTOR LEADER"
+                elif sector_context.is_sector_laggard:
+                    sector_note += " - Sector Laggard"
+                
+                # Add to reasoning list
+                alert.reasoning.append(sector_note)
+                
+                # Boost priority for leaders in hot sectors (for longs)
+                if (sector_context.sector_strength.value == "hot" and 
+                    sector_context.is_sector_leader and 
+                    alert.direction == "long" and
+                    alert.priority != AlertPriority.CRITICAL):
+                    # Upgrade priority
+                    if alert.priority == AlertPriority.MEDIUM:
+                        alert.priority = AlertPriority.HIGH
+                    alert.reasoning.append(f"Priority boost: Leading in HOT sector (+{sector_context.stock_vs_sector}% vs sector)")
+                
+                # Warn about headwinds for longs in cold sectors
+                elif (sector_context.sector_strength.value == "cold" and 
+                      alert.direction == "long"):
+                    alert.reasoning.append(f"Warning: {sector_context.sector} sector is COLD - headwind risk")
+        except Exception as e:
+            logger.debug(f"Could not add sector context: {e}")
         
         # Persist to database
         if self.db is not None:

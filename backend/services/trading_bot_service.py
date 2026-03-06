@@ -318,7 +318,7 @@ DEFAULT_STRATEGY_CONFIG = {
 
 @dataclass
 class RiskParameters:
-    """Risk management parameters"""
+    """Risk management parameters with volatility-adjusted sizing"""
     max_risk_per_trade: float = 2500.0      # Maximum $ risk per trade
     max_daily_loss: float = 5000.0           # Maximum daily loss before stopping
     starting_capital: float = 1000000.0      # Account capital for position sizing
@@ -326,6 +326,13 @@ class RiskParameters:
     max_open_positions: int = 5              # Maximum concurrent positions
     min_risk_reward: float = 1.5             # Minimum risk/reward ratio
     max_slippage_pct: float = 0.5           # Maximum acceptable slippage %
+    
+    # Volatility-adjusted position sizing
+    use_volatility_sizing: bool = True       # Enable ATR-based position sizing
+    base_atr_multiplier: float = 1.5         # Stop distance = ATR * multiplier
+    volatility_scale_factor: float = 1.0     # Scale position size by volatility (1.0 = neutral)
+    min_atr_multiplier: float = 1.0          # Minimum stop distance in ATRs
+    max_atr_multiplier: float = 3.0          # Maximum stop distance in ATRs
 
 
 @dataclass
@@ -924,17 +931,30 @@ class TradingBotService:
             # Apply intelligence adjustments to scoring
             score_adjustment = self._calculate_intelligence_adjustment(intelligence)
             
+            # Extract ATR from intelligence for volatility-adjusted sizing
+            atr = alert.get('atr', 0)
+            atr_percent = alert.get('atr_percent', 0)
+            
+            # Try to get real ATR from technical data if not in alert
+            if not atr and intelligence.get('technicals'):
+                tech = intelligence['technicals']
+                atr = tech.get('atr', current_price * 0.02)
+                atr_percent = tech.get('atr_percent', 2.0)
+            elif not atr:
+                # Default to 2% of price
+                atr = current_price * 0.02
+                atr_percent = 2.0
+            
             # Get trade parameters from alert
             entry_price = alert.get('trigger_price', current_price)
             stop_price = alert.get('stop_price', 0)
             target_prices = alert.get('targets', [])
             
-            # Calculate stop if not provided
+            # Calculate ATR-based stop if not provided
             if not stop_price:
-                atr = alert.get('atr', current_price * 0.02)  # Default 2% ATR
-                stop_price = entry_price - atr if direction == TradeDirection.LONG else entry_price + atr
+                stop_price = self.calculate_atr_based_stop(entry_price, direction, atr, setup_type)
             
-            # Calculate targets if not provided
+            # Calculate targets if not provided (using ATR-based risk)
             if not target_prices:
                 risk = abs(entry_price - stop_price)
                 if direction == TradeDirection.LONG:
@@ -942,8 +962,8 @@ class TradingBotService:
                 else:
                     target_prices = [entry_price - risk * 1.5, entry_price - risk * 2.5, entry_price - risk * 4]
             
-            # Calculate position size
-            shares, risk_amount = self._calculate_position_size(entry_price, stop_price, direction)
+            # Calculate position size with volatility adjustment
+            shares, risk_amount = self._calculate_position_size(entry_price, stop_price, direction, atr, atr_percent)
             
             if shares <= 0:
                 return None
@@ -1036,10 +1056,19 @@ class TradingBotService:
             logger.error(f"Error evaluating opportunity: {e}")
             return None
     
-    def _calculate_position_size(self, entry_price: float, stop_price: float, direction: TradeDirection) -> Tuple[int, float]:
+    def _calculate_position_size(self, entry_price: float, stop_price: float, direction: TradeDirection, atr: float = None, atr_percent: float = None) -> Tuple[int, float]:
         """
-        Calculate position size based on risk management rules.
-        Returns (shares, risk_amount)
+        Calculate position size based on risk management rules with volatility adjustment.
+        
+        Args:
+            entry_price: Entry price for the trade
+            stop_price: Stop loss price
+            direction: LONG or SHORT
+            atr: Average True Range in dollars (optional, for volatility adjustment)
+            atr_percent: ATR as percentage of price (optional)
+        
+        Returns:
+            (shares, risk_amount)
         """
         # Calculate risk per share
         risk_per_share = abs(entry_price - stop_price)
@@ -1047,8 +1076,32 @@ class TradingBotService:
         if risk_per_share <= 0:
             return 0, 0
         
-        # Calculate max shares based on max risk per trade
-        max_shares_by_risk = int(self.risk_params.max_risk_per_trade / risk_per_share)
+        # Volatility-adjusted sizing
+        adjusted_max_risk = self.risk_params.max_risk_per_trade
+        volatility_multiplier = 1.0
+        
+        if self.risk_params.use_volatility_sizing and atr_percent:
+            # Adjust position size based on volatility
+            # Lower volatility (ATR% < 2%) = can take larger position
+            # Higher volatility (ATR% > 4%) = should take smaller position
+            # Normal volatility (2-3%) = standard sizing
+            if atr_percent < 1.5:
+                volatility_multiplier = 1.3  # Low vol - can size up
+            elif atr_percent < 2.5:
+                volatility_multiplier = 1.1  # Normal-low vol
+            elif atr_percent < 3.5:
+                volatility_multiplier = 1.0  # Normal vol
+            elif atr_percent < 5.0:
+                volatility_multiplier = 0.8  # High vol - size down
+            else:
+                volatility_multiplier = 0.6  # Very high vol - significant reduction
+            
+            # Apply volatility scale factor
+            volatility_multiplier *= self.risk_params.volatility_scale_factor
+            adjusted_max_risk = self.risk_params.max_risk_per_trade * volatility_multiplier
+        
+        # Calculate max shares based on adjusted risk per trade
+        max_shares_by_risk = int(adjusted_max_risk / risk_per_share)
         
         # Calculate max shares based on max position size
         max_position_value = self.risk_params.starting_capital * (self.risk_params.max_position_pct / 100)
@@ -1063,12 +1116,50 @@ class TradingBotService:
         # Calculate actual risk
         risk_amount = shares * risk_per_share
         
-        # Cap risk at max per trade
-        if risk_amount > self.risk_params.max_risk_per_trade:
-            shares = int(self.risk_params.max_risk_per_trade / risk_per_share)
+        # Cap risk at max per trade (using adjusted max)
+        if risk_amount > adjusted_max_risk:
+            shares = int(adjusted_max_risk / risk_per_share)
             risk_amount = shares * risk_per_share
         
         return shares, risk_amount
+    
+    def calculate_atr_based_stop(self, entry_price: float, direction: TradeDirection, atr: float, setup_type: str = None) -> float:
+        """
+        Calculate stop loss based on ATR with setup-specific adjustments.
+        
+        Args:
+            entry_price: Entry price for the trade
+            direction: LONG or SHORT
+            atr: Average True Range in dollars
+            setup_type: Optional setup type for custom multiplier
+        
+        Returns:
+            Stop price
+        """
+        # Setup-specific ATR multipliers
+        setup_multipliers = {
+            'rubber_band': 1.0,      # Tighter stops for mean reversion
+            'squeeze': 1.5,          # Medium stops for squeeze plays
+            'breakout': 1.5,         # Standard stops for breakouts
+            'vwap_bounce': 1.0,      # Tight stops for VWAP plays
+            'gap_fade': 1.25,        # Moderate stops for gap fades
+            'relative_strength': 1.5, # Standard stops
+            'mean_reversion': 1.0,   # Tight stops for MR
+            'orb': 1.25,             # Moderate stops for ORB
+        }
+        
+        multiplier = setup_multipliers.get(setup_type, self.risk_params.base_atr_multiplier)
+        
+        # Clamp multiplier within bounds
+        multiplier = max(self.risk_params.min_atr_multiplier, 
+                        min(multiplier, self.risk_params.max_atr_multiplier))
+        
+        stop_distance = atr * multiplier
+        
+        if direction == TradeDirection.LONG:
+            return entry_price - stop_distance
+        else:
+            return entry_price + stop_distance
     
     def _score_to_grade(self, score: int) -> str:
         """Convert score to letter grade"""
