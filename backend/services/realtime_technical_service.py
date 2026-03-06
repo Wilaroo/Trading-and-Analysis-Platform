@@ -77,6 +77,29 @@ class TechnicalSnapshot:
     extended_from_ema9: bool
     extension_pct: float
     
+    # Bollinger Bands (20-period, 2 std dev)
+    bb_upper: float
+    bb_middle: float
+    bb_lower: float
+    bb_width: float  # (upper - lower) / middle * 100
+    
+    # Keltner Channels (20-period, 1.5 ATR)
+    kc_upper: float
+    kc_middle: float
+    kc_lower: float
+    
+    # Squeeze state
+    squeeze_on: bool  # BB inside KC = volatility compression
+    squeeze_fire: float  # Momentum histogram value (positive = bullish fire)
+    
+    # Opening Range (first 30 min)
+    or_high: float
+    or_low: float
+    or_breakout: str  # "above", "below", "inside"
+    
+    # Relative strength vs SPY
+    rs_vs_spy: float  # Today's % change vs SPY's % change (positive = outperforming)
+    
     # Source tracking
     bars_used: int
     data_quality: str  # "real", "partial", "estimated"
@@ -92,6 +115,8 @@ class RealTimeTechnicalService:
         self._alpaca_service = None
         self._cache: Dict[str, TechnicalSnapshot] = {}
         self._cache_ttl = 120  # 2 minute cache for technical data
+        self._spy_change_pct: float = 0.0  # Cached SPY daily % change
+        self._spy_cache_time: Optional[datetime] = None
         
     @property
     def alpaca(self):
@@ -99,6 +124,23 @@ class RealTimeTechnicalService:
             from services.alpaca_service import get_alpaca_service
             self._alpaca_service = get_alpaca_service()
         return self._alpaca_service
+    
+    async def _get_spy_change(self) -> float:
+        """Get SPY's daily % change (cached for 2 min)"""
+        now = datetime.now(timezone.utc)
+        if self._spy_cache_time and (now - self._spy_cache_time).total_seconds() < 120:
+            return self._spy_change_pct
+        try:
+            quote = await self.alpaca.get_quote("SPY")
+            bars = await self.alpaca.get_bars("SPY", "1Day", 2)
+            if quote and bars and len(bars) >= 2:
+                prev_close = bars[-2]["close"]
+                price = quote.get("price", bars[-1]["close"])
+                self._spy_change_pct = ((price - prev_close) / prev_close) * 100
+                self._spy_cache_time = now
+        except:
+            pass
+        return self._spy_change_pct
     
     async def get_technical_snapshot(self, symbol: str, force_refresh: bool = False) -> Optional[TechnicalSnapshot]:
         """
@@ -138,12 +180,14 @@ class RealTimeTechnicalService:
                 return None
             
             # Calculate all indicators
+            spy_change = await self._get_spy_change()
             snapshot = self._calculate_snapshot(
                 symbol=symbol,
                 current_price=current_price,
                 intraday_bars=intraday_bars,
                 daily_bars=daily_bars,
-                quote=quote
+                quote=quote,
+                spy_change_pct=spy_change
             )
             
             # Cache the result
@@ -161,7 +205,8 @@ class RealTimeTechnicalService:
         current_price: float,
         intraday_bars: List[Dict],
         daily_bars: List[Dict],
-        quote: Dict
+        quote: Dict,
+        spy_change_pct: float = 0.0
     ) -> TechnicalSnapshot:
         """Calculate all technical indicators from bar data"""
         
@@ -273,6 +318,43 @@ class RealTimeTechnicalService:
         # Extension analysis (for rubber band setups)
         extended_from_ema9 = abs(dist_from_ema9) > 2.0
         
+        # === BOLLINGER BANDS (20-period, 2 std dev) from daily closes ===
+        daily_closes = [bar["close"] for bar in daily_bars] if daily_bars else [current_price]
+        bb_middle = self._calculate_sma(daily_closes, 20)
+        bb_std = self._calculate_std(daily_closes, 20)
+        bb_upper = bb_middle + (2 * bb_std)
+        bb_lower = bb_middle - (2 * bb_std)
+        bb_width = ((bb_upper - bb_lower) / bb_middle * 100) if bb_middle > 0 else 0
+        
+        # === KELTNER CHANNELS (20-period, 1.5 ATR) ===
+        kc_middle = bb_middle  # Same 20-period SMA
+        kc_upper = kc_middle + (1.5 * atr)
+        kc_lower = kc_middle - (1.5 * atr)
+        
+        # === SQUEEZE DETECTION ===
+        squeeze_on = bb_upper < kc_upper and bb_lower > kc_lower
+        # Momentum: use difference between price and midline, normalized
+        squeeze_fire = ((current_price - bb_middle) / atr) if atr > 0 else 0
+        
+        # === OPENING RANGE (first 30 min = first 6 five-min bars) ===
+        or_high = high_of_day
+        or_low = low_of_day
+        or_breakout = "inside"
+        if intraday_bars and len(intraday_bars) >= 6:
+            or_bars = intraday_bars[:6]
+            or_high = max(bar["high"] for bar in or_bars)
+            or_low = min(bar["low"] for bar in or_bars)
+            if current_price > or_high:
+                or_breakout = "above"
+            elif current_price < or_low:
+                or_breakout = "below"
+            else:
+                or_breakout = "inside"
+        
+        # === RELATIVE STRENGTH vs SPY ===
+        stock_change_pct = ((current_price - prev_close) / prev_close * 100) if prev_close > 0 else 0
+        rs_vs_spy = stock_change_pct - spy_change_pct
+        
         # RSI interpretation
         if rsi_14 < 30:
             rsi_trend = "oversold"
@@ -321,6 +403,19 @@ class RealTimeTechnicalService:
             trend=trend,
             extended_from_ema9=extended_from_ema9,
             extension_pct=round(dist_from_ema9, 2),
+            bb_upper=round(bb_upper, 2),
+            bb_middle=round(bb_middle, 2),
+            bb_lower=round(bb_lower, 2),
+            bb_width=round(bb_width, 2),
+            kc_upper=round(kc_upper, 2),
+            kc_middle=round(kc_middle, 2),
+            kc_lower=round(kc_lower, 2),
+            squeeze_on=squeeze_on,
+            squeeze_fire=round(squeeze_fire, 3),
+            or_high=round(or_high, 2),
+            or_low=round(or_low, 2),
+            or_breakout=or_breakout,
+            rs_vs_spy=round(rs_vs_spy, 2),
             bars_used=bars_used,
             data_quality=data_quality
         )
@@ -361,6 +456,15 @@ class RealTimeTechnicalService:
         if len(prices) < period:
             return sum(prices) / len(prices)
         return sum(prices[-period:]) / period
+    
+    def _calculate_std(self, prices: List[float], period: int) -> float:
+        """Calculate standard deviation from price list"""
+        if not prices or len(prices) < 2:
+            return 0
+        subset = prices[-period:] if len(prices) >= period else prices
+        mean = sum(subset) / len(subset)
+        variance = sum((p - mean) ** 2 for p in subset) / len(subset)
+        return variance ** 0.5
     
     def _calculate_rsi(self, prices: List[float], period: int = 14) -> float:
         """Calculate RSI from price list"""
@@ -500,6 +604,29 @@ class RealTimeTechnicalService:
                 "extended_from_ema9": snapshot.extended_from_ema9,
                 "extension_pct": snapshot.extension_pct
             },
+            "bollinger_bands": {
+                "upper": snapshot.bb_upper,
+                "middle": snapshot.bb_middle,
+                "lower": snapshot.bb_lower,
+                "width": snapshot.bb_width
+            },
+            "keltner_channels": {
+                "upper": snapshot.kc_upper,
+                "middle": snapshot.kc_middle,
+                "lower": snapshot.kc_lower
+            },
+            "squeeze": {
+                "on": snapshot.squeeze_on,
+                "fire": snapshot.squeeze_fire
+            },
+            "opening_range": {
+                "high": snapshot.or_high,
+                "low": snapshot.or_low,
+                "breakout": snapshot.or_breakout
+            },
+            "relative_strength": {
+                "vs_spy": snapshot.rs_vs_spy
+            },
             "data_quality": snapshot.data_quality,
             "bars_used": snapshot.bars_used
         }
@@ -531,6 +658,13 @@ GAP: {snapshot.gap_pct:+.1f}% ({snapshot.gap_direction}) {"✓ Holding" if snaps
 SETUP STATUS:
 - Extended from EMA9: {"YES" if snapshot.extended_from_ema9 else "No"} ({snapshot.extension_pct:+.1f}%)
 - Position: {"Bullish (above key MAs)" if snapshot.above_vwap and snapshot.above_ema9 else "Bearish (below key MAs)" if not snapshot.above_vwap and not snapshot.above_ema9 else "Mixed"}
+
+SQUEEZE: {"ON - Volatility compressed, breakout imminent" if snapshot.squeeze_on else "OFF"} | Momentum: {snapshot.squeeze_fire:+.2f}
+BB Width: {snapshot.bb_width:.2f}% | BB: ${snapshot.bb_lower}-${snapshot.bb_upper} | KC: ${snapshot.kc_lower}-${snapshot.kc_upper}
+
+OPENING RANGE: ${snapshot.or_low} - ${snapshot.or_high} | Status: {snapshot.or_breakout.upper()}
+
+RELATIVE STRENGTH vs SPY: {snapshot.rs_vs_spy:+.1f}% {"(Outperforming)" if snapshot.rs_vs_spy > 1 else "(Underperforming)" if snapshot.rs_vs_spy < -1 else "(In-line)"}
 """
 
 
