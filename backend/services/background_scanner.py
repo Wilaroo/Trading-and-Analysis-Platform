@@ -80,7 +80,10 @@ class BackgroundScannerService:
         # Configuration
         self._scan_interval = 90  # seconds between scans
         self._watchlist: List[str] = []
-        self._enabled_setups: Set[str] = {"rubber_band", "breakout", "vwap_bounce", "squeeze"}
+        self._enabled_setups: Set[str] = {
+            "rubber_band", "breakout", "vwap_bounce",  # Original setups
+            "squeeze", "gap_play", "orb", "relative_strength", "mean_reversion"  # New setups
+        }
         
         # Alert management
         self._live_alerts: Dict[str, LiveAlert] = {}
@@ -238,6 +241,45 @@ class BackgroundScannerService:
                 if alert:
                     alerts.append(alert)
         
+        # Squeeze Detection (Bollinger Bands inside Keltner Channels)
+        if "squeeze" in self._enabled_setups:
+            if snapshot.squeeze_on and snapshot.rvol >= 1.2:
+                alert = self._create_squeeze_alert(symbol, snapshot)
+                if alert:
+                    alerts.append(alert)
+        
+        # Gap & Go / Gap Fade
+        if "gap_play" in self._enabled_setups:
+            if abs(snapshot.gap_pct) >= 2.0 and snapshot.rvol >= 1.5:
+                alert = self._create_gap_play_alert(symbol, snapshot)
+                if alert:
+                    alerts.append(alert)
+        
+        # Opening Range Breakout
+        if "orb" in self._enabled_setups:
+            if snapshot.or_breakout in ("above", "below") and snapshot.rvol >= 1.3:
+                alert = self._create_orb_alert(symbol, snapshot)
+                if alert:
+                    alerts.append(alert)
+        
+        # Relative Strength / Weakness vs SPY
+        if "relative_strength" in self._enabled_setups:
+            if abs(snapshot.rs_vs_spy) >= 2.0 and snapshot.rvol >= 1.2:
+                alert = self._create_relative_strength_alert(symbol, snapshot)
+                if alert:
+                    alerts.append(alert)
+        
+        # Mean Reversion
+        if "mean_reversion" in self._enabled_setups:
+            is_oversold = snapshot.rsi_14 < 30 and snapshot.dist_from_ema20 < -3.0
+            is_overbought = snapshot.rsi_14 > 70 and snapshot.dist_from_ema20 > 3.0
+            near_support = snapshot.current_price <= snapshot.support * 1.02
+            near_resistance = snapshot.current_price >= snapshot.resistance * 0.98
+            if (is_oversold and near_support) or (is_overbought and near_resistance):
+                alert = self._create_mean_reversion_alert(symbol, snapshot, "long" if is_oversold else "short")
+                if alert:
+                    alerts.append(alert)
+        
         # Process new alerts
         for alert in alerts:
             await self._process_new_alert(alert)
@@ -356,7 +398,7 @@ class BackgroundScannerService:
             reasoning=[
                 f"Price {dist_to_breakout:.1f}% below resistance at ${snapshot.resistance:.2f}",
                 f"Strong volume: {snapshot.rvol:.1f}x RVOL",
-                f"Above VWAP" if snapshot.above_vwap else "Testing VWAP",
+                "Above VWAP" if snapshot.above_vwap else "Testing VWAP",
                 "Watch for volume surge on break"
             ],
             expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
@@ -397,11 +439,314 @@ class BackgroundScannerService:
             headline=f"📍 {symbol} VWAP Bounce - Testing ${snapshot.vwap:.2f}",
             reasoning=[
                 f"Price {snapshot.dist_from_vwap:+.1f}% from VWAP",
-                f"Uptrend intact (above EMAs)",
+                "Uptrend intact (above EMAs)",
                 f"RVOL: {snapshot.rvol:.1f}x",
                 "Looking for bounce off VWAP support"
             ],
             expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        )
+    
+    # ==================== NEW SETUP ALERT CREATION ====================
+    
+    def _create_squeeze_alert(self, symbol: str, snapshot) -> Optional[LiveAlert]:
+        """Squeeze Detection: BB inside KC = volatility compression about to explode"""
+        # Direction based on momentum (squeeze fire)
+        direction = "long" if snapshot.squeeze_fire > 0 else "short"
+        
+        # Priority based on BB width (tighter = more explosive)
+        if snapshot.bb_width < 3.0:
+            priority = AlertPriority.CRITICAL
+            minutes = 5
+        elif snapshot.bb_width < 5.0:
+            priority = AlertPriority.HIGH
+            minutes = 10
+        else:
+            priority = AlertPriority.MEDIUM
+            minutes = 20
+        
+        if direction == "long":
+            stop_loss = snapshot.bb_lower
+            target = snapshot.current_price + (snapshot.atr * 2.5)
+        else:
+            stop_loss = snapshot.bb_upper
+            target = snapshot.current_price - (snapshot.atr * 2.5)
+        
+        risk = abs(snapshot.current_price - stop_loss)
+        reward = abs(target - snapshot.current_price)
+        rr = reward / risk if risk > 0 else 1
+        
+        return LiveAlert(
+            id=f"squeeze_{symbol}_{direction}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="squeeze",
+            direction=direction,
+            priority=priority,
+            current_price=snapshot.current_price,
+            trigger_price=snapshot.bb_upper if direction == "long" else snapshot.bb_lower,
+            stop_loss=round(stop_loss, 2),
+            target=round(target, 2),
+            risk_reward=round(rr, 2),
+            trigger_probability=0.72 if priority == AlertPriority.CRITICAL else 0.60,
+            win_probability=0.65,
+            minutes_to_trigger=minutes,
+            headline=f"SQUEEZE {symbol} {direction.upper()} - BB Width {snapshot.bb_width:.1f}% | Momentum {'bullish' if direction == 'long' else 'bearish'}",
+            reasoning=[
+                "Bollinger Bands INSIDE Keltner Channels = volatility compression",
+                f"BB Width: {snapshot.bb_width:.1f}% (tighter = more explosive move)",
+                f"Squeeze momentum: {snapshot.squeeze_fire:+.2f} ({'bullish' if snapshot.squeeze_fire > 0 else 'bearish'})",
+                f"RVOL: {snapshot.rvol:.1f}x | RSI: {snapshot.rsi_14:.0f}",
+                "Expect sharp directional move when squeeze fires"
+            ],
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        )
+    
+    def _create_gap_play_alert(self, symbol: str, snapshot) -> Optional[LiveAlert]:
+        """Gap & Go or Gap Fade based on gap characteristics"""
+        gap = snapshot.gap_pct
+        holding = snapshot.holding_gap
+        
+        # Gap & Go: gap up + holding + volume = continuation
+        # Gap Fade: gap up + failing + reversal candle = fade
+        if gap > 0:
+            if holding and snapshot.above_vwap:
+                # Gap & Go Long
+                setup = "gap_go"
+                direction = "long"
+                stop_loss = max(snapshot.vwap, snapshot.low_of_day)
+                target = snapshot.current_price + (abs(gap) / 100 * snapshot.prev_close * 0.5)
+                headline = f"GAP & GO {symbol} +{gap:.1f}% - Holding above VWAP"
+                reasoning = [
+                    f"Gapped up {gap:.1f}% and HOLDING the gap",
+                    f"Trading above VWAP (${snapshot.vwap:.2f})",
+                    f"RVOL: {snapshot.rvol:.1f}x confirms institutional interest",
+                    f"Look for continuation above high of day ${snapshot.high_of_day:.2f}"
+                ]
+            else:
+                # Gap Fade Short
+                setup = "gap_fade"
+                direction = "short"
+                stop_loss = snapshot.high_of_day + (snapshot.atr * 0.3)
+                target = snapshot.prev_close
+                headline = f"GAP FADE {symbol} +{gap:.1f}% - Losing gap, fading to fill"
+                reasoning = [
+                    f"Gapped up {gap:.1f}% but FAILING to hold",
+                    "Below VWAP — sellers in control",
+                    f"RVOL: {snapshot.rvol:.1f}x",
+                    f"Target: Gap fill to prev close ${snapshot.prev_close:.2f}"
+                ]
+        else:
+            if not holding and not snapshot.above_vwap:
+                # Gap Down continuation (short)
+                setup = "gap_go"
+                direction = "short"
+                stop_loss = snapshot.vwap
+                target = snapshot.current_price - (abs(gap) / 100 * snapshot.prev_close * 0.5)
+                headline = f"GAP DOWN {symbol} {gap:.1f}% - Selling continues"
+                reasoning = [
+                    f"Gapped down {gap:.1f}% and failing to recover",
+                    "Below VWAP — no buyer support",
+                    f"RVOL: {snapshot.rvol:.1f}x",
+                    "Look for continuation below low of day"
+                ]
+            else:
+                # Gap Down Reversal (long)
+                setup = "gap_fade"
+                direction = "long"
+                stop_loss = snapshot.low_of_day - (snapshot.atr * 0.3)
+                target = snapshot.prev_close
+                headline = f"GAP REVERSAL {symbol} {gap:.1f}% - Recovering, gap fill possible"
+                reasoning = [
+                    f"Gapped down {gap:.1f}% but RECOVERING",
+                    "Reclaiming VWAP — buyers stepping in",
+                    f"RVOL: {snapshot.rvol:.1f}x",
+                    f"Target: Gap fill to prev close ${snapshot.prev_close:.2f}"
+                ]
+        
+        priority = AlertPriority.HIGH if abs(gap) >= 4.0 else AlertPriority.MEDIUM
+        risk = abs(snapshot.current_price - stop_loss)
+        reward = abs(target - snapshot.current_price)
+        rr = reward / risk if risk > 0 else 1
+        
+        return LiveAlert(
+            id=f"gap_{symbol}_{setup}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type=setup,
+            direction=direction,
+            priority=priority,
+            current_price=snapshot.current_price,
+            trigger_price=snapshot.high_of_day if direction == "long" else snapshot.low_of_day,
+            stop_loss=round(stop_loss, 2),
+            target=round(target, 2),
+            risk_reward=round(rr, 2),
+            trigger_probability=0.65,
+            win_probability=0.58,
+            minutes_to_trigger=10,
+            headline=headline,
+            reasoning=reasoning,
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        )
+    
+    def _create_orb_alert(self, symbol: str, snapshot) -> Optional[LiveAlert]:
+        """Opening Range Breakout: price breaks above/below first 30-min range"""
+        direction = "long" if snapshot.or_breakout == "above" else "short"
+        or_range = snapshot.or_high - snapshot.or_low
+        or_range_pct = (or_range / snapshot.or_low * 100) if snapshot.or_low > 0 else 0
+        
+        if direction == "long":
+            stop_loss = snapshot.or_high - (or_range * 0.5)  # Mid-range stop
+            target = snapshot.or_high + or_range  # 1x range extension
+            trigger = snapshot.or_high
+        else:
+            stop_loss = snapshot.or_low + (or_range * 0.5)
+            target = snapshot.or_low - or_range
+            trigger = snapshot.or_low
+        
+        # Higher priority for tight ranges (more explosive)
+        if or_range_pct < 1.0:
+            priority = AlertPriority.CRITICAL
+            minutes = 3
+        elif or_range_pct < 2.0:
+            priority = AlertPriority.HIGH
+            minutes = 5
+        else:
+            priority = AlertPriority.MEDIUM
+            minutes = 10
+        
+        risk = abs(snapshot.current_price - stop_loss)
+        reward = abs(target - snapshot.current_price)
+        rr = reward / risk if risk > 0 else 1
+        
+        return LiveAlert(
+            id=f"orb_{symbol}_{direction}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="orb",
+            direction=direction,
+            priority=priority,
+            current_price=snapshot.current_price,
+            trigger_price=round(trigger, 2),
+            stop_loss=round(stop_loss, 2),
+            target=round(target, 2),
+            risk_reward=round(rr, 2),
+            trigger_probability=0.68 if priority == AlertPriority.CRITICAL else 0.55,
+            win_probability=0.60,
+            minutes_to_trigger=minutes,
+            headline=f"ORB {symbol} {direction.upper()} - Broke {'above' if direction == 'long' else 'below'} 30-min range",
+            reasoning=[
+                f"Opening Range: ${snapshot.or_low:.2f} - ${snapshot.or_high:.2f} ({or_range_pct:.1f}% range)",
+                f"Price broke {'above' if direction == 'long' else 'below'} at ${trigger:.2f}",
+                f"RVOL: {snapshot.rvol:.1f}x confirms participation",
+                f"Target: {or_range_pct:.1f}% range extension to ${target:.2f}",
+                f"{'Above VWAP — trend aligned' if snapshot.above_vwap and direction == 'long' else 'Below VWAP — trend aligned' if not snapshot.above_vwap and direction == 'short' else 'Counter-trend — use tighter stops'}"
+            ],
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        )
+    
+    def _create_relative_strength_alert(self, symbol: str, snapshot) -> Optional[LiveAlert]:
+        """Relative Strength/Weakness vs SPY: leaders and laggards"""
+        rs = snapshot.rs_vs_spy
+        
+        if rs > 0:
+            # Outperforming SPY — relative strength leader
+            direction = "long"
+            strength_type = "leader"
+            stop_loss = snapshot.current_price - (snapshot.atr * 1.5)
+            target = snapshot.current_price + (snapshot.atr * 3)
+            headline = f"RS LEADER {symbol} +{rs:.1f}% vs SPY - Outperforming market"
+            reasoning = [
+                f"Outperforming SPY by {rs:.1f}% today",
+                "Relative strength leaders tend to continue outperforming",
+                f"Trend: {snapshot.trend} | RSI: {snapshot.rsi_14:.0f}",
+                f"RVOL: {snapshot.rvol:.1f}x | {'Above VWAP' if snapshot.above_vwap else 'Below VWAP'}",
+                "Play: Buy dips, ride the relative strength"
+            ]
+        else:
+            # Underperforming SPY — relative weakness laggard
+            direction = "short"
+            strength_type = "laggard"
+            stop_loss = snapshot.current_price + (snapshot.atr * 1.5)
+            target = snapshot.current_price - (snapshot.atr * 3)
+            headline = f"RS LAGGARD {symbol} {rs:.1f}% vs SPY - Underperforming market"
+            reasoning = [
+                f"Underperforming SPY by {abs(rs):.1f}% today",
+                "Relative weakness laggards tend to continue underperforming",
+                f"Trend: {snapshot.trend} | RSI: {snapshot.rsi_14:.0f}",
+                f"RVOL: {snapshot.rvol:.1f}x | {'Above VWAP' if snapshot.above_vwap else 'Below VWAP'}",
+                "Play: Short rallies, ride the weakness"
+            ]
+        
+        priority = AlertPriority.HIGH if abs(rs) >= 4.0 else AlertPriority.MEDIUM
+        risk = abs(snapshot.current_price - stop_loss)
+        reward = abs(target - snapshot.current_price)
+        rr = reward / risk if risk > 0 else 1
+        
+        return LiveAlert(
+            id=f"rs_{symbol}_{strength_type}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type=f"relative_strength_{strength_type}",
+            direction=direction,
+            priority=priority,
+            current_price=snapshot.current_price,
+            trigger_price=snapshot.current_price,
+            stop_loss=round(stop_loss, 2),
+            target=round(target, 2),
+            risk_reward=round(rr, 2),
+            trigger_probability=0.55,
+            win_probability=0.58,
+            minutes_to_trigger=15,
+            headline=headline,
+            reasoning=reasoning,
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        )
+    
+    def _create_mean_reversion_alert(self, symbol: str, snapshot, direction: str) -> Optional[LiveAlert]:
+        """Mean Reversion: RSI extreme + near support/resistance + volume divergence"""
+        if direction == "long":
+            # Oversold bounce at support
+            stop_loss = snapshot.support - (snapshot.atr * 0.5)
+            target = snapshot.ema_20
+            headline = f"MEAN REVERSION {symbol} LONG - RSI {snapshot.rsi_14:.0f} at support ${snapshot.support:.2f}"
+            reasoning = [
+                f"RSI extremely oversold at {snapshot.rsi_14:.0f}",
+                f"Price near support ${snapshot.support:.2f}",
+                f"Extended {abs(snapshot.dist_from_ema20):.1f}% below 20 EMA — snapback likely",
+                f"RVOL: {snapshot.rvol:.1f}x",
+                f"Target: Reversion to 20 EMA at ${snapshot.ema_20:.2f}"
+            ]
+        else:
+            # Overbought reversal at resistance
+            stop_loss = snapshot.resistance + (snapshot.atr * 0.5)
+            target = snapshot.ema_20
+            headline = f"MEAN REVERSION {symbol} SHORT - RSI {snapshot.rsi_14:.0f} at resistance ${snapshot.resistance:.2f}"
+            reasoning = [
+                f"RSI extremely overbought at {snapshot.rsi_14:.0f}",
+                f"Price near resistance ${snapshot.resistance:.2f}",
+                f"Extended {snapshot.dist_from_ema20:.1f}% above 20 EMA — pullback likely",
+                f"RVOL: {snapshot.rvol:.1f}x",
+                f"Target: Reversion to 20 EMA at ${snapshot.ema_20:.2f}"
+            ]
+        
+        priority = AlertPriority.HIGH if snapshot.rsi_14 < 25 or snapshot.rsi_14 > 75 else AlertPriority.MEDIUM
+        risk = abs(snapshot.current_price - stop_loss)
+        reward = abs(target - snapshot.current_price)
+        rr = reward / risk if risk > 0 else 1
+        
+        return LiveAlert(
+            id=f"mr_{symbol}_{direction}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="mean_reversion",
+            direction=direction,
+            priority=priority,
+            current_price=snapshot.current_price,
+            trigger_price=snapshot.support if direction == "long" else snapshot.resistance,
+            stop_loss=round(stop_loss, 2),
+            target=round(target, 2),
+            risk_reward=round(rr, 2),
+            trigger_probability=0.62,
+            win_probability=0.60,
+            minutes_to_trigger=15,
+            headline=headline,
+            reasoning=reasoning,
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
         )
     
     # ==================== ALERT MANAGEMENT ====================
