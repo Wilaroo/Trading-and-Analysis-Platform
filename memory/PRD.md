@@ -304,6 +304,19 @@ Triggers AI Coaching Notification
     - **Scanner Integration**: `chart_pattern` setup type added to scanner - generates alerts for high-quality patterns
     - **Pattern Scoring**: 0-100 quality score based on clarity, volume confirmation, risk/reward
     - Backend: `/app/backend/services/chart_pattern_service.py`, `/app/backend/routers/patterns.py`
+- ✅ **Sentiment Analysis Integration (Mar 6, 2026)**: Dual-layer sentiment analysis
+    - **Basic Analysis**: Fast keyword-based scoring with weighted bullish/bearish dictionaries
+    - **AI Deep Analysis**: Ollama-powered headline analysis for high-priority alerts
+    - **API Endpoints**: `/api/sentiment/analyze/{symbol}`, `/api/sentiment/market`, `/api/sentiment/batch`
+    - **Scanner Integration**: High-priority alerts automatically enriched with sentiment context
+    - **Market Sentiment**: Aggregated sentiment from SPY, QQQ, DIA, IWM
+    - Backend: `/app/backend/services/sentiment_analysis_service.py`, `/app/backend/routers/sentiment.py`
+- ✅ **Market Hours Simulator (Mar 6, 2026)**: Scanner testing when markets closed
+    - **Scenarios**: bullish_momentum, bearish_reversal, range_bound, high_volatility
+    - **Features**: Configurable alert interval, real-time WebSocket alerts, on-demand generation
+    - **API Endpoints**: `/api/simulator/start`, `/api/simulator/stop`, `/api/simulator/generate`, `/api/simulator/alerts`
+    - **WebSocket**: `/api/simulator/ws/alerts` for real-time simulated alert stream
+    - Backend: `/app/backend/services/market_simulator_service.py`, `/app/backend/routers/simulator.py`
 
 ### Data Source Clarification
 | Component | Data Source | Latency |
