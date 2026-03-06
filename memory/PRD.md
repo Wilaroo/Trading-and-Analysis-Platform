@@ -285,6 +285,25 @@ Triggers AI Coaching Notification
     - Converted from asyncio to synchronous `requests` library to fix event loop conflicts
     - Script reliably pushes account/position data from IB Gateway to cloud app
     - Updated `StartTrading.bat` for automated startup
+- ✅ **Quick Actions + Volatility-Adjusted Position Sizing (Mar 6, 2026)**: Implemented P1 features
+    - **Buy/Sell Endpoints**: `/api/quick-actions/buy` and `/api/quick-actions/sell` with ATR-based position sizing
+    - **Volatility Adjustment**: Positions automatically sized based on ATR% (low vol = larger position, high vol = smaller)
+    - **Setup-Specific Stops**: Different ATR multipliers for different setup types (e.g., 1.0x for mean reversion, 1.5x for breakouts)
+    - **RiskParameters Enhanced**: Added `use_volatility_sizing`, `base_atr_multiplier`, `volatility_scale_factor` config
+    - Backend: `/app/backend/routers/quick_actions.py`, `/app/backend/services/trading_bot_service.py`
+- ✅ **Sector/Industry Strength Analysis (Mar 6, 2026)**: Implemented sector rotation detection
+    - **Sector Rankings**: `/api/sectors/rankings` - All 11 S&P sector ETFs ranked by performance
+    - **Stock Sector Context**: `/api/sectors/context/{symbol}` - Get sector strength, relative performance, recommendation
+    - **Rotation Signals**: `/api/sectors/rotation` - Detect risk-on/risk-off/inflation patterns with trading implications
+    - **Scanner Integration**: Alerts enhanced with sector context (leaders in hot sectors get priority boost)
+    - **AI Integration**: Sector summary added to AI assistant context for better recommendations
+    - Backend: `/app/backend/services/sector_analysis_service.py`, `/app/backend/routers/sectors.py`
+- ✅ **Advanced Chart Pattern Detection (Mar 6, 2026)**: Implemented pattern recognition
+    - **Patterns Detected**: Flags (bull/bear), Pennants, Triangles (ascending/descending/symmetric), Wedges (rising/falling), Head & Shoulders (regular/inverse), Double Top/Bottom
+    - **API Endpoints**: `/api/patterns/detect/{symbol}`, `/api/patterns/scan` (batch), `/api/patterns/summary`
+    - **Scanner Integration**: `chart_pattern` setup type added to scanner - generates alerts for high-quality patterns
+    - **Pattern Scoring**: 0-100 quality score based on clarity, volume confirmation, risk/reward
+    - Backend: `/app/backend/services/chart_pattern_service.py`, `/app/backend/routers/patterns.py`
 
 ### Data Source Clarification
 | Component | Data Source | Latency |

@@ -494,6 +494,33 @@ class SmartContextEngine:
                     context_parts.append("")
                     context_data.earnings_proximity = earnings_data
             
+            # SECTOR ROTATION
+            if sources.get("sectors") or sources.get("market_indices"):
+                try:
+                    from services.sector_analysis_service import get_sector_analysis_service
+                    sector_service = get_sector_analysis_service()
+                    sector_summary = await sector_service.get_sector_summary_for_ai()
+                    if sector_summary:
+                        context_parts.append("=== SECTOR ROTATION ===")
+                        context_parts.append(sector_summary)
+                        context_parts.append("")
+                    
+                    # Add specific stock sector context if symbols present
+                    if symbols:
+                        for symbol in symbols[:3]:  # Limit to 3 to avoid context bloat
+                            sector_ctx = await sector_service.get_stock_sector_context(symbol)
+                            if sector_ctx:
+                                ctx_line = f"{symbol}: {sector_ctx.sector} (Rank #{sector_ctx.sector_rank}, {sector_ctx.sector_strength.value})"
+                                if sector_ctx.is_sector_leader:
+                                    ctx_line += " - SECTOR LEADER"
+                                elif sector_ctx.is_sector_laggard:
+                                    ctx_line += " - Sector Laggard"
+                                ctx_line += f" | Rec: {sector_ctx.recommendation}"
+                                context_parts.append(ctx_line)
+                        context_parts.append("")
+                except Exception as e:
+                    logger.debug(f"Could not gather sector context: {e}")
+            
         except Exception as e:
             logger.error(f"Error gathering context: {e}")
             context_parts.append(f"[Some context unavailable: {str(e)[:50]}]")
