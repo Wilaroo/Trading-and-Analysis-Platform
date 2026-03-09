@@ -657,6 +657,58 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
                 return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
               };
               
+              // SMB Integration: Get trade style display
+              const getTradeStyleBadge = (style) => {
+                if (!style) return null;
+                const styles = {
+                  'move_2_move': { label: 'M2M', color: 'bg-blue-500/20 text-blue-400', title: 'Move2Move - Quick scalp (1R target)' },
+                  'trade_2_hold': { label: 'T2H', color: 'bg-purple-500/20 text-purple-400', title: 'Trade2Hold - Hold for target (3R+)' },
+                  'a_plus': { label: 'A+', color: 'bg-amber-500/20 text-amber-400', title: 'A+ Setup - Max conviction' }
+                };
+                const s = styles[style];
+                if (!s) return null;
+                return (
+                  <span className={`text-[8px] px-1 py-0.5 rounded font-bold ${s.color}`} title={s.title}>
+                    {s.label}
+                  </span>
+                );
+              };
+              
+              // SMB Integration: Get SMB grade color
+              const getSmbGradeColor = (grade) => {
+                if (!grade) return 'text-zinc-500';
+                if (grade === 'A+' || grade === 'A') return 'text-emerald-400';
+                if (grade === 'B+' || grade === 'B') return 'text-cyan-400';
+                if (grade === 'C') return 'text-yellow-400';
+                return 'text-red-400';
+              };
+              
+              // SMB Integration: Get tape score indicator
+              const getTapeIndicator = (score) => {
+                if (!score && score !== 0) return null;
+                const color = score >= 7 ? 'text-emerald-400' : score >= 5 ? 'text-yellow-400' : 'text-red-400';
+                const label = score >= 7 ? 'STRONG' : score >= 5 ? 'OK' : 'WEAK';
+                return (
+                  <span className={`text-[8px] ${color}`} title={`Tape Score: ${score}/10`}>
+                    T:{score}
+                  </span>
+                );
+              };
+              
+              // SMB Integration: Get direction bias indicator
+              const getDirectionBiasBadge = (bias, direction) => {
+                if (!bias || bias === 'both') return null;
+                // Show warning if trade direction doesn't match setup's primary direction
+                if (bias !== direction) {
+                  return (
+                    <span className="text-[8px] px-1 py-0.5 rounded bg-red-500/30 text-red-400" title={`Setup is primarily ${bias}, but this is ${direction}`}>
+                      !{bias.toUpperCase()}
+                    </span>
+                  );
+                }
+                return null;
+              };
+              
               return (
                 <div
                   key={idx}
@@ -688,10 +740,22 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
                       <span className={`text-[9px] px-1 py-0.5 rounded border ${getPriorityColor(alert.priority)}`}>
                         {alert.priority?.toUpperCase()}
                       </span>
+                      {/* SMB Integration: Trade Style Badge */}
+                      {getTradeStyleBadge(alert.trade_style)}
+                      {/* SMB Integration: Direction bias warning */}
+                      {getDirectionBiasBadge(alert.direction_bias, alert.direction)}
                     </div>
                     <div className="flex items-center gap-1">
-                      {alert.tape_confirmation && (
-                        <span className="text-[9px] text-emerald-400">✓ TAPE</span>
+                      {/* SMB Integration: SMB Grade */}
+                      {(alert.smb_grade || alert.trade_grade) && (
+                        <span className={`text-[9px] font-bold ${getSmbGradeColor(alert.smb_grade || alert.trade_grade)}`} title="SMB Grade">
+                          {alert.smb_grade || alert.trade_grade}
+                        </span>
+                      )}
+                      {/* SMB Integration: Tape Score */}
+                      {getTapeIndicator(alert.tape_score)}
+                      {alert.tape_confirmation && !alert.tape_score && (
+                        <span className="text-[9px] text-emerald-400">TAPE</span>
                       )}
                       {/* Quick Actions */}
                       <QuickActionsMenu 
@@ -732,11 +796,21 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
                       ${alert.current_price?.toFixed(2)}
                     </span>
                   </div>
-                  {alert.strategy_win_rate > 0 && (
-                    <div className="text-[9px] text-zinc-500 mt-1">
-                      Win Rate: <span className="text-zinc-300">{(alert.strategy_win_rate * 100).toFixed(0)}%</span>
-                    </div>
-                  )}
+                  {/* SMB Integration: Enhanced stats row */}
+                  <div className="flex items-center gap-3 mt-1 text-[9px] text-zinc-500">
+                    {alert.strategy_win_rate > 0 && (
+                      <span>WR: <span className="text-zinc-300">{(alert.strategy_win_rate * 100).toFixed(0)}%</span></span>
+                    )}
+                    {alert.target_r_multiple > 0 && (
+                      <span>Target: <span className="text-cyan-400">{alert.target_r_multiple.toFixed(1)}R</span></span>
+                    )}
+                    {alert.risk_reward > 0 && !alert.target_r_multiple && (
+                      <span>R:R <span className="text-cyan-400">{alert.risk_reward.toFixed(1)}:1</span></span>
+                    )}
+                    {alert.setup_category && (
+                      <span className="text-zinc-600">{alert.setup_category.replace(/_/g, ' ')}</span>
+                    )}
+                  </div>
                 </div>
               );
             })

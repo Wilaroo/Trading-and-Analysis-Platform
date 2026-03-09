@@ -201,7 +201,7 @@ class MarketIntelService:
         return "\n".join(parts)
 
     async def _gather_scanner_context(self) -> str:
-        """Gather recent scanner results"""
+        """Gather recent scanner results with SMB context"""
         parts = []
         if self._scanner_service:
             try:
@@ -212,9 +212,25 @@ class MarketIntelService:
                         sym = getattr(alert, 'symbol', '?')
                         setup = getattr(alert, 'setup_type', '?')
                         priority = getattr(alert, 'priority', '?')
-                        price = getattr(alert, 'price', 0)
+                        price = getattr(alert, 'current_price', getattr(alert, 'price', 0))
                         msg = getattr(alert, 'message', '')
-                        parts.append(f"  {sym}: {setup} ({priority}) @ ${price:.2f}")
+                        
+                        # SMB Integration: Add trade style and grade
+                        trade_style = getattr(alert, 'trade_style', '')
+                        smb_grade = getattr(alert, 'trade_grade', '')
+                        tape_score = getattr(alert, 'tape_score', 0)
+                        target_r = getattr(alert, 'target_r_multiple', 0)
+                        direction_bias = getattr(alert, 'direction_bias', '')
+                        
+                        # Format with SMB context
+                        style_tag = f" [{trade_style.upper()}]" if trade_style else ""
+                        grade_tag = f" Grade:{smb_grade}" if smb_grade else ""
+                        tape_tag = f" T:{tape_score}" if tape_score else ""
+                        target_tag = f" Target:{target_r:.1f}R" if target_r else ""
+                        
+                        parts.append(f"  {sym}: {setup} ({priority}){style_tag}{grade_tag}{tape_tag}{target_tag} @ ${price:.2f}")
+                        if direction_bias and direction_bias != 'both':
+                            parts.append(f"    Direction bias: {direction_bias.upper()}")
                         if msg:
                             parts.append(f"    {msg[:100]}")
                 else:

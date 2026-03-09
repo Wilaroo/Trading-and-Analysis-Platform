@@ -56,6 +56,97 @@ const DirectionBadge = ({ direction }) => {
   );
 };
 
+// SMB Integration: Reasons2Sell Monitor for open positions
+const Reasons2SellMonitor = ({ trade }) => {
+  const [reasons, setReasons] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [lastCheck, setLastCheck] = useState(null);
+  
+  // Check reasons to sell periodically for Trade2Hold positions
+  const checkReasons = useCallback(async () => {
+    if (!trade.fill_price || !trade.current_price) return;
+    
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/smb/reasons-to-sell/check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entry_price: trade.fill_price,
+          current_price: trade.current_price,
+          target: trade.target_prices?.[0] || trade.fill_price * 1.02,
+          stop_loss: trade.stop_price,
+          direction: trade.direction,
+          peak_price: trade.high_water_mark || trade.current_price,
+          ema_9: trade.ema_9 || 0,
+          vwap: trade.vwap || 0,
+          trade_style: trade.trade_style || 'trade_2_hold'
+        })
+      });
+      const data = await response.json();
+      setReasons(data);
+      setLastCheck(new Date());
+    } catch (err) {
+      console.error('Reasons2Sell check failed:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [trade]);
+  
+  // Initial check and periodic refresh (every 30 seconds for T2H)
+  useEffect(() => {
+    checkReasons();
+    const interval = setInterval(checkReasons, 30000);
+    return () => clearInterval(interval);
+  }, [checkReasons]);
+  
+  if (!reasons || reasons.reasons?.length === 0) return null;
+  
+  const severityColors = {
+    exit: 'bg-red-500/20 border-red-500/30 text-red-400',
+    warning: 'bg-yellow-500/20 border-yellow-500/30 text-yellow-400',
+    none: 'bg-zinc-500/10 border-zinc-500/30 text-zinc-400'
+  };
+  
+  const reasonLabels = {
+    price_target: 'Target Hit',
+    trend_violation: '9 EMA Break',
+    give_back_rule: 'Give-Back',
+    parabolic_extension: 'Extended',
+    end_of_day: 'EOD Near',
+    tape_exhaustion: 'Tape Slowing',
+    thesis_invalid: 'Thesis Invalid',
+    market_resistance: 'SPY Resistance'
+  };
+  
+  return (
+    <div className={`p-2 m-2 rounded border ${severityColors[reasons.severity] || severityColors.none}`}>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs font-medium flex items-center gap-1">
+          <AlertTriangle className="w-3 h-3" />
+          {reasons.severity === 'exit' ? 'EXIT SIGNAL' : 
+           reasons.severity === 'warning' ? 'WARNING' : 'STATUS'}
+        </span>
+        <span className="text-[10px] text-zinc-500">
+          {reasons.recommended_action?.toUpperCase()}
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {reasons.reasons.map((reason, i) => (
+          <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-black/20">
+            {reasonLabels[reason] || reason}
+          </span>
+        ))}
+      </div>
+      {reasons.details?.give_back_pct > 0 && (
+        <div className="text-[10px] text-zinc-500 mt-1">
+          Gave back {reasons.details.give_back_pct.toFixed(0)}% of peak profit
+        </div>
+      )}
+    </div>
+  );
+};
+
 // P&L display component
 const PnLDisplay = ({ pnl, pnlPct, size = 'sm' }) => {
   const isPositive = pnl >= 0;
@@ -378,6 +469,8 @@ const TradeCard = ({ trade, onConfirm, onReject, onClose, onTickerClick, showClo
       
       {isOpen && (
         <div className="border-t border-zinc-700/50">
+          {/* SMB Integration: Reasons2Sell Status */}
+          <Reasons2SellMonitor trade={trade} />
           <button
             onClick={() => onClose(trade.id)}
             className="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-orange-400 hover:bg-orange-500/10"

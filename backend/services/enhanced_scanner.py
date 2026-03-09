@@ -3220,6 +3220,17 @@ class EnhancedBackgroundScanner:
         if base_setup in self._strategy_stats:
             self._strategy_stats[base_setup].total_alerts += 1
         
+        # === SMB INTEGRATION: Populate SMB fields ===
+        try:
+            context = {
+                "market_regime": self._market_regime.value,
+                "tape_score": alert.tape_score if hasattr(alert, 'tape_score') else 5
+            }
+            alert.populate_smb_fields(context)
+            logger.debug(f"SMB fields populated for {alert.symbol}: style={alert.trade_style}, grade={alert.trade_grade}")
+        except Exception as e:
+            logger.debug(f"Could not populate SMB fields: {e}")
+        
         self._live_alerts[alert.id] = alert
         self._alerts_generated += 1
         
