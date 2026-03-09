@@ -214,20 +214,20 @@ echo       [SKIP] IB Data Pusher not started - fix errors above
 echo.
 
 :: ===================== VERIFY CONNECTIONS =====================
-echo [6/8] Verifying connections...
-timeout /t 5 /nobreak >nul
+echo [6/8] Verifying connections (5 second timeout each)...
+timeout /t 3 /nobreak >nul
 
-:: Check Ollama tunnel
+:: Check Ollama tunnel (with timeout)
 echo       Checking Ollama tunnel...
-curl -s -f "https://pseudoaccidentally-linty-addie.ngrok-free.dev/api/tags" -H "ngrok-skip-browser-warning: true" >nul 2>&1
+curl -s -f -m 5 "https://pseudoaccidentally-linty-addie.ngrok-free.dev/api/tags" -H "ngrok-skip-browser-warning: true" >nul 2>&1
 if %errorlevel%==0 (
     echo       Ollama tunnel: CONNECTED
 ) else (
-    echo       Ollama tunnel: Connecting... (may take a moment)
+    echo       Ollama tunnel: Not responding (will retry in background)
 )
 
-:: Check IB Data Pusher
-curl -s -f "%PLATFORM_URL%/api/ib/pushed-data" > "%TEMP%\pusher_check.tmp" 2>nul
+:: Check IB Data Pusher (with timeout)
+curl -s -f -m 5 "%PLATFORM_URL%/api/ib/pushed-data" > "%TEMP%\pusher_check.tmp" 2>nul
 if %errorlevel%==0 (
     findstr /C:"\"connected\":true" "%TEMP%\pusher_check.tmp" >nul 2>&1
     if %errorlevel%==0 (
@@ -236,20 +236,20 @@ if %errorlevel%==0 (
         echo       IB Data Pusher: Connecting...
     )
 ) else (
-    echo       IB Data Pusher: Waiting for cloud...
+    echo       IB Data Pusher: Cloud not responding (will connect when ready)
 )
 del "%TEMP%\pusher_check.tmp" 2>nul
 echo.
 
 :: ===================== REGISTER OLLAMA WITH CLOUD =====================
 echo [7/8] Registering Ollama with cloud platform...
-curl -s -X POST "%PLATFORM_URL%/api/assistant/configure" ^
+curl -s -m 10 -X POST "%PLATFORM_URL%/api/assistant/configure" ^
     -H "Content-Type: application/json" ^
     -d "{\"ollama_url\":\"https://pseudoaccidentally-linty-addie.ngrok-free.dev\",\"ollama_model\":\"%OLLAMA_MODEL%\"}" >nul 2>&1
 if %errorlevel%==0 (
     echo       Ollama registered with cloud!
 ) else (
-    echo       Cloud registration pending (will auto-detect)
+    echo       Cloud registration pending (will auto-detect when available)
 )
 echo.
 
