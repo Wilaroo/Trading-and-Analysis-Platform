@@ -373,4 +373,192 @@ async def resolve_setup_alias(alias: str):
     }
 
 
-logger.info("📊 SMB Integration Router loaded")
+# ==================== Reasons2Sell Endpoints ====================
+
+class Reason2SellRequest(BaseModel):
+    entry_price: float
+    current_price: float
+    target: float
+    stop_loss: float
+    direction: str = "long"
+    peak_price: Optional[float] = None
+    ema_9: Optional[float] = None
+    vwap: Optional[float] = None
+    trade_style: str = "trade_2_hold"
+
+
+@router.post("/reasons-to-sell/check")
+async def check_reasons_to_sell(request: Reason2SellRequest):
+    """Check all Reasons2Sell for a position"""
+    try:
+        from services.smb_unified_scoring import check_reasons_to_sell, Reason2Sell
+        
+        position = {
+            "entry_price": request.entry_price,
+            "target": request.target,
+            "stop_loss": request.stop_loss,
+            "direction": request.direction,
+            "peak_price": request.peak_price or request.entry_price
+        }
+        
+        current_quote = {
+            "price": request.current_price,
+            "ema_9": request.ema_9 or 0,
+            "vwap": request.vwap or 0
+        }
+        
+        result = check_reasons_to_sell(
+            position=position,
+            current_quote=current_quote,
+            trade_style=request.trade_style
+        )
+        
+        return {
+            "triggered": result.triggered,
+            "reasons": result.reasons,
+            "severity": result.severity,
+            "recommended_action": result.recommended_action,
+            "details": result.details,
+            "reason_descriptions": {
+                "price_target": "Price target reached",
+                "trend_violation": "9 EMA or trendline broken",
+                "thesis_invalid": "Original trade thesis no longer valid",
+                "market_resistance": "SPY/QQQ at major resistance",
+                "tape_exhaustion": "Volume/momentum dried up",
+                "parabolic_extension": "Price too extended from value",
+                "end_of_day": "Market close approaching",
+                "give_back_rule": "Gave back too much of peak profit"
+            }
+        }
+    except ImportError:
+        raise HTTPException(500, "Reasons2Sell module not available")
+
+
+@router.get("/reasons-to-sell/list")
+async def list_reasons_to_sell():
+    """Get all Reasons2Sell with descriptions"""
+    return {
+        "reasons": [
+            {"code": "price_target", "name": "Price Target Hit", "description": "Exit at predetermined target level"},
+            {"code": "trend_violation", "name": "Trend Violation", "description": "Price broke 9 EMA or key trendline (critical for T2H)"},
+            {"code": "thesis_invalid", "name": "Thesis Invalidation", "description": "Original reason for trade no longer valid"},
+            {"code": "market_resistance", "name": "Market Resistance", "description": "SPY/QQQ hit major level that may stall momentum"},
+            {"code": "tape_exhaustion", "name": "Tape Exhaustion", "description": "Buying/selling volume dissipated, tape slowing"},
+            {"code": "parabolic_extension", "name": "Parabolic Extension", "description": "Price too far from VWAP/moving averages"},
+            {"code": "breaking_news", "name": "Breaking News", "description": "Fresh headlines that change the setup"},
+            {"code": "end_of_day", "name": "End of Day", "description": "Market close approaching (last 15 min)"},
+            {"code": "give_back_rule", "name": "Give-Back Rule", "description": "Gave back 30-50% of peak open profit"},
+            {"code": "time_stop", "name": "Time Stop", "description": "Trade not working within expected time window"}
+        ],
+        "by_trade_style": {
+            "move_2_move": ["price_target", "tape_exhaustion", "time_stop"],
+            "trade_2_hold": ["price_target", "trend_violation", "thesis_invalid", "give_back_rule"],
+            "a_plus": ["trend_violation", "thesis_invalid", "market_resistance"]
+        }
+    }
+
+
+# ==================== Tiered Entry Endpoints ====================
+
+class TieredEntryRequest(BaseModel):
+    risk_per_trade: float  # e.g., $200
+    entry_price: float
+    stop_price: float
+    trade_style: str = "trade_2_hold"
+    smb_grade: str = "B"
+
+
+@router.post("/tiered-entry/calculate")
+async def calculate_tiered_entry(request: TieredEntryRequest):
+    """Calculate tiered entry sizes based on SMB methodology"""
+    try:
+        from services.smb_unified_scoring import calculate_tier_sizes
+        
+        result = calculate_tier_sizes(
+            risk_per_trade=request.risk_per_trade,
+            entry_price=request.entry_price,
+            stop_price=request.stop_price,
+            trade_style=request.trade_style,
+            smb_grade=request.smb_grade
+        )
+        
+        risk_per_share = result.get("risk_per_share", 0)
+        
+        return {
+            "tiers": {
+                "tier_1": {
+                    "shares": result["tier_1"],
+                    "description": "Feelers - initial position at key level",
+                    "trigger": "Entry at trigger price with tape confirmation"
+                },
+                "tier_2": {
+                    "shares": result["tier_2"],
+                    "description": "Confirmation - add after setup confirms",
+                    "trigger": "Setup holds, tape improves, pattern validates"
+                },
+                "tier_3": {
+                    "shares": result["tier_3"],
+                    "description": "A+ Size - full conviction add",
+                    "trigger": "All 5 SMB variables align, A+ grade confirmed"
+                }
+            },
+            "total_shares": result["total"],
+            "risk_per_share": risk_per_share,
+            "total_risk": request.risk_per_trade,
+            "allocation_percentages": {
+                "tier_1": round(result["tier_1"] / result["total"] * 100, 1) if result["total"] > 0 else 0,
+                "tier_2": round(result["tier_2"] / result["total"] * 100, 1) if result["total"] > 0 else 0,
+                "tier_3": round(result["tier_3"] / result["total"] * 100, 1) if result["total"] > 0 else 0
+            },
+            "style_rules": {
+                "move_2_move": "Larger Tier 1 (70%), quick in-and-out",
+                "trade_2_hold": "Gradual scaling (30/40/30), hold for target",
+                "a_plus": "Aggressive (40/30/30), max conviction"
+            }.get(request.trade_style, "Standard scaling")
+        }
+    except ImportError:
+        raise HTTPException(500, "Tiered entry module not available")
+
+
+# ==================== Tape Reading Endpoints ====================
+
+class TapeAnalysisRequest(BaseModel):
+    symbol: str
+    price: float
+    bid: float
+    ask: float
+    volume: int
+    avg_volume: int
+    bid_size: int = 0
+    ask_size: int = 0
+    change_percent: float = 0
+
+
+@router.post("/tape/analyze")
+async def analyze_tape(request: TapeAnalysisRequest):
+    """Analyze tape/order flow and return Level 2 Box metrics"""
+    try:
+        from services.smb_unified_scoring import analyze_tape_from_quote_data
+        
+        quote_data = {
+            "price": request.price,
+            "bid": request.bid,
+            "ask": request.ask,
+            "volume": request.volume,
+            "avg_volume": request.avg_volume,
+            "bid_size": request.bid_size,
+            "ask_size": request.ask_size,
+            "change_percent": request.change_percent
+        }
+        
+        metrics = analyze_tape_from_quote_data(
+            symbol=request.symbol,
+            quote_data=quote_data
+        )
+        
+        return metrics.to_dict()
+    except ImportError:
+        raise HTTPException(500, "Tape analysis module not available")
+
+
+logger.info("📊 SMB Integration Router loaded with Reasons2Sell, Tiered Entry, and Tape Analysis")
