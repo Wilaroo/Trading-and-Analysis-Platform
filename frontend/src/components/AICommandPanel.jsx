@@ -85,33 +85,49 @@ const TickerAwareText = ({ text, onTickerClick, onViewChart }) => {
     'T','VZ','TMUS','KO','PEP','MCD','SBUX','NKE','LULU','CROX','SIEGY'
   ]);
   
-  // Map company names to ticker symbols
+  // Words that match tickers but are common English words - DON'T highlight these
+  const excludedWords = new Set([
+    'A', 'I', 'IT', 'AT', 'ON', 'OR', 'AN', 'AS', 'BE', 'BY', 'DO', 'GO', 'HE', 
+    'IF', 'IN', 'IS', 'ME', 'MY', 'NO', 'OF', 'OK', 'SO', 'TO', 'UP', 'US', 'WE',
+    'ALL', 'AND', 'ARE', 'BIG', 'BUY', 'CAN', 'DAY', 'DID', 'FOR', 'GET', 'GOT',
+    'HAS', 'HAD', 'HIM', 'HIS', 'HOW', 'ITS', 'LET', 'MAY', 'NEW', 'NOT', 'NOW',
+    'OLD', 'ONE', 'OUR', 'OUT', 'OWN', 'PUT', 'RAN', 'RUN', 'SAW', 'SAY', 'SEE',
+    'SET', 'SHE', 'THE', 'TOO', 'TOP', 'TRY', 'TWO', 'USE', 'WAS', 'WAY', 'WHO',
+    'WHY', 'WIN', 'WON', 'YES', 'YET', 'YOU', 'LOW', 'HIGH', 'LONG', 'SHORT',
+    'CALL', 'STOP', 'HOLD', 'OPEN', 'CLOSE', 'ENTRY', 'EXIT', 'RISK', 'TRADE',
+    'BUY', 'SELL', 'HOLD', 'WAIT', 'MOVE', 'PLAY', 'TAKE', 'LOOK', 'ALSO', 'JUST',
+    'LIKE', 'ONLY', 'VERY', 'WELL', 'EVEN', 'GOOD', 'BEST', 'LAST', 'NEXT', 'SOME',
+    // Commonly confused with tickers in trading context
+    'TARGET', 'TGT' // Don't auto-link "target" the word - only $TGT or "Target Corp"
+  ]);
+  
+  // Map company names to ticker symbols - only proper company name references
   const companyToTicker = {
     'Apple': 'AAPL', 'Microsoft': 'MSFT', 'Nvidia': 'NVDA', 'NVIDIA': 'NVDA',
     'Tesla': 'TSLA', 'Amazon': 'AMZN', 'Google': 'GOOGL', 'Alphabet': 'GOOGL',
     'Meta': 'META', 'Facebook': 'META', 'Netflix': 'NFLX', 'Intel': 'INTC',
-    'AMD': 'AMD', 'Uber': 'UBER', 'Costco': 'COST', 'Walmart': 'WMT',
-    'Target': 'TGT', 'JPMorgan': 'JPM', 'Goldman': 'GS', 'Goldman Sachs': 'GS',
+    'Uber': 'UBER', 'Costco': 'COST', 'Walmart': 'WMT',
+    'Target Corp': 'TGT', 'Target Corporation': 'TGT', // Only match full company name
+    'JPMorgan': 'JPM', 'Goldman': 'GS', 'Goldman Sachs': 'GS',
     'Visa': 'V', 'Mastercard': 'MA', 'PayPal': 'PYPL', 'Shopify': 'SHOP',
     'Salesforce': 'CRM', 'Oracle': 'ORCL', 'Adobe': 'ADBE', 'Snowflake': 'SNOW',
     'Cloudflare': 'NET', 'CrowdStrike': 'CRWD', 'Datadog': 'DDOG', 'MongoDB': 'MDB',
     'Coinbase': 'COIN', 'Robinhood': 'HOOD', 'Roblox': 'RBLX', 'Roku': 'ROKU',
     'Snap': 'SNAP', 'Snapchat': 'SNAP', 'Pinterest': 'PINS', 'Spotify': 'SPOT',
-    'Boeing': 'BA', 'Lockheed': 'LMT', 'Lockheed Martin': 'LMT', 'GE': 'GE',
+    'Boeing': 'BA', 'Lockheed': 'LMT', 'Lockheed Martin': 'LMT',
     'General Electric': 'GE', 'Caterpillar': 'CAT', 'Deere': 'DE', 'John Deere': 'DE',
-    'Honeywell': 'HON', '3M': 'MMM', 'UnitedHealth': 'UNH', 'Johnson': 'JNJ',
-    'Pfizer': 'PFE', 'Moderna': 'MRNA', 'Lilly': 'LLY', 'Eli Lilly': 'LLY',
-    'AbbVie': 'ABBV', 'Bristol': 'BMY', 'Bristol-Myers': 'BMY', 'Gilead': 'GILD',
+    'Honeywell': 'HON', '3M': 'MMM', 'UnitedHealth': 'UNH', 'Johnson & Johnson': 'JNJ',
+    'Pfizer': 'PFE', 'Moderna': 'MRNA', 'Eli Lilly': 'LLY',
+    'AbbVie': 'ABBV', 'Bristol-Myers': 'BMY', 'Gilead': 'GILD',
     'Amgen': 'AMGN', 'Exxon': 'XOM', 'ExxonMobil': 'XOM', 'Chevron': 'CVX',
     'ConocoPhillips': 'COP', 'Schlumberger': 'SLB', 'Occidental': 'OXY',
     'Broadcom': 'AVGO', 'Qualcomm': 'QCOM', 'Micron': 'MU', 'Ford': 'F',
-    'GM': 'GM', 'General Motors': 'GM', 'Toyota': 'TM', 'NIO': 'NIO',
+    'General Motors': 'GM', 'Toyota': 'TM', 'NIO': 'NIO',
     'Disney': 'DIS', 'Comcast': 'CMCSA', 'AT&T': 'T', 'Verizon': 'VZ',
-    'Coca-Cola': 'KO', 'Coke': 'KO', 'Pepsi': 'PEP', 'PepsiCo': 'PEP',
-    'McDonald': 'MCD', "McDonald's": 'MCD', 'Starbucks': 'SBUX', 'Nike': 'NKE',
+    'Coca-Cola': 'KO', 'Pepsi': 'PEP', 'PepsiCo': 'PEP',
+    "McDonald's": 'MCD', 'Starbucks': 'SBUX', 'Nike': 'NKE',
     'Lululemon': 'LULU', 'Palantir': 'PLTR', 'Rivian': 'RIVN', 'SoFi': 'SOFI',
-    'Crocs': 'CROX', "Crocs's": 'CROX', 'Siemens': 'SIEGY', "Siemens's": 'SIEGY',
-    'Square': 'SQ', 'Block': 'SQ', 'Arm': 'ARM', 'ARM': 'ARM', 'Marvell': 'MRVL'
+    'Crocs': 'CROX', 'Siemens': 'SIEGY', 'Block': 'SQ', 'Marvell': 'MRVL'
   };
   
   // First, replace company names with placeholders
@@ -122,8 +138,8 @@ const TickerAwareText = ({ text, onTickerClick, onViewChart }) => {
   const sortedCompanies = Object.keys(companyToTicker).sort((a, b) => b.length - a.length);
   
   for (const company of sortedCompanies) {
-    // Match company name with word boundaries (case insensitive)
-    const regex = new RegExp(`\\b${company.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:'s)?\\b`, 'gi');
+    // Match company name with word boundaries - case SENSITIVE for proper nouns
+    const regex = new RegExp(`\\b${company.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:'s)?\\b`, 'g');
     processedText = processedText.replace(regex, (match) => {
       const ticker = companyToTicker[company];
       const placeholder = `__COMPANY_${replacements.length}__`;
@@ -132,8 +148,8 @@ const TickerAwareText = ({ text, onTickerClick, onViewChart }) => {
     });
   }
   
-  // Now split by tickers
-  const parts = processedText.split(/(\$?[A-Z]{1,5}(?=[\s,.:;!?)}\]"]|$)|__COMPANY_\d+__)/g);
+  // Now split by tickers (only match $TICKER format or standalone uppercase)
+  const parts = processedText.split(/(\$[A-Z]{1,5}(?=[\s,.:;!?)}\]"]|$)|__COMPANY_\d+__)/g);
   
   return parts.map((part, i) => {
     // Check if it's a company placeholder
@@ -150,10 +166,12 @@ const TickerAwareText = ({ text, onTickerClick, onViewChart }) => {
       );
     }
     
-    // Check if it's a ticker
-    const clean = part.replace('$', '');
-    if (knownTickers.has(clean) && part.length >= 2) {
-      return <TickerLink key={i} symbol={clean} onClick={onTickerClick} onViewChart={onViewChart} />;
+    // Check if it's a $TICKER format
+    if (part.startsWith('$')) {
+      const clean = part.replace('$', '');
+      if (knownTickers.has(clean) && !excludedWords.has(clean)) {
+        return <TickerLink key={i} symbol={clean} onClick={onTickerClick} onViewChart={onViewChart} />;
+      }
     }
     
     return part;
