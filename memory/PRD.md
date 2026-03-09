@@ -1770,3 +1770,79 @@ Recommendation: A-SIZE - Strong edge, increase position size
 ```
 
 **Status**: ✅ COMPLETE
+
+---
+
+## Iteration 52 - S/R Level Integration with EV (March 2026)
+
+**Enhancement**: Integrated Support/Resistance levels, target prices, and stops into the EV calculation system for more accurate R-multiple projections.
+
+### New Features
+
+**1. TradeLevels Data Structure** (`ev_tracking_service.py`)
+```python
+@dataclass
+class TradeLevels:
+    entry_price: float
+    stop_loss: float
+    target_1: float
+    target_2: Optional[float]
+    target_3: Optional[float]
+    support: Optional[float]
+    resistance: Optional[float]
+    vwap: Optional[float]
+    ema_9: Optional[float]
+    atr: Optional[float]
+```
+
+**2. `calculate_levels_from_technical()`**
+Calculates optimal entry, stop, and target levels based on:
+- Support/Resistance levels
+- ATR for volatility-adjusted stops
+- VWAP and EMA for mean reversion targets
+- Setup type (breakout vs mean reversion)
+
+**For LONG trades:**
+- Stop: Below support or 1 ATR below entry
+- Target 1: At resistance or VWAP
+- Target 2: Above resistance + 1 ATR
+
+**For SHORT trades:**
+- Stop: Above resistance or 1 ATR above entry
+- Target 1: At support or VWAP
+- Target 2: Below support - 1 ATR
+
+**3. `calculate_projected_ev()`**
+Calculates projected EV using:
+- Actual price levels for R-multiple
+- Historical win rate for the setup
+- Partial profit management (50% at T1, 30% at T2, 20% trails)
+
+### New API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/ev/calculate-levels` | Calculate entry/stop/targets from S/R levels |
+| `POST /api/ev/projected-ev` | Calculate projected EV using levels + historical data |
+| `GET /api/ev/analyze-alert/{symbol}` | Full EV analysis for a symbol |
+
+### Updated Alert Generation
+- Breakout and Rubber Band setups now calculate R-multiple from actual S/R levels
+- Stop placed below support (long) or above resistance (short)
+- Target placed at next key level
+- Alert reasoning includes R:R ratio and historical EV data
+
+### Test Results
+```
+Setup: rubber_band (10 trades)
+Historical: 70% win rate, 2.20R avg win, 1.00R avg loss
+EV: 1.24R (B_TRADE)
+
+Projected Trade (TSLA-like):
+  Entry: $250, Stop: $245.98, Target: $257.50
+  R at T1: 1.87R
+  Projected EV: 1.14R
+  Grade: B_TRADE - Solid projected edge
+```
+
+**Status**: ✅ COMPLETE

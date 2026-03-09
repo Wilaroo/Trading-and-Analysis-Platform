@@ -13,7 +13,13 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict
 import logging
 
-from services.ev_tracking_service import get_ev_service, EVTrackingService
+from services.ev_tracking_service import (
+    get_ev_service, 
+    EVTrackingService,
+    TradeLevels,
+    calculate_levels_from_technical,
+    calculate_projected_ev
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ev", tags=["EV Tracking"])
@@ -87,6 +93,30 @@ class ReviewTradeRequest(BaseModel):
     outcome: str  # won/lost/scratched
     exit_price: float
     actual_pnl: float = 0.0
+
+
+class CalculateLevelsRequest(BaseModel):
+    """Request to calculate trade levels from technical data"""
+    current_price: float
+    support: float
+    resistance: float
+    atr: float
+    direction: str  # long/short
+    vwap: Optional[float] = None
+    ema_9: Optional[float] = None
+    high_of_day: Optional[float] = None
+    low_of_day: Optional[float] = None
+    setup_type: str = "default"
+
+
+class ProjectedEVRequest(BaseModel):
+    """Request to calculate projected EV from levels and historical win rate"""
+    entry_price: float
+    stop_loss: float
+    target_1: float
+    target_2: Optional[float] = None
+    setup_type: str
+    partial_target_1_pct: float = 0.5  # Take 50% off at T1
 
 
 class EVResponse(BaseModel):
@@ -394,11 +424,11 @@ async def get_setup_gates():
     Get current EV gates for all setups.
     
     Gates determine position sizing:
-    - A_SIZE: EV > 0.5R (150% size)
-    - GREENLIGHT: EV > 0.2R (100% size)
-    - CAUTIOUS: EV > 0R (50% size)
-    - REVIEW: EV > -0.2R (25% size)
-    - DROP: EV < -0.2R (don't trade)
+    - A_TRADE: EV ≥ 2.5R (150% size)
+    - B_TRADE: EV 1.0-2.5R (100% size)
+    - C_TRADE: EV 0.5-1.0R (75% size)
+    - D_TRADE: EV 0-0.5R (50% size)
+    - F_TRADE: EV < 0R (don't trade)
     """
     service = get_service()
     
@@ -417,3 +447,225 @@ async def get_setup_gates():
         "success": True,
         "gates": gates
     }
+
+
+# ==================== TECHNICAL LEVELS & PROJECTED EV ====================
+
+@router.post("/calculate-levels")
+async def calculate_trade_levels(request: CalculateLevelsRequest):
+    """
+    Calculate entry, stop, and target levels from technical data.
+    
+    Uses Support/Resistance levels, ATR, VWAP, and EMAs to determine:
+    - Optimal stop loss placement (below support for longs, above resistance for shorts)
+    - Target 1: First profit target (typically at next S/R level)
+    - Target 2: Extended target for runners
+    - Target 3: Full extension target
+    
+    Returns R-multiples for each target level.
+    """
+    levels = calculate_levels_from_technical(
+        current_price=request.current_price,
+        support=request.support,
+        resistance=request.resistance,
+        atr=request.atr,
+        direction=request.direction,
+        vwap=request.vwap,
+        ema_9=request.ema_9,
+        high_of_day=request.high_of_day,
+        low_of_day=request.low_of_day,
+        setup_type=request.setup_type
+    )
+    
+    r_multiples = levels.get_projected_r_at_targets()
+    
+    return {
+        "success": True,
+        "levels": {
+            "entry_price": levels.entry_price,
+            "stop_loss": round(levels.stop_loss, 2),
+            "target_1": round(levels.target_1, 2),
+            "target_2": round(levels.target_2, 2) if levels.target_2 else None,
+            "target_3": round(levels.target_3, 2) if levels.target_3 else None,
+        },
+        "r_multiples": r_multiples,
+        "risk_per_share": round(abs(levels.entry_price - levels.stop_loss), 2),
+        "technical_context": {
+            "support": request.support,
+            "resistance": request.resistance,
+            "atr": request.atr,
+            "vwap": request.vwap,
+            "setup_type": request.setup_type
+        }
+    }
+
+
+@router.post("/projected-ev")
+async def calculate_projected_ev_endpoint(request: ProjectedEVRequest):
+    """
+    Calculate projected EV for a trade based on levels and historical performance.
+    
+    Combines:
+    1. Actual price levels (entry, stop, targets) for R-multiple calculation
+    2. Historical win rate for the setup type
+    3. Partial profit management assumptions (50% at T1, trail rest)
+    
+    Returns projected EV in R-multiples and trading recommendation.
+    """
+    service = get_service()
+    
+    # Get historical win rate for this setup
+    ev_report = service.get_ev_report(request.setup_type)
+    
+    if ev_report and ev_report.get("total_trades", 0) >= 10:
+        historical_win_rate = ev_report.get("win_rate", 0.5)
+        historical_avg_loss = ev_report.get("avg_loss_r", 1.0)
+    else:
+        # Default assumptions if no history
+        historical_win_rate = 0.50  # Conservative 50%
+        historical_avg_loss = 1.0   # Standard 1R stop
+    
+    # Create levels object
+    levels = TradeLevels(
+        entry_price=request.entry_price,
+        stop_loss=request.stop_loss,
+        target_1=request.target_1,
+        target_2=request.target_2 or request.target_1 * 1.5
+    )
+    
+    # Calculate projected EV
+    projection = calculate_projected_ev(
+        win_rate=historical_win_rate,
+        levels=levels,
+        partial_target_1_pct=request.partial_target_1_pct,
+        avg_loss_r=historical_avg_loss
+    )
+    
+    # Determine trade grade based on projected EV
+    projected_ev = projection["projected_ev_r"]
+    if projected_ev >= 2.5:
+        grade = "A_TRADE"
+        recommendation = "Excellent projected edge - Full size or larger"
+    elif projected_ev >= 1.0:
+        grade = "B_TRADE"
+        recommendation = "Solid projected edge - Standard position size"
+    elif projected_ev >= 0.5:
+        grade = "C_TRADE"
+        recommendation = "Marginal projected edge - Reduced size recommended"
+    elif projected_ev >= 0:
+        grade = "D_TRADE"
+        recommendation = "Poor projected edge - Minimal size or pass"
+    else:
+        grade = "F_TRADE"
+        recommendation = "Negative projected EV - Do not trade"
+    
+    return {
+        "success": True,
+        "setup_type": request.setup_type,
+        "projection": {
+            "projected_ev_r": round(projected_ev, 2),
+            "r_at_target_1": round(projection["r_at_target_1"], 2),
+            "r_at_target_2": round(projection["r_at_target_2"], 2),
+            "avg_win_r": round(projection["avg_win_r"], 2),
+            "win_rate_used": round(historical_win_rate, 2),
+            "risk_r": historical_avg_loss
+        },
+        "grade": grade,
+        "recommendation": recommendation,
+        "historical_data_used": ev_report.get("total_trades", 0) >= 10,
+        "levels_summary": {
+            "entry": request.entry_price,
+            "stop": request.stop_loss,
+            "target_1": request.target_1,
+            "target_2": request.target_2,
+            "risk_per_share": round(abs(request.entry_price - request.stop_loss), 2)
+        }
+    }
+
+
+@router.get("/analyze-alert/{symbol}")
+async def analyze_alert_ev(symbol: str, setup_type: str = None):
+    """
+    Analyze EV for a specific alert/symbol by fetching its technical levels.
+    
+    This endpoint:
+    1. Fetches current technical snapshot for the symbol
+    2. Calculates trade levels based on S/R
+    3. Combines with historical EV data for the setup
+    4. Returns comprehensive EV analysis
+    """
+    service = get_service()
+    
+    # Try to get technical data
+    try:
+        from services.realtime_technical_service import get_technical_service
+        tech_service = get_technical_service()
+        snapshot = await tech_service.get_technical_snapshot(symbol)
+        
+        if not snapshot:
+            return {
+                "success": False,
+                "error": f"Could not get technical data for {symbol}"
+            }
+        
+        # Calculate levels from technical data
+        # Default to long direction, can be overridden
+        direction = "long" if snapshot.rsi_14 < 50 else "short"
+        
+        levels = calculate_levels_from_technical(
+            current_price=snapshot.current_price,
+            support=snapshot.support,
+            resistance=snapshot.resistance,
+            atr=snapshot.atr,
+            direction=direction,
+            vwap=snapshot.vwap,
+            ema_9=snapshot.ema_9,
+            high_of_day=snapshot.high_of_day,
+            low_of_day=snapshot.low_of_day,
+            setup_type=setup_type or "default"
+        )
+        
+        # Get historical EV if setup type provided
+        historical_data = None
+        if setup_type:
+            historical_data = service.get_ev_report(setup_type)
+        
+        # Calculate projected EV
+        win_rate = historical_data.get("win_rate", 0.5) if historical_data else 0.5
+        projection = calculate_projected_ev(win_rate=win_rate, levels=levels)
+        
+        return {
+            "success": True,
+            "symbol": symbol,
+            "direction": direction,
+            "setup_type": setup_type,
+            "technical_snapshot": {
+                "current_price": snapshot.current_price,
+                "support": snapshot.support,
+                "resistance": snapshot.resistance,
+                "vwap": snapshot.vwap,
+                "ema_9": snapshot.ema_9,
+                "atr": snapshot.atr,
+                "rsi": snapshot.rsi_14
+            },
+            "calculated_levels": {
+                "entry": round(levels.entry_price, 2),
+                "stop_loss": round(levels.stop_loss, 2),
+                "target_1": round(levels.target_1, 2),
+                "target_2": round(levels.target_2, 2) if levels.target_2 else None,
+                "r_at_target_1": round(levels.calculate_r_multiple(levels.target_1), 2)
+            },
+            "projected_ev": {
+                "ev_r": round(projection["projected_ev_r"], 2),
+                "based_on_win_rate": round(win_rate, 2)
+            },
+            "historical_ev": historical_data if historical_data else {"message": "No historical data"}
+        }
+        
+    except Exception as e:
+        logger.error(f"Error analyzing alert EV: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
