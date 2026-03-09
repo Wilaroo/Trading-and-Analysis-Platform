@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   FileText, Plus, Check, X, Save, ChevronDown, ChevronRight,
   Clock, Target, TrendingUp, TrendingDown, AlertCircle,
-  Calendar, BarChart3, Award, Activity, Edit3, Zap, RefreshCw
+  Calendar, BarChart3, Award, Activity, Edit3, Zap, RefreshCw,
+  Timer, Info
 } from 'lucide-react';
 import api from '../../utils/api';
 
@@ -18,19 +19,22 @@ const DRCTab = () => {
   const [expandedSection, setExpandedSection] = useState('big_picture');
 
   const [autoGenerating, setAutoGenerating] = useState(false);
+  const [eodStatus, setEodStatus] = useState(null);
 
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const [todayRes, recentRes, statsRes] = await Promise.all([
+      const [todayRes, recentRes, statsRes, eodStatusRes] = await Promise.all([
         api.get('/api/journal/drc/today'),
         api.get('/api/journal/drc/recent?limit=7'),
-        api.get('/api/journal/drc/stats?days=30')
+        api.get('/api/journal/drc/stats?days=30'),
+        api.get('/api/journal/eod/status')
       ]);
       setDrc(todayRes.data.drc);
       setEditedDrc(todayRes.data.drc);
       setRecentDrcs(recentRes.data.drcs || []);
       setStats(statsRes.data);
+      setEodStatus(eodStatusRes.data);
     } catch (err) {
       console.error('Failed to load DRC data:', err);
     } finally {
@@ -185,6 +189,35 @@ const DRCTab = () => {
         </div>
       )}
 
+      {/* Auto-Generation Status Banner */}
+      {eodStatus && (
+        <div className={`p-3 rounded-lg border flex items-center justify-between ${
+          eodStatus.scheduler_running 
+            ? 'bg-emerald-500/10 border-emerald-500/30' 
+            : 'bg-zinc-500/10 border-zinc-500/30'
+        }`}>
+          <div className="flex items-center gap-3">
+            <div className={`w-2 h-2 rounded-full ${eodStatus.scheduler_running ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-500'}`} />
+            <div>
+              <p className="text-xs font-medium text-white flex items-center gap-1">
+                <Timer className="w-3 h-3" />
+                Auto-Generation {eodStatus.scheduler_running ? 'Active' : 'Inactive'}
+              </p>
+              <p className="text-[10px] text-zinc-400">
+                {eodStatus.scheduler_running 
+                  ? `Next: ${eodStatus.next_runs?.auto_generate_drc ? new Date(eodStatus.next_runs.auto_generate_drc).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : '4:30 PM ET weekdays'}`
+                  : 'Scheduler not running'
+                }
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-zinc-400">
+            <Info className="w-3 h-3" />
+            DRC auto-fills daily at market close
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-4">
         {/* Left Column - Main DRC */}
         <div className="col-span-2 space-y-3">
@@ -192,7 +225,15 @@ const DRCTab = () => {
           <div className="p-4 rounded-lg bg-gradient-to-br from-purple-500/10 to-purple-500/5 border border-purple-500/20">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-zinc-500 uppercase">Today's Grade</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-xs text-zinc-500 uppercase">Today's Grade</p>
+                  {drc?.auto_generated && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                      <Zap className="w-2.5 h-2.5" />
+                      AI Generated
+                    </span>
+                  )}
+                </div>
                 {editing ? (
                   <select
                     value={editedDrc?.overall_grade || ''}

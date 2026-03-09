@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://smb-trading-fix.preview.emergentagent.com
+https://playbook-drc-gen.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://smb-trading-fix.preview.emergentagent.com
+https://playbook-drc-gen.preview.emergentagent.com
 ```

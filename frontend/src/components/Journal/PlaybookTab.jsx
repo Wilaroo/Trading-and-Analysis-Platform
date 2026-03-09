@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   BookOpen, Plus, X, Save, Edit3, Trash2, ChevronDown, ChevronRight,
   Target, TrendingUp, TrendingDown, AlertCircle, Check, Star,
-  Zap, Activity, BarChart3, Clock, DollarSign, Percent, Award, Upload
+  Zap, Activity, BarChart3, Clock, DollarSign, Percent, Award, Upload,
+  Timer, ThumbsUp, ThumbsDown, Info
 } from 'lucide-react';
 import api from '../../utils/api';
 import TraderSyncImport from './TraderSyncImport';
@@ -11,12 +12,14 @@ import TraderSyncImport from './TraderSyncImport';
 // SMB Playbook Component
 const PlaybookTab = ({ onSelectPlaybook }) => {
   const [playbooks, setPlaybooks] = useState([]);
+  const [pendingPlaybooks, setPendingPlaybooks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [selectedPlaybook, setSelectedPlaybook] = useState(null);
   const [summary, setSummary] = useState(null);
   const [expandedPlaybook, setExpandedPlaybook] = useState(null);
+  const [eodStatus, setEodStatus] = useState(null);
 
   // Form state for new playbook - SMB 6-section structure
   const [formData, setFormData] = useState({
@@ -81,12 +84,16 @@ const PlaybookTab = ({ onSelectPlaybook }) => {
   const loadPlaybooks = useCallback(async () => {
     try {
       setLoading(true);
-      const [playbooksRes, summaryRes] = await Promise.all([
+      const [playbooksRes, summaryRes, pendingRes, eodStatusRes] = await Promise.all([
         api.get('/api/journal/playbooks'),
-        api.get('/api/journal/playbooks/summary')
+        api.get('/api/journal/playbooks/summary'),
+        api.get('/api/journal/eod/pending-playbooks'),
+        api.get('/api/journal/eod/status')
       ]);
       setPlaybooks(playbooksRes.data.playbooks || []);
       setSummary(summaryRes.data);
+      setPendingPlaybooks(pendingRes.data.pending_playbooks || []);
+      setEodStatus(eodStatusRes.data);
     } catch (err) {
       console.error('Failed to load playbooks:', err);
     } finally {
@@ -129,6 +136,29 @@ const PlaybookTab = ({ onSelectPlaybook }) => {
     const updated = [...formData.if_then_statements];
     updated[index] = { ...updated[index], [field]: value };
     setFormData({ ...formData, if_then_statements: updated });
+  };
+
+  const handleApprovePending = async (playbookId) => {
+    try {
+      const res = await api.post(`/api/journal/eod/pending-playbooks/${playbookId}/approve`);
+      if (res.data.success) {
+        setPendingPlaybooks(pendingPlaybooks.filter(p => p.id !== playbookId));
+        loadPlaybooks(); // Reload to get the newly approved playbook
+      }
+    } catch (err) {
+      console.error('Failed to approve playbook:', err);
+    }
+  };
+
+  const handleRejectPending = async (playbookId) => {
+    try {
+      const res = await api.post(`/api/journal/eod/pending-playbooks/${playbookId}/reject`);
+      if (res.data.success) {
+        setPendingPlaybooks(pendingPlaybooks.filter(p => p.id !== playbookId));
+      }
+    } catch (err) {
+      console.error('Failed to reject playbook:', err);
+    }
   };
 
   const getTradeStyleColor = (style) => {
@@ -220,6 +250,91 @@ const PlaybookTab = ({ onSelectPlaybook }) => {
                 </span>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Auto-Generation Status Banner */}
+      {eodStatus && (
+        <div className={`p-3 rounded-lg border flex items-center justify-between ${
+          eodStatus.scheduler_running 
+            ? 'bg-emerald-500/10 border-emerald-500/30' 
+            : 'bg-zinc-500/10 border-zinc-500/30'
+        }`}>
+          <div className="flex items-center gap-3">
+            <div className={`w-2 h-2 rounded-full ${eodStatus.scheduler_running ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-500'}`} />
+            <div>
+              <p className="text-xs font-medium text-white flex items-center gap-1">
+                <Timer className="w-3 h-3" />
+                Auto-Generation {eodStatus.scheduler_running ? 'Active' : 'Inactive'}
+              </p>
+              <p className="text-[10px] text-zinc-400">
+                {eodStatus.scheduler_running 
+                  ? `Next analysis: ${eodStatus.next_runs?.auto_playbook_analysis ? new Date(eodStatus.next_runs.auto_playbook_analysis).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : '4:45 PM ET weekdays'}`
+                  : 'Scheduler not running'
+                }
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-zinc-400">
+            <Info className="w-3 h-3" />
+            New playbooks suggested from winning trades
+          </div>
+        </div>
+      )}
+
+      {/* Pending Playbooks Section (AI-Generated awaiting approval) */}
+      {pendingPlaybooks.length > 0 && (
+        <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium flex items-center gap-2 text-amber-400">
+              <Zap className="w-4 h-4" />
+              Pending Review ({pendingPlaybooks.length})
+            </h3>
+            <span className="text-[10px] text-zinc-400">AI-generated from your winning trades</span>
+          </div>
+          <div className="space-y-2">
+            {pendingPlaybooks.map((pb) => (
+              <div key={pb.id} className="p-3 rounded-lg bg-black/30 border border-amber-500/20">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-white">{pb.name}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded border ${getTradeStyleColor(pb.trade_style)}`}>
+                      {pb.trade_style}
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-500/20 text-zinc-400 border border-zinc-500/30">
+                      {pb.setup_type}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleRejectPending(pb.id)}
+                      className="p-1.5 rounded hover:bg-red-500/20 text-red-400 transition-colors"
+                      title="Reject"
+                    >
+                      <ThumbsDown className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleApprovePending(pb.id)}
+                      className="p-1.5 rounded hover:bg-emerald-500/20 text-emerald-400 transition-colors"
+                      title="Approve"
+                    >
+                      <ThumbsUp className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                {pb.description && (
+                  <p className="text-xs text-zinc-400 mt-2">{pb.description}</p>
+                )}
+                {pb.performance_stats && (
+                  <div className="flex gap-4 mt-2 text-xs">
+                    <span className="text-zinc-500">Trades: <span className="text-white">{pb.generated_from_trades}</span></span>
+                    <span className="text-zinc-500">Win Rate: <span className={pb.performance_stats.win_rate >= 50 ? 'text-emerald-400' : 'text-red-400'}>{pb.performance_stats.win_rate}%</span></span>
+                    <span className="text-zinc-500">P&L: <span className={pb.performance_stats.total_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>${pb.performance_stats.total_pnl}</span></span>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}

@@ -178,10 +178,10 @@ async def get_playbooks(
 ):
     """Get all playbooks with optional filters"""
     playbook_svc, _, _ = get_services()
+    # Note: market_context filter not yet implemented in PlaybookService
     playbooks = await playbook_svc.get_playbooks(
         setup_type=setup_type,
         trade_style=trade_style,
-        market_context=market_context,
         is_active=is_active,
         limit=limit
     )
@@ -656,3 +656,104 @@ async def save_generated_playbook(playbook_data: dict):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+# ==================== END-OF-DAY GENERATION ENDPOINTS ====================
+
+def get_eod_service_instance():
+    """Get the singleton EOD service instance"""
+    from services.eod_generation_service import get_eod_service
+    from pymongo import MongoClient
+    
+    eod_svc = get_eod_service()
+    if eod_svc is None:
+        # Initialize if not yet created (fallback)
+        mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+        db_name = os.environ.get("DB_NAME", "trading_app")
+        client = MongoClient(mongo_url)
+        db = client[db_name]
+        eod_svc = get_eod_service(db)
+    
+    return eod_svc
+
+
+@router.get("/eod/status")
+async def get_eod_status():
+    """Get the status of the end-of-day auto-generation scheduler"""
+    eod_svc = get_eod_service_instance()
+    
+    is_running = eod_svc.scheduler is not None and eod_svc.scheduler.running
+    next_run_times = {}
+    
+    if is_running:
+        for job in eod_svc.scheduler.get_jobs():
+            next_run = job.next_run_time
+            if next_run:
+                next_run_times[job.id] = next_run.isoformat()
+    
+    return {
+        "success": True,
+        "scheduler_running": is_running,
+        "scheduled_time": "4:30 PM ET (weekdays)",
+        "next_runs": next_run_times,
+        "timezone": "America/New_York"
+    }
+
+
+@router.post("/eod/trigger")
+async def trigger_eod_generation(date: str = None):
+    """Manually trigger end-of-day DRC and Playbook generation"""
+    eod_svc = get_eod_service_instance()
+    try:
+        result = await eod_svc.trigger_manual_generation(date)
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/eod/pending-playbooks")
+async def get_pending_playbooks():
+    """Get AI-generated playbooks pending review"""
+    eod_svc = get_eod_service_instance()
+    try:
+        playbooks = await eod_svc.get_pending_playbooks()
+        return {"success": True, "pending_playbooks": playbooks, "count": len(playbooks)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/eod/pending-playbooks/{playbook_id}/approve")
+async def approve_pending_playbook(playbook_id: str):
+    """Approve a pending playbook and make it active"""
+    eod_svc = get_eod_service_instance()
+    try:
+        result = await eod_svc.approve_pending_playbook(playbook_id)
+        if "error" in result:
+            raise HTTPException(status_code=404, detail=result["error"])
+        return {"success": True, **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/eod/pending-playbooks/{playbook_id}/reject")
+async def reject_pending_playbook(playbook_id: str):
+    """Reject/delete a pending playbook"""
+    eod_svc = get_eod_service_instance()
+    try:
+        result = await eod_svc.reject_pending_playbook(playbook_id)
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/eod/logs")
+async def get_eod_generation_logs(days: int = 7):
+    """Get recent end-of-day generation logs"""
+    eod_svc = get_eod_service_instance()
+    try:
+        logs = await eod_svc.get_generation_logs(days=days)
+        return {"success": True, "logs": logs, "count": len(logs)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
