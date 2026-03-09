@@ -17,9 +17,12 @@ set SCRIPT_DIR=%~dp0
 :: =====================================================
 :: CONFIGURATION - Edit these for your setup
 :: =====================================================
-:: Ollama model - use smaller model for CPU-only systems
-:: Options: llama3.2:3b (fast), llama3:8b (balanced), mistral:7b (good reasoning)
-set OLLAMA_MODEL=llama3.2:3b
+:: Ollama model - RTX 5060 (8GB VRAM) can handle these well:
+:: Options: llama3:8b (recommended), mistral:7b (fast reasoning), llama3.1:8b (newer)
+set OLLAMA_MODEL=llama3:8b
+
+:: GPU layers - set to 35 for RTX 5060 (uses GPU for most layers)
+set OLLAMA_GPU_LAYERS=35
 
 :: Symbols to track via IB Data Pusher (space-separated)
 :: Core market + your active trading tickers
@@ -65,29 +68,28 @@ if %errorlevel%==0 (
 del "%TEMP%\deployment_url.tmp" 2>nul
 echo.
 
-:: Check/Start Ollama with optimized settings
-echo [2/8] Starting Ollama (optimized for CPU)...
+:: Check/Start Ollama with GPU optimization
+echo [2/8] Starting Ollama (GPU accelerated - RTX 5060)...
 curl -s http://localhost:11434/api/tags >nul 2>&1
 if %errorlevel%==0 (
     echo       Ollama already running!
 ) else (
-    echo       Starting Ollama with CPU optimization...
+    echo       Starting Ollama with GPU acceleration...
     :: OLLAMA_HOST: Allow external connections
-    :: OLLAMA_ORIGINS: Allow cross-origin requests
-    :: OLLAMA_NUM_PARALLEL: Limit parallel requests for CPU
-    :: OLLAMA_MAX_LOADED_MODELS: Only keep 1 model in memory
-    start "Ollama Server" cmd /k "set OLLAMA_HOST=0.0.0.0 && set OLLAMA_ORIGINS=* && set OLLAMA_NUM_PARALLEL=1 && set OLLAMA_MAX_LOADED_MODELS=1 && ollama serve"
+    :: OLLAMA_ORIGINS: Allow cross-origin requests  
+    :: GPU acceleration is automatic with NVIDIA drivers
+    start "Ollama Server" cmd /k "set OLLAMA_HOST=0.0.0.0 && set OLLAMA_ORIGINS=* && ollama serve"
     echo       Waiting for Ollama to start...
     timeout /t 8 /nobreak >nul
 )
 
-:: Pre-load the model (so first chat isn't slow)
-echo       Pre-loading model: %OLLAMA_MODEL%...
-curl -s -X POST http://localhost:11434/api/generate -d "{\"model\":\"%OLLAMA_MODEL%\",\"prompt\":\"hi\",\"stream\":false}" >nul 2>&1
+:: Pre-load the model to GPU (so first chat is instant)
+echo       Pre-loading model: %OLLAMA_MODEL% to GPU...
+curl -s -X POST http://localhost:11434/api/generate -d "{\"model\":\"%OLLAMA_MODEL%\",\"prompt\":\"hello\",\"stream\":false}" >nul 2>&1
 if %errorlevel%==0 (
-    echo       Model loaded and ready!
+    echo       Model loaded to GPU and ready!
 ) else (
-    echo       Model will load on first use
+    echo       Model will load on first use (may need: ollama pull %OLLAMA_MODEL%)
 )
 echo.
 
@@ -263,7 +265,7 @@ echo.
 echo    Platform: %PLATFORM_URL%
 echo.
 echo    Services Running:
-echo    - Ollama: %OLLAMA_MODEL% (CPU mode)
+echo    - Ollama: %OLLAMA_MODEL% (GPU accelerated - RTX 5060)
 echo      Tunnel: https://pseudoaccidentally-linty-addie.ngrok-free.dev
 echo    - IB Gateway: Running on port 4002
 echo    - IB Data Pusher: Pushing to cloud
