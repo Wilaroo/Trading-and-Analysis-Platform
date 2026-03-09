@@ -1998,6 +1998,29 @@ Answer questions using the real-time data provided. Be concise and direct.
                     "session_id": session_id
                 }
         
+        # ===== BOT DEPLOYMENT DETECTION =====
+        # Check if user wants to deploy/configure the trading bot
+        bot_command = await self._detect_bot_command(user_message)
+        if bot_command and self._trading_bot:
+            try:
+                bot_response = await self._execute_bot_command(bot_command, user_message, conv)
+                if bot_response:
+                    assistant_msg = AssistantMessage(
+                        role="assistant",
+                        content=bot_response,
+                        metadata={"provider": "bot_command", "command": bot_command["action"]}
+                    )
+                    conv.messages.append(assistant_msg)
+                    return {
+                        "success": True, 
+                        "response": bot_response, 
+                        "session_id": session_id,
+                        "bot_action": bot_command["action"]
+                    }
+            except Exception as e:
+                logger.error(f"Bot command execution error: {e}")
+                # Continue to regular flow if bot command fails
+        
         # ===== REGULAR FLOW: Complex messages =====
         
         # Check for research intent first
@@ -2862,6 +2885,299 @@ Be specific with price levels when possible."""
                 logger.warning(f"Error getting sessions: {e}")
         
         return sessions
+
+    async def _detect_bot_command(self, message: str) -> Optional[Dict]:
+        """
+        Detect if the user wants to execute a trading bot command.
+        Returns command info or None if no bot command detected.
+        """
+        msg_lower = message.lower()
+        
+        # Deploy/Start bot patterns
+        deploy_patterns = [
+            "deploy the bot", "deploy bot", "deploy trading bot",
+            "start the bot", "start bot", "enable bot", "enable the bot",
+            "activate bot", "activate the bot", "turn on bot",
+            "run the bot", "execute trades", "trade on my behalf",
+            "monitor and trade", "auto trade", "automated trading"
+        ]
+        
+        # Stop bot patterns
+        stop_patterns = [
+            "stop the bot", "stop bot", "disable bot", "disable the bot",
+            "turn off bot", "deactivate bot", "pause bot", "halt bot"
+        ]
+        
+        # Configure watchlist patterns
+        watchlist_patterns = [
+            "focus on", "watch these", "monitor these", "trade these",
+            "set watchlist", "add to watchlist", "bot watchlist"
+        ]
+        
+        # Get bot status patterns
+        status_patterns = [
+            "bot status", "is the bot", "bot running", "trading bot status"
+        ]
+        
+        # Check for deploy command
+        if any(p in msg_lower for p in deploy_patterns):
+            # Extract tickers from message or recent conversation
+            tickers = self._extract_tickers_from_text(message)
+            strategies = self._extract_strategies_from_text(message)
+            return {
+                "action": "deploy",
+                "tickers": tickers,
+                "strategies": strategies
+            }
+        
+        # Check for stop command
+        if any(p in msg_lower for p in stop_patterns):
+            return {"action": "stop"}
+        
+        # Check for status command
+        if any(p in msg_lower for p in status_patterns):
+            return {"action": "status"}
+        
+        # Check for watchlist configuration
+        if any(p in msg_lower for p in watchlist_patterns):
+            tickers = self._extract_tickers_from_text(message)
+            if tickers:
+                return {"action": "set_watchlist", "tickers": tickers}
+        
+        return None
+    
+    def _extract_tickers_from_text(self, text: str) -> List[str]:
+        """Extract stock tickers from text."""
+        import re
+        # Match common ticker patterns
+        # Uppercase 1-5 letter words that look like tickers
+        potential_tickers = re.findall(r'\b([A-Z]{1,5})\b', text.upper())
+        
+        # Known tickers to validate against
+        known_tickers = {
+            # Oil/Energy
+            "XOM", "CVX", "COP", "BP", "SLB", "OXY", "EOG", "PXD", "DVN", "HAL",
+            "VLO", "MPC", "PSX", "XLE", "USO", "OIH", "BKR",
+            # Fertilizer/Agriculture
+            "CF", "NTR", "MOS", "FMC", "ADM", "DE", "AGCO",
+            # Tech
+            "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "NVDA", "META", "TSLA", "AMD", "INTC",
+            "AVGO", "QCOM", "ADBE", "CRM", "ORCL", "CSCO", "TXN", "MU", "AMAT",
+            # Finance
+            "JPM", "BAC", "GS", "MS", "WFC", "C", "V", "MA", "BLK", "SCHW",
+            # ETFs
+            "SPY", "QQQ", "IWM", "DIA", "XLF", "XLK", "XLV", "XLY", "XLP", "XLE", "XLI", "XLB",
+            # Healthcare
+            "UNH", "JNJ", "PFE", "MRK", "ABBV", "LLY", "BMY", "AMGN", "GILD", "MRNA",
+            # Consumer
+            "HD", "LOW", "TGT", "WMT", "COST", "NKE", "SBUX", "MCD", "DIS",
+            # Others
+            "NFLX", "COIN", "SQ", "SHOP", "PLTR", "SNOW", "DDOG", "NET", "CRWD",
+            "BA", "CAT", "HON", "UPS", "FDX", "GE", "RTX", "LMT"
+        }
+        
+        # Common words to exclude that might look like tickers
+        exclude_words = {
+            "THE", "AND", "FOR", "WITH", "ON", "MY", "TO", "IN", "OF", "AT", "OR", 
+            "AS", "IS", "IT", "OK", "AM", "PM", "US", "A", "I", "BE", "DO", "SO",
+            "IF", "AN", "BY", "UP", "NO", "GO", "HE", "WE", "ME", "BOT", "TRADE",
+            "BUY", "SELL", "LONG", "SHORT", "PUT", "CALL", "STOP", "ALL", "SET",
+            "RUN", "NOW", "DAY", "USE", "NEW", "GET", "CAN", "MAY", "SAY", "SEE",
+            "OIL", "GAS", "ETF", "IPO", "ATH", "ATR", "EMA", "RSI", "HOD", "LOD",
+            "VWAP", "NYSE", "NASDAQ"
+        }
+        
+        # Also check for tickers mentioned in common patterns like "XOM (Exxon)"
+        pattern_matches = re.findall(r'\b([A-Z]{1,5})\s*\([^)]+\)', text.upper())
+        potential_tickers.extend(pattern_matches)
+        
+        # Filter to known tickers only (strict mode)
+        valid_tickers = []
+        for t in potential_tickers:
+            if t in known_tickers:
+                valid_tickers.append(t)
+            elif t not in exclude_words and len(t) >= 2 and len(t) <= 4:
+                # For unknown tickers, only include if they look valid and aren't common words
+                # Must be 2-4 chars (most real tickers)
+                if t.isalpha():
+                    valid_tickers.append(t)
+        
+        return list(dict.fromkeys(valid_tickers))  # Remove duplicates, preserve order
+    
+    def _extract_strategies_from_text(self, text: str) -> List[str]:
+        """Extract strategy names from text."""
+        msg_lower = text.lower()
+        
+        strategy_map = {
+            "hitchhiker": "hitchhiker",
+            "spencer": "spencer_scalp", 
+            "spencer scalp": "spencer_scalp",
+            "rubber band": "rubber_band",
+            "rubberband": "rubber_band",
+            "gap give": "gap_give_go",
+            "backside": "backside",
+            "back$ide": "backside",
+            "off sides": "off_sides",
+            "offsides": "off_sides",
+            "second chance": "second_chance",
+            "vwap": "vwap_bounce",
+            "breakout": "breakout",
+            "squeeze": "squeeze",
+            "mean reversion": "mean_reversion",
+            "gap fade": "gap_fade",
+            "orb": "orb",
+            "opening range": "orb",
+            "first move": "first_move_up",
+            "growth": "breakout",  # Map generic "growth" to breakout
+            "momentum": "breakout"
+        }
+        
+        found_strategies = []
+        for pattern, strategy in strategy_map.items():
+            if pattern in msg_lower:
+                if strategy not in found_strategies:
+                    found_strategies.append(strategy)
+        
+        return found_strategies
+    
+    async def _execute_bot_command(self, command: Dict, original_message: str, conv) -> Optional[str]:
+        """Execute a trading bot command and return response."""
+        action = command.get("action")
+        
+        if action == "deploy":
+            return await self._deploy_bot(command, original_message, conv)
+        elif action == "stop":
+            return await self._stop_bot()
+        elif action == "status":
+            return self._get_bot_status()
+        elif action == "set_watchlist":
+            return self._set_bot_watchlist(command.get("tickers", []))
+        
+        return None
+    
+    async def _deploy_bot(self, command: Dict, original_message: str, conv) -> str:
+        """Deploy the trading bot with specified configuration."""
+        tickers = command.get("tickers", [])
+        strategies = command.get("strategies", [])
+        
+        # If no tickers in current message, try to extract from conversation history
+        if not tickers:
+            for msg in reversed(conv.messages[-10:]):
+                if msg.role == "assistant":
+                    tickers = self._extract_tickers_from_text(msg.content)
+                    if tickers:
+                        break
+        
+        if not tickers:
+            return ("I couldn't identify specific tickers to monitor. Please specify the symbols you want me to trade, "
+                   "for example: 'Deploy the bot to trade XOM, CVX, CF, and NTR'")
+        
+        # If no strategies specified, use defaults for the sector
+        if not strategies:
+            strategies = ["hitchhiker", "breakout", "gap_give_go", "vwap_bounce"]
+        
+        try:
+            # Configure the bot
+            self._trading_bot.set_watchlist(tickers)
+            self._trading_bot.set_enabled_setups(strategies)
+            
+            # Start the bot
+            await self._trading_bot.start()
+            
+            # Get current mode
+            mode = self._trading_bot.get_mode()
+            mode_desc = "PAPER TRADING (simulated)" if mode.value == "paper" else "LIVE TRADING"
+            
+            response = f"""**Trading Bot Deployed Successfully**
+
+**Mode:** {mode_desc}
+**Watchlist:** {', '.join(tickers)}
+**Strategies Enabled:** {', '.join(strategies)}
+
+The bot is now actively monitoring these symbols for setups matching your strategies. Here's what it will do:
+
+1. **Monitor** - Continuously scan {', '.join(tickers)} for entry signals
+2. **Evaluate** - Score each opportunity using the enabled strategies
+3. **Alert** - Notify you when high-quality setups are detected
+4. **Execute** - Place trades automatically when conditions are met (in {mode_desc} mode)
+
+**Risk Management:**
+- Position sizing based on ATR volatility
+- Maximum risk per trade: ${self._trading_bot.risk_params.max_risk_per_trade:,.0f}
+- Stop losses set according to strategy rules
+
+I'll keep you updated on any trades executed. Say "stop the bot" at any time to halt automated trading."""
+
+            return response
+            
+        except Exception as e:
+            logger.error(f"Failed to deploy bot: {e}")
+            return f"I encountered an error deploying the bot: {str(e)}. Please try again or check the system status."
+    
+    async def _stop_bot(self) -> str:
+        """Stop the trading bot."""
+        try:
+            await self._trading_bot.stop()
+            
+            # Get summary of activity
+            summary = self._trading_bot.get_all_trades_summary()
+            
+            response = f"""**Trading Bot Stopped**
+
+The automated trading bot has been disabled. Here's today's summary:
+- **Total Trades:** {summary.get('total_trades', 0)}
+- **Winning Trades:** {summary.get('winning_trades', 0)}
+- **P&L:** ${summary.get('total_pnl', 0):.2f}
+
+The bot will no longer execute trades automatically. You can re-enable it anytime by asking me to deploy it again."""
+
+            return response
+            
+        except Exception as e:
+            logger.error(f"Failed to stop bot: {e}")
+            return f"Error stopping the bot: {str(e)}"
+    
+    def _get_bot_status(self) -> str:
+        """Get current bot status."""
+        try:
+            context = self._trading_bot.get_bot_context_for_ai()
+            mode = self._trading_bot.get_mode()
+            summary = self._trading_bot.get_all_trades_summary()
+            
+            status = "RUNNING" if getattr(self._trading_bot, '_running', False) else "STOPPED"
+            
+            response = f"""**Trading Bot Status**
+
+**Status:** {status}
+**Mode:** {mode.value.upper()}
+**Watchlist:** {', '.join(getattr(self._trading_bot, '_watchlist', [])) or 'Not set'}
+**Enabled Strategies:** {', '.join(getattr(self._trading_bot, '_enabled_setups', [])) or 'Default'}
+
+**Today's Activity:**
+- Trades Executed: {summary.get('total_trades', 0)}
+- Win Rate: {summary.get('win_rate', 0):.0%}
+- P&L: ${summary.get('total_pnl', 0):.2f}
+
+{context}"""
+
+            return response
+            
+        except Exception as e:
+            logger.error(f"Failed to get bot status: {e}")
+            return f"Error getting bot status: {str(e)}"
+    
+    def _set_bot_watchlist(self, tickers: List[str]) -> str:
+        """Set the bot's watchlist."""
+        if not tickers:
+            return "Please specify tickers to add to the watchlist."
+        
+        try:
+            self._trading_bot.set_watchlist(tickers)
+            return f"**Watchlist Updated**\n\nThe bot is now monitoring: {', '.join(tickers)}"
+        except Exception as e:
+            logger.error(f"Failed to set watchlist: {e}")
+            return f"Error updating watchlist: {str(e)}"
+
 
 
 # Singleton instance
