@@ -1800,19 +1800,20 @@ const AICommandPanel = ({
   
   // Dynamic chat height based on content
   const getChatMinHeight = () => {
-    if (messages.length === 0) return 200;
+    if (messages.length === 0) return 250;
     
     // Calculate total content length
     const totalContentLength = messages.reduce((acc, msg) => {
       return acc + (msg.content?.length || 0);
     }, 0);
     
-    // Scale height based on content (min 200, max 600)
-    if (totalContentLength > 2000) return 550;
-    if (totalContentLength > 1000) return 450;
-    if (totalContentLength > 500) return 350;
-    if (totalContentLength > 200) return 280;
-    return 220;
+    // Scale height based on content (min 250, max 700)
+    if (totalContentLength > 3000) return 700;
+    if (totalContentLength > 2000) return 600;
+    if (totalContentLength > 1000) return 500;
+    if (totalContentLength > 500) return 400;
+    if (totalContentLength > 200) return 320;
+    return 280;
   };
   
   const chatMinHeight = getChatMinHeight();
@@ -2588,8 +2589,8 @@ const AICommandPanel = ({
 
       {/* Main Content - New Layout: Chat on top, Pipeline + Chart below */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* TOP: AI Chat - Full width, constrained height */}
-        <div className="flex flex-col border-b border-white/5" style={{ maxHeight: '45%', minHeight: '200px' }}>
+        {/* TOP: AI Chat - Full width, expanded height */}
+        <div className="flex flex-col border-b border-white/5" style={{ maxHeight: '60%', minHeight: '300px' }}>
           {/* Chat Header with Clear Button */}
           {messages.length > 0 && (
             <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-black/20 shrink-0">
