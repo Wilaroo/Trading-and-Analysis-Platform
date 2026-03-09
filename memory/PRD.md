@@ -21,7 +21,7 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 | **Ollama** | Free AI for chat, summaries, market intel | Via ngrok tunnel |
 
 ## Startup Modes
-- **Cloud Dev**: Ollama + ngrok → `https://ai-scanner-sim.preview.emergentagent.com`
+- **Cloud Dev**: Ollama + ngrok → `https://market-hours-sim.preview.emergentagent.com`
 - **Full Local**: All services on PC → `http://localhost:3000`
 - See `/documents/STARTUP_GUIDE.md` for detailed instructions
 
@@ -1589,11 +1589,41 @@ Each card now shows:
 
 #### P1 - High Priority
 - [x] IB Data Pusher integrated into StartTrading.bat (auto-download, auto-install deps, connection verification)
+- [x] AI Alert Reasoning Fix (March 2026) - AI now provides specific reasoning based on actual alert data
 - [ ] Quick Actions Integration in Chat (Buy, Sell, Alert buttons in chat messages)
 - [ ] IB Pushed Data Integration end-to-end verification (user must run pusher)
 - [ ] Perplexity Search API integration
+- [ ] Sentiment Heatmap Widget
 
 #### P2 - Future
 - [ ] CrewAI multi-agent system
 - [ ] Strategy backtesting
 - [ ] Remove unused NewsletterPage.js and backend endpoints
+
+---
+
+## Iteration 49 - AI Alert Reasoning Fix (March 2026)
+
+**Problem**: When user asked "explain your reasoning for taking a trade on XPEV", the AI gave generic textbook responses instead of using the specific alert data (score, setup_type, reasoning) from the scanner.
+
+**Root Causes Identified & Fixed**:
+1. **Ticker Extraction Bug**: The regex was extracting common words like "PLAIN" (from "exPLAIN"), "ON", "YOU" instead of actual ticker symbols
+2. **Alert Source**: Only checked live scanner alerts, not simulator alerts which persist separately
+3. **Alert Expiration**: Live scanner alerts expire quickly, causing lookups to fail
+
+**Changes Made** (`backend/services/ai_assistant_service.py`):
+1. **Improved Ticker Extraction**:
+   - Added context-based patterns: `on TICKER`, `for TICKER`, `about TICKER`
+   - Expanded excluded words list with 80+ common English words
+   - Prioritizes explicit `$TICKER` mentions
+2. **Multi-Source Alert Lookup**:
+   - Checks live scanner alerts first (`/api/live-scanner/alerts`)
+   - Falls back to simulator alerts (`/api/simulator/alerts`)
+   - Falls back to MongoDB `live_alerts` collection for recent (1-hour) alerts
+3. **Rich Context Injection**:
+   - When alert found, injects full context: setup_type, direction, priority, prices, R:R, reasoning points, market context
+   - AI uses this specific data to explain the "why" behind alerts
+
+**Testing**: Verified with simulator-generated alerts (XOM, NFLX, etc.) - AI now correctly explains specific setup data.
+
+**Status**: ✅ COMPLETE
