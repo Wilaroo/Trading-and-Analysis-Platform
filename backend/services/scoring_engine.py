@@ -1497,6 +1497,64 @@ class UniversalScoringEngine:
         elif checklist_passed <= 3:
             composite = max(0, composite - 5)  # Penalty for D grade
         
+        # NEW: SMB Unified Scoring Integration
+        smb_unified = {}
+        try:
+            from services.smb_unified_scoring import (
+                convert_checklist_to_smb_score,
+                analyze_tape_from_quote_data,
+                get_trade_style_recommendation,
+                generate_smb_coaching_context
+            )
+            
+            # Convert existing checklist to SMB 5-Variable format
+            smb_5var = convert_checklist_to_smb_score(smb_checklist)
+            if smb_5var:
+                smb_unified["smb_5var"] = smb_5var.to_dict()
+                
+                # Add SMB grade to quick_stats
+                smb_grade = smb_5var.grade
+                smb_is_a_plus = smb_5var.is_a_plus
+            else:
+                smb_grade = smb_checklist["summary"]["grade"]
+                smb_is_a_plus = False
+            
+            # Enhanced tape reading from quote data
+            tape_metrics = analyze_tape_from_quote_data(
+                symbol=stock_data.get("symbol", ""),
+                quote_data=stock_data
+            )
+            smb_unified["tape_reading"] = tape_metrics.to_dict()
+            
+            # Trade style recommendation
+            setup_type = stock_data.get("setup_type", stock_data.get("matched_setup", ""))
+            if setup_type and smb_5var:
+                trade_style_rec = get_trade_style_recommendation(
+                    smb_score=smb_5var,
+                    setup_type=setup_type,
+                    tape_metrics=tape_metrics,
+                    market_regime=market_data.get("regime", "neutral") if market_data else "neutral"
+                )
+                smb_unified["trade_style"] = trade_style_rec
+            
+            # AI coaching context (for integration with AI assistant)
+            if smb_5var and setup_type:
+                smb_unified["coaching_context"] = generate_smb_coaching_context(
+                    symbol=stock_data.get("symbol", ""),
+                    setup_type=setup_type,
+                    smb_score=smb_5var,
+                    tape_metrics=tape_metrics,
+                    trade_style_rec=smb_unified.get("trade_style")
+                )
+            
+        except ImportError:
+            smb_grade = smb_checklist["summary"]["grade"]
+            smb_is_a_plus = False
+        except Exception as e:
+            logger.warning(f"SMB unified scoring error: {e}")
+            smb_grade = smb_checklist["summary"]["grade"]
+            smb_is_a_plus = False
+        
         return {
             "symbol": stock_data.get("symbol", "UNKNOWN"),
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1507,7 +1565,8 @@ class UniversalScoringEngine:
             "primary_timeframe": primary_timeframe.value,
             "success_probability": success_prob,
             "key_levels": key_levels,
-            "smb_checklist": smb_checklist,  # NEW: SMB Trade Evaluation
+            "smb_checklist": smb_checklist,  # 11-point checklist
+            "smb_unified": smb_unified,  # NEW: Enhanced SMB scoring with tape, style, coaching
             "category_scores": {
                 "technical": technical,
                 "fundamental": fundamental,
@@ -1523,12 +1582,17 @@ class UniversalScoringEngine:
                 "squeeze_watch": risk["components"]["short_interest"]["squeeze_potential"],
                 "checklist_grade": smb_checklist["summary"]["grade"],
                 "checklist_passed": f"{checklist_passed}/11",
+                "smb_grade": smb_grade,  # NEW: SMB 5-var grade
+                "smb_is_a_plus": smb_is_a_plus,  # NEW: A+ flag
+                "tape_score": smb_unified.get("tape_reading", {}).get("tape_score", 5),  # NEW
+                "tape_bias": smb_unified.get("tape_reading", {}).get("bias", "neutral"),  # NEW
+                "trade_style": smb_unified.get("trade_style", {}).get("style", ""),  # NEW
                 # Advanced indicators summary
                 "is_trend_day": advanced_indicators["components"].get("vold_alignment", {}).get("is_trend_day", False),
                 "is_over_extended": advanced_indicators["components"].get("atr_extension", {}).get("is_over_extended", False),
                 "volume_significant": advanced_indicators["components"].get("volume_significance", {}).get("volume_status") == "SIGNIFICANT"
             },
-            "advanced_indicators": advanced_indicators,  # NEW: Full advanced indicators analysis
+            "advanced_indicators": advanced_indicators,
             "knowledge_base": {
                 "applicable_strategies": kb_strategies,
                 "kb_trade_bias": kb_trade_bias,

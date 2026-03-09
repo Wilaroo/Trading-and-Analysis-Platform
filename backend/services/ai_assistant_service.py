@@ -2778,13 +2778,18 @@ Quick coaching: Is this a valid setup? Any concerns? Action: TAKE, WAIT, or PASS
         Generate proactive coaching message for a scanner opportunity.
         Creates both an AI chat message AND returns data for toast notification.
         
-        Called by the enhanced scanner when high-priority opportunities are detected.
+        Now enhanced with SMB Capital methodology:
+        - Trade style recommendations (M2M/T2H/A+)
+        - 5-Variable scoring context
+        - Tiered entry suggestions
+        - Reasons2Sell framework
         
         alert_data should include:
         - symbol, setup_type, direction, current_price
         - trigger_price, stop_loss, target, risk_reward
         - win_rate, tape_confirmation, headline, reasoning
         - time_window, market_regime, priority
+        - smb_score (optional), tape_score (optional)
         """
         symbol = alert_data.get('symbol', 'UNKNOWN')
         setup_type = alert_data.get('setup_type', 'unknown')
@@ -2794,12 +2799,61 @@ Quick coaching: Is this a valid setup? Any concerns? Action: TAKE, WAIT, or PASS
         tape = alert_data.get('tape_confirmation', False)
         r_r = alert_data.get('risk_reward', 0)
         
+        # NEW: Get SMB-specific data
+        smb_grade = alert_data.get('smb_grade', alert_data.get('trade_grade', 'B'))
+        smb_score = alert_data.get('smb_score_total', 25)
+        tape_score = alert_data.get('tape_score', 5)
+        trade_style = alert_data.get('trade_style', '')
+        direction_bias = alert_data.get('direction_bias', 'both')
+        target_r = alert_data.get('target_r_multiple', r_r)
+        
+        # Generate SMB coaching context if available
+        smb_coaching_context = ""
+        try:
+            from services.smb_unified_scoring import get_ai_coaching_prompts
+            from services.smb_integration import get_setup_config, TradeStyle
+            
+            config = get_setup_config(setup_type)
+            if config:
+                # Get trade style-specific coaching
+                style = trade_style or config.default_style.value
+                coaching_points = get_ai_coaching_prompts(
+                    smb_score=None,  # We don't have full object, just grade
+                    trade_style=style,
+                    current_situation="entry"
+                )
+                
+                smb_coaching_context = f"""
+=== SMB METHODOLOGY CONTEXT ===
+Setup Direction Bias: {config.direction.value.upper()} (this is primarily a {config.direction.value} setup)
+Trade Style: {style.upper()} (Target: {target_r:.1f}R)
+SMB Grade: {smb_grade} | Score: {smb_score}/50
+Tape Score: {tape_score}/10 ({'confirming' if tape_score >= 6 else 'not confirming'})
+Category: {config.category.value}
+
+SMB Coaching Points:
+{chr(10).join('- ' + p for p in coaching_points) if coaching_points else '- Standard entry rules apply'}
+
+Tiered Entry Suggestion:
+- Tier 1 (30%): At current trigger level with tape confirmation
+- Tier 2 (40%): Add if setup holds and tape improves  
+- Tier 3 (30%): Full size only if A+ grade
+
+Reasons2Sell (for {style}):
+- {'Target hit, first momentum pause, or tape slows' if style == 'move_2_move' else '9 EMA break, target hit, or thesis invalidation'}
+"""
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"Could not generate SMB coaching context: {e}")
+        
         # Build a concise prompt for quick coaching response
         prompt = f"""🚨 SCANNER OPPORTUNITY DETECTED - QUICK COACHING NEEDED
 
 **{symbol}** - {setup_type.replace('_', ' ').title()} {direction.upper()}
 Priority: {priority.upper()} | Win Rate: {win_rate*100:.0f}% | R:R {r_r:.1f}:1
 Tape Confirmation: {'YES ✓' if tape else 'NO'}
+SMB Grade: {smb_grade} | Trade Style: {trade_style.upper() if trade_style else 'AUTO'}
 
 Setup Details:
 - Current: ${alert_data.get('current_price', 0):.2f}
@@ -2810,11 +2864,12 @@ Setup Details:
 - Market Regime: {alert_data.get('market_regime', 'unknown')}
 
 Reasoning: {'; '.join(alert_data.get('reasoning', [])[:3])}
-
-Based on my playbook knowledge, provide a BRIEF 2-3 sentence coaching response:
-1. Is this a valid setup for the current conditions?
-2. Any quick warnings or confirmations needed?
+{smb_coaching_context}
+Based on my playbook knowledge and SMB methodology, provide a BRIEF 2-3 sentence coaching response:
+1. Is this a valid setup for the current conditions? (Check direction bias matches trade direction)
+2. Any quick warnings or confirmations needed? (Tape score, grade, tiered entry)
 3. Suggested action: TAKE, WAIT, or PASS?
+4. If TAKE: Recommend M2M (quick scalp) or T2H (hold for full target)?
 
 Keep it punchy and actionable - trader needs to act fast!"""
 
@@ -2838,6 +2893,15 @@ Keep it punchy and actionable - trader needs to act fast!"""
             else:
                 verdict = "WAIT"
             
+            # Determine recommended style from response
+            recommended_style = ""
+            if "t2h" in coaching_lower or "trade2hold" in coaching_lower or "hold for" in coaching_lower:
+                recommended_style = "trade_2_hold"
+            elif "m2m" in coaching_lower or "move2move" in coaching_lower or "scalp" in coaching_lower:
+                recommended_style = "move_2_move"
+            elif "a+" in coaching_lower or "a plus" in coaching_lower or "full conviction" in coaching_lower:
+                recommended_style = "a_plus"
+            
             # Store the coaching message for the chat panel to pick up
             coaching_message = {
                 "type": "scanner_coaching",
@@ -2848,6 +2912,9 @@ Keep it punchy and actionable - trader needs to act fast!"""
                 "coaching": coaching_text,
                 "summary": summary,
                 "verdict": verdict,
+                "recommended_style": recommended_style,  # NEW
+                "smb_grade": smb_grade,  # NEW
+                "tape_score": tape_score,  # NEW
                 "alert_data": alert_data,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
@@ -2859,7 +2926,7 @@ Keep it punchy and actionable - trader needs to act fast!"""
             # Keep only last 20 notifications
             self._coaching_notifications = self._coaching_notifications[-20:]
             
-            logger.info(f"🧠 Scanner coaching for {symbol}: {verdict} - {summary[:50]}...")
+            logger.info(f"🧠 Scanner coaching for {symbol}: {verdict} ({recommended_style or 'auto'}) - {summary[:50]}...")
             
             return {
                 "success": True,
@@ -2868,6 +2935,8 @@ Keep it punchy and actionable - trader needs to act fast!"""
                 "coaching": coaching_text,
                 "summary": summary,
                 "verdict": verdict,
+                "recommended_style": recommended_style,
+                "smb_grade": smb_grade,
                 "timestamp": coaching_message["timestamp"]
             }
             

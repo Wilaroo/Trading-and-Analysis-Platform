@@ -335,6 +335,15 @@ Triggers AI Coaching Notification
     - **New API Endpoints**: `/api/smb/setups/summary`, `/api/smb/setup/{name}`, `/api/smb/score`, `/api/smb/earnings/score`, `/api/smb/resolve-alias/{alias}`
     - Backend: `/app/backend/services/smb_integration.py`, `/app/backend/services/earnings_scoring_service.py`, `/app/backend/routers/smb_router.py`
     - Updated: `enhanced_scanner.py` (LiveAlert with SMB fields), `ev_tracking_service.py` (integrated alias resolution)
+- ✅ **SMB Capital Integration Phase 2 (Mar 9, 2026)**: Unified scoring and advanced features
+    - **Unified Scoring Integration**: SMB 5-Variable score now integrated into existing scoring_engine.py
+    - **Enhanced Tape Reading**: Level 2 "Box" metrics with SMB signals (hidden seller/buyer, re-bid, absorption, stuffed)
+    - **Reasons2Sell Framework**: Real-time monitoring for T2H exit triggers (9 EMA break, give-back rule, thesis invalid)
+    - **Tiered Entry System**: Calculate tier 1/2/3 share allocations based on risk, trade style, and SMB grade
+    - **AI Coaching Integration**: SMB methodology context automatically injected into AI coaching prompts
+    - **New API Endpoints**: `/api/smb/reasons-to-sell/check`, `/api/smb/reasons-to-sell/list`, `/api/smb/tiered-entry/calculate`, `/api/smb/tape/analyze`
+    - **Scoring Engine Enhanced**: `quick_stats` now includes `smb_grade`, `smb_is_a_plus`, `tape_score`, `tape_bias`, `trade_style`
+    - Backend: `/app/backend/services/smb_unified_scoring.py`, updated `scoring_engine.py`, `ai_assistant_service.py`
 
 ### Data Source Clarification
 | Component | Data Source | Latency |
