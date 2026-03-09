@@ -1803,16 +1803,14 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         """
         Call the LLM with smart routing.
         
-        CLOUD-FIRST ARCHITECTURE (for reliability):
-        - Emergent/GPT-4o is PRIMARY for fast, reliable responses
-        - Ollama (local) is used as FALLBACK when cloud is unavailable
+        OLLAMA-FIRST with QUICK HEALTH CHECK:
+        - Ping Ollama (2s timeout) - if healthy, use it (FREE)
+        - If Ollama slow/down, fall back to cloud AI (Emergent/GPT-4o)
         
-        complexity:
-          - "light"    → Cloud only (quick chat)
-          - "standard" → Cloud with Ollama fallback
-          - "deep"     → Cloud for synthesis and analysis
+        This saves credits while maintaining reliability.
         """
         from datetime import datetime, timezone, timedelta
+        import httpx
         
         # Build the full message list with system prompt
         full_messages = [
@@ -1820,11 +1818,91 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         ]
         full_messages.extend(messages)
         
-        # TRY CLOUD FIRST (Emergent/GPT-4o) - fast and reliable
+        # Check if Ollama should be skipped due to recent failures
+        skip_ollama = False
+        if self._ollama_skip_until and datetime.now(timezone.utc) < self._ollama_skip_until:
+            logger.info(f"⏭️ Skipping Ollama (cooling down)")
+            skip_ollama = True
+        
+        # QUICK HEALTH CHECK: Ping Ollama first (2 second timeout)
+        ollama_healthy = False
+        if not skip_ollama and LLMProvider.OLLAMA in self.llm_clients:
+            try:
+                ollama_cfg = self.llm_clients[LLMProvider.OLLAMA]
+                ping_url = f"{ollama_cfg['url']}/api/tags"
+                
+                async with httpx.AsyncClient(timeout=httpx.Timeout(2.0, connect=1.5)) as client:
+                    ping_response = await client.get(
+                        ping_url,
+                        headers={"ngrok-skip-browser-warning": "true"}
+                    )
+                    if ping_response.status_code == 200:
+                        ollama_healthy = True
+                        logger.debug("✅ Ollama ping OK - using local AI (FREE)")
+            except Exception as e:
+                logger.debug(f"⚠️ Ollama ping failed: {e}")
+        
+        # USE OLLAMA if healthy (saves credits!)
+        if ollama_healthy:
+            try:
+                ollama_cfg = self.llm_clients[LLMProvider.OLLAMA]
+                url = f"{ollama_cfg['url']}/api/chat"
+                
+                # Reduce context for Ollama
+                truncated_context = context[:2000] if len(context) > 2000 else context
+                
+                ollama_system = """You are an expert trading assistant with REAL-TIME market data access. 
+You CAN see live stock prices, quotes, and market data - it's provided in the context below.
+Answer questions using the real-time data provided. Be concise and direct.
+
+""" + truncated_context
+                
+                ollama_messages = [{"role": "system", "content": ollama_system}]
+                ollama_messages.extend(messages[-3:] if len(messages) > 3 else messages)
+                
+                payload = {
+                    "model": ollama_cfg["model"],
+                    "messages": ollama_messages,
+                    "stream": False,
+                    "options": {"num_ctx": 2048}
+                }
+                
+                async with httpx.AsyncClient(timeout=httpx.Timeout(45.0, connect=5.0)) as client:
+                    response = await client.post(
+                        url,
+                        json=payload,
+                        headers={
+                            "Content-Type": "application/json",
+                            "ngrok-skip-browser-warning": "true"
+                        }
+                    )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    content = result.get("message", {}).get("content", "")
+                    if content:
+                        # Reset failure counter on success
+                        self._ollama_failures = 0
+                        self._ollama_last_success = datetime.now(timezone.utc)
+                        logger.info(f"✅ Ollama response OK ({len(content)} chars) - FREE")
+                        return content
+                        
+            except Exception as e:
+                self._ollama_failures += 1
+                logger.warning(f"⚠️ Ollama request failed ({self._ollama_failures}x): {e}")
+                
+                # After 3 failures, skip Ollama for 5 minutes
+                if self._ollama_failures >= 3:
+                    self._ollama_skip_until = datetime.now(timezone.utc) + timedelta(minutes=5)
+                    logger.warning(f"⏸️ Ollama disabled for 5 minutes")
+        
+        # FALLBACK: Use cloud AI (Emergent/GPT-4o) - only when Ollama unavailable
         if LLMProvider.EMERGENT in self.llm_clients:
             try:
                 from emergentintegrations.llm.chat import LlmChat, UserMessage
                 import asyncio
+                
+                logger.info("🔄 Using cloud AI (Ollama unavailable)")
                 
                 system_message = self.SYSTEM_PROMPT + "\n\n" + context
                 
@@ -1849,82 +1927,16 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                 if asyncio.iscoroutine(response):
                     response = await response
                 
-                logger.info(f"✅ Cloud AI (GPT-4o) response OK ({len(response)} chars, complexity={complexity})")
+                logger.info(f"✅ Cloud AI response OK ({len(response)} chars)")
                 return response
                 
             except Exception as e:
                 error_msg = str(e).lower()
-                logger.warning(f"⚠️ Cloud AI error: {e}")
+                logger.error(f"Cloud AI error: {e}")
                 
-                # If budget/quota issue, inform user
                 if "budget" in error_msg or "quota" in error_msg or "insufficient" in error_msg:
-                    return ("I'm having trouble connecting to the cloud AI (budget limit may be reached). "
-                           "Please check your Universal Key balance in Profile > Universal Key.")
-        
-        # FALLBACK: Try Ollama if cloud failed
-        ollama_available = LLMProvider.OLLAMA in self.llm_clients
-        
-        # Check if Ollama should be skipped due to recent failures
-        if self._ollama_skip_until and datetime.now(timezone.utc) < self._ollama_skip_until:
-            logger.info(f"⏭️ Skipping Ollama (cooling down after failures)")
-            ollama_available = False
-        
-        if ollama_available:
-            import httpx
-            
-            ollama_cfg = self.llm_clients[LLMProvider.OLLAMA]
-            url = f"{ollama_cfg['url']}/api/chat"
-            
-            # Reduce context for Ollama to prevent timeouts
-            truncated_context = context[:2000] if len(context) > 2000 else context
-            
-            ollama_system = """You are an expert trading assistant with REAL-TIME market data access. 
-You CAN see live stock prices, quotes, and market data - it's provided in the context below.
-Answer questions using the real-time data provided. Be concise and direct.
-
-""" + truncated_context
-            
-            ollama_messages = [
-                {"role": "system", "content": ollama_system}
-            ]
-            ollama_messages.extend(messages[-3:] if len(messages) > 3 else messages)
-            
-            payload = {
-                "model": ollama_cfg["model"],
-                "messages": ollama_messages,
-                "stream": False,
-                "options": {"num_ctx": 2048}
-            }
-            
-            try:
-                async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=5.0)) as client:
-                    response = await client.post(
-                        url,
-                        json=payload,
-                        headers={
-                            "Content-Type": "application/json",
-                            "ngrok-skip-browser-warning": "true"
-                        }
-                    )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    content = result.get("message", {}).get("content", "")
-                    if content:
-                        # Reset failure counter on success
-                        self._ollama_failures = 0
-                        self._ollama_last_success = datetime.now(timezone.utc)
-                        logger.info(f"✅ Ollama response OK ({len(content)} chars)")
-                        return content
-                        
-            except Exception as e:
-                self._ollama_failures += 1
-                logger.warning(f"⚠️ Ollama failed ({self._ollama_failures} consecutive failures): {e}")
-                
-                # After 3 failures, skip Ollama for 5 minutes
-                if self._ollama_failures >= 3:
-                    self._ollama_skip_until = datetime.now(timezone.utc) + timedelta(minutes=5)
-                    logger.warning(f"⏸️ Ollama disabled for 5 minutes due to repeated failures")
+                    return ("Cloud AI budget limit reached. Please check your Universal Key balance "
+                           "in Profile > Universal Key, or ensure Ollama is running locally.")
         
         # Last resort error
         return ("I apologize, but I'm having trouble connecting to AI services right now. "
