@@ -98,7 +98,8 @@ const TickerAwareText = ({ text, onTickerClick, onViewChart }) => {
     'BUY', 'SELL', 'HOLD', 'WAIT', 'MOVE', 'PLAY', 'TAKE', 'LOOK', 'ALSO', 'JUST',
     'LIKE', 'ONLY', 'VERY', 'WELL', 'EVEN', 'GOOD', 'BEST', 'LAST', 'NEXT', 'SOME',
     // Commonly confused with tickers in trading context
-    'TARGET', 'TGT' // Don't auto-link "target" the word - only $TGT or "Target Corp"
+    'TARGET', 'TGT', // Don't auto-link "target" the word - only $TGT or "Target Corp"
+    'AI', 'Ai' // Don't auto-link AI (artificial intelligence) - only $AI for C3.ai
   ]);
   
   // Map company names to ticker symbols - only proper company name references
