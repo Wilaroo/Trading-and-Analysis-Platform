@@ -1075,6 +1075,119 @@ DECISION: {score_result['trade_or_skip']}
         
         return sorted_suggestions[:6]
     
+
+    async def _get_alert_reasoning_context(self, user_message: str) -> Optional[str]:
+        """
+        If user is asking about an alert's reasoning, fetch the full alert data
+        and return it as context for the AI to explain.
+        """
+        msg_lower = user_message.lower()
+        
+        # Detect reasoning/explanation questions
+        reasoning_patterns = [
+            "explain", "reasoning", "why", "how come", "what made you",
+            "why did", "tell me about", "walk me through", "break down",
+            "what's the thesis", "what's your thesis", "logic behind"
+        ]
+        
+        if not any(p in msg_lower for p in reasoning_patterns):
+            return None
+        
+        # Extract symbol from message
+        import re
+        symbols = re.findall(r'\$?([A-Z]{2,5})\b', user_message.upper())
+        
+        # Filter out common words
+        excluded = {'THE', 'AND', 'FOR', 'WHY', 'HOW', 'THIS', 'THAT', 'YOUR', 'TRADE', 'ALERT', 'TAKING'}
+        symbols = [s for s in symbols if s not in excluded]
+        
+        if not symbols:
+            logger.debug("No symbols found in reasoning question")
+            return None
+        
+        target_symbol = symbols[0]
+        logger.info(f"🔍 Looking for alert reasoning for {target_symbol}")
+        
+        try:
+            # Get the alert for this symbol via API (ensures we get the actual running scanner data)
+            import httpx
+            async with httpx.AsyncClient() as client:
+                response = await client.get("http://localhost:8001/api/live-scanner/alerts", timeout=5.0)
+                if response.status_code != 200:
+                    logger.warning(f"Failed to get alerts: {response.status_code}")
+                    return None
+                    
+                data = response.json()
+                alerts_data = data.get("alerts", [])
+                logger.info(f"📋 Found {len(alerts_data)} live alerts via API")
+            
+            # Find alert for this symbol
+            alert = None
+            for a in alerts_data:
+                if a.get("symbol") == target_symbol:
+                    alert = a
+                    break
+            
+            if not alert:
+                logger.info(f"❌ No alert found for {target_symbol}")
+                return None
+            
+            logger.info(f"✅ Found alert for {target_symbol}: {alert.get('setup_type')}")
+            
+            # Build detailed context from alert data (dict format from API)
+            context_lines = [
+                f"**📊 SCANNER ALERT DETAILS FOR {alert.get('symbol')}:**",
+                f"",
+                f"**Setup Type:** {alert.get('setup_type')} ({alert.get('strategy_name', 'N/A')})",
+                f"**Direction:** {alert.get('direction', 'long').upper()}",
+                f"**Priority:** {alert.get('priority', 'medium').upper()}",
+                f"",
+                f"**Price Levels:**",
+                f"- Current Price: ${alert.get('current_price', 0):.2f}",
+                f"- Entry/Trigger: ${alert.get('trigger_price', 0):.2f}",
+                f"- Stop Loss: ${alert.get('stop_loss', 0):.2f}",
+                f"- Target: ${alert.get('target', 0):.2f}",
+                f"- Risk/Reward: {alert.get('risk_reward', 0):.1f}:1",
+                f"",
+                f"**Probabilities:**",
+                f"- Trigger Probability: {alert.get('trigger_probability', 0):.0%}",
+                f"- Win Probability: {alert.get('win_probability', 0):.0%}",
+                f"- Strategy Historical Win Rate: {alert.get('strategy_win_rate', 0):.0%}",
+                f"",
+                f"**🎯 REASONING (Why this alert was generated):**"
+            ]
+            
+            # Add each reasoning point
+            reasoning = alert.get("reasoning", [])
+            if reasoning:
+                for reason in reasoning:
+                    context_lines.append(f"- {reason}")
+            else:
+                context_lines.append("- No specific reasoning provided")
+            
+            context_lines.extend([
+                f"",
+                f"**Market Context:**",
+                f"- Time Window: {alert.get('time_window', 'N/A')}",
+                f"- Market Regime: {alert.get('market_regime', 'N/A')}",
+                f"- Volatility: {alert.get('volatility_regime', 'N/A')}",
+                f"- Tape Confirmation: {'Yes' if alert.get('tape_confirmation') else 'No'}",
+                f"- Tape Score: {alert.get('tape_score', 0):.2f}",
+                f"",
+                f"**IMPORTANT: Use this SPECIFIC data to explain the reasoning for the {alert.get('symbol')} trade alert.**",
+                f"Reference the actual reasoning points above. Do NOT give generic advice."
+            ])
+            
+            result = "\n".join(context_lines)
+            logger.info(f"📝 Built alert reasoning context ({len(result)} chars)")
+            return result
+            
+        except Exception as e:
+            logger.warning(f"Error getting alert reasoning context: {e}")
+            import traceback
+            logger.warning(traceback.format_exc())
+            return None
+
     async def _build_context(self, user_message: str, session_id: str) -> str:
         """Build context string with relevant knowledge and data"""
         # Try smart context engine first if enabled (proof of concept)
@@ -2037,6 +2150,12 @@ Answer questions using the real-time data provided. Be concise and direct.
         
         # Build context with relevant knowledge
         context = await self._build_context(user_message, session_id)
+        
+        # ===== ALERT REASONING INJECTION =====
+        # If user is asking about a specific alert/trade reasoning, inject the alert data
+        alert_reasoning_context = await self._get_alert_reasoning_context(user_message)
+        if alert_reasoning_context:
+            context = f"{alert_reasoning_context}\n\n{context}"
         
         # Add research results to context if available
         if research_context:
