@@ -2070,3 +2070,51 @@ Automatic generation of Daily Report Cards (DRCs) and Playbooks at market close 
 5. **Edit Capability**: All AI-generated content is editable
 
 **Status**: ✅ COMPLETE - Tested (25/25 backend tests passed)
+
+---
+
+## Bug Fix: Bot Autonomous Mode Not Auto-Executing (March 2026)
+
+### Issue
+When the trading bot was set to "autonomous" mode, it was still showing trade ideas as recommendations instead of auto-executing them.
+
+### Root Cause
+Two separate flags controlled auto-execution:
+1. **Bot Mode** (`autonomous`/`confirmation`/`paused`) - Controls bot's internal behavior
+2. **Scanner Auto-Execute** (`_auto_execute_enabled`) - Controls whether scanner pushes alerts to bot
+
+These were independent - setting bot to "autonomous" didn't enable scanner auto-execute.
+
+### Fix Applied
+Modified `/app/backend/routers/trading_bot.py`:
+- `POST /mode/{mode}` - Now syncs scanner auto-execute with bot mode
+- `POST /start` - Syncs scanner auto-execute on bot start
+- `POST /config` - Syncs scanner auto-execute on config update
+
+When bot mode is `autonomous`:
+- Scanner auto-execute enabled (min_win_rate=55%, min_priority=HIGH)
+
+When bot mode is `confirmation` or `paused`:
+- Scanner auto-execute disabled
+
+**Status**: ✅ FIXED
+
+---
+
+## Future Enhancement: Weekly Performance Summary (Saved)
+
+### Concept
+Auto-generate a Weekly Performance Summary every Friday at market close that aggregates:
+- All DRCs from the week
+- Win rate and P&L totals
+- Best performing playbooks
+- Areas for improvement
+- Comparison with previous weeks
+
+### Implementation Notes (for future)
+- Add new endpoint: `/api/journal/weekly-summary`
+- Schedule generation: Friday 4:30 PM ET
+- Include: win/loss ratio, average R, best/worst trades, playbook performance
+- Could use AI to generate narrative insights
+
+**Status**: 📋 SAVED FOR FUTURE
