@@ -1875,3 +1875,36 @@ Projected Trade (TSLA-like):
 ```
 
 **Status**: ✅ COMPLETE
+
+
+
+---
+
+## UI/UX Improvements (March 2026)
+
+### Completed Fixes
+
+| Issue | Fix | File |
+|-------|-----|------|
+| **Startup Modal Too Large** | Reduced to max-w-xl (576px), 2-column status grid, compact header/footer | `StartupModal.jsx` |
+| **Chat Alert Cards Too Large** | Compact layout with inline price row, smaller padding (p-2.5) | `AICommandPanel.jsx` |
+| **Missing Entry/Target/Stop Prices** | Fixed field mapping - backend sends `trigger_price/stop_loss/target`, frontend now handles both direct and nested `alert_data` formats | `AICommandPanel.jsx` |
+| **Main Panels Too Small** | Changed from 8/4 to 9/3 column split, increased min-height to 900px | `AICoachTab.jsx` |
+
+### Price Field Mapping Fix (BUG FIX)
+
+**Problem**: Alert prices (Entry, Target, Stop) displayed as `$--` because:
+1. Backend sends: `trigger_price`, `stop_loss`, `target`
+2. Frontend expected: `entry`, `target`, `stop`
+3. Coaching notifications nest data under `alert_data` object
+
+**Solution** (AICommandPanel.jsx lines 237-246):
+```javascript
+const alertData = alert.alert_data || {};
+const entryPrice = alert.entry || alert.trigger_price || alertData.trigger_price || alert.current_price || alertData.current_price;
+const targetPrice = alert.target || alertData.target;
+const stopPrice = alert.stop || alert.stop_loss || alertData.stop_loss;
+const riskReward = alert.risk_reward || alertData.risk_reward;
+```
+
+**Status**: ✅ COMPLETE - Verified via testing agent (iteration_50.json)
