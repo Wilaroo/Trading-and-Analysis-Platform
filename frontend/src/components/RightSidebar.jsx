@@ -686,11 +686,14 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
               // SMB Integration: Get tape score indicator
               const getTapeIndicator = (score) => {
                 if (!score && score !== 0) return null;
-                const color = score >= 7 ? 'text-emerald-400' : score >= 5 ? 'text-yellow-400' : 'text-red-400';
-                const label = score >= 7 ? 'STRONG' : score >= 5 ? 'OK' : 'WEAK';
+                // Format to 1 decimal place
+                const formattedScore = typeof score === 'number' ? score.toFixed(1) : score;
+                const numScore = parseFloat(score);
+                const color = numScore >= 7 ? 'text-emerald-400' : numScore >= 5 ? 'text-yellow-400' : 'text-red-400';
+                const label = numScore >= 7 ? 'STRONG' : numScore >= 5 ? 'OK' : 'WEAK';
                 return (
-                  <span className={`text-[8px] ${color}`} title={`Tape Score: ${score}/10`}>
-                    T:{score}
+                  <span className={`text-[8px] ${color}`} title={`Tape Score: ${formattedScore}/10`}>
+                    T:{formattedScore}
                   </span>
                 );
               };

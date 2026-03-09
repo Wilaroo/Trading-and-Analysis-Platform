@@ -1908,3 +1908,31 @@ const riskReward = alert.risk_reward || alertData.risk_reward;
 ```
 
 **Status**: ✅ COMPLETE - Verified via testing agent (iteration_50.json)
+
+
+---
+
+## Additional UI Fixes (March 2026 - Follow-up)
+
+### Panel Sizing Adjustments
+
+| Change | Before | After | File |
+|--------|--------|-------|------|
+| Chat area maxHeight | 70% | 55% | `AICommandPanel.jsx` |
+| Chat area minHeight | 400px | 280px | `AICommandPanel.jsx` |
+| Chart minHeight | 350px | 400px | `AICommandPanel.jsx` |
+
+**Result**: Portfolio Insights, My Portfolio, and Stock Charts panels now have more visible space without being cut off.
+
+### Tape Score Formatting
+
+**Problem**: Tape scores displayed with excessive decimal places (e.g., `-0.11428571428571428`)
+
+**Solution** (RightSidebar.jsx line 690):
+```javascript
+const formattedScore = typeof score === 'number' ? score.toFixed(1) : score;
+```
+
+**Result**: Tape scores now display as `-0.1`, `0.3`, etc.
+
+**Status**: ✅ COMPLETE

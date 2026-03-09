@@ -2606,8 +2606,8 @@ const AICommandPanel = ({
 
       {/* Main Content - New Layout: Chat on top, Pipeline + Chart below */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* TOP: AI Chat - Full width, expanded height */}
-        <div className="flex flex-col border-b border-white/5" style={{ maxHeight: '70%', minHeight: '400px' }}>
+        {/* TOP: AI Chat - Reduced height to give more room to bottom panels */}
+        <div className="flex flex-col border-b border-white/5" style={{ maxHeight: '55%', minHeight: '280px' }}>
           {/* Chat Header with Clear Button */}
           {messages.length > 0 && (
             <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-black/20 shrink-0">
@@ -2803,7 +2803,7 @@ const AICommandPanel = ({
                 ))}
               </div>
             </div>
-            <div className="flex-1 min-h-[350px]">
+            <div className="flex-1 min-h-[400px]">
               <TradingViewWidget symbol={chartSymbol || 'SPY'} />
             </div>
           </div>
