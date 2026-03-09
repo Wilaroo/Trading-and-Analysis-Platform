@@ -22,7 +22,8 @@ import {
   Sun,
   Moon,
   LineChart,
-  FlaskConical
+  FlaskConical,
+  MessageSquare
 } from 'lucide-react';
 import MarketIntelPanel from './MarketIntelPanel';
 import QuickActionsMenu from './QuickActionsMenu';
@@ -698,6 +699,21 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
                         currentPrice={alert.current_price}
                         variant="compact"
                       />
+                      {/* Explain Alert button */}
+                      <button
+                        onClick={(e) => { 
+                          e.stopPropagation(); 
+                          // Dispatch custom event for AI to explain this alert
+                          window.dispatchEvent(new CustomEvent('explainAlert', { 
+                            detail: { symbol: alert.symbol, alert } 
+                          }));
+                        }}
+                        className="p-0.5 opacity-0 group-hover:opacity-100 hover:bg-purple-500/20 rounded transition-all"
+                        title="Ask AI to explain this alert"
+                        data-testid={`explain-alert-${alert.symbol}`}
+                      >
+                        <MessageSquare className="w-3 h-3 text-zinc-500 hover:text-purple-400" />
+                      </button>
                       {/* Chart button */}
                       <button
                         onClick={(e) => { e.stopPropagation(); onViewChart?.(alert.symbol); }}

@@ -2388,6 +2388,21 @@ const AICommandPanel = ({
     // No polling intervals - WebSocket handles real-time updates
   }, []); // Only on mount
 
+  // Listen for "Explain Alert" button clicks from RightSidebar
+  useEffect(() => {
+    const handleExplainAlert = (event) => {
+      const { symbol, alert } = event.detail;
+      if (symbol) {
+        // Craft a natural question about the alert
+        const question = `Explain the reasoning for the ${symbol} alert. Why was this setup identified?`;
+        sendMessage(question);
+      }
+    };
+
+    window.addEventListener('explainAlert', handleExplainAlert);
+    return () => window.removeEventListener('explainAlert', handleExplainAlert);
+  }, [sendMessage]);
+
   const quickActions = [
     { label: 'My Trades', action: () => sendMessage('Show my open trades'), icon: Target },
     { label: 'Performance', action: () => sendMessage('Analyze my trading performance today.'), icon: TrendingUp },
