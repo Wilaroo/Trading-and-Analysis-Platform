@@ -359,41 +359,58 @@ class EVTrackingService:
     2. Track trade ideas through SMB workflow states
     3. Gate trades based on historical EV
     4. Recommend position sizing based on edge quality
+    
+    Now integrated with smb_integration.py for:
+    - Setup name resolution (aliases)
+    - Trade style classification (M2M/T2H/A+)
+    - Direction bias (long/short/both)
+    - 5-Variable scoring
     """
     
-    # SMB's 20 core setups
-    SMB_SETUPS = [
-        "changing_fundamentals",
-        "breakout",
-        "big_dawg",
-        "technical_analysis",
-        "opening_drive",
-        "ipo_trade",
-        "second_day",
-        "elite_101",
-        "return_pullback",
-        "scalp",
-        "stuffed",
-        "multiple_timeframe_support",
-        "dr_s",
-        "market_play",
-        "breaking_news",
-        "bounce",
-        "gap_and_go",
-        "low_float",
-        "stock_filters",
-        "vwap_shark",
-        # Our additional setups
-        "rubber_band",
-        "vwap_bounce",
-        "vwap_fade",
-        "orb",
-        "hitchhiker",
-        "spencer_scalp",
-        "fashionably_late",
-        "second_chance",
-        "hod_breakout",
+    # Import setup registry from SMB integration module
+    # This provides canonical setup names with alias resolution
+    @staticmethod
+    def _get_all_setups() -> list:
+        """Get all setups from the SMB integration registry"""
+        try:
+            from services.smb_integration import SETUP_REGISTRY, SMB_SETUP_ALIASES
+            # Return all canonical names plus aliases for backwards compatibility
+            all_setups = list(SETUP_REGISTRY.keys())
+            return all_setups
+        except ImportError:
+            # Fallback to hardcoded list if import fails
+            return EVTrackingService._FALLBACK_SETUPS
+    
+    # Fallback setups if smb_integration not available
+    _FALLBACK_SETUPS = [
+        # Opening
+        "first_vwap_pullback", "first_move_up", "first_move_down", "bella_fade",
+        "back_through_open", "up_through_open", "opening_drive",
+        # Morning momentum
+        "orb", "hitchhiker", "gap_give_go", "gap_pick_roll",
+        # Core session
+        "spencer_scalp", "second_chance", "backside", "off_sides", "fashionably_late",
+        # Mean reversion
+        "rubber_band", "rubber_band_long", "rubber_band_short",
+        "vwap_bounce", "vwap_fade", "tidal_wave", "mean_reversion",
+        # Consolidation
+        "big_dog", "puppy_dog", "9_ema_scalp", "abc_scalp", "squeeze",
+        # Afternoon
+        "hod_breakout", "lod_breakdown", "time_of_day_fade",
+        # Special
+        "breaking_news", "volume_capitulation", "range_break", 
+        "breakout", "breakdown", "relative_strength", "relative_weakness",
+        "gap_fade", "chart_pattern",
     ]
+    
+    @staticmethod
+    def resolve_setup_name(name: str) -> str:
+        """Resolve alias to canonical setup name"""
+        try:
+            from services.smb_integration import resolve_setup_name
+            return resolve_setup_name(name)
+        except ImportError:
+            return name.lower()
     
     def __init__(self, db=None):
         self.db = db
@@ -415,8 +432,9 @@ class EVTrackingService:
         logger.info("📊 EV Tracking Service initialized with SMB workflow")
     
     def _init_ev_records(self):
-        """Initialize EV records for all SMB setups"""
-        for setup in self.SMB_SETUPS:
+        """Initialize EV records for all setups from SMB registry"""
+        all_setups = self._get_all_setups()
+        for setup in all_setups:
             if setup not in self._ev_records:
                 self._ev_records[setup] = EVTrackingRecord(setup_type=setup)
     

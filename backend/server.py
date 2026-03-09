@@ -60,6 +60,7 @@ from routers.patterns import router as patterns_router
 from routers.sentiment import router as sentiment_router
 from routers.simulator import router as simulator_router
 from routers.ev_tracking import router as ev_tracking_router
+from routers.smb_router import router as smb_router
 from services.market_intel_service import get_market_intel_service
 from services.ib_service import get_ib_service
 from services.news_service import init_news_service
@@ -226,6 +227,7 @@ app.include_router(patterns_router)
 app.include_router(sentiment_router)
 app.include_router(simulator_router)
 app.include_router(ev_tracking_router)
+app.include_router(smb_router)
 
 # Collections
 strategies_col = db["strategies"]

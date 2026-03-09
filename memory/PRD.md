@@ -325,6 +325,16 @@ Triggers AI Coaching Notification
       - Settings panel with collapsible configuration
       - 'SIM' badge on simulated alerts in feed
       - Frontend: `/app/frontend/src/components/SimulatorControl.jsx`, integrated into `RightSidebar.jsx`
+- ✅ **SMB Capital Integration Phase 1 (Mar 9, 2026)**: Deep integration of SMB trading methodology
+    - **Trade Style Classification**: Added M2M (Move2Move), T2H (Trade2Hold), A+ execution styles with targets
+    - **SMB 5-Variable Scoring**: Big Picture, Intraday Fundamental, Technical Level, Tape Reading, Intuition
+    - **Setup Direction Classification**: All 40 setups categorized as Long/Short/Both
+    - **Setup Categories**: trend_momentum, catalyst_driven, reversal, consolidation, specialized
+    - **Earnings Catalyst Scoring**: Full -10 to +10 scoring system with trading approach mapping
+    - **SMB Alias Mapping**: SMB original names (bounce, stuffed, big_dawg) map to our implementation names
+    - **New API Endpoints**: `/api/smb/setups/summary`, `/api/smb/setup/{name}`, `/api/smb/score`, `/api/smb/earnings/score`, `/api/smb/resolve-alias/{alias}`
+    - Backend: `/app/backend/services/smb_integration.py`, `/app/backend/services/earnings_scoring_service.py`, `/app/backend/routers/smb_router.py`
+    - Updated: `enhanced_scanner.py` (LiveAlert with SMB fields), `ev_tracking_service.py` (integrated alias resolution)
 
 ### Data Source Clarification
 | Component | Data Source | Latency |
