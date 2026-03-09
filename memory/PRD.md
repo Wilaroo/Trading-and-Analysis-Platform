@@ -1936,3 +1936,66 @@ const formattedScore = typeof score === 'number' ? score.toFixed(1) : score;
 **Result**: Tape scores now display as `-0.1`, `0.3`, etc.
 
 **Status**: ✅ COMPLETE
+
+
+---
+
+## SMB Playbook, DRC & Game Plan System (March 2026)
+
+### Implementation Complete
+
+Based on Mike Bellafiore's "The Playbook" methodology and SMB Capital's trading practices, implemented a comprehensive trading journal system with 3 new components:
+
+#### **1. Playbook System** (`/app/backend/services/playbook_service.py`)
+- Document repeatable trade setups with IF/THEN rules
+- 30+ setup types from SMB registry
+- Market context categories (High/Low Strength/Weakness)
+- Catalyst types (Fresh Planned, Breaking News, Technical)
+- Trade styles (M2M, T2H, A+, Scalp, Swing)
+- Process-based grading (not P&L outcome)
+- Performance tracking per playbook
+
+#### **2. Daily Report Card (DRC)** (`/app/backend/services/drc_service.py`)
+- Overall day grade (A+ to F)
+- Pre-market checklist (customizable, 8 default items)
+- Intraday performance tracker (3 segments: 7:30-11, 11-2, 2-4:30)
+- Trades summary (auto-populated from day's activity)
+- Reflections section ("Easiest $3K trade", lessons learned)
+- Auto-generation from trading data
+
+#### **3. Game Plan System** (`/app/backend/services/gameplan_service.py`)
+- Big picture market commentary
+- Stocks in play (max 5) with IF/THEN statements
+- Day 2 names (continuation candidates)
+- Risk management parameters (daily stop, per-trade risk)
+- Session goals and what to avoid
+- Auto-generation from scanner alerts
+
+### API Endpoints (`/app/backend/routers/journal_router.py`)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/journal/playbooks` | GET/POST | List/Create playbooks |
+| `/api/journal/playbooks/{id}` | GET/PUT/DELETE | CRUD operations |
+| `/api/journal/playbooks/{id}/trades` | POST | Log trade against playbook |
+| `/api/journal/drc/today` | GET | Get/Create today's DRC |
+| `/api/journal/drc/date/{date}` | GET/PUT | Get/Update DRC by date |
+| `/api/journal/gameplan/today` | GET | Get/Create today's game plan |
+| `/api/journal/gameplan/date/{date}/stocks` | POST | Add stock to game plan |
+| `/api/journal/overview` | GET | Get journal overview stats |
+
+### Frontend Components
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `PlaybookTab.jsx` | `/app/frontend/src/components/Journal/` | Create/manage playbooks |
+| `DRCTab.jsx` | `/app/frontend/src/components/Journal/` | Daily report card interface |
+| `GamePlanTab.jsx` | `/app/frontend/src/components/Journal/` | Daily game plan interface |
+
+### Integration with AI Assistant
+The AI assistant now has access to:
+- User's playbooks for personalized coaching
+- DRC data for performance analysis
+- Game plan data for trade suggestions
+
+**Status**: ✅ COMPLETE - Backend services working, frontend tabs integrated into Trade Journal page
