@@ -8,6 +8,9 @@ Features:
 - Tape reading confirmation signals (bid/ask spread, momentum, order flow)
 - Strategy win-rate tracking per setup type
 - Auto-execution wiring to Trading Bot for high-priority alerts
+- SMB 5-Variable Scoring integration
+- Trade Style classification (M2M/T2H/A+)
+- Direction bias (Long/Short/Both) per setup
 """
 
 import asyncio
@@ -17,6 +20,20 @@ from typing import Dict, List, Optional, Set, Any, Tuple
 from dataclasses import dataclass, asdict, field
 from enum import Enum
 from collections import defaultdict
+
+# SMB Integration imports
+try:
+    from services.smb_integration import (
+        TradeStyle, SetupDirection, SetupCategory,
+        SETUP_REGISTRY, SMB_SETUP_ALIASES,
+        get_setup_config, resolve_setup_name, get_default_trade_style,
+        get_setup_direction, get_directional_setup_name,
+        SMBVariableScore, calculate_smb_score,
+        TRADE_STYLE_TARGETS, get_style_targets
+    )
+    SMB_INTEGRATION_AVAILABLE = True
+except ImportError:
+    SMB_INTEGRATION_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -350,6 +367,28 @@ class LiveAlert:
     # Auto-execution
     auto_execute_eligible: bool = False
     
+    # NEW: SMB Integration fields
+    trade_style: str = "move_2_move"     # "move_2_move", "trade_2_hold", "a_plus"
+    setup_category: str = "consolidation" # "trend_momentum", "catalyst_driven", "reversal", "consolidation", "specialized"
+    direction_bias: str = "both"         # "long", "short", "both" - primary setup direction
+    
+    # SMB 5-Variable Score
+    smb_score_total: int = 25            # 0-50 total score
+    smb_big_picture: int = 5             # 1-10
+    smb_fundamental: int = 5             # 1-10
+    smb_technical: int = 5               # 1-10
+    smb_tape: int = 5                    # 1-10
+    smb_intuition: int = 5               # 1-10
+    smb_is_a_plus: bool = False          # True if qualifies as A+ setup
+    
+    # Trade style targets
+    target_r_multiple: float = 2.0       # Target R based on trade style
+    exit_rule: str = ""                  # How to manage/exit based on style
+    
+    # Earnings catalyst score (if applicable)
+    earnings_score: int = 0              # -10 to +10
+    trading_approach: str = ""           # "max_conviction", "aggressive", "directional", "limited", "avoid"
+    
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     expires_at: Optional[str] = None
     acknowledged: bool = False
@@ -435,6 +474,61 @@ class LiveAlert:
         
         self.grade_reasoning = reasons
         return self.trade_grade
+    
+    def populate_smb_fields(self, context: Dict = None):
+        """
+        Populate SMB integration fields based on setup configuration.
+        Called when creating or updating alerts.
+        """
+        if not SMB_INTEGRATION_AVAILABLE:
+            return
+        
+        try:
+            # Get setup configuration
+            config = get_setup_config(self.setup_type)
+            if config:
+                # Trade style and category
+                self.trade_style = config.default_style.value
+                self.setup_category = config.category.value
+                self.direction_bias = config.direction.value
+                
+                # Get style-specific targets
+                style_targets = get_style_targets(config.default_style)
+                self.target_r_multiple = style_targets.get("target_r", 2.0)
+                self.exit_rule = style_targets.get("exit_rule", "")
+                
+                # Override with context if available
+                if context:
+                    # Potentially upgrade to T2H or A+ based on context
+                    recommended_style = get_default_trade_style(self.setup_type, context)
+                    if recommended_style != config.default_style:
+                        self.trade_style = recommended_style.value
+                        style_targets = get_style_targets(recommended_style)
+                        self.target_r_multiple = style_targets.get("target_r", 2.0)
+                        self.exit_rule = style_targets.get("exit_rule", "")
+                    
+                    # SMB 5-Variable scoring
+                    smb_score = context.get("smb_score")
+                    if smb_score and isinstance(smb_score, SMBVariableScore):
+                        self.smb_score_total = smb_score.total_score
+                        self.smb_big_picture = smb_score.big_picture
+                        self.smb_fundamental = smb_score.intraday_fundamental
+                        self.smb_technical = smb_score.technical_level
+                        self.smb_tape = smb_score.tape_reading
+                        self.smb_intuition = smb_score.intuition
+                        self.smb_is_a_plus = smb_score.is_a_plus
+                        
+                        if smb_score.is_a_plus:
+                            self.trade_style = "a_plus"
+                            self.target_r_multiple = 5.0
+                    
+                    # Earnings score if available
+                    if "earnings_score" in context:
+                        self.earnings_score = context["earnings_score"]
+                        self.trading_approach = context.get("trading_approach", "")
+                        
+        except Exception as e:
+            logger.warning(f"Error populating SMB fields for {self.setup_type}: {e}")
     
     def to_dict(self) -> Dict:
         result = asdict(self)
