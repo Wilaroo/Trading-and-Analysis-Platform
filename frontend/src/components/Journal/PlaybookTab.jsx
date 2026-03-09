@@ -3,15 +3,17 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   BookOpen, Plus, X, Save, Edit3, Trash2, ChevronDown, ChevronRight,
   Target, TrendingUp, TrendingDown, AlertCircle, Check, Star,
-  Zap, Activity, BarChart3, Clock, DollarSign, Percent, Award
+  Zap, Activity, BarChart3, Clock, DollarSign, Percent, Award, Upload
 } from 'lucide-react';
 import api from '../../utils/api';
+import TraderSyncImport from './TraderSyncImport';
 
 // SMB Playbook Component
 const PlaybookTab = ({ onSelectPlaybook }) => {
   const [playbooks, setPlaybooks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [selectedPlaybook, setSelectedPlaybook] = useState(null);
   const [summary, setSummary] = useState(null);
   const [expandedPlaybook, setExpandedPlaybook] = useState(null);
@@ -157,15 +159,40 @@ const PlaybookTab = ({ onSelectPlaybook }) => {
           </h2>
           <p className="text-xs text-zinc-500">Document repeatable trade setups with IF/THEN rules</p>
         </div>
-        <button
-          onClick={() => setShowCreateForm(true)}
-          className="px-3 py-1.5 rounded-lg bg-cyan-500 text-black text-sm font-medium hover:bg-cyan-400 transition-colors flex items-center gap-1"
-          data-testid="create-playbook-btn"
-        >
-          <Plus className="w-4 h-4" />
-          New Playbook
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowImport(!showImport)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${
+              showImport ? 'bg-purple-500 text-white' : 'bg-purple-500/20 text-purple-400 hover:bg-purple-500/30'
+            }`}
+          >
+            <Upload className="w-4 h-4" />
+            Import
+          </button>
+          <button
+            onClick={() => setShowCreateForm(true)}
+            className="px-3 py-1.5 rounded-lg bg-cyan-500 text-black text-sm font-medium hover:bg-cyan-400 transition-colors flex items-center gap-1"
+            data-testid="create-playbook-btn"
+          >
+            <Plus className="w-4 h-4" />
+            New Playbook
+          </button>
+        </div>
       </div>
+
+      {/* TraderSync Import Panel */}
+      <AnimatePresence>
+        {showImport && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <TraderSyncImport onImportComplete={() => loadPlaybooks()} />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Summary Stats */}
       {summary && (

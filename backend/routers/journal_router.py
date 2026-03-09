@@ -474,3 +474,185 @@ async def get_journal_overview():
             "process_grades": playbook_summary.get("process_grades", [])
         }
     }
+
+
+# ==================== TRADERSYNC IMPORT ENDPOINTS ====================
+
+_tradersync_service = None
+_ai_journal_service = None
+
+def get_import_services():
+    global _tradersync_service, _ai_journal_service
+    
+    if _tradersync_service is None:
+        from pymongo import MongoClient
+        mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+        db_name = os.environ.get("DB_NAME", "trading_app")
+        client = MongoClient(mongo_url)
+        db = client[db_name]
+        
+        from services.tradersync_import_service import TraderSyncImportService
+        from services.ai_journal_generation_service import AIJournalGenerationService
+        
+        _tradersync_service = TraderSyncImportService(db)
+        _ai_journal_service = AIJournalGenerationService(db)
+    
+    return _tradersync_service, _ai_journal_service
+
+
+class TraderSyncImportRequest(BaseModel):
+    csv_content: str
+    batch_name: str = None
+
+
+@router.post("/tradersync/import")
+async def import_tradersync_csv(request: TraderSyncImportRequest):
+    """Import trades from TraderSync CSV content"""
+    tradersync_svc, _ = get_import_services()
+    try:
+        result = await tradersync_svc.import_csv(request.csv_content, request.batch_name)
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/tradersync/batches")
+async def get_import_batches(limit: int = 20):
+    """Get list of import batches"""
+    tradersync_svc, _ = get_import_services()
+    batches = await tradersync_svc.get_import_batches(limit=limit)
+    return {"success": True, "batches": batches}
+
+
+@router.get("/tradersync/trades")
+async def get_imported_trades(
+    batch_id: str = None,
+    symbol: str = None,
+    setup_type: str = None,
+    min_pnl: float = None,
+    min_r_multiple: float = None,
+    limit: int = 100
+):
+    """Get imported trades with filters"""
+    tradersync_svc, _ = get_import_services()
+    trades = await tradersync_svc.get_imported_trades(
+        batch_id=batch_id,
+        symbol=symbol,
+        setup_type=setup_type,
+        min_pnl=min_pnl,
+        min_r_multiple=min_r_multiple,
+        limit=limit
+    )
+    return {"success": True, "trades": trades, "count": len(trades)}
+
+
+@router.get("/tradersync/playbook-candidates")
+async def get_playbook_candidates(min_r_multiple: float = 1.5, min_trades_per_setup: int = 2):
+    """Get trades grouped by setup type that are candidates for playbooks"""
+    tradersync_svc, _ = get_import_services()
+    result = await tradersync_svc.get_trades_for_playbook_generation(
+        min_r_multiple=min_r_multiple,
+        min_trades_per_setup=min_trades_per_setup
+    )
+    return {"success": True, **result}
+
+
+@router.delete("/tradersync/batch/{batch_id}")
+async def delete_import_batch(batch_id: str):
+    """Delete an import batch"""
+    tradersync_svc, _ = get_import_services()
+    result = await tradersync_svc.delete_import_batch(batch_id)
+    return {"success": True, **result}
+
+
+# ==================== AI GENERATION ENDPOINTS ====================
+
+class AIPlaybookGenerateRequest(BaseModel):
+    trades: List[dict] = []
+    setup_type: str = None
+
+
+@router.post("/ai/generate-playbook")
+async def generate_playbook_from_trades(request: AIPlaybookGenerateRequest):
+    """AI-assisted: Generate a playbook from a list of trades"""
+    _, ai_svc = get_import_services()
+    try:
+        playbook = await ai_svc.generate_playbook_from_trades(request.trades, request.setup_type)
+        return {"success": True, "playbook": playbook}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/ai/generate-playbooks-from-tradersync")
+async def generate_playbooks_from_tradersync(min_trades: int = 2, min_pnl: float = 0):
+    """AI-assisted: Generate playbooks for all setup types from TraderSync imports"""
+    _, ai_svc = get_import_services()
+    try:
+        result = await ai_svc.generate_multiple_playbooks_from_tradersync(
+            min_trades=min_trades,
+            min_pnl=min_pnl
+        )
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/ai/generate-drc/{date}")
+async def generate_drc_content(date: str):
+    """AI-assisted: Auto-generate DRC content for a date"""
+    _, ai_svc = get_import_services()
+    try:
+        drc_content = await ai_svc.generate_drc_content(date)
+        return {"success": True, "drc": drc_content}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/ai/auto-populate-drc")
+async def auto_populate_drc(date: str = None):
+    """Auto-populate today's DRC with AI-generated content"""
+    _, ai_svc = get_import_services()
+    _, drc_svc, _ = get_services()
+    
+    if date is None:
+        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    try:
+        # Generate AI content
+        ai_content = await ai_svc.generate_drc_content(date)
+        
+        # Get or create DRC
+        drc = await drc_svc.get_drc(date)
+        if not drc:
+            drc = await drc_svc.create_drc(date=date, auto_populate=False)
+        
+        # Update with AI content
+        updates = {
+            "overall_grade": ai_content.get("overall_grade", drc.get("overall_grade", "")),
+            "day_pnl": ai_content.get("day_pnl", drc.get("day_pnl", 0)),
+            "trades_summary": ai_content.get("trades_summary", drc.get("trades_summary", {})),
+            "intraday_segments": ai_content.get("intraday_segments", drc.get("intraday_segments", [])),
+            "reflections": {
+                **drc.get("reflections", {}),
+                **ai_content.get("reflections", {})
+            },
+            "auto_generated": True
+        }
+        
+        updated_drc = await drc_svc.update_drc(date, updates)
+        
+        return {"success": True, "drc": updated_drc, "ai_generated": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/playbooks/save-generated")
+async def save_generated_playbook(playbook_data: dict):
+    """Save an AI-generated playbook"""
+    playbook_svc, _, _ = get_services()
+    try:
+        playbook = await playbook_svc.create_playbook(playbook_data)
+        return {"success": True, "playbook": playbook}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
