@@ -1090,16 +1090,64 @@ DECISION: {score_result['trade_or_skip']}
             "what's the thesis", "what's your thesis", "logic behind"
         ]
         
-        if not any(p in msg_lower for p in reasoning_patterns):
+        pattern_match = any(p in msg_lower for p in reasoning_patterns)
+        
+        if not pattern_match:
             return None
         
-        # Extract symbol from message
+        # Extract symbol from message - look for ticker patterns
+        # Tickers are usually 1-5 uppercase letters, often prefixed with $
         import re
-        symbols = re.findall(r'\$?([A-Z]{2,5})\b', user_message.upper())
         
-        # Filter out common words
-        excluded = {'THE', 'AND', 'FOR', 'WHY', 'HOW', 'THIS', 'THAT', 'YOUR', 'TRADE', 'ALERT', 'TAKING'}
-        symbols = [s for s in symbols if s not in excluded]
+        # First, try to find explicit $TICKER mentions (most reliable)
+        explicit_tickers = re.findall(r'\$([A-Z]{1,5})\b', user_message.upper())
+        
+        # If no explicit tickers, try context-based extraction
+        if not explicit_tickers:
+            # Look for patterns like "on TICKER", "for TICKER", "about TICKER"
+            # This is more reliable than just extracting all uppercase words
+            context_patterns = [
+                r'(?:on|for|about|trade|trading|alert|buy|sell)\s+([A-Z]{1,5})\b',
+                r'\b([A-Z]{1,5})\s+(?:trade|alert|setup|stock|position)',
+            ]
+            
+            symbols = []
+            for pattern in context_patterns:
+                matches = re.findall(pattern, user_message.upper())
+                symbols.extend(matches)
+            
+            # Remove duplicates while preserving order
+            symbols = list(dict.fromkeys(symbols))
+            
+            # If still no matches, fall back to all uppercase words with extensive filtering
+            if not symbols:
+                all_matches = re.findall(r'\b([A-Z]{2,5})\b', user_message.upper())
+                
+                # Extended list of common English words to exclude
+                excluded = {
+                    # Question/common words
+                    'THE', 'AND', 'FOR', 'WHY', 'HOW', 'THIS', 'THAT', 'YOUR', 'WHAT', 'WHEN', 'WHERE',
+                    'EXPLAIN', 'PLAIN', 'BREAK', 'DOWN', 'WALK', 'ABOUT', 'MADE', 'COME', 'LOGIC',
+                    'TELL', 'SHOW', 'GIVE', 'TAKE', 'MAKE', 'DOES', 'WILL', 'HAVE', 'BEEN', 'FROM',
+                    'TRADE', 'ALERT', 'TAKING', 'BUY', 'SELL', 'LONG', 'SHORT', 'STOP', 'LOSS',
+                    'ENTRY', 'EXIT', 'PRICE', 'STOCK', 'SHARE', 'MARKET', 'SETUP', 'PLAY',
+                    'WITH', 'INTO', 'JUST', 'ONLY', 'ALSO', 'SOME', 'THEM', 'THAN', 'THEN', 'VERY',
+                    'HERE', 'THERE', 'WERE', 'THEY', 'THESE', 'THOSE', 'WOULD', 'COULD', 'SHOULD',
+                    'REASONING', 'REASON', 'THINK', 'THOUGHT', 'THESIS', 'BEHIND', 'THROUGH',
+                    # Short common words
+                    'ON', 'IN', 'TO', 'OF', 'AT', 'BY', 'AS', 'IS', 'IT', 'AN', 'OR', 'IF', 'SO', 'UP',
+                    'NO', 'GO', 'DO', 'ME', 'MY', 'HE', 'WE', 'BE', 'AM',
+                    # Pronouns and common words
+                    'YOU', 'CAN', 'DID', 'ARE', 'WAS', 'HAS', 'HAD', 'GET', 'GOT', 'PUT', 'SAY',
+                    'NOT', 'NOW', 'NEW', 'OLD', 'OUR', 'OUT', 'OWN', 'TOO', 'TWO', 'USE', 'WAY',
+                    'ALL', 'ANY', 'BUT', 'HER', 'HIM', 'HIS', 'ITS', 'LET', 'MAY', 'ONE', 'SAW',
+                    'SEE', 'SET', 'SHE', 'TRY', 'WHO', 'KNOW', 'WANT', 'LIKE', 'NEED', 'LOOK',
+                    'GOOD', 'BEST', 'BACK', 'COME', 'OVER', 'SUCH', 'MUCH', 'MORE', 'MOST', 'LAST',
+                    'FIRST', 'BEING', 'AFTER', 'WHILE', 'AGAIN', 'THERE', 'SINCE'
+                }
+                symbols = [s for s in all_matches if s not in excluded]
+        else:
+            symbols = explicit_tickers
         
         if not symbols:
             logger.debug("No symbols found in reasoning question")
@@ -1109,27 +1157,81 @@ DECISION: {score_result['trade_or_skip']}
         logger.info(f"🔍 Looking for alert reasoning for {target_symbol}")
         
         try:
-            # Get the alert for this symbol via API (ensures we get the actual running scanner data)
+            alert = None
+            
+            # First, try to get from live alerts API
             import httpx
             async with httpx.AsyncClient() as client:
                 response = await client.get("http://localhost:8001/api/live-scanner/alerts", timeout=5.0)
-                if response.status_code != 200:
-                    logger.warning(f"Failed to get alerts: {response.status_code}")
-                    return None
+                if response.status_code == 200:
+                    data = response.json()
+                    alerts_data = data.get("alerts", [])
+                    logger.info(f"📋 Found {len(alerts_data)} live alerts")
                     
-                data = response.json()
-                alerts_data = data.get("alerts", [])
-                logger.info(f"📋 Found {len(alerts_data)} live alerts via API")
+                    # Find alert for this symbol
+                    for a in alerts_data:
+                        if a.get("symbol") == target_symbol:
+                            alert = a
+                            break
+                
+                # Also check simulator alerts if not found in live alerts
+                if not alert:
+                    sim_response = await client.get("http://localhost:8001/api/simulator/alerts", timeout=5.0)
+                    if sim_response.status_code == 200:
+                        sim_data = sim_response.json()
+                        sim_alerts = sim_data.get("alerts", [])
+                        logger.info(f"📋 Found {len(sim_alerts)} simulator alerts")
+                        
+                        for a in sim_alerts:
+                            if a.get("symbol") == target_symbol:
+                                alert = a
+                                logger.info(f"✅ Found alert in simulator for {target_symbol}")
+                                break
             
-            # Find alert for this symbol
-            alert = None
-            for a in alerts_data:
-                if a.get("symbol") == target_symbol:
-                    alert = a
-                    break
+            # If not found in live alerts, check MongoDB for recent alerts (last 1 hour)
+            if not alert and self.db is not None:
+                try:
+                    from datetime import timedelta
+                    cutoff_time = datetime.now(timezone.utc) - timedelta(hours=1)
+                    
+                    # Search in live_alerts collection
+                    db_alert = self.db["live_alerts"].find_one(
+                        {
+                            "symbol": target_symbol,
+                            "timestamp": {"$gte": cutoff_time.isoformat()}
+                        },
+                        sort=[("timestamp", -1)]
+                    )
+                    
+                    if db_alert:
+                        logger.info(f"✅ Found alert in MongoDB for {target_symbol}")
+                        # Convert MongoDB doc to dict format
+                        alert = {
+                            "symbol": db_alert.get("symbol"),
+                            "setup_type": db_alert.get("setup_type"),
+                            "strategy_name": db_alert.get("strategy_name"),
+                            "direction": db_alert.get("direction", "long"),
+                            "priority": db_alert.get("priority", "medium"),
+                            "current_price": db_alert.get("current_price", 0),
+                            "trigger_price": db_alert.get("trigger_price", 0),
+                            "stop_loss": db_alert.get("stop_loss", 0),
+                            "target": db_alert.get("target", 0),
+                            "risk_reward": db_alert.get("risk_reward", 0),
+                            "trigger_probability": db_alert.get("trigger_probability", 0),
+                            "win_probability": db_alert.get("win_probability", 0),
+                            "strategy_win_rate": db_alert.get("strategy_win_rate", 0),
+                            "reasoning": db_alert.get("reasoning", []),
+                            "time_window": db_alert.get("time_window"),
+                            "market_regime": db_alert.get("market_regime"),
+                            "volatility_regime": db_alert.get("volatility_regime"),
+                            "tape_confirmation": db_alert.get("tape_confirmation", False),
+                            "tape_score": db_alert.get("tape_score", 0),
+                        }
+                except Exception as e:
+                    logger.warning(f"MongoDB alert lookup error: {e}")
             
             if not alert:
-                logger.info(f"❌ No alert found for {target_symbol}")
+                logger.info(f"❌ No alert found for {target_symbol} in live alerts or MongoDB")
                 return None
             
             logger.info(f"✅ Found alert for {target_symbol}: {alert.get('setup_type')}")

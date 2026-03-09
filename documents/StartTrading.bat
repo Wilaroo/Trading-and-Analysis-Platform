@@ -10,7 +10,7 @@ echo.
 
 :: GitHub repo info
 set GITHUB_RAW=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents
-set DEFAULT_URL=https://ai-scanner-sim.preview.emergentagent.com
+set DEFAULT_URL=https://market-hours-sim.preview.emergentagent.com
 set PLATFORM_URL=%DEFAULT_URL%
 set SCRIPT_DIR=%~dp0
 
