@@ -1,0 +1,485 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  FileText, Plus, Check, X, Save, ChevronDown, ChevronRight,
+  Clock, Target, TrendingUp, TrendingDown, AlertCircle,
+  Calendar, BarChart3, Award, Activity, Edit3
+} from 'lucide-react';
+import api from '../../utils/api';
+
+// SMB Daily Report Card (DRC) Component
+const DRCTab = () => {
+  const [drc, setDrc] = useState(null);
+  const [recentDrcs, setRecentDrcs] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [editedDrc, setEditedDrc] = useState(null);
+  const [expandedSection, setExpandedSection] = useState('big_picture');
+
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [todayRes, recentRes, statsRes] = await Promise.all([
+        api.get('/api/journal/drc/today'),
+        api.get('/api/journal/drc/recent?limit=7'),
+        api.get('/api/journal/drc/stats?days=30')
+      ]);
+      setDrc(todayRes.data.drc);
+      setEditedDrc(todayRes.data.drc);
+      setRecentDrcs(recentRes.data.drcs || []);
+      setStats(statsRes.data);
+    } catch (err) {
+      console.error('Failed to load DRC data:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const handleSave = async () => {
+    try {
+      const res = await api.put(`/api/journal/drc/date/${drc.date}`, editedDrc);
+      if (res.data.success) {
+        setDrc(res.data.drc);
+        setEditing(false);
+      }
+    } catch (err) {
+      console.error('Failed to save DRC:', err);
+    }
+  };
+
+  const toggleChecklistItem = (type, index) => {
+    const checklist = [...editedDrc[`${type}_checklist`]];
+    checklist[index] = { ...checklist[index], checked: !checklist[index].checked };
+    setEditedDrc({ ...editedDrc, [`${type}_checklist`]: checklist });
+  };
+
+  const updateSegment = (index, field, value) => {
+    const segments = [...editedDrc.intraday_segments];
+    segments[index] = { ...segments[index], [field]: value };
+    setEditedDrc({ ...editedDrc, intraday_segments: segments });
+  };
+
+  const getGradeColor = (grade) => {
+    if (!grade) return 'text-zinc-500';
+    if (grade.startsWith('A')) return 'text-emerald-400';
+    if (grade.startsWith('B')) return 'text-cyan-400';
+    if (grade.startsWith('C')) return 'text-yellow-400';
+    return 'text-red-400';
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4" data-testid="drc-tab">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <FileText className="w-5 h-5 text-purple-400" />
+            Daily Report Card
+          </h2>
+          <p className="text-xs text-zinc-500">
+            {drc?.date ? new Date(drc.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : 'Today'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {editing ? (
+            <>
+              <button
+                onClick={() => { setEditing(false); setEditedDrc(drc); }}
+                className="px-3 py-1.5 rounded-lg bg-zinc-700 text-white text-sm hover:bg-zinc-600"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                className="px-3 py-1.5 rounded-lg bg-purple-500 text-white text-sm font-medium hover:bg-purple-400 flex items-center gap-1"
+              >
+                <Save className="w-4 h-4" />
+                Save
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setEditing(true)}
+              className="px-3 py-1.5 rounded-lg bg-purple-500/20 text-purple-400 text-sm font-medium hover:bg-purple-500/30 flex items-center gap-1"
+            >
+              <Edit3 className="w-4 h-4" />
+              Edit
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Stats Row */}
+      {stats && (
+        <div className="grid grid-cols-5 gap-3">
+          <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
+            <p className="text-[10px] text-zinc-500">30-Day P&L</p>
+            <p className={`text-lg font-bold ${stats.total_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              ${stats.total_pnl?.toFixed(0) || 0}
+            </p>
+          </div>
+          <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
+            <p className="text-[10px] text-zinc-500">Avg Daily P&L</p>
+            <p className={`text-lg font-bold ${stats.avg_daily_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              ${stats.avg_daily_pnl?.toFixed(0) || 0}
+            </p>
+          </div>
+          <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
+            <p className="text-[10px] text-zinc-500">DRCs Complete</p>
+            <p className="text-lg font-bold text-white">{stats.complete_drcs}/{stats.total_drcs}</p>
+          </div>
+          <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
+            <p className="text-[10px] text-zinc-500">Best Segment</p>
+            <p className="text-lg font-bold text-emerald-400">{stats.best_segment?.id || '-'}</p>
+          </div>
+          <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
+            <p className="text-[10px] text-zinc-500">Worst Segment</p>
+            <p className="text-lg font-bold text-red-400">{stats.worst_segment?.id || '-'}</p>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-3 gap-4">
+        {/* Left Column - Main DRC */}
+        <div className="col-span-2 space-y-3">
+          {/* Overall Grade & P&L */}
+          <div className="p-4 rounded-lg bg-gradient-to-br from-purple-500/10 to-purple-500/5 border border-purple-500/20">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-zinc-500 uppercase">Today's Grade</p>
+                {editing ? (
+                  <select
+                    value={editedDrc?.overall_grade || ''}
+                    onChange={(e) => setEditedDrc({ ...editedDrc, overall_grade: e.target.value })}
+                    className={`text-4xl font-bold bg-transparent border-b border-white/20 outline-none ${getGradeColor(editedDrc?.overall_grade)}`}
+                  >
+                    <option value="">-</option>
+                    {['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D', 'F'].map(g => (
+                      <option key={g} value={g}>{g}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className={`text-4xl font-bold ${getGradeColor(drc?.overall_grade)}`}>
+                    {drc?.overall_grade || '-'}
+                  </p>
+                )}
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-zinc-500 uppercase">Day P&L</p>
+                {editing ? (
+                  <input
+                    type="number"
+                    value={editedDrc?.day_pnl || 0}
+                    onChange={(e) => setEditedDrc({ ...editedDrc, day_pnl: parseFloat(e.target.value) })}
+                    className={`text-3xl font-bold bg-transparent border-b border-white/20 outline-none w-32 text-right ${(editedDrc?.day_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}
+                  />
+                ) : (
+                  <p className={`text-3xl font-bold ${(drc?.day_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    ${drc?.day_pnl?.toFixed(0) || 0}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Pre-Market Checklist */}
+          <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+            <button
+              onClick={() => setExpandedSection(expandedSection === 'premarket' ? null : 'premarket')}
+              className="w-full flex items-center justify-between"
+            >
+              <div className="flex items-center gap-2">
+                <ChevronRight className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSection === 'premarket' ? 'rotate-90' : ''}`} />
+                <span className="text-sm font-medium">Pre-Market Checklist</span>
+              </div>
+              <span className="text-xs text-zinc-500">
+                {editedDrc?.premarket_checklist?.filter(i => i.checked).length || 0}/{editedDrc?.premarket_checklist?.length || 0}
+              </span>
+            </button>
+            <AnimatePresence>
+              {expandedSection === 'premarket' && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="mt-2 space-y-1 overflow-hidden"
+                >
+                  {(editing ? editedDrc : drc)?.premarket_checklist?.map((item, idx) => (
+                    <div
+                      key={item.id}
+                      onClick={() => editing && toggleChecklistItem('premarket', idx)}
+                      className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-colors ${
+                        item.checked ? 'bg-emerald-500/10' : 'hover:bg-white/5'
+                      }`}
+                    >
+                      <div className={`w-4 h-4 rounded border flex items-center justify-center ${
+                        item.checked ? 'bg-emerald-500 border-emerald-500' : 'border-white/30'
+                      }`}>
+                        {item.checked && <Check className="w-3 h-3 text-black" />}
+                      </div>
+                      <span className={`text-xs ${item.checked ? 'text-emerald-400' : 'text-zinc-400'}`}>
+                        {item.label}
+                      </span>
+                    </div>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Intraday Performance Tracker */}
+          <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+            <button
+              onClick={() => setExpandedSection(expandedSection === 'intraday' ? null : 'intraday')}
+              className="w-full flex items-center justify-between"
+            >
+              <div className="flex items-center gap-2">
+                <ChevronRight className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSection === 'intraday' ? 'rotate-90' : ''}`} />
+                <span className="text-sm font-medium">Intraday Performance (3 Segments)</span>
+              </div>
+              <Clock className="w-4 h-4 text-zinc-500" />
+            </button>
+            <AnimatePresence>
+              {expandedSection === 'intraday' && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="mt-3 space-y-2 overflow-hidden"
+                >
+                  {(editing ? editedDrc : drc)?.intraday_segments?.map((seg, idx) => (
+                    <div key={seg.segment_id} className="p-3 rounded bg-black/30 border border-white/5">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-medium text-white">{seg.label}</span>
+                        {editing ? (
+                          <select
+                            value={seg.grade}
+                            onChange={(e) => updateSegment(idx, 'grade', e.target.value)}
+                            className={`text-sm font-bold bg-transparent border-b border-white/20 outline-none ${getGradeColor(seg.grade)}`}
+                          >
+                            <option value="">-</option>
+                            {['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D', 'F'].map(g => (
+                              <option key={g} value={g}>{g}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className={`text-sm font-bold ${getGradeColor(seg.grade)}`}>{seg.grade || '-'}</span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-xs">
+                        <div>
+                          <p className="text-zinc-500">P&L</p>
+                          {editing ? (
+                            <input
+                              type="number"
+                              value={seg.pnl || 0}
+                              onChange={(e) => updateSegment(idx, 'pnl', parseFloat(e.target.value))}
+                              className="w-full bg-white/5 rounded px-1 py-0.5 text-white outline-none"
+                            />
+                          ) : (
+                            <p className={seg.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>${seg.pnl || 0}</p>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-zinc-500">Trades</p>
+                          {editing ? (
+                            <input
+                              type="number"
+                              value={seg.trades_taken || 0}
+                              onChange={(e) => updateSegment(idx, 'trades_taken', parseInt(e.target.value))}
+                              className="w-full bg-white/5 rounded px-1 py-0.5 text-white outline-none"
+                            />
+                          ) : (
+                            <p className="text-white">{seg.trades_taken || 0}</p>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-zinc-500">Comments</p>
+                          {editing ? (
+                            <input
+                              type="text"
+                              value={seg.comments || ''}
+                              onChange={(e) => updateSegment(idx, 'comments', e.target.value)}
+                              className="w-full bg-white/5 rounded px-1 py-0.5 text-white outline-none text-xs"
+                              placeholder="Add comments..."
+                            />
+                          ) : (
+                            <p className="text-zinc-400 truncate">{seg.comments || '-'}</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Reflections */}
+          <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+            <button
+              onClick={() => setExpandedSection(expandedSection === 'reflections' ? null : 'reflections')}
+              className="w-full flex items-center justify-between"
+            >
+              <div className="flex items-center gap-2">
+                <ChevronRight className={`w-4 h-4 text-zinc-500 transition-transform ${expandedSection === 'reflections' ? 'rotate-90' : ''}`} />
+                <span className="text-sm font-medium">Reflections & Lessons</span>
+              </div>
+              <Award className="w-4 h-4 text-zinc-500" />
+            </button>
+            <AnimatePresence>
+              {expandedSection === 'reflections' && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="mt-3 space-y-3 overflow-hidden"
+                >
+                  <div>
+                    <label className="text-[10px] text-zinc-500 uppercase">What I Learned Today</label>
+                    {editing ? (
+                      <textarea
+                        value={editedDrc?.reflections?.what_i_learned || ''}
+                        onChange={(e) => setEditedDrc({
+                          ...editedDrc,
+                          reflections: { ...editedDrc.reflections, what_i_learned: e.target.value }
+                        })}
+                        className="w-full mt-1 p-2 rounded bg-black/30 border border-white/10 text-xs text-white outline-none resize-none"
+                        rows={2}
+                        placeholder="What key lessons did you learn today?"
+                      />
+                    ) : (
+                      <p className="text-xs text-zinc-300 mt-1">{drc?.reflections?.what_i_learned || 'Not filled yet'}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-500 uppercase">Easiest $3K Trade (Even if Missed)</label>
+                    {editing ? (
+                      <textarea
+                        value={editedDrc?.reflections?.easiest_3k_trade || ''}
+                        onChange={(e) => setEditedDrc({
+                          ...editedDrc,
+                          reflections: { ...editedDrc.reflections, easiest_3k_trade: e.target.value }
+                        })}
+                        className="w-full mt-1 p-2 rounded bg-black/30 border border-white/10 text-xs text-white outline-none resize-none"
+                        rows={2}
+                        placeholder="What was the most obvious, high-probability trade today?"
+                      />
+                    ) : (
+                      <p className="text-xs text-zinc-300 mt-1">{drc?.reflections?.easiest_3k_trade || 'Not filled yet'}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-500 uppercase">Changes for Tomorrow</label>
+                    {editing ? (
+                      <textarea
+                        value={editedDrc?.reflections?.changes_for_tomorrow || ''}
+                        onChange={(e) => setEditedDrc({
+                          ...editedDrc,
+                          reflections: { ...editedDrc.reflections, changes_for_tomorrow: e.target.value }
+                        })}
+                        className="w-full mt-1 p-2 rounded bg-black/30 border border-white/10 text-xs text-white outline-none resize-none"
+                        rows={2}
+                        placeholder="What will you do differently tomorrow?"
+                      />
+                    ) : (
+                      <p className="text-xs text-zinc-300 mt-1">{drc?.reflections?.changes_for_tomorrow || 'Not filled yet'}</p>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
+
+        {/* Right Column - Recent DRCs */}
+        <div className="space-y-3">
+          <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+            <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-zinc-500" />
+              Recent DRCs
+            </h3>
+            <div className="space-y-2">
+              {recentDrcs.map((d) => (
+                <div
+                  key={d.date}
+                  className={`p-2 rounded cursor-pointer transition-colors ${
+                    d.date === drc?.date ? 'bg-purple-500/20 border border-purple-500/30' : 'hover:bg-white/5'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-400">
+                      {new Date(d.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                    </span>
+                    <span className={`text-sm font-bold ${getGradeColor(d.overall_grade)}`}>
+                      {d.overall_grade || '-'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between mt-1 text-xs">
+                    <span className="text-zinc-500">{d.trades_summary?.total_trades || 0} trades</span>
+                    <span className={d.day_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                      ${d.day_pnl?.toFixed(0) || 0}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Trades Summary */}
+          {drc?.trades_summary?.total_trades > 0 && (
+            <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+              <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-zinc-500" />
+                Trades Summary
+              </h3>
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Total Trades</span>
+                  <span className="text-white">{drc.trades_summary.total_trades}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Win Rate</span>
+                  <span className={drc.trades_summary.win_rate >= 50 ? 'text-emerald-400' : 'text-red-400'}>
+                    {drc.trades_summary.win_rate}%
+                  </span>
+                </div>
+                {drc.trades_summary.biggest_winner && (
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Best Trade</span>
+                    <span className="text-emerald-400">
+                      {drc.trades_summary.biggest_winner.symbol} +${drc.trades_summary.biggest_winner.pnl}
+                    </span>
+                  </div>
+                )}
+                {drc.trades_summary.biggest_loser && (
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Worst Trade</span>
+                    <span className="text-red-400">
+                      {drc.trades_summary.biggest_loser.symbol} ${drc.trades_summary.biggest_loser.pnl}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default DRCTab;

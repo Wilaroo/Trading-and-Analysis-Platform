@@ -21,9 +21,11 @@ import {
   AlertTriangle,
   ChevronDown,
   FileText,
-  Zap
+  Zap,
+  Map
 } from 'lucide-react';
 import api from '../utils/api';
+import { PlaybookTab, DRCTab, GamePlanTab } from '../components/Journal';
 
 const Card = ({ children, className = '', hover = true }) => (
   <div className={`bg-paper rounded-lg p-4 border border-white/10 ${
@@ -420,6 +422,7 @@ const TemplateSelector = ({ templates, onSelect, selectedTemplate }) => {
 
 // ===================== TRADE JOURNAL PAGE =====================
 const TradeJournalPage = () => {
+  const [activeTab, setActiveTab] = useState('trades'); // trades, playbook, drc, gameplan
   const [trades, setTrades] = useState([]);
   const [performance, setPerformance] = useState(null);
   const [matrix, setMatrix] = useState(null);
@@ -573,48 +576,82 @@ const TradeJournalPage = () => {
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <BookOpen className="w-6 h-6 text-primary" />
-            Trade Journal
+            Trading Journal
           </h1>
-          <p className="text-zinc-500 text-sm">Track trades and analyze strategy performance by market context</p>
+          <p className="text-zinc-500 text-sm">Playbooks, Daily Report Cards, Game Plans & Trade Log</p>
         </div>
         <div className="flex gap-2">
           <button onClick={loadData} className="btn-secondary flex items-center gap-2">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-          <button
-            onClick={() => setShowNewTrade(true)}
-            className="btn-primary flex items-center gap-2"
-            data-testid="new-trade-btn"
-          >
-            <Plus className="w-4 h-4" />
-            Log Trade
-          </button>
+          {activeTab === 'trades' && (
+            <button
+              onClick={() => setShowNewTrade(true)}
+              className="btn-primary flex items-center gap-2"
+              data-testid="new-trade-btn"
+            >
+              <Plus className="w-4 h-4" />
+              Log Trade
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Performance Summary */}
-      {performance && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <StatCard
-            label="Total Trades"
-            value={performance.total_trades}
-            icon={BookOpen}
-            color="primary"
-          />
-          <StatCard
-            label="Win Rate"
-            value={`${performance.win_rate}%`}
-            icon={Percent}
-            color={performance.win_rate >= 50 ? 'green' : 'red'}
-            subtext={`${performance.winning_trades}W / ${performance.losing_trades}L`}
-          />
-          <StatCard
-            label="Total P&L"
-            value={`$${performance.total_pnl?.toFixed(0)}`}
-            icon={DollarSign}
-            color={performance.total_pnl >= 0 ? 'green' : 'red'}
-          />
+      {/* Tab Navigation */}
+      <div className="flex gap-1 p-1 bg-white/5 rounded-lg border border-white/10 w-fit">
+        {[
+          { id: 'trades', label: 'Trade Log', icon: BarChart3 },
+          { id: 'playbook', label: 'Playbooks', icon: BookOpen },
+          { id: 'drc', label: 'Daily Report Card', icon: FileText },
+          { id: 'gameplan', label: 'Game Plan', icon: Map }
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              activeTab === tab.id
+                ? 'bg-primary text-black'
+                : 'text-zinc-400 hover:text-white hover:bg-white/5'
+            }`}
+            data-testid={`journal-tab-${tab.id}`}
+          >
+            <tab.icon className="w-4 h-4" />
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'playbook' && <PlaybookTab />}
+      {activeTab === 'drc' && <DRCTab />}
+      {activeTab === 'gameplan' && <GamePlanTab />}
+
+      {/* Original Trade Log Content (only show when trades tab is active) */}
+      {activeTab === 'trades' && (
+        <>
+          {/* Performance Summary */}
+          {performance && (
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <StatCard
+                label="Total Trades"
+                value={performance.total_trades}
+                icon={BookOpen}
+                color="primary"
+              />
+              <StatCard
+                label="Win Rate"
+                value={`${performance.win_rate}%`}
+                icon={Percent}
+                color={performance.win_rate >= 50 ? 'green' : 'red'}
+                subtext={`${performance.winning_trades}W / ${performance.losing_trades}L`}
+              />
+              <StatCard
+                label="Total P&L"
+                value={`$${performance.total_pnl?.toFixed(0)}`}
+                icon={DollarSign}
+                color={performance.total_pnl >= 0 ? 'green' : 'red'}
+              />
           <StatCard
             label="Avg P&L"
             value={`$${performance.avg_pnl?.toFixed(0)}`}
@@ -882,7 +919,7 @@ const TradeJournalPage = () => {
       </AnimatePresence>
 
       {/* Close Trade Modal */}
-      <AnimatePresence>
+        <AnimatePresence>
         {showCloseTrade && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -970,6 +1007,8 @@ const TradeJournalPage = () => {
           </motion.div>
         )}
       </AnimatePresence>
+        </>
+      )}
     </div>
   );
 };
