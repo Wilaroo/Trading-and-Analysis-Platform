@@ -99,8 +99,21 @@ async def start_bot():
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
     
+    from services.trading_bot_service import BotMode
+    from services.enhanced_scanner import get_enhanced_scanner
+    
     await _trading_bot.start()
-    return {"success": True, "message": "Trading bot started", "mode": _trading_bot.get_mode().value}
+    
+    # Sync scanner auto-execute with bot mode on start
+    bot_mode = _trading_bot.get_mode()
+    scanner = get_enhanced_scanner()
+    if scanner:
+        if bot_mode == BotMode.AUTONOMOUS:
+            scanner.enable_auto_execute(True, min_win_rate=0.55, min_priority="high")
+        else:
+            scanner.enable_auto_execute(False)
+    
+    return {"success": True, "message": "Trading bot started", "mode": bot_mode.value, "scanner_auto_execute": bot_mode == BotMode.AUTONOMOUS}
 
 
 @router.post("/stop")
@@ -120,11 +133,23 @@ async def set_bot_mode(mode: str):
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
     
     from services.trading_bot_service import BotMode
+    from services.enhanced_scanner import get_enhanced_scanner
     
     try:
         bot_mode = BotMode(mode.lower())
         _trading_bot.set_mode(bot_mode)
-        return {"success": True, "mode": bot_mode.value}
+        
+        # Sync scanner auto-execute with bot mode
+        scanner = get_enhanced_scanner()
+        if scanner:
+            if bot_mode == BotMode.AUTONOMOUS:
+                # Enable scanner auto-execute when bot is autonomous
+                scanner.enable_auto_execute(True, min_win_rate=0.55, min_priority="high")
+            else:
+                # Disable scanner auto-execute for other modes
+                scanner.enable_auto_execute(False)
+        
+        return {"success": True, "mode": bot_mode.value, "scanner_auto_execute": bot_mode == BotMode.AUTONOMOUS}
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid mode: {mode}. Use 'autonomous', 'confirmation', or 'paused'")
 
@@ -136,11 +161,20 @@ async def update_bot_config(config: BotConfigUpdate):
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
     
     from services.trading_bot_service import BotMode
+    from services.enhanced_scanner import get_enhanced_scanner
     
     if config.mode:
         try:
             bot_mode = BotMode(config.mode.lower())
             _trading_bot.set_mode(bot_mode)
+            
+            # Sync scanner auto-execute with bot mode
+            scanner = get_enhanced_scanner()
+            if scanner:
+                if bot_mode == BotMode.AUTONOMOUS:
+                    scanner.enable_auto_execute(True, min_win_rate=0.55, min_priority="high")
+                else:
+                    scanner.enable_auto_execute(False)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid mode: {config.mode}")
     
