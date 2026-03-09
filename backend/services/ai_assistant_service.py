@@ -2893,13 +2893,17 @@ Be specific with price levels when possible."""
         """
         msg_lower = message.lower()
         
-        # Deploy/Start bot patterns
+        # Deploy/Start bot patterns - more flexible matching
         deploy_patterns = [
-            "deploy the bot", "deploy bot", "deploy trading bot",
-            "start the bot", "start bot", "enable bot", "enable the bot",
-            "activate bot", "activate the bot", "turn on bot",
-            "run the bot", "execute trades", "trade on my behalf",
-            "monitor and trade", "auto trade", "automated trading"
+            "deploy the trading bot", "deploy trading bot", "deploy the bot", "deploy bot",
+            "start the trading bot", "start trading bot", "start the bot", "start bot",
+            "enable the trading bot", "enable trading bot", "enable the bot", "enable bot",
+            "activate the trading bot", "activate trading bot", "activate the bot", "activate bot",
+            "turn on the bot", "turn on bot", "turn the bot on",
+            "run the trading bot", "run the bot", "run bot",
+            "execute trades on my behalf", "execute trades for me", "trade on my behalf",
+            "trades on my behalf", "monitor and trade", "monitor and deploy",
+            "auto trade", "automated trading", "automate trading"
         ]
         
         # Stop bot patterns
