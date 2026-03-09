@@ -63,6 +63,7 @@ from routers.ev_tracking import router as ev_tracking_router
 from routers.smb_router import router as smb_router
 from routers.journal_router import router as journal_router
 from services.market_intel_service import get_market_intel_service
+from services.eod_generation_service import get_eod_service
 from services.ib_service import get_ib_service
 from services.news_service import init_news_service
 from services.strategy_service import get_strategy_service
@@ -108,6 +109,11 @@ strategy_service = get_strategy_service(db)
 scoring_engine = get_scoring_engine(db)
 feature_engine = get_feature_engine()
 quality_service = init_quality_service(ib_service, db)
+
+# Initialize End-of-Day Generation Service (for automatic DRC & Playbook generation at 4:30 PM ET)
+eod_service = get_eod_service(db)
+eod_service.start_scheduler()
+print("End-of-Day auto-generation scheduler started (4:30 PM ET weekdays)")
 
 # Initialize Alpaca service early and wire it to stock_service
 alpaca_service = init_alpaca_service()
