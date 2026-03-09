@@ -49,6 +49,17 @@ class DemoTradeRequest(BaseModel):
     setup_type: str = "rubber_band"
 
 
+class TradeSubmitRequest(BaseModel):
+    symbol: str
+    direction: str = "long"
+    setup_type: str = "breakout"
+    entry_price: Optional[float] = None
+    stop_price: Optional[float] = None
+    target_prices: Optional[List[float]] = None
+    half_size: bool = False
+    source: str = "manual"
+
+
 class StrategyConfigUpdate(BaseModel):
     trail_pct: Optional[float] = None
     close_at_eod: Optional[bool] = None
@@ -224,6 +235,110 @@ async def ai_evaluate_trade(request: DemoTradeRequest):
     
     result = await _trading_bot._ai_assistant.evaluate_bot_opportunity(trade_data)
     return result
+
+
+@router.post("/trades/submit")
+async def submit_trade(request: TradeSubmitRequest):
+    """Submit a new trade for execution"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    try:
+        symbol = request.symbol.upper()
+        
+        # Calculate position size based on risk params
+        risk_params = _trading_bot.risk_params
+        
+        # Get current price if not provided
+        entry_price = request.entry_price
+        if not entry_price:
+            # Try to get from Alpaca
+            try:
+                from services.alpaca_service import get_alpaca_service
+                alpaca = get_alpaca_service()
+                quote = alpaca.get_latest_quote(symbol)
+                entry_price = float(quote.get('price', 0)) if quote else 0
+            except:
+                entry_price = 0
+        
+        # Calculate shares based on risk
+        stop_price = request.stop_price or (entry_price * 0.98 if request.direction == 'long' else entry_price * 1.02)
+        risk_per_share = abs(entry_price - stop_price) if entry_price and stop_price else entry_price * 0.02
+        
+        if risk_per_share > 0:
+            max_shares = int(risk_params.max_risk_per_trade / risk_per_share)
+        else:
+            max_shares = 100
+        
+        # Apply half size if requested
+        if request.half_size:
+            max_shares = max(1, max_shares // 2)
+        
+        # Create trade record
+        trade_id = f"trade_{uuid.uuid4().hex[:8]}"
+        trade = {
+            "id": trade_id,
+            "symbol": symbol,
+            "direction": request.direction,
+            "setup_type": request.setup_type,
+            "status": "pending",
+            "entry_price": entry_price,
+            "stop_price": stop_price,
+            "target_prices": request.target_prices or [entry_price * 1.03] if request.direction == 'long' else [entry_price * 0.97],
+            "shares": max_shares,
+            "risk_amount": risk_per_share * max_shares if risk_per_share else 0,
+            "source": request.source,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "half_size": request.half_size
+        }
+        
+        # Add to pending trades (it's a Dict keyed by trade_id)
+        if not hasattr(_trading_bot, '_pending_trades') or _trading_bot._pending_trades is None:
+            _trading_bot._pending_trades = {}
+        
+        # Create a BotTrade object if possible, otherwise use dict
+        try:
+            from services.trading_bot_service import BotTrade
+            bot_trade = BotTrade(
+                id=trade_id,
+                symbol=symbol,
+                direction=request.direction,
+                setup_type=request.setup_type,
+                entry_price=entry_price,
+                stop_price=stop_price,
+                target_prices=request.target_prices or ([entry_price * 1.03] if request.direction == 'long' else [entry_price * 0.97]),
+                shares=max_shares,
+                status="pending"
+            )
+            _trading_bot._pending_trades[trade_id] = bot_trade
+        except Exception as e:
+            logger.warning(f"Could not create BotTrade object: {e}")
+            # Store as dict in a separate structure if needed
+        
+        # If in autonomous mode, execute immediately
+        if _trading_bot._mode.value == "autonomous":
+            # Execute the trade
+            try:
+                if _trade_executor:
+                    result = await _trade_executor.execute_trade(trade)
+                    trade["status"] = "open" if result.get("success") else "failed"
+                    trade["execution_result"] = result
+            except Exception as e:
+                logger.error(f"Trade execution error: {e}")
+                trade["status"] = "pending"
+        
+        logger.info(f"✅ Trade submitted: {symbol} {request.direction} - {max_shares} shares @ ${entry_price:.2f}")
+        
+        return {
+            "success": True,
+            "trade_id": trade_id,
+            "trade": trade,
+            "message": f"Trade submitted: {symbol} {request.direction.upper()} {max_shares} shares"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to submit trade: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/trades/{trade_id}")
