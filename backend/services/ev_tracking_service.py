@@ -30,12 +30,15 @@ class WorkflowState(Enum):
 
 
 class EVGate(Enum):
-    """EV-based gates for trade sizing decisions"""
-    A_SIZE = "A_SIZE"           # EV > 0.5R - Go big
-    GREENLIGHT = "GREENLIGHT"   # EV > 0.2R - Standard size
-    CAUTIOUS = "CAUTIOUS"       # EV > 0R - Reduced size
-    REVIEW = "REVIEW"           # EV < 0R - Need analysis
-    DROP = "DROP"               # EV < -0.2R - Remove from playbook
+    """
+    SMB-style EV gates for trade grading and sizing decisions.
+    Based on SMB Capital's EV Calculator thresholds.
+    """
+    A_TRADE = "A_TRADE"         # EV ≥ 2.5R - Excellent edge, full size+
+    B_TRADE = "B_TRADE"         # EV 1.0-2.5R - Solid edge, full size
+    C_TRADE = "C_TRADE"         # EV 0.5-1.0R - Marginal edge, reduced size
+    D_TRADE = "D_TRADE"         # EV 0-0.5R - Poor edge, minimal size
+    F_TRADE = "F_TRADE"         # EV < 0R - Negative edge, don't trade
 
 
 @dataclass
@@ -122,7 +125,7 @@ class EVTrackingRecord:
     c_grade_wins: int = 0
     
     # SMB sizing recommendation
-    ev_gate: EVGate = EVGate.GREENLIGHT
+    ev_gate: EVGate = EVGate.B_TRADE
     size_multiplier: float = 1.0
     
     last_updated: str = ""
@@ -304,26 +307,37 @@ class EVTrackingService:
         return record.expected_value_r
     
     def _determine_ev_gate(self, ev: float) -> EVGate:
-        """Determine EV gate based on expected value"""
-        if ev > 0.5:
-            return EVGate.A_SIZE
-        elif ev > 0.2:
-            return EVGate.GREENLIGHT
-        elif ev > 0:
-            return EVGate.CAUTIOUS
-        elif ev > -0.2:
-            return EVGate.REVIEW
+        """
+        Determine EV gate based on expected value.
+        SMB Capital thresholds based on their EV Calculator:
+        - A trade: EV ≥ 2.5R (excellent edge)
+        - B trade: EV 1.0-2.5R (solid edge)
+        - C trade: EV 0.5-1.0R (marginal edge) - exclusive of 0.5
+        - D trade: EV 0-0.5R (poor edge) - inclusive of 0.5
+        - F trade: EV < 0R (negative edge)
+        """
+        if ev >= 2.5:
+            return EVGate.A_TRADE
+        elif ev >= 1.0:
+            return EVGate.B_TRADE
+        elif ev > 0.5:  # Changed from >= to > to match SMB (0.5 is D, not C)
+            return EVGate.C_TRADE
+        elif ev >= 0:
+            return EVGate.D_TRADE
         else:
-            return EVGate.DROP
+            return EVGate.F_TRADE
     
     def _get_size_multiplier(self, gate: EVGate) -> float:
-        """Get position size multiplier based on EV gate"""
+        """
+        Get position size multiplier based on EV gate.
+        A trades get more size, D/F trades get reduced or no size.
+        """
         multipliers = {
-            EVGate.A_SIZE: 1.5,      # 150% of base size
-            EVGate.GREENLIGHT: 1.0,  # 100% standard
-            EVGate.CAUTIOUS: 0.5,    # 50% reduced
-            EVGate.REVIEW: 0.25,     # 25% minimal
-            EVGate.DROP: 0.0         # Don't trade
+            EVGate.A_TRADE: 1.5,     # 150% - Go big on best setups
+            EVGate.B_TRADE: 1.0,     # 100% - Standard size
+            EVGate.C_TRADE: 0.75,    # 75% - Slightly reduced
+            EVGate.D_TRADE: 0.5,     # 50% - Reduced size
+            EVGate.F_TRADE: 0.0      # 0% - Don't trade negative EV
         }
         return multipliers.get(gate, 1.0)
     
@@ -661,20 +675,20 @@ class EVTrackingService:
         }
     
     def _get_recommendation(self, record: EVTrackingRecord) -> str:
-        """Get trading recommendation based on EV"""
+        """Get trading recommendation based on EV (SMB Capital style)"""
         if record.total_trades < 10:
             return "TRACK - Need 10+ trades for reliable EV"
         
-        if record.ev_gate == EVGate.A_SIZE:
-            return "A-SIZE - Strong edge, increase position size"
-        elif record.ev_gate == EVGate.GREENLIGHT:
-            return "GREENLIGHT - Positive edge, continue trading"
-        elif record.ev_gate == EVGate.CAUTIOUS:
-            return "CAUTIOUS - Marginal edge, reduce size"
-        elif record.ev_gate == EVGate.REVIEW:
-            return "REVIEW - Needs analysis, minimal size"
+        if record.ev_gate == EVGate.A_TRADE:
+            return "A TRADE - Excellent edge (EV≥2.5R), increase position size"
+        elif record.ev_gate == EVGate.B_TRADE:
+            return "B TRADE - Solid edge (EV 1.0-2.5R), standard position size"
+        elif record.ev_gate == EVGate.C_TRADE:
+            return "C TRADE - Marginal edge (EV 0.5-1.0R), reduced position size"
+        elif record.ev_gate == EVGate.D_TRADE:
+            return "D TRADE - Poor edge (EV 0-0.5R), minimal size or review"
         else:
-            return "DROP - Remove from PlayBook"
+            return "F TRADE - Negative EV, remove from PlayBook"
     
     def get_playbook_summary(self) -> Dict:
         """Get PlayBook summary with EV status for all setups"""
