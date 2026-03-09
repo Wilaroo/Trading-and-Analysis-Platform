@@ -2590,7 +2590,7 @@ const AICommandPanel = ({
       {/* Main Content - New Layout: Chat on top, Pipeline + Chart below */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* TOP: AI Chat - Full width, expanded height */}
-        <div className="flex flex-col border-b border-white/5" style={{ maxHeight: '60%', minHeight: '300px' }}>
+        <div className="flex flex-col border-b border-white/5" style={{ maxHeight: '70%', minHeight: '400px' }}>
           {/* Chat Header with Clear Button */}
           {messages.length > 0 && (
             <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-black/20 shrink-0">
