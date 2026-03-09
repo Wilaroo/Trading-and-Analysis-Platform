@@ -514,42 +514,59 @@ class TradingBotService:
     async def _restore_state(self):
         """Restore bot state from MongoDB on startup"""
         try:
-            if not self._db:
+            if self._db is None:
                 return
             
-            state = await self._db.bot_state.find_one({"_id": "bot_state"})
+            # Use synchronous pymongo (db is MongoClient, not Motor)
+            state = self._db.bot_state.find_one({"_id": "bot_state"})
             if state:
                 was_running = state.get("running", False)
                 saved_mode = state.get("mode", "confirmation")
+                saved_watchlist = state.get("watchlist", [])
+                saved_setups = state.get("enabled_setups", [])
                 
                 # Restore mode
                 if saved_mode in ["autonomous", "confirmation", "paused"]:
                     self._mode = BotMode(saved_mode)
                 
+                # Restore watchlist
+                if saved_watchlist:
+                    self._watchlist = saved_watchlist
+                    logger.info(f"📋 Restored watchlist: {', '.join(saved_watchlist)}")
+                
+                # Restore enabled setups
+                if saved_setups:
+                    self._enabled_setups = saved_setups
+                    logger.info(f"🎯 Restored strategies: {', '.join(saved_setups)}")
+                
                 # Auto-restart if bot was running before
-                if was_running:
+                if was_running and saved_watchlist:
                     logger.info("🔄 Bot was running before restart - auto-resuming...")
                     await self.start()
                 
-                logger.info(f"✅ Bot state restored: mode={self._mode.value}, running={self._running}")
+                logger.info(f"✅ Bot state restored: mode={self._mode.value}, running={self._running}, watchlist={len(self._watchlist)} symbols")
         except Exception as e:
             logger.warning(f"Could not restore bot state: {e}")
     
     async def _save_state(self):
         """Save bot state to MongoDB"""
         try:
-            if not self._db:
+            if self._db is None:
                 return
             
-            await self._db.bot_state.update_one(
+            # Use synchronous pymongo (db is MongoClient, not Motor)
+            self._db.bot_state.update_one(
                 {"_id": "bot_state"},
                 {"$set": {
                     "running": self._running,
                     "mode": self._mode.value,
+                    "watchlist": self._watchlist,
+                    "enabled_setups": self._enabled_setups,
                     "last_updated": datetime.now(timezone.utc)
                 }},
                 upsert=True
             )
+            logger.info(f"💾 Bot state saved: running={self._running}, watchlist={len(self._watchlist)} symbols")
         except Exception as e:
             logger.warning(f"Could not save bot state: {e}")
     
@@ -644,10 +661,30 @@ class TradingBotService:
     def set_watchlist(self, symbols: List[str]):
         """Set symbols to scan"""
         self._watchlist = [s.upper() for s in symbols]
+        # Schedule state save (non-blocking)
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._save_state())
+            else:
+                loop.run_until_complete(self._save_state())
+        except Exception:
+            pass  # State will be saved on next start/stop
     
     def set_enabled_setups(self, setups: List[str]):
         """Set which setup types to trade"""
         self._enabled_setups = setups
+        # Schedule state save (non-blocking)
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._save_state())
+            else:
+                loop.run_until_complete(self._save_state())
+        except Exception:
+            pass  # State will be saved on next start/stop
     
     def get_strategy_configs(self) -> Dict[str, Any]:
         """Get all strategy configurations"""
