@@ -16,26 +16,63 @@ const PlaybookTab = ({ onSelectPlaybook }) => {
   const [summary, setSummary] = useState(null);
   const [expandedPlaybook, setExpandedPlaybook] = useState(null);
 
-  // Form state for new playbook
+  // Form state for new playbook - SMB 6-section structure
   const [formData, setFormData] = useState({
     name: '',
     setup_type: '',
-    description: '',
-    market_context: '',
-    catalyst_type: 'Technical Setup Only',
+    ticker: '',
+    direction: 'long',
     trade_style: 'M2M',
+    description: '',
+    
+    // 1. BIGGER PICTURE
+    bigger_picture: {
+      market_context: '',
+      spy_action: '',
+      trade_rationale: ''
+    },
+    
+    // 2. INTRADAY FUNDAMENTALS
+    intraday_fundamentals: {
+      catalyst_type: 'Technical Setup Only',
+      why_in_play: '',
+      volume_analysis: ''
+    },
+    
+    // 3. TECHNICAL ANALYSIS
+    technical_analysis: {
+      chart_pattern: '',
+      vwap_position: '',
+      chart_markup_notes: ''
+    },
+    
+    // 4. READING THE TAPE
+    reading_the_tape: {
+      clean_or_choppy: '',
+      key_tape_signals: ''
+    },
+    
+    // 5. TRADE MANAGEMENT
+    trade_management: {
+      entry_trigger: '',
+      initial_stop: '',
+      profit_target_1: '',
+      scaling_rules: ''
+    },
+    
+    // 6. TRADE REVIEW
+    trade_review: {
+      what_to_look_for: '',
+      common_mistakes: ''
+    },
+    
+    // IF/THEN Statements
     if_then_statements: [
       { condition: '', action: '', notes: '' },
       { condition: '', action: '', notes: '' },
       { condition: '', action: '', notes: '' }
     ],
-    entry_rules: { trigger: '', confirmation: '', timing: '', notes: '' },
-    exit_rules: { target_1: '', target_2: '', target_3: '', scaling_rules: '', trail_stop: '', notes: '' },
-    stop_rules: { initial_stop: '', break_even_rule: '', time_stop: '', notes: '' },
-    risk_reward_target: 2.0,
-    max_risk_percent: 1.0,
-    best_time_of_day: '',
-    notes: '',
+    
     tags: []
   });
 
@@ -66,17 +103,19 @@ const PlaybookTab = ({ onSelectPlaybook }) => {
         setPlaybooks([res.data.playbook, ...playbooks]);
         setShowCreateForm(false);
         setFormData({
-          name: '', setup_type: '', description: '', market_context: '',
-          catalyst_type: 'Technical Setup Only', trade_style: 'M2M',
+          name: '', setup_type: '', ticker: '', direction: 'long', trade_style: 'M2M', description: '',
+          bigger_picture: { market_context: '', spy_action: '', trade_rationale: '' },
+          intraday_fundamentals: { catalyst_type: 'Technical Setup Only', why_in_play: '', volume_analysis: '' },
+          technical_analysis: { chart_pattern: '', vwap_position: '', chart_markup_notes: '' },
+          reading_the_tape: { clean_or_choppy: '', key_tape_signals: '' },
+          trade_management: { entry_trigger: '', initial_stop: '', profit_target_1: '', scaling_rules: '' },
+          trade_review: { what_to_look_for: '', common_mistakes: '' },
           if_then_statements: [
             { condition: '', action: '', notes: '' },
             { condition: '', action: '', notes: '' },
             { condition: '', action: '', notes: '' }
           ],
-          entry_rules: { trigger: '', confirmation: '', timing: '', notes: '' },
-          exit_rules: { target_1: '', target_2: '', target_3: '', scaling_rules: '', trail_stop: '', notes: '' },
-          stop_rules: { initial_stop: '', break_even_rule: '', time_stop: '', notes: '' },
-          risk_reward_target: 2.0, max_risk_percent: 1.0, best_time_of_day: '', notes: '', tags: []
+          tags: []
         });
       }
     } catch (err) {
