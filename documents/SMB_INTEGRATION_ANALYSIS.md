@@ -1,383 +1,404 @@
-# SMB Capital Integration Analysis & Recommendations
+# SMB Capital Integration Analysis
 
-## Executive Summary
+## Current State vs. SMB Methodology
 
-After analyzing the SMB Capital methodology against our current implementation, I've identified **15 enhancement opportunities** across 5 categories. Our app already has strong foundations (tape reading, VWAP, relative volume), but there are significant gaps in execution methodology and advanced pattern recognition.
+### Key SMB Concepts (From User's Research)
+
+#### 1. Setup vs Trade Distinction
+- **Setup**: Repeatable high-probability pattern with proven edge (the "what")
+- **Trade**: Real-time execution of that setup within specific context (the "how")
+
+#### 2. The 5 Variable Score
+| Variable | Description | Our Current Implementation |
+|----------|-------------|---------------------------|
+| **Big Picture** | Is SPY/Sector helping or hurting? | Partial (market_regime) |
+| **Intraday Fundamentals** | Why is the stock moving? | Partial (catalyst_score) |
+| **Technical Level** | Clear level to trade against? | Yes (S/R service) |
+| **Reading the Tape** | Hidden Seller/Aggressive Buyer? | Basic (tape_reading) |
+| **Intuition** | Historical pattern recognition | Missing |
+
+#### 3. Execution Styles (CRITICAL GAP)
+| Style | Description | Target R | Win Rate | Our Status |
+|-------|-------------|----------|----------|------------|
+| **Move2Move (M2M)** | Scalp - capture immediate move | 1R | 60-70% | NOT IMPLEMENTED |
+| **Trade2Hold (T2H)** | Intraday swing - hold for Reason2Sell | 3-5R | 40-50% | NOT IMPLEMENTED |
+| **A+ Trade** | Full conviction when all align | 10R+ | Variable | Partial (grade A) |
+
+#### 4. Tiered Entry System
+| Tier | Description | Our Status |
+|------|-------------|------------|
+| **Tier 1 (Feelers)** | Starter position at key level | NOT IMPLEMENTED |
+| **Tier 2 (Confirmation)** | Add on tape confirmation | NOT IMPLEMENTED |
+| **Tier 3 (A+ Size)** | Full size when all align | NOT IMPLEMENTED |
+
+#### 5. Reasons2Sell Checklist
+| Reason | Description | Our Status |
+|--------|-------------|------------|
+| Price Target Reached | Hit predetermined level | Yes |
+| Trend Violation | 9 EMA break | Partial |
+| Thesis Invalidation | Fundamental reason invalid | NOT TRACKED |
+| Market Resistance | SPY/QQQ hits major level | NOT TRACKED |
+| Tape Exhaustion | Volume dissipates | Basic |
+| Parabolic Extension | Too far from value | NOT TRACKED |
+| Breaking News | Fresh headlines | NOT TRACKED |
+| End of Day | Close before market close | Yes |
 
 ---
 
-## Current State vs. SMB Best Practices
+## Restructuring Recommendations
 
-### ✅ What We Have (Strengths)
+### Phase 1: Trade Style Classification
 
-| Feature | Our Implementation | SMB Equivalent |
-|---------|-------------------|----------------|
-| Tape Reading | `TapeReading` class with bid/ask analysis | Level 2 "Box" basics |
-| VWAP Trading | `vwap_bounce`, `vwap_fade` setups | VWAP Continuation plays |
-| Relative Volume | RVOL filtering (1.5x+ threshold) | "Stocks In Play" filter |
-| EV Tracking | Full R-multiple and EV calculation | Expected Value framework |
-| Market Regime | 6 regime types with setup filtering | Context-aware trading |
-| Time Windows | 8 time windows for setup validity | Intraday timing |
-| S/R Levels | Support/Resistance for targets/stops | Technical levels |
+**Add `trade_style` to LiveAlert and TradeIdea models:**
+```python
+class TradeStyle(Enum):
+    MOVE_2_MOVE = "move_2_move"  # Scalp for 1R
+    TRADE_2_HOLD = "trade_2_hold"  # Swing for 3R+
+    A_PLUS = "a_plus"  # Max conviction
+```
 
-### ❌ What We're Missing (Gaps)
-
-| SMB Feature | Current State | Priority |
-|-------------|---------------|----------|
-| **Tiered Entry System** | Single entry only | 🔴 HIGH |
-| **Level 2 Depth Analysis** | Basic bid/ask only | 🔴 HIGH |
-| **"Stuffed" Pattern Detection** | Not implemented | 🟡 MEDIUM |
-| **Re-Bid/Re-Offer Detection** | Not implemented | 🔴 HIGH |
-| **3-5-7 Risk Rule** | No capital limits | 🔴 HIGH |
-| **Reasons2Sell Framework** | Basic targets only | 🟡 MEDIUM |
-| **A+ Trade Identification** | Grade exists but not actionable | 🟡 MEDIUM |
-| **Volume Divergence** | Not tracked | 🟡 MEDIUM |
-| **Case Study Recording** | Not implemented | 🟢 LOW |
-| **Fashionably Late Setup** | Not fully implemented | 🟡 MEDIUM |
-| **Second Day Play** | Partial implementation | 🟡 MEDIUM |
+**Auto-detect based on setup type:**
+- M2M: `spencer_scalp`, `9_ema_scalp`, `abc_scalp`, `gap_give_go`, `first_vwap_pullback`
+- T2H: `orb`, `breakout`, `hod_breakout`, `hitchhiker`, `second_chance`
+- Context-dependent: `rubber_band`, `vwap_bounce` (depends on market regime)
 
 ---
 
-## Detailed Recommendations
+### Phase 2: SMB 5-Variable Scoring
 
-### 1. 🔴 HIGH PRIORITY: Tiered Entry/Exit System
+**Replace current checklist with SMB's exact variables:**
 
-**Current State:** Our alerts suggest single entry points with fixed stops/targets.
-
-**SMB Approach:**
-```
-Tier 1 (Feelers): 25% position at first signal
-Tier 2 (Confirmation): 50% when setup confirms  
-Tier 3 (A+ Size): 100%+ when all variables align
-```
-
-**Recommendation:** Add to `LiveAlert` and `TradeLevels`:
 ```python
 @dataclass
-class TieredEntry:
-    tier_1_price: float      # Entry on first signal
-    tier_1_size_pct: float   # 25%
-    tier_2_price: float      # Entry on confirmation
-    tier_2_size_pct: float   # 50%
-    tier_3_price: float      # Entry on A+ confirmation
-    tier_3_size_pct: float   # 100%+
+class SMBVariableScore:
+    big_picture: int  # 1-10 (SPY trend, sector strength)
+    intraday_fundamental: int  # 1-10 (catalyst score)
+    technical_level: int  # 1-10 (S/R clarity)
+    tape_reading: int  # 1-10 (order flow quality)
+    intuition: int  # 1-10 (pattern recognition confidence)
     
-    # Exit tiers
-    scale_out_1: float       # First profit target (partial)
-    scale_out_2: float       # Second target
-    runner_target: float     # Let it run target
+    @property
+    def total_score(self) -> int:
+        return (self.big_picture + self.intraday_fundamental + 
+                self.technical_level + self.tape_reading + self.intuition)
+    
+    @property
+    def is_a_plus(self) -> bool:
+        return self.total_score >= 40 and min(self.big_picture, 
+            self.intraday_fundamental, self.technical_level, 
+            self.tape_reading) >= 7
 ```
-
-**Impact:** Allows traders to scale in/out properly instead of all-or-nothing entries.
 
 ---
 
-### 2. 🔴 HIGH PRIORITY: Enhanced Tape Reading (Level 2 Analysis)
+### Phase 3: Setup Categories (Restructure)
 
-**Current State:** We track `bid_price`, `ask_price`, `imbalance_signal` but lack:
-- Velocity of prints
-- Size analysis (thick levels)
-- Absorption detection
-- Re-bid/Re-offer patterns
+**Map all setups to SMB categories:**
 
-**SMB Checklist We Should Implement:**
-| Signal | Description | Implementation |
-|--------|-------------|----------------|
-| **Speed** | Velocity of prints | Track prints/second at key levels |
-| **Size** | Level 2 depth | Track bid/ask size changes |
-| **Absorption** | Large orders absorbed | Detect price holds despite selling |
-| **Re-Bid** | Quick recovery after break | Detect immediate bounce after support break |
-| **Divergence** | Volume vs Price | Track volume on new highs/lows |
+```python
+SETUP_CATEGORIES = {
+    # Trend & Momentum (Works in STRONG_UPTREND/DOWNTREND)
+    "trend_momentum": [
+        "opening_drive", "hitchhiker", "gap_give_go", "gap_pick_roll",
+        "orb", "hod_breakout", "breakout", "relative_strength"
+    ],
+    
+    # Catalyst-Driven (Breaking news, fundamentals changed)
+    "catalyst_driven": [
+        "breaking_news", "first_vwap_pullback", "back_through_open",
+        "up_through_open", "first_move_up", "first_move_down"
+    ],
+    
+    # Reversal/Counter-Trend (Mean reversion, fades)
+    "reversal": [
+        "rubber_band", "vwap_bounce", "vwap_fade", "bella_fade",
+        "off_sides", "backside", "mean_reversion", "time_of_day_fade",
+        "tidal_wave", "volume_capitulation", "gap_fade"
+    ],
+    
+    # Consolidation (Flag breaks, squeezes)
+    "consolidation": [
+        "spencer_scalp", "big_dog", "puppy_dog", "squeeze",
+        "range_break", "chart_pattern"
+    ],
+    
+    # Specialized Execution
+    "specialized": [
+        "fashionably_late", "second_chance", "9_ema_scalp", "abc_scalp"
+    ]
+}
+```
 
-**Recommendation:** Enhance `TapeReading` class:
+---
+
+### Phase 4: Reasons2Sell Framework
+
+**New service: `/backend/services/reasons2sell_service.py`**
+
+```python
+class Reason2Sell(Enum):
+    PRICE_TARGET = "price_target"
+    TREND_VIOLATION = "trend_violation"
+    THESIS_INVALID = "thesis_invalid"
+    MARKET_RESISTANCE = "market_resistance"
+    TAPE_EXHAUSTION = "tape_exhaustion"
+    PARABOLIC_EXTENSION = "parabolic_extension"
+    BREAKING_NEWS = "breaking_news"
+    END_OF_DAY = "end_of_day"
+    GIVE_BACK_RULE = "give_back_rule"  # 30-50% of peak profit
+
+async def check_reasons_to_sell(position: Position) -> List[Reason2Sell]:
+    """
+    Real-time check for all Reasons2Sell.
+    Called every tick for Trade2Hold positions.
+    """
+    triggers = []
+    
+    # Check each reason...
+    if position.unrealized_pnl >= position.target_price * position.shares:
+        triggers.append(Reason2Sell.PRICE_TARGET)
+    
+    if price_below_9ema(position.symbol):
+        triggers.append(Reason2Sell.TREND_VIOLATION)
+    
+    # etc...
+    
+    return triggers
+```
+
+---
+
+### Phase 5: Level 2 "Box" Structure
+
+**Enhance TapeReading with SMB's Box metrics:**
+
 ```python
 @dataclass
-class EnhancedTapeReading:
-    # Existing
-    bid_price: float
-    ask_price: float
-    spread_signal: TapeSignal
-    imbalance_signal: TapeSignal
-    
-    # NEW: SMB Tape Signals
-    print_velocity: float           # Prints per second
-    velocity_trend: str             # "accelerating", "decelerating"
-    bid_depth_ratio: float          # Size at bid vs normal
-    ask_depth_ratio: float          # Size at ask vs normal
-    absorption_detected: bool       # Large seller being absorbed
-    re_bid_signal: bool             # Price broke support but re-bid quickly
-    re_offer_signal: bool           # Price broke resistance but re-offered
-    volume_divergence: str          # "bullish_div", "bearish_div", "none"
-    hidden_buyer: bool              # Large buyer detected on tape
-    hidden_seller: bool             # Large seller detected on tape
-```
-
-**Impact:** Enables "Stuffed" trade detection and better entry timing.
-
----
-
-### 3. 🔴 HIGH PRIORITY: 3-5-7 Risk Management Rule
-
-**Current State:** No capital allocation limits.
-
-**SMB Rule:**
-- **3%**: Maximum capital on single trade
-- **5%**: Total capital exposed across all positions
-- **7%**: Minimum profit target for positive expectancy
-
-**Recommendation:** Add to `TradingBotService`:
-```python
-class RiskManager:
-    max_single_trade_risk: float = 0.03      # 3% of capital
-    max_total_exposure: float = 0.05         # 5% of capital
-    min_profit_target_ratio: float = 0.07    # 7% target
-    
-    def validate_trade(self, trade, account_value):
-        risk_pct = trade.risk_amount / account_value
-        if risk_pct > self.max_single_trade_risk:
-            return False, "Exceeds 3% single trade limit"
-        # ... more checks
-```
-
-**Impact:** Prevents overexposure and ensures positive expectancy trades.
-
----
-
-### 4. 🟡 MEDIUM PRIORITY: "Stuffed" Pattern Detection
-
-**SMB Definition:** A stock attempts to break resistance but is immediately "stuffed" by a hidden seller, leading to a high-probability short.
-
-**Detection Logic:**
-```python
-def detect_stuffed_pattern(candles, tape):
-    """
-    Stuffed Pattern:
-    1. Price breaks above resistance
-    2. Within 1-3 candles, price fails back below
-    3. Tape shows heavy selling (hidden seller)
-    4. = Short signal
-    """
-    if (price_broke_resistance and 
-        failed_within_3_bars and
-        tape.hidden_seller):
-        return StuffedPattern(direction="short", confidence=0.8)
-```
-
-**Impact:** Adds high-probability counter-trend setup.
-
----
-
-### 5. 🟡 MEDIUM PRIORITY: Reasons2Sell Framework
-
-**Current State:** Fixed targets only.
-
-**SMB Approach:** Exit when ANY of these triggers:
-1. Target hit
-2. Thesis invalidated
-3. Tape deteriorates
-4. Time stop (intraday)
-5. Momentum exhaustion
-6. Counter-trend signal
-
-**Recommendation:**
-```python
-@dataclass
-class Reasons2Sell:
-    target_hit: bool = False
-    stop_triggered: bool = False
-    thesis_invalidated: bool = False      # Price action negates setup
-    tape_deteriorated: bool = False       # Tape score drops significantly
-    time_stop: bool = False               # End of session
-    momentum_exhausted: bool = False      # Volume divergence
-    new_resistance_formed: bool = False   # New seller appeared
-    
-    def should_exit(self) -> Tuple[bool, str]:
-        for field in fields(self):
-            if getattr(self, field.name):
-                return True, field.name
-        return False, None
-```
-
-**Impact:** Allows smarter exits beyond fixed targets.
-
----
-
-### 6. 🟡 MEDIUM PRIORITY: A+ Trade Automation
-
-**Current State:** We grade trades A/B/C/D/F but don't act on it.
-
-**SMB Approach:** A+ trades get:
-- Larger position size (1.5x+)
-- More patience on exits
-- Add on confirmation
-
-**Recommendation:** In `TradingBotService`:
-```python
-def calculate_position_size(self, alert, account_value):
-    base_size = self.calculate_base_size(alert, account_value)
-    
-    if alert.trade_grade == "A":
-        # A+ trade: All variables align
-        if self.all_variables_align(alert):
-            return base_size * 1.5  # Push it
-        return base_size * 1.2
-    elif alert.trade_grade == "B":
-        return base_size
-    elif alert.trade_grade == "C":
-        return base_size * 0.75
-    else:
-        return 0  # Don't trade D/F
-```
-
-**Impact:** Automatically sizes up on best setups.
-
----
-
-### 7. 🟡 MEDIUM PRIORITY: Volume Divergence Detection
-
-**SMB Signal:** New highs/lows on decreasing volume = exhaustion.
-
-**Implementation:**
-```python
-def detect_volume_divergence(candles):
-    """
-    Bullish Divergence: Lower lows on decreasing volume
-    Bearish Divergence: Higher highs on decreasing volume
-    """
-    if new_high and volume_decreasing:
-        return "bearish_divergence"  # Exhaustion, expect reversal
-    if new_low and volume_decreasing:
-        return "bullish_divergence"  # Exhaustion, expect bounce
-```
-
-**Impact:** Improves "Fashionably Late" and fade setups.
-
----
-
-### 8. 🟢 LOW PRIORITY: Case Study Recording
-
-**SMB Practice:** Archive every trade as a PlayBook entry with:
-- Big Picture
-- Technicals
-- Fundamentals
-- Tape Reading
-- What worked/didn't
-
-**Recommendation:** Add automatic trade journaling:
-```python
-@dataclass
-class PlayBookEntry:
-    trade_id: str
+class Level2Box:
+    # Level 1 (Summary)
     symbol: str
-    setup_type: str
+    last_price: float
+    net_change: float
+    net_change_pct: float
+    best_bid: float
+    best_ask: float
+    spread: float
+    
+    # Level 2 (Depth)
+    bid_depth: List[Dict]  # [{price, size, source}]
+    ask_depth: List[Dict]
+    thick_levels: List[float]  # Large size levels
+    
+    # Time & Sales (Tape)
+    tape_velocity: float  # Prints per second
+    green_vs_red: float  # Ratio of hitting ask vs bid
+    large_prints: List[Dict]  # Prints > 10k shares
+    
+    # SMB Signals
+    hidden_seller: bool
+    aggressive_buyer: bool
+    absorption_detected: bool
+    stuffed_pattern: bool
+    re_bid_signal: bool
+    re_offer_signal: bool
+    
+    def score_tape(self) -> int:
+        """Score 1-10 based on SMB tape reading criteria"""
+        score = 5  # Neutral start
+        
+        if self.aggressive_buyer:
+            score += 2
+        if self.re_bid_signal:
+            score += 2
+        if self.hidden_seller:
+            score -= 2
+        if self.stuffed_pattern:
+            score -= 2
+        # etc...
+        
+        return max(1, min(10, score))
+```
+
+---
+
+### Phase 6: Tiered Entry System
+
+**New service: `/backend/services/tiered_entry_service.py`**
+
+```python
+@dataclass
+class TieredPosition:
+    symbol: str
+    direction: str  # "long" or "short"
+    
+    # Tier entries
+    tier_1_shares: int = 0
+    tier_1_price: float = 0
+    tier_1_reason: str = ""  # "Key level reached"
+    
+    tier_2_shares: int = 0
+    tier_2_price: float = 0
+    tier_2_reason: str = ""  # "Tape confirmed"
+    
+    tier_3_shares: int = 0
+    tier_3_price: float = 0
+    tier_3_reason: str = ""  # "A+ alignment"
+    
+    @property
+    def total_shares(self) -> int:
+        return self.tier_1_shares + self.tier_2_shares + self.tier_3_shares
+    
+    @property
+    def avg_entry(self) -> float:
+        total_cost = (self.tier_1_shares * self.tier_1_price +
+                     self.tier_2_shares * self.tier_2_price +
+                     self.tier_3_shares * self.tier_3_price)
+        return total_cost / self.total_shares if self.total_shares > 0 else 0
+
+def calculate_tier_sizes(
+    base_risk: float,  # e.g., $200
+    smb_score: SMBVariableScore,
+    trade_style: TradeStyle
+) -> Dict[str, int]:
+    """
+    Calculate share counts for each tier based on SMB methodology.
+    """
+    if trade_style == TradeStyle.MOVE_2_MOVE:
+        # M2M: Larger tier 1 (capture immediate move)
+        return {"tier_1": 70, "tier_2": 20, "tier_3": 10}
+    
+    elif trade_style == TradeStyle.TRADE_2_HOLD:
+        # T2H: Scaled entry
+        return {"tier_1": 30, "tier_2": 40, "tier_3": 30}
+    
+    elif trade_style == TradeStyle.A_PLUS:
+        # A+: Start larger
+        return {"tier_1": 40, "tier_2": 30, "tier_3": 30}
+```
+
+---
+
+### Phase 7: Daily Report Card (DRC)
+
+**New service: `/backend/services/daily_report_card_service.py`**
+
+```python
+@dataclass
+class DailyReportCard:
     date: str
     
-    # SMB Variables
-    big_picture: str           # Market context
-    technicals: str            # Chart setup
-    fundamentals: str          # Catalyst/news
-    tape_reading: str          # Order flow notes
+    # Big Picture Metrics
+    total_pnl: float
+    total_r_captured: float
+    best_trade: Dict
+    worst_trade: Dict
     
-    # Execution
-    entry_price: float
-    exit_price: float
-    r_multiple: float
+    # Setup & Execution Audit (1-5 each)
+    selection_score: int  # Did I trade stocks In Play?
+    patience_score: int  # Did I wait for triggers?
+    risk_mgmt_score: int  # Did I hit out when invalid?
+    sizing_score: int  # Did I push A+ setups?
     
-    # Review
-    what_worked: List[str]
-    what_didnt: List[str]
-    grade_accuracy: str        # Did grade match outcome?
-    lessons: str
-```
-
-**Impact:** Creates learning database for AI to reference.
-
----
-
-## New Setups to Add
-
-Based on SMB material, these setups should be added:
-
-### 1. Stuffed Trade
-```
-Trigger: Breakout attempt fails within 3 bars
-Validation: Hidden seller on tape
-Direction: Counter (short failed long breakout)
-Expected R: 2:1
-```
-
-### 2. Re-Bid/Re-Offer
-```
-Trigger: Price breaks level but immediately recovers
-Validation: Fast recovery (<2 min), tape shows aggressive buying
-Direction: With the recovery
-Expected R: 3:1 (strong signal)
-```
-
-### 3. Fashionably Late (Enhanced)
-```
-Trigger: Stock weak early, reclaims VWAP after 10:30 AM
-Validation: 9 EMA crossover, increasing volume
-Direction: Long on VWAP reclaim
-Expected R: 2:1
-```
-
-### 4. Big Dog Trade
-```
-Trigger: High-conviction "In Play" stock with all variables aligned
-Validation: A+ grade, tape confirmation, news catalyst
-Direction: With momentum
-Expected R: 3:1+ (scale in aggressively)
+    # Trade Details
+    trades: List[Dict]  # Each with setup, style, 1R, result, reason2sell
+    
+    # Reflection
+    a_plus_setup: str
+    held_for_reason2sell: bool
+    tape_note: str
+    
+    # Tomorrow
+    one_thing_to_improve: str
+    one_thing_to_repeat: str
+    
+    def calculate_avg_win_r(self) -> float:
+        wins = [t for t in self.trades if t["result_r"] > 0]
+        return sum(t["result_r"] for t in wins) / len(wins) if wins else 0
+    
+    def calculate_avg_loss_r(self) -> float:
+        losses = [t for t in self.trades if t["result_r"] < 0]
+        return abs(sum(t["result_r"] for t in losses) / len(losses)) if losses else 0
 ```
 
 ---
 
-## Implementation Priority Matrix
+## Implementation Priority
 
-| Phase | Features | Effort | Impact |
-|-------|----------|--------|--------|
-| **Phase 1** | Tiered Entry, 3-5-7 Rule, Enhanced Tape | 2 weeks | 🔴 HIGH |
-| **Phase 2** | Stuffed Detection, Reasons2Sell, A+ Automation | 1 week | 🟡 MEDIUM |
-| **Phase 3** | Volume Divergence, New Setups | 1 week | 🟡 MEDIUM |
-| **Phase 4** | Case Study Recording, PlayBook UI | 1 week | 🟢 LOW |
+### P0 - Foundation (Do First)
+1. Add `TradeStyle` enum (M2M/T2H/A+)
+2. Map existing setups to styles
+3. Add SMB 5-Variable scoring
 
----
+### P1 - Core SMB Features
+4. Implement Reasons2Sell framework
+5. Add tiered entry tracking
+6. Enhance tape reading with Box metrics
 
-## AI Integration Suggestions
-
-### 1. Context-Aware Reasoning
-When explaining alerts, AI should reference:
-- Which SMB setup this matches
-- Specific validation criteria met
-- Expected R based on historical data
-- Tiered entry recommendations
-
-### 2. Real-Time Tape Coaching
-AI could provide live commentary:
-```
-"Seeing aggressive buying at $175.50 - this is the 'Re-Bid' signal 
-SMB teaches. Tier 1 entry here, add on break of $176."
-```
-
-### 3. Post-Trade Review
-AI could analyze closed trades:
-```
-"This trade matched the 'Opening Drive' pattern but was taken 
-too late (6+ minutes after open). SMB rule says Opening Drives 
-must happen in first 5 minutes. Consider faster execution next time."
-```
+### P2 - Advanced Features
+7. Daily Report Card
+8. Auto-detection of M2M vs T2H based on context
+9. AI integration for SMB coaching
 
 ---
 
-## Summary of Recommendations
+## Files to Modify
 
-1. **Tiered Entry/Exit** - Most impactful change for professional execution
-2. **Enhanced Tape Reading** - Adds "hidden buyer/seller" detection
-3. **3-5-7 Risk Rule** - Prevents overexposure
-4. **Stuffed Pattern** - High-probability counter-trend setup
-5. **Reasons2Sell** - Smarter exits beyond fixed targets
-6. **A+ Automation** - Size up on best setups automatically
-7. **Volume Divergence** - Improves fade/reversal timing
-8. **Case Study Recording** - Creates learning database
+| File | Changes |
+|------|---------|
+| `/backend/services/ev_tracking_service.py` | Add TradeStyle, SMBVariableScore |
+| `/backend/services/enhanced_scanner.py` | Map setups to categories/styles |
+| `/backend/models/alert.py` | Add trade_style, smb_score fields |
+| `/backend/services/reasons2sell_service.py` | NEW - Reasons2Sell framework |
+| `/backend/services/tiered_entry_service.py` | NEW - Tiered entry system |
+| `/backend/services/daily_report_card_service.py` | NEW - DRC tracking |
+| `/backend/services/tape_reading_service.py` | NEW - Enhanced Level 2 Box |
 
-**Shall I proceed with implementing any of these?**
+---
+
+## SMB Setup-to-Trade Mapping Reference
+
+### Trend & Momentum Setups → Typical Trades
+| Setup | Default Style | Long Rules | Short Rules |
+|-------|---------------|------------|-------------|
+| Opening Drive | M2M | Break of 1-5 min high on gap up | Break of 1-5 min low on gap down |
+| Gap and Go | T2H | 1-min/5-min high break after open | Inverse |
+| Pullback to VWAP | T2H | Bounce off VWAP + re-bid on tape | Rejection at VWAP + re-offer |
+| Flag Break | M2M/T2H | Break of tight range above level | Break of tight range below level |
+| Trend Join | T2H | Enter on pullback during Day 1 trend | Enter on pop during Day 1 downtrend |
+
+### Catalyst-Driven Setups → Typical Trades
+| Setup | Default Style | Long Rules | Short Rules |
+|-------|---------------|------------|-------------|
+| Day 2 Play | T2H | Buy Day 1 high flyer that holds gains | Short Day 1 laggard that fails bounce |
+| Earnings Gap | T2H | Post-earnings beat clears pre-market highs | Post-earnings miss breaks lows |
+| Headline Trade | T2H | Buy on FDA approval, partnerships | Short on investigation, dividend cuts |
+| Changing Fundamentals | T2H | Major positive catalyst | Major negative catalyst |
+
+### Reversal/Counter-Trend Setups → Typical Trades
+| Setup | Default Style | Long Rules | Short Rules |
+|-------|---------------|------------|-------------|
+| Stuffed Play | M2M | Broke lower but quickly re-bid above support | Broke higher but stuffed by hidden seller |
+| Mean Reversion | M2M | Climax volume spike at range bottom | Parabolic move too far from 20 EMA |
+| VWAP Reclaim | T2H | Weak stock breaks and holds above VWAP | Strong stock breaks and holds below VWAP |
+| Rubber Band | M2M | 2.5%+ extension from EMA9, snapback | Inverse |
+
+### Specialized Execution Styles
+| Style | Goal | Target R | Entry Rule | Exit Rule |
+|-------|------|----------|------------|-----------|
+| Move2Move | Immediate next level | 1R | Full size on tape confirmation | Exit on first momentum pause |
+| Trade2Hold | Multi-point capture | 3-5R | Tiered entry | Only exit on Reason2Sell |
+| A+ Setup | Max conviction | 10R+ | All 5 variables align (>40 score) | Trail with 9 EMA, give back rule |
+| Fashionably Late | Late-day momentum | 2R | After 10:30 AM when noise settles | Measured move |
+
+---
+
+## R-Multiple Scoring Legend
+
+| R Result | Assessment |
+|----------|------------|
+| Negative R | Unacceptable - failed to follow stop |
+| 0R to 1R | Break-even - scalping too much or exiting early |
+| 2R to 5R | Trading system correctly - catching the "meat" |
+| 10R+ | Big Dog trade - scaled in correctly, held until trend end |
+
+**Key Insight**: If average win = 1R and average loss = 1R, you have ZERO EDGE after commissions. Goal: Average Win > 2R.
