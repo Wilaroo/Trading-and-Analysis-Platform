@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://market-hours-sim.preview.emergentagent.com
+https://smb-trading-workflow.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://market-hours-sim.preview.emergentagent.com
+https://smb-trading-workflow.preview.emergentagent.com
 ```
