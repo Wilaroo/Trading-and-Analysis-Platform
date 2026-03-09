@@ -43,7 +43,7 @@ const AICoachTab = ({
     <div className="grid lg:grid-cols-12 gap-4" data-testid="ai-coach-tab-content">
       {/* LEFT - AI Trading Assistant (Bot + AI integrated) - Takes more space */}
       <div className="lg:col-span-8">
-        <div className="h-[calc(100vh-200px)] min-h-[650px]">
+        <div className="h-[calc(100vh-120px)] min-h-[800px]">
           <AICommandPanel
             onTickerSelect={handleTickerClick}
             onViewChart={(ticker) => setChartSymbol(ticker)}
