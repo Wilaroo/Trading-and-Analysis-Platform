@@ -2023,3 +2023,50 @@ The AI assistant now has access to:
 - AI-generated reflections when LLM available
 
 **Status**: ✅ COMPLETE
+
+---
+
+## End-of-Day Auto-Generation Scheduler (March 2026)
+
+### Overview
+Automatic generation of Daily Report Cards (DRCs) and Playbooks at market close without manual intervention.
+
+### Implementation Details
+
+#### **Scheduler Configuration**
+- **DRC Generation**: 4:30 PM ET weekdays
+- **Playbook Analysis**: 4:45 PM ET weekdays
+- **Timezone**: America/New_York
+- **Library**: APScheduler (BackgroundScheduler)
+
+#### **Backend Components**
+| File | Purpose |
+|------|---------|
+| `/app/backend/services/eod_generation_service.py` | Scheduler and generation logic |
+| `/app/backend/server.py` (lines 114-116) | Scheduler initialization |
+| `/app/backend/routers/journal_router.py` (lines 660-765) | EOD API endpoints |
+
+#### **API Endpoints**
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/journal/eod/status` | GET | Get scheduler status and next run times |
+| `/api/journal/eod/trigger` | POST | Manually trigger EOD generation |
+| `/api/journal/eod/pending-playbooks` | GET | List AI-generated playbooks awaiting review |
+| `/api/journal/eod/pending-playbooks/{id}/approve` | POST | Approve pending playbook |
+| `/api/journal/eod/pending-playbooks/{id}/reject` | POST | Reject pending playbook |
+| `/api/journal/eod/logs` | GET | Get recent generation logs |
+
+#### **Frontend Updates**
+| Component | Changes |
+|-----------|---------|
+| `DRCTab.jsx` | Added Auto-Generation Status banner, AI Generated badge |
+| `PlaybookTab.jsx` | Added Pending Playbooks review section, approve/reject buttons |
+
+#### **Features**
+1. **Auto-Generation Banner**: Shows scheduler status, next run time
+2. **AI Generated Badge**: Marks auto-generated DRCs with timestamp
+3. **Pending Playbooks**: AI-generated playbooks require user approval before activation
+4. **Manual Override**: Users can still create manual entries alongside AI ones
+5. **Edit Capability**: All AI-generated content is editable
+
+**Status**: ✅ COMPLETE - Tested (25/25 backend tests passed)
