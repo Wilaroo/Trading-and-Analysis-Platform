@@ -1768,9 +1768,7 @@ const AICommandPanel = ({
   // Section expansion state - collapsed by default for more chat space
   const [expandedSections, setExpandedSections] = useState({
     positions: true,  // Show positions by default
-    botTrades: false,
-    earnings: false,
-    watchlist: false
+    botTrades: false
   });
   
   // Bot state
@@ -2756,87 +2754,6 @@ const AICommandPanel = ({
                       </div>
                     </div>
                   )}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          {/* Earnings Section */}
-          <div className="p-3 pt-0">
-            <SectionHeader 
-              icon={Calendar} 
-              title="Earnings" 
-              count={earnings.length}
-              isExpanded={expandedSections.earnings}
-              onToggle={() => toggleSection('earnings')}
-              compact
-            />
-            <AnimatePresence>
-              {expandedSections.earnings && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="overflow-hidden"
-                >
-                  <div className="mt-2 space-y-1 max-h-[100px] overflow-y-auto">
-                    {earnings.slice(0, 5).map((earn, idx) => (
-                      <div 
-                        key={idx}
-                        onClick={() => onTickerSelect?.({ symbol: earn.symbol, quote: {} })}
-                        className="flex items-center justify-between p-2 bg-zinc-800/50 rounded-lg hover:bg-zinc-800 cursor-pointer text-xs"
-                      >
-                        <span className="font-medium text-white">{earn.symbol}</span>
-                        <span className="text-zinc-500">{earn.timing || 'BMO'}</span>
-                      </div>
-                    ))}
-                    {earnings.length === 0 && (
-                      <p className="text-[10px] text-zinc-600 text-center py-2">No upcoming earnings</p>
-                    )}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          {/* Watchlist Section */}
-          <div className="p-3 pt-0">
-            <SectionHeader 
-              icon={Eye} 
-              title="Watchlist" 
-              count={watchlist.length}
-              isExpanded={expandedSections.watchlist}
-              onToggle={() => toggleSection('watchlist')}
-              compact
-            />
-            <AnimatePresence>
-              {expandedSections.watchlist && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="overflow-hidden"
-                >
-                  <div className="mt-2 space-y-1 max-h-[100px] overflow-y-auto">
-                    {watchlist.slice(0, 6).map((item, idx) => (
-                      <div 
-                        key={idx}
-                        onClick={() => onTickerSelect?.({ symbol: item.symbol, quote: item })}
-                        className="flex items-center justify-between p-2 bg-zinc-800/50 rounded-lg hover:bg-zinc-800 cursor-pointer text-xs"
-                      >
-                        <span className="font-medium text-white">{item.symbol}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-white">${formatPrice(item.price)}</span>
-                          <span className={item.change_percent >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                            {formatPercent(item.change_percent)}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                    {watchlist.length === 0 && (
-                      <p className="text-[10px] text-zinc-600 text-center py-2">Watchlist empty</p>
-                    )}
-                  </div>
                 </motion.div>
               )}
             </AnimatePresence>
