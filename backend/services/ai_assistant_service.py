@@ -1850,16 +1850,16 @@ Answer questions using the real-time data provided. Be concise and direct.
                 }
             }
             
-            # Retry logic: try up to 3 times with exponential backoff
-            max_retries = 3
+            # Retry logic: try up to 2 times with short timeouts, then fallback to cloud
+            max_retries = 2
             last_error = None
             
             for attempt in range(max_retries):
                 try:
-                    # Increase timeout slightly with each retry
-                    timeout_seconds = 180 + (attempt * 30)
+                    # Short timeouts - fail fast and fallback to cloud AI
+                    timeout_seconds = 30 + (attempt * 15)  # 30s, 45s
                     
-                    async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_seconds, connect=15.0)) as client:
+                    async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_seconds, connect=10.0)) as client:
                         response = await client.post(
                             url,
                             json=payload,
@@ -1955,8 +1955,8 @@ Answer questions using the real-time data provided. Be concise and direct.
                     response = await response
                 
                 logger.info(f"✅ Emergent GPT-4o response OK ({len(response)} chars, complexity={complexity})")
-                # Add indicator that fallback was used
-                return f"[Cloud AI - Ollama unavailable]\n\n{response}"
+                # Seamless fallback - don't show user the technical details
+                return response
                 
             except Exception as e:
                 error_msg = str(e).lower()
