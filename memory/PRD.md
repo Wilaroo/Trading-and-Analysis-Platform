@@ -1627,3 +1627,31 @@ Each card now shows:
 **Testing**: Verified with simulator-generated alerts (XOM, NFLX, etc.) - AI now correctly explains specific setup data.
 
 **Status**: ✅ COMPLETE
+
+---
+
+## Iteration 50 - "Explain Alert" Button Enhancement (March 2026)
+
+**Feature**: Added an "Explain this alert" button to each alert card in the Scanner Alerts widget, making it one-click to get AI reasoning.
+
+**Implementation**:
+1. **Frontend - RightSidebar.jsx**:
+   - Added `MessageSquare` icon import from lucide-react
+   - Added a new button with `data-testid="explain-alert-{symbol}"` 
+   - Button dispatches custom event `explainAlert` with symbol and alert data
+   - Button appears on hover (opacity-0 → opacity-100 transition)
+
+2. **Frontend - AICommandPanel.jsx**:
+   - Added `useEffect` hook to listen for `explainAlert` custom event
+   - When event received, auto-sends message: "Explain the reasoning for the {symbol} alert. Why was this setup identified?"
+   - Uses existing `sendMessage` function
+
+**UI/UX**:
+- Button uses purple hover effect (`hover:bg-purple-500/20`)
+- Icon turns purple on hover (`hover:text-purple-400`)
+- Positioned between QuickActions and Chart button
+- Shows tooltip: "Ask AI to explain this alert"
+
+**Testing**: Verified via screenshot - clicking button sends message to AI, AI analyzes and responds with specific alert reasoning.
+
+**Status**: ✅ COMPLETE
