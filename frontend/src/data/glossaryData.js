@@ -7,10 +7,11 @@ export const glossaryData = {
   // ==================== CATEGORIES ====================
   categories: [
     { id: 'scores', name: 'Scores & Grades', icon: 'Target', description: 'How we evaluate trading opportunities' },
+    { id: 'smb', name: 'SMB Methodology', icon: 'Briefcase', description: 'SMB Capital trading framework' },
     { id: 'technical', name: 'Technical Indicators', icon: 'TrendingUp', description: 'Price and volume based signals' },
     { id: 'momentum', name: 'Momentum & Volume', icon: 'Zap', description: 'Market energy and participation' },
     { id: 'levels', name: 'Support & Resistance', icon: 'Activity', description: 'Key price levels' },
-    { id: 'strategies', name: 'Trading Strategies', icon: 'Briefcase', description: 'Trade setups and patterns' },
+    { id: 'strategies', name: 'Trading Strategies', icon: 'Target', description: 'Trade setups and patterns' },
     { id: 'risk', name: 'Risk Management', icon: 'Shield', description: 'Position sizing and protection' },
     { id: 'orders', name: 'Order Types', icon: 'FileText', description: 'How to execute trades' },
     { id: 'market', name: 'Market Context', icon: 'Globe', description: 'Broader market conditions' },
@@ -893,9 +894,267 @@ When heavily shorted stocks rally:
 - SPY: S&P 500 ETF
 - QQQ: Nasdaq 100 ETF
 - DIA: Dow Jones ETF
-- VIX: Volatility Index`,
+- VIX: Volatility Index
+
+**SMB Capital:**
+- M2M: Move2Move (scalp)
+- T2H: Trade2Hold (swing)
+- R2S: Reason2Sell
+- EV: Expected Value`,
       relatedTerms: [],
       tags: ['abbreviation', 'acronym', 'shorthand']
+    },
+    // === SMB CAPITAL METHODOLOGY ===
+    {
+      id: 'smb-methodology',
+      term: 'SMB Capital Methodology',
+      category: 'strategies',
+      shortDef: 'Professional trading framework with 5-variable scoring, trade styles, and disciplined execution',
+      fullDef: `SMB Capital is a proprietary trading firm in NYC known for their systematic approach to intraday trading.
+
+**Core Principles:**
+1. **Setup vs Trade**: A setup is a repeatable pattern with edge. A trade is real-time execution of that setup.
+2. **5-Variable Scoring**: Every trade idea is scored on Big Picture, Fundamentals, Technical, Tape, and Intuition.
+3. **Trade Styles**: M2M (scalp 1R), T2H (swing 3R+), A+ (max conviction 10R+)
+4. **Tiered Entries**: Scale in with Tier 1 (feelers), Tier 2 (confirmation), Tier 3 (A+ size)
+5. **Reasons2Sell**: Exit rules specific to each trade style
+
+**TradeCommand Integration:**
+- SMB 5-Variable score automatically calculated from our existing metrics
+- Trade style recommendations based on setup type and context
+- Reasons2Sell monitoring for open positions
+- AI coaching uses SMB methodology for guidance`,
+      relatedTerms: ['trade-style', 'smb-5var', 'reasons2sell', 'tiered-entry'],
+      tags: ['smb', 'methodology', 'framework']
+    },
+    {
+      id: 'trade-style',
+      term: 'Trade Style (M2M/T2H/A+)',
+      category: 'strategies',
+      shortDef: 'SMB execution style determining how long to hold and when to exit',
+      fullDef: `Trade styles define your execution approach based on setup quality and market conditions.
+
+**Move2Move (M2M):**
+- Target: 1R (1x your risk)
+- Win Rate: 60-70%
+- Exit: First momentum pause or target hit
+- Use for: Scalps, weak setups, choppy markets
+
+**Trade2Hold (T2H):**
+- Target: 3-5R
+- Win Rate: 40-50%
+- Exit: Only on Reason2Sell trigger (9 EMA break, target, thesis invalid)
+- Use for: Trending setups, strong catalysts
+
+**A+ Setup:**
+- Target: 5-10R+
+- Exit: Hold until major thesis invalidation
+- Criteria: All 5 SMB variables score 7+ (total 40+/50)
+- Use for: Best setups of the week
+
+**Color Coding in TradeCommand:**
+- M2M: Blue badge
+- T2H: Purple badge
+- A+: Gold badge`,
+      relatedTerms: ['smb-methodology', 'reasons2sell'],
+      tags: ['smb', 'trade-style', 'execution']
+    },
+    {
+      id: 'smb-5var',
+      term: 'SMB 5-Variable Score',
+      category: 'scores',
+      shortDef: 'Five key variables scored 1-10 each: Big Picture, Fundamental, Technical, Tape, Intuition',
+      fullDef: `SMB Capital's 5-Variable scoring system for trade evaluation.
+
+**The Variables (1-10 each, 50 total):**
+
+1. **Big Picture** - Is the market helping or hurting?
+   - SPY/QQQ trend
+   - Sector alignment
+   - Market regime (momentum vs chop)
+
+2. **Intraday Fundamental** - Why is the stock moving?
+   - Catalyst strength (earnings, news)
+   - Earnings score (-10 to +10)
+   - Fresh vs stale news
+
+3. **Technical Level** - Is there a clear level to trade against?
+   - Support/resistance clarity
+   - Risk/reward ratio
+   - Moving average alignment
+
+4. **Tape Reading** - What is the order flow telling us?
+   - Bid/ask spread and size
+   - Aggressive buyers/sellers
+   - Hidden buyer/seller detection
+   - Re-bid/re-offer signals
+
+5. **Intuition** - Pattern recognition confidence
+   - Similar historical patterns
+   - Setup confidence
+   - "Does it feel right?"
+
+**Grades:**
+- A+ (40+, no var below 7): Max conviction
+- A (35+): Strong setup
+- B (25+): Good setup
+- C (20+): Moderate
+- D (<20): Avoid
+
+**In TradeCommand:**
+- SMB Grade shown on alert cards
+- 5-variable breakdown in scoring details
+- Auto-calculated from existing metrics`,
+      relatedTerms: ['smb-methodology', 'tape-score', 'trade-style'],
+      tags: ['smb', 'score', '5-variable']
+    },
+    {
+      id: 'tape-score',
+      term: 'Tape Score (Level 2 Box)',
+      category: 'momentum',
+      shortDef: 'Order flow quality score (1-10) based on bid/ask analysis and SMB tape reading signals',
+      fullDef: `The Tape Score evaluates real-time order flow using SMB Capital's "Level 2 Box" methodology.
+
+**What We Analyze:**
+
+**Level 1 (Summary):**
+- Last price, bid, ask
+- Spread (tight = institutional interest)
+
+**Level 2 (Depth):**
+- Bid size vs ask size
+- Thick levels (large size)
+
+**Tape Signals:**
+- **Aggressive Buyer**: Hitting the ask consistently
+- **Aggressive Seller**: Hitting the bid consistently
+- **Hidden Buyer**: Large buyer absorbing selling
+- **Hidden Seller**: Large seller blocking breakouts
+- **Re-bid Signal**: Price broke support but immediately re-bid (bullish)
+- **Re-offer Signal**: Price broke resistance but immediately re-offered (bearish)
+- **Stuffed Pattern**: Failed breakout, hidden seller blocked
+
+**Scoring:**
+- 9-10: Very Strong (take trade)
+- 7-8: Strong (good confirmation)
+- 5-6: Moderate (wait for more)
+- 3-4: Weak (consider passing)
+- 1-2: Very Weak (avoid)
+
+**In TradeCommand:**
+- T:# shown on alert cards
+- Full breakdown via API
+- Auto-analyzed from quote data`,
+      relatedTerms: ['smb-5var', 'bid-ask', 'order-flow'],
+      tags: ['smb', 'tape', 'order-flow', 'level2']
+    },
+    {
+      id: 'reasons2sell',
+      term: 'Reasons2Sell (R2S)',
+      category: 'risk',
+      shortDef: 'SMB framework for trade exits - specific triggers for when to close a position',
+      fullDef: `Reasons2Sell is SMB Capital's disciplined exit framework. Only exit when a R2S triggers.
+
+**Core Reasons2Sell:**
+
+1. **Price Target Hit** - Predetermined target reached
+2. **Trend Violation** - Price broke 9 EMA or key trendline (critical for T2H)
+3. **Thesis Invalid** - Original trade reason no longer valid
+4. **Market Resistance** - SPY/QQQ hit major level
+5. **Tape Exhaustion** - Volume/momentum dried up
+6. **Parabolic Extension** - Too far from VWAP/value
+7. **Breaking News** - Fresh headlines change the setup
+8. **End of Day** - Market close approaching (last 15 min)
+9. **Give-Back Rule** - Gave back 30-50% of peak profit
+10. **Time Stop** - Trade not working in expected timeframe
+
+**By Trade Style:**
+- **M2M**: Target hit, tape slows, time stop
+- **T2H**: 9 EMA break, target hit, thesis invalid, give-back
+- **A+**: Major trend break, thesis invalid, market resistance
+
+**In TradeCommand:**
+- R2S monitor on open positions
+- Real-time checking every 30 seconds
+- Exit signal alerts with severity (warning vs exit)`,
+      relatedTerms: ['trade-style', 'smb-methodology', 'stop-loss'],
+      tags: ['smb', 'exit', 'risk-management']
+    },
+    {
+      id: 'tiered-entry',
+      term: 'Tiered Entry',
+      category: 'risk',
+      shortDef: 'SMB position scaling - enter in 3 tiers based on confirmation level',
+      fullDef: `Tiered Entry is SMB Capital's risk management approach for scaling into positions.
+
+**The Three Tiers:**
+
+**Tier 1 - Feelers (30%):**
+- Initial position at key level
+- Requires: Price at trigger, basic tape confirmation
+- Purpose: Get skin in the game
+
+**Tier 2 - Confirmation (40%):**
+- Add after setup confirms
+- Requires: Setup holds, tape improves, pattern validates
+- Purpose: Add on confirmation
+
+**Tier 3 - A+ Size (30%):**
+- Full conviction add
+- Requires: All 5 SMB variables align, A+ grade
+- Purpose: Maximize best setups
+
+**Allocations by Trade Style:**
+- M2M: 70/20/10 (front-loaded for quick moves)
+- T2H: 30/40/30 (gradual scaling)
+- A+: 40/30/30 (aggressive but controlled)
+
+**In TradeCommand:**
+- Tier calculator API: /api/smb/tiered-entry/calculate
+- Automatically adjusts for grade (A = more aggressive)
+- Risk-based share calculation`,
+      relatedTerms: ['trade-style', 'position-sizing', 'risk-management'],
+      tags: ['smb', 'scaling', 'position-sizing']
+    },
+    {
+      id: 'earnings-catalyst-score',
+      term: 'Earnings Catalyst Score (-10 to +10)',
+      category: 'earnings',
+      shortDef: 'SMB scoring for earnings reports based on EPS, revenue, margins, and guidance',
+      fullDef: `SMB Capital's earnings scoring system for evaluating post-earnings opportunities.
+
+**The Big Three (Initial Score):**
+1. **EPS vs Estimate** - Earnings per share surprise %
+2. **Revenue vs Estimate** - Top line surprise %
+3. **Margins** - Expanding, flat, or contracting
+
+**Then Add:**
+4. **Guidance** - Quarterly and/or full year outlook
+
+**Score Meanings:**
+- **+10 Black Swan**: Extreme beat, everything perfect (NVDA 05/24/2023)
+- **+9 Exponential**: 15%+ EPS, 8%+ revenue, both guidances raised
+- **+8 Double Beat**: 5-10% EPS, 4-6% revenue, guidance raised
+- **+7 Inline Beat**: <5% surprise, limited opportunity
+- **+5/0 Neutral**: Mixed/no surprise, avoid
+- **-7 to -10**: Mirror of positive (shorts)
+
+**Modifiers (±1-2):**
+- Management track record (under-promise = +1)
+- Competitor comparison (better = +1)
+- Revenue guidance missing (efficiency only = -1)
+
+**Trading Approach by Score:**
+- ±10: Max conviction, trend all day
+- ±9: Back-through-open, buy/short PM high/low
+- ±8: Gap Give and Go / Gap Pick and Roll
+- ±7: Wait for setup to "fall in lap"
+- ±6: Avoid or fade extremes only
+
+**3-Minute Rule:**
+Must complete scoring in under 3 minutes. If it takes longer, the edge is unclear.`,
+      relatedTerms: ['smb-methodology', 'earnings', 'catalyst-score'],
+      tags: ['smb', 'earnings', 'catalyst']
     }
   ]
 };

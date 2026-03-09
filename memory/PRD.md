@@ -344,6 +344,16 @@ Triggers AI Coaching Notification
     - **New API Endpoints**: `/api/smb/reasons-to-sell/check`, `/api/smb/reasons-to-sell/list`, `/api/smb/tiered-entry/calculate`, `/api/smb/tape/analyze`
     - **Scoring Engine Enhanced**: `quick_stats` now includes `smb_grade`, `smb_is_a_plus`, `tape_score`, `tape_bias`, `trade_style`
     - Backend: `/app/backend/services/smb_unified_scoring.py`, updated `scoring_engine.py`, `ai_assistant_service.py`
+- ✅ **SMB Capital Integration Phase 3 (Mar 9, 2026)**: Full system integration
+    - **Frontend Alert Cards**: Updated with SMB grade, tape score, trade style badges (M2M/T2H/A+), direction bias warnings
+    - **Reasons2Sell Monitor**: Real-time exit signal tracking for open positions in TradingBotPanel
+    - **Scanner Integration**: Alerts now auto-populate SMB fields (trade_style, direction_bias, target_r_multiple)
+    - **Trading Bot Enhancement**: BotTrade dataclass includes SMB fields for style-based management
+    - **Market Intel Enhancement**: Scanner context now includes SMB metadata (grade, style, tape score)
+    - **AI Coaching Enhancement**: SMB methodology context injected into coaching prompts with tiered entry suggestions
+    - **Glossary Updated**: 8 new SMB terminology entries (methodology, trade styles, 5-var score, tape, R2S, tiered entry, earnings)
+    - Frontend: `RightSidebar.jsx` (alert cards), `TradingBotPanel.jsx` (R2S monitor), `glossaryData.js`
+    - Backend: `enhanced_scanner.py`, `trading_bot_service.py`, `market_intel_service.py`
 
 ### Data Source Clarification
 | Component | Data Source | Latency |

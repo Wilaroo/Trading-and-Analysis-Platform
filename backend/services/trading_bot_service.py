@@ -366,17 +366,24 @@ class BotTrade:
     quality_score: int
     quality_grade: str
     
-    # Price levels
+    # Price levels (required fields before defaults)
     entry_price: float
     current_price: float
     stop_price: float
     target_prices: List[float]
     
-    # Position details
+    # Position details (required)
     shares: int
     risk_amount: float
     potential_reward: float
     risk_reward_ratio: float
+    
+    # SMB Integration fields (with defaults)
+    trade_style: str = "trade_2_hold"  # "move_2_move", "trade_2_hold", "a_plus"
+    smb_grade: str = "B"              # A+, A, B+, B, C, D
+    tape_score: int = 5               # 1-10
+    target_r_multiple: float = 2.0    # Target R based on trade style
+    direction_bias: str = "both"      # Setup's primary direction
     
     # Scale-out tracking (with defaults)
     original_shares: int = 0  # Original position size before scale-outs
@@ -1041,6 +1048,12 @@ class TradingBotService:
                 timeframe=timeframe_str,
                 quality_score=quality_score,
                 quality_grade=quality_grade,
+                # SMB Integration fields (from alert or defaults)
+                trade_style=alert.get("trade_style", "trade_2_hold"),
+                smb_grade=alert.get("smb_grade", quality_grade),
+                tape_score=alert.get("tape_score", 5),
+                target_r_multiple=alert.get("target_r_multiple", risk_reward_ratio),
+                direction_bias=alert.get("direction_bias", "both"),
                 entry_price=entry_price,
                 current_price=current_price,
                 stop_price=stop_price,
