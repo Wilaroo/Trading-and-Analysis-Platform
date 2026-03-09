@@ -228,127 +228,112 @@ const playTradeAlert = () => {
   }
 };
 
-// Trade Alert Message Component - appears in chat with distinct styling
+// Trade Alert Message Component - COMPACT version for chat display
 const TradeAlertMessage = ({ alert, onExecute, onPass, onTickerClick, onViewChart, executing }) => {
   const isPending = !alert.executed && !alert.passed;
   const direction = alert.direction || 'LONG';
   const isLong = direction.toUpperCase() === 'LONG';
   
+  // Map backend field names to frontend expected names
+  // Backend sends data in two formats:
+  // 1. Direct fields: trigger_price, stop_loss, target (from /api/live-scanner/alerts)
+  // 2. Nested in alert_data: alert_data.trigger_price, alert_data.stop_loss, alert_data.target (from coaching notifications)
+  // Frontend expects: entry, target, stop
+  const alertData = alert.alert_data || {};
+  const entryPrice = alert.entry || alert.trigger_price || alertData.trigger_price || alert.current_price || alertData.current_price;
+  const targetPrice = alert.target || alertData.target;
+  const stopPrice = alert.stop || alert.stop_loss || alertData.stop_loss;
+  const riskReward = alert.risk_reward || alertData.risk_reward;
+  
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.95, y: 10 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      className="relative"
-    >
-      {/* Glowing border effect */}
-      <div className={`absolute inset-0 rounded-xl ${
-        isLong ? 'bg-emerald-500/20' : 'bg-red-500/20'
-      } blur-sm`} />
-      
-      <div className={`relative p-4 rounded-xl border-2 ${
+      initial={{ opacity: 0, y: 5 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={`p-2.5 rounded-lg border ${
         isLong 
-          ? 'bg-gradient-to-br from-emerald-900/40 to-emerald-950/60 border-emerald-500/50' 
-          : 'bg-gradient-to-br from-red-900/40 to-red-950/60 border-red-500/50'
-      }`}>
-        {/* Header with Alert Badge */}
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <div className={`px-2 py-1 rounded-md text-xs font-bold uppercase ${
-              isLong ? 'bg-emerald-500 text-black' : 'bg-red-500 text-white'
-            }`}>
-              <Zap className="w-3 h-3 inline mr-1" />
-              {direction} ALERT
-            </div>
-            <button
-              onClick={() => onTickerClick?.(alert.symbol)}
-              className="px-2 py-1 bg-white/10 rounded text-sm font-bold text-white hover:bg-white/20 transition-colors"
-            >
-              {alert.symbol}
-            </button>
-          </div>
-          <span className="text-[10px] text-zinc-500">
-            {new Date(alert.timestamp).toLocaleTimeString()}
-          </span>
-        </div>
-        
-        {/* Strategy & Reasoning */}
-        <div className="mb-3">
-          <p className="text-sm font-semibold text-white mb-1">{alert.strategy || 'Trade Opportunity'}</p>
-          <p className="text-xs text-zinc-300">{alert.reasoning || alert.description}</p>
-        </div>
-        
-        {/* Key Levels */}
-        <div className="grid grid-cols-3 gap-2 mb-3 text-center">
-          <div className="bg-black/30 rounded-lg p-2">
-            <p className="text-[9px] text-zinc-500 uppercase">Entry</p>
-            <p className="text-sm font-bold text-white">${alert.entry?.toFixed(2) || '--'}</p>
-          </div>
-          <div className="bg-black/30 rounded-lg p-2">
-            <p className="text-[9px] text-zinc-500 uppercase">Target</p>
-            <p className="text-sm font-bold text-emerald-400">${alert.target?.toFixed(2) || '--'}</p>
-          </div>
-          <div className="bg-black/30 rounded-lg p-2">
-            <p className="text-[9px] text-zinc-500 uppercase">Stop</p>
-            <p className="text-sm font-bold text-red-400">${alert.stop?.toFixed(2) || '--'}</p>
-          </div>
-        </div>
-        
-        {/* Confidence & R/R */}
-        {(alert.confidence || alert.risk_reward) && (
-          <div className="flex items-center gap-3 mb-3 text-xs">
-            {alert.confidence && (
-              <span className="text-zinc-400">
-                Confidence: <span className="text-cyan-400 font-semibold">{alert.confidence}%</span>
-              </span>
-            )}
-            {alert.risk_reward && (
-              <span className="text-zinc-400">
-                R/R: <span className="text-amber-400 font-semibold">{alert.risk_reward}</span>
-              </span>
-            )}
-          </div>
-        )}
-        
-        {/* Action Buttons */}
-        {isPending && (
-          <div className="flex gap-2">
-            <button
-              onClick={() => onExecute?.(alert)}
-              disabled={executing}
-              className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
-                isLong 
-                  ? 'bg-emerald-500 text-black hover:bg-emerald-400' 
-                  : 'bg-red-500 text-white hover:bg-red-400'
-              } disabled:opacity-50`}
-            >
-              {executing ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : `Execute ${direction}`}
-            </button>
-            <button
-              onClick={() => onPass?.(alert)}
-              className="px-4 py-2 rounded-lg text-sm font-medium bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
-            >
-              Pass
-            </button>
-            <button
-              onClick={() => onViewChart?.(alert.symbol)}
-              className="px-3 py-2 rounded-lg text-sm bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors"
-            >
-              <LineChart className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-        
-        {/* Executed/Passed Status */}
-        {!isPending && (
-          <div className={`text-center py-2 rounded-lg text-sm font-medium ${
-            alert.executed 
-              ? 'bg-emerald-500/20 text-emerald-400' 
-              : 'bg-zinc-700/50 text-zinc-400'
+          ? 'bg-emerald-900/30 border-emerald-500/40' 
+          : 'bg-red-900/30 border-red-500/40'
+      }`}
+      data-testid={`trade-alert-${alert.symbol}`}
+    >
+      {/* Compact Header Row */}
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-1.5">
+          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+            isLong ? 'bg-emerald-500 text-black' : 'bg-red-500 text-white'
           }`}>
-            {alert.executed ? '✓ Executed' : '○ Passed'}
-          </div>
-        )}
+            {direction}
+          </span>
+          <button
+            onClick={() => onTickerClick?.(alert.symbol)}
+            className="text-sm font-bold text-white hover:text-cyan-400 transition-colors"
+          >
+            {alert.symbol}
+          </button>
+          {riskReward > 0 && (
+            <span className="text-[9px] text-amber-400 font-medium">
+              {riskReward.toFixed(1)}R
+            </span>
+          )}
+        </div>
+        <span className="text-[9px] text-zinc-500">
+          {new Date(alert.timestamp || alert.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </span>
       </div>
+      
+      {/* Setup Type - single line */}
+      <p className="text-[10px] text-zinc-400 mb-1.5 truncate">
+        {alert.strategy || alert.setup_type?.replace(/_/g, ' ') || 'Trade Opportunity'}
+      </p>
+      
+      {/* Compact Price Row - inline */}
+      <div className="flex items-center gap-3 text-[10px] mb-2">
+        <span className="text-zinc-500">
+          Entry: <span className="text-white font-mono">${entryPrice?.toFixed(2) || '--'}</span>
+        </span>
+        <span className="text-zinc-500">
+          Target: <span className="text-emerald-400 font-mono">${targetPrice?.toFixed(2) || '--'}</span>
+        </span>
+        <span className="text-zinc-500">
+          Stop: <span className="text-red-400 font-mono">${stopPrice?.toFixed(2) || '--'}</span>
+        </span>
+      </div>
+      
+      {/* Compact Action Buttons */}
+      {isPending && (
+        <div className="flex gap-1.5">
+          <button
+            onClick={() => onExecute?.(alert)}
+            disabled={executing}
+            className={`flex-1 py-1.5 rounded text-[10px] font-bold transition-all ${
+              isLong ? 'bg-emerald-500 text-black hover:bg-emerald-400' : 'bg-red-500 text-white hover:bg-red-400'
+            } disabled:opacity-50`}
+          >
+            {executing ? <Loader2 className="w-3 h-3 animate-spin mx-auto" /> : 'Take'}
+          </button>
+          <button
+            onClick={() => onPass?.(alert)}
+            className="px-2.5 py-1.5 rounded text-[10px] font-medium bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors"
+          >
+            Pass
+          </button>
+          <button
+            onClick={() => onViewChart?.(alert.symbol)}
+            className="px-2 py-1.5 rounded bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors"
+          >
+            <LineChart className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+      
+      {/* Status Badge */}
+      {!isPending && (
+        <div className={`text-center py-1 rounded text-[10px] font-medium ${
+          alert.executed ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-700/50 text-zinc-400'
+        }`}>
+          {alert.executed ? '✓ Executed' : '○ Passed'}
+        </div>
+      )}
     </motion.div>
   );
 };

@@ -255,108 +255,84 @@ const StartupModal = ({ onComplete }) => {
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.9, opacity: 0 }}
-          className="relative w-full max-w-3xl mx-4 bg-zinc-900 rounded-2xl border border-zinc-700 shadow-2xl overflow-hidden"
+          className="relative w-full max-w-xl mx-4 bg-zinc-900 rounded-xl border border-zinc-700 shadow-2xl overflow-hidden"
         >
-          {/* Header */}
-          <div className="relative px-8 pt-8 pb-6 bg-gradient-to-br from-cyan-500/10 to-purple-500/10 border-b border-zinc-700">
-            <div className="flex items-center gap-4">
-              <div className="p-3 rounded-xl bg-gradient-to-br from-cyan-500 to-purple-500">
-                <Rocket className="w-8 h-8 text-white" />
+          {/* Compact Header */}
+          <div className="relative px-6 py-4 bg-gradient-to-br from-cyan-500/10 to-purple-500/10 border-b border-zinc-700">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-gradient-to-br from-cyan-500 to-purple-500">
+                <Rocket className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-white">Welcome to TradeCommand</h1>
-                <p className="text-zinc-400 text-sm mt-1">Your AI-powered trading intelligence hub</p>
+                <h1 className="text-lg font-bold text-white">TradeCommand</h1>
+                <p className="text-zinc-400 text-xs">AI-powered trading intelligence</p>
               </div>
             </div>
           </div>
 
-          {/* Content */}
-          <div className="px-8 py-6 max-h-[60vh] overflow-y-auto">
-            {/* Features Grid */}
-            <div className="mb-8">
-              <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wide mb-4">
-                Key Features
-              </h2>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {FEATURES.map((feature, idx) => (
+          {/* Content - Compact System Status Only */}
+          <div className="px-6 py-4">
+            {/* System Status - Compact 2-column list */}
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 bg-zinc-800/30 rounded-lg p-3 border border-zinc-700/50">
+              {STARTUP_PROCESSES.map((process) => {
+                const status = processes[process.id];
+                return (
                   <div
-                    key={idx}
-                    className="p-4 rounded-lg bg-zinc-800/50 border border-zinc-700/50 hover:border-cyan-500/30 transition-all hover:bg-zinc-800/80 group"
+                    key={process.id}
+                    className="flex items-center gap-2"
+                    data-testid={`startup-process-${process.id}`}
                   >
-                    <div className="flex items-start justify-between mb-2">
-                      <feature.icon className="w-5 h-5 text-cyan-400" />
-                      {feature.highlight && (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400 font-medium">
-                          {feature.highlight}
-                        </span>
-                      )}
-                    </div>
-                    <h3 className="text-sm font-semibold text-white mb-1">{feature.title}</h3>
-                    <p className="text-xs text-zinc-400 leading-relaxed mb-2">{feature.description}</p>
-                    <p className="text-[10px] text-zinc-500 leading-relaxed group-hover:text-zinc-400 transition-colors">
-                      {feature.details}
-                    </p>
+                    {getStatusIcon(status)}
+                    <span className={`text-xs truncate ${
+                      status === 'success' ? 'text-green-400' :
+                      status === 'warning' ? 'text-yellow-400' :
+                      status === 'error' ? 'text-red-400' :
+                      status === 'loading' ? 'text-cyan-400' :
+                      'text-zinc-500'
+                    }`}>
+                      {status === 'success' || status === 'warning' 
+                        ? process.successLabel 
+                        : process.label}
+                    </span>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
 
-            {/* Startup Status */}
-            <div>
-              <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wide mb-4">
-                System Status
-              </h2>
-              <div className="space-y-2 bg-zinc-800/30 rounded-lg p-4 border border-zinc-700/50">
-                {STARTUP_PROCESSES.map((process) => {
-                  const status = processes[process.id];
-                  return (
-                    <div
-                      key={process.id}
-                      className="flex items-center gap-3"
-                      data-testid={`startup-process-${process.id}`}
-                    >
-                      {getStatusIcon(status)}
-                      <span className={`text-sm ${
-                        status === 'success' ? 'text-green-400' :
-                        status === 'warning' ? 'text-yellow-400' :
-                        status === 'error' ? 'text-red-400' :
-                        status === 'loading' ? 'text-cyan-400' :
-                        'text-zinc-500'
-                      }`}>
-                        {status === 'success' || status === 'warning' 
-                          ? process.successLabel 
-                          : process.label}
-                      </span>
-                    </div>
-                  );
-                })}
+            {error && (
+              <div className="mt-3 p-2 rounded-lg bg-red-500/10 border border-red-500/30">
+                <p className="text-xs text-red-400">{error}</p>
               </div>
-
-              {error && (
-                <div className="mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30">
-                  <p className="text-sm text-red-400">{error}</p>
+            )}
+            
+            {/* Compact feature hints - single line each */}
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {FEATURES.slice(0, 3).map((feature, idx) => (
+                <div key={idx} className="flex items-center gap-1.5 text-[10px] text-zinc-500">
+                  <feature.icon className="w-3 h-3 text-cyan-400/70 shrink-0" />
+                  <span className="truncate">{feature.title}</span>
                 </div>
-              )}
+              ))}
             </div>
           </div>
 
-          {/* Footer */}
-          <div className="px-8 py-4 bg-zinc-800/50 border-t border-zinc-700 flex items-center justify-between">
+          {/* Compact Footer */}
+          <div className="px-6 py-3 bg-zinc-800/50 border-t border-zinc-700 flex items-center justify-between">
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
                 checked={dontShowAgain}
                 onChange={(e) => setDontShowAgain(e.target.checked)}
-                className="w-4 h-4 rounded border-zinc-600 bg-zinc-700 text-cyan-500 focus:ring-cyan-500"
+                className="w-3.5 h-3.5 rounded border-zinc-600 bg-zinc-700 text-cyan-500 focus:ring-cyan-500"
                 data-testid="dont-show-again-checkbox"
               />
-              <span className="text-sm text-zinc-400">Don't show this again</span>
+              <span className="text-xs text-zinc-400">Don't show again</span>
             </label>
 
             <button
               onClick={handleGetStarted}
               disabled={!allReady && !error}
-              className={`px-6 py-2.5 rounded-lg font-medium transition-all flex items-center gap-2 ${
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-1.5 ${
                 allReady || error
                   ? 'bg-gradient-to-r from-cyan-500 to-purple-500 text-white hover:shadow-lg hover:shadow-cyan-500/25'
                   : 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
@@ -365,13 +341,13 @@ const StartupModal = ({ onComplete }) => {
             >
               {allReady || error ? (
                 <>
-                  <Zap className="w-4 h-4" />
+                  <Zap className="w-3.5 h-3.5" />
                   Get Started
                 </>
               ) : (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Starting up...
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Starting...
                 </>
               )}
             </button>
