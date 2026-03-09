@@ -1655,3 +1655,118 @@ Each card now shows:
 **Testing**: Verified via screenshot - clicking button sends message to AI, AI analyzes and responds with specific alert reasoning.
 
 **Status**: ✅ COMPLETE
+
+---
+
+## Iteration 51 - SMB Capital EV Tracking System (March 2026)
+
+**Feature**: Implemented full SMB Capital-style Expected Value (EV) tracking and workflow management system.
+
+### Core Formula (SMB Capital Style)
+```
+EV = (win_rate × avg_win_R) – (loss_rate × avg_loss_R)
+```
+
+### New Files Created
+1. **`backend/services/ev_tracking_service.py`** - EV calculation engine and workflow state machine
+2. **`backend/routers/ev_tracking.py`** - API endpoints for EV tracking
+
+### Key Features
+
+**1. Expected Value Calculation**
+- Tracks R-multiples per setup (not just win/loss)
+- Calculates EV using SMB's formula
+- Maintains rolling EV trend (last 20 trades)
+- Determines if EV is improving over time
+
+**2. EV Gates (Sizing Recommendations)**
+| Gate | EV Threshold | Size Multiplier | Recommendation |
+|------|--------------|-----------------|----------------|
+| A_SIZE | > 0.5R | 1.5x | Go big - strong edge |
+| GREENLIGHT | > 0.2R | 1.0x | Standard size |
+| CAUTIOUS | > 0R | 0.5x | Reduced size |
+| REVIEW | > -0.2R | 0.25x | Needs analysis |
+| DROP | < -0.2R | 0x | Remove from playbook |
+
+**3. SMB Workflow State Machine**
+```
+IDEA_GEN → FILTER_GRADE → TRADE_PLAN → EXECUTION → REVIEW_EV
+```
+- **Idea Gen**: Create trade idea with catalyst score
+- **Filter/Grade**: Assign A/B/C grade based on EV, catalyst, context
+- **Trade Plan**: Define entry, stops, targets with EV-adjusted sizing
+- **Execution**: Mark trade as live
+- **Review**: Record R-multiple, update EV, close loop
+
+**4. Trade Grading (A/B/C)**
+- A-grade: Score ≥70 (best setups, 1.2x size bonus)
+- B-grade: Score 45-69 (standard setups)
+- C-grade: Score <45 (marginal, reduced size)
+
+Grading factors:
+- R:R ratio (30 pts max)
+- Historical EV (30 pts max)
+- Tape confirmation (20 pts max)
+- Priority/catalyst (15 pts max)
+- Market context (10 pts max)
+
+**5. Enhanced Data Models**
+- `StrategyStats` now includes R-multiples, EV calculation, EV trend
+- `LiveAlert` now includes `strategy_ev_r`, `trade_grade`, `projected_r`, `workflow_state`
+
+### API Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/ev/report` | GET | Get EV report for one/all setups |
+| `/api/ev/playbook` | GET | Get PlayBook summary (positive/negative EV setups) |
+| `/api/ev/record-outcome` | POST | Record R-multiple for EV calculation |
+| `/api/ev/calculate` | POST | Manually recalculate EV |
+| `/api/ev/workflow/idea` | POST | Create trade idea |
+| `/api/ev/workflow/grade` | POST | Filter and grade idea |
+| `/api/ev/workflow/plan` | POST | Create trade plan |
+| `/api/ev/workflow/execute` | POST | Mark as executed |
+| `/api/ev/workflow/review` | POST | Review trade, update EV |
+| `/api/ev/active-ideas` | GET | Get active workflow ideas |
+| `/api/ev/setup-gates` | GET | Get EV gates for all setups |
+
+### SMB's 20 Core Setups Tracked
+1. Changing Fundamentals
+2. Breakout Trade
+3. Big Dawg Trade
+4. Technical Analysis
+5. Opening Drive
+6. IPO Trade
+7. 2nd Day Trade
+8. Elite Trading 101
+9. Return Pullback
+10. Scalp Trade
+11. Stuffed Trade
+12. Multiple Time Frame Support
+13. Dr. S Trades
+14. Market Play Trade
+15. Breaking News
+16. Bounce Trades
+17. Gap and Go Trade
+18. Low Float Trade
+19. Stock Filters
+20. VWAP with Shark
+
+Plus our custom setups: rubber_band, vwap_bounce, vwap_fade, orb, hitchhiker, spencer_scalp, etc.
+
+### Integration with AI Assistant
+- AI context now includes EV data when explaining alerts
+- Shows: Historical Win Rate, Avg Win R, Avg Loss R, EV per trade, EV Gate, Size Recommendation
+
+### Testing Results
+```
+Setup: rubber_band (11 trades)
+Win Rate: 63.6%
+Avg Win R: 2.47
+Avg Loss R: 0.88
+Expected Value: 1.25R per trade
+EV Gate: A_SIZE
+Size Multiplier: 1.5x
+Recommendation: A-SIZE - Strong edge, increase position size
+```
+
+**Status**: ✅ COMPLETE

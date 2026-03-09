@@ -172,7 +172,7 @@ class TapeReading:
 
 @dataclass
 class StrategyStats:
-    """Win-rate tracking per strategy"""
+    """Win-rate and Expected Value tracking per strategy (SMB-style)"""
     setup_type: str
     total_alerts: int = 0
     alerts_triggered: int = 0
@@ -186,13 +186,112 @@ class StrategyStats:
     avg_rr_achieved: float = 0.0
     last_updated: str = ""
     
+    # R-Multiple tracking (SMB-style)
+    r_outcomes: List[float] = field(default_factory=list)  # List of R-multiples achieved
+    avg_win_r: float = 0.0  # Average win in R-multiples
+    avg_loss_r: float = 1.0  # Average loss in R-multiples (typically 1R)
+    expected_value_r: float = 0.0  # EV per trade in R-multiples
+    
+    # SMB workflow grade distribution
+    a_grade_count: int = 0
+    b_grade_count: int = 0
+    c_grade_count: int = 0
+    a_grade_win_rate: float = 0.0
+    b_grade_win_rate: float = 0.0
+    
+    # EV trend (last 20 trades)
+    ev_trend: List[float] = field(default_factory=list)
+    ev_improving: bool = False
+    
     def update_win_rate(self):
-        """Recalculate win rate"""
+        """Recalculate win rate and Expected Value"""
         if self.alerts_triggered > 0:
             self.win_rate = self.alerts_won / self.alerts_triggered
         if self.alerts_lost > 0 and self.avg_loss != 0:
             self.profit_factor = (self.alerts_won * abs(self.avg_win)) / (self.alerts_lost * abs(self.avg_loss))
+        
+        # Calculate Expected Value in R-multiples (SMB formula)
+        # EV = (win_rate × avg_win_R) – (loss_rate × avg_loss_R)
+        self._calculate_expected_value()
         self.last_updated = datetime.now(timezone.utc).isoformat()
+    
+    def _calculate_expected_value(self):
+        """Calculate EV using SMB Capital's formula: EV = (p_win × avg_win) – (p_loss × avg_loss)"""
+        if len(self.r_outcomes) < 5:  # Need minimum sample size
+            return
+        
+        wins_r = [r for r in self.r_outcomes if r > 0]
+        losses_r = [r for r in self.r_outcomes if r <= 0]
+        
+        if wins_r:
+            self.avg_win_r = sum(wins_r) / len(wins_r)
+        if losses_r:
+            self.avg_loss_r = abs(sum(losses_r) / len(losses_r))
+        
+        loss_rate = 1 - self.win_rate
+        self.expected_value_r = (self.win_rate * self.avg_win_r) - (loss_rate * self.avg_loss_r)
+        
+        # Track EV trend (rolling 20)
+        self.ev_trend.append(self.expected_value_r)
+        if len(self.ev_trend) > 20:
+            self.ev_trend = self.ev_trend[-20:]
+        
+        # Determine if EV is improving
+        if len(self.ev_trend) >= 5:
+            recent_avg = sum(self.ev_trend[-5:]) / 5
+            older_avg = sum(self.ev_trend[:5]) / 5 if len(self.ev_trend) >= 10 else recent_avg
+            self.ev_improving = recent_avg > older_avg
+    
+    def record_r_outcome(self, r_multiple: float, grade: str = "B"):
+        """Record an R-multiple outcome for EV calculation"""
+        self.r_outcomes.append(r_multiple)
+        
+        # Keep last 100 outcomes for memory efficiency
+        if len(self.r_outcomes) > 100:
+            self.r_outcomes = self.r_outcomes[-100:]
+        
+        # Track by grade
+        if grade == "A":
+            self.a_grade_count += 1
+        elif grade == "B":
+            self.b_grade_count += 1
+        else:
+            self.c_grade_count += 1
+        
+        self._calculate_expected_value()
+    
+    def get_ev_assessment(self) -> dict:
+        """Get SMB-style EV assessment for this setup"""
+        return {
+            "setup_type": self.setup_type,
+            "sample_size": len(self.r_outcomes),
+            "win_rate": self.win_rate,
+            "avg_win_r": self.avg_win_r,
+            "avg_loss_r": self.avg_loss_r,
+            "expected_value_r": self.expected_value_r,
+            "ev_trend": self.ev_trend[-10:] if self.ev_trend else [],
+            "ev_improving": self.ev_improving,
+            "profit_factor": self.profit_factor,
+            "is_positive_ev": self.expected_value_r > 0,
+            "min_sample_reached": len(self.r_outcomes) >= 10,
+            "recommendation": self._get_ev_recommendation()
+        }
+    
+    def _get_ev_recommendation(self) -> str:
+        """SMB-style recommendation based on EV"""
+        if len(self.r_outcomes) < 10:
+            return "TRACK - Need 10+ trades for reliable EV"
+        
+        if self.expected_value_r > 0.5:
+            return "A-SIZE - Strong positive EV, increase position size"
+        elif self.expected_value_r > 0.2:
+            return "GREENLIGHT - Positive EV, continue trading this setup"
+        elif self.expected_value_r > 0:
+            return "CAUTIOUS - Marginal EV, consider refinements"
+        elif self.expected_value_r > -0.2:
+            return "REVIEW - Negative EV, needs analysis"
+        else:
+            return "DROP - Strong negative EV, remove from playbook"
 
 
 @dataclass
@@ -229,6 +328,18 @@ class LiveAlert:
     strategy_win_rate: float = 0.0
     strategy_profit_factor: float = 0.0
     
+    # SMB-style Expected Value and R-multiple tracking
+    strategy_ev_r: float = 0.0           # Expected Value in R-multiples
+    projected_r: float = 0.0             # Projected R-multiple if target hit
+    risk_r: float = 1.0                  # Risk in R-multiples (1R = stop loss distance)
+    
+    # SMB-style trade grading (A/B/C based on edge quality)
+    trade_grade: str = "B"               # "A" = best setup, "B" = standard, "C" = marginal
+    grade_reasoning: List[str] = field(default_factory=list)
+    
+    # SMB workflow state
+    workflow_state: str = "idea"         # "idea", "filtered", "planned", "executed", "reviewed"
+    
     # Volatility-adjusted position sizing data
     atr: float = 0.0                    # Average True Range in dollars
     atr_percent: float = 0.0            # ATR as % of price
@@ -247,6 +358,83 @@ class LiveAlert:
     # Outcome tracking
     outcome: Optional[str] = None  # "won", "lost", "expired", "cancelled"
     actual_pnl: Optional[float] = None
+    actual_r_multiple: Optional[float] = None  # Actual R-multiple achieved
+    
+    def calculate_r_multiple(self) -> float:
+        """Calculate the R-multiple for this alert (target/risk ratio)"""
+        risk_per_share = abs(self.current_price - self.stop_loss)
+        reward_per_share = abs(self.target - self.current_price)
+        if risk_per_share > 0:
+            self.projected_r = reward_per_share / risk_per_share
+            self.risk_r = 1.0  # By definition, risk is 1R
+        return self.projected_r
+    
+    def grade_trade(self, strategy_ev: float = 0.0, market_context_score: float = 0.5) -> str:
+        """
+        SMB-style trade grading based on edge quality.
+        A = Best setups (high EV, strong context, tape confirmation)
+        B = Standard setups (positive EV, decent context)
+        C = Marginal setups (low EV or weak context)
+        """
+        score = 0
+        reasons = []
+        
+        # 1. R:R ratio (SMB wants 2:1+)
+        if self.risk_reward >= 3:
+            score += 30
+            reasons.append(f"Excellent R:R of {self.risk_reward:.1f}:1")
+        elif self.risk_reward >= 2:
+            score += 20
+            reasons.append(f"Good R:R of {self.risk_reward:.1f}:1")
+        elif self.risk_reward >= 1.5:
+            score += 10
+            reasons.append(f"Acceptable R:R of {self.risk_reward:.1f}:1")
+        else:
+            reasons.append(f"Low R:R of {self.risk_reward:.1f}:1")
+        
+        # 2. Strategy EV (positive EV is key)
+        if strategy_ev > 0.5:
+            score += 30
+            reasons.append(f"Strong historical EV: {strategy_ev:.2f}R")
+        elif strategy_ev > 0.2:
+            score += 20
+            reasons.append(f"Positive historical EV: {strategy_ev:.2f}R")
+        elif strategy_ev > 0:
+            score += 10
+            reasons.append(f"Marginal EV: {strategy_ev:.2f}R")
+        else:
+            reasons.append(f"Negative/unknown EV: {strategy_ev:.2f}R")
+        
+        # 3. Tape confirmation
+        if self.tape_confirmation and self.tape_score >= 70:
+            score += 20
+            reasons.append(f"Strong tape confirmation: {self.tape_score:.0f}")
+        elif self.tape_confirmation:
+            score += 10
+            reasons.append(f"Tape confirms: {self.tape_score:.0f}")
+        
+        # 4. Priority/Catalyst strength
+        if self.priority == AlertPriority.HIGH:
+            score += 15
+            reasons.append("High priority catalyst")
+        elif self.priority == AlertPriority.MEDIUM:
+            score += 10
+        
+        # 5. Market context alignment
+        if market_context_score > 0.7:
+            score += 10
+            reasons.append("Favorable market context")
+        
+        # Determine grade
+        if score >= 70:
+            self.trade_grade = "A"
+        elif score >= 45:
+            self.trade_grade = "B"
+        else:
+            self.trade_grade = "C"
+        
+        self.grade_reasoning = reasons
+        return self.trade_grade
     
     def to_dict(self) -> Dict:
         result = asdict(self)
@@ -873,8 +1061,11 @@ class EnhancedBackgroundScanner:
     
     # ==================== WIN-RATE TRACKING ====================
     
-    def record_alert_outcome(self, alert_id: str, outcome: str, pnl: float = 0.0):
-        """Record the outcome of an alert for win-rate tracking"""
+    def record_alert_outcome(self, alert_id: str, outcome: str, pnl: float = 0.0, exit_price: float = None):
+        """
+        Record the outcome of an alert for win-rate and EV tracking.
+        SMB-style: Tracks R-multiples for Expected Value calculation.
+        """
         if alert_id not in self._live_alerts:
             return
         
@@ -887,19 +1078,43 @@ class EnhancedBackgroundScanner:
         stats = self._strategy_stats[setup_type]
         stats.alerts_triggered += 1
         
+        # Calculate R-multiple for this trade
+        r_multiple = 0.0
+        risk_per_share = abs(alert.current_price - alert.stop_loss)
+        
+        if risk_per_share > 0 and exit_price is not None:
+            if alert.direction == "long":
+                profit_per_share = exit_price - alert.current_price
+            else:
+                profit_per_share = alert.current_price - exit_price
+            r_multiple = profit_per_share / risk_per_share
+        elif risk_per_share > 0 and pnl != 0:
+            # Estimate R-multiple from PnL if exit_price not provided
+            # This is approximate - assumes full position
+            estimated_shares = abs(pnl) / risk_per_share if outcome == "lost" else abs(pnl) / (alert.target - alert.current_price) if alert.target != alert.current_price else 1
+            r_multiple = pnl / (risk_per_share * max(estimated_shares, 1)) if estimated_shares > 0 else 0
+        
+        # Update stats based on outcome
         if outcome == "won":
             stats.alerts_won += 1
             stats.total_pnl += pnl
-            # Update average win
             if stats.alerts_won > 0:
                 stats.avg_win = stats.total_pnl / stats.alerts_won if stats.total_pnl > 0 else stats.avg_win
+            # R-multiple for wins should be positive
+            if r_multiple <= 0:
+                r_multiple = alert.risk_reward  # Use projected R:R as estimate
         elif outcome == "lost":
             stats.alerts_lost += 1
             stats.total_pnl += pnl  # pnl is negative for losses
-            # Update average loss
             if stats.alerts_lost > 0:
                 total_losses = stats.total_pnl - (stats.avg_win * stats.alerts_won) if stats.alerts_won > 0 else stats.total_pnl
                 stats.avg_loss = total_losses / stats.alerts_lost
+            # R-multiple for losses should be negative (typically -1R at stop)
+            if r_multiple >= 0:
+                r_multiple = -1.0  # Standard 1R loss
+        
+        # Record R-multiple for EV calculation
+        stats.record_r_outcome(r_multiple, alert.trade_grade)
         
         stats.update_win_rate()
         self._save_strategy_stats(setup_type)
@@ -907,8 +1122,10 @@ class EnhancedBackgroundScanner:
         # Update alert
         alert.outcome = outcome
         alert.actual_pnl = pnl
+        alert.actual_r_multiple = r_multiple
+        alert.workflow_state = "reviewed"
         
-        # Save to outcomes collection
+        # Save to outcomes collection with R-multiple data
         if self.alert_outcomes_collection is not None:
             try:
                 self.alert_outcomes_collection.insert_one({
@@ -918,16 +1135,35 @@ class EnhancedBackgroundScanner:
                     "direction": alert.direction,
                     "outcome": outcome,
                     "pnl": pnl,
+                    "r_multiple": r_multiple,
+                    "trade_grade": alert.trade_grade,
                     "entry_price": alert.current_price,
+                    "exit_price": exit_price,
                     "stop_loss": alert.stop_loss,
                     "target": alert.target,
+                    "projected_rr": alert.risk_reward,
                     "created_at": alert.created_at,
                     "closed_at": datetime.now(timezone.utc).isoformat()
                 })
             except Exception as e:
                 logger.warning(f"Could not save alert outcome: {e}")
         
-        logger.info(f"📊 Recorded {outcome} for {setup_type}: Win rate now {stats.win_rate:.1%}")
+        # Log with EV information
+        ev_info = f"EV: {stats.expected_value_r:.2f}R" if len(stats.r_outcomes) >= 5 else "EV: tracking"
+        logger.info(f"📊 Recorded {outcome} ({r_multiple:+.2f}R) for {setup_type}: Win rate {stats.win_rate:.1%}, {ev_info}")
+    
+    def get_strategy_ev(self, setup_type: str) -> dict:
+        """Get SMB-style Expected Value assessment for a strategy"""
+        if setup_type in self._strategy_stats:
+            return self._strategy_stats[setup_type].get_ev_assessment()
+        return {"setup_type": setup_type, "is_positive_ev": False, "recommendation": "NO_DATA"}
+    
+    def get_all_strategy_ev(self) -> dict:
+        """Get EV assessments for all strategies"""
+        return {
+            setup: stats.get_ev_assessment() 
+            for setup, stats in self._strategy_stats.items()
+        }
     
     def get_strategy_stats(self, setup_type: str = None) -> Dict:
         """Get win-rate stats for a strategy or all strategies"""
@@ -1303,6 +1539,12 @@ class EnhancedBackgroundScanner:
                         stats = self._strategy_stats[base_setup]
                         alert.strategy_win_rate = stats.win_rate
                         alert.strategy_profit_factor = stats.profit_factor
+                        # Add EV data (SMB-style)
+                        alert.strategy_ev_r = stats.expected_value_r
+                        # Calculate R-multiple for this alert
+                        alert.calculate_r_multiple()
+                        # Grade the trade based on EV and context
+                        alert.grade_trade(strategy_ev=stats.expected_value_r, market_context_score=0.5)
                     
                     # Add tape reading to alert
                     alert.tape_score = tape.tape_score

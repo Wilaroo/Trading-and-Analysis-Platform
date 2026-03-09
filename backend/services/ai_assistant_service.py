@@ -1275,9 +1275,34 @@ DECISION: {score_result['trade_or_skip']}
                 f"- Volatility: {alert.get('volatility_regime', 'N/A')}",
                 f"- Tape Confirmation: {'Yes' if alert.get('tape_confirmation') else 'No'}",
                 f"- Tape Score: {alert.get('tape_score', 0):.2f}",
+            ])
+            
+            # Add Expected Value (EV) data if available
+            setup_type = alert.get('setup_type', '').split('_long')[0].split('_short')[0]
+            try:
+                from services.ev_tracking_service import get_ev_service
+                ev_service = get_ev_service(self.db)
+                ev_report = ev_service.get_ev_report(setup_type)
+                if ev_report and ev_report.get('total_trades', 0) >= 5:
+                    context_lines.extend([
+                        f"",
+                        f"**📈 EXPECTED VALUE (SMB-Style Edge Assessment):**",
+                        f"- Historical Win Rate: {ev_report.get('win_rate', 0):.1%}",
+                        f"- Average Win: {ev_report.get('avg_win_r', 0):.2f}R",
+                        f"- Average Loss: {ev_report.get('avg_loss_r', 1):.2f}R",
+                        f"- Expected Value: {ev_report.get('expected_value_r', 0):.2f}R per trade",
+                        f"- EV Gate: {ev_report.get('ev_gate', 'TRACK')}",
+                        f"- Size Recommendation: {ev_report.get('size_multiplier', 1.0):.1f}x base position",
+                        f"- Sample Size: {ev_report.get('total_trades', 0)} trades",
+                        f"- Trading Recommendation: {ev_report.get('recommendation', 'N/A')}",
+                    ])
+            except Exception as e:
+                logger.debug(f"Could not fetch EV data: {e}")
+            
+            context_lines.extend([
                 f"",
                 f"**IMPORTANT: Use this SPECIFIC data to explain the reasoning for the {alert.get('symbol')} trade alert.**",
-                f"Reference the actual reasoning points above. Do NOT give generic advice."
+                f"Reference the actual reasoning points and EV statistics above. Do NOT give generic advice."
             ])
             
             result = "\n".join(context_lines)
