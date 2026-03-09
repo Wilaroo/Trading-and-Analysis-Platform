@@ -7,17 +7,236 @@ This service implements the SMB Capital trading workflow:
 Core formula: EV = (win_rate × avg_win_R) – (loss_rate × avg_loss_R)
 
 The service tracks R-multiples per setup and gates future trades based on EV.
+Integrates with S/R levels, targets, and stops for accurate R-multiple projections.
 """
 
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from pymongo import MongoClient
 import os
 
 logger = logging.getLogger(__name__)
+
+
+# ==================== R-MULTIPLE CALCULATION UTILITIES ====================
+
+@dataclass
+class TradeLevels:
+    """
+    Key price levels for R-multiple calculation.
+    Based on Support/Resistance analysis and ATR for volatility-adjusted stops.
+    """
+    entry_price: float
+    stop_loss: float
+    target_1: float                    # Primary target (1-2R typically)
+    target_2: Optional[float] = None   # Extended target (2-3R)
+    target_3: Optional[float] = None   # Runner target (3R+)
+    
+    # Key technical levels that inform the targets
+    support: Optional[float] = None
+    resistance: Optional[float] = None
+    vwap: Optional[float] = None
+    ema_9: Optional[float] = None
+    ema_20: Optional[float] = None
+    high_of_day: Optional[float] = None
+    low_of_day: Optional[float] = None
+    atr: Optional[float] = None
+    
+    def calculate_r_multiple(self, target_price: float = None) -> float:
+        """
+        Calculate R-multiple for a given target price.
+        R = (target - entry) / (entry - stop)
+        """
+        if target_price is None:
+            target_price = self.target_1
+        
+        risk = abs(self.entry_price - self.stop_loss)
+        if risk == 0:
+            return 0.0
+        
+        reward = abs(target_price - self.entry_price)
+        return reward / risk
+    
+    def get_projected_r_at_targets(self) -> Dict[str, float]:
+        """Get R-multiple at each target level"""
+        results = {
+            "target_1_r": self.calculate_r_multiple(self.target_1),
+        }
+        if self.target_2:
+            results["target_2_r"] = self.calculate_r_multiple(self.target_2)
+        if self.target_3:
+            results["target_3_r"] = self.calculate_r_multiple(self.target_3)
+        return results
+    
+    def get_risk_in_dollars(self, shares: int = 100) -> float:
+        """Calculate dollar risk for position sizing"""
+        return abs(self.entry_price - self.stop_loss) * shares
+    
+    def get_reward_in_dollars(self, shares: int = 100, target: str = "target_1") -> float:
+        """Calculate dollar reward at target"""
+        target_price = getattr(self, target, self.target_1)
+        return abs(target_price - self.entry_price) * shares
+
+
+def calculate_levels_from_technical(
+    current_price: float,
+    support: float,
+    resistance: float,
+    atr: float,
+    direction: str,
+    vwap: float = None,
+    ema_9: float = None,
+    high_of_day: float = None,
+    low_of_day: float = None,
+    setup_type: str = "default"
+) -> TradeLevels:
+    """
+    Calculate entry, stop, and targets from technical levels.
+    
+    For LONG trades:
+    - Stop: Below support or below entry by 1-1.5 ATR
+    - Target 1: At resistance or VWAP (whichever is closer)
+    - Target 2: Above resistance by 1 ATR or at next key level
+    
+    For SHORT trades:
+    - Stop: Above resistance or above entry by 1-1.5 ATR
+    - Target 1: At support or VWAP (whichever is closer)
+    - Target 2: Below support by 1 ATR
+    """
+    levels = TradeLevels(
+        entry_price=current_price,
+        stop_loss=current_price,
+        target_1=current_price,
+        support=support,
+        resistance=resistance,
+        vwap=vwap,
+        ema_9=ema_9,
+        high_of_day=high_of_day,
+        low_of_day=low_of_day,
+        atr=atr
+    )
+    
+    if direction == "long":
+        # LONG: Stop below support or entry, target at/above resistance
+        
+        # Stop loss options (pick the tightest logical one)
+        stop_options = [
+            support - (atr * 0.25),        # Just below support
+            current_price - atr,           # 1 ATR below entry
+            low_of_day - 0.02 if low_of_day else current_price - atr,  # Below LOD
+        ]
+        levels.stop_loss = max(stop_options)  # Use the highest (tightest) stop
+        
+        # Target options based on setup type
+        if setup_type in ["rubber_band", "vwap_bounce", "mean_reversion"]:
+            # Mean reversion targets EMA or VWAP
+            target_options = [
+                ema_9 if ema_9 and ema_9 > current_price else None,
+                vwap if vwap and vwap > current_price else None,
+                current_price + (atr * 1.5),
+            ]
+        elif setup_type in ["breakout", "breakout_confirmed"]:
+            # Breakout targets extension above resistance
+            target_options = [
+                resistance + (atr * 1.5) if resistance else None,
+                current_price + (atr * 2),
+                high_of_day + (atr * 0.5) if high_of_day else None,
+            ]
+        else:
+            # Default: target resistance or 2 ATR
+            target_options = [
+                resistance if resistance and resistance > current_price else None,
+                current_price + (atr * 2),
+            ]
+        
+        # Pick the first valid target
+        levels.target_1 = next((t for t in target_options if t and t > current_price), current_price + atr)
+        levels.target_2 = levels.target_1 + atr  # Extended target
+        levels.target_3 = levels.target_1 + (atr * 2)  # Runner target
+        
+    else:  # SHORT
+        # SHORT: Stop above resistance or entry, target at/below support
+        
+        stop_options = [
+            resistance + (atr * 0.25),      # Just above resistance
+            current_price + atr,            # 1 ATR above entry
+            high_of_day + 0.02 if high_of_day else current_price + atr,  # Above HOD
+        ]
+        levels.stop_loss = min(stop_options)  # Use the lowest (tightest) stop
+        
+        if setup_type in ["rubber_band", "vwap_fade", "mean_reversion"]:
+            target_options = [
+                ema_9 if ema_9 and ema_9 < current_price else None,
+                vwap if vwap and vwap < current_price else None,
+                current_price - (atr * 1.5),
+            ]
+        elif setup_type in ["breakdown"]:
+            target_options = [
+                support - (atr * 1.5) if support else None,
+                current_price - (atr * 2),
+                low_of_day - (atr * 0.5) if low_of_day else None,
+            ]
+        else:
+            target_options = [
+                support if support and support < current_price else None,
+                current_price - (atr * 2),
+            ]
+        
+        levels.target_1 = next((t for t in target_options if t and t < current_price), current_price - atr)
+        levels.target_2 = levels.target_1 - atr
+        levels.target_3 = levels.target_1 - (atr * 2)
+    
+    return levels
+
+
+def calculate_projected_ev(
+    win_rate: float,
+    levels: TradeLevels,
+    partial_target_1_pct: float = 0.5,  # Take 50% off at target 1
+    avg_loss_r: float = 1.0              # Typically lose 1R at stop
+) -> Dict[str, float]:
+    """
+    Calculate projected EV using actual price levels and partial target management.
+    
+    SMB Capital approach:
+    - Take partial profits at Target 1 (typically 50%)
+    - Trail remaining position to Target 2 or beyond
+    - Average win is weighted by partial management
+    
+    Formula: EV = (win_rate × avg_win_R) – (loss_rate × avg_loss_R)
+    
+    Where avg_win_R considers:
+    - Probability of reaching each target
+    - Partial profit taking strategy
+    """
+    r_at_target_1 = levels.calculate_r_multiple(levels.target_1)
+    r_at_target_2 = levels.calculate_r_multiple(levels.target_2) if levels.target_2 else r_at_target_1 * 1.5
+    
+    # Weighted average R for wins (accounting for partial profits)
+    # Assume: 50% at T1, 30% at T2, 20% trails to breakeven or small gain
+    avg_win_r = (
+        (r_at_target_1 * partial_target_1_pct) +  # 50% at T1
+        (r_at_target_2 * 0.3) +                    # 30% reaches T2
+        (r_at_target_1 * 0.5 * 0.2)               # 20% trails to ~0.5 T1
+    )
+    
+    loss_rate = 1 - win_rate
+    ev = (win_rate * avg_win_r) - (loss_rate * avg_loss_r)
+    
+    return {
+        "projected_ev_r": ev,
+        "r_at_target_1": r_at_target_1,
+        "r_at_target_2": r_at_target_2,
+        "avg_win_r": avg_win_r,
+        "win_rate": win_rate,
+        "risk_r": avg_loss_r
+    }
+
+
+# ==================== WORKFLOW STATE MACHINE ====================
 
 
 class WorkflowState(Enum):

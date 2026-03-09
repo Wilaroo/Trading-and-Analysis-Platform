@@ -1645,6 +1645,23 @@ class EnhancedBackgroundScanner:
             else:
                 priority = AlertPriority.MEDIUM
             
+            # Calculate proper levels using S/R and ATR
+            stop_loss = round(min(snapshot.low_of_day - 0.02, snapshot.support - (snapshot.atr * 0.25)), 2)
+            target_1 = round(snapshot.ema_9, 2)  # Primary target: EMA9
+            target_2 = round(snapshot.vwap, 2) if snapshot.vwap > snapshot.ema_9 else round(snapshot.ema_9 + snapshot.atr, 2)
+            
+            # Calculate R-multiple
+            risk = snapshot.current_price - stop_loss
+            reward = target_1 - snapshot.current_price
+            r_multiple = round(reward / risk, 2) if risk > 0 else 2.0
+            
+            # Get historical EV
+            ev_info = ""
+            if "rubber_band" in self._strategy_stats:
+                stats = self._strategy_stats["rubber_band"]
+                if stats.win_rate > 0:
+                    ev_info = f"Historical: {stats.win_rate:.0%} win, EV {stats.expected_value_r:.2f}R"
+            
             return LiveAlert(
                 id=f"rb_long_{symbol}_{datetime.now().strftime('%H%M%S')}",
                 symbol=symbol,
@@ -1654,20 +1671,21 @@ class EnhancedBackgroundScanner:
                 priority=priority,
                 current_price=snapshot.current_price,
                 trigger_price=snapshot.ema_9,
-                stop_loss=round(snapshot.low_of_day - 0.02, 2),
-                target=round(snapshot.ema_9, 2),
-                risk_reward=2.0,
+                stop_loss=stop_loss,
+                target=target_1,
+                risk_reward=r_multiple,
                 trigger_probability=0.65,
                 win_probability=0.62,
                 minutes_to_trigger=10,
                 headline=f"🎯 {symbol} Rubber Band LONG - {extension:.1f}% extended {'✓ TAPE' if tape.confirmation_for_long else ''}",
                 reasoning=[
-                    f"Price {extension:.1f}% below 9-EMA (trigger: >2.5%)",
-                    f"RSI oversold at {snapshot.rsi_14:.0f} (trigger: <38)",
-                    f"RVOL: {snapshot.rvol:.1f}x",
-                    f"Tape: {tape.overall_signal.value} (score: {tape.tape_score:.2f})",
-                    f"Entry: Double bar break above prior highs",
-                    f"Target: Snap back to 9-EMA ${snapshot.ema_9:.2f}"
+                    f"Extended {extension:.1f}% below 9-EMA ${snapshot.ema_9:.2f}",
+                    f"RSI oversold at {snapshot.rsi_14:.0f}",
+                    f"R:R = {r_multiple:.1f}:1 (Stop: ${stop_loss:.2f} below support, Target: ${target_1:.2f})",
+                    f"Support at ${snapshot.support:.2f}, Resistance at ${snapshot.resistance:.2f}",
+                    f"RVOL: {snapshot.rvol:.1f}x | Tape: {tape.overall_signal.value}",
+                    ev_info if ev_info else f"Mean reversion to EMA9",
+                    f"Entry: Double bar break above prior highs"
                 ],
                 time_window=self._get_current_time_window().value,
                 market_regime=self._market_regime.value,
@@ -1685,6 +1703,23 @@ class EnhancedBackgroundScanner:
             else:
                 priority = AlertPriority.MEDIUM
             
+            # Calculate proper levels using S/R and ATR
+            stop_loss = round(max(snapshot.high_of_day + 0.02, snapshot.resistance + (snapshot.atr * 0.25)), 2)
+            target_1 = round(snapshot.ema_9, 2)  # Primary target: EMA9
+            target_2 = round(snapshot.vwap, 2) if snapshot.vwap < snapshot.ema_9 else round(snapshot.ema_9 - snapshot.atr, 2)
+            
+            # Calculate R-multiple
+            risk = stop_loss - snapshot.current_price
+            reward = snapshot.current_price - target_1
+            r_multiple = round(reward / risk, 2) if risk > 0 else 2.0
+            
+            # Get historical EV
+            ev_info = ""
+            if "rubber_band" in self._strategy_stats:
+                stats = self._strategy_stats["rubber_band"]
+                if stats.win_rate > 0:
+                    ev_info = f"Historical: {stats.win_rate:.0%} win, EV {stats.expected_value_r:.2f}R"
+            
             return LiveAlert(
                 id=f"rb_short_{symbol}_{datetime.now().strftime('%H%M%S')}",
                 symbol=symbol,
@@ -1694,20 +1729,21 @@ class EnhancedBackgroundScanner:
                 priority=priority,
                 current_price=snapshot.current_price,
                 trigger_price=snapshot.ema_9,
-                stop_loss=round(snapshot.high_of_day + 0.02, 2),
-                target=round(snapshot.ema_9, 2),
-                risk_reward=2.0,
+                stop_loss=stop_loss,
+                target=target_1,
+                risk_reward=r_multiple,
                 trigger_probability=0.65,
                 win_probability=0.58,
                 minutes_to_trigger=10,
                 headline=f"🎯 {symbol} Rubber Band SHORT - {extension:.1f}% extended {'✓ TAPE' if tape.confirmation_for_short else ''}",
                 reasoning=[
-                    f"Price {extension:.1f}% above 9-EMA (trigger: >3.0%)",
-                    f"RSI overbought at {snapshot.rsi_14:.0f} (trigger: >65)",
-                    f"RVOL: {snapshot.rvol:.1f}x",
-                    f"Tape: {tape.overall_signal.value} (score: {tape.tape_score:.2f})",
-                    f"Entry: Double bar break below prior lows",
-                    f"Target: Snap back to 9-EMA ${snapshot.ema_9:.2f}"
+                    f"Extended {extension:.1f}% above 9-EMA ${snapshot.ema_9:.2f}",
+                    f"RSI overbought at {snapshot.rsi_14:.0f}",
+                    f"R:R = {r_multiple:.1f}:1 (Stop: ${stop_loss:.2f} above resistance, Target: ${target_1:.2f})",
+                    f"Support at ${snapshot.support:.2f}, Resistance at ${snapshot.resistance:.2f}",
+                    f"RVOL: {snapshot.rvol:.1f}x | Tape: {tape.overall_signal.value}",
+                    ev_info if ev_info else f"Mean reversion to EMA9",
+                    f"Entry: Double bar break below prior lows"
                 ],
                 time_window=self._get_current_time_window().value,
                 market_regime=self._market_regime.value,
@@ -1825,6 +1861,20 @@ class EnhancedBackgroundScanner:
             breakout_pct = abs(dist_to_resistance)
             priority = AlertPriority.CRITICAL if tape.confirmation_for_long else AlertPriority.HIGH
             
+            # Calculate R-multiple using S/R levels
+            stop_loss = round(snapshot.resistance - snapshot.atr, 2)
+            target = round(snapshot.current_price + (snapshot.atr * 2), 2)
+            risk = snapshot.current_price - stop_loss
+            reward = target - snapshot.current_price
+            r_multiple = round(reward / risk, 2) if risk > 0 else 2.0
+            
+            # Get historical EV for breakout setups
+            ev_info = ""
+            if "breakout" in self._strategy_stats:
+                stats = self._strategy_stats["breakout"]
+                if stats.win_rate > 0:
+                    ev_info = f"Historical: {stats.win_rate:.0%} win rate, {stats.expected_value_r:.2f}R EV"
+            
             return LiveAlert(
                 id=f"breakout_confirmed_{symbol}_{datetime.now().strftime('%H%M%S')}",
                 symbol=symbol,
@@ -1834,9 +1884,9 @@ class EnhancedBackgroundScanner:
                 priority=priority,
                 current_price=snapshot.current_price,
                 trigger_price=snapshot.resistance,
-                stop_loss=round(snapshot.resistance - snapshot.atr, 2),
-                target=round(snapshot.current_price + (snapshot.atr * 2), 2),
-                risk_reward=2.0,
+                stop_loss=stop_loss,
+                target=target,
+                risk_reward=r_multiple,
                 trigger_probability=0.70,
                 win_probability=0.58,
                 minutes_to_trigger=0,
@@ -1845,7 +1895,9 @@ class EnhancedBackgroundScanner:
                     f"Price ABOVE resistance by {breakout_pct:.2f}%",
                     f"Resistance was ${snapshot.resistance:.2f}, now ${snapshot.current_price:.2f}",
                     f"Strong volume: {snapshot.rvol:.1f}x RVOL",
+                    f"R:R = {r_multiple:.1f}:1 (Stop: ${stop_loss:.2f}, Target: ${target:.2f})",
                     f"Tape: {tape.overall_signal.value}",
+                    ev_info if ev_info else f"Support at ${snapshot.support:.2f}",
                     f"⚠️ Entry now or on pullback to ${snapshot.resistance:.2f}"
                 ],
                 time_window=self._get_current_time_window().value,
