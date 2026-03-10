@@ -109,39 +109,34 @@ if defined OLLAMA_MODEL_OVERRIDE (
     )
 )
 
-:: Auto-select based on VRAM
-:: 16GB+ : deepseek-r1:8b (best reasoning for trading)
-:: 12-16GB: qwen2.5:14b (excellent quality)
-:: 8-12GB : qwen2.5:7b (great balance)
-:: 6-8GB  : qwen2.5:7b (with CPU assist)
-:: 4-6GB  : gemma3:4b (efficient)
-:: <4GB   : qwen2.5:1.5b (lightweight)
-
+:: Auto-select based on VRAM (use GOTO to break after first match)
 if %GPU_VRAM% GEQ 16000 (
     set OLLAMA_MODEL=deepseek-r1:8b
-    echo       16GB+ VRAM detected
-    echo       Selected: deepseek-r1:8b (best reasoning)
-) else if %GPU_VRAM% GEQ 12000 (
-    set OLLAMA_MODEL=qwen2.5:14b
-    echo       12GB+ VRAM detected
-    echo       Selected: qwen2.5:14b (excellent)
-) else if %GPU_VRAM% GEQ 8000 (
-    set OLLAMA_MODEL=qwen2.5:7b
-    echo       8GB+ VRAM detected
-    echo       Selected: qwen2.5:7b (great balance)
-) else if %GPU_VRAM% GEQ 6000 (
-    set OLLAMA_MODEL=qwen2.5:7b
-    echo       6GB+ VRAM detected
-    echo       Selected: qwen2.5:7b (with CPU assist)
-) else if %GPU_VRAM% GEQ 4000 (
-    set OLLAMA_MODEL=gemma3:4b
-    echo       4GB+ VRAM detected
-    echo       Selected: gemma3:4b (efficient)
-) else (
-    set OLLAMA_MODEL=qwen2.5:1.5b
-    echo       Low VRAM detected
-    echo       Selected: qwen2.5:1.5b (lightweight)
+    echo       16GB+ VRAM - Using deepseek-r1:8b
+    goto model_selected
 )
+if %GPU_VRAM% GEQ 12000 (
+    set OLLAMA_MODEL=qwen2.5:14b
+    echo       12GB+ VRAM - Using qwen2.5:14b
+    goto model_selected
+)
+if %GPU_VRAM% GEQ 8000 (
+    set OLLAMA_MODEL=qwen2.5:7b
+    echo       8GB+ VRAM - Using qwen2.5:7b
+    goto model_selected
+)
+if %GPU_VRAM% GEQ 6000 (
+    set OLLAMA_MODEL=qwen2.5:7b
+    echo       6GB+ VRAM - Using qwen2.5:7b
+    goto model_selected
+)
+if %GPU_VRAM% GEQ 4000 (
+    set OLLAMA_MODEL=gemma3:4b
+    echo       4GB+ VRAM - Using gemma3:4b
+    goto model_selected
+)
+set OLLAMA_MODEL=qwen2.5:1.5b
+echo       Low VRAM - Using qwen2.5:1.5b
 
 :model_selected
 echo.
