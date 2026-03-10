@@ -49,7 +49,7 @@ class IBDataPusher:
         self.subscribed_contracts: Dict[str, Contract] = {}
         self.depth_subscriptions: Dict[str, object] = {}  # symbol -> ticker object for L2
         self.last_push_time = 0
-        self.push_interval = 1.0  # Push every 1 second
+        self.push_interval = 2.0  # Push every 2 seconds (reduced from 1 to lower load)
         self.level2_enabled = True  # Level 2 uses polling approach, always available
         
         # Data buffers
@@ -546,8 +546,9 @@ class IBDataPusher:
         logger.info(f"Pushing: {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions, {len(self.account_data)} account fields")
         
         # Clean all data to remove NaN/Inf values before JSON serialization
+        # Use UTC timestamp for proper timezone handling
         payload = self._clean_for_json({
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.utcnow().isoformat() + "Z",  # UTC with Z suffix
             "source": "ib_gateway",
             "quotes": self.quotes_buffer.copy(),
             "account": self.account_data.copy(),
@@ -561,7 +562,7 @@ class IBDataPusher:
                 f"{self.cloud_url}/api/ib/push-data",
                 json=payload,
                 headers={"Content-Type": "application/json"},
-                timeout=5
+                timeout=10  # Increased timeout for slower connections
             )
             if response.status_code == 200:
                 result = response.json()
@@ -573,7 +574,7 @@ class IBDataPusher:
                 logger.warning(f"Push failed: HTTP {response.status_code} - {response.text[:200]}")
                         
         except requests.Timeout:
-            logger.warning("Push timeout - cloud backend may be slow")
+            logger.warning("Push timeout - retrying on next cycle")
         except Exception as e:
             logger.error(f"Push error: {e}")
     

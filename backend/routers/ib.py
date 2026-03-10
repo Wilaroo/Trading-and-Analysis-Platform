@@ -532,10 +532,21 @@ def is_pusher_connected() -> bool:
         return False
     
     try:
-        last_dt = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
-        age_seconds = (datetime.now(timezone.utc) - last_dt).total_seconds()
+        # Handle both timezone-aware and naive timestamps
+        if 'Z' in last_update or '+' in last_update:
+            last_dt = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
+        else:
+            # Assume local time if no timezone
+            last_dt = datetime.fromisoformat(last_update)
+            # Make it UTC for comparison (pusher sends in local time)
+            last_dt = last_dt.replace(tzinfo=timezone.utc)
+        
+        now = datetime.now(timezone.utc)
+        age_seconds = (now - last_dt).total_seconds()
+        
+        # Allow up to 30 seconds staleness
         return age_seconds <= 30
-    except:
+    except Exception as e:
         return False
 
 
