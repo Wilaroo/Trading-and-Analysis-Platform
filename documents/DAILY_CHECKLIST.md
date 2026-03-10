@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://ib-ollama-sync.preview.emergentagent.com
+https://ib-trading-engine.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://ib-ollama-sync.preview.emergentagent.com
+https://ib-trading-engine.preview.emergentagent.com
 ```

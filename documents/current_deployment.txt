@@ -1,1 +1,1 @@
-https://ib-ollama-sync.preview.emergentagent.com
+https://ib-trading-engine.preview.emergentagent.com
