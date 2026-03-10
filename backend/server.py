@@ -56,6 +56,7 @@ from routers.config import router as config_router
 from routers.tqs_router import router as tqs_router
 from routers.risk_router import router as risk_router
 from routers.rag_router import router as rag_router
+from routers.medium_learning_router import router as medium_learning_router
 from routers.portfolio_awareness import router as portfolio_awareness_router
 from routers.quick_actions import router as quick_actions_router, init_quick_actions_router
 from routers.sectors import router as sectors_router
@@ -76,6 +77,13 @@ from services.position_sizer import get_position_sizer_service, init_position_si
 from services.health_monitor import get_health_monitor_service, init_health_monitor_service
 from services.dynamic_thresholds import get_dynamic_threshold_service, init_dynamic_threshold_service
 from services.rag import get_rag_service, init_rag_service
+from services.medium_learning import (
+    get_calibration_service, init_calibration_service,
+    get_context_performance_service,
+    get_confirmation_validator_service,
+    get_playbook_performance_service,
+    get_edge_decay_service
+)
 from services.eod_generation_service import get_eod_service
 from services.ib_service import get_ib_service
 from services.news_service import init_news_service
@@ -262,6 +270,7 @@ app.include_router(journal_router)
 app.include_router(tqs_router)
 app.include_router(risk_router)
 app.include_router(rag_router)
+app.include_router(medium_learning_router)
 
 # Collections
 strategies_col = db["strategies"]
@@ -401,6 +410,36 @@ except Exception as e:
     print(f"RAG Knowledge Base initialization deferred: {e}")
     print("  - Will initialize on first use (embedding model loading)")
     rag_service = None
+
+# ===================== MEDIUM LEARNING (Phase 5) =====================
+# Initialize end-of-day analysis services
+
+try:
+    # Initialize all Medium Learning services with database
+    calibration_service = init_calibration_service(db=db)
+    
+    context_perf_service = get_context_performance_service()
+    context_perf_service.set_db(db)
+    
+    confirmation_service = get_confirmation_validator_service()
+    confirmation_service.set_db(db)
+    
+    playbook_perf_service = get_playbook_performance_service()
+    playbook_perf_service.set_db(db)
+    
+    edge_decay_service = get_edge_decay_service()
+    edge_decay_service.set_db(db)
+    
+    print("Medium Learning (Phase 5) initialized")
+    print("  - Calibration Service: TQS threshold recommendations")
+    print("  - Context Performance: Setup+regime+time tracking")
+    print("  - Confirmation Validator: Signal effectiveness analysis")
+    print("  - Playbook Performance: Theory vs reality linkage")
+    print("  - Edge Decay: Strategy degradation detection")
+    print("  - Endpoints: /api/medium-learning/*")
+except Exception as e:
+    print(f"Medium Learning initialization deferred: {e}")
+    calibration_service = None
 
 # ===================== STRATEGY HELPERS =====================
 # Strategies are now stored in MongoDB and accessed via strategy_service

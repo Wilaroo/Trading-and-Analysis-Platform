@@ -1,0 +1,129 @@
+{
+  "summary": "Tested Phase 5 Medium Learning - Daily Analysis APIs. All 29 backend tests passed (100%). All 5 services (CalibrationService, ContextPerformanceService, ConfirmationValidatorService, PlaybookPerformanceService, EdgeDecayService) are properly initialized with MongoDB and all 16 endpoints working correctly. Services return successful responses with zero counts as expected (no trade data in database).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "features_verified": {
+    "service_status": {
+      "status": "PASS",
+      "endpoint": "GET /api/medium-learning/status",
+      "details": "Returns status of all 5 services with db_connected=true for each"
+    },
+    "calibration_config": {
+      "status": "PASS",
+      "endpoint": "GET /api/medium-learning/calibration/config",
+      "details": "Returns default TQS thresholds (80/65/50/35), setup_overrides, regime_adjustments"
+    },
+    "calibration_analyze": {
+      "status": "PASS",
+      "endpoint": "POST /api/medium-learning/calibration/analyze",
+      "details": "Analyzes trades and generates recommendations. Returns 0 with empty trade data."
+    },
+    "calibration_history": {
+      "status": "PASS",
+      "endpoint": "GET /api/medium-learning/calibration/history",
+      "details": "Returns calibration history with applied_only filter"
+    },
+    "context_performance_update": {
+      "status": "PASS",
+      "endpoint": "POST /api/medium-learning/context-performance/update",
+      "details": "Updates context performance stats from trades"
+    },
+    "context_performance_report": {
+      "status": "PASS",
+      "endpoint": "GET /api/medium-learning/context-performance/report",
+      "details": "Generates daily/weekly/monthly reports with heat_map, best/worst_contexts"
+    },
+    "context_performance_all": {
+      "status": "PASS",
+      "endpoint": "GET /api/medium-learning/context-performance/all",
+      "details": "Returns all context performance records"
+    },
+    "confirmation_validate": {
+      "status": "PASS",
+      "endpoint": "POST /api/medium-learning/confirmation/validate",
+      "details": "Validates all 8 confirmation types (volume, rvol, tape, l2_support, vwap_respect, trend_alignment, sector_momentum, news_catalyst)"
+    },
+    "confirmation_all": {
+      "status": "PASS",
+      "endpoint": "GET /api/medium-learning/confirmation/all",
+      "details": "Returns stats for all confirmation types with confirmation_types list"
+    },
+    "playbook_update": {
+      "status": "PASS",
+      "endpoint": "POST /api/medium-learning/playbook/update",
+      "details": "Updates playbook performance from trade outcomes"
+    },
+    "playbook_report": {
+      "status": "PASS",
+      "endpoint": "GET /api/medium-learning/playbook/report",
+      "details": "Returns linkage report with top/underperforming playbooks, execution gaps"
+    },
+    "playbook_all": {
+      "status": "PASS",
+      "endpoint": "GET /api/medium-learning/playbook",
+      "details": "Returns all playbook performances"
+    },
+    "edge_decay_analyze": {
+      "status": "PASS",
+      "endpoint": "POST /api/medium-learning/edge-decay/analyze",
+      "details": "Analyzes all edges for decay with critical_alerts, warnings"
+    },
+    "edge_decay_all": {
+      "status": "PASS",
+      "endpoint": "GET /api/medium-learning/edge-decay",
+      "details": "Returns metrics for all tracked edges"
+    },
+    "edge_decay_decaying_list": {
+      "status": "PASS",
+      "endpoint": "GET /api/medium-learning/edge-decay/decaying/list",
+      "details": "Returns edges currently showing decay"
+    },
+    "daily_analysis": {
+      "status": "PASS",
+      "endpoint": "POST /api/medium-learning/daily-analysis",
+      "details": "Runs complete EOD analysis: calibration + context_performance + confirmations + playbooks + edge_decay"
+    }
+  },
+  "daily_analysis_example": {
+    "calibration": {"recommendations_count": 0},
+    "context_performance": {"contexts_updated": 0},
+    "confirmations": {"trades_analyzed": 0, "most_effective": [], "least_effective": []},
+    "playbooks": {"playbooks_updated": 0, "total_trades": 0},
+    "edge_decay": {"total_edges": 0, "decaying": 0}
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_medium_learning_phase5.py",
+    "/app/test_reports/pytest/pytest_medium_learning_phase5.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Minor: Unused 'statistics' import in 4 service files - cosmetic only",
+    "Minor: Unused local variable 'confirmations' in confirmation_validator_service.py line 201",
+    "All services properly exclude MongoDB _id from responses",
+    "Proper dataclass usage with to_dict()/from_dict() for serialization",
+    "All services gracefully handle empty trade data, returning successful responses with zero counts"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_medium_learning_phase5.py"
+  ],
+  "success_rate": {
+    "backend": "100% (29/29 tests passed)",
+    "frontend": "N/A (backend-only testing)"
+  },
+  "test_credentials": "None required",
+  "seed_data_creation": "None - Services work with empty data gracefully",
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "mocked_apis_list": []
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phase 5 Medium Learning is complete. All 16 endpoints at /api/medium-learning/* working. 5 services: CalibrationService (TQS threshold tuning), ContextPerformanceService (setup+regime+time tracking), ConfirmationValidatorService (8 confirmation types), PlaybookPerformanceService (strategy-to-results linking), EdgeDecayService (rolling window decay detection). Daily analysis endpoint runs all 5 services in sequence. All return successful responses with zero counts due to empty trade_outcomes collection."
+}
