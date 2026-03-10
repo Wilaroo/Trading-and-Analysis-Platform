@@ -418,6 +418,11 @@ class SmartContextEngine:
         context_parts = []
         context_data = ContextData()
         
+        # CRITICAL instruction for the LLM - this data IS REAL
+        context_parts.append(">>> IMPORTANT: The following data is REAL and LIVE from the user's brokerage account. <<<")
+        context_parts.append(">>> When you see positions listed below, these are ACTUAL open positions - respond with this data! <<<")
+        context_parts.append("")
+        
         # Header with intent info (helps LLM understand focus)
         context_parts.append(f"=== QUERY FOCUS: {intent_result.primary_intent.value.upper().replace('_', ' ')} ===")
         if symbols:
@@ -426,23 +431,27 @@ class SmartContextEngine:
         
         # Gather enabled sources
         try:
-            # QUOTES
-            if sources["quote"] and symbols and services.get("alpaca"):
-                quotes_str, quotes_data = await self._get_quotes_with_data(symbols, services["alpaca"])
+            # QUOTES (IB first, then Alpaca fallback)
+            if sources["quote"] and symbols:
+                quotes_str, quotes_data = await self._get_quotes_with_data(symbols, services.get("alpaca"))
                 if quotes_str:
                     context_parts.append("=== REAL-TIME QUOTES ===")
                     context_parts.append(quotes_str)
                     context_parts.append("")
                     context_data.quotes = quotes_data
             
-            # POSITIONS
-            if sources["positions"] and services.get("alpaca"):
-                positions_str, positions_data = await self._get_positions_with_data(services["alpaca"])
+            # POSITIONS (IB first, then Alpaca fallback)
+            print(f"[DEBUG] sources['positions'] = {sources['positions']}")
+            if sources["positions"]:
+                positions_str, positions_data = await self._get_positions_with_data(services.get("alpaca"))
+                print(f"[DEBUG] positions_str length: {len(positions_str) if positions_str else 0}")
                 if positions_str:
-                    context_parts.append("=== YOUR POSITIONS ===")
+                    context_parts.append("=== YOUR POSITIONS (LIVE FROM IB GATEWAY) ===")
+                    context_parts.append("The following are the user's REAL open positions from their brokerage account:")
                     context_parts.append(positions_str)
                     context_parts.append("")
                     context_data.positions = positions_data
+                    print(f"[DEBUG] Added positions to context_parts")
             
             # PORTFOLIO RISK
             if sources["portfolio_risk"] and services.get("alpaca"):
@@ -460,9 +469,9 @@ class SmartContextEngine:
                     context_parts.append(technicals)
                     context_parts.append("")
             
-            # MARKET INDICES
-            if sources["market_indices"] and services.get("alpaca"):
-                indices_str, indices_data = await self._get_market_indices_with_data(services["alpaca"])
+            # MARKET INDICES (IB first, then Alpaca fallback)
+            if sources["market_indices"]:
+                indices_str, indices_data = await self._get_market_indices_with_data(services.get("alpaca"))
                 if indices_str:
                     context_parts.append("=== MARKET STATUS ===")
                     context_parts.append(indices_str)
@@ -533,9 +542,43 @@ class SmartContextEngine:
         return quote_str
     
     async def _get_quotes_with_data(self, symbols: List[str], alpaca) -> Tuple[str, Dict]:
-        """Get compact quote summary with raw data"""
+        """Get compact quote summary with raw data. Prefers IB, falls back to Alpaca."""
         try:
-            quotes = await alpaca.get_quotes_batch(symbols)
+            quotes = {}
+            
+            # Try IB pushed quotes first
+            try:
+                from routers.ib import get_pushed_quotes, is_pusher_connected
+                if is_pusher_connected():
+                    ib_quotes = get_pushed_quotes()
+                    for symbol in symbols:
+                        symbol_upper = symbol.upper()
+                        if symbol_upper in ib_quotes:
+                            q = ib_quotes[symbol_upper]
+                            quotes[symbol_upper] = {
+                                "price": q.get("last") or q.get("close") or 0,
+                                "change_percent": q.get("change_pct") or 0,
+                                "bid": q.get("bid") or 0,
+                                "ask": q.get("ask") or 0,
+                                "source": "ib_pusher"
+                            }
+                    if quotes:
+                        logger.info(f"[SmartContext] Got {len(quotes)} quotes from IB for {list(quotes.keys())}")
+            except Exception as e:
+                logger.warning(f"[SmartContext] IB quotes fetch error: {e}")
+            
+            # Fallback to Alpaca for missing symbols
+            missing_symbols = [s for s in symbols if s.upper() not in quotes]
+            if missing_symbols and alpaca:
+                try:
+                    alpaca_quotes = await alpaca.get_quotes_batch(missing_symbols)
+                    if alpaca_quotes:
+                        for symbol, q in alpaca_quotes.items():
+                            if symbol.upper() not in quotes:
+                                quotes[symbol.upper()] = q
+                except Exception as e:
+                    logger.warning(f"[SmartContext] Alpaca quotes fetch error: {e}")
+            
             if not quotes:
                 return "", {}
             
@@ -562,9 +605,41 @@ class SmartContextEngine:
         return positions_str
     
     async def _get_positions_with_data(self, alpaca) -> Tuple[str, List[Dict]]:
-        """Get compact positions summary with raw data"""
+        """Get compact positions summary with raw data. Prefers IB, falls back to Alpaca."""
         try:
-            positions = await alpaca.get_positions()
+            positions = []
+            
+            # Try IB pushed positions first (primary source)
+            try:
+                from routers.ib import get_pushed_positions, is_pusher_connected
+                connected = is_pusher_connected()
+                print(f"[DEBUG] SmartContext IB pusher connected: {connected}")
+                if connected:
+                    ib_positions = get_pushed_positions()
+                    print(f"[DEBUG] SmartContext IB positions count: {len(ib_positions)}")
+                    if ib_positions:
+                        positions = [{
+                            "symbol": p.get("symbol", ""),
+                            "qty": float(p.get("position", p.get("qty", 0))),
+                            "unrealized_pl": float(p.get("unrealized_pnl", p.get("unrealizedPNL", 0))),
+                            "unrealized_plpc": 0,  # Calculate below if needed
+                            "avg_cost": float(p.get("avg_cost", p.get("avgCost", 0))),
+                            "market_value": float(p.get("market_value", p.get("marketValue", 0))),
+                            "source": "ib_gateway"
+                        } for p in ib_positions]
+                        print(f"[DEBUG] SmartContext mapped IB positions: {[p['symbol'] for p in positions]}")
+            except Exception as e:
+                print(f"[DEBUG] SmartContext IB positions error: {e}")
+            
+            # Fallback to Alpaca if no IB positions
+            if not positions and alpaca:
+                try:
+                    positions = await alpaca.get_positions()
+                    if positions:
+                        logger.info(f"[SmartContext] Got {len(positions)} positions from Alpaca")
+                except Exception as e:
+                    logger.warning(f"[SmartContext] Alpaca positions fetch error: {e}")
+            
             if not positions:
                 return "No open positions", []
             
@@ -574,8 +649,17 @@ class SmartContextEngine:
             for pos in positions:
                 symbol = pos.get("symbol", "")
                 qty = float(pos.get("qty", 0))
-                pnl = float(pos.get("unrealized_pl", 0))
+                pnl = float(pos.get("unrealized_pl", pos.get("unrealized_pnl", 0)))
                 pnl_pct = float(pos.get("unrealized_plpc", 0)) * 100
+                
+                # Calculate P&L percentage if not provided
+                if pnl_pct == 0 and pos.get("avg_cost"):
+                    avg_cost = float(pos.get("avg_cost", 0))
+                    market_value = float(pos.get("market_value", 0))
+                    if avg_cost > 0 and qty != 0:
+                        cost_basis = abs(qty) * avg_cost
+                        pnl_pct = (pnl / cost_basis * 100) if cost_basis else 0
+                
                 total_pnl += pnl
                 
                 direction = "LONG" if qty > 0 else "SHORT"
@@ -587,7 +671,8 @@ class SmartContextEngine:
                     "qty": qty,
                     "unrealized_pl": pnl,
                     "unrealized_plpc": pnl_pct,
-                    "direction": direction
+                    "direction": direction,
+                    "source": pos.get("source", "alpaca")
                 })
             
             lines.append(f"TOTAL UNREALIZED: {'+'if total_pnl >= 0 else ''}${total_pnl:.2f}")
@@ -602,10 +687,41 @@ class SmartContextEngine:
         return indices_str
     
     async def _get_market_indices_with_data(self, alpaca) -> Tuple[str, Dict]:
-        """Get compact market overview with raw data"""
+        """Get compact market overview with raw data. Prefers IB, falls back to Alpaca."""
         try:
             indices = ["SPY", "QQQ", "IWM", "DIA"]
-            quotes = await alpaca.get_quotes_batch(indices)
+            quotes = {}
+            
+            # Try IB pushed quotes first
+            try:
+                from routers.ib import get_pushed_quotes, is_pusher_connected
+                if is_pusher_connected():
+                    ib_quotes = get_pushed_quotes()
+                    for symbol in indices:
+                        if symbol in ib_quotes:
+                            q = ib_quotes[symbol]
+                            quotes[symbol] = {
+                                "price": q.get("last") or q.get("close") or 0,
+                                "change_percent": q.get("change_pct") or 0,
+                                "source": "ib_pusher"
+                            }
+                    if quotes:
+                        logger.info(f"[SmartContext] Got {len(quotes)} index quotes from IB")
+            except Exception as e:
+                logger.warning(f"[SmartContext] IB quotes fetch error: {e}")
+            
+            # Fallback to Alpaca for missing symbols
+            missing_indices = [s for s in indices if s not in quotes]
+            if missing_indices and alpaca:
+                try:
+                    alpaca_quotes = await alpaca.get_quotes_batch(missing_indices)
+                    if alpaca_quotes:
+                        for symbol, q in alpaca_quotes.items():
+                            if symbol not in quotes:
+                                quotes[symbol] = q
+                        logger.info(f"[SmartContext] Got {len(alpaca_quotes)} index quotes from Alpaca")
+                except Exception as e:
+                    logger.warning(f"[SmartContext] Alpaca quotes fetch error: {e}")
             
             if not quotes:
                 return "", {}

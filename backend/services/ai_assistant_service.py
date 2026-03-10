@@ -151,8 +151,9 @@ For each pattern, you can provide: Entry criteria, Stop placement, Target calcul
 When asked about specific setups or opportunities:
 1. State exact criteria required for that strategy
 2. Note any time restrictions or avoidance conditions
-3. Use Alpaca data for quotes/indices (always available) - IB only needed for VIX/L2/scanners
+3. Use the LIVE DATA provided in context (IB Gateway data is primary, Alpaca is fallback)
 4. Provide specific entry, stop, and target levels when possible
+5. When position data is provided in context (YOUR POSITIONS section), USE IT - this is the user's REAL account data
 
 === AUTONOMOUS TRADING BOT ===
 You are integrated with an autonomous trading bot. When the user asks about "the bot", "bot trades", "bot status", or "bot performance", refer to the TRADING BOT STATUS section in your context. The bot can:
@@ -1480,6 +1481,9 @@ DECISION: {score_result['trade_or_skip']}
 {smart_context}
 {learning_context}"""
             
+            print(f"[DEBUG] Full context length: {len(full_context)}")
+            print(f"[DEBUG] Smart context in full_context: {'YOUR POSITIONS' in full_context}")
+            
             return full_context
             
         except Exception as e:
@@ -2041,8 +2045,12 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
             # Try IB pushed positions first
             try:
                 from routers.ib import get_pushed_positions, is_pusher_connected
-                if is_pusher_connected():
+                logger.info(f"[Context] Checking IB pusher connection...")
+                is_connected = is_pusher_connected()
+                logger.info(f"[Context] IB pusher connected: {is_connected}")
+                if is_connected:
                     ib_positions = get_pushed_positions()
+                    logger.info(f"[Context] IB positions fetched: {len(ib_positions)}")
                     if ib_positions:
                         positions = [{
                             'symbol': p.get('symbol'),
@@ -2053,8 +2061,9 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                             'unrealized_pnl': p.get('unrealized_pnl', p.get('unrealizedPNL', 0)),
                             'source': 'ib_gateway'
                         } for p in ib_positions]
-            except Exception:
-                pass
+                        logger.info(f"[Context] Mapped {len(positions)} IB positions for AI context")
+            except Exception as e:
+                logger.warning(f"[Context] IB positions fetch error: {e}")
             
             # Fallback to Alpaca if no IB positions
             if not positions and self.alpaca_service:
