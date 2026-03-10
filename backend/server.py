@@ -3737,6 +3737,122 @@ async def get_ollama_proxy_status():
     return ollama_proxy_manager.get_status()
 
 
+# HTTP Polling endpoints for Ollama proxy (more compatible than WebSocket)
+_http_proxy_sessions = {}
+_http_proxy_requests = {}
+_http_proxy_responses = {}
+
+@app.post("/api/ollama-proxy/register")
+async def register_http_proxy(data: dict):
+    """Register an HTTP-based Ollama proxy"""
+    session_id = data.get("session_id")
+    ollama_status = data.get("ollama_status", {})
+    
+    _http_proxy_sessions[session_id] = {
+        "registered_at": datetime.now(timezone.utc).isoformat(),
+        "last_heartbeat": datetime.now(timezone.utc).isoformat(),
+        "ollama_status": ollama_status
+    }
+    
+    logger.info(f"HTTP Ollama proxy registered: {session_id}, models: {ollama_status.get('models', [])}")
+    return {"success": True, "message": "Registered"}
+
+
+@app.post("/api/ollama-proxy/heartbeat")
+async def http_proxy_heartbeat(data: dict):
+    """Heartbeat from HTTP proxy"""
+    session_id = data.get("session_id")
+    if session_id in _http_proxy_sessions:
+        _http_proxy_sessions[session_id]["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
+        _http_proxy_sessions[session_id]["ollama_status"] = data.get("ollama_status", {})
+    return {"success": True}
+
+
+@app.get("/api/ollama-proxy/poll")
+async def poll_http_proxy(session_id: str):
+    """Poll for pending requests (long-poll style)"""
+    if session_id not in _http_proxy_sessions:
+        return {"requests": [], "error": "Not registered"}
+    
+    # Check for pending requests for this session
+    pending = []
+    for req_id, req_data in list(_http_proxy_requests.items()):
+        if not req_data.get("assigned"):
+            req_data["assigned"] = session_id
+            pending.append({"request_id": req_id, "request": req_data.get("request")})
+    
+    return {"requests": pending}
+
+
+@app.post("/api/ollama-proxy/response")
+async def submit_http_proxy_response(data: dict):
+    """Submit response from HTTP proxy"""
+    request_id = data.get("request_id")
+    result = data.get("result", {})
+    
+    if request_id in _http_proxy_requests:
+        _http_proxy_responses[request_id] = result
+        # Notify any waiting futures
+        if "future" in _http_proxy_requests[request_id]:
+            future = _http_proxy_requests[request_id]["future"]
+            if not future.done():
+                future.set_result(result)
+    
+    return {"success": True}
+
+
+async def call_ollama_via_http_proxy(model: str, messages: list, options: dict = None, timeout: float = 120.0) -> dict:
+    """Call Ollama through the HTTP proxy"""
+    import uuid
+    
+    # Check if any HTTP proxy is connected
+    active_sessions = [
+        sid for sid, info in _http_proxy_sessions.items()
+        if info.get("ollama_status", {}).get("available", False)
+    ]
+    
+    if not active_sessions:
+        return {"success": False, "error": "No HTTP proxy connected"}
+    
+    # Create request
+    request_id = f"req_{uuid.uuid4().hex[:8]}"
+    future = asyncio.get_event_loop().create_future()
+    
+    _http_proxy_requests[request_id] = {
+        "request": {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "options": options or {}
+        },
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "future": future
+    }
+    
+    try:
+        result = await asyncio.wait_for(future, timeout=timeout)
+        return result
+    except asyncio.TimeoutError:
+        return {"success": False, "error": "Request timed out"}
+    finally:
+        _http_proxy_requests.pop(request_id, None)
+        _http_proxy_responses.pop(request_id, None)
+
+
+def is_http_ollama_proxy_connected() -> bool:
+    """Check if HTTP Ollama proxy is connected and available"""
+    for sid, info in _http_proxy_sessions.items():
+        if info.get("ollama_status", {}).get("available", False):
+            # Check heartbeat is recent (within 30 seconds)
+            try:
+                last_hb = datetime.fromisoformat(info["last_heartbeat"].replace("Z", "+00:00"))
+                if (datetime.now(timezone.utc) - last_hb).total_seconds() < 30:
+                    return True
+            except:
+                pass
+    return False
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)

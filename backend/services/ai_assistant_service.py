@@ -2103,7 +2103,54 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
             logger.info(f"⏭️ Skipping Ollama (cooling down)")
             skip_ollama = True
         
-        # PRIORITY 1: Check for Local Ollama Proxy (most reliable, no ngrok)
+        # PRIORITY 1: Check for HTTP Ollama Proxy (most reliable, no WebSocket issues)
+        if not skip_ollama:
+            try:
+                # Import the HTTP proxy checker from server
+                from server import is_http_ollama_proxy_connected, call_ollama_via_http_proxy
+                
+                if is_http_ollama_proxy_connected():
+                    logger.info("🔌 Using Local Ollama Proxy (HTTP polling)")
+                    
+                    # Get model from config or use default
+                    model = "qwen2.5:7b"
+                    if LLMProvider.OLLAMA in self.llm_clients:
+                        model = self.llm_clients[LLMProvider.OLLAMA].get("model", "qwen2.5:7b")
+                    
+                    # Build context for proxy
+                    max_context = 4000 if complexity == "deep" else 2000
+                    truncated_context = context[:max_context] if len(context) > max_context else context
+                    
+                    proxy_messages = [
+                        {"role": "system", "content": f"""You are an expert trading assistant with REAL-TIME market data.
+The data below is LIVE - use it to answer questions directly.
+
+{truncated_context}
+
+Be concise and reference the data above."""},
+                        {"role": "user", "content": messages[-1]["content"] if messages else ""}
+                    ]
+                    
+                    result = await call_ollama_via_http_proxy(
+                        model=model,
+                        messages=proxy_messages,
+                        options={"num_ctx": 2048, "temperature": 0.7, "num_predict": 512},
+                        timeout=120.0
+                    )
+                    
+                    if result.get("success"):
+                        content = result.get("response", {}).get("message", {}).get("content", "")
+                        if content:
+                            logger.info(f"✅ HTTP Ollama Proxy response OK ({len(content)} chars) - FREE")
+                            return content
+                    else:
+                        logger.warning(f"⚠️ HTTP Ollama Proxy failed: {result.get('error')}")
+            except ImportError:
+                pass  # HTTP proxy not available
+            except Exception as e:
+                logger.warning(f"⚠️ HTTP Ollama Proxy error: {e}")
+        
+        # PRIORITY 2: Check for WebSocket Ollama Proxy (fallback)
         if not skip_ollama and ollama_proxy_manager and ollama_proxy_manager.is_connected:
             try:
                 logger.info("🔌 Using Local Ollama Proxy (WebSocket connection)")
