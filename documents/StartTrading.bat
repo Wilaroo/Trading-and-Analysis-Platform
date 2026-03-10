@@ -17,9 +17,9 @@ set SCRIPT_DIR=%~dp0
 :: =====================================================
 :: CONFIGURATION - Edit these for your setup
 :: =====================================================
-:: Ollama model - RTX 5060 (8GB VRAM) can handle these well:
-:: Options: llama3:8b (recommended), mistral:7b (fast reasoning), llama3.1:8b (newer)
-set OLLAMA_MODEL=llama3:8b
+:: Ollama model - will be auto-detected based on GPU VRAM
+:: Manual override (leave empty for auto-detect):
+set OLLAMA_MODEL_OVERRIDE=
 
 :: GPU layers - set to 35 for RTX 5060 (uses GPU for most layers)
 set OLLAMA_GPU_LAYERS=35
@@ -32,6 +32,45 @@ set IB_SYMBOLS=VIX SPY QQQ IWM DIA XOM CVX CF NTR NVDA AAPL MSFT TSLA AMD
 set IB_GATEWAY_PATH=C:\Jts\ibgateway\1037\ibgateway.exe
 
 :: =====================================================
+:: AUTO-DETECT GPU AND SELECT MODEL
+:: =====================================================
+echo [0/9] Detecting GPU and selecting optimal model...
+
+:: Check for NVIDIA GPU
+set GPU_VRAM=0
+set GPU_NAME=Unknown
+for /f "tokens=1,2 delims=," %%a in ('nvidia-smi --query-gpu^=name^,memory.total --format^=csv^,noheader^,nounits 2^>nul') do (
+    set GPU_NAME=%%a
+    set GPU_VRAM=%%b
+)
+
+:: Remove leading/trailing spaces from GPU_VRAM
+for /f "tokens=* delims= " %%a in ("%GPU_VRAM%") do set GPU_VRAM=%%a
+
+:: Select model based on VRAM (if not overridden)
+if defined OLLAMA_MODEL_OVERRIDE (
+    set OLLAMA_MODEL=%OLLAMA_MODEL_OVERRIDE%
+    echo       Using override model: %OLLAMA_MODEL%
+) else (
+    :: Auto-select based on VRAM
+    if %GPU_VRAM% GEQ 8000 (
+        set OLLAMA_MODEL=qwen2.5:14b
+        echo       GPU: %GPU_NAME% ^(%GPU_VRAM% MB^) - Using qwen2.5:14b
+    ) else if %GPU_VRAM% GEQ 6000 (
+        set OLLAMA_MODEL=qwen2.5:7b
+        echo       GPU: %GPU_NAME% ^(%GPU_VRAM% MB^) - Using qwen2.5:7b
+    ) else if %GPU_VRAM% GEQ 4000 (
+        set OLLAMA_MODEL=qwen2.5:7b
+        echo       GPU: %GPU_NAME% ^(%GPU_VRAM% MB^) - Using qwen2.5:7b ^(with CPU offload^)
+    ) else if %GPU_VRAM% GEQ 2000 (
+        set OLLAMA_MODEL=qwen2.5:3b
+        echo       GPU: %GPU_NAME% ^(%GPU_VRAM% MB^) - Using qwen2.5:3b
+    ) else (
+        set OLLAMA_MODEL=qwen2.5:1.5b
+        echo       Low VRAM detected - Using qwen2.5:1.5b
+    )
+)
+echo.
 
 :: Self-update check (downloads latest bat file if changed)
 echo [0/8] Checking for script updates...
@@ -213,18 +252,76 @@ echo       [SKIP] IB Data Pusher not started - fix errors above
 :done_pusher
 echo.
 
+:: ===================== OLLAMA LOCAL AI PROXY =====================
+echo [6/9] Setting up Ollama Local AI Proxy...
+
+:: Download latest ollama_proxy.py from GitHub
+echo       Downloading latest ollama_proxy.py...
+curl -s -f "%GITHUB_RAW%/ollama_proxy.py" > "%SCRIPT_DIR%ollama_proxy.py" 2>nul
+if %errorlevel%==0 (
+    echo       Downloaded latest proxy script!
+) else (
+    if exist "%SCRIPT_DIR%ollama_proxy.py" (
+        echo       Could not download update, using existing local copy
+    ) else (
+        echo       [ERROR] Cannot download ollama_proxy.py - Ollama will use ngrok fallback
+        goto skip_proxy
+    )
+)
+
+:: Check/install Python dependencies for proxy
+echo       Checking proxy dependencies...
+python -c "import websockets" >nul 2>&1
+if errorlevel 1 (
+    echo       Installing websockets...
+    pip install websockets >nul 2>&1
+)
+
+python -c "import httpx" >nul 2>&1
+if errorlevel 1 (
+    echo       Installing httpx...
+    pip install httpx >nul 2>&1
+)
+echo       Dependencies OK!
+
+:: Start the Ollama proxy (connects outbound to cloud - no ngrok needed!)
+echo       Starting Ollama Local AI Proxy (WebSocket)...
+start "Ollama Proxy" cmd /k "title Ollama AI Proxy - KEEP OPEN && color 0D && echo ============================================ && echo   Ollama Local AI Proxy Running && echo   Cloud: %PLATFORM_URL% && echo   Model: %OLLAMA_MODEL% && echo   Connection: WebSocket (outbound, no ngrok) && echo   Press Ctrl+C to stop && echo ============================================ && python "%SCRIPT_DIR%ollama_proxy.py" --cloud-url %PLATFORM_URL%"
+timeout /t 3 /nobreak >nul
+echo       Ollama Proxy started!
+goto done_proxy
+
+:skip_proxy
+echo       [SKIP] Ollama Proxy not started - will use ngrok fallback
+:done_proxy
+echo.
+
 :: ===================== VERIFY CONNECTIONS =====================
-echo [6/8] Verifying connections (5 second timeout each)...
+echo [7/9] Verifying connections (5 second timeout each)...
 timeout /t 3 /nobreak >nul
 
 :: Check Ollama tunnel (with timeout)
 echo       Checking Ollama tunnel...
 curl -s -f -m 5 "https://pseudoaccidentally-linty-addie.ngrok-free.dev/api/tags" -H "ngrok-skip-browser-warning: true" >nul 2>&1
 if %errorlevel%==0 (
-    echo       Ollama tunnel: CONNECTED
+    echo       Ollama tunnel (ngrok): CONNECTED
 ) else (
-    echo       Ollama tunnel: Not responding (will retry in background)
+    echo       Ollama tunnel (ngrok): Not responding (proxy will handle)
 )
+
+:: Check Ollama Proxy (WebSocket)
+curl -s -f -m 5 "%PLATFORM_URL%/api/ollama-proxy/status" > "%TEMP%\proxy_check.tmp" 2>nul
+if %errorlevel%==0 (
+    findstr /C:"\"connected\":true" "%TEMP%\proxy_check.tmp" >nul 2>&1
+    if %errorlevel%==0 (
+        echo       Ollama Proxy (WebSocket): CONNECTED - Primary AI
+    ) else (
+        echo       Ollama Proxy (WebSocket): Connecting...
+    )
+) else (
+    echo       Ollama Proxy: Starting up...
+)
+del "%TEMP%\proxy_check.tmp" 2>nul
 
 :: Check IB Data Pusher (with timeout)
 curl -s -f -m 5 "%PLATFORM_URL%/api/ib/pushed-data" > "%TEMP%\pusher_check.tmp" 2>nul
@@ -242,7 +339,7 @@ del "%TEMP%\pusher_check.tmp" 2>nul
 echo.
 
 :: ===================== REGISTER OLLAMA WITH CLOUD =====================
-echo [7/8] Registering Ollama with cloud platform...
+echo [8/9] Registering Ollama with cloud platform...
 curl -s -m 10 -X POST "%PLATFORM_URL%/api/assistant/configure" ^
     -H "Content-Type: application/json" ^
     -d "{\"ollama_url\":\"https://pseudoaccidentally-linty-addie.ngrok-free.dev\",\"ollama_model\":\"%OLLAMA_MODEL%\"}" >nul 2>&1
@@ -253,7 +350,7 @@ if %errorlevel%==0 (
 )
 echo.
 
-echo [8/8] Opening Trading Platform...
+echo [9/9] Opening Trading Platform...
 timeout /t 2 /nobreak >nul
 start "" "%PLATFORM_URL%"
 
@@ -265,8 +362,9 @@ echo.
 echo    Platform: %PLATFORM_URL%
 echo.
 echo    Services Running:
-echo    - Ollama: %OLLAMA_MODEL% (GPU accelerated - RTX 5060)
-echo      Tunnel: https://pseudoaccidentally-linty-addie.ngrok-free.dev
+echo    - Ollama: %OLLAMA_MODEL% (GPU: %GPU_NAME%)
+echo      Proxy: WebSocket (direct, no ngrok latency)
+echo      Fallback: ngrok tunnel
 echo    - IB Gateway: Running on port 4002
 echo    - IB Data Pusher: Pushing to cloud
 echo    - ngrok: All tunnels active
