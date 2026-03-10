@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 def _ensure_initialized():
     """Ensure sentiment service is initialized with dependencies"""
     service = get_sentiment_service()
-    if not service._initialized:
+    if not service.is_initialized():
         try:
             from services.news_service import get_news_service
             from services.llm_service import get_llm_service

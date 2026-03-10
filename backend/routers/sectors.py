@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 def _ensure_initialized():
     """Ensure sector service is initialized with Alpaca"""
     service = get_sector_analysis_service()
-    if not service._initialized:
+    if not service.is_initialized():
         try:
             from services.alpaca_service import get_alpaca_service
             alpaca = get_alpaca_service()

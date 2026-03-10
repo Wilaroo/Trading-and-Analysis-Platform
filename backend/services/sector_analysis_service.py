@@ -151,18 +151,29 @@ class SectorAnalysisService:
         self._cache_ttl = 300  # 5 minutes
         self._initialized = False
     
+    def is_initialized(self) -> bool:
+        """Check if service is properly initialized"""
+        return self._initialized and self._alpaca_service is not None
+    
     def set_alpaca_service(self, alpaca_service):
         """Set the Alpaca service reference"""
         self._alpaca_service = alpaca_service
         self._initialized = True
+        logger.info("SectorAnalysisService initialized with Alpaca service")
+    
+    def _ensure_initialized(self) -> bool:
+        """Ensure service is initialized before operations"""
+        if not self.is_initialized():
+            logger.warning("SectorAnalysisService not initialized - call set_alpaca_service() first")
+            return False
+        return True
     
     async def get_sector_rankings(self, force_refresh: bool = False) -> List[SectorData]:
         """
         Get current sector performance rankings.
         Returns sectors sorted by performance (best to worst).
         """
-        if not self._initialized or self._alpaca_service is None:
-            logger.warning("Sector analysis service not initialized")
+        if not self._ensure_initialized():
             return []
         
         # Check cache

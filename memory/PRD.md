@@ -2118,3 +2118,46 @@ Auto-generate a Weekly Performance Summary every Friday at market close that agg
 - Could use AI to generate narrative insights
 
 **Status**: 📋 SAVED FOR FUTURE
+
+---
+
+## Tech Debt Fix: Singleton Initialization Pattern (March 2026)
+
+### Issue
+Older backend services (chart_pattern_service, sector_analysis_service, sentiment_analysis_service) had inconsistent initialization patterns:
+- Used `self._initialized` directly in checks
+- External code accessed `service._initialized` (private attribute)
+- No `is_initialized()` public method
+
+### Fix Applied
+Updated all three services and their routers to use a consistent pattern:
+
+**Services Updated:**
+- `/app/backend/services/chart_pattern_service.py`
+- `/app/backend/services/sector_analysis_service.py`
+- `/app/backend/services/sentiment_analysis_service.py`
+
+**Routers Updated:**
+- `/app/backend/routers/patterns.py`
+- `/app/backend/routers/sectors.py`
+- `/app/backend/routers/sentiment.py`
+
+**Pattern Implemented:**
+```python
+def is_initialized(self) -> bool:
+    """Check if service is properly initialized"""
+    return self._initialized and self._dependency is not None
+
+def _ensure_initialized(self) -> bool:
+    """Ensure service is initialized before operations"""
+    if not self.is_initialized():
+        logger.warning("Service not initialized")
+        return False
+    return True
+```
+
+**Also Updated:**
+- `/app/backend/server.py` - Added initialization for chart_pattern_service and sentiment_service at startup
+- `/app/backend/services/enhanced_scanner.py` - Changed `_initialized` access to `is_initialized()`
+
+**Status**: ✅ FIXED - All three services now working correctly
