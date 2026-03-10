@@ -501,6 +501,9 @@ class TradingBotService:
         self._quality_service = None
         self._news_service = None
         
+        # Learning Loop integration (Phase 1)
+        self._learning_loop = None
+        
         # Callbacks for real-time updates
         self._trade_callbacks: List[callable] = []
         
@@ -1646,6 +1649,19 @@ class TradingBotService:
             return
         
         try:
+            # Start execution tracking (Phase 1 Learning)
+            if hasattr(self, '_learning_loop') and self._learning_loop:
+                try:
+                    self._learning_loop.start_execution_tracking(
+                        trade_id=trade.id,
+                        alert_id=getattr(trade, 'alert_id', trade.id),
+                        intended_entry=trade.entry_price,
+                        intended_size=trade.shares,
+                        planned_r=trade.targets[0] / trade.entry_price - 1 if trade.targets else 2.0
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to start execution tracking: {e}")
+            
             # Execute entry order
             result = await self._trade_executor.execute_entry(trade)
             
@@ -1654,6 +1670,17 @@ class TradingBotService:
                 trade.fill_price = result.get('fill_price', trade.entry_price)
                 trade.executed_at = datetime.now(timezone.utc).isoformat()
                 trade.entry_order_id = result.get('order_id')
+                
+                # Record actual entry (Phase 1 Learning)
+                if hasattr(self, '_learning_loop') and self._learning_loop:
+                    try:
+                        self._learning_loop.record_trade_entry(
+                            trade_id=trade.id,
+                            actual_entry=trade.fill_price,
+                            actual_size=trade.shares
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to record entry: {e}")
                 
                 # Place stop and target orders
                 stop_result = await self._trade_executor.place_stop_order(trade)
@@ -2107,6 +2134,31 @@ class TradingBotService:
                     self._perf_service.record_trade(trade.to_dict())
                 except Exception as e:
                     logger.warning(f"Failed to record trade performance: {e}")
+            
+            # NEW: Record to Learning Loop (Phase 1)
+            if hasattr(self, '_learning_loop') and self._learning_loop:
+                try:
+                    outcome = "won" if trade.realized_pnl > 0 else ("lost" if trade.realized_pnl < 0 else "breakeven")
+                    asyncio.create_task(self._learning_loop.record_trade_outcome(
+                        trade_id=trade.id,
+                        alert_id=getattr(trade, 'alert_id', trade.id),
+                        symbol=trade.symbol,
+                        setup_type=trade.setup_type,
+                        strategy_name=trade.setup_type,
+                        direction=trade.direction.value if hasattr(trade.direction, 'value') else str(trade.direction),
+                        trade_style=getattr(trade, 'trade_style', 'move_2_move'),
+                        entry_price=trade.fill_price,
+                        exit_price=trade.exit_price,
+                        stop_price=trade.stop_loss,
+                        target_price=trade.targets[0] if trade.targets else trade.fill_price * 1.02,
+                        outcome=outcome,
+                        pnl=trade.realized_pnl,
+                        entry_time=trade.opened_at,
+                        exit_time=trade.closed_at,
+                        confirmation_signals=getattr(trade, 'confirmation_signals', [])
+                    ))
+                except Exception as e:
+                    logger.warning(f"Failed to record trade to learning loop: {e}")
             
             logger.info(f"Trade closed ({reason}): {trade.symbol} P&L: ${trade.realized_pnl:.2f}")
             return True

@@ -1,10 +1,12 @@
 """
 Learning Dashboard API Router
 Endpoints for strategy performance, AI analysis, and auto-tuning.
+Extended with Three-Speed Learning Architecture endpoints (Phase 1).
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List, Dict, Any
+from services.learning_loop_service import get_learning_loop_service
 
 router = APIRouter(prefix="/api/learning", tags=["learning-dashboard"])
 
@@ -77,3 +79,141 @@ async def get_tuning_history(limit: int = 20):
         raise HTTPException(status_code=503, detail="Performance service not initialized")
     history = _perf_service.get_tuning_history(limit=limit)
     return {"success": True, "history": history}
+
+
+# ==================== THREE-SPEED LEARNING ARCHITECTURE (Phase 1) ====================
+
+@router.get("/loop/stats")
+async def get_learning_loop_stats(
+    setup_type: Optional[str] = None,
+    market_regime: Optional[str] = None,
+    time_of_day: Optional[str] = None
+):
+    """
+    Get aggregated learning statistics by context.
+    
+    Query params:
+    - setup_type: Filter by setup type (e.g., "bull_flag", "vwap_bounce")
+    - market_regime: Filter by market regime (e.g., "strong_uptrend", "range_bound")
+    - time_of_day: Filter by time (e.g., "morning_momentum", "afternoon")
+    """
+    learning_loop = get_learning_loop_service()
+    
+    stats = await learning_loop.get_learning_stats(
+        setup_type=setup_type,
+        market_regime=market_regime,
+        time_of_day=time_of_day
+    )
+    
+    return {
+        "success": True,
+        "stats": [s.to_dict() for s in stats],
+        "count": len(stats)
+    }
+
+
+@router.get("/loop/contextual-winrate")
+async def get_contextual_win_rate(
+    setup_type: str,
+    market_regime: Optional[str] = None,
+    time_of_day: Optional[str] = None
+):
+    """
+    Get win rate for a specific setup in a specific context.
+    Returns confidence level based on sample size.
+    """
+    learning_loop = get_learning_loop_service()
+    
+    result = await learning_loop.get_contextual_win_rate(
+        setup_type=setup_type,
+        market_regime=market_regime,
+        time_of_day=time_of_day
+    )
+    
+    return {"success": True, **result}
+
+
+@router.get("/loop/outcomes")
+async def get_trade_outcomes(
+    setup_type: Optional[str] = None,
+    limit: int = 20
+):
+    """Get recent trade outcomes with full context and execution data"""
+    learning_loop = get_learning_loop_service()
+    
+    outcomes = await learning_loop.get_recent_outcomes(
+        limit=limit,
+        setup_type=setup_type
+    )
+    
+    return {
+        "success": True,
+        "outcomes": [o.to_dict() for o in outcomes],
+        "count": len(outcomes)
+    }
+
+
+@router.get("/loop/profile")
+async def get_trader_profile():
+    """
+    Get current trader profile for RAG injection.
+    Shows best/worst setups, hours, execution tendencies.
+    """
+    learning_loop = get_learning_loop_service()
+    
+    profile = await learning_loop.get_trader_profile()
+    
+    return {
+        "success": True,
+        "profile": profile.to_dict(),
+        "ai_context": profile.generate_ai_context()
+    }
+
+
+@router.get("/loop/tilt-status")
+async def get_tilt_status():
+    """Check if trader is currently tilted (based on recent performance)"""
+    learning_loop = get_learning_loop_service()
+    
+    return {
+        "success": True,
+        "is_tilted": learning_loop.is_tilted(),
+        "severity": learning_loop.get_tilt_severity()
+    }
+
+
+@router.post("/loop/daily-analysis")
+async def run_daily_analysis():
+    """
+    Manually trigger end-of-day analysis.
+    This is usually auto-triggered at market close.
+    
+    Performs:
+    - Aggregates today's trades into stats
+    - Updates trader profile
+    - Checks for edge decay
+    - Generates calibration recommendations
+    """
+    learning_loop = get_learning_loop_service()
+    
+    result = await learning_loop.run_daily_analysis()
+    
+    return {
+        "success": True,
+        "analysis": result
+    }
+
+
+@router.get("/loop/health")
+async def get_learning_system_health():
+    """Get health status of the learning system and its services"""
+    from services.graceful_degradation import get_degradation_service
+    
+    degradation = get_degradation_service()
+    system_health = degradation.get_system_health()
+    
+    return {
+        "success": True,
+        "health": system_health.to_dict()
+    }
+

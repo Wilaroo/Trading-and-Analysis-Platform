@@ -63,6 +63,10 @@ from routers.ev_tracking import router as ev_tracking_router
 from routers.smb_router import router as smb_router
 from routers.journal_router import router as journal_router
 from services.market_intel_service import get_market_intel_service
+from services.learning_loop_service import get_learning_loop_service, init_learning_loop_service
+from services.trade_context_service import get_trade_context_service, init_trade_context_service
+from services.execution_tracker_service import get_execution_tracker, init_execution_tracker
+from services.graceful_degradation import get_degradation_service, init_degradation_service
 from services.eod_generation_service import get_eod_service
 from services.ib_service import get_ib_service
 from services.news_service import init_news_service
@@ -258,6 +262,12 @@ insider_col = db["insider_trades"]
 cot_col = db["cot_data"]
 earnings_col = db["earnings"]
 
+# NEW: Learning Architecture Collections (Phase 1)
+trade_outcomes_col = db["trade_outcomes"]  # Full trade records with context
+learning_stats_col = db["learning_stats"]  # Aggregated statistics by context
+calibration_log_col = db["calibration_log"]  # Threshold adjustment history
+trader_profile_col = db["trader_profile"]  # Trader patterns for RAG
+
 # Initialize smart watchlist and wave scanner
 smart_watchlist = init_smart_watchlist(smart_watchlist_col)
 index_universe = get_index_universe()
@@ -277,6 +287,41 @@ market_intel_service.set_services(
     alert_system=alert_system
 )
 init_market_intel_router(market_intel_service)
+
+# ===================== LEARNING ARCHITECTURE (Phase 1) =====================
+# Initialize Three-Speed Learning Architecture services
+
+# 1. Graceful Degradation Service - handles service failures
+degradation_service = init_degradation_service()
+
+# 2. Execution Tracker - tracks trade execution quality
+execution_tracker = init_execution_tracker(db=db, alpaca_service=alpaca_service)
+
+# 3. Trade Context Service - captures market context at trade time
+trade_context_service = init_trade_context_service(
+    alpaca_service=alpaca_service,
+    ib_service=ib_service,
+    sector_service=sector_service,
+    news_service=news_service,
+    technical_service=realtime_tech_service,
+    sentiment_service=sentiment_service,
+    db=db
+)
+
+# 4. Learning Loop Service - orchestrates the learning system
+learning_loop_service = init_learning_loop_service(db=db)
+learning_loop_service.set_services(
+    context_service=trade_context_service,
+    execution_tracker=execution_tracker,
+    degradation_service=degradation_service
+)
+
+# Wire learning loop to trading bot for trade outcome recording
+trading_bot._learning_loop = learning_loop_service
+
+print("Three-Speed Learning Architecture Phase 1 initialized")
+print(f"  - Collections: trade_outcomes, learning_stats, calibration_log, trader_profile")
+print(f"  - Services: LearningLoop, TradeContext, ExecutionTracker, GracefulDegradation")
 
 # ===================== STRATEGY HELPERS =====================
 # Strategies are now stored in MongoDB and accessed via strategy_service

@@ -11,7 +11,7 @@ load_dotenv()
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 if not BASE_URL:
-    BASE_URL = "https://playbook-drc-gen.preview.emergentagent.com"
+    BASE_URL = "https://tqs-engine.preview.emergentagent.com"
 
 
 class TestHealthAndStatus:
