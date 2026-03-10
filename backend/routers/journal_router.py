@@ -757,3 +757,136 @@ async def get_eod_generation_logs(days: int = 7):
         return {"success": True, "logs": logs, "count": len(logs)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== WEEKLY INTELLIGENCE REPORT ENDPOINTS ====================
+
+_weekly_report_service = None
+
+def get_weekly_report_service_instance():
+    """Get the singleton weekly report service instance"""
+    global _weekly_report_service
+    
+    if _weekly_report_service is None:
+        from pymongo import MongoClient
+        mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+        db_name = os.environ.get("DB_NAME", "trading_app")
+        client = MongoClient(mongo_url)
+        db = client[db_name]
+        
+        from services.weekly_report_service import init_weekly_report_service
+        from services.medium_learning import (
+            get_calibration_service,
+            get_context_performance_service,
+            get_confirmation_validator_service,
+            get_playbook_performance_service,
+            get_edge_decay_service
+        )
+        
+        _weekly_report_service = init_weekly_report_service(
+            db=db,
+            calibration_service=get_calibration_service(),
+            context_performance_service=get_context_performance_service(),
+            confirmation_validator_service=get_confirmation_validator_service(),
+            playbook_performance_service=get_playbook_performance_service(),
+            edge_decay_service=get_edge_decay_service()
+        )
+    
+    return _weekly_report_service
+
+
+class ReflectionUpdate(BaseModel):
+    what_went_well: str = ""
+    what_to_improve: str = ""
+    key_lessons: str = ""
+    goals_for_next_week: str = ""
+    mood_rating: int = 3
+    confidence_rating: int = 3
+    notes: str = ""
+
+
+@router.post("/weekly-report/generate")
+async def generate_weekly_report(week_start: str = None, force: bool = False):
+    """
+    Generate a weekly intelligence report.
+    
+    - week_start: Start date of the week (Monday, YYYY-MM-DD). If None, uses current week.
+    - force: If True, regenerate even if report exists.
+    """
+    service = get_weekly_report_service_instance()
+    try:
+        report = await service.generate_weekly_report(week_start=week_start, force=force)
+        return {"success": True, "report": report.to_dict()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/weekly-report/current")
+async def get_current_weekly_report():
+    """Get or generate the current week's report"""
+    service = get_weekly_report_service_instance()
+    try:
+        report = await service.generate_weekly_report()
+        return {"success": True, "report": report.to_dict()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/weekly-report/stats")
+async def get_weekly_report_stats():
+    """Get weekly report service statistics"""
+    service = get_weekly_report_service_instance()
+    return {"success": True, **service.get_stats()}
+
+
+@router.get("/weekly-report/week/{year}/{week_number}")
+async def get_weekly_report_by_week(year: int, week_number: int):
+    """Get weekly report by year and week number"""
+    service = get_weekly_report_service_instance()
+    report = await service.get_report_by_week(year, week_number)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found for this week")
+    return {"success": True, "report": report.to_dict()}
+
+
+@router.get("/weekly-report/{report_id}")
+async def get_weekly_report(report_id: str):
+    """Get a specific weekly report by ID"""
+    service = get_weekly_report_service_instance()
+    report = await service.get_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return {"success": True, "report": report.to_dict()}
+
+
+@router.get("/weekly-report")
+async def get_recent_weekly_reports(limit: int = 12):
+    """Get recent weekly reports (for archive view)"""
+    service = get_weekly_report_service_instance()
+    reports = await service.get_recent_reports(limit=limit)
+    return {
+        "success": True,
+        "reports": [r.to_dict() for r in reports],
+        "count": len(reports)
+    }
+
+
+@router.put("/weekly-report/{report_id}/reflection")
+async def update_weekly_reflection(report_id: str, reflection: ReflectionUpdate):
+    """Update the personal reflection section of a weekly report"""
+    service = get_weekly_report_service_instance()
+    report = await service.update_reflection(report_id, reflection.dict())
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return {"success": True, "report": report.to_dict()}
+
+
+@router.post("/weekly-report/{report_id}/complete")
+async def mark_weekly_report_complete(report_id: str):
+    """Mark a weekly report as complete (user has reviewed and added reflection)"""
+    service = get_weekly_report_service_instance()
+    success = await service.mark_complete(report_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return {"success": True, "message": "Report marked as complete"}
+
