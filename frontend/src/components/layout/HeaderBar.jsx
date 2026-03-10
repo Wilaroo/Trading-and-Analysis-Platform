@@ -368,7 +368,7 @@ const SystemStatusPopover = ({
     },
     {
       name: 'Ollama AI',
-      description: ollamaStatus === 'online' ? 'Local AI via HTTP proxy' : 'Local AI (offline)',
+      description: ollamaStatus === 'online' ? 'Cloud AI (gpt-oss:120b)' : 'AI (offline)',
       connected: ollamaStatus === 'online',
       checking: ollamaStatus === 'checking',
       icon: Zap

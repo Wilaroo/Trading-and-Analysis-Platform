@@ -2191,26 +2191,46 @@ REMEMBER: Only use the EXACT data provided above. Do not invent positions or pri
                         {"role": "user", "content": messages[-1]["content"] if messages else ""}
                     ]
                     
-                    # Adjust options based on model - deepseek-r1 needs more time for reasoning
-                    ollama_options = {"num_ctx": 4096, "temperature": 0.7, "num_predict": 1024}
-                    if "deepseek" in model.lower():
+                    # Adjust options based on model
+                    # gpt-oss:120b-cloud can handle larger context, use more tokens
+                    if "120b" in model.lower() or "gpt-oss" in model.lower():
+                        ollama_options = {"num_ctx": 8192, "temperature": 0.7, "num_predict": 2048}
+                    elif "deepseek" in model.lower():
                         # Deepseek-r1 has extended reasoning - give it more room
                         ollama_options = {"num_ctx": 4096, "temperature": 0.5, "num_predict": 1500}
+                    else:
+                        ollama_options = {"num_ctx": 4096, "temperature": 0.7, "num_predict": 1024}
                     
                     result = await call_ollama_via_http_proxy(
                         model=model,
                         messages=proxy_messages,
                         options=ollama_options,
-                        timeout=180.0  # 3 minutes for deepseek reasoning
+                        timeout=120.0  # 2 minutes should be enough for cloud model
                     )
                     
                     if result.get("success"):
                         content = result.get("response", {}).get("message", {}).get("content", "")
                         if content:
-                            logger.info(f"✅ HTTP Ollama Proxy response OK ({len(content)} chars) - FREE")
+                            logger.info(f"✅ Ollama Cloud ({model}) response OK ({len(content)} chars)")
                             return content
                     else:
-                        logger.warning(f"⚠️ HTTP Ollama Proxy failed: {result.get('error')}")
+                        error_msg = result.get('error', 'Unknown error')
+                        logger.warning(f"⚠️ Ollama Cloud failed: {error_msg}")
+                        
+                        # If cloud model failed, try local fallback
+                        if "120b" in model.lower() or "cloud" in model.lower():
+                            logger.info("🔄 Trying local fallback model (llama3:8b)...")
+                            fallback_result = await call_ollama_via_http_proxy(
+                                model="llama3:8b",
+                                messages=proxy_messages,
+                                options={"num_ctx": 4096, "temperature": 0.7, "num_predict": 1024},
+                                timeout=60.0
+                            )
+                            if fallback_result.get("success"):
+                                content = fallback_result.get("response", {}).get("message", {}).get("content", "")
+                                if content:
+                                    logger.info(f"✅ Local fallback (llama3:8b) response OK")
+                                    return content
             except ImportError:
                 pass  # HTTP proxy not available
             except Exception as e:
