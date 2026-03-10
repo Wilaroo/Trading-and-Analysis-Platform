@@ -572,6 +572,10 @@ class IBDataPusher:
         l2_update_interval = 30  # Check for in-play changes every 30 seconds
         last_l2_update = 0
         
+        # Force initial push immediately
+        logger.info(f"Doing initial push: {len(self.positions_data)} positions, {len(self.quotes_buffer)} quotes")
+        self.push_data_to_cloud()
+        
         try:
             while self.running:
                 try:
