@@ -449,6 +449,20 @@ class IBDataPusher:
         except Exception as e:
             logger.debug(f"Error parsing fundamental XML for {symbol}: {e}")
     
+    def _clean_for_json(self, obj):
+        """Clean data for JSON serialization - replace NaN/Inf with None"""
+        import math
+        if isinstance(obj, dict):
+            return {k: self._clean_for_json(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._clean_for_json(item) for item in obj]
+        elif isinstance(obj, float):
+            if math.isnan(obj) or math.isinf(obj):
+                return None
+            return obj
+        else:
+            return obj
+    
     def push_data_to_cloud(self):
         """Push buffered data to cloud backend (synchronous)"""
         has_data = (self.quotes_buffer or self.account_data or 
@@ -460,8 +474,9 @@ class IBDataPusher:
         
         # Log what we're pushing
         logger.info(f"Pushing: {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions, {len(self.account_data)} account fields")
-            
-        payload = {
+        
+        # Clean all data to remove NaN/Inf values before JSON serialization
+        payload = self._clean_for_json({
             "timestamp": datetime.now().isoformat(),
             "source": "ib_gateway",
             "quotes": self.quotes_buffer.copy(),
@@ -469,7 +484,7 @@ class IBDataPusher:
             "positions": self.positions_data.copy(),
             "level2": self.level2_buffer.copy(),
             "fundamentals": self.fundamentals_buffer.copy()
-        }
+        })
         
         try:
             response = requests.post(
