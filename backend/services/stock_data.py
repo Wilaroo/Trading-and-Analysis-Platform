@@ -71,6 +71,10 @@ class StockDataService:
         # Sanitize symbol - remove $ prefix and clean up
         symbol = symbol.replace("$", "").upper().strip()
         
+        # Special handling for VIX - get from IB pushed data
+        if symbol == "VIX":
+            return await self._get_vix_quote()
+        
         # Skip invalid/problematic symbols
         if not self._is_valid_symbol(symbol):
             return self._generate_empty_quote(symbol, "Invalid or unsupported symbol")
@@ -82,14 +86,20 @@ class StockDataService:
         if cached:
             return cached
         
-        # Try Alpaca first (best - free real-time)
+        # Try IB pushed data first (best - real-time from user's IB Gateway)
+        ib_quote = await self._fetch_ib_pushed_quote(symbol)
+        if ib_quote and ib_quote.get('price', 0) > 0:
+            self._set_cache(self._quote_cache, cache_key, ib_quote)
+            return ib_quote
+        
+        # Try Alpaca second (free real-time)
         if self._alpaca_service:
             quote = await self._fetch_alpaca_quote(symbol)
             if quote:
                 self._set_cache(self._quote_cache, cache_key, quote)
                 return quote
         
-        # Try Finnhub second (good rate limits)
+        # Try Finnhub third (good rate limits)
         if self.finnhub_client and await self._can_make_call():
             quote = await self._fetch_finnhub_quote(symbol)
             if quote:
@@ -150,6 +160,67 @@ class StockDataService:
             "source": "invalid",
             "error": reason
         }
+    
+    async def _get_vix_quote(self) -> Dict:
+        """Get VIX quote from IB pushed data"""
+        try:
+            from routers.ib import get_vix_from_pushed_data, is_pusher_connected, _pushed_ib_data
+            
+            # Try to get VIX from pushed data (allow slightly stale data for VIX)
+            vix_data = get_vix_from_pushed_data()
+            if vix_data and vix_data.get("price"):
+                price = vix_data.get("price", 0)
+                return {
+                    "symbol": "VIX",
+                    "price": round(price, 2),
+                    "change": 0,
+                    "change_percent": 0,
+                    "volume": 0,
+                    "bid": round(vix_data.get("bid") or price, 2),
+                    "ask": round(vix_data.get("ask") or price, 2),
+                    "high": round(vix_data.get("high") or price, 2),
+                    "low": round(vix_data.get("low") or price, 2),
+                    "open": round(vix_data.get("close") or price, 2),
+                    "previous_close": round(vix_data.get("close") or price, 2),
+                    "source": "ib_pusher" if is_pusher_connected() else "ib_cached"
+                }
+        except Exception as e:
+            pass
+        
+        # Fallback to empty/default VIX
+        return self._generate_empty_quote("VIX", "VIX data not available from IB Gateway")
+    
+    async def _fetch_ib_pushed_quote(self, symbol: str) -> Optional[Dict]:
+        """Fetch quote from IB pushed data"""
+        try:
+            from routers.ib import get_pushed_quotes, is_pusher_connected
+            
+            if not is_pusher_connected():
+                return None
+            
+            quotes = get_pushed_quotes()
+            if symbol in quotes:
+                q = quotes[symbol]
+                price = q.get("last") or q.get("close") or 0
+                if price > 0:
+                    return {
+                        "symbol": symbol,
+                        "price": round(price, 2),
+                        "change": 0,
+                        "change_percent": 0,
+                        "volume": q.get("volume", 0),
+                        "bid": round(q.get("bid") or price, 2),
+                        "ask": round(q.get("ask") or price, 2),
+                        "high": round(q.get("high") or price, 2),
+                        "low": round(q.get("low") or price, 2),
+                        "open": round(q.get("open") or price, 2),
+                        "previous_close": round(q.get("close") or price, 2),
+                        "source": "ib_pusher"
+                    }
+        except Exception:
+            pass
+        
+        return None
     
     async def _fetch_alpaca_quote(self, symbol: str) -> Optional[Dict]:
         """Fetch quote from Alpaca API"""
