@@ -1481,9 +1481,6 @@ DECISION: {score_result['trade_or_skip']}
 {smart_context}
 {learning_context}"""
             
-            print(f"[DEBUG] Full context length: {len(full_context)}")
-            print(f"[DEBUG] Smart context in full_context: {'YOUR POSITIONS' in full_context}")
-            
             return full_context
             
         except Exception as e:
@@ -2177,17 +2174,18 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                     if LLMProvider.OLLAMA in self.llm_clients:
                         model = self.llm_clients[LLMProvider.OLLAMA].get("model", "qwen2.5:7b")
                     
-                    # Build context for proxy
-                    max_context = 4000 if complexity == "deep" else 2000
+                    # Build context for proxy - allow more context for position queries
+                    max_context = 6000 if complexity == "deep" else 4000
                     truncated_context = context[:max_context] if len(context) > max_context else context
                     
                     proxy_messages = [
                         {"role": "system", "content": f"""You are an expert trading assistant with REAL-TIME market data.
-The data below is LIVE - use it to answer questions directly.
+The data below is LIVE from the user's IB Gateway brokerage account - this is REAL data, not simulated.
+When asked about positions, refer to the "YOUR POSITIONS" section below.
 
 {truncated_context}
 
-Be concise and reference the data above."""},
+IMPORTANT: If asked about positions and you see "YOUR POSITIONS" data above, you MUST report those positions to the user. Do not say you don't have access."""},
                         {"role": "user", "content": messages[-1]["content"] if messages else ""}
                     ]
                     
