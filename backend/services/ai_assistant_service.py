@@ -144,7 +144,7 @@ For each pattern, you can provide: Entry criteria, Stop placement, Target calcul
 When asked about specific setups or opportunities:
 1. State exact criteria required for that strategy
 2. Note any time restrictions or avoidance conditions
-3. If IB not connected, explain need for live data
+3. Use Alpaca data for quotes/indices (always available) - IB only needed for VIX/L2/scanners
 4. Provide specific entry, stop, and target levels when possible
 
 === AUTONOMOUS TRADING BOT ===
@@ -1323,6 +1323,7 @@ DECISION: {score_result['trade_or_skip']}
 
     async def _build_context(self, user_message: str, session_id: str) -> str:
         """Build context string with relevant knowledge and data"""
+        logger.info(f"📝 Building context for: '{user_message[:50]}...' USE_SMART_CONTEXT={USE_SMART_CONTEXT}")
         # Try smart context engine first if enabled (proof of concept)
         if USE_SMART_CONTEXT:
             try:
@@ -1364,8 +1365,10 @@ DECISION: {score_result['trade_or_skip']}
                        f"(confidence: {intent_result.confidence:.2f}, symbols: {intent_result.symbols})")
             
             # Prepare services dict
+            alpaca = self.alpaca_service if hasattr(self, 'alpaca_service') else None
+            logger.info(f"🔍 Smart context services - Alpaca: {'CONNECTED' if alpaca else 'NONE'}")
             services = {
-                "alpaca": self.alpaca_service if hasattr(self, 'alpaca_service') else None,
+                "alpaca": alpaca,
                 "technical": self.technical_service if hasattr(self, 'technical_service') else None,
             }
             
@@ -2329,7 +2332,9 @@ Answer questions using the real-time data provided. Be concise and direct.
                 "strategy", "backtest", "risk", "recommend", "quality score",
                 "compare", "portfolio", "rebalance", "hedge", "options",
                 "earnings play", "swing trade", "position size", "thesis",
-                "research", "news", "what's happening", "latest"
+                "research", "news", "what's happening", "whats happening", "latest",
+                "market today", "market doing", "how is the market", "hows the market",
+                "market overview", "market conditions", "happening in the market"
             ]
             complexity = "deep" if any(kw in msg_lower for kw in deep_keywords) else "standard"
             
