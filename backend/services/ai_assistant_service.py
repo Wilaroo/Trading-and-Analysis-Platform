@@ -186,6 +186,7 @@ Format responses with clear sections. Cite specific rules from the playbook."""
         self._trade_history_service = None
         self._trading_rules_engine = None
         self._alpaca_service = None
+        self._learning_context_provider = None
     
     def set_trading_bot(self, trading_bot):
         """Wire the trading bot service for AI-bot integration"""
@@ -196,6 +197,11 @@ Format responses with clear sections. Cite specific rules from the playbook."""
         """Wire the Alpaca service for position/account data"""
         self._alpaca_service = alpaca_service
         logger.info("Alpaca service wired to AI assistant")
+    
+    def set_learning_context_provider(self, provider):
+        """Wire the Learning Context Provider for personalized insights"""
+        self._learning_context_provider = provider
+        logger.info("Learning Context Provider wired to AI assistant")
     
     @property
     def alpaca_service(self):
@@ -1412,12 +1418,35 @@ DECISION: {score_result['trade_or_skip']}
             
             intent_instruction = intent_instructions.get(intent_result.primary_intent.value, "")
             
+            # Add learning context if available (TQS + personalized insights)
+            learning_context = ""
+            if hasattr(self, '_learning_context_provider') and self._learning_context_provider:
+                try:
+                    # Extract symbol from intent if present
+                    symbol = intent_result.symbols[0] if intent_result.symbols else None
+                    
+                    # Only fetch learning context for trade-related intents
+                    trade_intents = ["trade_decision", "stock_analysis", "scanner_alerts", "risk_check"]
+                    if intent_result.primary_intent.value in trade_intents and symbol:
+                        learning_context = await self._learning_context_provider.build_full_learning_context(
+                            symbol=symbol,
+                            user_query=user_message,
+                            include_tqs=True,
+                            include_performance=True,
+                            include_edge_decay=True,
+                            include_confirmations=False,  # Skip for speed
+                            include_rag=False  # Skip for speed
+                        )
+                except Exception as e:
+                    logger.warning(f"Learning context error: {e}")
+            
             full_context = f"""{base_prompt}
 
 === INTENT DETECTED ===
 {intent_instruction}
 
-{smart_context}"""
+{smart_context}
+{learning_context}"""
             
             return full_context
             

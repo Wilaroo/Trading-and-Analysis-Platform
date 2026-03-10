@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://tqs-adaptive-trader.preview.emergentagent.com
+https://learning-trader-1.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://tqs-adaptive-trader.preview.emergentagent.com
+https://learning-trader-1.preview.emergentagent.com
 ```
