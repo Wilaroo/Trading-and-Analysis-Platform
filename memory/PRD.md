@@ -2161,3 +2161,67 @@ def _ensure_initialized(self) -> bool:
 - `/app/backend/services/enhanced_scanner.py` - Changed `_initialized` access to `is_initialized()`
 
 **Status**: ✅ FIXED - All three services now working correctly
+
+---
+
+## Level 2 / DOM Integration for Tape Reading (March 2026)
+
+### Overview
+Enhanced tape reading with Level 2 (Depth of Market) data from IB Gateway for better trade confirmation signals.
+
+### Components Updated
+
+**IB Data Pusher** (`/app/documents/ib_data_pusher.py`):
+- Added `level2_buffer` for DOM data storage
+- Added `on_market_depth()` handler for L2 updates
+- Added `subscribe_level2()` / `unsubscribe_level2()` methods
+- Added `update_level2_subscriptions()` for dynamic in-play stock tracking
+- Added `--no-level2` flag to disable if needed
+- L2 subscriptions auto-update every 30 seconds based on in-play stocks
+
+**Backend IB Router** (`/app/backend/routers/ib.py`):
+- Added `level2` field to `IBPushDataRequest` model
+- New endpoint: `GET /api/ib/level2/{symbol}` - Get L2 data for symbol
+- New endpoint: `GET /api/ib/inplay-stocks` - Get symbols needing L2
+- Helper functions: `get_level2_for_symbol()`, `get_all_level2_data()`
+
+**Enhanced Scanner** (`/app/backend/services/enhanced_scanner.py`):
+- `_get_tape_reading()` now incorporates L2 imbalance when available
+- Added L2 fields to `TapeReading` dataclass:
+  - `l2_available`, `l2_imbalance`, `l2_bid_depth`, `l2_ask_depth`
+  - `l2_gate_would_pass_long`, `l2_gate_would_pass_short` (monitoring)
+
+### L2 Gate Monitoring (Not Enforced Yet)
+The system now tracks whether an L2-based gate **would have** blocked trades:
+- Long trade gate: `l2_imbalance > 0.1` (10%+ more bids than asks)
+- Short trade gate: `l2_imbalance < -0.1` (10%+ more asks than bids)
+
+This data is logged for analysis. Once we confirm it improves accuracy without being too strict, we can enable it as a hard gate.
+
+### Usage
+```bash
+# Run IB Data Pusher with Level 2 enabled (default)
+python ib_data_pusher.py --cloud-url https://your-app.preview.emergentagent.com
+
+# Disable Level 2 if needed
+python ib_data_pusher.py --cloud-url https://your-app.preview.emergentagent.com --no-level2
+```
+
+**Status**: ✅ IMPLEMENTED - Monitoring mode active
+
+---
+
+## Sentiment Data Sources (Current State)
+
+### Currently Integrated
+- ✅ **Finnhub** - News articles and company news
+
+### Not Yet Integrated
+- ❌ **Twitter/X** - Would require API access ($100+/month for Basic)
+- ❌ **Reddit** - Would need r/wallstreetbets, r/stocks scraping
+- ❌ **StockTwits** - Free API available, good for retail sentiment
+
+### Placeholder
+The `social_sentiment` field exists in `SentimentResult` but is hardcoded to `0.0`.
+
+**Status**: 📋 NOTED FOR FUTURE - Twitter/social integration on backlog

@@ -100,6 +100,7 @@ class IBPushDataRequest(BaseModel):
     quotes: dict = Field(default={}, description="Quote data by symbol")
     account: dict = Field(default={}, description="Account data")
     positions: list = Field(default=[], description="Position data")
+    level2: dict = Field(default={}, description="Level 2 / DOM data by symbol")
 
 
 # In-memory storage for pushed IB data
@@ -108,6 +109,7 @@ _pushed_ib_data = {
     "quotes": {},
     "account": {},
     "positions": [],
+    "level2": {},  # Level 2 / DOM data
     "connected": False
 }
 
@@ -255,15 +257,21 @@ async def receive_pushed_ib_data(request: IBPushDataRequest):
         if request.positions:
             _pushed_ib_data["positions"] = request.positions
         
+        # Update Level 2 / DOM data
+        if request.level2:
+            _pushed_ib_data["level2"].update(request.level2)
+        
         quote_count = len(request.quotes) if request.quotes else 0
         pos_count = len(request.positions) if request.positions else 0
+        l2_count = len(request.level2) if request.level2 else 0
         
         return {
             "success": True,
             "received": {
                 "quotes": quote_count,
                 "positions": pos_count,
-                "account_fields": len(request.account) if request.account else 0
+                "account_fields": len(request.account) if request.account else 0,
+                "level2": l2_count
             },
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
@@ -299,8 +307,107 @@ async def get_pushed_ib_data():
         "last_update": _pushed_ib_data.get("last_update"),
         "quotes": _pushed_ib_data.get("quotes", {}),
         "account": _pushed_ib_data.get("account", {}),
-        "positions": _pushed_ib_data.get("positions", [])
+        "positions": _pushed_ib_data.get("positions", []),
+        "level2": _pushed_ib_data.get("level2", {})
     }
+
+
+@router.get("/level2/{symbol}")
+async def get_level2_data(symbol: str):
+    """
+    Get Level 2 / DOM data for a specific symbol.
+    Returns order book depth with bid/ask sizes and imbalance.
+    """
+    global _pushed_ib_data
+    
+    symbol_upper = symbol.upper()
+    level2 = _pushed_ib_data.get("level2", {})
+    
+    if symbol_upper not in level2:
+        return {
+            "success": False,
+            "error": f"No Level 2 data for {symbol_upper}",
+            "available_symbols": list(level2.keys())
+        }
+    
+    l2_data = level2[symbol_upper]
+    return {
+        "success": True,
+        "symbol": symbol_upper,
+        "bids": l2_data.get("bids", []),
+        "asks": l2_data.get("asks", []),
+        "bid_total_size": l2_data.get("bid_total_size", 0),
+        "ask_total_size": l2_data.get("ask_total_size", 0),
+        "imbalance": l2_data.get("imbalance", 0.0),
+        "timestamp": l2_data.get("timestamp")
+    }
+
+
+@router.get("/inplay-stocks")
+async def get_inplay_stocks():
+    """
+    Get current in-play stocks for Level 2 subscription.
+    These are stocks with active alerts or on the smart watchlist.
+    """
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        from services.smart_watchlist_service import get_smart_watchlist
+        
+        symbols = set()
+        
+        # Get symbols from smart watchlist
+        watchlist = get_smart_watchlist()
+        if watchlist:
+            wl_symbols = watchlist.get_symbols()
+            symbols.update(wl_symbols[:10])  # Top 10 from watchlist
+        
+        # Get symbols from active scanner alerts
+        scanner = get_enhanced_scanner()
+        if scanner:
+            active_alerts = scanner.get_live_alerts()
+            for alert in active_alerts[:5]:  # Top 5 alerts
+                symbol = getattr(alert, 'symbol', None)
+                if symbol:
+                    symbols.add(symbol)
+        
+        # Always include core ETFs
+        symbols.update(["SPY", "QQQ", "IWM"])
+        
+        return {
+            "success": True,
+            "symbols": list(symbols),
+            "count": len(symbols)
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "symbols": ["SPY", "QQQ", "IWM"],
+            "error": str(e)
+        }
+
+
+# Helper function for other services to access Level 2 data
+def get_level2_for_symbol(symbol: str) -> dict:
+    """
+    Get Level 2 data for a symbol (called by other services).
+    Returns None if not available.
+    """
+    global _pushed_ib_data
+    
+    symbol_upper = symbol.upper()
+    level2 = _pushed_ib_data.get("level2", {})
+    
+    if symbol_upper not in level2:
+        return None
+    
+    return level2[symbol_upper]
+
+
+def get_all_level2_data() -> dict:
+    """Get all Level 2 data (called by other services)."""
+    global _pushed_ib_data
+    return _pushed_ib_data.get("level2", {})
 
 
 @router.get("/pushed-quote/{symbol}")
