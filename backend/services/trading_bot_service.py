@@ -962,8 +962,20 @@ class TradingBotService:
             direction_str = alert.get('direction', 'long')
             direction = TradeDirection.LONG if direction_str == 'long' else TradeDirection.SHORT
             
-            # Get current price
+            # Get current price - try IB pushed data first, then Alpaca
             current_price = alert.get('current_price', 0)
+            if not current_price:
+                try:
+                    from routers.ib import get_pushed_quotes, is_pusher_connected
+                    if is_pusher_connected():
+                        quotes = get_pushed_quotes()
+                        if symbol in quotes:
+                            q = quotes[symbol]
+                            current_price = q.get('last') or q.get('close') or 0
+                except Exception:
+                    pass
+            
+            # Fallback to Alpaca
             if not current_price and self._alpaca_service:
                 quote = await self._alpaca_service.get_quote(symbol)
                 current_price = quote.get('price', 0) if quote else 0
@@ -1730,13 +1742,26 @@ class TradingBotService:
     # ==================== POSITION MANAGEMENT ====================
     
     async def _update_open_positions(self):
-        """Update P&L for open positions"""
-        if not self._alpaca_service:
-            return
-        
+        """Update P&L for open positions - uses IB data first, then Alpaca"""
         for trade_id, trade in list(self._open_trades.items()):
             try:
-                quote = await self._alpaca_service.get_quote(trade.symbol)
+                quote = None
+                
+                # Try IB pushed data first
+                try:
+                    from routers.ib import get_pushed_quotes, is_pusher_connected
+                    if is_pusher_connected():
+                        quotes = get_pushed_quotes()
+                        if trade.symbol in quotes:
+                            q = quotes[trade.symbol]
+                            quote = {'price': q.get('last') or q.get('close') or 0}
+                except Exception:
+                    pass
+                
+                # Fallback to Alpaca
+                if not quote and self._alpaca_service:
+                    quote = await self._alpaca_service.get_quote(trade.symbol)
+                
                 if not quote:
                     continue
                 

@@ -1581,10 +1581,13 @@ const StatsHeader = ({ status, account, marketContext, positions, onToggle, onMo
   const openCount = status?.open_trades_count || 0;
   const pendingCount = status?.pending_trades_count || 0;
   
-  // Account data
+  // Account data from IB
   const netLiq = account?.net_liquidation || 0;
+  const buyingPower = account?.buying_power || 0;
+  const dailyPnl = account?.daily_pnl || account?.unrealized_pnl || 0;
+  const dailyPnlPct = account?.daily_pnl_percent || 0;
   const accountPnl = account?.unrealized_pnl || 0;
-  const totalPnl = botPnl + accountPnl;
+  const totalPnl = dailyPnl || (botPnl + accountPnl);
   
   // Market regime colors
   const regimeConfig = {

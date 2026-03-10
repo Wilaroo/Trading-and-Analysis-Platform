@@ -52,24 +52,36 @@ if %errorlevel%==0 (
 )
 del "%TEMP%\StartTrading_new.bat" 2>nul
 
-:: Update ollama_http.py
-curl -s -f "%GITHUB_RAW%/ollama_http.py" > "%SCRIPT_DIR%ollama_http.py.tmp" 2>nul
+:: Update ollama_http.py (try cloud first, then GitHub)
+curl -s -f "%CLOUD_URL%/api/scripts/ollama_http.py" > "%SCRIPT_DIR%ollama_http.py.tmp" 2>nul
 if %errorlevel%==0 (
     move /y "%SCRIPT_DIR%ollama_http.py.tmp" "%SCRIPT_DIR%ollama_http.py" >nul
-    echo       ollama_http.py: Updated
+    echo       ollama_http.py: Updated from cloud
 ) else (
-    del "%SCRIPT_DIR%ollama_http.py.tmp" 2>nul
-    echo       ollama_http.py: Using local
+    curl -s -f "%GITHUB_RAW%/ollama_http.py" > "%SCRIPT_DIR%ollama_http.py.tmp" 2>nul
+    if %errorlevel%==0 (
+        move /y "%SCRIPT_DIR%ollama_http.py.tmp" "%SCRIPT_DIR%ollama_http.py" >nul
+        echo       ollama_http.py: Updated from GitHub
+    ) else (
+        del "%SCRIPT_DIR%ollama_http.py.tmp" 2>nul
+        echo       ollama_http.py: Using local
+    )
 )
 
-:: Update ib_data_pusher.py
-curl -s -f "%GITHUB_RAW%/ib_data_pusher.py" > "%SCRIPT_DIR%ib_data_pusher.py.tmp" 2>nul
+:: Update ib_data_pusher.py (try cloud first, then GitHub)
+curl -s -f "%CLOUD_URL%/api/scripts/ib_data_pusher.py" > "%SCRIPT_DIR%ib_data_pusher.py.tmp" 2>nul
 if %errorlevel%==0 (
     move /y "%SCRIPT_DIR%ib_data_pusher.py.tmp" "%SCRIPT_DIR%ib_data_pusher.py" >nul
-    echo       ib_data_pusher.py: Updated
+    echo       ib_data_pusher.py: Updated from cloud
 ) else (
-    del "%SCRIPT_DIR%ib_data_pusher.py.tmp" 2>nul
-    echo       ib_data_pusher.py: Using local
+    curl -s -f "%GITHUB_RAW%/ib_data_pusher.py" > "%SCRIPT_DIR%ib_data_pusher.py.tmp" 2>nul
+    if %errorlevel%==0 (
+        move /y "%SCRIPT_DIR%ib_data_pusher.py.tmp" "%SCRIPT_DIR%ib_data_pusher.py" >nul
+        echo       ib_data_pusher.py: Updated from GitHub
+    ) else (
+        del "%SCRIPT_DIR%ib_data_pusher.py.tmp" 2>nul
+        echo       ib_data_pusher.py: Using local
+    )
 )
 echo.
 
