@@ -3845,6 +3845,37 @@ _http_proxy_sessions = {}
 _http_proxy_requests = {}
 _http_proxy_responses = {}
 
+
+def is_http_ollama_proxy_connected() -> bool:
+    """Check if any HTTP Ollama proxy is connected and has models available"""
+    for sid, info in _http_proxy_sessions.items():
+        try:
+            last_hb = datetime.fromisoformat(info.get("last_heartbeat", "").replace("Z", "+00:00"))
+            is_recent = (datetime.now(timezone.utc) - last_hb).total_seconds() < 30
+            if is_recent and info.get("ollama_status", {}).get("available", False):
+                return True
+        except:
+            pass
+    return False
+
+
+def get_http_proxy_info() -> dict:
+    """Get info about the connected HTTP proxy"""
+    for sid, info in _http_proxy_sessions.items():
+        try:
+            last_hb = datetime.fromisoformat(info.get("last_heartbeat", "").replace("Z", "+00:00"))
+            is_recent = (datetime.now(timezone.utc) - last_hb).total_seconds() < 30
+            if is_recent and info.get("ollama_status", {}).get("available", False):
+                return {
+                    "session_id": sid,
+                    "models": info.get("ollama_status", {}).get("models", []),
+                    "last_heartbeat": info.get("last_heartbeat")
+                }
+        except:
+            pass
+    return {}
+
+
 @app.post("/api/ollama-proxy/register")
 async def register_http_proxy(data: dict):
     """Register an HTTP-based Ollama proxy"""
@@ -3951,20 +3982,6 @@ async def call_ollama_via_http_proxy(model: str, messages: list, options: dict =
     finally:
         _http_proxy_requests.pop(request_id, None)
         _http_proxy_responses.pop(request_id, None)
-
-
-def is_http_ollama_proxy_connected() -> bool:
-    """Check if HTTP Ollama proxy is connected and available"""
-    for sid, info in _http_proxy_sessions.items():
-        if info.get("ollama_status", {}).get("available", False):
-            # Check heartbeat is recent (within 30 seconds)
-            try:
-                last_hb = datetime.fromisoformat(info["last_heartbeat"].replace("Z", "+00:00"))
-                if (datetime.now(timezone.utc) - last_hb).total_seconds() < 30:
-                    return True
-            except:
-                pass
-    return False
 
 
 # =====================================================

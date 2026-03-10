@@ -44,10 +44,27 @@ class ProviderRequest(BaseModel):
 
 @router.get("/check-ollama")
 async def check_ollama():
-    """Check if Ollama is available"""
+    """Check if Ollama is available (via HTTP proxy or direct connection)"""
     import httpx
     import os
     
+    # First check HTTP proxy (preferred method - no ngrok needed)
+    try:
+        from server import is_http_ollama_proxy_connected, get_http_proxy_info
+        if is_http_ollama_proxy_connected():
+            proxy_info = get_http_proxy_info()
+            return {
+                "available": True, 
+                "method": "http_proxy",
+                "models": proxy_info.get("models", []),
+                "session_id": proxy_info.get("session_id")
+            }
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.debug(f"HTTP proxy check error: {e}")
+    
+    # Fallback: Check direct connection via ngrok/tunnel (old method)
     ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
     
     try:
@@ -57,7 +74,7 @@ async def check_ollama():
                 headers={"ngrok-skip-browser-warning": "true"}
             )
             if response.status_code == 200:
-                return {"available": True, "url": ollama_url}
+                return {"available": True, "method": "direct", "url": ollama_url}
             return {"available": False, "error": f"Status {response.status_code}"}
     except Exception as e:
         return {"available": False, "error": str(e)}
