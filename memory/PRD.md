@@ -12,11 +12,32 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 - ✅ Frontend data fetch priority changed: IB pushed data → Alpaca fallback
 - ✅ Position field normalization (avgCost ↔ avg_cost, unrealizedPNL ↔ unrealized_pnl)
 
-### Phase 2 In Progress: Performance & AI Integration (March 10, 2026)
+### Phase 2 Complete: Performance & AI Integration (March 10, 2026)
 - ✅ Updated `realtime_technical_service.py` to check IB quotes first
 - ✅ Updated `ai_assistant_service.py` to use IB data for quotes and positions
-- 🔄 Pending: Verify scanner performance and timeout prevention
-- 🔄 Pending: Update settings/glossary for architectural changes
+- ✅ Updated `smart_context_engine.py` to fetch positions/quotes from IB first
+- ✅ Fixed AI context building to properly include IB positions
+- ✅ Improved intent detection for position-related queries
+- ✅ Changed default Ollama model to `deepseek-r1:8b` (better context following)
+- ✅ Confirmed Ollama HTTP proxy is working (no ngrok needed for Ollama)
+- ✅ AI now correctly reports real IB positions (TMC, INTC, TSLA)
+
+### Ollama HTTP Proxy Architecture (No ngrok needed)
+```
+Local PC                              Cloud Backend
+┌─────────────────┐                  ┌──────────────────────┐
+│ Ollama          │                  │ FastAPI              │
+│ (localhost:11434)──▶ ollama_      │ ┌──────────────────┐ │
+│                 │   http.py  ◀──▶ │ │ /api/ollama-proxy│ │
+│ Models:         │   (HTTP poll)   │ │ (request queue)  │ │
+│ - deepseek-r1:8b│                  │ └────────┬─────────┘ │
+│ - llama3:8b     │                  │          │           │
+│ - qwen2.5:7b    │                  │  ┌───────▼────────┐  │
+│ - gemma3:4b     │                  │  │ AI Assistant   │  │
+└─────────────────┘                  │  │ (uses proxy)   │  │
+                                     │  └────────────────┘  │
+                                     └──────────────────────┘
+```
 
 ### IB Data Pipeline Architecture
 ```
@@ -47,9 +68,9 @@ Local PC                              Cloud Backend
 - **Frontend**: React, TailwindCSS, Framer Motion, TradingView Widget (embedded charts)
 - **Backend**: FastAPI, Python
 - **Database**: MongoDB
-- **AI**: Smart Routing — Ollama (local/free via ngrok tunnel) + GPT-4o (Emergent, deep tasks)
+- **AI**: Smart Routing — Ollama (local via HTTP proxy, deepseek-r1:8b default) + GPT-4o (Emergent, deep tasks)
 - **Integrations**: Alpaca, Finnhub, IB Gateway (see Data Sources below)
-- **Tunneling**: ngrok (Hobby paid plan - static URL: `pseudoaccidentally-linty-addie.ngrok-free.dev`)
+- **Local Scripts**: `ib_data_pusher.py` (IB data), `ollama_http.py` (AI proxy)
 
 ## Data Sources
 

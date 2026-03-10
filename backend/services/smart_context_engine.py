@@ -104,8 +104,11 @@ class SmartContextEngine:
                 r"how (?:am i|are my|is my portfolio)",
                 r"(?:p&l|pnl|profit|loss)",
                 r"what do i (?:own|hold|have)",
+                r"what (?:positions?|trades?) do i have",
+                r"(?:show|list|display) (?:my )?positions?",
+                r"(?:current|open) positions?",
             ],
-            "keywords": ["my position", "my trades", "portfolio", "p&l", "pnl", "holdings", "how am i doing", "unrealized"],
+            "keywords": ["my position", "my trades", "portfolio", "p&l", "pnl", "holdings", "how am i doing", "unrealized", "show positions", "list positions", "current positions", "open positions", "what positions"],
             "weight": 1.0
         },
         QueryIntent.MARKET_OVERVIEW: {
@@ -441,17 +444,14 @@ class SmartContextEngine:
                     context_data.quotes = quotes_data
             
             # POSITIONS (IB first, then Alpaca fallback)
-            print(f"[DEBUG] sources['positions'] = {sources['positions']}")
             if sources["positions"]:
                 positions_str, positions_data = await self._get_positions_with_data(services.get("alpaca"))
-                print(f"[DEBUG] positions_str length: {len(positions_str) if positions_str else 0}")
                 if positions_str:
                     context_parts.append("=== YOUR POSITIONS (LIVE FROM IB GATEWAY) ===")
                     context_parts.append("The following are the user's REAL open positions from their brokerage account:")
                     context_parts.append(positions_str)
                     context_parts.append("")
                     context_data.positions = positions_data
-                    print(f"[DEBUG] Added positions to context_parts")
             
             # PORTFOLIO RISK
             if sources["portfolio_risk"] and services.get("alpaca"):
@@ -612,11 +612,8 @@ class SmartContextEngine:
             # Try IB pushed positions first (primary source)
             try:
                 from routers.ib import get_pushed_positions, is_pusher_connected
-                connected = is_pusher_connected()
-                print(f"[DEBUG] SmartContext IB pusher connected: {connected}")
-                if connected:
+                if is_pusher_connected():
                     ib_positions = get_pushed_positions()
-                    print(f"[DEBUG] SmartContext IB positions count: {len(ib_positions)}")
                     if ib_positions:
                         positions = [{
                             "symbol": p.get("symbol", ""),
@@ -627,9 +624,9 @@ class SmartContextEngine:
                             "market_value": float(p.get("market_value", p.get("marketValue", 0))),
                             "source": "ib_gateway"
                         } for p in ib_positions]
-                        print(f"[DEBUG] SmartContext mapped IB positions: {[p['symbol'] for p in positions]}")
+                        logger.info(f"[SmartContext] Got {len(positions)} positions from IB")
             except Exception as e:
-                print(f"[DEBUG] SmartContext IB positions error: {e}")
+                logger.warning(f"[SmartContext] IB positions fetch error: {e}")
             
             # Fallback to Alpaca if no IB positions
             if not positions and alpaca:
