@@ -493,14 +493,16 @@ class IBDataPusher:
             logger.error(f"Push error: {e}")
     
     def request_account_updates(self):
-        """Request account and position updates"""
+        """Request account and position updates (non-blocking)"""
         try:
             accounts = self.ib.managedAccounts()
             if accounts:
-                self.ib.reqAccountUpdates(accounts[0])
+                # Use subscribe=True to get continuous updates, don't wait for response
+                self.ib.reqAccountUpdates(subscribe=True, account=accounts[0])
                 logger.info(f"  Requested account updates for {accounts[0]}")
         except Exception as e:
             logger.error(f"Account update request error: {e}")
+        logger.info("  Account update request sent (non-blocking)")
     
     def fetch_inplay_stocks(self) -> List[str]:
         """Fetch current in-play stocks from cloud backend for L2 subscription"""
@@ -562,22 +564,34 @@ class IBDataPusher:
             core_l2 = [s for s in symbols if s != "VIX"]
             self.subscribe_level2(core_l2)
         
-        # Request account updates
+        # Request account updates (fire and forget - don't wait)
         logger.info("Requesting account updates...")
-        self.request_account_updates()
+        try:
+            self.request_account_updates()
+            logger.info("  Account updates requested successfully")
+        except Exception as e:
+            logger.error(f"  Account updates failed: {e}")
         
-        # Skip blocking fundamental data request on startup - will fetch later in background
-        # stock_symbols = [s for s in symbols if s != "VIX"]
-        # self.request_fundamental_data(stock_symbols)
-        logger.info("Skipping initial fundamental data (will fetch later to avoid blocking)")
+        # Skip blocking fundamental data - not needed for basic push functionality
+        logger.info("Skipping fundamental data to avoid blocking")
         
         push_count = 0
-        l2_update_interval = 30  # Check for in-play changes every 30 seconds
+        l2_update_interval = 30
         last_l2_update = 0
+        current_time = time.time()
         
         # Force initial push immediately
-        logger.info(f"==> STARTING PUSH LOOP: {len(self.positions_data)} positions, {len(self.quotes_buffer)} quotes")
+        logger.info(f"")
+        logger.info(f"========================================")
+        logger.info(f"==> STARTING PUSH LOOP")
+        logger.info(f"    Positions: {len(self.positions_data)}")
+        logger.info(f"    Quotes: {len(self.quotes_buffer)}")
+        logger.info(f"========================================")
+        logger.info(f"")
+        
+        # Do first push
         self.push_data_to_cloud()
+        self.last_push_time = current_time
         
         try:
             while self.running:
