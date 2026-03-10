@@ -85,6 +85,9 @@ class IBDataPusher:
                 self.ib.positionEvent += self.on_position
                 self.ib.errorEvent += self.on_error
                 
+                # Portfolio update handler for market prices and P&L
+                self.ib.updatePortfolioEvent += self.on_portfolio_update
+                
                 # Level 2 uses polling approach - no event handler needed
                 # We store ticker objects and read domBids/domAsks in the push loop
                 logger.info("  Level 2 support: Using polling approach (compatible with all ib_insync versions)")
@@ -176,13 +179,22 @@ class IBDataPusher:
                 "exchange": position.contract.exchange,
                 "position": float(position.position),
                 "avgCost": float(position.avgCost),
-                "account": position.account
+                "account": position.account,
+                "marketPrice": 0,
+                "marketValue": 0,
+                "unrealizedPNL": 0,
+                "realizedPNL": 0
             }
             
             # Update existing or add new
             updated = False
             for i, existing in enumerate(self.positions_data):
                 if existing["symbol"] == pos_data["symbol"]:
+                    # Preserve market data if we have it
+                    pos_data["marketPrice"] = existing.get("marketPrice", 0)
+                    pos_data["marketValue"] = existing.get("marketValue", 0)
+                    pos_data["unrealizedPNL"] = existing.get("unrealizedPNL", 0)
+                    pos_data["realizedPNL"] = existing.get("realizedPNL", 0)
                     self.positions_data[i] = pos_data
                     updated = True
                     break
@@ -192,6 +204,37 @@ class IBDataPusher:
                 
         except Exception as e:
             logger.error(f"Position update error: {e}")
+    
+    def on_portfolio_update(self, item):
+        """Handle portfolio updates with market values and P&L"""
+        try:
+            symbol = item.contract.symbol
+            
+            # Find and update the position with market data
+            for pos in self.positions_data:
+                if pos["symbol"] == symbol:
+                    pos["marketPrice"] = float(item.marketPrice) if item.marketPrice else 0
+                    pos["marketValue"] = float(item.marketValue) if item.marketValue else 0
+                    pos["unrealizedPNL"] = float(item.unrealizedPNL) if item.unrealizedPNL else 0
+                    pos["realizedPNL"] = float(item.realizedPNL) if item.realizedPNL else 0
+                    break
+            else:
+                # Position not found, add it
+                self.positions_data.append({
+                    "symbol": symbol,
+                    "secType": item.contract.secType,
+                    "exchange": item.contract.exchange or item.contract.primaryExchange,
+                    "position": float(item.position),
+                    "avgCost": float(item.averageCost),
+                    "account": item.account,
+                    "marketPrice": float(item.marketPrice) if item.marketPrice else 0,
+                    "marketValue": float(item.marketValue) if item.marketValue else 0,
+                    "unrealizedPNL": float(item.unrealizedPNL) if item.unrealizedPNL else 0,
+                    "realizedPNL": float(item.realizedPNL) if item.realizedPNL else 0
+                })
+                
+        except Exception as e:
+            logger.error(f"Portfolio update error: {e}")
     
     def on_error(self, reqId, errorCode, errorString, contract):
         """Handle IB errors"""
@@ -547,8 +590,9 @@ class IBDataPusher:
         
         # Clean all data to remove NaN/Inf values before JSON serialization
         # Use UTC timestamp for proper timezone handling
+        from datetime import timezone as tz
         payload = self._clean_for_json({
-            "timestamp": datetime.utcnow().isoformat() + "Z",  # UTC with Z suffix
+            "timestamp": datetime.now(tz.utc).isoformat().replace('+00:00', 'Z'),
             "source": "ib_gateway",
             "quotes": self.quotes_buffer.copy(),
             "account": self.account_data.copy(),
