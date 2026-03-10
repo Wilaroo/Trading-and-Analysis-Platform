@@ -218,7 +218,7 @@ Format responses with clear sections. Cite specific rules from the playbook."""
             self.llm_clients[LLMProvider.OLLAMA] = {
                 "available": True,
                 "url": ollama_url.rstrip("/"),
-                "model": os.environ.get("OLLAMA_MODEL", "llama3:8b")
+                "model": os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")  # Default to qwen2.5:7b
             }
             logger.info(f"Ollama client initialized: {ollama_url} (model: {self.llm_clients[LLMProvider.OLLAMA]['model']})")
         
@@ -2076,7 +2076,7 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         Call the LLM with smart routing.
         
         OLLAMA-FIRST with QUICK HEALTH CHECK:
-        - Ping Ollama (2s timeout) - if healthy, use it (FREE)
+        - Ping Ollama (5s timeout) - if healthy, use it (FREE)
         - If Ollama slow/down, fall back to cloud AI (Emergent/GPT-4o)
         
         This saves credits while maintaining reliability.
@@ -2096,39 +2096,42 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
             logger.info(f"⏭️ Skipping Ollama (cooling down)")
             skip_ollama = True
         
-        # QUICK HEALTH CHECK: Ping Ollama first (2 second timeout)
+        # QUICK HEALTH CHECK: Ping Ollama first (5 second timeout)
         ollama_healthy = False
         if not skip_ollama and LLMProvider.OLLAMA in self.llm_clients:
             try:
                 ollama_cfg = self.llm_clients[LLMProvider.OLLAMA]
                 ping_url = f"{ollama_cfg['url']}/api/tags"
                 
-                async with httpx.AsyncClient(timeout=httpx.Timeout(2.0, connect=1.5)) as client:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=3.0)) as client:
                     ping_response = await client.get(
                         ping_url,
                         headers={"ngrok-skip-browser-warning": "true"}
                     )
                     if ping_response.status_code == 200:
                         ollama_healthy = True
-                        logger.debug("✅ Ollama ping OK - using local AI (FREE)")
+                        logger.info("✅ Ollama ping OK - using local AI (FREE)")
             except Exception as e:
                 logger.debug(f"⚠️ Ollama ping failed: {e}")
         
-        # USE OLLAMA if healthy AND not a deep query (saves credits!)
-        # Deep queries need full context and GPT-4o's reasoning
-        if ollama_healthy and complexity != "deep":
+        # USE OLLAMA if healthy (saves credits!) - LOCAL AI FIRST
+        if ollama_healthy:
             try:
                 ollama_cfg = self.llm_clients[LLMProvider.OLLAMA]
                 url = f"{ollama_cfg['url']}/api/chat"
                 
-                # Reduce context for Ollama
-                truncated_context = context[:2000] if len(context) > 2000 else context
+                # For market/deep queries, keep more context (up to 6000 chars)
+                # For simple queries, use smaller context
+                max_context = 6000 if complexity == "deep" else 2000
+                truncated_context = context[:max_context] if len(context) > max_context else context
                 
-                ollama_system = """You are an expert trading assistant with REAL-TIME market data access. 
-You CAN see live stock prices, quotes, and market data - it's provided in the context below.
-Answer questions using the real-time data provided. Be concise and direct.
+                ollama_system = f"""You are an expert trading assistant with REAL-TIME market data access.
+IMPORTANT: The market data below is LIVE and CURRENT - use it to answer questions!
+Do NOT say you don't have access to real-time data - YOU DO, it's provided below.
 
-""" + truncated_context
+{truncated_context}
+
+Be concise, direct, and reference the specific data above when answering."""
                 
                 ollama_messages = [{"role": "system", "content": ollama_system}]
                 ollama_messages.extend(messages[-3:] if len(messages) > 3 else messages)
@@ -2137,10 +2140,17 @@ Answer questions using the real-time data provided. Be concise and direct.
                     "model": ollama_cfg["model"],
                     "messages": ollama_messages,
                     "stream": False,
-                    "options": {"num_ctx": 2048}
+                    "options": {
+                        "num_ctx": 4096 if complexity == "deep" else 2048,  # More context for deep queries
+                        "temperature": 0.7
+                    }
                 }
                 
-                async with httpx.AsyncClient(timeout=httpx.Timeout(45.0, connect=5.0)) as client:
+                # Longer timeout for deep queries (model needs more time with larger context)
+                timeout_seconds = 90.0 if complexity == "deep" else 45.0
+                logger.info(f"🤖 Calling Ollama: model={ollama_cfg['model']}, context={len(truncated_context)} chars")
+                
+                async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_seconds, connect=5.0)) as client:
                     response = await client.post(
                         url,
                         json=payload,
@@ -2153,12 +2163,14 @@ Answer questions using the real-time data provided. Be concise and direct.
                 if response.status_code == 200:
                     result = response.json()
                     content = result.get("message", {}).get("content", "")
-                    if content:
+                    if content and len(content) > 0:
                         # Reset failure counter on success
                         self._ollama_failures = 0
                         self._ollama_last_success = datetime.now(timezone.utc)
                         logger.info(f"✅ Ollama response OK ({len(content)} chars) - FREE")
                         return content
+                    else:
+                        logger.warning(f"⚠️ Ollama returned empty content")
                         
             except Exception as e:
                 self._ollama_failures += 1
@@ -2169,16 +2181,13 @@ Answer questions using the real-time data provided. Be concise and direct.
                     self._ollama_skip_until = datetime.now(timezone.utc) + timedelta(minutes=5)
                     logger.warning(f"⏸️ Ollama disabled for 5 minutes")
         
-        # FALLBACK: Use cloud AI (Emergent/GPT-4o) - for deep queries or when Ollama unavailable
+        # FALLBACK: Use cloud AI (Emergent/GPT-4o) - ONLY when Ollama unavailable
         if LLMProvider.EMERGENT in self.llm_clients:
             try:
                 from emergentintegrations.llm.chat import LlmChat, UserMessage
                 import asyncio
                 
-                if complexity == "deep":
-                    logger.info("🧠 Using GPT-4o for deep analysis (full context)")
-                else:
-                    logger.info("🔄 Using cloud AI (Ollama unavailable)")
+                logger.info("🔄 Fallback to GPT-4o (Ollama unavailable or failed)")
                 
                 system_message = self.SYSTEM_PROMPT + "\n\n" + context
                 
@@ -2313,6 +2322,7 @@ Answer questions using the real-time data provided. Be concise and direct.
         
         # Build context with relevant knowledge
         context = await self._build_context(user_message, session_id)
+        logger.info(f"📦 Context built: {len(context)} chars")
         
         # ===== ALERT REASONING INJECTION =====
         # If user is asking about a specific alert/trade reasoning, inject the alert data
