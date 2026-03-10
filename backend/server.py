@@ -3788,9 +3788,20 @@ async def register_http_proxy(data: dict):
 async def http_proxy_heartbeat(data: dict):
     """Heartbeat from HTTP proxy"""
     session_id = data.get("session_id")
-    if session_id in _http_proxy_sessions:
+    ollama_status = data.get("ollama_status", {})
+    
+    if session_id not in _http_proxy_sessions:
+        # Auto-register if session doesn't exist
+        _http_proxy_sessions[session_id] = {
+            "ollama_status": ollama_status,
+            "last_heartbeat": datetime.now(timezone.utc).isoformat(),
+            "registered_at": datetime.now(timezone.utc).isoformat()
+        }
+        print(f"HTTP Ollama proxy auto-registered via heartbeat: {session_id}")
+    else:
         _http_proxy_sessions[session_id]["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
-        _http_proxy_sessions[session_id]["ollama_status"] = data.get("ollama_status", {})
+        _http_proxy_sessions[session_id]["ollama_status"] = ollama_status
+    
     return {"success": True}
 
 
