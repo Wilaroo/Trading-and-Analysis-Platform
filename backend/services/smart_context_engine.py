@@ -9,6 +9,7 @@ Features:
 - Structured output formatting
 - Response validation hooks
 - Automatic symbol tracking for personalized scanning
+- Query preprocessing to reduce hallucinations
 """
 import re
 import logging
@@ -24,6 +25,136 @@ try:
     from services.user_viewed_tracker import track_multiple_symbols
 except ImportError:
     track_multiple_symbols = None  # Graceful fallback
+
+
+class QueryPreprocessor:
+    """
+    Intelligent query preprocessing to reduce LLM hallucinations.
+    Reformats user queries with explicit instructions and injects structured data.
+    """
+    
+    # Data injection templates for different query types
+    INJECTION_TEMPLATES = {
+        "positions": """
+[EXACT DATA - DO NOT MODIFY THESE VALUES]
+Your positions from IB Gateway:
+{position_list}
+Total Unrealized P&L: ${total_pnl}
+
+INSTRUCTION: Report ONLY the positions listed above with their EXACT values. Do not invent or estimate any numbers.""",
+        
+        "market": """
+[EXACT DATA - DO NOT MODIFY THESE VALUES]  
+Market Status:
+{market_data}
+
+INSTRUCTION: Use ONLY the prices shown above. Do not invent prices or percentages.""",
+        
+        "quote": """
+[EXACT DATA - DO NOT MODIFY THESE VALUES]
+{symbol} Current Quote:
+- Price: ${price}
+- Change: {change_pct}%
+- Volume: {volume}
+
+INSTRUCTION: Report ONLY these exact values for {symbol}."""
+    }
+    
+    @staticmethod
+    def preprocess_for_positions(original_query: str, positions_data: List[Dict]) -> Tuple[str, str]:
+        """
+        Preprocess a position-related query to inject exact position data.
+        Returns (processed_query, data_injection)
+        """
+        if not positions_data:
+            return original_query, "[NO POSITIONS - User has no open positions currently]"
+        
+        # Build exact position list
+        position_lines = []
+        total_pnl = 0
+        for p in positions_data:
+            symbol = p.get("symbol", "UNK")
+            qty = p.get("qty", p.get("position", 0))
+            pnl = p.get("unrealized_pl", p.get("unrealized_pnl", 0))
+            pnl_pct = p.get("unrealized_plpc", 0) * 100 if p.get("unrealized_plpc") else 0
+            avg_cost = p.get("avg_cost", p.get("avg_entry_price", 0))
+            
+            total_pnl += pnl
+            direction = "LONG" if float(qty) > 0 else "SHORT"
+            position_lines.append(
+                f"  • {symbol}: {direction} {abs(float(qty)):,.0f} shares @ ${float(avg_cost):.2f} avg | P&L: ${float(pnl):+,.2f} ({float(pnl_pct):+.1f}%)"
+            )
+        
+        data_injection = QueryPreprocessor.INJECTION_TEMPLATES["positions"].format(
+            position_list="\n".join(position_lines),
+            total_pnl=f"{total_pnl:+,.2f}"
+        )
+        
+        # Enhance the query with explicit instruction
+        processed_query = f"{original_query}\n\nIMPORTANT: Only report the EXACT positions and values provided in the data above."
+        
+        return processed_query, data_injection
+    
+    @staticmethod
+    def preprocess_for_quotes(original_query: str, quotes_data: Dict[str, Dict], symbols: List[str]) -> Tuple[str, str]:
+        """
+        Preprocess a quote-related query to inject exact quote data.
+        """
+        if not quotes_data or not symbols:
+            return original_query, ""
+        
+        quote_lines = []
+        for symbol in symbols:
+            if symbol.upper() in quotes_data:
+                q = quotes_data[symbol.upper()]
+                price = q.get("price", q.get("last", 0))
+                change = q.get("change_percent", q.get("change_pct", 0))
+                quote_lines.append(f"  • {symbol}: ${float(price):.2f} ({float(change):+.2f}%)")
+        
+        if not quote_lines:
+            return original_query, ""
+        
+        data_injection = f"""
+[EXACT QUOTE DATA]
+{chr(10).join(quote_lines)}
+
+INSTRUCTION: Use ONLY these exact prices."""
+        
+        return original_query, data_injection
+    
+    @staticmethod
+    def detect_hallucination_risk(query: str) -> str:
+        """
+        Detect if a query is high-risk for hallucinations and return risk level.
+        """
+        high_risk_patterns = [
+            r"how many shares",
+            r"exact\s+(number|amount|quantity|price)",
+            r"what is my (p&l|pnl|profit|loss)",
+            r"total (value|worth|invested)",
+        ]
+        
+        medium_risk_patterns = [
+            r"what.*(positions?|holdings?)",
+            r"show.*(positions?|portfolio)",
+            r"list.*(stocks?|positions?)",
+        ]
+        
+        query_lower = query.lower()
+        
+        for pattern in high_risk_patterns:
+            if re.search(pattern, query_lower):
+                return "high"
+        
+        for pattern in medium_risk_patterns:
+            if re.search(pattern, query_lower):
+                return "medium"
+        
+        return "low"
+
+
+# Singleton instance
+_query_preprocessor = QueryPreprocessor()
 
 
 class QueryIntent(Enum):
@@ -444,9 +575,17 @@ class SmartContextEngine:
                     context_data.quotes = quotes_data
             
             # POSITIONS (IB first, then Alpaca fallback)
+            # Use QueryPreprocessor to inject exact data and reduce hallucinations
             if sources["positions"]:
                 positions_str, positions_data = await self._get_positions_with_data(services.get("alpaca"))
-                if positions_str:
+                if positions_str and positions_data:
+                    # Use preprocessor to create structured, exact data injection
+                    _, data_injection = _query_preprocessor.preprocess_for_positions("", positions_data)
+                    context_parts.append("=== YOUR POSITIONS (LIVE FROM IB GATEWAY) ===")
+                    context_parts.append(data_injection)
+                    context_parts.append("")
+                    context_data.positions = positions_data
+                elif positions_str:
                     context_parts.append("=== YOUR POSITIONS (LIVE FROM IB GATEWAY) ===")
                     context_parts.append("The following are the user's REAL open positions from their brokerage account:")
                     context_parts.append(positions_str)

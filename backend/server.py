@@ -3845,6 +3845,123 @@ _http_proxy_sessions = {}
 _http_proxy_requests = {}
 _http_proxy_responses = {}
 
+# Ollama usage tracking
+_ollama_usage = {
+    "session_requests": 0,
+    "session_start": datetime.now(timezone.utc).isoformat(),
+    "daily_requests": 0,
+    "daily_start": datetime.now(timezone.utc).date().isoformat(),
+    "weekly_requests": 0,
+    "weekly_start": datetime.now(timezone.utc).date().isoformat(),
+    "models_used": {},
+    "request_history": []  # Last 50 requests
+}
+
+
+def _reset_ollama_usage_if_needed():
+    """Reset usage counters if session/day/week has rolled over"""
+    global _ollama_usage
+    now = datetime.now(timezone.utc)
+    today = now.date().isoformat()
+    
+    # Reset daily if date changed
+    if _ollama_usage["daily_start"] != today:
+        _ollama_usage["daily_requests"] = 0
+        _ollama_usage["daily_start"] = today
+    
+    # Reset session every 5 hours (matches Ollama Pro)
+    try:
+        session_start = datetime.fromisoformat(_ollama_usage["session_start"].replace("Z", "+00:00"))
+        if (now - session_start).total_seconds() > 5 * 3600:
+            _ollama_usage["session_requests"] = 0
+            _ollama_usage["session_start"] = now.isoformat()
+    except:
+        _ollama_usage["session_start"] = now.isoformat()
+    
+    # Reset weekly every 7 days
+    try:
+        weekly_start = datetime.fromisoformat(_ollama_usage["weekly_start"])
+        days_diff = (now.date() - datetime.fromisoformat(_ollama_usage["weekly_start"]).date()).days
+        if days_diff >= 7:
+            _ollama_usage["weekly_requests"] = 0
+            _ollama_usage["weekly_start"] = today
+    except:
+        _ollama_usage["weekly_start"] = today
+
+
+def track_ollama_request(model: str, success: bool = True):
+    """Track an Ollama request for usage monitoring"""
+    global _ollama_usage
+    _reset_ollama_usage_if_needed()
+    
+    _ollama_usage["session_requests"] += 1
+    _ollama_usage["daily_requests"] += 1
+    _ollama_usage["weekly_requests"] += 1
+    
+    # Track by model
+    if model not in _ollama_usage["models_used"]:
+        _ollama_usage["models_used"][model] = 0
+    _ollama_usage["models_used"][model] += 1
+    
+    # Keep last 50 requests
+    _ollama_usage["request_history"].append({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "model": model,
+        "success": success
+    })
+    if len(_ollama_usage["request_history"]) > 50:
+        _ollama_usage["request_history"] = _ollama_usage["request_history"][-50:]
+
+
+@app.get("/api/ollama-usage")
+async def get_ollama_usage():
+    """Get Ollama usage statistics"""
+    _reset_ollama_usage_if_needed()
+    
+    # Estimate remaining based on Ollama Pro limits (these are estimates)
+    # Ollama Pro typically allows ~100-200 requests/session, ~500-1000/week
+    session_limit = 150  # Conservative estimate
+    weekly_limit = 750   # Conservative estimate
+    
+    session_used_pct = min(100, (_ollama_usage["session_requests"] / session_limit) * 100)
+    weekly_used_pct = min(100, (_ollama_usage["weekly_requests"] / weekly_limit) * 100)
+    
+    # Calculate time until reset
+    now = datetime.now(timezone.utc)
+    try:
+        session_start = datetime.fromisoformat(_ollama_usage["session_start"].replace("Z", "+00:00"))
+        session_age_hours = (now - session_start).total_seconds() / 3600
+        session_reset_hours = max(0, 5 - session_age_hours)
+    except:
+        session_reset_hours = 5
+    
+    try:
+        weekly_start_date = datetime.fromisoformat(_ollama_usage["weekly_start"]).date()
+        days_until_weekly_reset = 7 - (now.date() - weekly_start_date).days
+    except:
+        days_until_weekly_reset = 7
+    
+    return {
+        "session": {
+            "requests": _ollama_usage["session_requests"],
+            "limit": session_limit,
+            "used_percent": round(session_used_pct, 1),
+            "reset_hours": round(session_reset_hours, 1)
+        },
+        "weekly": {
+            "requests": _ollama_usage["weekly_requests"],
+            "limit": weekly_limit,
+            "used_percent": round(weekly_used_pct, 1),
+            "reset_days": days_until_weekly_reset
+        },
+        "daily": {
+            "requests": _ollama_usage["daily_requests"]
+        },
+        "models_used": _ollama_usage["models_used"],
+        "recent_requests": _ollama_usage["request_history"][-10:],
+        "subscription": "Pro"
+    }
+
 
 def is_http_ollama_proxy_connected() -> bool:
     """Check if any HTTP Ollama proxy is connected and has models available"""
@@ -3976,8 +4093,12 @@ async def call_ollama_via_http_proxy(model: str, messages: list, options: dict =
     
     try:
         result = await asyncio.wait_for(future, timeout=timeout)
+        # Track successful request
+        track_ollama_request(model, success=True)
         return result
     except asyncio.TimeoutError:
+        # Track failed request
+        track_ollama_request(model, success=False)
         return {"success": False, "error": "Request timed out"}
     finally:
         _http_proxy_requests.pop(request_id, None)

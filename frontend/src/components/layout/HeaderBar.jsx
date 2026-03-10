@@ -297,6 +297,134 @@ const CreditBudgetModal = ({ isOpen, onClose, creditBudget }) => {
   );
 };
 
+// Ollama Usage Modal Component
+const OllamaUsageModal = ({ isOpen, onClose, ollamaUsage }) => {
+  if (!isOpen || !ollamaUsage) return null;
+
+  const { session, weekly, daily, models_used, subscription } = ollamaUsage;
+
+  const getStatusColor = (percent) => {
+    if (percent >= 90) return 'text-red-400 bg-red-500/10 border-red-500/30';
+    if (percent >= 70) return 'text-orange-400 bg-orange-500/10 border-orange-500/30';
+    if (percent >= 50) return 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30';
+    return 'text-green-400 bg-green-500/10 border-green-500/30';
+  };
+
+  const getProgressColor = (percent) => {
+    if (percent >= 90) return 'bg-red-500';
+    if (percent >= 70) return 'bg-orange-500';
+    if (percent >= 50) return 'bg-yellow-500';
+    return 'bg-green-500';
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      {/* Backdrop */}
+      <div 
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      
+      {/* Modal */}
+      <div className="relative w-full max-w-md mx-4 p-6 rounded-2xl"
+           style={{
+             background: 'linear-gradient(145deg, rgba(24, 32, 42, 0.98), rgba(16, 20, 28, 0.98))',
+             border: '1px solid rgba(255, 255, 255, 0.08)',
+             boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+           }}>
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-purple-500/10 border border-purple-500/20">
+              <Zap className="w-5 h-5 text-purple-400" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-white">Ollama {subscription}</h3>
+              <p className="text-xs text-zinc-500">Cloud AI Usage</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-zinc-800/50 rounded-lg transition-colors">
+            <X className="w-5 h-5 text-zinc-400" />
+          </button>
+        </div>
+
+        {/* Session Usage */}
+        <div className={`mb-4 p-4 rounded-xl border ${getStatusColor(session?.used_percent || 0)}`}>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium">Session Usage</span>
+            <span className="text-xs text-zinc-400">Resets in {session?.reset_hours || '?'}h</span>
+          </div>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="flex-1 h-2 rounded-full bg-black/40 overflow-hidden">
+              <div 
+                className={`h-full rounded-full transition-all ${getProgressColor(session?.used_percent || 0)}`}
+                style={{ width: `${Math.min(session?.used_percent || 0, 100)}%` }}
+              />
+            </div>
+            <span className="text-sm font-mono">{session?.used_percent || 0}%</span>
+          </div>
+          <div className="text-xs text-zinc-400">
+            {session?.requests || 0} / ~{session?.limit || 150} requests
+          </div>
+        </div>
+
+        {/* Weekly Usage */}
+        <div className={`mb-4 p-4 rounded-xl border ${getStatusColor(weekly?.used_percent || 0)}`}>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium">Weekly Usage</span>
+            <span className="text-xs text-zinc-400">Resets in {weekly?.reset_days || '?'} days</span>
+          </div>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="flex-1 h-2 rounded-full bg-black/40 overflow-hidden">
+              <div 
+                className={`h-full rounded-full transition-all ${getProgressColor(weekly?.used_percent || 0)}`}
+                style={{ width: `${Math.min(weekly?.used_percent || 0, 100)}%` }}
+              />
+            </div>
+            <span className="text-sm font-mono">{weekly?.used_percent || 0}%</span>
+          </div>
+          <div className="text-xs text-zinc-400">
+            {weekly?.requests || 0} / ~{weekly?.limit || 750} requests
+          </div>
+        </div>
+
+        {/* Today's Stats */}
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="bg-zinc-800/50 rounded-lg p-3 border border-zinc-700/50">
+            <div className="text-xs text-zinc-400 mb-1">Today</div>
+            <div className="text-lg font-semibold text-white">{daily?.requests || 0}</div>
+            <div className="text-xs text-zinc-500">requests</div>
+          </div>
+          <div className="bg-zinc-800/50 rounded-lg p-3 border border-zinc-700/50">
+            <div className="text-xs text-zinc-400 mb-1">Primary Model</div>
+            <div className="text-sm font-semibold text-purple-400 truncate">
+              {Object.keys(models_used || {})[0] || 'N/A'}
+            </div>
+            <div className="text-xs text-zinc-500">
+              {Object.values(models_used || {})[0] || 0} uses
+            </div>
+          </div>
+        </div>
+
+        {/* Models Used */}
+        {models_used && Object.keys(models_used).length > 0 && (
+          <div className="p-3 rounded-xl bg-zinc-800/30 border border-zinc-700/30">
+            <div className="text-xs text-zinc-400 mb-2">Models Used</div>
+            <div className="space-y-1">
+              {Object.entries(models_used).map(([model, count]) => (
+                <div key={model} className="flex items-center justify-between text-sm">
+                  <span className="text-zinc-300 truncate">{model}</span>
+                  <span className="text-zinc-500">{count} requests</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // System Status Popover Component
 const SystemStatusPopover = ({ 
   wsConnected, 
@@ -489,9 +617,11 @@ const HeaderBar = ({
   handleDisconnectFromIB,
   creditBudget,
   ollamaStatus = 'unknown',
+  ollamaUsage = null,
   ibPusherStatus = null
 }) => {
   const [showCreditModal, setShowCreditModal] = useState(false);
+  const [showOllamaModal, setShowOllamaModal] = useState(false);
 
   // Credit budget status color and icon
   const getCreditStatusConfig = () => {
@@ -608,6 +738,45 @@ const HeaderBar = ({
               </div>
             </button>
           )}
+          
+          {/* Ollama Usage Indicator - COMPACT */}
+          {ollamaUsage && ollamaStatus === 'online' && (
+            <button
+              onClick={() => setShowOllamaModal(true)}
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg transition-all hover:scale-[1.02]"
+              style={{
+                background: 'rgba(21, 28, 36, 0.9)',
+                backdropFilter: 'blur(16px)',
+                WebkitBackdropFilter: 'blur(16px)',
+                border: '1px solid rgba(139, 92, 246, 0.3)',
+                boxShadow: '0 2px 12px rgba(139, 92, 246, 0.1)'
+              }}
+              title="Click to view Ollama Pro usage"
+              data-testid="ollama-usage-indicator"
+            >
+              <Zap className="w-4 h-4 text-purple-400" />
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-zinc-400 font-medium">Ollama Pro</span>
+                <div className="w-16 h-1.5 rounded-full overflow-hidden"
+                     style={{
+                       background: 'rgba(0, 0, 0, 0.4)',
+                       border: '1px solid rgba(255, 255, 255, 0.1)'
+                     }}>
+                  <div 
+                    className={`h-full rounded-full transition-all ${
+                      (ollamaUsage.session?.used_percent || 0) >= 70 ? 'bg-orange-500' :
+                      (ollamaUsage.session?.used_percent || 0) >= 50 ? 'bg-yellow-500' :
+                      'bg-purple-500 shadow-[0_0_10px_rgba(139,92,246,0.5)]'
+                    }`}
+                    style={{ width: `${Math.min(ollamaUsage.session?.used_percent || 0, 100)}%` }}
+                  />
+                </div>
+                <span className="text-xs font-mono font-medium text-zinc-300">
+                  {ollamaUsage.session?.requests || 0}
+                </span>
+              </div>
+            </button>
+          )}
         </div>
         
         {/* Right Side - Status Indicators */}
@@ -638,6 +807,13 @@ const HeaderBar = ({
         isOpen={showCreditModal} 
         onClose={() => setShowCreditModal(false)} 
         creditBudget={creditBudget}
+      />
+      
+      {/* Ollama Usage Modal */}
+      <OllamaUsageModal 
+        isOpen={showOllamaModal} 
+        onClose={() => setShowOllamaModal(false)} 
+        ollamaUsage={ollamaUsage}
       />
     </>
   );
