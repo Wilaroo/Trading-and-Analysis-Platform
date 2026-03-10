@@ -10,7 +10,7 @@ echo.
 
 :: GitHub repo info
 set GITHUB_RAW=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents
-set DEFAULT_URL=https://playbook-drc-gen.preview.emergentagent.com
+set DEFAULT_URL=https://tqs-engine.preview.emergentagent.com
 set PLATFORM_URL=%DEFAULT_URL%
 set SCRIPT_DIR=%~dp0
 

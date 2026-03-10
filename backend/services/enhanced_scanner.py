@@ -3284,6 +3284,24 @@ class EnhancedBackgroundScanner:
         except Exception as e:
             logger.debug(f"Could not populate SMB fields: {e}")
         
+        # === LEARNING LOOP: Capture context (Phase 1) ===
+        try:
+            from services.learning_loop_service import get_learning_loop_service
+            learning_loop = get_learning_loop_service()
+            if learning_loop:
+                await learning_loop.capture_alert_context(
+                    alert_id=alert.id,
+                    symbol=alert.symbol,
+                    setup_type=alert.setup_type,
+                    alert_priority=alert.priority.value,
+                    tape_score=alert.tape_score,
+                    tape_confirmation=alert.tape_confirmation,
+                    smb_score=alert.smb_score_total,
+                    trade_grade=alert.trade_grade
+                )
+        except Exception as e:
+            logger.debug(f"Could not capture learning context: {e}")
+        
         self._live_alerts[alert.id] = alert
         self._alerts_generated += 1
         

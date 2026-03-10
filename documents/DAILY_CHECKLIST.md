@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://playbook-drc-gen.preview.emergentagent.com
+https://tqs-engine.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://playbook-drc-gen.preview.emergentagent.com
+https://tqs-engine.preview.emergentagent.com
 ```
