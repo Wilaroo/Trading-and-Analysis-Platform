@@ -2555,20 +2555,111 @@ When analyzing a new setup, retrieve your past similar trades and outcomes.
 
 ---
 
-## Next Steps: Phase 3A - Fast Learning (Circuit Breakers, Sizing, Health)
+## Session Log - March 10, 2026 (Phase 3A & 3B: Fast Learning) - COMPLETE
+
+### Fast Learning Architecture - Phase 3 COMPLETE
+
+**Goal**: Implement real-time risk controls, adaptive sizing, and dynamic thresholds.
+
+**What was implemented:**
+
+#### 1. Circuit Breakers (`/app/backend/services/circuit_breaker.py`)
+
+| Breaker Type | Default Threshold | Action |
+|--------------|-------------------|--------|
+| daily_loss_dollar | -$500 | BLOCK_ALL |
+| daily_loss_percent | -2% | BLOCK_ALL |
+| consecutive_losses | 3 | REDUCE_SIZE 50% |
+| trade_frequency | 10/hour | REQUIRE_OVERRIDE |
+| drawdown | -5% | BLOCK_ALL |
+| tilt_detection | any | REDUCE_SIZE 50% |
+| time_restriction | varies | WARN_ONLY |
+
+#### 2. Position Sizing (`/app/backend/services/position_sizer.py`)
+
+**TQS Multiplier Scale:**
+| TQS Score | Multiplier |
+|-----------|------------|
+| 35 (min) | 0.25x |
+| 50 (base) | 1.0x |
+| 65 | 1.21x |
+| 75 | 1.36x |
+| 85+ (max) | 1.5x |
+
+**Sizing Modes:**
+- `fixed_dollar`: Risk same $ per trade
+- `fixed_percent`: Risk same % per trade
+- `tqs_scaled`: Scale based on TQS score (default)
+- `kelly`: Kelly criterion with configurable fraction
+
+#### 3. Health Monitor (`/app/backend/services/health_monitor.py`)
+
+**Components Tracked:**
+- Data Feeds: alpaca, alpaca_stream, ib_gateway, finnhub
+- AI Services: ollama
+- Database: mongodb
+- Analytics: scanner, tqs_engine, learning_loop
+- Risk: circuit_breakers
+
+#### 4. Dynamic Thresholds (`/app/backend/services/dynamic_thresholds.py`)
+
+**Context-Aware Adjustments:**
+- **Market Regime**: -5 in strong uptrend, +8 in volatile
+- **VIX Level**: -3 at 15-20 (sweet spot), +15 at extreme (40+)
+- **Time of Day**: -1 opening drive, +2 midday
+- **Performance**: +3 per consecutive loss, -3 for hot streak
+
+#### 5. New API Endpoints (`/api/risk/*`)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/circuit-breakers/status` | GET | All breaker states |
+| `/circuit-breakers/configs` | GET | Breaker configs |
+| `/circuit-breakers/{type}/configure` | POST | Update config |
+| `/circuit-breakers/check-permission` | GET | Can trade? |
+| `/position-sizing/config` | GET | Sizing config |
+| `/position-sizing/calculate` | POST | Calculate size |
+| `/position-sizing/table` | GET | TQS scaling table |
+| `/thresholds/summary` | GET | Threshold configs |
+| `/thresholds/calculate` | POST | Dynamic thresholds |
+| `/thresholds/check-trade` | POST | Check vs thresholds |
+| `/health/quick-status` | GET | Quick health |
+| `/health/report` | GET | Full health report |
+
+### Testing Results
+- 27/27 backend API tests passed (100%)
+- Position sizing formula verified correct
+- Dynamic threshold adjustments working
+- Circuit breakers ready for production
+
+### Files Created
+- `/app/backend/services/circuit_breaker.py`
+- `/app/backend/services/position_sizer.py`
+- `/app/backend/services/health_monitor.py`
+- `/app/backend/services/dynamic_thresholds.py`
+- `/app/backend/routers/risk_router.py`
+- `/app/backend/tests/test_risk_management_phase3.py`
+
+### Files Modified
+- `/app/backend/server.py` - Added Phase 3 initialization
+
+---
+
+## Next Steps: Phase 4 - RAG Knowledge Base
 
 ### Overview
-Implement real-time risk controls and adaptive behavior:
-- Circuit breakers (daily loss limits, tilt detection, trade frequency)
-- TQS-based position sizing (higher score = larger position)
-- System health monitoring dashboard
+Set up ChromaDB for personalized AI context injection:
+- Store trade history, playbooks, patterns as embeddings
+- Retrieve relevant context for AI prompts
+- Auto-rebuild from MongoDB when switching machines
 
 ### Key Features
-1. **Circuit Breakers**: Auto-pause trading after X consecutive losses or daily loss limit
-2. **Dynamic Position Sizing**: Scale position size based on TQS score
-3. **Health Monitor**: Dashboard showing service status, data quality, model performance
+1. **ChromaDB Integration**: Local vector database for semantic search
+2. **Embedding Pipeline**: Convert trade data to embeddings
+3. **RAG Retrieval**: Fetch relevant context for AI prompts
+4. **Auto-Sync**: Detect stale data and rebuild from MongoDB
 
 ### Files to Create
-- `/backend/services/circuit_breaker.py`
-- `/backend/services/position_sizer.py`
-- `/backend/services/health_monitor.py`
+- `/backend/services/rag_service.py` - Main RAG service
+- `/backend/services/embedding_service.py` - Text to embeddings
+- `/backend/services/vector_store.py` - ChromaDB wrapper
