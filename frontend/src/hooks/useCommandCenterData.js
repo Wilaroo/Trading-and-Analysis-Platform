@@ -179,18 +179,39 @@ export function useCommandCenterData({
     
     setPositions(positionsData);
     
-    // Try to fetch account summary - first from pushed data, then direct IB
+    // Try to fetch account summary - use new dedicated endpoint
     try {
-      const pushedRes = await api.get('/api/ib/pushed-data');
-      if (pushedRes.data?.connected && pushedRes.data?.account && Object.keys(pushedRes.data.account).length > 0) {
+      // First try the new account summary endpoint that has Net Liq, Buying Power, Daily P&L
+      const summaryRes = await api.get('/api/ib/account/summary');
+      if (summaryRes.data?.success && summaryRes.data?.net_liquidation > 0) {
         setAccount({
-          ...pushedRes.data.account,
-          source: 'ib_pusher'
+          net_liquidation: summaryRes.data.net_liquidation,
+          buying_power: summaryRes.data.buying_power,
+          available_funds: summaryRes.data.available_funds,
+          total_cash: summaryRes.data.total_cash,
+          realized_pnl: summaryRes.data.realized_pnl,
+          unrealized_pnl: summaryRes.data.unrealized_pnl,
+          daily_pnl: summaryRes.data.daily_pnl,
+          daily_pnl_percent: summaryRes.data.daily_pnl_percent,
+          account_id: summaryRes.data.account_id,
+          connected: summaryRes.data.connected,
+          source: 'ib_gateway'
         });
       } else {
-        // Fall back to direct IB
-        const res = await api.get('/api/ib/account/summary');
-        setAccount(res.data);
+        // Fall back to raw pushed data
+        const pushedRes = await api.get('/api/ib/pushed-data');
+        if (pushedRes.data?.connected && pushedRes.data?.account) {
+          const acct = pushedRes.data.account;
+          setAccount({
+            net_liquidation: parseFloat(acct.NetLiquidation) || 0,
+            buying_power: parseFloat(acct.BuyingPower) || 0,
+            available_funds: parseFloat(acct.AvailableFunds) || 0,
+            total_cash: parseFloat(acct.TotalCashBalance) || 0,
+            daily_pnl: parseFloat(acct.DailyPnL) || 0,
+            unrealized_pnl: parseFloat(acct.UnrealizedPnL) || 0,
+            source: 'ib_pusher'
+          });
+        }
       }
     } catch (err) {
       // Non-blocking, account will be empty

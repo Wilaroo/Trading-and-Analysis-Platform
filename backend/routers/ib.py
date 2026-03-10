@@ -402,6 +402,69 @@ async def get_all_fundamentals():
     }
 
 
+@router.get("/account/summary")
+async def get_account_summary():
+    """
+    Get account summary with Net Liquidation, Buying Power, Today P&L.
+    This data comes from IB Gateway pushed account values.
+    """
+    global _pushed_ib_data
+    
+    account = _pushed_ib_data.get("account", {})
+    
+    # Extract key account values
+    net_liq = account.get("NetLiquidation", 0)
+    if isinstance(net_liq, str):
+        try:
+            net_liq = float(net_liq)
+        except:
+            net_liq = 0
+    
+    buying_power = account.get("BuyingPower", 0)
+    if isinstance(buying_power, str):
+        try:
+            buying_power = float(buying_power)
+        except:
+            buying_power = 0
+    
+    # Today's P&L can come from different fields
+    realized_pnl = account.get("RealizedPnL", 0)
+    unrealized_pnl = account.get("UnrealizedPnL", 0)
+    daily_pnl = account.get("DailyPnL", realized_pnl)
+    
+    for val in [realized_pnl, unrealized_pnl, daily_pnl]:
+        if isinstance(val, str):
+            try:
+                val = float(val)
+            except:
+                val = 0
+    
+    # Get cash and other values
+    total_cash = account.get("TotalCashBalance", 0)
+    available_funds = account.get("AvailableFunds", buying_power)
+    
+    # Calculate daily P&L percentage
+    if net_liq and net_liq > 0:
+        daily_pnl_pct = (float(daily_pnl or 0) / net_liq) * 100
+    else:
+        daily_pnl_pct = 0
+    
+    return {
+        "success": True,
+        "account_id": "DUN615665",
+        "net_liquidation": float(net_liq) if net_liq else 0,
+        "buying_power": float(buying_power) if buying_power else 0,
+        "available_funds": float(available_funds) if available_funds else 0,
+        "total_cash": float(total_cash) if total_cash else 0,
+        "realized_pnl": float(realized_pnl) if realized_pnl else 0,
+        "unrealized_pnl": float(unrealized_pnl) if unrealized_pnl else 0,
+        "daily_pnl": float(daily_pnl) if daily_pnl else 0,
+        "daily_pnl_percent": round(daily_pnl_pct, 2),
+        "connected": is_pusher_connected(),
+        "last_update": _pushed_ib_data.get("last_update")
+    }
+
+
 # Helper function for other services to access fundamental data
 def get_fundamentals_for_symbol(symbol: str) -> dict:
     """

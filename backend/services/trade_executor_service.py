@@ -28,15 +28,17 @@ class TradeExecutorService:
     """
     Handles order execution and management.
     Supports paper trading via Alpaca and live trading via IB.
+    Default: IB Gateway (user's paper account DUN615665)
     """
     
     def __init__(self):
-        self._mode = ExecutorMode.PAPER
+        # Default to IB Gateway (LIVE mode connects to IB)
+        self._mode = ExecutorMode.LIVE
         self._alpaca_client = None
         self._ib_client = None
         self._initialized = False
         
-        logger.info("TradeExecutorService initialized")
+        logger.info("TradeExecutorService initialized (default: IB Gateway)")
     
     def _ensure_initialized(self) -> bool:
         """Initialize broker clients"""

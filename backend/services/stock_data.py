@@ -170,18 +170,22 @@ class StockDataService:
             vix_data = get_vix_from_pushed_data()
             if vix_data and vix_data.get("price"):
                 price = vix_data.get("price", 0)
+                prev_close = vix_data.get("close") or price
+                change = price - prev_close
+                change_percent = (change / prev_close * 100) if prev_close else 0
+                
                 return {
                     "symbol": "VIX",
                     "price": round(price, 2),
-                    "change": 0,
-                    "change_percent": 0,
+                    "change": round(change, 2),
+                    "change_percent": round(change_percent, 2),
                     "volume": 0,
                     "bid": round(vix_data.get("bid") or price, 2),
                     "ask": round(vix_data.get("ask") or price, 2),
                     "high": round(vix_data.get("high") or price, 2),
                     "low": round(vix_data.get("low") or price, 2),
-                    "open": round(vix_data.get("close") or price, 2),
-                    "previous_close": round(vix_data.get("close") or price, 2),
+                    "open": round(prev_close, 2),
+                    "previous_close": round(prev_close, 2),
                     "source": "ib_pusher" if is_pusher_connected() else "ib_cached"
                 }
         except Exception as e:
@@ -202,19 +206,24 @@ class StockDataService:
             if symbol in quotes:
                 q = quotes[symbol]
                 price = q.get("last") or q.get("close") or 0
+                prev_close = q.get("close") or price
+                
                 if price > 0:
+                    change = price - prev_close
+                    change_percent = (change / prev_close * 100) if prev_close else 0
+                    
                     return {
                         "symbol": symbol,
                         "price": round(price, 2),
-                        "change": 0,
-                        "change_percent": 0,
+                        "change": round(change, 2),
+                        "change_percent": round(change_percent, 2),
                         "volume": q.get("volume", 0),
                         "bid": round(q.get("bid") or price, 2),
                         "ask": round(q.get("ask") or price, 2),
                         "high": round(q.get("high") or price, 2),
                         "low": round(q.get("low") or price, 2),
-                        "open": round(q.get("open") or price, 2),
-                        "previous_close": round(q.get("close") or price, 2),
+                        "open": round(q.get("open") or prev_close, 2),
+                        "previous_close": round(prev_close, 2),
                         "source": "ib_pusher"
                     }
         except Exception:
