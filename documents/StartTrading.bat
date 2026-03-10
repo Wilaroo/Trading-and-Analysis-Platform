@@ -110,14 +110,15 @@ if defined OLLAMA_MODEL_OVERRIDE (
 )
 
 :: Auto-select based on VRAM (use GOTO to break after first match)
+:: Note: Using qwen2.5:7b for 16GB+ because deepseek-r1:8b is too heavy with other apps running
 if %GPU_VRAM% GEQ 16000 (
-    set OLLAMA_MODEL=deepseek-r1:8b
-    echo       16GB+ VRAM - Using deepseek-r1:8b
+    set OLLAMA_MODEL=qwen2.5:7b
+    echo       16GB+ VRAM - Using qwen2.5:7b
     goto model_selected
 )
 if %GPU_VRAM% GEQ 12000 (
-    set OLLAMA_MODEL=qwen2.5:14b
-    echo       12GB+ VRAM - Using qwen2.5:14b
+    set OLLAMA_MODEL=qwen2.5:7b
+    echo       12GB+ VRAM - Using qwen2.5:7b
     goto model_selected
 )
 if %GPU_VRAM% GEQ 8000 (
@@ -126,8 +127,8 @@ if %GPU_VRAM% GEQ 8000 (
     goto model_selected
 )
 if %GPU_VRAM% GEQ 6000 (
-    set OLLAMA_MODEL=qwen2.5:7b
-    echo       6GB+ VRAM - Using qwen2.5:7b
+    set OLLAMA_MODEL=gemma3:4b
+    echo       6GB+ VRAM - Using gemma3:4b
     goto model_selected
 )
 if %GPU_VRAM% GEQ 4000 (
