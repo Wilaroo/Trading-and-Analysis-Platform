@@ -92,6 +92,13 @@ class IBDataPusher:
                     logger.warning("Level 2 data not available - updateMktDepthEvent not found in ib_insync")
                     self.level2_enabled = False
                 
+                # Capture existing positions (they're loaded during connect sync)
+                existing_positions = self.ib.positions()
+                if existing_positions:
+                    logger.info(f"  Found {len(existing_positions)} existing positions")
+                    for pos in existing_positions:
+                        self.on_position(pos)
+                
                 return True
             else:
                 logger.error("Failed to connect to IB Gateway")
