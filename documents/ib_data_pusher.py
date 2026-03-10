@@ -320,10 +320,18 @@ class IBDataPusher:
         Subscribe to Level 2 / DOM data for specified symbols.
         Stores ticker objects and polls domBids/domAsks for order book data.
         
+        Note: Level 2 requires specific exchange, not SMART routing.
+        - ETFs (SPY, QQQ, IWM) -> ARCA
+        - NASDAQ stocks -> ISLAND (NASDAQ's ECN)
+        - NYSE stocks -> NYSE
+        
         Args:
             symbols: List of stock symbols
             num_rows: Number of price levels to track (default 5)
         """
+        # Known ETFs that trade on ARCA
+        arca_symbols = {"SPY", "QQQ", "IWM", "DIA", "GLD", "SLV", "USO", "XLF", "XLE", "XLK", "VXX", "TQQQ", "SQQQ"}
+        
         for symbol in symbols:
             try:
                 if symbol in self.depth_subscriptions:
@@ -333,15 +341,34 @@ class IBDataPusher:
                 if symbol == "VIX":
                     continue  # VIX doesn't have L2
                 
-                contract = Stock(symbol, "SMART", "USD")
-                self.ib.qualifyContracts(contract)
+                # Determine the correct exchange for Level 2
+                if symbol in arca_symbols:
+                    exchange = "ARCA"
+                else:
+                    # Try ISLAND (NASDAQ's ECN) for most stocks - it has good L2 data
+                    exchange = "ISLAND"
+                
+                contract = Stock(symbol, exchange, "USD")
+                
+                try:
+                    self.ib.qualifyContracts(contract)
+                except Exception as e:
+                    # If ISLAND fails, try NYSE
+                    logger.debug(f"  {symbol} not on {exchange}, trying NYSE")
+                    contract = Stock(symbol, "NYSE", "USD")
+                    try:
+                        self.ib.qualifyContracts(contract)
+                        exchange = "NYSE"
+                    except:
+                        logger.debug(f"  Skipping L2 for {symbol} - couldn't qualify contract")
+                        continue
                 
                 # Request market depth (Level 2) - returns a Ticker object
                 ticker = self.ib.reqMktDepth(contract, numRows=num_rows)
                 if ticker:
                     # Store the ticker object itself so we can poll domBids/domAsks
                     self.depth_subscriptions[symbol] = ticker
-                    logger.info(f"  L2 Subscribed: {symbol} ({num_rows} levels)")
+                    logger.info(f"  L2 Subscribed: {symbol} @ {exchange} ({num_rows} levels)")
                     
             except Exception as e:
                 logger.error(f"  Failed to subscribe L2 {symbol}: {e}")
