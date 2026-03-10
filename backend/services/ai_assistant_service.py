@@ -2205,7 +2205,7 @@ REMEMBER: Only use the EXACT data provided above. Do not invent positions or pri
                         model=model,
                         messages=proxy_messages,
                         options=ollama_options,
-                        timeout=120.0  # 2 minutes should be enough for cloud model
+                        timeout=180.0  # 3 minutes for cloud model with complex context
                     )
                     
                     if result.get("success"):

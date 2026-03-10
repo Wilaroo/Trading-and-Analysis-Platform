@@ -35,6 +35,7 @@ const CommandCenterPage = ({
 
   // Check Ollama status
   const [ollamaStatus, setOllamaStatus] = useState('unknown');
+  const [ollamaUsage, setOllamaUsage] = useState(null);
   
   useEffect(() => {
     const checkOllama = async () => {
@@ -54,8 +55,27 @@ const CommandCenterPage = ({
       }
     };
     
+    const fetchOllamaUsage = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/ollama-usage`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setOllamaUsage(data);
+        }
+      } catch (e) {
+        console.log('Failed to fetch Ollama usage:', e);
+      }
+    };
+    
     checkOllama();
-    const interval = setInterval(checkOllama, 30000); // Check every 30s
+    fetchOllamaUsage();
+    const interval = setInterval(() => {
+      checkOllama();
+      fetchOllamaUsage();
+    }, 30000); // Check every 30s
     return () => clearInterval(interval);
   }, []);
 
@@ -79,6 +99,7 @@ const CommandCenterPage = ({
         handleDisconnectFromIB={data.handleDisconnectFromIB}
         creditBudget={data.creditBudget}
         ollamaStatus={ollamaStatus}
+        ollamaUsage={ollamaUsage}
         ibPusherStatus={ibPusherStatus}
       />
 
