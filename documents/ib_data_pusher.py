@@ -453,8 +453,9 @@ class IBDataPusher:
         """Push buffered data to cloud backend (synchronous)"""
         has_data = (self.quotes_buffer or self.account_data or 
                     self.positions_data or self.level2_buffer or self.fundamentals_buffer)
+        
+        # Always log what we have
         if not has_data:
-            logger.debug("No data to push")
             return
         
         # Log what we're pushing
@@ -573,25 +574,30 @@ class IBDataPusher:
         
         try:
             while self.running:
-                # Let ib_insync process events (sync — no event loop conflict)
-                self.ib.sleep(0.1)
-                
-                # Push data at regular intervals
-                current_time = time.time()
-                if current_time - self.last_push_time >= self.push_interval:
-                    self.push_data_to_cloud()
-                    self.last_push_time = current_time
-                    push_count += 1
+                try:
+                    # Let ib_insync process events (sync — no event loop conflict)
+                    self.ib.sleep(0.1)
                     
-                    if push_count % 30 == 0:
-                        l2_count = len(self.level2_buffer)
-                        fund_count = len([f for f in self.fundamentals_buffer.values() if f.get("pe_ratio") or f.get("short_interest")])
-                        logger.info(f"Running... {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions, {l2_count} L2, {fund_count} fundamentals")
-                
-                # Update L2 subscriptions based on in-play stocks (only if enabled and supported)
-                if enable_level2 and self.level2_enabled and (current_time - last_l2_update >= l2_update_interval):
-                    self.update_level2_subscriptions()
-                    last_l2_update = current_time
+                    # Push data at regular intervals
+                    current_time = time.time()
+                    if current_time - self.last_push_time >= self.push_interval:
+                        self.push_data_to_cloud()
+                        self.last_push_time = current_time
+                        push_count += 1
+                        
+                        if push_count % 30 == 0:
+                            l2_count = len(self.level2_buffer)
+                            fund_count = len([f for f in self.fundamentals_buffer.values() if f.get("pe_ratio") or f.get("short_interest")])
+                            logger.info(f"Running... {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions, {l2_count} L2, {fund_count} fundamentals")
+                    
+                    # Update L2 subscriptions based on in-play stocks (only if enabled and supported)
+                    if enable_level2 and self.level2_enabled and (current_time - last_l2_update >= l2_update_interval):
+                        self.update_level2_subscriptions()
+                        last_l2_update = current_time
+                except Exception as e:
+                    logger.error(f"Loop error: {e}")
+                    import traceback
+                    traceback.print_exc()
                 
                 # Refresh fundamental data periodically (every 5 minutes)
                 if current_time - self.last_fundamentals_refresh >= self.fundamentals_refresh_interval:
