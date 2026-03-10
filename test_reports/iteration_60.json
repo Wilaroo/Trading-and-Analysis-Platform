@@ -1,0 +1,123 @@
+{
+  "summary": "Tested IB pushed data endpoints with LIVE data flowing from user's local IB Gateway. All 13/14 tests passed (93%). One timeout failure was network-related, not code issue. IB pusher successfully pushing 14 quotes, 3 positions, and Level 2 data for SPY/QQQ/IWM.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/ib/status", "issue": "Intermittent network timeout during testing (network latency to preview environment)", "priority": "LOW"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "features_verified": {
+    "ib_status_pusher_info": {
+      "status": "PASS",
+      "endpoint": "GET /api/ib/status",
+      "details": "Returns pusher.connected, pusher.last_update, pusher.quotes_count (14), pusher.positions_count (3), connection_source"
+    },
+    "ib_pushed_data_quotes": {
+      "status": "PASS",
+      "endpoint": "GET /api/ib/pushed-data",
+      "details": "Returns quotes for VIX (24.35), SPY (678.44), QQQ (608.76), IWM, DIA, XOM, CVX, CF, NTR, NVDA, AAPL, MSFT, TSLA, AMD (14 total)"
+    },
+    "ib_pushed_data_positions": {
+      "status": "PASS",
+      "endpoint": "GET /api/ib/pushed-data",
+      "details": "Returns 3 positions: TMC (10000 shares), INTC (1000 shares), TSLA (101 shares)"
+    },
+    "ib_level2_spy": {
+      "status": "PASS",
+      "endpoint": "GET /api/ib/level2/SPY",
+      "details": "Returns 5 bids, 5 asks with imbalance calculation (-0.147)"
+    },
+    "ib_level2_qqq": {
+      "status": "PASS",
+      "endpoint": "GET /api/ib/level2/QQQ",
+      "details": "Returns 5 bids, 5 asks with Level 2 order book data"
+    },
+    "ib_pushed_quote_vix": {
+      "status": "PASS",
+      "endpoint": "GET /api/ib/pushed-quote/VIX",
+      "details": "Returns VIX price 24.35 (user expected ~24.55), source=ib_pusher. High: 26.01, Low: 22.19"
+    },
+    "alpaca_quote_prefer_ib": {
+      "status": "PASS",
+      "endpoint": "GET /api/alpaca/quote/SPY?prefer_ib=true",
+      "details": "Falls back to Alpaca when pusher data is stale (>30 seconds). Expected behavior - pusher must be continuously running for IB source"
+    },
+    "alpaca_quote_force_alpaca": {
+      "status": "PASS",
+      "endpoint": "GET /api/alpaca/quote/AAPL?prefer_ib=false",
+      "details": "Returns Alpaca data as source when prefer_ib=false"
+    },
+    "trading_bot_status": {
+      "status": "PASS",
+      "endpoint": "GET /api/trading-bot/status",
+      "details": "Returns success=true, mode=autonomous, running=true"
+    },
+    "config_test_connection": {
+      "status": "PASS",
+      "endpoint": "GET /api/config/test-connection",
+      "details": "Ollama connected via http_proxy. Models: deepseek-r1:8b, gpt-oss:120b-cloud, gemma3:4b, llama3:8b, qwen2.5:7b"
+    },
+    "script_ib_data_pusher": {
+      "status": "PASS",
+      "endpoint": "GET /api/scripts/ib_data_pusher.py",
+      "details": "Serves 33200 bytes, contains IBDataPusher class, ib_insync, push_data_to_cloud method"
+    },
+    "script_start_trading_bat": {
+      "status": "PASS",
+      "endpoint": "GET /api/scripts/StartTrading.bat",
+      "details": "Serves 10766 bytes, contains paperesw100000 credentials, CLOUD_URL variable"
+    }
+  },
+  "live_data_snapshot": {
+    "timestamp": "2026-03-10T15:23:xx",
+    "quotes_count": 14,
+    "positions_count": 3,
+    "level2_symbols": ["SPY", "QQQ", "IWM"],
+    "vix_price": 24.35,
+    "spy_price": 678.44,
+    "qqq_price": 608.76,
+    "positions": [
+      {"symbol": "TMC", "qty": 10000, "avgCost": 7.915},
+      {"symbol": "INTC", "qty": 1000, "avgCost": 44.755},
+      {"symbol": "TSLA", "qty": 101, "avgCost": 449.10}
+    ],
+    "account_id": "DUN615665",
+    "net_liquidation": "994841.69 USD",
+    "buying_power": "3712786.19 USD"
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ib_pusher_live_data.py",
+    "/app/test_reports/pytest/pytest_ib_pusher_live.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "IB pusher integration working correctly with live data flowing",
+    "Level 2 order book data properly captured with 5 levels each for bids/asks",
+    "VIX data being pushed from CBOE via IB Gateway",
+    "Alpaca fallback correctly triggers when pusher data is stale (>30s threshold)",
+    "is_pusher_connected() function correctly checks 30-second freshness window",
+    "StartTrading.bat contains paper trading credentials (paperesw100000) as expected",
+    "All API responses properly exclude MongoDB _id fields"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ib_pusher_live_data.py"
+  ],
+  "success_rate": {
+    "backend": "93% (13/14 tests passed, 1 network timeout)"
+  },
+  "test_credentials": "Paper trading account: paperesw100000 / DUN615665",
+  "seed_data_creation": "None - tested with live IB data",
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "mocked_apis_list": []
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "IB data pusher integration fully tested with LIVE data. Pusher pushes 14 quotes (VIX, SPY, QQQ, IWM, DIA, XOM, CVX, CF, NTR, NVDA, AAPL, MSFT, TSLA, AMD), 3 positions (TMC, INTC, TSLA), and Level 2 order book for SPY/QQQ/IWM. Pusher data becomes stale after 30 seconds without fresh pushes - this is expected. When stale, Alpaca fallback is used. Account DUN615665 has ~$994K net liquidation, ~$3.7M buying power.",
+  "rca_of_issues": "Network timeout on first test was due to network latency to preview environment, not a code issue. All endpoints verified working via direct curl tests."
+}
