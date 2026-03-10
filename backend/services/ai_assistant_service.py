@@ -2181,19 +2181,27 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                     proxy_messages = [
                         {"role": "system", "content": f"""You are an expert trading assistant with REAL-TIME market data.
 The data below is LIVE from the user's IB Gateway brokerage account - this is REAL data, not simulated.
-When asked about positions, refer to the "YOUR POSITIONS" section below.
+
+CRITICAL: When the user asks about positions, ONLY report the positions shown in the "YOUR POSITIONS" section below.
+DO NOT make up or hallucinate any positions. If you see TMC, INTC, TSLA in the data, report THOSE - not SPY, QQQ, AAPL or other symbols.
 
 {truncated_context}
 
-IMPORTANT: If asked about positions and you see "YOUR POSITIONS" data above, you MUST report those positions to the user. Do not say you don't have access."""},
+REMEMBER: Only use the EXACT data provided above. Do not invent positions or prices."""},
                         {"role": "user", "content": messages[-1]["content"] if messages else ""}
                     ]
+                    
+                    # Adjust options based on model - deepseek-r1 needs more time for reasoning
+                    ollama_options = {"num_ctx": 4096, "temperature": 0.7, "num_predict": 1024}
+                    if "deepseek" in model.lower():
+                        # Deepseek-r1 has extended reasoning - give it more room
+                        ollama_options = {"num_ctx": 4096, "temperature": 0.5, "num_predict": 1500}
                     
                     result = await call_ollama_via_http_proxy(
                         model=model,
                         messages=proxy_messages,
-                        options={"num_ctx": 2048, "temperature": 0.7, "num_predict": 512},
-                        timeout=120.0
+                        options=ollama_options,
+                        timeout=180.0  # 3 minutes for deepseek reasoning
                     )
                     
                     if result.get("success"):
