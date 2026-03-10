@@ -62,12 +62,44 @@ async def get_alpaca_status():
 
 
 @router.get("/quote/{symbol}")
-async def get_quote(symbol: str):
+async def get_quote(symbol: str, prefer_ib: bool = True):
     """
     Get real-time quote for a single symbol.
     
+    By default, tries IB pushed data first, falls back to Alpaca.
+    Set prefer_ib=false to force Alpaca.
+    
     Returns bid, ask, last price, and volume data.
     """
+    symbol_upper = symbol.upper()
+    
+    # Try IB pushed data first (if preferred)
+    if prefer_ib:
+        try:
+            from routers.ib import get_pushed_quotes, is_pusher_connected
+            
+            if is_pusher_connected():
+                quotes = get_pushed_quotes()
+                if symbol_upper in quotes:
+                    q = quotes[symbol_upper]
+                    return {
+                        "success": True,
+                        "data": {
+                            "symbol": symbol_upper,
+                            "price": q.get("last") or q.get("close") or 0,
+                            "bid": q.get("bid") or 0,
+                            "ask": q.get("ask") or 0,
+                            "bid_size": q.get("bid_size") or 0,
+                            "ask_size": q.get("ask_size") or 0,
+                            "volume": q.get("volume") or 0,
+                            "timestamp": q.get("timestamp", ""),
+                            "source": "ib_pusher"
+                        }
+                    }
+        except Exception as e:
+            pass  # Fall through to Alpaca
+    
+    # Fallback to Alpaca
     if not _alpaca_service:
         raise HTTPException(status_code=500, detail="Alpaca service not initialized")
     

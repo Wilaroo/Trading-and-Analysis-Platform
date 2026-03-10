@@ -82,16 +82,15 @@ echo [2/8] Detecting system...
 set COMPUTER_NAME=%COMPUTERNAME%
 echo       Computer: %COMPUTER_NAME%
 
-:: Detect GPU using nvidia-smi
+:: Detect GPU using nvidia-smi (get VRAM in MB)
 set GPU_NAME=Unknown
 set GPU_VRAM=0
-for /f "tokens=1,2 delims=," %%a in ('nvidia-smi --query-gpu^=name^,memory.total --format^=csv^,noheader^,nounits 2^>nul') do (
-    set GPU_NAME=%%a
-    set /a GPU_VRAM=%%b
-)
 
-:: Trim spaces
-for /f "tokens=* delims= " %%a in ("%GPU_NAME%") do set GPU_NAME=%%a
+:: Use PowerShell for more reliable parsing
+for /f "usebackq delims=" %%a in (`powershell -command "$gpu = nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits 2>$null; if($gpu) { $parts = $gpu -split ','; Write-Host ($parts[0].Trim()) } else { Write-Host 'No NVIDIA GPU' }"`) do set GPU_NAME=%%a
+
+for /f "usebackq delims=" %%a in (`powershell -command "$gpu = nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>$null; if($gpu) { Write-Host ([int]$gpu.Trim()) } else { Write-Host '0' }"`) do set GPU_VRAM=%%a
+
 echo       GPU: %GPU_NAME%
 echo       VRAM: %GPU_VRAM% MB
 
@@ -178,18 +177,18 @@ if exist "%IB_GATEWAY_PATH%" (
     echo       Waiting for IB Gateway...
     timeout /t 12 /nobreak >nul
 
-    :: Auto-login
-    echo       Logging in...
+    :: Auto-login with PAPER TRADING account
+    echo       Logging in to PAPER account...
     (
     echo Set WshShell = CreateObject^("WScript.Shell"^)
     echo WScript.Sleep 2000
     echo WshShell.AppActivate "IBKR Gateway"
     echo WScript.Sleep 1000
-    echo WshShell.SendKeys "esw100000"
+    echo WshShell.SendKeys "paperesw100000"
     echo WScript.Sleep 500
     echo WshShell.SendKeys "{TAB}"
     echo WScript.Sleep 400
-    echo WshShell.SendKeys "Socr1025!"
+    echo WshShell.SendKeys "Socr1025!@!?"
     echo WScript.Sleep 500
     echo WshShell.SendKeys "{ENTER}"
     ) > "%TEMP%\ib_login.vbs"

@@ -186,14 +186,25 @@ class ContextQualityService:
             except Exception as e:
                 logger.debug(f"Could not fetch SPY data: {e}")
                 
-        # Get VIX from IB or default
-        if vix_level is None and self._ib_service:
+        # Get VIX from IB pushed data or service
+        if vix_level is None:
             try:
-                vix_data = self._ib_service.get_vix()
-                if vix_data:
-                    vix_level = vix_data.get("price", 18)
+                # Try pushed data first (most reliable)
+                from routers.ib import get_vix_from_pushed_data
+                vix_data = get_vix_from_pushed_data()
+                if vix_data and vix_data.get("price"):
+                    vix_level = vix_data.get("price")
             except Exception:
                 pass
+            
+            # Fallback to IB service
+            if vix_level is None and self._ib_service:
+                try:
+                    vix_data = self._ib_service.get_vix()
+                    if vix_data:
+                        vix_level = vix_data.get("price", 18)
+                except Exception:
+                    pass
                 
         # Fetch sector data if not provided
         if self._sector_service and (sector is None or sector_rank is None):

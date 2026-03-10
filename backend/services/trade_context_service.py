@@ -167,12 +167,21 @@ class TradeContextService:
             return VolatilityRegime.EXTREME
             
     async def _get_vix_level(self) -> float:
-        """Get VIX level from IB service or estimate"""
+        """Get VIX level from IB service (pushed data or direct) or estimate"""
         try:
             if self._ib_service is not None:
                 vix_data = self._ib_service.get_vix()
-                if vix_data and 'price' in vix_data:
-                    return vix_data['price']
+                if vix_data and vix_data.get('price'):
+                    return float(vix_data['price'])
+        except Exception as e:
+            logger.debug(f"Error getting VIX from IB: {e}")
+        
+        # Fallback: Try to get from pushed data directly
+        try:
+            from routers.ib import get_vix_from_pushed_data
+            vix_data = get_vix_from_pushed_data()
+            if vix_data and vix_data.get('price'):
+                return float(vix_data['price'])
         except Exception:
             pass
             

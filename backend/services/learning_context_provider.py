@@ -304,7 +304,9 @@ TQS Hold: ≥{config.tqs_hold_threshold}
         include_performance: bool = True,
         include_edge_decay: bool = True,
         include_confirmations: bool = True,
-        include_rag: bool = True
+        include_rag: bool = True,
+        include_level2: bool = True,
+        include_market_snapshot: bool = True
     ) -> str:
         """
         Build comprehensive learning context for AI prompt injection.
@@ -314,11 +316,23 @@ TQS Hold: ≥{config.tqs_hold_threshold}
         """
         context_parts = []
         
+        # 0. Real-time market snapshot (VIX, SPY, etc.)
+        if include_market_snapshot:
+            market_context = await self.get_market_snapshot_context()
+            if market_context:
+                context_parts.append(market_context)
+        
         # 1. TQS Score for symbol
         if include_tqs and symbol:
             tqs_context = await self.get_tqs_context(symbol)
             if tqs_context:
                 context_parts.append(tqs_context)
+                
+        # 1.5. Level 2 order book context
+        if include_level2 and symbol:
+            l2_context = await self.get_level2_context(symbol)
+            if l2_context:
+                context_parts.append(l2_context)
                 
         # 2. Historical performance for this context
         if include_performance and setup_type:
@@ -367,6 +381,98 @@ TQS Hold: ≥{config.tqs_hold_threshold}
             "rag_connected": self._rag_service is not None,
             "playbook_performance_connected": self._playbook_performance_service is not None
         }
+    
+    async def get_level2_context(self, symbol: str) -> str:
+        """
+        Get Level 2 / order book context for a symbol.
+        Includes bid/ask imbalance analysis for AI coaching.
+        """
+        try:
+            from routers.ib import get_level2_for_symbol, is_pusher_connected
+            
+            if not is_pusher_connected():
+                return ""
+                
+            l2_data = get_level2_for_symbol(symbol.upper())
+            if not l2_data:
+                return ""
+                
+            imbalance = l2_data.get("imbalance", 0)
+            bid_total = l2_data.get("bid_total_size", 0)
+            ask_total = l2_data.get("ask_total_size", 0)
+            bids = l2_data.get("bids", [])
+            asks = l2_data.get("asks", [])
+            
+            # Interpret imbalance
+            if imbalance > 0.2:
+                pressure = "STRONG BID PRESSURE (bullish)"
+            elif imbalance > 0.1:
+                pressure = "Moderate bid pressure (slightly bullish)"
+            elif imbalance < -0.2:
+                pressure = "STRONG ASK PRESSURE (bearish)"
+            elif imbalance < -0.1:
+                pressure = "Moderate ask pressure (slightly bearish)"
+            else:
+                pressure = "Balanced order flow"
+            
+            context = f"""
+=== LEVEL 2 ORDER BOOK ({symbol.upper()}) ===
+Order Flow: {pressure}
+Bid/Ask Imbalance: {imbalance:.1%}
+Total Bid Size: {bid_total:,}
+Total Ask Size: {ask_total:,}
+
+Top Bids: {', '.join([f'${b[0]:.2f}x{b[1]}' for b in bids[:3]]) if bids else 'N/A'}
+Top Asks: {', '.join([f'${a[0]:.2f}x{a[1]}' for a in asks[:3]]) if asks else 'N/A'}
+"""
+            return context
+            
+        except Exception as e:
+            logger.debug(f"Error getting L2 context: {e}")
+            return ""
+    
+    async def get_market_snapshot_context(self) -> str:
+        """
+        Get real-time market snapshot from IB pushed data.
+        Includes VIX, SPY, QQQ for market context.
+        """
+        try:
+            from routers.ib import get_pushed_quotes, get_vix_from_pushed_data, is_pusher_connected
+            
+            if not is_pusher_connected():
+                return ""
+            
+            quotes = get_pushed_quotes()
+            vix_data = get_vix_from_pushed_data()
+            
+            context_lines = ["\n=== REAL-TIME MARKET SNAPSHOT ==="]
+            
+            # VIX
+            if vix_data and vix_data.get("price"):
+                vix = vix_data["price"]
+                if vix < 15:
+                    vix_note = "(Low - complacent market)"
+                elif vix < 20:
+                    vix_note = "(Normal)"
+                elif vix < 30:
+                    vix_note = "(Elevated - cautious)"
+                else:
+                    vix_note = "(HIGH - fear in market)"
+                context_lines.append(f"VIX: {vix:.2f} {vix_note}")
+            
+            # Major indices
+            for sym in ["SPY", "QQQ", "IWM"]:
+                if sym in quotes:
+                    q = quotes[sym]
+                    last = q.get("last") or q.get("close") or 0
+                    if last > 0:
+                        context_lines.append(f"{sym}: ${last:.2f}")
+            
+            return "\n".join(context_lines) + "\n"
+            
+        except Exception as e:
+            logger.debug(f"Error getting market snapshot: {e}")
+            return ""
 
 
 # Singleton
