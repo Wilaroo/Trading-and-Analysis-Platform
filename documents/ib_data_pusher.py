@@ -554,6 +554,7 @@ class IBDataPusher:
         logger.info(f"  Level 2: {'Enabled' if enable_level2 and self.level2_enabled else 'Disabled'}")
         
         # Subscribe to market data
+        logger.info("Subscribing to market data...")
         self.subscribe_market_data(symbols)
         
         # Subscribe to Level 2 for core symbols (only if enabled and supported)
@@ -562,18 +563,20 @@ class IBDataPusher:
             self.subscribe_level2(core_l2)
         
         # Request account updates
+        logger.info("Requesting account updates...")
         self.request_account_updates()
         
-        # Initial fundamental data request
-        stock_symbols = [s for s in symbols if s != "VIX"]
-        self.request_fundamental_data(stock_symbols)
+        # Skip blocking fundamental data request on startup - will fetch later in background
+        # stock_symbols = [s for s in symbols if s != "VIX"]
+        # self.request_fundamental_data(stock_symbols)
+        logger.info("Skipping initial fundamental data (will fetch later to avoid blocking)")
         
         push_count = 0
         l2_update_interval = 30  # Check for in-play changes every 30 seconds
         last_l2_update = 0
         
         # Force initial push immediately
-        logger.info(f"Doing initial push: {len(self.positions_data)} positions, {len(self.quotes_buffer)} quotes")
+        logger.info(f"==> STARTING PUSH LOOP: {len(self.positions_data)} positions, {len(self.quotes_buffer)} quotes")
         self.push_data_to_cloud()
         
         try:
@@ -598,16 +601,14 @@ class IBDataPusher:
                     if enable_level2 and self.level2_enabled and (current_time - last_l2_update >= l2_update_interval):
                         self.update_level2_subscriptions()
                         last_l2_update = current_time
+                        
                 except Exception as e:
                     logger.error(f"Loop error: {e}")
                     import traceback
                     traceback.print_exc()
                 
-                # Refresh fundamental data periodically (every 5 minutes)
-                if current_time - self.last_fundamentals_refresh >= self.fundamentals_refresh_interval:
-                    logger.info("Refreshing fundamental data...")
-                    self.request_fundamental_data(list(self.subscribed_contracts.keys()))
-                    self.last_fundamentals_refresh = current_time
+                # Note: Skipping fundamental data refresh as it blocks the loop
+                # Fundamental data is fetched via ticker events instead
                     
         except KeyboardInterrupt:
             logger.info("Shutting down...")
