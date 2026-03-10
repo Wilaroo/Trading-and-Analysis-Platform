@@ -195,8 +195,11 @@ def detect_gpu():
 
 
 async def main():
+    # Default cloud URL - update this if it changes
+    DEFAULT_CLOUD_URL = "https://local-ai-trading.preview.emergentagent.com"
+    
     parser = argparse.ArgumentParser(description="Ollama Local AI Proxy (HTTP)")
-    parser.add_argument("--cloud-url", required=True, help="Cloud backend URL")
+    parser.add_argument("--cloud-url", default=DEFAULT_CLOUD_URL, help="Cloud backend URL")
     parser.add_argument("--ollama-url", default="http://localhost:11434", help="Local Ollama URL")
     args = parser.parse_args()
     

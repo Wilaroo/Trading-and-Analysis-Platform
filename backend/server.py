@@ -3733,8 +3733,34 @@ async def websocket_ollama_proxy(websocket: WebSocket):
 
 @app.get("/api/ollama-proxy/status")
 async def get_ollama_proxy_status():
-    """Get Ollama proxy connection status"""
-    return ollama_proxy_manager.get_status()
+    """Get Ollama proxy connection status (both WebSocket and HTTP)"""
+    ws_status = ollama_proxy_manager.get_status()
+    
+    # Check HTTP proxy status
+    http_connected = False
+    http_sessions = []
+    for sid, info in _http_proxy_sessions.items():
+        try:
+            last_hb = datetime.fromisoformat(info.get("last_heartbeat", "").replace("Z", "+00:00"))
+            is_recent = (datetime.now(timezone.utc) - last_hb).total_seconds() < 30
+            if is_recent and info.get("ollama_status", {}).get("available", False):
+                http_connected = True
+                http_sessions.append({
+                    "session_id": sid,
+                    "models": info.get("ollama_status", {}).get("models", []),
+                    "last_heartbeat": info.get("last_heartbeat")
+                })
+        except:
+            pass
+    
+    return {
+        "websocket": ws_status,
+        "http": {
+            "connected": http_connected,
+            "sessions": http_sessions
+        },
+        "any_connected": ws_status.get("connected", False) or http_connected
+    }
 
 
 # HTTP Polling endpoints for Ollama proxy (more compatible than WebSocket)
