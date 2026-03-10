@@ -2114,8 +2114,9 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
             except Exception as e:
                 logger.debug(f"⚠️ Ollama ping failed: {e}")
         
-        # USE OLLAMA if healthy (saves credits!)
-        if ollama_healthy:
+        # USE OLLAMA if healthy AND not a deep query (saves credits!)
+        # Deep queries need full context and GPT-4o's reasoning
+        if ollama_healthy and complexity != "deep":
             try:
                 ollama_cfg = self.llm_clients[LLMProvider.OLLAMA]
                 url = f"{ollama_cfg['url']}/api/chat"
@@ -2168,13 +2169,16 @@ Answer questions using the real-time data provided. Be concise and direct.
                     self._ollama_skip_until = datetime.now(timezone.utc) + timedelta(minutes=5)
                     logger.warning(f"⏸️ Ollama disabled for 5 minutes")
         
-        # FALLBACK: Use cloud AI (Emergent/GPT-4o) - only when Ollama unavailable
+        # FALLBACK: Use cloud AI (Emergent/GPT-4o) - for deep queries or when Ollama unavailable
         if LLMProvider.EMERGENT in self.llm_clients:
             try:
                 from emergentintegrations.llm.chat import LlmChat, UserMessage
                 import asyncio
                 
-                logger.info("🔄 Using cloud AI (Ollama unavailable)")
+                if complexity == "deep":
+                    logger.info("🧠 Using GPT-4o for deep analysis (full context)")
+                else:
+                    logger.info("🔄 Using cloud AI (Ollama unavailable)")
                 
                 system_message = self.SYSTEM_PROMPT + "\n\n" + context
                 
