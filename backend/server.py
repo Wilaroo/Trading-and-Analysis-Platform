@@ -58,6 +58,7 @@ from routers.risk_router import router as risk_router
 from routers.rag_router import router as rag_router
 from routers.medium_learning_router import router as medium_learning_router
 from routers.slow_learning_router import router as slow_learning_router
+from routers.scheduler_router import router as scheduler_router
 from routers.portfolio_awareness import router as portfolio_awareness_router
 from routers.quick_actions import router as quick_actions_router, init_quick_actions_router
 from routers.sectors import router as sectors_router
@@ -89,6 +90,12 @@ from services.slow_learning import (
     get_historical_data_service, init_historical_data_service,
     get_backtest_engine, init_backtest_engine,
     get_shadow_mode_service, init_shadow_mode_service
+)
+from services.learning_context_provider import (
+    get_learning_context_provider, init_learning_context_provider
+)
+from services.trading_scheduler import (
+    get_trading_scheduler, init_trading_scheduler
 )
 from services.eod_generation_service import get_eod_service
 from services.ib_service import get_ib_service
@@ -278,6 +285,7 @@ app.include_router(risk_router)
 app.include_router(rag_router)
 app.include_router(medium_learning_router)
 app.include_router(slow_learning_router)
+app.include_router(scheduler_router)
 
 # Collections
 strategies_col = db["strategies"]
@@ -472,6 +480,67 @@ try:
 except Exception as e:
     print(f"Slow Learning initialization deferred: {e}")
     historical_data_service = None
+
+# ===================== LEARNING CONTEXT PROVIDER =====================
+# Provides personalized learning insights for AI coaching
+
+try:
+    from services.weekly_report_service import get_weekly_report_service
+    
+    learning_context_provider = init_learning_context_provider(
+        db=db,
+        calibration_service=globals().get('calibration_service'),
+        context_performance_service=globals().get('context_perf_service'),
+        confirmation_validator_service=globals().get('confirmation_service'),
+        playbook_performance_service=globals().get('playbook_perf_service'),
+        edge_decay_service=globals().get('edge_decay_service'),
+        rag_service=globals().get('rag_service')
+    )
+    print("Learning Context Provider initialized")
+    print("  - Provides TQS + Learning insights for AI coaching")
+    # Wire to AI assistant
+    if assistant_service is not None:
+        assistant_service.set_learning_context_provider(learning_context_provider)
+except Exception as e:
+    print(f"Learning Context Provider initialization deferred: {e}")
+    learning_context_provider = None
+
+# ===================== TRADING SCHEDULER =====================
+# Automated daily/weekly analysis tasks
+
+try:
+    from services.weekly_report_service import get_weekly_report_service, init_weekly_report_service
+    
+    # Initialize weekly report service with all required dependencies
+    weekly_report_svc = init_weekly_report_service(
+        db=db,
+        calibration_service=globals().get('calibration_service'),
+        context_performance_service=globals().get('context_perf_service'),
+        confirmation_validator_service=globals().get('confirmation_service'),
+        playbook_performance_service=globals().get('playbook_perf_service'),
+        edge_decay_service=globals().get('edge_decay_service')
+    )
+    
+    trading_scheduler = init_trading_scheduler(
+        db=db,
+        calibration_service=globals().get('calibration_service'),
+        context_performance_service=globals().get('context_perf_service'),
+        confirmation_validator_service=globals().get('confirmation_service'),
+        playbook_performance_service=globals().get('playbook_perf_service'),
+        edge_decay_service=globals().get('edge_decay_service'),
+        weekly_report_service=weekly_report_svc,
+        shadow_mode_service=globals().get('shadow_mode_service'),
+        start=True  # Auto-start scheduler
+    )
+    print("Trading Scheduler initialized")
+    print("  - Daily Analysis: 4:00 PM ET (Mon-Fri)")
+    print("  - Weekly Report: Friday 4:30 PM ET")
+    print("  - Edge Decay Check: 4:15 PM ET (Mon-Fri)")
+    print("  - Shadow Updates: Every 5 min (market hours)")
+    print("  - Endpoints: /api/scheduler/*")
+except Exception as e:
+    print(f"Trading Scheduler initialization deferred: {e}")
+    trading_scheduler = None
 
 # ===================== STRATEGY HELPERS =====================
 # Strategies are now stored in MongoDB and accessed via strategy_service
