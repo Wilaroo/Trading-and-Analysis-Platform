@@ -101,6 +101,7 @@ class IBPushDataRequest(BaseModel):
     account: dict = Field(default={}, description="Account data")
     positions: list = Field(default=[], description="Position data")
     level2: dict = Field(default={}, description="Level 2 / DOM data by symbol")
+    fundamentals: dict = Field(default={}, description="Fundamental data by symbol")
 
 
 # In-memory storage for pushed IB data
@@ -110,6 +111,7 @@ _pushed_ib_data = {
     "account": {},
     "positions": [],
     "level2": {},  # Level 2 / DOM data
+    "fundamentals": {},  # Fundamental data (P/E, short interest, float, etc.)
     "connected": False
 }
 
@@ -261,9 +263,14 @@ async def receive_pushed_ib_data(request: IBPushDataRequest):
         if request.level2:
             _pushed_ib_data["level2"].update(request.level2)
         
+        # Update Fundamental data
+        if request.fundamentals:
+            _pushed_ib_data["fundamentals"].update(request.fundamentals)
+        
         quote_count = len(request.quotes) if request.quotes else 0
         pos_count = len(request.positions) if request.positions else 0
         l2_count = len(request.level2) if request.level2 else 0
+        fund_count = len(request.fundamentals) if request.fundamentals else 0
         
         return {
             "success": True,
@@ -271,7 +278,8 @@ async def receive_pushed_ib_data(request: IBPushDataRequest):
                 "quotes": quote_count,
                 "positions": pos_count,
                 "account_fields": len(request.account) if request.account else 0,
-                "level2": l2_count
+                "level2": l2_count,
+                "fundamentals": fund_count
             },
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
@@ -341,6 +349,74 @@ async def get_level2_data(symbol: str):
         "imbalance": l2_data.get("imbalance", 0.0),
         "timestamp": l2_data.get("timestamp")
     }
+
+
+@router.get("/fundamentals/{symbol}")
+async def get_fundamentals(symbol: str):
+    """
+    Get fundamental data for a specific symbol from IB Gateway.
+    Returns P/E, short interest, float, institutional ownership, etc.
+    """
+    global _pushed_ib_data
+    
+    symbol_upper = symbol.upper()
+    fundamentals = _pushed_ib_data.get("fundamentals", {})
+    
+    if symbol_upper not in fundamentals:
+        return {
+            "success": False,
+            "error": f"No fundamental data for {symbol_upper}",
+            "available_symbols": list(fundamentals.keys())
+        }
+    
+    fund_data = fundamentals[symbol_upper]
+    return {
+        "success": True,
+        "symbol": symbol_upper,
+        "pe_ratio": fund_data.get("pe_ratio"),
+        "price_to_book": fund_data.get("price_to_book"),
+        "shares_outstanding": fund_data.get("shares_outstanding"),
+        "float": fund_data.get("float"),
+        "short_interest": fund_data.get("short_interest"),
+        "short_interest_pct": fund_data.get("short_interest_pct"),
+        "institutional_pct": fund_data.get("institutional_pct"),
+        "week_52_high": fund_data.get("week_52_high"),
+        "week_52_low": fund_data.get("week_52_low"),
+        "avg_volume_90d": fund_data.get("avg_volume_90d"),
+        "timestamp": fund_data.get("timestamp")
+    }
+
+
+@router.get("/fundamentals")
+async def get_all_fundamentals():
+    """Get all available fundamental data"""
+    global _pushed_ib_data
+    
+    fundamentals = _pushed_ib_data.get("fundamentals", {})
+    
+    return {
+        "success": True,
+        "count": len(fundamentals),
+        "symbols": list(fundamentals.keys()),
+        "data": fundamentals
+    }
+
+
+# Helper function for other services to access fundamental data
+def get_fundamentals_for_symbol(symbol: str) -> dict:
+    """
+    Get fundamental data for a symbol (called by other services).
+    Returns None if not available.
+    """
+    global _pushed_ib_data
+    
+    symbol_upper = symbol.upper()
+    fundamentals = _pushed_ib_data.get("fundamentals", {})
+    
+    if symbol_upper not in fundamentals:
+        return None
+    
+    return fundamentals[symbol_upper]
 
 
 @router.get("/inplay-stocks")
