@@ -184,6 +184,7 @@ class IBDataPusher:
                     break
             if not updated:
                 self.positions_data.append(pos_data)
+                logger.info(f"  Position captured: {pos_data['symbol']} qty={pos_data['position']}")
                 
         except Exception as e:
             logger.error(f"Position update error: {e}")
@@ -446,7 +447,11 @@ class IBDataPusher:
         has_data = (self.quotes_buffer or self.account_data or 
                     self.positions_data or self.level2_buffer or self.fundamentals_buffer)
         if not has_data:
+            logger.debug("No data to push")
             return
+        
+        # Log what we're pushing
+        logger.info(f"Pushing: {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions, {len(self.account_data)} account fields")
             
         payload = {
             "timestamp": datetime.now().isoformat(),
@@ -468,11 +473,11 @@ class IBDataPusher:
             if response.status_code == 200:
                 result = response.json()
                 if result.get("success"):
-                    l2_count = len(self.level2_buffer)
-                    fund_count = len(self.fundamentals_buffer)
-                    logger.debug(f"Pushed {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions, {l2_count} L2, {fund_count} fundamentals")
+                    logger.info(f"Push OK! Cloud received: {result.get('received', {})}")
+                else:
+                    logger.warning(f"Push returned error: {result}")
             else:
-                logger.warning(f"Push failed: HTTP {response.status_code}")
+                logger.warning(f"Push failed: HTTP {response.status_code} - {response.text[:200]}")
                         
         except requests.Timeout:
             logger.warning("Push timeout - cloud backend may be slow")
