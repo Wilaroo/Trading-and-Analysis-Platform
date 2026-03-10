@@ -3879,6 +3879,34 @@ def is_http_ollama_proxy_connected() -> bool:
     return False
 
 
+# =====================================================
+# SCRIPT DOWNLOAD ENDPOINTS (for auto-update)
+# =====================================================
+from fastapi.responses import PlainTextResponse
+import os
+
+SCRIPTS_DIR = "/app/documents"
+
+@app.get("/api/scripts/{script_name}")
+async def get_script(script_name: str):
+    """Serve scripts for auto-update (StartTrading.bat, ollama_http.py, etc.)"""
+    # Whitelist allowed scripts
+    allowed_scripts = ["StartTrading.bat", "ollama_http.py", "ib_data_pusher.py", "ollama_proxy.py"]
+    
+    if script_name not in allowed_scripts:
+        return PlainTextResponse("Script not found", status_code=404)
+    
+    script_path = os.path.join(SCRIPTS_DIR, script_name)
+    
+    if not os.path.exists(script_path):
+        return PlainTextResponse("Script not found", status_code=404)
+    
+    with open(script_path, "r", encoding="utf-8", errors="ignore") as f:
+        content = f.read()
+    
+    return PlainTextResponse(content, media_type="text/plain")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)
