@@ -2489,7 +2489,7 @@ async def get_portfolio(source: str = "auto"):
                     
                     for pos in ib_positions:
                         symbol = pos.get("symbol", "")
-                        shares = pos.get("qty", 0)
+                        shares = pos.get("position", 0) or pos.get("qty", 0)  # IB uses 'position' field
                         avg_cost = pos.get("avgCost", 0)
                         
                         # Get current price from pushed quotes or position data
