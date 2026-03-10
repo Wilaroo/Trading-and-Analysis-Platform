@@ -605,6 +605,15 @@ class IBDataPusher:
     
     def update_level2_subscriptions(self):
         """Dynamically update L2 subscriptions based on in-play stocks"""
+        # Paper trading has a limit of 3 market depth subscriptions
+        # We keep SPY, QQQ, IWM as our core L2 symbols
+        # Skip dynamic updates to avoid hitting the limit
+        max_l2_subscriptions = 3
+        
+        if len(self.depth_subscriptions) >= max_l2_subscriptions:
+            logger.debug(f"L2 limit reached ({max_l2_subscriptions}), skipping dynamic updates")
+            return
+        
         inplay = self.fetch_inplay_stocks()
         
         if not inplay:
@@ -613,18 +622,13 @@ class IBDataPusher:
         current_l2 = set(self.depth_subscriptions.keys())
         new_inplay = set(inplay)
         
-        # Subscribe to new in-play stocks
-        to_subscribe = new_inplay - current_l2
-        if to_subscribe:
-            logger.info(f"Adding L2 for: {list(to_subscribe)}")
-            self.subscribe_level2(list(to_subscribe))
-        
-        # Unsubscribe from stocks no longer in-play (keep core symbols)
-        core_symbols = {"SPY", "QQQ", "IWM"}
-        to_unsubscribe = current_l2 - new_inplay - core_symbols
-        if to_unsubscribe:
-            logger.info(f"Removing L2 for: {list(to_unsubscribe)}")
-            self.unsubscribe_level2(list(to_unsubscribe))
+        # Only subscribe to new in-play if we have room
+        available_slots = max_l2_subscriptions - len(current_l2)
+        if available_slots > 0:
+            to_subscribe = list(new_inplay - current_l2)[:available_slots]
+            if to_subscribe:
+                logger.info(f"Adding L2 for: {to_subscribe}")
+                self.subscribe_level2(to_subscribe)
     
     def run(self, symbols: List[str] = None, enable_level2: bool = True):
         """Main run loop (fully synchronous)"""
