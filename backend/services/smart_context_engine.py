@@ -615,8 +615,8 @@ class SmartContextEngine:
             for symbol in indices:
                 if symbol in quotes:
                     q = quotes[symbol]
-                    price = q.get("price", 0)
-                    change = q.get("change_percent", 0)
+                    price = q.get("price") or 0
+                    change = q.get("change_percent") or 0
                     direction = "+" if change >= 0 else ""
                     emoji = "🟢" if change >= 0 else "🔴"
                     lines.append(f"{emoji} {symbol}: ${price:.2f} ({direction}{change:.2f}%)")
@@ -626,7 +626,7 @@ class SmartContextEngine:
                     }
             
             # Determine regime
-            spy_change = quotes.get("SPY", {}).get("change_percent", 0)
+            spy_change = quotes.get("SPY", {}).get("change_percent") or 0
             if spy_change > 0.5:
                 regime = "BULLISH"
             elif spy_change < -0.5:
