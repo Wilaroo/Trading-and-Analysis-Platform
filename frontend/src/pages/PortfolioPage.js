@@ -26,7 +26,12 @@ const PriceDisplay = ({ value, className = '' }) => {
 
 // ===================== PORTFOLIO PAGE =====================
 const PortfolioPage = () => {
-  const [portfolio, setPortfolio] = useState({ positions: [], total_value: 0, total_cost: 0, total_pnl: 0, total_pnl_percent: 0 });
+  const [portfolio, setPortfolio] = useState({ 
+    positions: [], 
+    summary: { total_value: 0, total_cost: 0, total_gain_loss: 0, total_gain_loss_percent: 0 },
+    source: null,
+    account: null
+  });
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newPosition, setNewPosition] = useState({ symbol: '', shares: '', avg_cost: '' });
@@ -35,7 +40,17 @@ const PortfolioPage = () => {
     setLoading(true);
     try {
       const res = await api.get('/api/portfolio');
-      setPortfolio(res.data);
+      // Map response to consistent format
+      const data = res.data;
+      setPortfolio({
+        positions: data.positions || [],
+        total_value: data.summary?.total_value || 0,
+        total_cost: data.summary?.total_cost || 0,
+        total_pnl: data.summary?.total_gain_loss || 0,
+        total_pnl_percent: data.summary?.total_gain_loss_percent || 0,
+        source: data.source,
+        account: data.account
+      });
     } catch (err) { console.error('Failed to load portfolio:', err); }
     finally { setLoading(false); }
   }, []);
@@ -71,19 +86,37 @@ const PortfolioPage = () => {
             <Briefcase className="w-6 h-6 text-primary" />
             Portfolio
           </h1>
-          <p className="text-zinc-500 text-sm">Track your positions and P&L</p>
+          <p className="text-zinc-500 text-sm">
+            {portfolio.source === 'ib_gateway' 
+              ? `Live from IB Gateway (${portfolio.account || 'Paper'})` 
+              : portfolio.source === 'manual' 
+                ? 'Manual positions' 
+                : 'Track your positions and P&L'}
+          </p>
         </div>
         <div className="flex gap-2">
           <button onClick={loadPortfolio} className="btn-secondary flex items-center gap-2" data-testid="refresh-portfolio">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-          <button onClick={() => setShowAddForm(!showAddForm)} className="btn-primary flex items-center gap-2" data-testid="add-position-btn">
-            <Plus className="w-4 h-4" />
-            Add Position
-          </button>
+          {portfolio.source !== 'ib_gateway' && (
+            <button onClick={() => setShowAddForm(!showAddForm)} className="btn-primary flex items-center gap-2" data-testid="add-position-btn">
+              <Plus className="w-4 h-4" />
+              Add Position
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Data Source Indicator */}
+      {portfolio.source && (
+        <div className={`text-xs px-3 py-1 rounded-full inline-flex items-center gap-1 ${
+          portfolio.source === 'ib_gateway' ? 'bg-green-500/20 text-green-400' : 'bg-zinc-700/50 text-zinc-400'
+        }`}>
+          <span className={`w-2 h-2 rounded-full ${portfolio.source === 'ib_gateway' ? 'bg-green-400 animate-pulse' : 'bg-zinc-500'}`}></span>
+          {portfolio.source === 'ib_gateway' ? 'Live IB Data' : 'Manual Tracking'}
+        </div>
+      )}
 
       {/* Portfolio Summary */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

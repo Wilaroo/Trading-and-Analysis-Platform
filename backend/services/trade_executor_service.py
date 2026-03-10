@@ -72,10 +72,16 @@ class TradeExecutorService:
         logger.info("Alpaca trading client initialized (paper mode)")
     
     def _init_ib(self):
-        """Initialize Interactive Brokers client"""
-        # TODO: Implement IB integration for live trading
-        logger.warning("IB live trading not yet implemented")
-        raise NotImplementedError("IB live trading coming soon")
+        """Initialize Interactive Brokers client via IB Service"""
+        try:
+            from services.ib_service import get_ib_service
+            self._ib_client = get_ib_service()
+            logger.info("IB trading client initialized via IB Service")
+        except Exception as e:
+            logger.warning(f"IB live trading initialization failed: {e}")
+            # Fall back to simulated mode
+            self._mode = ExecutorMode.SIMULATED
+            logger.info("Falling back to SIMULATED mode")
     
     def set_mode(self, mode: ExecutorMode):
         """Set execution mode"""
@@ -193,8 +199,35 @@ class TradeExecutorService:
     
     async def _ib_entry(self, trade) -> Dict[str, Any]:
         """Execute entry via Interactive Brokers"""
-        # TODO: Implement IB order execution
-        return {"success": False, "error": "IB not implemented"}
+        if not self._ib_client:
+            return {"success": False, "error": "IB client not initialized"}
+        
+        try:
+            # Use IB Service to place order
+            action = "BUY" if trade.direction.value == "long" else "SELL"
+            
+            result = await self._ib_client.place_order(
+                symbol=trade.symbol,
+                action=action,
+                quantity=trade.shares,
+                order_type="MKT"
+            )
+            
+            if result.get("success"):
+                return {
+                    "success": True,
+                    "order_id": result.get("order_id"),
+                    "fill_price": result.get("fill_price", trade.entry_price),
+                    "filled_qty": trade.shares,
+                    "status": "filled",
+                    "broker": "interactive_brokers"
+                }
+            else:
+                return {"success": False, "error": result.get("error", "IB order failed")}
+                
+        except Exception as e:
+            logger.error(f"IB entry error: {e}")
+            return {"success": False, "error": str(e)}
     
     # ==================== STOP ORDERS ====================
     

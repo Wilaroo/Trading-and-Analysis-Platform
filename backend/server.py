@@ -2464,8 +2464,79 @@ async def get_index_symbols(index_type: str):
 
 # ----- Portfolio -----
 @app.get("/api/portfolio")
-async def get_portfolio():
-    """Get portfolio positions"""
+async def get_portfolio(source: str = "auto"):
+    """
+    Get portfolio positions.
+    
+    Args:
+        source: "ib" for IB pushed data, "manual" for MongoDB, "auto" tries IB first
+    """
+    # Try IB pushed data first (if source is auto or ib)
+    if source in ["auto", "ib"]:
+        try:
+            from routers.ib import get_pushed_positions, is_pusher_connected, get_pushed_quotes
+            
+            if is_pusher_connected():
+                ib_positions = get_pushed_positions()
+                if ib_positions:
+                    # Format IB positions for the frontend
+                    positions = []
+                    total_value = 0
+                    total_cost = 0
+                    
+                    # Get current quotes for P&L calculation
+                    quotes = get_pushed_quotes()
+                    
+                    for pos in ib_positions:
+                        symbol = pos.get("symbol", "")
+                        shares = pos.get("qty", 0)
+                        avg_cost = pos.get("avgCost", 0)
+                        
+                        # Get current price from pushed quotes or position data
+                        current_price = pos.get("marketPrice", 0)
+                        if not current_price and symbol in quotes:
+                            q = quotes[symbol]
+                            current_price = q.get("last") or q.get("close") or avg_cost
+                        
+                        market_value = shares * current_price if current_price else 0
+                        cost_basis = shares * avg_cost if avg_cost else 0
+                        gain_loss = market_value - cost_basis
+                        gain_loss_pct = (gain_loss / cost_basis * 100) if cost_basis else 0
+                        
+                        positions.append({
+                            "symbol": symbol,
+                            "shares": shares,
+                            "avg_cost": round(avg_cost, 4),
+                            "current_price": round(current_price, 2),
+                            "market_value": round(market_value, 2),
+                            "gain_loss": round(gain_loss, 2),
+                            "gain_loss_percent": round(gain_loss_pct, 2),
+                            "unrealized_pnl": round(pos.get("unrealizedPNL", 0), 2),
+                            "realized_pnl": round(pos.get("realizedPNL", 0), 2),
+                            "source": "ib_gateway"
+                        })
+                        
+                        total_value += market_value
+                        total_cost += cost_basis
+                    
+                    total_gain = total_value - total_cost
+                    total_gain_pct = (total_gain / total_cost * 100) if total_cost else 0
+                    
+                    return {
+                        "positions": positions,
+                        "summary": {
+                            "total_value": round(total_value, 2),
+                            "total_cost": round(total_cost, 2),
+                            "total_gain_loss": round(total_gain, 2),
+                            "total_gain_loss_percent": round(total_gain_pct, 2)
+                        },
+                        "source": "ib_gateway",
+                        "account": "DUN615665"
+                    }
+        except Exception as e:
+            logger.debug(f"IB portfolio fetch failed, falling back to manual: {e}")
+    
+    # Fallback to manual MongoDB positions
     positions = list(portfolios_col.find({}, {"_id": 0}))
     
     if positions:
@@ -2506,10 +2577,11 @@ async def get_portfolio():
                 "total_cost": round(total_cost, 2),
                 "total_gain_loss": round(total_gain, 2),
                 "total_gain_loss_percent": round(total_gain_pct, 2)
-            }
+            },
+            "source": "manual"
         }
     
-    return {"positions": [], "summary": {"total_value": 0, "total_cost": 0, "total_gain_loss": 0, "total_gain_loss_percent": 0}}
+    return {"positions": [], "summary": {"total_value": 0, "total_cost": 0, "total_gain_loss": 0, "total_gain_loss_percent": 0}, "source": "none"}
 
 @app.post("/api/portfolio/add")
 async def add_position(data: dict):

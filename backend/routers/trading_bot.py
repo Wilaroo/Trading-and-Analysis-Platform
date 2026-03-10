@@ -126,6 +126,57 @@ async def stop_bot():
     return {"success": True, "message": "Trading bot stopped"}
 
 
+@router.get("/executor/status")
+async def get_executor_status():
+    """Get trade executor status and current broker"""
+    if not _trade_executor:
+        raise HTTPException(status_code=503, detail="Trade executor not initialized")
+    
+    return {
+        "success": True,
+        "mode": _trade_executor.get_mode().value,
+        "broker": "alpaca" if _trade_executor.get_mode().value == "paper" else "interactive_brokers" if _trade_executor.get_mode().value == "live" else "simulated",
+        "description": {
+            "paper": "Orders routed to Alpaca paper trading",
+            "live": "Orders routed to Interactive Brokers",
+            "simulated": "No actual orders placed (simulation only)"
+        }.get(_trade_executor.get_mode().value, "Unknown")
+    }
+
+
+@router.post("/executor/mode/{mode}")
+async def set_executor_mode(mode: str):
+    """
+    Set trade execution mode/broker.
+    
+    Modes:
+    - paper: Route orders to Alpaca paper trading
+    - live: Route orders to Interactive Brokers (requires IB Gateway)
+    - simulated: No actual orders, just simulate fills
+    """
+    if not _trade_executor:
+        raise HTTPException(status_code=503, detail="Trade executor not initialized")
+    
+    from services.trade_executor_service import ExecutorMode
+    
+    mode_lower = mode.lower()
+    if mode_lower not in ["paper", "live", "simulated"]:
+        raise HTTPException(status_code=400, detail=f"Invalid mode: {mode}. Use 'paper', 'live', or 'simulated'")
+    
+    try:
+        executor_mode = ExecutorMode(mode_lower)
+        _trade_executor.set_mode(executor_mode)
+        
+        return {
+            "success": True,
+            "mode": mode_lower,
+            "broker": "alpaca" if mode_lower == "paper" else "interactive_brokers" if mode_lower == "live" else "simulated",
+            "message": f"Trade execution now using {mode_lower} mode"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/mode/{mode}")
 async def set_bot_mode(mode: str):
     """Set bot operating mode (autonomous, confirmation, paused)"""
