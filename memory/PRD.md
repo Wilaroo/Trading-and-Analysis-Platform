@@ -2390,6 +2390,116 @@ When analyzing a new setup, retrieve your past similar trades and outcomes.
 | News | Finnhub | ✅ Working |
 | Sector Data | Alpaca/Internal | ✅ Working |
 | Trade History | MongoDB | ✅ Working |
-| Learning Stats | MongoDB | 🔨 Phase 1 |
+| Learning Stats | MongoDB | ✅ Phase 1 Complete |
 
-**Status**: 📋 READY FOR IMPLEMENTATION - Begin Phase 1
+**Status**: ✅ PHASE 1 COMPLETE - Ready for Phase 2 (TQS Engine)
+
+---
+
+## Session Log - March 10, 2026 (Phase 1: Core Learning Infrastructure)
+
+### Three-Speed Learning Architecture - Phase 1 COMPLETE
+
+**Goal**: Build foundational infrastructure for the learning system.
+
+**What was implemented:**
+
+#### 1. New Data Models (`/app/backend/models/learning_models.py`)
+- `TradeContext`: Complete market context snapshot (regime, VIX, time, sector, fundamentals, technicals, sentiment)
+- `ExecutionMetrics`: Entry/exit quality tracking (slippage, R-capture, timing, scale-outs, stop management)
+- `TradeOutcome`: Full trade record with context and execution for learning
+- `LearningStats`: Aggregated statistics by context (win rate, EV, profit factor by setup+regime+time)
+- `TraderProfile`: Summary of trader patterns for RAG injection into AI prompts
+- Supporting: `TiltState`, `CalibrationEntry`, Enums for regime/time/volatility
+
+#### 2. New Services
+- **LearningLoopService** (`learning_loop_service.py`): Main orchestrator
+  - Captures alert context, tracks executions, records outcomes
+  - Runs daily analysis to aggregate stats and update profile
+  - Tilt detection based on recent performance
+  - Generates trader profile context for AI prompts
+  
+- **TradeContextService** (`trade_context_service.py`): Context capture
+  - Gathers SPY/QQQ/VIX, time-of-day, sector rankings
+  - Captures fundamentals from IB Gateway
+  - Captures technicals (RSI, ATR, VWAP, MAs, squeeze)
+  - Captures news sentiment
+  
+- **ExecutionTrackerService** (`execution_tracker_service.py`): Execution quality
+  - Tracks entry/exit slippage
+  - Monitors R-capture and timing
+  - Records scale-outs and stop adjustments
+  - Calculates overall execution quality score
+  
+- **GracefulDegradationService** (`graceful_degradation.py`): Fault tolerance
+  - Service health monitoring by priority (critical/important/optional)
+  - Automatic fallback mechanisms
+  - Never blocks trading due to non-critical service failure
+
+#### 3. New MongoDB Collections
+- `trade_outcomes`: Full trade records with context and execution
+- `learning_stats`: Aggregated statistics by context key
+- `calibration_log`: History of threshold adjustments
+- `trader_profile`: Current trader patterns for RAG
+
+#### 4. New API Endpoints (`/api/learning/loop/*`)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/learning/loop/stats` | GET | Learning statistics with filters |
+| `/api/learning/loop/contextual-winrate` | GET | Win rate by setup+context |
+| `/api/learning/loop/outcomes` | GET | Recent trade outcomes |
+| `/api/learning/loop/profile` | GET | Trader profile for RAG |
+| `/api/learning/loop/tilt-status` | GET | Current tilt status |
+| `/api/learning/loop/daily-analysis` | POST | Trigger EOD analysis |
+| `/api/learning/loop/health` | GET | System health status |
+
+#### 5. Integration Points
+- **Scanner** → Captures context when alerts are generated
+- **Trading Bot** → Tracks execution and records outcomes when trades close
+- **AI Assistant** → Can inject trader profile into prompts (future)
+
+### Testing Results
+- 17/17 backend API tests passed (100%)
+- Frontend loads correctly with WebSocket streaming
+- All new services initialize without errors
+
+### Files Created/Modified
+**New Files:**
+- `/app/backend/models/__init__.py`
+- `/app/backend/models/learning_models.py`
+- `/app/backend/services/learning_loop_service.py`
+- `/app/backend/services/trade_context_service.py`
+- `/app/backend/services/execution_tracker_service.py`
+- `/app/backend/services/graceful_degradation.py`
+- `/app/backend/tests/test_learning_loop_phase1.py`
+
+**Modified Files:**
+- `/app/backend/server.py` - Added imports and service initialization
+- `/app/backend/services/trading_bot_service.py` - Integrated learning loop
+- `/app/backend/services/enhanced_scanner.py` - Added context capture
+- `/app/backend/routers/learning_dashboard.py` - Added new endpoints
+
+---
+
+## Next Steps: Phase 2 - TQS Engine
+
+### Overview
+Build the Trade Quality Score (TQS) Engine with 5 weighted pillars:
+- Setup Quality (25%): Pattern, win rate, EV, tape confirmation
+- Technical Quality (25%): RSI, MAs, ATR, levels, RVOL
+- Fundamental Quality (15%): Catalyst, short%, float, institutional%
+- Context Quality (20%): Regime, time, sector, VIX
+- Execution Quality (15%): Your history, entry/exit, tilt state
+
+### Files to Create
+- `/backend/services/tqs_engine.py` - Master scorer
+- `/backend/services/setup_quality.py` - Setup pillar
+- `/backend/services/technical_quality.py` - Technical pillar
+- `/backend/services/fundamental_quality.py` - Fundamental pillar
+- `/backend/services/context_quality.py` - Context pillar
+- `/backend/services/execution_quality.py` - Execution pillar
+
+### API Endpoints
+- `GET /api/tqs/score/{symbol}` - Get TQS score for a symbol
+- `GET /api/tqs/breakdown/{symbol}` - Get detailed pillar breakdown
+- `POST /api/tqs/batch` - Score multiple symbols
