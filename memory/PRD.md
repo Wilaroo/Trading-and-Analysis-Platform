@@ -3,6 +3,46 @@
 ## Original Problem Statement
 Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading coach, autonomous trading bot, and mutual learning loop.
 
+## Recent Updates (March 2026)
+
+### Phase 1 Complete: Core Data & Display Fixes (March 10, 2026)
+- ✅ Fixed account data extraction from IB pusher (handles nested format with `-S` suffix keys)
+- ✅ Net Liquidation, Buying Power, Daily P&L now display correctly from IB account
+- ✅ Positions display correctly from IB Gateway (TMC, INTC, NVDA)
+- ✅ Frontend data fetch priority changed: IB pushed data → Alpaca fallback
+- ✅ Position field normalization (avgCost ↔ avg_cost, unrealizedPNL ↔ unrealized_pnl)
+
+### Phase 2 In Progress: Performance & AI Integration (March 10, 2026)
+- ✅ Updated `realtime_technical_service.py` to check IB quotes first
+- ✅ Updated `ai_assistant_service.py` to use IB data for quotes and positions
+- 🔄 Pending: Verify scanner performance and timeout prevention
+- 🔄 Pending: Update settings/glossary for architectural changes
+
+### IB Data Pipeline Architecture
+```
+Local PC                              Cloud Backend
+┌─────────────────┐                  ┌──────────────────────┐
+│ IB Gateway      │                  │ FastAPI              │
+│ (paper account) │──▶ ib_data_     │ ┌──────────────────┐ │
+│ DUN615665       │   pusher.py ──▶ │ │ POST /api/ib/    │ │
+│                 │   (quotes,      │ │ push-data        │ │
+│                 │    positions,   │ └────────┬─────────┘ │
+│                 │    account,     │          │           │
+│                 │    L2 data)     │    ┌─────▼─────┐     │
+└─────────────────┘                  │    │ _pushed_  │     │
+                                     │    │ _ib_data  │     │
+                                     │    └─────┬─────┘     │
+                                     │          │           │
+                                     │  ┌───────▼────────┐  │
+                                     │  │ Services       │  │
+                                     │  │ (AI, Scanner,  │  │
+                                     │  │  Trading Bot)  │  │
+                                     │  │ check IB first │  │
+                                     │  │ Alpaca fallback│  │
+                                     │  └────────────────┘  │
+                                     └──────────────────────┘
+```
+
 ## Tech Stack
 - **Frontend**: React, TailwindCSS, Framer Motion, TradingView Widget (embedded charts)
 - **Backend**: FastAPI, Python

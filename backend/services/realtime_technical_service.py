@@ -108,7 +108,8 @@ class TechnicalSnapshot:
 class RealTimeTechnicalService:
     """
     Service for calculating real-time technical indicators
-    using actual market data from Alpaca.
+    using actual market data. Prefers IB pushed data for quotes
+    when available, falls back to Alpaca for historical bars.
     """
     
     def __init__(self):
@@ -125,17 +126,48 @@ class RealTimeTechnicalService:
             self._alpaca_service = get_alpaca_service()
         return self._alpaca_service
     
+    def _get_ib_quote(self, symbol: str) -> Optional[Dict]:
+        """Try to get quote from IB pushed data (non-async)"""
+        try:
+            from routers.ib import get_pushed_quotes, is_pusher_connected
+            if is_pusher_connected():
+                quotes = get_pushed_quotes()
+                if symbol.upper() in quotes:
+                    q = quotes[symbol.upper()]
+                    return {
+                        "symbol": symbol.upper(),
+                        "price": q.get("last") or q.get("close") or 0,
+                        "bid": q.get("bid") or 0,
+                        "ask": q.get("ask") or 0,
+                        "volume": q.get("volume") or 0,
+                        "source": "ib_pusher"
+                    }
+        except Exception:
+            pass
+        return None
+    
     async def _get_spy_change(self) -> float:
-        """Get SPY's daily % change (cached for 2 min)"""
+        """Get SPY's daily % change (cached for 2 min). Prefers IB data."""
         now = datetime.now(timezone.utc)
         if self._spy_cache_time and (now - self._spy_cache_time).total_seconds() < 120:
             return self._spy_change_pct
         try:
-            quote = await self.alpaca.get_quote("SPY")
+            # Try IB first for current price
+            ib_quote = self._get_ib_quote("SPY")
+            
+            # Get historical bars from Alpaca for prev_close
             bars = await self.alpaca.get_bars("SPY", "1Day", 2)
-            if quote and bars and len(bars) >= 2:
+            
+            if bars and len(bars) >= 2:
                 prev_close = bars[-2]["close"]
-                price = quote.get("price", bars[-1]["close"])
+                
+                # Use IB price if available, else Alpaca
+                if ib_quote and ib_quote.get("price", 0) > 0:
+                    price = ib_quote["price"]
+                else:
+                    quote = await self.alpaca.get_quote("SPY")
+                    price = quote.get("price", bars[-1]["close"]) if quote else bars[-1]["close"]
+                
                 self._spy_change_pct = ((price - prev_close) / prev_close) * 100
                 self._spy_cache_time = now
         except:
@@ -145,7 +177,7 @@ class RealTimeTechnicalService:
     async def get_technical_snapshot(self, symbol: str, force_refresh: bool = False) -> Optional[TechnicalSnapshot]:
         """
         Get comprehensive technical snapshot for a symbol.
-        Uses real bar data from Alpaca to calculate all indicators.
+        Uses IB pushed data for real-time quotes, Alpaca for historical bars.
         """
         symbol = symbol.upper()
         
@@ -162,14 +194,18 @@ class RealTimeTechnicalService:
                 return cached
         
         try:
-            # Get intraday bars (5-min) for VWAP, EMA, intraday levels
+            # Get intraday bars (5-min) for VWAP, EMA, intraday levels (from Alpaca)
             intraday_bars = await self.alpaca.get_bars(symbol, "5Min", 78)  # ~6.5 hours of data
             
-            # Get daily bars for ATR, average volume, daily levels
+            # Get daily bars for ATR, average volume, daily levels (from Alpaca)
             daily_bars = await self.alpaca.get_bars(symbol, "1Day", 50)
             
-            # Get current quote
-            quote = await self.alpaca.get_quote(symbol)
+            # Get current quote - prefer IB pushed data, fallback to Alpaca
+            ib_quote = self._get_ib_quote(symbol)
+            if ib_quote and ib_quote.get("price", 0) > 0:
+                quote = ib_quote
+            else:
+                quote = await self.alpaca.get_quote(symbol)
             
             if not quote or not daily_bars:
                 logger.warning(f"Insufficient data for {symbol}")

@@ -214,6 +214,28 @@ Format responses with clear sections. Cite specific rules from the playbook."""
     def alpaca_service(self):
         """Get the Alpaca service for positions/account data"""
         return self._alpaca_service
+    
+    def _get_ib_quote(self, symbol: str) -> dict:
+        """Get quote from IB pushed data if available (non-async helper)"""
+        try:
+            from routers.ib import get_pushed_quotes, is_pusher_connected
+            if is_pusher_connected():
+                quotes = get_pushed_quotes()
+                symbol_upper = symbol.upper()
+                if symbol_upper in quotes:
+                    q = quotes[symbol_upper]
+                    return {
+                        "symbol": symbol_upper,
+                        "price": q.get("last") or q.get("close") or 0,
+                        "bid": q.get("bid") or 0,
+                        "ask": q.get("ask") or 0,
+                        "volume": q.get("volume") or 0,
+                        "change_percent": q.get("change_pct") or 0,
+                        "source": "ib_pusher"
+                    }
+        except Exception:
+            pass
+        return None
         
     def _init_llm_clients(self):
         """Initialize available LLM clients"""
@@ -1931,27 +1953,33 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
             context_parts.append("\n📊 REAL-TIME STOCK DATA:")
             for symbol in symbols[:3]:
                 try:
-                    # ALWAYS get fresh real-time quote when discussing specific stocks
-                    if self.alpaca_service:
-                        # Force refresh for trading decisions, otherwise use cache
+                    # Try IB pushed data first (real-time from user's broker)
+                    ib_quote = self._get_ib_quote(symbol)
+                    if ib_quote and ib_quote.get('price', 0) > 0:
+                        quote = ib_quote
+                    elif self.alpaca_service:
+                        # Fall back to Alpaca if IB not available
                         quote = await self.alpaca_service.get_quote(symbol, force_refresh=needs_fresh_data)
-                        if quote:
-                            price = quote.get('price', 0)
-                            change = quote.get('change_percent', 0)
-                            bid = quote.get('bid', 0)
-                            ask = quote.get('ask', 0)
-                            volume = quote.get('volume', 0)
-                            emoji = "🟢" if change >= 0 else "🔴"
-                            
-                            context_parts.append(f"\n**{symbol}** (LIVE):")
-                            context_parts.append(f"  💰 Price: ${price:.2f} {emoji} {change:+.2f}%")
-                            if bid and ask:
-                                spread = ((ask - bid) / price * 100) if price else 0
-                                context_parts.append(f"  📈 Bid/Ask: ${bid:.2f} / ${ask:.2f} (spread: {spread:.2f}%)")
-                            if volume:
-                                context_parts.append(f"  📊 Volume: {volume:,}")
-                        else:
-                            context_parts.append(f"\n**{symbol}**: Quote unavailable")
+                    else:
+                        quote = None
+                    
+                    if quote:
+                        price = quote.get('price', 0)
+                        change = quote.get('change_percent', 0)
+                        bid = quote.get('bid', 0)
+                        ask = quote.get('ask', 0)
+                        volume = quote.get('volume', 0)
+                        emoji = "🟢" if change >= 0 else "🔴"
+                        
+                        context_parts.append(f"\n**{symbol}** (LIVE):")
+                        context_parts.append(f"  💰 Price: ${price:.2f} {emoji} {change:+.2f}%")
+                        if bid and ask:
+                            spread = ((ask - bid) / price * 100) if price else 0
+                            context_parts.append(f"  📈 Bid/Ask: ${bid:.2f} / ${ask:.2f} (spread: {spread:.2f}%)")
+                        if volume:
+                            context_parts.append(f"  📊 Volume: {volume:,}")
+                    else:
+                        context_parts.append(f"\n**{symbol}**: Quote unavailable")
                     
                     # Get quality score with timeout
                     async def get_quality_data():
@@ -2006,36 +2034,59 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         wants_position_info = any(keyword in user_message.lower() for keyword in position_keywords)
         
         # Always try to include positions context for trading relevance
+        # Prefer IB pushed positions, fallback to Alpaca
         try:
-            if self.alpaca_service:
+            positions = []
+            
+            # Try IB pushed positions first
+            try:
+                from routers.ib import get_pushed_positions, is_pusher_connected
+                if is_pusher_connected():
+                    ib_positions = get_pushed_positions()
+                    if ib_positions:
+                        positions = [{
+                            'symbol': p.get('symbol'),
+                            'qty': p.get('position', p.get('qty', 0)),
+                            'avg_entry_price': p.get('avg_cost', p.get('avgCost', 0)),
+                            'current_price': p.get('market_price', p.get('marketPrice', 0)),
+                            'market_value': p.get('market_value', p.get('marketValue', 0)),
+                            'unrealized_pnl': p.get('unrealized_pnl', p.get('unrealizedPNL', 0)),
+                            'source': 'ib_gateway'
+                        } for p in ib_positions]
+            except Exception:
+                pass
+            
+            # Fallback to Alpaca if no IB positions
+            if not positions and self.alpaca_service:
                 positions = await self.alpaca_service.get_positions()
-                if positions:
-                    pos_lines = ["\n=== YOUR CURRENT POSITIONS ==="]
-                    total_unrealized = 0
-                    total_market_value = 0
+            
+            if positions:
+                pos_lines = ["\n=== YOUR CURRENT POSITIONS ==="]
+                total_unrealized = 0
+                total_market_value = 0
+                
+                for pos in positions:
+                    symbol = pos.get('symbol', 'UNK')
+                    qty = float(pos.get('qty', 0))
+                    avg_price = float(pos.get('avg_entry_price', 0))
+                    current_price = float(pos.get('current_price', 0))
+                    market_value = float(pos.get('market_value', 0))
+                    unrealized = float(pos.get('unrealized_pnl', 0) or pos.get('unrealized_pl', 0) or 0)
+                    unrealized_pct = float(pos.get('unrealized_plpc', 0) or pos.get('unrealized_pnl_percent', 0) or 0) * 100
+                    side = 'LONG' if qty > 0 else 'SHORT'
                     
-                    for pos in positions:
-                        symbol = pos.get('symbol', 'UNK')
-                        qty = float(pos.get('qty', 0))
-                        avg_price = float(pos.get('avg_entry_price', 0))
-                        current_price = float(pos.get('current_price', 0))
-                        market_value = float(pos.get('market_value', 0))
-                        unrealized = float(pos.get('unrealized_pnl', 0) or pos.get('unrealized_pl', 0) or 0)
-                        unrealized_pct = float(pos.get('unrealized_plpc', 0) or pos.get('unrealized_pnl_percent', 0) or 0) * 100
-                        side = 'LONG' if qty > 0 else 'SHORT'
-                        
-                        total_unrealized += unrealized
-                        total_market_value += abs(market_value)
-                        
-                        pos_lines.append(
-                            f"- **{symbol}** ({side}): {abs(qty):.0f} shares @ ${avg_price:.2f} avg | "
-                            f"Current: ${current_price:.2f} | P&L: ${unrealized:+.2f} ({unrealized_pct:+.2f}%)"
-                        )
+                    total_unrealized += unrealized
+                    total_market_value += abs(market_value)
                     
-                    pos_lines.append(f"\n📊 TOTAL: {len(positions)} positions | Market Value: ${total_market_value:,.2f} | Unrealized P&L: ${total_unrealized:+.2f}")
-                    context_parts.append("\n".join(pos_lines))
-                elif wants_position_info:
-                    context_parts.append("\n=== YOUR CURRENT POSITIONS ===\nNo open positions currently.")
+                    pos_lines.append(
+                        f"- **{symbol}** ({side}): {abs(qty):.0f} shares @ ${avg_price:.2f} avg | "
+                        f"Current: ${current_price:.2f} | P&L: ${unrealized:+.2f} ({unrealized_pct:+.2f}%)"
+                    )
+                
+                pos_lines.append(f"\n📊 TOTAL: {len(positions)} positions | Market Value: ${total_market_value:,.2f} | Unrealized P&L: ${total_unrealized:+.2f}")
+                context_parts.append("\n".join(pos_lines))
+            elif wants_position_info:
+                context_parts.append("\n=== YOUR CURRENT POSITIONS ===\nNo open positions currently.")
         except Exception as e:
             logger.warning(f"Error fetching positions context: {e}")
             if wants_position_info:
