@@ -47,10 +47,10 @@ class IBDataPusher:
         self.ib = IB()
         self.running = False
         self.subscribed_contracts: Dict[str, Contract] = {}
-        self.depth_subscriptions: Dict[str, int] = {}  # symbol -> reqId for L2
+        self.depth_subscriptions: Dict[str, object] = {}  # symbol -> ticker object for L2
         self.last_push_time = 0
         self.push_interval = 1.0  # Push every 1 second
-        self.level2_enabled = True  # Will be set to False if updateMktDepthEvent not available
+        self.level2_enabled = True  # Level 2 uses polling approach, always available
         
         # Data buffers
         self.quotes_buffer: Dict[str, dict] = {}
@@ -85,12 +85,9 @@ class IBDataPusher:
                 self.ib.positionEvent += self.on_position
                 self.ib.errorEvent += self.on_error
                 
-                # Level 2 / Market Depth event - check if available (version-dependent)
-                if hasattr(self.ib, 'updateMktDepthEvent'):
-                    self.ib.updateMktDepthEvent += self.on_market_depth
-                else:
-                    logger.warning("Level 2 data not available - updateMktDepthEvent not found in ib_insync")
-                    self.level2_enabled = False
+                # Level 2 uses polling approach - no event handler needed
+                # We store ticker objects and read domBids/domAsks in the push loop
+                logger.info("  Level 2 support: Using polling approach (compatible with all ib_insync versions)")
                 
                 # Capture existing positions (they're loaded during connect sync)
                 existing_positions = self.ib.positions()
@@ -321,7 +318,7 @@ class IBDataPusher:
     def subscribe_level2(self, symbols: List[str], num_rows: int = 5):
         """
         Subscribe to Level 2 / DOM data for specified symbols.
-        Only subscribe to in-play stocks to minimize data volume.
+        Stores ticker objects and polls domBids/domAsks for order book data.
         
         Args:
             symbols: List of stock symbols
@@ -339,10 +336,11 @@ class IBDataPusher:
                 contract = Stock(symbol, "SMART", "USD")
                 self.ib.qualifyContracts(contract)
                 
-                # Request market depth (Level 2)
+                # Request market depth (Level 2) - returns a Ticker object
                 ticker = self.ib.reqMktDepth(contract, numRows=num_rows)
                 if ticker:
-                    self.depth_subscriptions[symbol] = id(ticker)
+                    # Store the ticker object itself so we can poll domBids/domAsks
+                    self.depth_subscriptions[symbol] = ticker
                     logger.info(f"  L2 Subscribed: {symbol} ({num_rows} levels)")
                     
             except Exception as e:
@@ -353,15 +351,60 @@ class IBDataPusher:
         for symbol in symbols:
             try:
                 if symbol in self.depth_subscriptions:
-                    if symbol in self.subscribed_contracts:
-                        contract = self.subscribed_contracts[symbol]
-                        self.ib.cancelMktDepth(contract)
+                    ticker = self.depth_subscriptions[symbol]
+                    if hasattr(ticker, 'contract'):
+                        self.ib.cancelMktDepth(ticker.contract)
                     del self.depth_subscriptions[symbol]
                     if symbol in self.level2_buffer:
                         del self.level2_buffer[symbol]
                     logger.info(f"  L2 Unsubscribed: {symbol}")
             except Exception as e:
                 logger.error(f"  Failed to unsubscribe L2 {symbol}: {e}")
+    
+    def poll_level2_data(self):
+        """
+        Poll Level 2 data from subscribed tickers.
+        Called in the main loop to update level2_buffer with current order book.
+        """
+        for symbol, ticker in self.depth_subscriptions.items():
+            try:
+                # Get domBids and domAsks from the ticker
+                dom_bids = getattr(ticker, 'domBids', []) or []
+                dom_asks = getattr(ticker, 'domAsks', []) or []
+                
+                # Convert to our format: [[price, size], ...]
+                bids = []
+                asks = []
+                
+                for item in dom_bids[:5]:  # Top 5 levels
+                    if hasattr(item, 'price') and hasattr(item, 'size'):
+                        if item.price > 0 and item.size > 0:
+                            bids.append([float(item.price), int(item.size)])
+                
+                for item in dom_asks[:5]:  # Top 5 levels
+                    if hasattr(item, 'price') and hasattr(item, 'size'):
+                        if item.price > 0 and item.size > 0:
+                            asks.append([float(item.price), int(item.size)])
+                
+                # Only update if we have data
+                if bids or asks:
+                    bid_total = sum(b[1] for b in bids)
+                    ask_total = sum(a[1] for a in asks)
+                    total = bid_total + ask_total
+                    imbalance = (bid_total - ask_total) / total if total > 0 else 0.0
+                    
+                    self.level2_buffer[symbol] = {
+                        "symbol": symbol,
+                        "bids": bids,
+                        "asks": asks,
+                        "bid_total_size": bid_total,
+                        "ask_total_size": ask_total,
+                        "imbalance": round(imbalance, 3),
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
+            except Exception as e:
+                logger.debug(f"L2 poll error for {symbol}: {e}")
     
     def request_fundamental_data(self, symbols: List[str]):
         """
@@ -601,6 +644,7 @@ class IBDataPusher:
         logger.info(f"==> STARTING PUSH LOOP")
         logger.info(f"    Positions: {len(self.positions_data)}")
         logger.info(f"    Quotes: {len(self.quotes_buffer)}")
+        logger.info(f"    Level 2 Subscriptions: {len(self.depth_subscriptions)}")
         logger.info(f"========================================")
         logger.info(f"")
         
@@ -613,6 +657,10 @@ class IBDataPusher:
                 try:
                     # Let ib_insync process events (sync — no event loop conflict)
                     self.ib.sleep(0.1)
+                    
+                    # Poll Level 2 data from subscribed tickers
+                    if enable_level2 and self.level2_enabled:
+                        self.poll_level2_data()
                     
                     # Push data at regular intervals
                     current_time = time.time()
