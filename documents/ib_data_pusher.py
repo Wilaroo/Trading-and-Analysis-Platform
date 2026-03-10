@@ -56,6 +56,11 @@ class IBDataPusher:
         self.account_data: dict = {}
         self.positions_data: List[dict] = []
         self.level2_buffer: Dict[str, dict] = {}  # Level 2 / DOM data
+        self.fundamentals_buffer: Dict[str, dict] = {}  # Fundamental data
+        
+        # Fundamental data refresh tracking (don't need to refresh every second)
+        self.last_fundamentals_refresh = 0
+        self.fundamentals_refresh_interval = 300  # Refresh every 5 minutes
         
     def connect(self) -> bool:
         """Connect to local IB Gateway"""
@@ -90,10 +95,12 @@ class IBDataPusher:
             return False
     
     def on_pending_tickers(self, tickers):
-        """Handle incoming ticker updates"""
+        """Handle incoming ticker updates including fundamental data"""
         for ticker in tickers:
             if ticker.contract:
                 symbol = ticker.contract.symbol
+                
+                # Regular quote data
                 self.quotes_buffer[symbol] = {
                     "symbol": symbol,
                     "bid": ticker.bid if ticker.bid > 0 else None,
@@ -106,6 +113,35 @@ class IBDataPusher:
                     "open": ticker.open if ticker.open > 0 else None,
                     "timestamp": datetime.now().isoformat()
                 }
+                
+                # Extract fundamental data from ticker if available
+                if symbol in self.fundamentals_buffer:
+                    fund = self.fundamentals_buffer[symbol]
+                    
+                    # These come from generic ticks we requested
+                    # Short Interest (tick 256)
+                    if hasattr(ticker, 'shortableShares') and ticker.shortableShares:
+                        fund["shortable_shares"] = ticker.shortableShares
+                    
+                    # Fundamental ratios come through ticker.fundamentalRatios
+                    if hasattr(ticker, 'fundamentalRatios') and ticker.fundamentalRatios:
+                        ratios = ticker.fundamentalRatios
+                        if hasattr(ratios, 'peRatio') and ratios.peRatio:
+                            fund["pe_ratio"] = ratios.peRatio
+                        if hasattr(ratios, 'sharesOutstanding') and ratios.sharesOutstanding:
+                            fund["shares_outstanding"] = ratios.sharesOutstanding
+                    
+                    # 52-week high/low
+                    if hasattr(ticker, 'low52') and ticker.low52 and ticker.low52 > 0:
+                        fund["week_52_low"] = ticker.low52
+                    if hasattr(ticker, 'high52') and ticker.high52 and ticker.high52 > 0:
+                        fund["week_52_high"] = ticker.high52
+                    
+                    # Average volume
+                    if hasattr(ticker, 'avVolume') and ticker.avVolume and ticker.avVolume > 0:
+                        fund["avg_volume_90d"] = ticker.avVolume
+                    
+                    fund["timestamp"] = datetime.now().isoformat()
     
     def on_account_value(self, value):
         """Handle account value updates"""
@@ -219,19 +255,48 @@ class IBDataPusher:
         except Exception as e:
             logger.error(f"L2 update error: {e}")
     
-    def subscribe_market_data(self, symbols: List[str]):
-        """Subscribe to real-time market data (skips symbols without live subscriptions)"""
+    def subscribe_market_data(self, symbols: List[str], include_fundamentals: bool = True):
+        """Subscribe to real-time market data with optional fundamental data ticks"""
+        # Generic ticks for fundamental data:
+        # 165 = Avg Volume 90 day
+        # 256 = Short Interest  
+        # 258 = Institutional %
+        # 293 = Shares Outstanding
+        # 294 = Float (if available)
+        # 411 = P/E Ratio
+        # 456 = 52-Week High
+        # 457 = 52-Week Low
+        fundamental_ticks = "165,256,258,293,411,456,457" if include_fundamentals else ""
+        
         for symbol in symbols:
             try:
                 if symbol == "VIX":
                     contract = Index("VIX", "CBOE")
+                    # VIX doesn't have fundamentals
+                    self.ib.qualifyContracts(contract)
+                    self.ib.reqMktData(contract, '', False, False)
                 else:
                     contract = Stock(symbol, "SMART", "USD")
+                    self.ib.qualifyContracts(contract)
+                    self.ib.reqMktData(contract, fundamental_ticks, False, False)
+                    
+                    # Initialize fundamentals buffer for this symbol
+                    if symbol not in self.fundamentals_buffer:
+                        self.fundamentals_buffer[symbol] = {
+                            "symbol": symbol,
+                            "short_interest": None,
+                            "institutional_pct": None,
+                            "shares_outstanding": None,
+                            "float": None,
+                            "pe_ratio": None,
+                            "week_52_high": None,
+                            "week_52_low": None,
+                            "avg_volume_90d": None,
+                            "timestamp": datetime.now().isoformat()
+                        }
                 
-                self.ib.qualifyContracts(contract)
-                self.ib.reqMktData(contract, '', False, False)
                 self.subscribed_contracts[symbol] = contract
-                logger.info(f"  Subscribed: {symbol}")
+                logger.info(f"  Subscribed: {symbol}" + (" (with fundamentals)" if include_fundamentals and symbol != "VIX" else ""))
                 
             except Exception as e:
                 logger.error(f"  Failed to subscribe {symbol}: {e}")
@@ -281,9 +346,97 @@ class IBDataPusher:
             except Exception as e:
                 logger.error(f"  Failed to unsubscribe L2 {symbol}: {e}")
     
+    def request_fundamental_data(self, symbols: List[str]):
+        """
+        Request detailed fundamental data for symbols.
+        This includes short interest, institutional ownership, etc.
+        Called less frequently than quote data.
+        """
+        for symbol in symbols:
+            try:
+                if symbol == "VIX" or symbol not in self.subscribed_contracts:
+                    continue
+                
+                contract = self.subscribed_contracts[symbol]
+                
+                # Request fundamental snapshot (XML data)
+                try:
+                    # ReportSnapshot gives us key ratios and stats
+                    fundamental_data = self.ib.reqFundamentalData(
+                        contract, 
+                        reportType='ReportSnapshot',
+                        fundamentalDataOptions=[]
+                    )
+                    
+                    if fundamental_data:
+                        # Parse the XML to extract key metrics
+                        self._parse_fundamental_xml(symbol, fundamental_data)
+                        
+                except Exception as e:
+                    logger.debug(f"Fundamental data not available for {symbol}: {e}")
+                    
+            except Exception as e:
+                logger.error(f"Error requesting fundamentals for {symbol}: {e}")
+    
+    def _parse_fundamental_xml(self, symbol: str, xml_data: str):
+        """Parse IB fundamental data XML and extract key metrics"""
+        try:
+            import xml.etree.ElementTree as ET
+            
+            root = ET.fromstring(xml_data)
+            
+            if symbol not in self.fundamentals_buffer:
+                self.fundamentals_buffer[symbol] = {"symbol": symbol}
+            
+            fund = self.fundamentals_buffer[symbol]
+            
+            # Find key ratios
+            ratios = root.find('.//Ratios')
+            if ratios is not None:
+                # P/E Ratio
+                pe = ratios.find('.//PE')
+                if pe is not None and pe.text:
+                    fund["pe_ratio"] = float(pe.text)
+                
+                # Price to Book
+                pb = ratios.find('.//PB')
+                if pb is not None and pb.text:
+                    fund["price_to_book"] = float(pb.text)
+            
+            # Find share data
+            share_data = root.find('.//SharesOut')
+            if share_data is not None and share_data.text:
+                fund["shares_outstanding"] = float(share_data.text) * 1000000  # Usually in millions
+            
+            float_data = root.find('.//Float')
+            if float_data is not None and float_data.text:
+                fund["float"] = float(float_data.text) * 1000000
+            
+            # Short interest
+            short_int = root.find('.//ShortInt')
+            if short_int is not None and short_int.text:
+                fund["short_interest"] = float(short_int.text)
+            
+            short_pct = root.find('.//ShortPct')
+            if short_pct is not None and short_pct.text:
+                fund["short_interest_pct"] = float(short_pct.text)
+            
+            # Institutional ownership
+            inst_own = root.find('.//InstOwn')
+            if inst_own is not None and inst_own.text:
+                fund["institutional_pct"] = float(inst_own.text)
+            
+            fund["timestamp"] = datetime.now().isoformat()
+            logger.debug(f"Parsed fundamentals for {symbol}")
+            
+        except Exception as e:
+            logger.debug(f"Error parsing fundamental XML for {symbol}: {e}")
+    
     def push_data_to_cloud(self):
         """Push buffered data to cloud backend (synchronous)"""
-        if not self.quotes_buffer and not self.account_data and not self.positions_data and not self.level2_buffer:
+        has_data = (self.quotes_buffer or self.account_data or 
+                    self.positions_data or self.level2_buffer or self.fundamentals_buffer)
+        if not has_data:
             return
             
         payload = {
@@ -292,7 +445,8 @@ class IBDataPusher:
             "quotes": self.quotes_buffer.copy(),
             "account": self.account_data.copy(),
             "positions": self.positions_data.copy(),
-            "level2": self.level2_buffer.copy()  # Add Level 2 data
+            "level2": self.level2_buffer.copy(),
+            "fundamentals": self.fundamentals_buffer.copy()
         }
         
         try:
@@ -306,7 +460,8 @@ class IBDataPusher:
                 result = response.json()
                 if result.get("success"):
                     l2_count = len(self.level2_buffer)
-                    logger.debug(f"Pushed {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions, {l2_count} L2")
+                    fund_count = len(self.fundamentals_buffer)
+                    logger.debug(f"Pushed {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions, {l2_count} L2, {fund_count} fundamentals")
             else:
                 logger.warning(f"Push failed: HTTP {response.status_code}")
                         
@@ -387,6 +542,10 @@ class IBDataPusher:
         # Request account updates
         self.request_account_updates()
         
+        # Initial fundamental data request
+        stock_symbols = [s for s in symbols if s != "VIX"]
+        self.request_fundamental_data(stock_symbols)
+        
         push_count = 0
         l2_update_interval = 30  # Check for in-play changes every 30 seconds
         last_l2_update = 0
@@ -405,12 +564,19 @@ class IBDataPusher:
                     
                     if push_count % 30 == 0:
                         l2_count = len(self.level2_buffer)
-                        logger.info(f"Running... {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions, {l2_count} L2")
+                        fund_count = len([f for f in self.fundamentals_buffer.values() if f.get("pe_ratio") or f.get("short_interest")])
+                        logger.info(f"Running... {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions, {l2_count} L2, {fund_count} fundamentals")
                 
                 # Update L2 subscriptions based on in-play stocks
                 if enable_level2 and (current_time - last_l2_update >= l2_update_interval):
                     self.update_level2_subscriptions()
                     last_l2_update = current_time
+                
+                # Refresh fundamental data periodically (every 5 minutes)
+                if current_time - self.last_fundamentals_refresh >= self.fundamentals_refresh_interval:
+                    logger.info("Refreshing fundamental data...")
+                    self.request_fundamental_data(list(self.subscribed_contracts.keys()))
+                    self.last_fundamentals_refresh = current_time
                     
         except KeyboardInterrupt:
             logger.info("Shutting down...")
