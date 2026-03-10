@@ -402,6 +402,44 @@ async def get_all_fundamentals():
     }
 
 
+def _extract_account_value(account: dict, key: str, default=0):
+    """
+    Extract account value from pushed data.
+    Handles both nested format from pusher: {"value": "123.45", "currency": "USD", "account": "..."}
+    and flat format: "123.45" or 123.45
+    Also handles -S suffix variants (e.g., "NetLiquidation-S")
+    """
+    # Try exact key first
+    val = account.get(key)
+    
+    # Try with -S suffix (IB sends both variants)
+    if val is None:
+        val = account.get(f"{key}-S")
+    
+    # Try without -S suffix if key has it
+    if val is None and key.endswith("-S"):
+        val = account.get(key[:-2])
+    
+    if val is None:
+        return default
+    
+    # Handle nested dict format from pusher
+    if isinstance(val, dict):
+        val = val.get("value", default)
+    
+    # Convert to float
+    if isinstance(val, str):
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return default
+    
+    try:
+        return float(val) if val else default
+    except (ValueError, TypeError):
+        return default
+
+
 @router.get("/account/summary")
 async def get_account_summary():
     """
@@ -412,53 +450,43 @@ async def get_account_summary():
     
     account = _pushed_ib_data.get("account", {})
     
-    # Extract key account values
-    net_liq = account.get("NetLiquidation", 0)
-    if isinstance(net_liq, str):
-        try:
-            net_liq = float(net_liq)
-        except:
-            net_liq = 0
+    # Extract key account values using helper that handles nested format
+    net_liq = _extract_account_value(account, "NetLiquidation", 0)
+    buying_power = _extract_account_value(account, "BuyingPower", 0)
+    available_funds = _extract_account_value(account, "AvailableFunds", buying_power)
+    total_cash = _extract_account_value(account, "TotalCashBalance", 0)
     
-    buying_power = account.get("BuyingPower", 0)
-    if isinstance(buying_power, str):
-        try:
-            buying_power = float(buying_power)
-        except:
-            buying_power = 0
+    # P&L values
+    realized_pnl = _extract_account_value(account, "RealizedPnL", 0)
+    unrealized_pnl = _extract_account_value(account, "UnrealizedPnL", 0)
+    daily_pnl = _extract_account_value(account, "DailyPnL", 0)
     
-    # Today's P&L can come from different fields
-    realized_pnl = account.get("RealizedPnL", 0)
-    unrealized_pnl = account.get("UnrealizedPnL", 0)
-    daily_pnl = account.get("DailyPnL", realized_pnl)
-    
-    for val in [realized_pnl, unrealized_pnl, daily_pnl]:
-        if isinstance(val, str):
-            try:
-                val = float(val)
-            except:
-                val = 0
-    
-    # Get cash and other values
-    total_cash = account.get("TotalCashBalance", 0)
-    available_funds = account.get("AvailableFunds", buying_power)
+    # If daily P&L not available, use realized as fallback
+    if daily_pnl == 0 and realized_pnl != 0:
+        daily_pnl = realized_pnl
     
     # Calculate daily P&L percentage
+    daily_pnl_pct = 0
     if net_liq and net_liq > 0:
-        daily_pnl_pct = (float(daily_pnl or 0) / net_liq) * 100
-    else:
-        daily_pnl_pct = 0
+        daily_pnl_pct = (daily_pnl / net_liq) * 100
+    
+    # Get account ID from first account value if available
+    account_id = "DUN615665"
+    for key, val in account.items():
+        if isinstance(val, dict) and val.get("account"):
+            account_id = val.get("account")
+            break
     
     return {
         "success": True,
-        "account_id": "DUN615665",
-        "net_liquidation": float(net_liq) if net_liq else 0,
-        "buying_power": float(buying_power) if buying_power else 0,
-        "available_funds": float(available_funds) if available_funds else 0,
-        "total_cash": float(total_cash) if total_cash else 0,
-        "realized_pnl": float(realized_pnl) if realized_pnl else 0,
-        "unrealized_pnl": float(unrealized_pnl) if unrealized_pnl else 0,
-        "daily_pnl": float(daily_pnl) if daily_pnl else 0,
+        "account_id": account_id,
+        "net_liquidation": round(net_liq, 2),
+        "buying_power": round(buying_power, 2),
+        "available_funds": round(available_funds, 2),
+        "total_cash": round(total_cash, 2),
+        "realized_pnl": round(realized_pnl, 2),
+        "unrealized_pnl": round(unrealized_pnl, 2),
+        "daily_pnl": round(daily_pnl, 2),
         "daily_pnl_percent": round(daily_pnl_pct, 2),
         "connected": is_pusher_connected(),
         "last_update": _pushed_ib_data.get("last_update")
@@ -575,9 +603,32 @@ def get_vix_from_pushed_data() -> dict:
 
 
 def get_pushed_positions() -> list:
-    """Get positions from pushed IB data (called by other services)."""
+    """
+    Get positions from pushed IB data (called by other services).
+    Normalizes field names for consistency.
+    """
     global _pushed_ib_data
-    return _pushed_ib_data.get("positions", [])
+    raw_positions = _pushed_ib_data.get("positions", [])
+    
+    # Normalize position field names for consistency
+    normalized = []
+    for pos in raw_positions:
+        normalized.append({
+            "symbol": pos.get("symbol"),
+            "position": pos.get("position", 0),
+            "qty": pos.get("position", 0),  # Alias
+            "avg_cost": pos.get("avgCost", pos.get("avg_cost", 0)),
+            "avgCost": pos.get("avgCost", pos.get("avg_cost", 0)),  # Keep original too
+            "market_price": pos.get("marketPrice", pos.get("market_price", 0)),
+            "market_value": pos.get("marketValue", pos.get("market_value", 0)),
+            "unrealized_pnl": pos.get("unrealizedPNL", pos.get("unrealized_pnl", 0)),
+            "realized_pnl": pos.get("realizedPNL", pos.get("realized_pnl", 0)),
+            "account": pos.get("account", ""),
+            "exchange": pos.get("exchange", ""),
+            "secType": pos.get("secType", "STK"),
+        })
+    
+    return normalized
 
 
 def get_pushed_quotes() -> dict:

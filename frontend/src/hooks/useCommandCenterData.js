@@ -131,49 +131,63 @@ export function useCommandCenterData({
 
   const fetchAccountData = async () => {
     let positionsData = [];
+    let positionsFetched = false;
     
-    // First try trading-bot positions (Alpaca) - more reliable
+    // First try IB pushed data (from local pusher script) - primary source
     try {
-      const botPositionsRes = await api.get('/api/trading-bot/positions');
-      if (botPositionsRes.data?.success && botPositionsRes.data?.positions) {
-        positionsData = botPositionsRes.data.positions.map(p => ({
-          symbol: p.symbol,
-          qty: parseFloat(p.qty) || 0,
-          quantity: parseFloat(p.qty) || 0,
-          avg_entry_price: parseFloat(p.avg_entry_price) || 0,
-          avg_cost: parseFloat(p.avg_entry_price) || 0,
-          current_price: parseFloat(p.current_price) || 0,
-          market_value: (parseFloat(p.qty) || 0) * (parseFloat(p.current_price) || 0),
-          unrealized_pnl: parseFloat(p.unrealized_pnl) || 0,
-          unrealized_pl: parseFloat(p.unrealized_pnl) || 0,
-          unrealized_plpc: (parseFloat(p.unrealized_pnl_pct) || 0) / 100,
-          unrealized_pnl_percent: (parseFloat(p.unrealized_pnl_pct) || 0) / 100,
-          side: p.side || 'long'
+      const pushedRes = await api.get('/api/ib/pushed-data');
+      if (pushedRes.data?.connected && pushedRes.data?.positions?.length > 0) {
+        positionsData = pushedRes.data.positions.map(p => ({
+          symbol: p.symbol || p.contract?.symbol,
+          qty: parseFloat(p.position) || parseFloat(p.qty) || 0,
+          market_value: parseFloat(p.market_value) || parseFloat(p.marketValue) || 0,
+          avg_entry_price: parseFloat(p.avg_cost) || parseFloat(p.avgCost) || parseFloat(p.averageCost) || 0,
+          avg_cost: parseFloat(p.avg_cost) || parseFloat(p.avgCost) || parseFloat(p.averageCost) || 0,
+          current_price: parseFloat(p.market_price) || parseFloat(p.marketPrice) || 0,
+          unrealized_pnl: parseFloat(p.unrealized_pnl) || parseFloat(p.unrealizedPNL) || 0,
+          unrealized_pnl_percent: parseFloat(p.unrealized_pnl_pct) || 0,
+          side: parseFloat(p.position || p.qty) >= 0 ? 'long' : 'short',
+          source: 'ib_pusher'
         }));
+        positionsFetched = true;
       }
-    } catch (botErr) {
-      // Fall back to IB pushed data first (from local pusher script)
+    } catch (ibErr) {
+      console.log('IB pushed data fetch failed:', ibErr.message);
+    }
+    
+    // Fall back to trading-bot positions (Alpaca) if IB not connected
+    if (!positionsFetched) {
       try {
-        const pushedRes = await api.get('/api/ib/pushed-data');
-        if (pushedRes.data?.connected && pushedRes.data?.positions?.length > 0) {
-          positionsData = pushedRes.data.positions.map(p => ({
-            symbol: p.symbol || p.contract?.symbol,
-            qty: parseFloat(p.position) || parseFloat(p.qty) || 0,
-            market_value: parseFloat(p.market_value) || parseFloat(p.marketValue) || 0,
-            avg_entry_price: parseFloat(p.avg_cost) || parseFloat(p.averageCost) || 0,
-            current_price: parseFloat(p.market_price) || parseFloat(p.marketPrice) || 0,
-            unrealized_pnl: parseFloat(p.unrealized_pnl) || parseFloat(p.unrealizedPNL) || 0,
-            unrealized_pnl_percent: parseFloat(p.unrealized_pnl_pct) || 0,
-            side: parseFloat(p.position || p.qty) >= 0 ? 'long' : 'short',
-            source: 'ib_pusher'
+        const botPositionsRes = await api.get('/api/trading-bot/positions');
+        if (botPositionsRes.data?.success && botPositionsRes.data?.positions?.length > 0) {
+          positionsData = botPositionsRes.data.positions.map(p => ({
+            symbol: p.symbol,
+            qty: parseFloat(p.qty) || 0,
+            quantity: parseFloat(p.qty) || 0,
+            avg_entry_price: parseFloat(p.avg_entry_price) || 0,
+            avg_cost: parseFloat(p.avg_entry_price) || 0,
+            current_price: parseFloat(p.current_price) || 0,
+            market_value: (parseFloat(p.qty) || 0) * (parseFloat(p.current_price) || 0),
+            unrealized_pnl: parseFloat(p.unrealized_pnl) || 0,
+            unrealized_pl: parseFloat(p.unrealized_pnl) || 0,
+            unrealized_plpc: (parseFloat(p.unrealized_pnl_pct) || 0) / 100,
+            unrealized_pnl_percent: (parseFloat(p.unrealized_pnl_pct) || 0) / 100,
+            side: p.side || 'long'
           }));
-        } else {
-          // Fall back to direct IB positions
-          const positionsRes = await api.get('/api/ib/account/positions');
-          positionsData = positionsRes.data?.positions || [];
+          positionsFetched = true;
         }
-      } catch (ibErr) {
-        // Both APIs failed - positions will be empty
+      } catch (botErr) {
+        console.log('Trading bot positions fetch failed:', botErr.message);
+      }
+    }
+    
+    // Final fallback to direct IB positions endpoint
+    if (!positionsFetched) {
+      try {
+        const positionsRes = await api.get('/api/ib/account/positions');
+        positionsData = positionsRes.data?.positions || [];
+      } catch (err) {
+        console.log('Direct IB positions fetch failed:', err.message);
       }
     }
     
