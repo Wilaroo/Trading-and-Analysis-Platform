@@ -37,26 +37,58 @@ async def get_config():
 
 @router.get("/test-connection")
 async def test_ollama_connection():
-    """Test connection to Ollama - separate endpoint for explicit testing."""
+    """Test connection to Ollama - checks HTTP proxy first, then direct connection."""
+    
+    # First check if HTTP proxy is connected via the proxy status endpoint
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            # Check our own proxy status
+            response = await client.get("http://localhost:8001/api/ollama-proxy/status")
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("any_connected"):
+                    # Get models from HTTP proxy sessions
+                    http_sessions = data.get("http", {}).get("sessions", [])
+                    if http_sessions:
+                        models = http_sessions[0].get("models", [])
+                        return {
+                            "connected": True, 
+                            "models": models,
+                            "method": "http_proxy",
+                            "message": "Connected via HTTP proxy (local Ollama)"
+                        }
+                    # Or from WebSocket
+                    ws_status = data.get("websocket", {})
+                    if ws_status.get("connected"):
+                        models = ws_status.get("models", [])
+                        return {
+                            "connected": True,
+                            "models": models,
+                            "method": "websocket_proxy"
+                        }
+    except Exception as e:
+        pass  # Fall through to direct connection check
+    
+    # Fallback: check direct connection via ngrok/tunnel (old method)
     ollama_url = os.environ.get("OLLAMA_URL", "")
     
     if not ollama_url:
-        return {"connected": False, "error": "No Ollama URL configured"}
+        return {"connected": False, "error": "No Ollama connection - run ollama_http.py locally"}
     
-    import httpx
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(f"{ollama_url}/api/tags")
             if response.status_code == 200:
                 data = response.json()
                 models = [m.get("name", "unknown") for m in data.get("models", [])]
-                return {"connected": True, "models": models}
+                return {"connected": True, "models": models, "method": "direct"}
             elif response.status_code == 403:
                 return {"connected": False, "error": "403 Forbidden - Check ngrok/tunnel settings"}
             else:
                 return {"connected": False, "error": f"HTTP {response.status_code}"}
     except httpx.TimeoutException:
-        return {"connected": False, "error": "Connection timed out - server cannot reach ngrok"}
+        return {"connected": False, "error": "Connection timed out - run ollama_http.py locally"}
     except Exception as e:
         return {"connected": False, "error": str(e)}
 
