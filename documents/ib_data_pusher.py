@@ -50,6 +50,7 @@ class IBDataPusher:
         self.depth_subscriptions: Dict[str, int] = {}  # symbol -> reqId for L2
         self.last_push_time = 0
         self.push_interval = 1.0  # Push every 1 second
+        self.level2_enabled = True  # Will be set to False if updateMktDepthEvent not available
         
         # Data buffers
         self.quotes_buffer: Dict[str, dict] = {}
@@ -83,7 +84,13 @@ class IBDataPusher:
                 self.ib.accountValueEvent += self.on_account_value
                 self.ib.positionEvent += self.on_position
                 self.ib.errorEvent += self.on_error
-                self.ib.updateMktDepthEvent += self.on_market_depth
+                
+                # Level 2 / Market Depth event - check if available (version-dependent)
+                if hasattr(self.ib, 'updateMktDepthEvent'):
+                    self.ib.updateMktDepthEvent += self.on_market_depth
+                else:
+                    logger.warning("Level 2 data not available - updateMktDepthEvent not found in ib_insync")
+                    self.level2_enabled = False
                 
                 return True
             else:
@@ -529,13 +536,13 @@ class IBDataPusher:
         logger.info("Starting data push loop...")
         logger.info(f"  Cloud URL: {self.cloud_url}")
         logger.info(f"  Symbols: {symbols}")
-        logger.info(f"  Level 2: {'Enabled' if enable_level2 else 'Disabled'}")
+        logger.info(f"  Level 2: {'Enabled' if enable_level2 and self.level2_enabled else 'Disabled'}")
         
         # Subscribe to market data
         self.subscribe_market_data(symbols)
         
-        # Subscribe to Level 2 for core symbols
-        if enable_level2:
+        # Subscribe to Level 2 for core symbols (only if enabled and supported)
+        if enable_level2 and self.level2_enabled:
             core_l2 = [s for s in symbols if s != "VIX"]
             self.subscribe_level2(core_l2)
         
@@ -567,8 +574,8 @@ class IBDataPusher:
                         fund_count = len([f for f in self.fundamentals_buffer.values() if f.get("pe_ratio") or f.get("short_interest")])
                         logger.info(f"Running... {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions, {l2_count} L2, {fund_count} fundamentals")
                 
-                # Update L2 subscriptions based on in-play stocks
-                if enable_level2 and (current_time - last_l2_update >= l2_update_interval):
+                # Update L2 subscriptions based on in-play stocks (only if enabled and supported)
+                if enable_level2 and self.level2_enabled and (current_time - last_l2_update >= l2_update_interval):
                     self.update_level2_subscriptions()
                     last_l2_update = current_time
                 

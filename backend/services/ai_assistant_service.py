@@ -2103,7 +2103,7 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                 ollama_cfg = self.llm_clients[LLMProvider.OLLAMA]
                 ping_url = f"{ollama_cfg['url']}/api/tags"
                 
-                async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=3.0)) as client:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
                     ping_response = await client.get(
                         ping_url,
                         headers={"ngrok-skip-browser-warning": "true"}
@@ -2120,9 +2120,9 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                 ollama_cfg = self.llm_clients[LLMProvider.OLLAMA]
                 url = f"{ollama_cfg['url']}/api/chat"
                 
-                # For market/deep queries, keep more context (up to 6000 chars)
-                # For simple queries, use smaller context
-                max_context = 6000 if complexity == "deep" else 2000
+                # For market/deep queries, use moderate context to fit in 4GB VRAM
+                # qwen2.5:7b needs ~2.4GB for model, ~0.15GB per 1K ctx tokens
+                max_context = 4000 if complexity == "deep" else 2000
                 truncated_context = context[:max_context] if len(context) > max_context else context
                 
                 ollama_system = f"""You are an expert trading assistant with REAL-TIME market data access.
@@ -2141,8 +2141,9 @@ Be concise, direct, and reference the specific data above when answering."""
                     "messages": ollama_messages,
                     "stream": False,
                     "options": {
-                        "num_ctx": 4096 if complexity == "deep" else 2048,  # More context for deep queries
-                        "temperature": 0.7
+                        "num_ctx": 2048,  # Fixed at 2048 for 4GB VRAM stability
+                        "temperature": 0.7,
+                        "num_predict": 512  # Limit output tokens
                     }
                 }
                 
