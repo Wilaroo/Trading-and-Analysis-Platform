@@ -2490,10 +2490,10 @@ async def get_portfolio(source: str = "auto"):
                     for pos in ib_positions:
                         symbol = pos.get("symbol", "")
                         shares = pos.get("position", 0) or pos.get("qty", 0)  # IB uses 'position' field
-                        avg_cost = pos.get("avgCost", 0)
+                        avg_cost = pos.get("avg_cost", 0) or pos.get("avgCost", 0)
                         
                         # Get current price from pushed quotes or position data
-                        current_price = pos.get("marketPrice", 0)
+                        current_price = pos.get("market_price", 0) or pos.get("marketPrice", 0)
                         if not current_price and symbol in quotes:
                             q = quotes[symbol]
                             current_price = q.get("last") or q.get("close") or avg_cost
@@ -2503,6 +2503,11 @@ async def get_portfolio(source: str = "auto"):
                         gain_loss = market_value - cost_basis
                         gain_loss_pct = (gain_loss / cost_basis * 100) if cost_basis else 0
                         
+                        # Get unrealized P&L from position or calculate it
+                        unrealized_pnl = pos.get("unrealized_pnl", 0) or pos.get("unrealizedPNL", 0)
+                        if unrealized_pnl == 0 and gain_loss != 0:
+                            unrealized_pnl = gain_loss
+                        
                         positions.append({
                             "symbol": symbol,
                             "shares": shares,
@@ -2511,8 +2516,8 @@ async def get_portfolio(source: str = "auto"):
                             "market_value": round(market_value, 2),
                             "gain_loss": round(gain_loss, 2),
                             "gain_loss_percent": round(gain_loss_pct, 2),
-                            "unrealized_pnl": round(pos.get("unrealizedPNL", 0), 2),
-                            "realized_pnl": round(pos.get("realizedPNL", 0), 2),
+                            "unrealized_pnl": round(unrealized_pnl, 2),
+                            "realized_pnl": round(pos.get("realized_pnl", 0) or pos.get("realizedPNL", 0), 2),
                             "source": "ib_gateway"
                         })
                         
