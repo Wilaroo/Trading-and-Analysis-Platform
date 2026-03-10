@@ -185,6 +185,16 @@ class TapeReading:
     tape_score: float  # -1 to 1, negative = bearish, positive = bullish
     confirmation_for_long: bool
     confirmation_for_short: bool
+    
+    # Level 2 data (if available)
+    l2_available: bool = False
+    l2_imbalance: float = 0.0
+    l2_bid_depth: int = 0
+    l2_ask_depth: int = 0
+    
+    # Monitoring: Would L2-based gate have blocked this?
+    l2_gate_would_pass_long: bool = True
+    l2_gate_would_pass_short: bool = True
 
 
 @dataclass
@@ -1042,7 +1052,7 @@ class EnhancedBackgroundScanner:
     # ==================== TAPE READING ====================
     
     async def _get_tape_reading(self, symbol: str, snapshot) -> TapeReading:
-        """Analyze tape for confirmation signals"""
+        """Analyze tape for confirmation signals, incorporating Level 2 if available"""
         try:
             quote = await self.alpaca_service.get_quote(symbol)
             
@@ -1054,6 +1064,29 @@ class EnhancedBackgroundScanner:
             spread = ask_price - bid_price
             spread_pct = (spread / snapshot.current_price) * 100 if snapshot.current_price > 0 else 0
             
+            # Try to get Level 2 data from IB pusher
+            l2_imbalance = None
+            l2_bid_depth = 0
+            l2_ask_depth = 0
+            l2_available = False
+            
+            try:
+                from routers.ib import get_level2_for_symbol
+                l2_data = get_level2_for_symbol(symbol)
+                if l2_data:
+                    l2_available = True
+                    l2_imbalance = l2_data.get("imbalance", 0.0)
+                    l2_bid_depth = l2_data.get("bid_total_size", 0)
+                    l2_ask_depth = l2_data.get("ask_total_size", 0)
+                    
+                    # Override bid/ask sizes with L2 depth (more accurate)
+                    if l2_bid_depth > 0:
+                        bid_size = l2_bid_depth
+                    if l2_ask_depth > 0:
+                        ask_size = l2_ask_depth
+            except Exception as e:
+                logger.debug(f"L2 not available for {symbol}: {e}")
+            
             # Spread signal
             if spread_pct < 0.05:
                 spread_signal = TapeSignal.TIGHT_SPREAD
@@ -1062,9 +1095,12 @@ class EnhancedBackgroundScanner:
             else:
                 spread_signal = TapeSignal.NEUTRAL
             
-            # Order imbalance
-            total_size = bid_size + ask_size
-            imbalance = (bid_size - ask_size) / total_size if total_size > 0 else 0
+            # Order imbalance - prefer L2 if available
+            if l2_imbalance is not None:
+                imbalance = l2_imbalance
+            else:
+                total_size = bid_size + ask_size
+                imbalance = (bid_size - ask_size) / total_size if total_size > 0 else 0
             
             if imbalance > 0.3:
                 imbalance_signal = TapeSignal.STRONG_BID
@@ -1109,6 +1145,17 @@ class EnhancedBackgroundScanner:
             else:
                 overall_signal = TapeSignal.NEUTRAL
             
+            # L2 Gate monitoring (not enforced yet, just tracked)
+            # Gate would pass for LONG if: imbalance > 0 (more bids than asks)
+            # Gate would pass for SHORT if: imbalance < 0 (more asks than bids)
+            l2_gate_would_pass_long = True
+            l2_gate_would_pass_short = True
+            
+            if l2_available:
+                # Stricter L2 gate: require positive imbalance for longs
+                l2_gate_would_pass_long = l2_imbalance > 0.1  # At least 10% more bids
+                l2_gate_would_pass_short = l2_imbalance < -0.1  # At least 10% more asks
+            
             return TapeReading(
                 symbol=symbol,
                 timestamp=datetime.now(timezone.utc).isoformat(),
@@ -1127,7 +1174,13 @@ class EnhancedBackgroundScanner:
                 overall_signal=overall_signal,
                 tape_score=tape_score,
                 confirmation_for_long=tape_score > 0.2,
-                confirmation_for_short=tape_score < -0.2
+                confirmation_for_short=tape_score < -0.2,
+                l2_available=l2_available,
+                l2_imbalance=l2_imbalance if l2_imbalance else 0.0,
+                l2_bid_depth=l2_bid_depth,
+                l2_ask_depth=l2_ask_depth,
+                l2_gate_would_pass_long=l2_gate_would_pass_long,
+                l2_gate_would_pass_short=l2_gate_would_pass_short
             )
             
         except Exception as e:

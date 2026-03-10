@@ -47,6 +47,7 @@ class IBDataPusher:
         self.ib = IB()
         self.running = False
         self.subscribed_contracts: Dict[str, Contract] = {}
+        self.depth_subscriptions: Dict[str, int] = {}  # symbol -> reqId for L2
         self.last_push_time = 0
         self.push_interval = 1.0  # Push every 1 second
         
@@ -54,6 +55,7 @@ class IBDataPusher:
         self.quotes_buffer: Dict[str, dict] = {}
         self.account_data: dict = {}
         self.positions_data: List[dict] = []
+        self.level2_buffer: Dict[str, dict] = {}  # Level 2 / DOM data
         
     def connect(self) -> bool:
         """Connect to local IB Gateway"""
@@ -76,6 +78,7 @@ class IBDataPusher:
                 self.ib.accountValueEvent += self.on_account_value
                 self.ib.positionEvent += self.on_position
                 self.ib.errorEvent += self.on_error
+                self.ib.updateMktDepthEvent += self.on_market_depth
                 
                 return True
             else:
@@ -149,8 +152,72 @@ class IBDataPusher:
             logger.debug(f"IB Info [{errorCode}]: {errorString}")
         elif errorCode in [10089, 354, 10090]:  # Market data subscription — using delayed data
             logger.debug(f"IB Market Data [{errorCode}]: Using delayed data for {contract.symbol if contract else 'unknown'}")
+        elif errorCode in [10092, 10182]:  # Deep market data not available
+            logger.debug(f"IB L2 [{errorCode}]: {errorString} for {contract.symbol if contract else 'unknown'}")
         else:
             logger.warning(f"IB Error [{errorCode}]: {errorString}")
+    
+    def on_market_depth(self, ticker, position: int, marketMaker: str, 
+                        operation: int, side: int, price: float, size: int):
+        """
+        Handle Level 2 / DOM updates.
+        
+        Args:
+            ticker: The ticker object
+            position: Row position in order book (0 = best bid/ask)
+            marketMaker: Market maker ID (for NASDAQ)
+            operation: 0=insert, 1=update, 2=delete
+            side: 0=ask, 1=bid
+            price: Price level
+            size: Size at this level
+        """
+        try:
+            if not ticker.contract:
+                return
+                
+            symbol = ticker.contract.symbol
+            
+            # Initialize L2 structure if needed
+            if symbol not in self.level2_buffer:
+                self.level2_buffer[symbol] = {
+                    "symbol": symbol,
+                    "bids": [],  # List of [price, size] sorted by price desc
+                    "asks": [],  # List of [price, size] sorted by price asc
+                    "timestamp": datetime.now().isoformat(),
+                    "bid_total_size": 0,
+                    "ask_total_size": 0,
+                    "imbalance": 0.0  # Positive = more bids (bullish)
+                }
+            
+            l2 = self.level2_buffer[symbol]
+            book = l2["bids"] if side == 1 else l2["asks"]
+            
+            # Ensure we have enough rows
+            while len(book) <= position:
+                book.append([0.0, 0])
+            
+            if operation == 2:  # Delete
+                book[position] = [0.0, 0]
+            else:  # Insert or Update
+                book[position] = [price, size]
+            
+            # Recalculate totals (top 5 levels)
+            l2["bids"] = [b for b in l2["bids"] if b[0] > 0][:5]
+            l2["asks"] = [a for a in l2["asks"] if a[0] > 0][:5]
+            l2["bid_total_size"] = sum(b[1] for b in l2["bids"])
+            l2["ask_total_size"] = sum(a[1] for a in l2["asks"])
+            
+            # Calculate imbalance: (bid_size - ask_size) / (bid_size + ask_size)
+            total = l2["bid_total_size"] + l2["ask_total_size"]
+            if total > 0:
+                l2["imbalance"] = (l2["bid_total_size"] - l2["ask_total_size"]) / total
+            else:
+                l2["imbalance"] = 0.0
+            
+            l2["timestamp"] = datetime.now().isoformat()
+            
+        except Exception as e:
+            logger.error(f"L2 update error: {e}")
     
     def subscribe_market_data(self, symbols: List[str]):
         """Subscribe to real-time market data (skips symbols without live subscriptions)"""
@@ -169,9 +236,54 @@ class IBDataPusher:
             except Exception as e:
                 logger.error(f"  Failed to subscribe {symbol}: {e}")
     
+    def subscribe_level2(self, symbols: List[str], num_rows: int = 5):
+        """
+        Subscribe to Level 2 / DOM data for specified symbols.
+        Only subscribe to in-play stocks to minimize data volume.
+        
+        Args:
+            symbols: List of stock symbols
+            num_rows: Number of price levels to track (default 5)
+        """
+        for symbol in symbols:
+            try:
+                if symbol in self.depth_subscriptions:
+                    logger.debug(f"  Already subscribed to L2: {symbol}")
+                    continue
+                
+                if symbol == "VIX":
+                    continue  # VIX doesn't have L2
+                
+                contract = Stock(symbol, "SMART", "USD")
+                self.ib.qualifyContracts(contract)
+                
+                # Request market depth (Level 2)
+                ticker = self.ib.reqMktDepth(contract, numRows=num_rows)
+                if ticker:
+                    self.depth_subscriptions[symbol] = id(ticker)
+                    logger.info(f"  L2 Subscribed: {symbol} ({num_rows} levels)")
+                    
+            except Exception as e:
+                logger.error(f"  Failed to subscribe L2 {symbol}: {e}")
+    
+    def unsubscribe_level2(self, symbols: List[str]):
+        """Unsubscribe from Level 2 data to free up resources"""
+        for symbol in symbols:
+            try:
+                if symbol in self.depth_subscriptions:
+                    if symbol in self.subscribed_contracts:
+                        contract = self.subscribed_contracts[symbol]
+                        self.ib.cancelMktDepth(contract)
+                    del self.depth_subscriptions[symbol]
+                    if symbol in self.level2_buffer:
+                        del self.level2_buffer[symbol]
+                    logger.info(f"  L2 Unsubscribed: {symbol}")
+            except Exception as e:
+                logger.error(f"  Failed to unsubscribe L2 {symbol}: {e}")
+    
     def push_data_to_cloud(self):
         """Push buffered data to cloud backend (synchronous)"""
-        if not self.quotes_buffer and not self.account_data and not self.positions_data:
+        if not self.quotes_buffer and not self.account_data and not self.positions_data and not self.level2_buffer:
             return
             
         payload = {
@@ -179,7 +291,8 @@ class IBDataPusher:
             "source": "ib_gateway",
             "quotes": self.quotes_buffer.copy(),
             "account": self.account_data.copy(),
-            "positions": self.positions_data.copy()
+            "positions": self.positions_data.copy(),
+            "level2": self.level2_buffer.copy()  # Add Level 2 data
         }
         
         try:
@@ -192,7 +305,8 @@ class IBDataPusher:
             if response.status_code == 200:
                 result = response.json()
                 if result.get("success"):
-                    logger.debug(f"Pushed {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions")
+                    l2_count = len(self.level2_buffer)
+                    logger.debug(f"Pushed {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions, {l2_count} L2")
             else:
                 logger.warning(f"Push failed: HTTP {response.status_code}")
                         
@@ -211,7 +325,44 @@ class IBDataPusher:
         except Exception as e:
             logger.error(f"Account update request error: {e}")
     
-    def run(self, symbols: List[str] = None):
+    def fetch_inplay_stocks(self) -> List[str]:
+        """Fetch current in-play stocks from cloud backend for L2 subscription"""
+        try:
+            response = requests.get(
+                f"{self.cloud_url}/api/ib/inplay-stocks",
+                timeout=5
+            )
+            if response.status_code == 200:
+                result = response.json()
+                return result.get("symbols", [])
+        except Exception as e:
+            logger.debug(f"Could not fetch in-play stocks: {e}")
+        return []
+    
+    def update_level2_subscriptions(self):
+        """Dynamically update L2 subscriptions based on in-play stocks"""
+        inplay = self.fetch_inplay_stocks()
+        
+        if not inplay:
+            return
+        
+        current_l2 = set(self.depth_subscriptions.keys())
+        new_inplay = set(inplay)
+        
+        # Subscribe to new in-play stocks
+        to_subscribe = new_inplay - current_l2
+        if to_subscribe:
+            logger.info(f"Adding L2 for: {list(to_subscribe)}")
+            self.subscribe_level2(list(to_subscribe))
+        
+        # Unsubscribe from stocks no longer in-play (keep core symbols)
+        core_symbols = {"SPY", "QQQ", "IWM"}
+        to_unsubscribe = current_l2 - new_inplay - core_symbols
+        if to_unsubscribe:
+            logger.info(f"Removing L2 for: {list(to_unsubscribe)}")
+            self.unsubscribe_level2(list(to_unsubscribe))
+    
+    def run(self, symbols: List[str] = None, enable_level2: bool = True):
         """Main run loop (fully synchronous)"""
         if symbols is None:
             symbols = ["VIX", "SPY", "QQQ", "IWM"]
@@ -223,14 +374,23 @@ class IBDataPusher:
         logger.info("Starting data push loop...")
         logger.info(f"  Cloud URL: {self.cloud_url}")
         logger.info(f"  Symbols: {symbols}")
+        logger.info(f"  Level 2: {'Enabled' if enable_level2 else 'Disabled'}")
         
         # Subscribe to market data
         self.subscribe_market_data(symbols)
+        
+        # Subscribe to Level 2 for core symbols
+        if enable_level2:
+            core_l2 = [s for s in symbols if s != "VIX"]
+            self.subscribe_level2(core_l2)
         
         # Request account updates
         self.request_account_updates()
         
         push_count = 0
+        l2_update_interval = 30  # Check for in-play changes every 30 seconds
+        last_l2_update = 0
+        
         try:
             while self.running:
                 # Let ib_insync process events (sync — no event loop conflict)
@@ -242,8 +402,15 @@ class IBDataPusher:
                     self.push_data_to_cloud()
                     self.last_push_time = current_time
                     push_count += 1
+                    
                     if push_count % 30 == 0:
-                        logger.info(f"Running... {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions")
+                        l2_count = len(self.level2_buffer)
+                        logger.info(f"Running... {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions, {l2_count} L2")
+                
+                # Update L2 subscriptions based on in-play stocks
+                if enable_level2 and (current_time - last_l2_update >= l2_update_interval):
+                    self.update_level2_subscriptions()
+                    last_l2_update = current_time
                     
         except KeyboardInterrupt:
             logger.info("Shutting down...")
@@ -264,6 +431,7 @@ def main():
     parser.add_argument("--ib-port", type=int, default=4002, help="IB Gateway port")
     parser.add_argument("--client-id", type=int, default=10, help="IB client ID")
     parser.add_argument("--symbols", nargs="+", default=["VIX", "SPY", "QQQ", "IWM"], help="Symbols to subscribe")
+    parser.add_argument("--no-level2", action="store_true", help="Disable Level 2 / DOM data")
     
     args = parser.parse_args()
     
@@ -273,6 +441,7 @@ def main():
     print(f"  Cloud URL: {args.cloud_url}")
     print(f"  IB Gateway: {args.ib_host}:{args.ib_port}")
     print(f"  Symbols: {args.symbols}")
+    print(f"  Level 2: {'Disabled' if args.no_level2 else 'Enabled'}")
     print("=" * 50)
     
     pusher = IBDataPusher(
@@ -282,7 +451,7 @@ def main():
         client_id=args.client_id
     )
     
-    pusher.run(symbols=args.symbols)
+    pusher.run(symbols=args.symbols, enable_level2=not args.no_level2)
 
 
 if __name__ == "__main__":
