@@ -11,7 +11,13 @@ echo.
 :: =====================================================
 :: CONFIGURATION
 :: =====================================================
+:: GitHub repo for auto-updates
+set GITHUB_RAW=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents
+
+:: Cloud platform URL
 set CLOUD_URL=https://local-ai-trading.preview.emergentagent.com
+
+:: Script directory (where this bat file is located)
 set SCRIPT_DIR=%~dp0
 
 :: IB Gateway settings
@@ -22,16 +28,16 @@ set IB_SYMBOLS=VIX SPY QQQ IWM DIA XOM CVX CF NTR NVDA AAPL MSFT TSLA AMD
 set OLLAMA_MODEL_OVERRIDE=
 
 :: =====================================================
-:: STEP 1: AUTO-UPDATE SCRIPTS FROM CLOUD
+:: STEP 1: AUTO-UPDATE FROM GITHUB
 :: =====================================================
-echo [1/8] Checking for script updates from cloud...
+echo [1/8] Checking for updates from GitHub...
 
-:: Update StartTrading.bat
-curl -s -f "%CLOUD_URL%/api/scripts/StartTrading.bat" > "%TEMP%\StartTrading_new.bat" 2>nul
+:: Update StartTrading.bat itself
+curl -s -f "%GITHUB_RAW%/StartTrading.bat" > "%TEMP%\StartTrading_new.bat" 2>nul
 if %errorlevel%==0 (
     fc /b "%~f0" "%TEMP%\StartTrading_new.bat" >nul 2>&1
     if errorlevel 1 (
-        echo       New version found! Updating...
+        echo       [UPDATE] New StartTrading.bat found!
         copy /y "%TEMP%\StartTrading_new.bat" "%~f0" >nul
         del "%TEMP%\StartTrading_new.bat" 2>nul
         echo       Restarting with updated script...
@@ -39,34 +45,38 @@ if %errorlevel%==0 (
         start "" "%~f0"
         exit
     ) else (
-        echo       StartTrading.bat is up to date!
+        echo       StartTrading.bat: Up to date
     )
 ) else (
-    echo       Could not check for updates (using local version)
+    echo       StartTrading.bat: Using local (GitHub unreachable)
 )
 del "%TEMP%\StartTrading_new.bat" 2>nul
 
-:: Update ollama_http.py (stable HTTP proxy)
-curl -s -f "%CLOUD_URL%/api/scripts/ollama_http.py" > "%SCRIPT_DIR%ollama_http.py" 2>nul
+:: Update ollama_http.py
+curl -s -f "%GITHUB_RAW%/ollama_http.py" > "%SCRIPT_DIR%ollama_http.py.tmp" 2>nul
 if %errorlevel%==0 (
-    echo       ollama_http.py updated!
+    move /y "%SCRIPT_DIR%ollama_http.py.tmp" "%SCRIPT_DIR%ollama_http.py" >nul
+    echo       ollama_http.py: Updated
 ) else (
-    echo       ollama_http.py: using local version
+    del "%SCRIPT_DIR%ollama_http.py.tmp" 2>nul
+    echo       ollama_http.py: Using local
 )
 
 :: Update ib_data_pusher.py
-curl -s -f "%CLOUD_URL%/api/scripts/ib_data_pusher.py" > "%SCRIPT_DIR%ib_data_pusher.py" 2>nul
+curl -s -f "%GITHUB_RAW%/ib_data_pusher.py" > "%SCRIPT_DIR%ib_data_pusher.py.tmp" 2>nul
 if %errorlevel%==0 (
-    echo       ib_data_pusher.py updated!
+    move /y "%SCRIPT_DIR%ib_data_pusher.py.tmp" "%SCRIPT_DIR%ib_data_pusher.py" >nul
+    echo       ib_data_pusher.py: Updated
 ) else (
-    echo       ib_data_pusher.py: using local version
+    del "%SCRIPT_DIR%ib_data_pusher.py.tmp" 2>nul
+    echo       ib_data_pusher.py: Using local
 )
 echo.
 
 :: =====================================================
 :: STEP 2: DETECT COMPUTER AND GPU
 :: =====================================================
-echo [2/8] Detecting computer and GPU...
+echo [2/8] Detecting system...
 
 :: Get computer name
 set COMPUTER_NAME=%COMPUTERNAME%
@@ -89,39 +99,51 @@ echo       VRAM: %GPU_VRAM% MB
 :: STEP 3: SELECT OPTIMAL MODEL BASED ON GPU
 :: =====================================================
 echo.
-echo [3/8] Selecting optimal AI model...
+echo [3/8] Selecting AI model for your GPU...
 
 if defined OLLAMA_MODEL_OVERRIDE (
-    set OLLAMA_MODEL=%OLLAMA_MODEL_OVERRIDE%
-    echo       Using override: %OLLAMA_MODEL%
-) else (
-    :: Auto-select based on VRAM
-    :: 16GB+ VRAM: Use deepseek-r1:8b or qwen2.5:14b (best quality)
-    :: 8-16GB VRAM: Use qwen2.5:7b (good balance)
-    :: 6-8GB VRAM: Use qwen2.5:7b with some CPU offload
-    :: 4-6GB VRAM: Use gemma3:4b or qwen2.5:3b
-    :: <4GB VRAM: Use qwen2.5:1.5b
-    
-    if %GPU_VRAM% GEQ 16000 (
-        set OLLAMA_MODEL=deepseek-r1:8b
-        echo       16GB+ VRAM - Using deepseek-r1:8b (best reasoning)
-    ) else if %GPU_VRAM% GEQ 12000 (
-        set OLLAMA_MODEL=qwen2.5:14b
-        echo       12GB+ VRAM - Using qwen2.5:14b (excellent)
-    ) else if %GPU_VRAM% GEQ 8000 (
-        set OLLAMA_MODEL=qwen2.5:7b
-        echo       8GB+ VRAM - Using qwen2.5:7b (great balance)
-    ) else if %GPU_VRAM% GEQ 6000 (
-        set OLLAMA_MODEL=qwen2.5:7b
-        echo       6GB+ VRAM - Using qwen2.5:7b (with CPU assist)
-    ) else if %GPU_VRAM% GEQ 4000 (
-        set OLLAMA_MODEL=gemma3:4b
-        echo       4GB+ VRAM - Using gemma3:4b (efficient)
-    ) else (
-        set OLLAMA_MODEL=qwen2.5:1.5b
-        echo       Low VRAM - Using qwen2.5:1.5b (lightweight)
+    if not "%OLLAMA_MODEL_OVERRIDE%"=="" (
+        set OLLAMA_MODEL=%OLLAMA_MODEL_OVERRIDE%
+        echo       Using override: %OLLAMA_MODEL%
+        goto model_selected
     )
 )
+
+:: Auto-select based on VRAM
+:: 16GB+ : deepseek-r1:8b (best reasoning for trading)
+:: 12-16GB: qwen2.5:14b (excellent quality)
+:: 8-12GB : qwen2.5:7b (great balance)
+:: 6-8GB  : qwen2.5:7b (with CPU assist)
+:: 4-6GB  : gemma3:4b (efficient)
+:: <4GB   : qwen2.5:1.5b (lightweight)
+
+if %GPU_VRAM% GEQ 16000 (
+    set OLLAMA_MODEL=deepseek-r1:8b
+    echo       16GB+ VRAM detected
+    echo       Selected: deepseek-r1:8b (best reasoning)
+) else if %GPU_VRAM% GEQ 12000 (
+    set OLLAMA_MODEL=qwen2.5:14b
+    echo       12GB+ VRAM detected
+    echo       Selected: qwen2.5:14b (excellent)
+) else if %GPU_VRAM% GEQ 8000 (
+    set OLLAMA_MODEL=qwen2.5:7b
+    echo       8GB+ VRAM detected
+    echo       Selected: qwen2.5:7b (great balance)
+) else if %GPU_VRAM% GEQ 6000 (
+    set OLLAMA_MODEL=qwen2.5:7b
+    echo       6GB+ VRAM detected
+    echo       Selected: qwen2.5:7b (with CPU assist)
+) else if %GPU_VRAM% GEQ 4000 (
+    set OLLAMA_MODEL=gemma3:4b
+    echo       4GB+ VRAM detected
+    echo       Selected: gemma3:4b (efficient)
+) else (
+    set OLLAMA_MODEL=qwen2.5:1.5b
+    echo       Low VRAM detected
+    echo       Selected: qwen2.5:1.5b (lightweight)
+)
+
+:model_selected
 echo.
 
 :: =====================================================
@@ -135,18 +157,18 @@ if %errorlevel%==0 (
 ) else (
     echo       Starting Ollama server...
     start "Ollama Server" cmd /k "set OLLAMA_HOST=0.0.0.0 && set OLLAMA_ORIGINS=* && ollama serve"
-    echo       Waiting for Ollama to start...
+    echo       Waiting for startup...
     timeout /t 8 /nobreak >nul
 )
 
 :: Pre-load model to GPU
-echo       Pre-loading %OLLAMA_MODEL% to GPU...
+echo       Loading %OLLAMA_MODEL% to GPU...
 curl -s -X POST http://localhost:11434/api/generate -d "{\"model\":\"%OLLAMA_MODEL%\",\"prompt\":\"hi\",\"stream\":false}" >nul 2>&1
 if %errorlevel%==0 (
-    echo       Model loaded and ready!
+    echo       Model ready!
 ) else (
     echo       Model will load on first use
-    echo       (If missing, run: ollama pull %OLLAMA_MODEL%)
+    echo       (Run: ollama pull %OLLAMA_MODEL%)
 )
 echo.
 
@@ -157,11 +179,11 @@ echo [5/8] Starting IB Gateway...
 
 if exist "%IB_GATEWAY_PATH%" (
     start "" "%IB_GATEWAY_PATH%"
-    echo       Waiting for IB Gateway to load...
+    echo       Waiting for IB Gateway...
     timeout /t 12 /nobreak >nul
 
     :: Auto-login
-    echo       Entering login credentials...
+    echo       Logging in...
     (
     echo Set WshShell = CreateObject^("WScript.Shell"^)
     echo WScript.Sleep 2000
@@ -178,7 +200,7 @@ if exist "%IB_GATEWAY_PATH%" (
     cscript //nologo "%TEMP%\ib_login.vbs"
     del "%TEMP%\ib_login.vbs" 2>nul
 
-    :: Wait and dismiss warnings
+    :: Dismiss warnings
     timeout /t 10 /nobreak >nul
     (
     echo Set WshShell = CreateObject^("WScript.Shell"^)
@@ -193,8 +215,8 @@ if exist "%IB_GATEWAY_PATH%" (
     del "%TEMP%\ib_dismiss.vbs" 2>nul
     echo       IB Gateway ready!
 ) else (
-    echo       [SKIP] IB Gateway not found
-    echo       Path: %IB_GATEWAY_PATH%
+    echo       [SKIP] IB Gateway not found at:
+    echo              %IB_GATEWAY_PATH%
 )
 echo.
 
@@ -216,9 +238,8 @@ if errorlevel 1 (
 )
 
 if exist "%SCRIPT_DIR%ib_data_pusher.py" (
-    timeout /t 5 /nobreak >nul
-    start "IB Data Pusher" cmd /k "title IB Data Pusher - KEEP OPEN && color 0B && echo ============================== && echo   IB Data Pusher Running && echo   Cloud: %CLOUD_URL% && echo   Symbols: %IB_SYMBOLS% && echo ============================== && python "%SCRIPT_DIR%ib_data_pusher.py" --cloud-url %CLOUD_URL% --symbols %IB_SYMBOLS%"
     timeout /t 3 /nobreak >nul
+    start "IB Data Pusher" cmd /k "title IB Data Pusher && color 0B && echo ============================== && echo   IB Data Pusher Running && echo   Cloud: %CLOUD_URL% && echo   Symbols: %IB_SYMBOLS% && echo ============================== && python "%SCRIPT_DIR%ib_data_pusher.py" --cloud-url %CLOUD_URL% --symbols %IB_SYMBOLS%"
     echo       IB Data Pusher started!
 ) else (
     echo       [SKIP] ib_data_pusher.py not found
@@ -226,9 +247,9 @@ if exist "%SCRIPT_DIR%ib_data_pusher.py" (
 echo.
 
 :: =====================================================
-:: STEP 7: START OLLAMA HTTP PROXY (STABLE!)
+:: STEP 7: START OLLAMA HTTP PROXY
 :: =====================================================
-echo [7/8] Starting Ollama HTTP Proxy (Stable Connection)...
+echo [7/8] Starting Ollama HTTP Proxy...
 
 :: Check dependencies
 python -c "import httpx" >nul 2>&1
@@ -238,109 +259,11 @@ if errorlevel 1 (
 )
 
 if exist "%SCRIPT_DIR%ollama_http.py" (
-    start "Ollama HTTP Proxy" cmd /k "title Ollama AI Proxy - KEEP OPEN && color 0D && echo ============================================ && echo   Ollama HTTP Proxy (Stable) && echo   Cloud: %CLOUD_URL% && echo   Model: %OLLAMA_MODEL% && echo   Connection: HTTP Polling (no disconnects!) && echo ============================================ && python "%SCRIPT_DIR%ollama_http.py""
-    timeout /t 3 /nobreak >nul
-    echo       Ollama HTTP Proxy started!
+    start "Ollama HTTP Proxy" cmd /k "title Ollama AI Proxy && color 0D && echo ============================================ && echo   Ollama HTTP Proxy (Stable) && echo   Cloud: %CLOUD_URL% && echo   Model: %OLLAMA_MODEL% && echo   No disconnects - HTTP polling! && echo ============================================ && python "%SCRIPT_DIR%ollama_http.py""
+    echo       Ollama Proxy started!
 ) else (
-    echo       [ERROR] ollama_http.py not found!
-    echo       Creating it now...
-    (
-    echo import asyncio, json, subprocess, sys, logging, time
-    echo from datetime import datetime
-    echo logging.basicConfig^(level=logging.INFO, format='%%(asctime)s [%%(levelname)s] %%(message)s', datefmt='%%H:%%M:%%S'^)
-    echo logger = logging.getLogger^(__name__^)
-    echo try:
-    echo     import httpx
-    echo except ImportError:
-    echo     subprocess.check_call^([sys.executable, "-m", "pip", "install", "httpx"]^)
-    echo     import httpx
-    echo CLOUD_URL = "%CLOUD_URL%"
-    echo OLLAMA_URL = "http://localhost:11434"
-    echo class OllamaProxyHTTP:
-    echo     def __init__^(self^):
-    echo         self.session_id = f"proxy_{int^(time.time^(^)^)}_{id^(self^)}"
-    echo     async def check_ollama^(self^):
-    echo         try:
-    echo             async with httpx.AsyncClient^(timeout=5.0^) as client:
-    echo                 r = await client.get^(f"{OLLAMA_URL}/api/tags"^)
-    echo                 if r.status_code == 200:
-    echo                     return {"available": True, "models": [m['name'] for m in r.json^(^).get^('models', []^)]}
-    echo         except Exception as e:
-    echo             logger.error^(f"Ollama check failed: {e}"^)
-    echo         return {"available": False, "models": []}
-    echo     async def call_ollama^(self, request^):
-    echo         try:
-    echo             async with httpx.AsyncClient^(timeout=180.0^) as client:
-    echo                 r = await client.post^(f"{OLLAMA_URL}/api/chat", json=request^)
-    echo                 if r.status_code == 200:
-    echo                     return {"success": True, "response": r.json^(^)}
-    echo         except Exception as e:
-    echo             return {"success": False, "error": str^(e^)}
-    echo         return {"success": False, "error": "Failed"}
-    echo     async def register^(self^):
-    echo         try:
-    echo             status = await self.check_ollama^(^)
-    echo             async with httpx.AsyncClient^(timeout=10.0^) as client:
-    echo                 r = await client.post^(f"{CLOUD_URL}/api/ollama-proxy/register", json={"session_id": self.session_id, "ollama_status": status, "timestamp": datetime.now^(^).isoformat^(^)}^)
-    echo                 if r.status_code == 200:
-    echo                     logger.info^(f"REGISTERED! Models: {status['models']}"^)
-    echo                     return True
-    echo         except Exception as e:
-    echo             logger.error^(f"Registration error: {e}"^)
-    echo         return False
-    echo     async def poll^(self^):
-    echo         try:
-    echo             async with httpx.AsyncClient^(timeout=30.0^) as client:
-    echo                 r = await client.get^(f"{CLOUD_URL}/api/ollama-proxy/poll", params={"session_id": self.session_id}^)
-    echo                 if r.status_code == 200:
-    echo                     return r.json^(^).get^("requests", []^)
-    echo         except:
-    echo             pass
-    echo         return []
-    echo     async def respond^(self, rid, result^):
-    echo         try:
-    echo             async with httpx.AsyncClient^(timeout=10.0^) as client:
-    echo                 await client.post^(f"{CLOUD_URL}/api/ollama-proxy/response", json={"session_id": self.session_id, "request_id": rid, "result": result}^)
-    echo         except:
-    echo             pass
-    echo     async def heartbeat^(self^):
-    echo         while True:
-    echo             try:
-    echo                 async with httpx.AsyncClient^(timeout=5.0^) as client:
-    echo                     await client.post^(f"{CLOUD_URL}/api/ollama-proxy/heartbeat", json={"session_id": self.session_id, "ollama_status": await self.check_ollama^(^)}^)
-    echo             except:
-    echo                 pass
-    echo             await asyncio.sleep^(10^)
-    echo     async def run^(self^):
-    echo         while not await self.register^(^):
-    echo             await asyncio.sleep^(5^)
-    echo         asyncio.create_task^(self.heartbeat^(^)^)
-    echo         logger.info^("READY - Waiting for AI requests..."^)
-    echo         while True:
-    echo             for req in await self.poll^(^):
-    echo                 rid = req.get^("request_id"^)
-    echo                 logger.info^(f">>> Processing: {rid}"^)
-    echo                 result = await self.call_ollama^(req.get^("request", {}^)^)
-    echo                 logger.info^(f"<<< Done: {rid} {'OK' if result.get^('success'^) else 'FAILED'}"^)
-    echo                 await self.respond^(rid, result^)
-    echo             await asyncio.sleep^(1^)
-    echo async def main^(^):
-    echo     print^("=" * 50^)
-    echo     print^("  OLLAMA PROXY ^(Stable HTTP^)"^)
-    echo     print^("=" * 50^)
-    echo     print^(f"  Cloud: {CLOUD_URL}"^)
-    echo     print^("  Keep this window open!"^)
-    echo     print^("=" * 50^)
-    echo     await OllamaProxyHTTP^(^).run^(^)
-    echo if __name__ == "__main__":
-    echo     try:
-    echo         asyncio.run^(main^(^)^)
-    echo     except KeyboardInterrupt:
-    echo         print^("\nStopped."^)
-    ) > "%SCRIPT_DIR%ollama_http.py"
-    echo       Created ollama_http.py!
-    start "Ollama HTTP Proxy" cmd /k "title Ollama AI Proxy - KEEP OPEN && color 0D && python "%SCRIPT_DIR%ollama_http.py""
-    timeout /t 3 /nobreak >nul
+    echo       [ERROR] ollama_http.py not found
+    echo       Download from: %GITHUB_RAW%/ollama_http.py
 )
 echo.
 
@@ -355,7 +278,7 @@ curl -s -f -m 5 "%CLOUD_URL%/api/ollama-proxy/status" > "%TEMP%\proxy_check.tmp"
 if %errorlevel%==0 (
     findstr /C:"\"any_connected\":true" "%TEMP%\proxy_check.tmp" >nul 2>&1
     if %errorlevel%==0 (
-        echo       Ollama Proxy: CONNECTED (using local GPU!)
+        echo       Ollama Proxy: CONNECTED
     ) else (
         echo       Ollama Proxy: Connecting...
     )
@@ -364,29 +287,29 @@ if %errorlevel%==0 (
 )
 del "%TEMP%\proxy_check.tmp" 2>nul
 
-:: Check IB Data Pusher
+:: Check IB
 curl -s -f -m 5 "%CLOUD_URL%/api/ib/status" > "%TEMP%\ib_check.tmp" 2>nul
 if %errorlevel%==0 (
     findstr /C:"\"connected\":true" "%TEMP%\ib_check.tmp" >nul 2>&1
     if %errorlevel%==0 (
         echo       IB Gateway: CONNECTED
     ) else (
-        echo       IB Gateway: Waiting for connection...
+        echo       IB Gateway: Connecting...
     )
 ) else (
-    echo       IB Gateway: Cloud checking...
+    echo       IB Gateway: Waiting...
 )
 del "%TEMP%\ib_check.tmp" 2>nul
 echo.
 
 :: Open browser
-echo       Opening Trading Platform...
+echo       Opening platform...
 timeout /t 2 /nobreak >nul
 start "" "%CLOUD_URL%"
 
 echo.
 echo ============================================
-echo    STARTUP COMPLETE!
+echo           STARTUP COMPLETE!
 echo ============================================
 echo.
 echo    Computer: %COMPUTER_NAME%
@@ -394,15 +317,16 @@ echo    GPU: %GPU_NAME% (%GPU_VRAM% MB)
 echo    AI Model: %OLLAMA_MODEL%
 echo.
 echo    Platform: %CLOUD_URL%
+echo    GitHub: %GITHUB_RAW%
 echo.
-echo    Services:
-echo    [*] Ollama HTTP Proxy - Stable, no disconnects!
-echo    [*] IB Data Pusher - Live market data
-echo    [*] Ollama Server - Local AI on GPU
+echo    Running Services:
+echo    * Ollama Server (local AI)
+echo    * Ollama HTTP Proxy (stable connection)
+echo    * IB Data Pusher (market data)
+echo    * IB Gateway (broker connection)
 echo.
-echo    KEEP ALL WINDOWS OPEN while trading!
+echo    KEEP ALL WINDOWS OPEN!
 echo.
 echo ============================================
 echo.
-echo Press any key to close this window...
-pause >nul
+pause
