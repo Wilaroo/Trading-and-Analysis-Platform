@@ -1,0 +1,141 @@
+{
+  "summary": "Tested Phase 3A & 3B Risk Management APIs. All 27 backend tests passed (100%). Circuit breakers (7 types), TQS-based position sizing, health monitoring, and dynamic thresholds all working correctly. Position sizing verified: entry=$150, stop=$147, account=$100k, TQS=75 gives 66 shares with 1.36x multiplier as expected.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "features_verified": {
+    "circuit_breaker_status": {
+      "status": "PASS",
+      "endpoint": "GET /api/risk/circuit-breakers/status",
+      "details": "Returns all 7 breaker types (daily_loss_dollar, daily_loss_percent, consecutive_losses, trade_frequency, drawdown, tilt_detection, time_restriction) with trading metrics (daily_pnl, daily_high_pnl, consecutive_losses, trades_this_hour)."
+    },
+    "circuit_breaker_configs": {
+      "status": "PASS",
+      "endpoint": "GET /api/risk/circuit-breakers/configs",
+      "details": "Returns configs for all 7 breakers with correct defaults: daily_loss_dollar=-$500, daily_loss_percent=-2%, consecutive_losses=3, trade_frequency=10/hr, drawdown=-5%."
+    },
+    "circuit_breaker_configure": {
+      "status": "PASS",
+      "endpoint": "POST /api/risk/circuit-breakers/{type}/configure",
+      "details": "Successfully updates circuit breaker config (tested with consecutive_losses), persists changes."
+    },
+    "trading_permission_check": {
+      "status": "PASS",
+      "endpoint": "GET /api/risk/circuit-breakers/check-permission",
+      "details": "Returns trading permission with allowed status, max_size_multiplier, triggered_breakers, warnings, requires_override. Low TQS (<50) adds warning, very low TQS (<35) caps size to 50%."
+    },
+    "position_sizing_config": {
+      "status": "PASS",
+      "endpoint": "GET /api/risk/position-sizing/config",
+      "details": "Returns sizing config with mode=tqs_scaled, TQS scaling params (min_score=35, base_score=50, max_score=85, min_multiplier=0.25, max_multiplier=1.5)."
+    },
+    "position_sizing_calculate": {
+      "status": "PASS",
+      "endpoint": "POST /api/risk/position-sizing/calculate",
+      "details": "Calculates position size with TQS multiplier scaling. Test case: entry=$150, stop=$147, account=$100k, TQS=75 → 66 shares with 1.36x multiplier (matches expected)."
+    },
+    "position_sizing_table": {
+      "status": "PASS",
+      "endpoint": "GET /api/risk/position-sizing/table",
+      "details": "Returns scaling table for different TQS scores: 35→0.25x, 50→1.0x, 65→1.21x, 75→1.36x, 85→1.5x."
+    },
+    "threshold_summary": {
+      "status": "PASS",
+      "endpoint": "GET /api/risk/thresholds/summary",
+      "details": "Returns base thresholds (min_tqs_score=50, min_win_rate=0.45, min_tape_score=4, min_expected_value=0.1), regime adjustments, time adjustments, VIX adjustments."
+    },
+    "threshold_calculate": {
+      "status": "PASS",
+      "endpoint": "POST /api/risk/thresholds/calculate",
+      "details": "Calculates dynamic thresholds based on context. Tested: volatile market + high VIX (35) + 2 consecutive losses raises min_tqs_score from 50 to 74."
+    },
+    "threshold_check_trade": {
+      "status": "PASS",
+      "endpoint": "POST /api/risk/thresholds/check-trade",
+      "details": "Checks trade against dynamic thresholds. Returns passes boolean, thresholds_checked, failures, warnings, context_used."
+    },
+    "health_quick_status": {
+      "status": "PASS",
+      "endpoint": "GET /api/risk/health/quick-status",
+      "details": "Returns quick status with can_trade, healthy_count, degraded_count, unhealthy_count, total_components (10 components monitored)."
+    },
+    "health_report": {
+      "status": "PASS",
+      "endpoint": "GET /api/risk/health/report",
+      "details": "Returns full health report with overall_status, components (alpaca, ib_gateway, mongodb, ollama, etc.), data_quality, alerts, recommendations."
+    },
+    "tqs_multiplier_scaling": {
+      "status": "PASS",
+      "details": "Verified TQS multiplier math: TQS 35→0.25x (min), TQS 50→1.0x (base), TQS 85→1.5x (max). Linear interpolation between scores works correctly."
+    },
+    "dynamic_threshold_adjustments": {
+      "status": "PASS",
+      "details": "Thresholds adjust based on: market regime (+8 for volatile), VIX level (+10 for 30-40 range), consecutive losses (+3 per loss), recent performance (+5 for cold streak, -3 for hot streak)."
+    }
+  },
+  "position_sizing_example": {
+    "input": {
+      "entry_price": 150,
+      "stop_price": 147,
+      "account_value": 100000,
+      "tqs_score": 75
+    },
+    "output": {
+      "shares": 66,
+      "dollar_risk": 198,
+      "tqs_multiplier": 1.36,
+      "warning": "Capped at max position 10%"
+    }
+  },
+  "tqs_multiplier_table": {
+    "35": 0.25,
+    "50": 1.0,
+    "65": 1.21,
+    "75": 1.36,
+    "85": 1.5
+  },
+  "circuit_breaker_defaults": {
+    "daily_loss_dollar": {"threshold": -500, "action": "block_all"},
+    "daily_loss_percent": {"threshold": -2.0, "action": "block_all"},
+    "consecutive_losses": {"threshold": 3, "action": "reduce_size", "reduction": "50%"},
+    "trade_frequency": {"threshold": 10, "action": "require_override"},
+    "drawdown": {"threshold": -5.0, "action": "block_all"},
+    "tilt_detection": {"threshold": 1, "action": "reduce_size", "reduction": "50%"},
+    "time_restriction": {"threshold": 0, "action": "warn_only"}
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_risk_management_phase3.py",
+    "/app/test_reports/pytest/pytest_risk_management_phase3.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Circuit breaker service implements 7 breaker types correctly with configurable thresholds and actions",
+    "Position sizer correctly implements TQS multiplier scaling with linear interpolation (0.25x at TQS 35 to 1.5x at TQS 85)",
+    "Dynamic thresholds service properly adjusts min_tqs_score based on market regime, VIX level, and trader performance",
+    "Health monitor tracks 10 components (alpaca, ib_gateway, mongodb, ollama, etc.) with graceful degradation",
+    "All services use singleton pattern with proper dependency injection via set_services()"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_risk_management_phase3.py"
+  ],
+  "success_rate": {
+    "backend": "100% (27/27 tests passed)",
+    "frontend": "N/A (backend-only testing)"
+  },
+  "test_credentials": "None required",
+  "seed_data_creation": "None - services use graceful defaults",
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "mocked_apis_list": []
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phase 3A (Circuit Breakers, Position Sizing, Health Monitoring) and Phase 3B (Dynamic Thresholds) are complete. All risk management APIs working at /api/risk/*. Key formula verified: TQS 75 with entry=$150, stop=$147, account=$100k gives 66 shares with 1.36x multiplier. Health monitor shows IB Gateway and Ollama as unhealthy (expected in cloud environment).",
+  "health_note": "Health monitor shows 4 healthy, 4 degraded, 2 unhealthy components. IB Gateway and Ollama unhealthy is expected in cloud environment. Critical components (alpaca, mongodb, scanner, circuit_breakers) are healthy."
+}

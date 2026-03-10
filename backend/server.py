@@ -54,6 +54,7 @@ from routers.market_intel import router as market_intel_router, init_market_inte
 from routers.research import router as research_router
 from routers.config import router as config_router
 from routers.tqs_router import router as tqs_router
+from routers.risk_router import router as risk_router
 from routers.portfolio_awareness import router as portfolio_awareness_router
 from routers.quick_actions import router as quick_actions_router, init_quick_actions_router
 from routers.sectors import router as sectors_router
@@ -69,6 +70,10 @@ from services.trade_context_service import get_trade_context_service, init_trade
 from services.execution_tracker_service import get_execution_tracker, init_execution_tracker
 from services.graceful_degradation import get_degradation_service, init_degradation_service
 from services.tqs import get_tqs_engine, init_tqs_engine
+from services.circuit_breaker import get_circuit_breaker_service, init_circuit_breaker_service
+from services.position_sizer import get_position_sizer_service, init_position_sizer_service
+from services.health_monitor import get_health_monitor_service, init_health_monitor_service
+from services.dynamic_thresholds import get_dynamic_threshold_service, init_dynamic_threshold_service
 from services.eod_generation_service import get_eod_service
 from services.ib_service import get_ib_service
 from services.news_service import init_news_service
@@ -253,6 +258,7 @@ app.include_router(ev_tracking_router)
 app.include_router(smb_router)
 app.include_router(journal_router)
 app.include_router(tqs_router)
+app.include_router(risk_router)
 
 # Collections
 strategies_col = db["strategies"]
@@ -341,6 +347,43 @@ tqs_engine = init_tqs_engine(
 print("TQS Engine (Phase 2) initialized")
 print(f"  - Pillars: Setup(25%), Technical(25%), Fundamental(15%), Context(20%), Execution(15%)")
 print(f"  - Endpoints: /api/tqs/score, /api/tqs/breakdown, /api/tqs/batch")
+
+# ===================== FAST LEARNING (Phase 3A & 3B) =====================
+# Initialize circuit breakers, position sizing, health monitoring, dynamic thresholds
+
+# 1. Circuit Breaker Service - risk controls
+circuit_breaker_service = init_circuit_breaker_service(
+    learning_loop=learning_loop_service,
+    db=db
+)
+
+# 2. Position Sizer Service - TQS-based sizing
+position_sizer_service = init_position_sizer_service(
+    circuit_breaker=circuit_breaker_service,
+    learning_loop=learning_loop_service
+)
+
+# 3. Dynamic Threshold Service - context-aware gating
+dynamic_threshold_service = init_dynamic_threshold_service(
+    learning_loop=learning_loop_service
+)
+
+# 4. Health Monitor Service - system status
+health_monitor_service = init_health_monitor_service(
+    alpaca_service=alpaca_service,
+    ib_service=ib_service,
+    scanner=background_scanner,
+    tqs_engine=tqs_engine,
+    circuit_breaker=circuit_breaker_service,
+    learning_loop=learning_loop_service,
+    db=db
+)
+
+print("Fast Learning (Phase 3A & 3B) initialized")
+print(f"  - Circuit Breakers: daily_loss, consecutive_losses, trade_frequency, tilt_detection")
+print(f"  - Position Sizing: TQS-scaled, volatility-adjusted, circuit breaker-constrained")
+print(f"  - Dynamic Thresholds: regime-based, time-based, VIX-based")
+print(f"  - Endpoints: /api/risk/circuit-breakers, /api/risk/position-sizing, /api/risk/thresholds")
 
 # ===================== STRATEGY HELPERS =====================
 # Strategies are now stored in MongoDB and accessed via strategy_service
