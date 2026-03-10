@@ -55,6 +55,7 @@ from routers.research import router as research_router
 from routers.config import router as config_router
 from routers.tqs_router import router as tqs_router
 from routers.risk_router import router as risk_router
+from routers.rag_router import router as rag_router
 from routers.portfolio_awareness import router as portfolio_awareness_router
 from routers.quick_actions import router as quick_actions_router, init_quick_actions_router
 from routers.sectors import router as sectors_router
@@ -74,6 +75,7 @@ from services.circuit_breaker import get_circuit_breaker_service, init_circuit_b
 from services.position_sizer import get_position_sizer_service, init_position_sizer_service
 from services.health_monitor import get_health_monitor_service, init_health_monitor_service
 from services.dynamic_thresholds import get_dynamic_threshold_service, init_dynamic_threshold_service
+from services.rag import get_rag_service, init_rag_service
 from services.eod_generation_service import get_eod_service
 from services.ib_service import get_ib_service
 from services.news_service import init_news_service
@@ -259,6 +261,7 @@ app.include_router(smb_router)
 app.include_router(journal_router)
 app.include_router(tqs_router)
 app.include_router(risk_router)
+app.include_router(rag_router)
 
 # Collections
 strategies_col = db["strategies"]
@@ -384,6 +387,20 @@ print(f"  - Circuit Breakers: daily_loss, consecutive_losses, trade_frequency, t
 print(f"  - Position Sizing: TQS-scaled, volatility-adjusted, circuit breaker-constrained")
 print(f"  - Dynamic Thresholds: regime-based, time-based, VIX-based")
 print(f"  - Endpoints: /api/risk/circuit-breakers, /api/risk/position-sizing, /api/risk/thresholds")
+
+# ===================== RAG KNOWLEDGE BASE (Phase 4) =====================
+# Initialize Retrieval-Augmented Generation for personalized AI context
+
+try:
+    rag_service = init_rag_service(db=db, learning_loop=learning_loop_service)
+    print("RAG Knowledge Base (Phase 4) initialized")
+    print(f"  - Vector Store: ChromaDB at /app/backend/data/chromadb")
+    print(f"  - Collections: trade_outcomes, playbooks, patterns, daily_insights")
+    print(f"  - Endpoints: /api/rag/retrieve, /api/rag/augment-prompt, /api/rag/sync")
+except Exception as e:
+    print(f"RAG Knowledge Base initialization deferred: {e}")
+    print("  - Will initialize on first use (embedding model loading)")
+    rag_service = None
 
 # ===================== STRATEGY HELPERS =====================
 # Strategies are now stored in MongoDB and accessed via strategy_service
