@@ -1113,6 +1113,42 @@ class IBService:
             return []
         return response.data or []
     
+    def get_vix(self) -> Optional[Dict]:
+        """
+        Get VIX data - prioritizes pushed data from IB Gateway.
+        Returns dict with price, bid, ask, etc. or None if unavailable.
+        """
+        try:
+            # First try to get from pushed IB data (most reliable when pusher is running)
+            from routers.ib import get_vix_from_pushed_data, is_pusher_connected
+            
+            if is_pusher_connected():
+                vix_data = get_vix_from_pushed_data()
+                if vix_data and vix_data.get("price"):
+                    return vix_data
+            
+            # Fallback: If we have a direct connection, try that
+            if self._connected and self.ib and self.ib.isConnected():
+                from ib_insync import Index
+                contract = Index("VIX", "CBOE")
+                self.ib.qualifyContracts(contract)
+                ticker = self.ib.reqMktData(contract, "", True, False)
+                self.ib.sleep(0.5)
+                
+                if ticker and (ticker.last or ticker.close):
+                    return {
+                        "symbol": "VIX",
+                        "price": ticker.last if ticker.last else ticker.close,
+                        "bid": ticker.bid,
+                        "ask": ticker.ask,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "source": "ib_direct"
+                    }
+        except Exception as e:
+            logger.debug(f"Error getting VIX: {e}")
+        
+        return None
+    
     def shutdown(self):
         """Shutdown the worker thread"""
         if self._worker_thread and self._worker_thread.is_alive():

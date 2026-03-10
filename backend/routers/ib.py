@@ -486,6 +486,59 @@ def get_all_level2_data() -> dict:
     return _pushed_ib_data.get("level2", {})
 
 
+def get_vix_from_pushed_data() -> dict:
+    """
+    Get VIX data from pushed IB data (called by other services).
+    Returns dict with price, change, timestamp or None if not available.
+    """
+    global _pushed_ib_data
+    
+    quotes = _pushed_ib_data.get("quotes", {})
+    vix_data = quotes.get("VIX")
+    
+    if vix_data:
+        return {
+            "symbol": "VIX",
+            "price": vix_data.get("last") or vix_data.get("close"),
+            "bid": vix_data.get("bid"),
+            "ask": vix_data.get("ask"),
+            "high": vix_data.get("high"),
+            "low": vix_data.get("low"),
+            "close": vix_data.get("close"),
+            "timestamp": vix_data.get("timestamp"),
+            "source": "ib_pusher"
+        }
+    return None
+
+
+def get_pushed_positions() -> list:
+    """Get positions from pushed IB data (called by other services)."""
+    global _pushed_ib_data
+    return _pushed_ib_data.get("positions", [])
+
+
+def get_pushed_quotes() -> dict:
+    """Get all quotes from pushed IB data (called by other services)."""
+    global _pushed_ib_data
+    return _pushed_ib_data.get("quotes", {})
+
+
+def is_pusher_connected() -> bool:
+    """Check if IB data pusher is connected (called by other services)."""
+    global _pushed_ib_data
+    
+    last_update = _pushed_ib_data.get("last_update")
+    if not last_update:
+        return False
+    
+    try:
+        last_dt = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
+        age_seconds = (datetime.now(timezone.utc) - last_dt).total_seconds()
+        return age_seconds <= 30
+    except:
+        return False
+
+
 @router.get("/pushed-quote/{symbol}")
 async def get_pushed_quote(symbol: str):
     """Get a specific quote from pushed IB data"""
@@ -2858,7 +2911,7 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                 quotes_cache[symbol] = quote
                 valid_candidates.append((symbol, data))
                 
-            except Exception as e:
+            except Exception:
                 continue
         
         print(f"After quote filtering: {len(valid_candidates)} valid candidates")
@@ -2980,7 +3033,7 @@ async def run_comprehensive_scan(request: ComprehensiveScanRequest = None):
                                     fundamentals=None, 
                                     market_data=None
                                 )
-                        except Exception as e:
+                        except Exception:
                             pass  # Keep using daily features
                 
                 # Calculate support/resistance levels with safety checks
