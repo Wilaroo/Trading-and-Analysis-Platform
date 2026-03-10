@@ -2225,3 +2225,171 @@ python ib_data_pusher.py --cloud-url https://your-app.preview.emergentagent.com 
 The `social_sentiment` field exists in `SentimentResult` but is hardcoded to `0.0`.
 
 **Status**: 📋 NOTED FOR FUTURE - Twitter/social integration on backlog
+
+---
+
+## Three-Speed Learning System - Master Implementation Plan (March 2026)
+
+### Overview
+A comprehensive learning and adaptation system for the AI Trading Bot that operates at three speeds:
+- **Fast (Real-time)**: Updates after every trade
+- **Medium (Daily)**: End-of-day analysis and calibration
+- **Slow (Weekly)**: Backtesting and strategy verification
+
+### Complete Feature List (29 Features)
+
+#### High Impact - Accuracy
+1. ✅ Tape Reading Calibration - Auto-adjust thresholds based on outcomes
+2. ✅ Setup-Specific Win Rate Filters - Dynamic thresholds per setup
+3. ✅ Time-of-Day Filters - Shadow mode first, then enable
+4. ✅ Market Regime Awareness - Gate bot based on regime
+
+#### Medium Impact - Reliability
+5. ✅ Circuit Breakers - Daily loss limit, consecutive loss pause
+6. ✅ Shadow/Paper Mode - Test changes before deploying
+7. ✅ Health Monitoring Dashboard - API latency, fill rates, uptime
+8. ✅ Graceful Degradation - Fallback when services fail
+
+#### Quick Wins
+9. ✅ Position Sizing by Conviction - TQS-based size multipliers
+10. ✅ Exit Optimization - Track R-capture, tune stops
+11. ✅ News Sentiment to Bot - Block longs on bearish, boost shorts
+
+#### Competitive Edge
+12. ✅ Backtest Module - Test setups on historical data
+13. ✅ Multi-Timeframe Confirmation - Daily trend + 5min entry
+14. ✅ Order Flow / Level 2 - IB Gateway integration (done)
+
+#### Learning Enhancements
+15. ✅ Contextual Win Rates - By regime, time, sector, VIX
+16. ✅ Entry Quality Scoring - Slippage, chase detection
+17. ✅ Exit Quality Analysis - R-capture, left-on-table
+18. ✅ Confirmation Signal Validation - Which signals help?
+19. ✅ Tilt Detection - Behavior change after losses
+20. ✅ Edge Decay Detection - Rolling performance decline
+21. ✅ Playbook Performance Linkage - Documented vs actual
+22. ✅ Correlated Losses - VIX, sector, time patterns
+23. ✅ Optimal Position Retrospective - What size would've been best
+24. ✅ Multi-Factor TQS - Single 0-100 score
+
+#### TQS Components
+25. ✅ Setup Quality (25%) - Pattern, win rate, EV, tape
+26. ✅ Technical Quality (25%) - Trend, levels, RSI, MAs, RVOL
+27. ✅ Fundamental Quality (15%) - Catalyst, short%, float, inst%
+28. ✅ Context Quality (20%) - Regime, time, sector, VIX
+29. ✅ Execution Quality (15%) - Your history, entry/exit, tilt
+
+### Implementation Phases
+
+#### PHASE 1: Core Infrastructure + Graceful Degradation
+**Files to create:**
+- `/backend/services/learning_loop_service.py`
+- `/backend/services/trade_context_service.py`
+- `/backend/services/execution_tracker_service.py`
+- `/backend/services/graceful_degradation.py`
+- `/backend/models/learning_models.py`
+
+**MongoDB collections:**
+- `trade_outcomes` - Full trade records with context
+- `learning_stats` - Aggregated statistics
+- `calibration_log` - Threshold adjustments over time
+- `trader_profile` - Your patterns for RAG
+
+**Dataclasses:**
+- `TradeContext` - regime, time, sector, VIX, fundamentals
+- `ExecutionMetrics` - entry/exit quality, slippage, R-capture
+- `TradeOutcome` - full trade with context and execution
+- `LearningStats` - aggregated per setup/context
+- `TraderProfile` - summary for AI context
+
+#### PHASE 2: TQS Engine (All 5 Pillars)
+**Files to create:**
+- `/backend/services/tqs_engine.py` - Master scorer
+- `/backend/services/setup_quality.py` - 25%
+- `/backend/services/technical_quality.py` - 25%
+- `/backend/services/fundamental_quality.py` - 15%
+- `/backend/services/context_quality.py` - 20%
+- `/backend/services/execution_quality.py` - 15%
+
+**Technical Quality includes:**
+- RSI calculation, MA stack detection
+- Support/resistance proximity
+- ATR-based risk assessment
+
+**Fundamental Quality sources:**
+- IB Gateway: P/E, short%, float, inst%
+- Finnhub: Earnings calendar
+- News sentiment integration
+
+#### PHASE 3A: Fast Learning - Circuit Breakers + Health
+- Daily loss limit (configurable)
+- Consecutive loss pause (3 losses)
+- Conviction-based sizing from TQS
+- Tilt detection with behavior tracking
+- Health monitoring dashboard
+- API latency, fill rate, slippage tracking
+
+#### PHASE 3B: Fast Learning - Dynamic Thresholds
+- Per-setup win rate thresholds
+- Tape score calibration
+- Time-of-day filtering (shadow mode)
+- Market regime gating
+- News sentiment gating
+- Bounded adjustments (max 10%/day)
+
+#### PHASE 4: RAG Knowledge Base
+- ChromaDB (local vector DB)
+- Trader profile generator
+- Similar trade retrieval
+- Playbook/trade history embedding
+- AI prompt enhancement with YOUR patterns
+
+#### PHASE 5: Medium Learning - Daily Analysis
+- EOD DRC/Playbook generation (done)
+- Calibration analysis
+- Context performance report
+- Confirmation signal validation
+- Edge decay detection
+- Playbook performance linkage
+- Trader profile updates
+
+#### PHASE 6: Slow Learning - Backtest & Verify
+- Historical data downloader (Alpaca)
+- Backtest engine
+- Shadow mode tracker
+- Weekly review generator
+- Strategy deployment verification
+
+### RAG Integration - Making Ollama Learn
+
+The AI doesn't get "retrained" - instead, we inject YOUR knowledge into every prompt:
+
+**Trader Profile (auto-generated):**
+```
+"You are advising a trader with these characteristics:
+ - Best setups: Bull Flag (68%), VWAP Bounce (64%)
+ - Avoid: Gap & Go (42%), Late Day Momentum (38%)
+ - Best hours: 9:30-11:00 AM (62% win)
+ - Tends to chase entries by avg 0.15%
+ - Exits too early, captures only 60% of move
+ - Performs best in trending markets (67% win)
+ - Current state: 2 losses today, possible tilt"
+```
+
+**Similar Trade Retrieval:**
+When analyzing a new setup, retrieve your past similar trades and outcomes.
+
+### Data Sources Summary
+
+| Data | Source | Status |
+|------|--------|--------|
+| Quotes/Bars | Alpaca | ✅ Working |
+| Level 2/DOM | IB Gateway | ✅ Implemented |
+| Fundamentals | IB Gateway | ✅ Implemented |
+| Earnings | Finnhub | ✅ Working |
+| News | Finnhub | ✅ Working |
+| Sector Data | Alpaca/Internal | ✅ Working |
+| Trade History | MongoDB | ✅ Working |
+| Learning Stats | MongoDB | 🔨 Phase 1 |
+
+**Status**: 📋 READY FOR IMPLEMENTATION - Begin Phase 1
