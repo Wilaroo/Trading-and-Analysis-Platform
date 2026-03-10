@@ -25,7 +25,7 @@ import {
   Map
 } from 'lucide-react';
 import api from '../utils/api';
-import { PlaybookTab, DRCTab, GamePlanTab } from '../components/Journal';
+import { PlaybookTab, DRCTab, GamePlanTab, WeeklyReportTab } from '../components/Journal';
 
 const Card = ({ children, className = '', hover = true }) => (
   <div className={`bg-paper rounded-lg p-4 border border-white/10 ${
@@ -602,6 +602,7 @@ const TradeJournalPage = () => {
       <div className="flex gap-1 p-1 bg-white/5 rounded-lg border border-white/10 w-fit">
         {[
           { id: 'trades', label: 'Trade Log', icon: BarChart3 },
+          { id: 'weekly', label: 'Weekly Report', icon: Calendar },
           { id: 'playbook', label: 'Playbooks', icon: BookOpen },
           { id: 'drc', label: 'Daily Report Card', icon: FileText },
           { id: 'gameplan', label: 'Game Plan', icon: Map }
@@ -626,6 +627,7 @@ const TradeJournalPage = () => {
       {activeTab === 'playbook' && <PlaybookTab />}
       {activeTab === 'drc' && <DRCTab />}
       {activeTab === 'gameplan' && <GamePlanTab />}
+      {activeTab === 'weekly' && <WeeklyReportTab />}
 
       {/* Original Trade Log Content (only show when trades tab is active) */}
       {activeTab === 'trades' && (

@@ -57,6 +57,7 @@ from routers.tqs_router import router as tqs_router
 from routers.risk_router import router as risk_router
 from routers.rag_router import router as rag_router
 from routers.medium_learning_router import router as medium_learning_router
+from routers.slow_learning_router import router as slow_learning_router
 from routers.portfolio_awareness import router as portfolio_awareness_router
 from routers.quick_actions import router as quick_actions_router, init_quick_actions_router
 from routers.sectors import router as sectors_router
@@ -83,6 +84,11 @@ from services.medium_learning import (
     get_confirmation_validator_service,
     get_playbook_performance_service,
     get_edge_decay_service
+)
+from services.slow_learning import (
+    get_historical_data_service, init_historical_data_service,
+    get_backtest_engine, init_backtest_engine,
+    get_shadow_mode_service, init_shadow_mode_service
 )
 from services.eod_generation_service import get_eod_service
 from services.ib_service import get_ib_service
@@ -271,6 +277,7 @@ app.include_router(tqs_router)
 app.include_router(risk_router)
 app.include_router(rag_router)
 app.include_router(medium_learning_router)
+app.include_router(slow_learning_router)
 
 # Collections
 strategies_col = db["strategies"]
@@ -440,6 +447,31 @@ try:
 except Exception as e:
     print(f"Medium Learning initialization deferred: {e}")
     calibration_service = None
+
+# ===================== SLOW LEARNING (Phase 6) =====================
+# Initialize backtesting, historical data, and shadow mode services
+
+try:
+    # Initialize Historical Data Service
+    historical_data_service = init_historical_data_service(db=db, alpaca_service=alpaca_service)
+    
+    # Initialize Backtest Engine
+    backtest_engine = init_backtest_engine(
+        db=db,
+        historical_data_service=historical_data_service
+    )
+    
+    # Initialize Shadow Mode Service
+    shadow_mode_service = init_shadow_mode_service(db=db, alpaca_service=alpaca_service)
+    
+    print("Slow Learning (Phase 6) initialized")
+    print("  - Historical Data Service: Alpaca data download and storage")
+    print("  - Backtest Engine: Strategy backtesting on historical data")
+    print("  - Shadow Mode: Paper trading filter validation")
+    print("  - Endpoints: /api/slow-learning/*")
+except Exception as e:
+    print(f"Slow Learning initialization deferred: {e}")
+    historical_data_service = None
 
 # ===================== STRATEGY HELPERS =====================
 # Strategies are now stored in MongoDB and accessed via strategy_service
