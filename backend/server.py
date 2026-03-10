@@ -48,6 +48,7 @@ from routers.scanner import router as scanner_router, init_scanner_router
 from routers.alerts import router as alerts_router, init_alerts_router
 from routers.technicals import router as technicals_router
 from routers.live_scanner import router as live_scanner_router, init_live_scanner_router
+from services.ollama_proxy_manager import ollama_proxy_manager, handle_ollama_proxy_websocket
 from routers.trading_bot import router as trading_bot_router, init_trading_bot_router
 from routers.learning_dashboard import router as learning_dashboard_router, init_learning_dashboard
 from routers.market_intel import router as market_intel_router, init_market_intel_router
@@ -3718,6 +3719,23 @@ async def get_stream_status():
         "update_interval_seconds": 5,
         "default_symbols": DEFAULT_STREAM_SYMBOLS
     }
+
+
+# ============================================================
+# OLLAMA PROXY WEBSOCKET
+# ============================================================
+
+@app.websocket("/api/ws/ollama-proxy")
+async def websocket_ollama_proxy(websocket: WebSocket):
+    """WebSocket endpoint for local Ollama proxy connections"""
+    await handle_ollama_proxy_websocket(websocket)
+
+
+@app.get("/api/ollama-proxy/status")
+async def get_ollama_proxy_status():
+    """Get Ollama proxy connection status"""
+    return ollama_proxy_manager.get_status()
+
 
 if __name__ == "__main__":
     import uvicorn

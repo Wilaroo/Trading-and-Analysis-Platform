@@ -15,6 +15,7 @@ Supports multiple LLM providers:
 - OpenAI
 - Anthropic
 - Perplexity (for research)
+- Ollama (local, via proxy)
 """
 import os
 import logging
@@ -28,6 +29,12 @@ import re
 
 # Feature flag for smart context engine (proof of concept)
 USE_SMART_CONTEXT = os.environ.get("USE_SMART_CONTEXT", "true").lower() == "true"
+
+# Import Ollama proxy manager
+try:
+    from services.ollama_proxy_manager import ollama_proxy_manager
+except ImportError:
+    ollama_proxy_manager = None
 
 logger = logging.getLogger(__name__)
 
@@ -2096,7 +2103,46 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
             logger.info(f"⏭️ Skipping Ollama (cooling down)")
             skip_ollama = True
         
-        # QUICK HEALTH CHECK: Ping Ollama first (5 second timeout)
+        # PRIORITY 1: Check for Local Ollama Proxy (most reliable, no ngrok)
+        if not skip_ollama and ollama_proxy_manager and ollama_proxy_manager.is_connected:
+            try:
+                logger.info("🔌 Using Local Ollama Proxy (WebSocket connection)")
+                
+                # Get model from config or use default
+                model = "qwen2.5:7b"
+                if LLMProvider.OLLAMA in self.llm_clients:
+                    model = self.llm_clients[LLMProvider.OLLAMA].get("model", "qwen2.5:7b")
+                
+                # Build context for proxy
+                max_context = 4000 if complexity == "deep" else 2000
+                truncated_context = context[:max_context] if len(context) > max_context else context
+                
+                proxy_messages = [
+                    {"role": "system", "content": f"""You are an expert trading assistant with REAL-TIME market data.
+The data below is LIVE - use it to answer questions directly.
+
+{truncated_context}
+
+Be concise and reference the data above."""},
+                    {"role": "user", "content": messages[-1]["content"] if messages else ""}
+                ]
+                
+                result = await ollama_proxy_manager.chat(
+                    model=model,
+                    messages=proxy_messages,
+                    options={"num_ctx": 2048, "temperature": 0.7, "num_predict": 512}
+                )
+                
+                if result.get("success") and result.get("content"):
+                    logger.info(f"✅ Ollama Proxy response OK ({len(result['content'])} chars) - FREE")
+                    return result["content"]
+                else:
+                    logger.warning(f"⚠️ Ollama Proxy failed: {result.get('error')}")
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Ollama Proxy error: {e}")
+        
+        # PRIORITY 2: Direct Ollama via ngrok (fallback)
         ollama_healthy = False
         if not skip_ollama and LLMProvider.OLLAMA in self.llm_clients:
             try:
