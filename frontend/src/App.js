@@ -87,8 +87,8 @@ if (typeof window !== 'undefined') {
 
 // ===================== MAIN APP =====================
 function App() {
-  // Startup modal state
-  const [showStartupModal, setShowStartupModal] = useState(true);
+  // Startup modal state - DISABLED for development (will be re-enabled after Phase 6 complete)
+  const [showStartupModal, setShowStartupModal] = useState(false);
   
   // Persist activeTab in localStorage so it survives page refresh
   const [activeTab, setActiveTab] = useState(() => {
