@@ -114,12 +114,34 @@ class OllamaProxy:
         while True:
             try:
                 logger.info(f"Connecting to {ws_url}...")
-                async with websockets.connect(
-                    ws_url,
-                    extra_headers={"X-Proxy-Type": "ollama"},
-                    ping_interval=30,
-                    ping_timeout=10
-                ) as ws:
+                
+                # Try different websockets API versions for compatibility
+                try:
+                    # Newer websockets (11.x+)
+                    ws = await websockets.connect(
+                        ws_url,
+                        additional_headers={"X-Proxy-Type": "ollama"},
+                        ping_interval=30,
+                        ping_timeout=10
+                    )
+                except TypeError:
+                    try:
+                        # Older websockets (10.x)
+                        ws = await websockets.connect(
+                            ws_url,
+                            extra_headers={"X-Proxy-Type": "ollama"},
+                            ping_interval=30,
+                            ping_timeout=10
+                        )
+                    except TypeError:
+                        # Even older or different API - no custom headers
+                        ws = await websockets.connect(
+                            ws_url,
+                            ping_interval=30,
+                            ping_timeout=10
+                        )
+                
+                async with ws:
                     self.ws = ws
                     self.connected = True
                     self.reconnect_delay = 5  # Reset on successful connection
