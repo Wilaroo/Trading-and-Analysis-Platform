@@ -15,7 +15,6 @@ import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, asdict, field
-import statistics
 
 logger = logging.getLogger(__name__)
 

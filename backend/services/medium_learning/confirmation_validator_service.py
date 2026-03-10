@@ -15,7 +15,6 @@ import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, asdict, field
-import statistics
 
 logger = logging.getLogger(__name__)
 
@@ -198,8 +197,6 @@ class ConfirmationValidatorService:
         without_conf = []
         
         for trade in trades:
-            confirmations = trade.get("context", {}).get("confirmations", {})
-            
             # Check if confirmation was present
             has_conf = self._check_confirmation(trade, conf_type)
             
