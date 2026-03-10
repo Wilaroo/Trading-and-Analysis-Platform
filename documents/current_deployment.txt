@@ -1,1 +1,1 @@
-https://local-ai-trading.preview.emergentagent.com
+https://ib-ollama-sync.preview.emergentagent.com

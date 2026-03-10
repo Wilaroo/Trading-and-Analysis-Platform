@@ -15,7 +15,7 @@ echo.
 set GITHUB_RAW=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents
 
 :: Cloud platform URL
-set CLOUD_URL=https://local-ai-trading.preview.emergentagent.com
+set CLOUD_URL=https://ib-ollama-sync.preview.emergentagent.com
 
 :: Script directory (where this bat file is located)
 set SCRIPT_DIR=%~dp0
