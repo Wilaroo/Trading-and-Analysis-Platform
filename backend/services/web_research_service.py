@@ -1278,8 +1278,8 @@ class WebResearchService:
                 logger.warning(f"Market news search failed: {e}")
             
             # Step 3: Determine market regime from index data
-            spy_change = result["indices"].get("SPY", {}).get("change_percent", 0)
-            qqq_change = result["indices"].get("QQQ", {}).get("change_percent", 0)
+            spy_change = result["indices"].get("SPY", {}).get("change_percent") or 0
+            qqq_change = result["indices"].get("QQQ", {}).get("change_percent") or 0
             
             if spy_change > 1 and qqq_change > 1:
                 result["market_regime"] = "strong_uptrend"
