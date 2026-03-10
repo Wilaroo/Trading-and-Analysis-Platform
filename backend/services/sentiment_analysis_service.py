@@ -111,11 +111,25 @@ class SentimentAnalysisService:
         self._cache_ttl = 300  # 5 minutes
         self._initialized = False
     
+    def is_initialized(self) -> bool:
+        """Check if service is properly initialized"""
+        return self._initialized
+    
     def set_services(self, news_service=None, llm_service=None):
         """Set service dependencies"""
-        self._news_service = news_service
-        self._llm_service = llm_service
+        if news_service is not None:
+            self._news_service = news_service
+        if llm_service is not None:
+            self._llm_service = llm_service
         self._initialized = True
+        logger.info("SentimentAnalysisService initialized")
+    
+    def _ensure_initialized(self) -> bool:
+        """Ensure service is initialized before operations"""
+        if not self.is_initialized():
+            logger.warning("SentimentAnalysisService not initialized - call set_services() first")
+            return False
+        return True
     
     async def analyze_sentiment(self, symbol: str, use_ai: bool = False) -> SentimentResult:
         """

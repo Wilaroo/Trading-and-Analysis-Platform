@@ -2919,7 +2919,7 @@ class EnhancedBackgroundScanner:
             from services.chart_pattern_service import get_chart_pattern_service
             pattern_service = get_chart_pattern_service()
             
-            if not pattern_service._initialized:
+            if not pattern_service.is_initialized():
                 return None
             
             # Detect patterns for this symbol

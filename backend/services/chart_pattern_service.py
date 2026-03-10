@@ -99,18 +99,29 @@ class ChartPatternService:
         self._pattern_cache: Dict[str, List[ChartPattern]] = {}
         self._initialized = False
     
+    def is_initialized(self) -> bool:
+        """Check if service is properly initialized"""
+        return self._initialized and self._alpaca_service is not None
+    
     def set_alpaca_service(self, alpaca_service):
         """Set the Alpaca service for data access"""
         self._alpaca_service = alpaca_service
         self._initialized = True
+        logger.info("ChartPatternService initialized with Alpaca service")
+    
+    def _ensure_initialized(self) -> bool:
+        """Ensure service is initialized before operations"""
+        if not self.is_initialized():
+            logger.warning("ChartPatternService not initialized - call set_alpaca_service() first")
+            return False
+        return True
     
     async def detect_patterns(self, symbol: str, bars: List[Dict] = None) -> List[ChartPattern]:
         """
         Detect all chart patterns for a symbol.
         Returns list of detected patterns sorted by strength.
         """
-        if not self._initialized:
-            logger.warning("Chart pattern service not initialized")
+        if not self._ensure_initialized():
             return []
         
         symbol = symbol.upper()

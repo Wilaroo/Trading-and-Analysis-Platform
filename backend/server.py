@@ -81,6 +81,8 @@ from services.smart_watchlist_service import init_smart_watchlist, get_smart_wat
 from services.index_universe import get_index_universe
 from services.wave_scanner import init_wave_scanner, get_wave_scanner
 from services.sector_analysis_service import get_sector_analysis_service
+from services.chart_pattern_service import get_chart_pattern_service
+from services.sentiment_analysis_service import get_sentiment_service
 from data.strategies_data import ALL_STRATEGIES_DATA
 
 app = FastAPI(title="TradeCommand API")
@@ -144,6 +146,14 @@ init_alpaca_router(alpaca_service)
 # Initialize sector analysis service
 sector_service = get_sector_analysis_service()
 sector_service.set_alpaca_service(alpaca_service)
+
+# Initialize chart pattern service
+chart_pattern_service = get_chart_pattern_service()
+chart_pattern_service.set_alpaca_service(alpaca_service)
+
+# Initialize sentiment analysis service
+sentiment_service = get_sentiment_service()
+sentiment_service.set_services(news_service=None, llm_service=None)  # Will be wired to news/llm later if available
 
 # Initialize quick actions router with technical service for volatility-adjusted sizing
 from services.realtime_technical_service import get_technical_service
