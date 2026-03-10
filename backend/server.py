@@ -3780,7 +3780,7 @@ async def register_http_proxy(data: dict):
         "ollama_status": ollama_status
     }
     
-    logger.info(f"HTTP Ollama proxy registered: {session_id}, models: {ollama_status.get('models', [])}")
+    print(f"HTTP Ollama proxy registered: {session_id}, models: {ollama_status.get('models', [])}")
     return {"success": True, "message": "Registered"}
 
 
