@@ -267,13 +267,15 @@ class IBDataPusher:
         # Generic ticks for fundamental data:
         # 165 = Avg Volume 90 day
         # 256 = Short Interest  
-        # 258 = Institutional %
-        # 293 = Shares Outstanding
-        # 294 = Float (if available)
-        # 411 = P/E Ratio
-        # 456 = 52-Week High
-        # 457 = 52-Week Low
-        fundamental_ticks = "165,256,258,293,411,456,457" if include_fundamentals else ""
+        # Valid generic tick types for stocks:
+        # 165 = Misc Stats (contains avg volume, etc.)
+        # 293 = Trade Count
+        # 294 = Trade Rate
+        # 295 = Volume Rate  
+        # 411 = Real-time Historical Volatility
+        # 456 = IB Dividends
+        # Using only valid tick types to avoid Error 321
+        fundamental_ticks = "165,293,294,295,411,456" if include_fundamentals else ""
         
         for symbol in symbols:
             try:
