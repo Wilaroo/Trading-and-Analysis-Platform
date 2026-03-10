@@ -2777,6 +2777,65 @@ When analyzing a new setup, retrieve your past similar trades and outcomes.
 
 ---
 
+## Session Log - March 10, 2026 (Weekly Intelligence Report Enhancement)
+
+### Weekly Intelligence Report - COMPLETE
+
+**Goal**: Create unified weekly report combining Analytics data and Journal reflection in the Trading Journal Tab.
+
+**What was implemented:**
+
+#### 1. WeeklyReportService (`/app/backend/services/weekly_report_service.py`)
+Aggregates data from all Phase 5 Medium Learning services into a single weekly report.
+
+#### 2. Report Structure
+```
+WeeklyIntelligenceReport:
+├── Performance Snapshot (auto-generated)
+│   ├── total_trades, wins, losses, win_rate
+│   ├── total_pnl, profit_factor, avg_r
+│   ├── best_day, worst_day
+│   └── week-over-week comparison
+├── Top Contexts (auto-generated from ContextPerformanceService)
+├── Struggling Contexts (auto-generated)
+├── Edge Alerts (auto-generated from EdgeDecayService)
+├── Calibration Suggestions (auto-generated from CalibrationService)
+├── Confirmation Insights (auto-generated from ConfirmationValidatorService)
+├── Playbook Focus (auto-generated from PlaybookPerformanceService)
+└── Personal Reflection (user-editable)
+    ├── what_went_well
+    ├── what_to_improve
+    ├── key_lessons
+    ├── goals_for_next_week
+    ├── mood_rating (1-5)
+    ├── confidence_rating (1-5)
+    └── notes
+```
+
+#### 3. API Endpoints (`/api/journal/weekly-report/*`)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/generate` | POST | Generate weekly report |
+| `/current` | GET | Get/create current week's report |
+| `/stats` | GET | Service statistics |
+| `/week/{year}/{week_number}` | GET | Get by year/week |
+| `/{report_id}` | GET | Get by ID |
+| `/` | GET | Get recent reports (archive) |
+| `/{report_id}/reflection` | PUT | Update personal reflection |
+| `/{report_id}/complete` | POST | Mark report complete |
+
+### Testing Results
+- 21/21 backend tests passed (100%)
+
+### Files Created
+- `/app/backend/services/weekly_report_service.py`
+
+### Files Modified
+- `/app/backend/routers/journal_router.py` - Added weekly report endpoints
+
+---
+
 ## Next Steps: Phase 6 - Slow Learning (Backtest & Verify)
 
 ### Overview
