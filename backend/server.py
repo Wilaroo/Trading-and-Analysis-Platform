@@ -53,6 +53,7 @@ from routers.learning_dashboard import router as learning_dashboard_router, init
 from routers.market_intel import router as market_intel_router, init_market_intel_router
 from routers.research import router as research_router
 from routers.config import router as config_router
+from routers.tqs_router import router as tqs_router
 from routers.portfolio_awareness import router as portfolio_awareness_router
 from routers.quick_actions import router as quick_actions_router, init_quick_actions_router
 from routers.sectors import router as sectors_router
@@ -67,6 +68,7 @@ from services.learning_loop_service import get_learning_loop_service, init_learn
 from services.trade_context_service import get_trade_context_service, init_trade_context_service
 from services.execution_tracker_service import get_execution_tracker, init_execution_tracker
 from services.graceful_degradation import get_degradation_service, init_degradation_service
+from services.tqs import get_tqs_engine, init_tqs_engine
 from services.eod_generation_service import get_eod_service
 from services.ib_service import get_ib_service
 from services.news_service import init_news_service
@@ -250,6 +252,7 @@ app.include_router(simulator_router)
 app.include_router(ev_tracking_router)
 app.include_router(smb_router)
 app.include_router(journal_router)
+app.include_router(tqs_router)
 
 # Collections
 strategies_col = db["strategies"]
@@ -322,6 +325,22 @@ trading_bot._learning_loop = learning_loop_service
 print("Three-Speed Learning Architecture Phase 1 initialized")
 print(f"  - Collections: trade_outcomes, learning_stats, calibration_log, trader_profile")
 print(f"  - Services: LearningLoop, TradeContext, ExecutionTracker, GracefulDegradation")
+
+# ===================== TQS ENGINE (Phase 2) =====================
+# Initialize Trade Quality Score engine with all 5 pillars
+
+tqs_engine = init_tqs_engine(
+    learning_loop=learning_loop_service,
+    alpaca_service=alpaca_service,
+    ib_service=ib_service,
+    technical_service=realtime_tech_service,
+    sector_service=sector_service,
+    scanner=background_scanner
+)
+
+print("TQS Engine (Phase 2) initialized")
+print(f"  - Pillars: Setup(25%), Technical(25%), Fundamental(15%), Context(20%), Execution(15%)")
+print(f"  - Endpoints: /api/tqs/score, /api/tqs/breakdown, /api/tqs/batch")
 
 # ===================== STRATEGY HELPERS =====================
 # Strategies are now stored in MongoDB and accessed via strategy_service
