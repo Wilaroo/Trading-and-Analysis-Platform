@@ -90,13 +90,16 @@ class AgentOrchestrator:
             "db": services.get("db")
         })
         
-        # Inject into coach (needs everything for guidance)
+        # Inject into coach (needs everything for guidance + learning services)
         self.coach.inject_services({
             "ib_router": services.get("ib_router"),
             "scanner": services.get("scanner"),
             "db": services.get("db"),
             "performance_analyzer": services.get("performance_analyzer"),
-            "learning_service": services.get("learning_service")
+            "learning_service": services.get("learning_service"),
+            # NEW: Three-Speed Learning Architecture services
+            "learning_context_provider": services.get("learning_context_provider"),
+            "learning_loop_service": services.get("learning_loop_service")
         })
         
         # Inject into analyst (needs market data services)

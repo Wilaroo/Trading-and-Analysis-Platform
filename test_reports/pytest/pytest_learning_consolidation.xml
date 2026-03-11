@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="12" skipped="0" tests="12" time="590.834" timestamp="2026-03-11T18:06:38.052455+00:00" hostname="agent-env-9aaad0a7-8293-45ad-b1fa-faceb7a00504"><testcase classname="backend.tests.test_learning_consolidation.TestLearningConsolidation" name="test_agents_status_lists_all_four_agents" time="60.274"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">backend/tests/test_learning_consolidation.py:24: in test_agents_status_lists_all_four_agents
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_learning_consolidation.TestLearningConsolidation" name="test_coach_agent_position_query" time="60.227"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">backend/tests/test_learning_consolidation.py:45: in test_coach_agent_position_query
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_learning_consolidation.TestLearningConsolidation" name="test_coach_agent_general_question" time="60.240"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">backend/tests/test_learning_consolidation.py:63: in test_coach_agent_general_question
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_learning_consolidation.TestLearningConsolidation" name="test_analyst_agent_analyze_nvda" time="60.240"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">backend/tests/test_learning_consolidation.py:78: in test_analyst_agent_analyze_nvda
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_learning_consolidation.TestLearningConsolidation" name="test_analyst_agent_what_do_you_think" time="60.197"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">backend/tests/test_learning_consolidation.py:96: in test_analyst_agent_what_do_you_think
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_learning_consolidation.TestLearningConsolidation" name="test_trade_confirmation_flow_buy" time="60.253"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">backend/tests/test_learning_consolidation.py:113: in test_trade_confirmation_flow_buy
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_learning_consolidation.TestLearningConsolidation" name="test_trade_confirmation_flow_sell" time="60.221"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">backend/tests/test_learning_consolidation.py:149: in test_trade_confirmation_flow_sell
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_learning_consolidation.TestLearningConsolidation" name="test_agents_metrics_endpoint" time="60.148"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">backend/tests/test_learning_consolidation.py:163: in test_agents_metrics_endpoint
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_learning_consolidation.TestLearningServicesGracefulDegradation" name="test_coach_works_without_llm" time="60.161"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">backend/tests/test_learning_consolidation.py:190: in test_coach_works_without_llm
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_learning_consolidation.TestLearningServicesGracefulDegradation" name="test_analyst_returns_structured_data_without_llm" time="28.426"><failure message="assert 503 == 200&#10; +  where 503 = &lt;Response [503]&gt;.status_code">backend/tests/test_learning_consolidation.py:207: in test_analyst_returns_structured_data_without_llm
+    assert response.status_code == 200
+E   assert 503 == 200
+E    +  where 503 = &lt;Response [503]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_learning_consolidation.TestNoLearningLayerImports" name="test_backend_starts_without_import_errors" time="20.070"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">backend/tests/test_learning_consolidation.py:227: in test_backend_starts_without_import_errors
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_learning_consolidation.TestNoLearningLayerImports" name="test_coach_agent_initializes_properly" time="0.197"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">backend/tests/test_learning_consolidation.py:242: in test_coach_agent_initializes_properly
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase></testsuite></testsuites>

@@ -562,11 +562,15 @@ try:
         "performance_analyzer": globals().get('perf_service'),
         "learning_service": globals().get('learning_loop_service'),
         "trading_bot": trading_bot,
-        "alpaca_service": alpaca_service
+        "alpaca_service": alpaca_service,
+        # Three-Speed Learning Architecture services
+        "learning_context_provider": globals().get('learning_context_provider'),
+        "learning_loop_service": globals().get('learning_loop_service')
     })
     print("Multi-Agent System initialized")
-    print("  - Agents: Router, Trade Executor, Coach")
+    print("  - Agents: Router, Trade Executor, Coach, Analyst")
     print("  - LLM: GPT-OSS cloud → llama3.5 8b fallback")
+    print("  - Learning: Integrated with Three-Speed Architecture")
     print("  - Endpoints: /api/agents/chat, /api/agents/status, /api/agents/metrics")
 except Exception as e:
     print(f"Multi-Agent System initialization deferred: {e}")
