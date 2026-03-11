@@ -225,35 +225,83 @@ class TradeExecutorService:
         }
     
     async def _ib_entry(self, trade) -> Dict[str, Any]:
-        """Execute entry via Interactive Brokers"""
-        if not self._ib_client:
-            return {"success": False, "error": "IB client not initialized"}
+        """
+        Execute entry via Interactive Brokers.
         
+        Uses the order queue system which allows the local pusher to execute orders.
+        This works even when the cloud can't directly connect to IB Gateway.
+        """
         try:
-            # Use IB Service to place order
+            # Import order queue functions
+            from routers.ib import queue_order, get_order_result, is_pusher_connected
+            
+            # Check if pusher is connected (required for order queue)
+            if not is_pusher_connected():
+                logger.warning("IB pusher not connected - falling back to simulation")
+                return await self._simulate_entry(trade)
+            
+            # Queue the order for execution by local pusher
             action = "BUY" if trade.direction.value == "long" else "SELL"
             
-            result = await self._ib_client.place_order(
-                symbol=trade.symbol,
-                action=action,
-                quantity=trade.shares,
-                order_type="MKT"
-            )
+            order_id = queue_order({
+                "symbol": trade.symbol,
+                "action": action,
+                "quantity": trade.shares,
+                "order_type": "MKT",
+                "limit_price": None,
+                "stop_price": None,
+                "time_in_force": "DAY",
+                "trade_id": trade.id
+            })
             
-            if result.get("success"):
-                return {
-                    "success": True,
-                    "order_id": result.get("order_id"),
-                    "fill_price": result.get("fill_price", trade.entry_price),
-                    "filled_qty": trade.shares,
-                    "status": "filled",
-                    "broker": "interactive_brokers"
-                }
+            logger.info(f"Order queued for IB execution: {order_id} - {action} {trade.shares} {trade.symbol}")
+            
+            # Wait for execution result (timeout 60s)
+            result = get_order_result(order_id, timeout=60.0)
+            
+            if result:
+                order_result = result.get("result", {})
+                status = order_result.get("status", "unknown")
+                
+                if status == "filled":
+                    return {
+                        "success": True,
+                        "order_id": order_id,
+                        "ib_order_id": order_result.get("ib_order_id"),
+                        "fill_price": order_result.get("fill_price", trade.entry_price),
+                        "filled_qty": order_result.get("filled_qty", trade.shares),
+                        "status": "filled",
+                        "broker": "interactive_brokers"
+                    }
+                elif status == "partial":
+                    return {
+                        "success": True,
+                        "order_id": order_id,
+                        "fill_price": order_result.get("fill_price", trade.entry_price),
+                        "filled_qty": order_result.get("filled_qty", 0),
+                        "remaining_qty": order_result.get("remaining_qty", 0),
+                        "status": "partial",
+                        "broker": "interactive_brokers"
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": order_result.get("error", f"Order {status}"),
+                        "order_id": order_id,
+                        "status": status
+                    }
             else:
-                return {"success": False, "error": result.get("error", "IB order failed")}
+                # Timeout - order may still execute
+                logger.warning(f"Timeout waiting for order {order_id} - may still execute")
+                return {
+                    "success": False,
+                    "error": "Timeout waiting for order execution",
+                    "order_id": order_id,
+                    "status": "timeout"
+                }
                 
         except Exception as e:
-            logger.error(f"IB entry error: {e}")
+            logger.error(f"IB order execution error: {e}")
             return {"success": False, "error": str(e)}
     
     # ==================== STOP ORDERS ====================
@@ -320,8 +368,41 @@ class TradeExecutorService:
         }
     
     async def _ib_stop(self, trade) -> Dict[str, Any]:
-        """Place stop via IB"""
-        return {"success": False, "error": "IB not implemented"}
+        """Place stop via IB using order queue"""
+        try:
+            from routers.ib import queue_order, get_order_result, is_pusher_connected
+            
+            if not is_pusher_connected():
+                logger.warning("IB pusher not connected - simulating stop order")
+                return await self._simulate_stop(trade)
+            
+            # Stop order is opposite side
+            action = "SELL" if trade.direction.value == "long" else "BUY"
+            
+            order_id = queue_order({
+                "symbol": trade.symbol,
+                "action": action,
+                "quantity": trade.shares,
+                "order_type": "STP",
+                "limit_price": None,
+                "stop_price": trade.stop_price,
+                "time_in_force": "GTC",
+                "trade_id": f"STOP-{trade.id}"
+            })
+            
+            logger.info(f"Stop order queued: {order_id} - {action} {trade.shares} {trade.symbol} @ ${trade.stop_price}")
+            
+            # Don't wait for stop orders to fill - they stay open
+            return {
+                "success": True,
+                "order_id": order_id,
+                "stop_price": trade.stop_price,
+                "broker": "interactive_brokers"
+            }
+            
+        except Exception as e:
+            logger.error(f"IB stop order error: {e}")
+            return {"success": False, "error": str(e)}
     
     # ==================== TARGET ORDERS ====================
     
@@ -466,9 +547,74 @@ class TradeExecutorService:
                     "order_id": str(order.id),
                     "fill_price": fill_price
                 }
+            
+            elif self._mode == ExecutorMode.LIVE:
+                # Close via IB order queue
+                return await self._ib_close_position(trade)
                 
         except Exception as e:
             logger.error(f"Close position error: {e}")
+            return {"success": False, "error": str(e)}
+    
+    async def _ib_close_position(self, trade) -> Dict[str, Any]:
+        """Close position via IB using order queue"""
+        try:
+            from routers.ib import queue_order, get_order_result, is_pusher_connected
+            
+            if not is_pusher_connected():
+                logger.warning("IB pusher not connected - simulating close")
+                return {
+                    "success": True,
+                    "order_id": f"SIM-CLOSE-{trade.id}",
+                    "fill_price": trade.current_price,
+                    "simulated": True
+                }
+            
+            # Close order is opposite side
+            action = "SELL" if trade.direction.value == "long" else "BUY"
+            
+            order_id = queue_order({
+                "symbol": trade.symbol,
+                "action": action,
+                "quantity": trade.shares,
+                "order_type": "MKT",
+                "limit_price": None,
+                "stop_price": None,
+                "time_in_force": "DAY",
+                "trade_id": f"CLOSE-{trade.id}"
+            })
+            
+            logger.info(f"Close order queued: {order_id} - {action} {trade.shares} {trade.symbol}")
+            
+            # Wait for execution result
+            result = get_order_result(order_id, timeout=60.0)
+            
+            if result:
+                order_result = result.get("result", {})
+                status = order_result.get("status", "unknown")
+                
+                if status == "filled":
+                    return {
+                        "success": True,
+                        "order_id": order_id,
+                        "fill_price": order_result.get("fill_price", trade.current_price),
+                        "broker": "interactive_brokers"
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": order_result.get("error", f"Close order {status}"),
+                        "order_id": order_id
+                    }
+            else:
+                return {
+                    "success": False,
+                    "error": "Timeout waiting for close order execution",
+                    "order_id": order_id
+                }
+                
+        except Exception as e:
+            logger.error(f"IB close position error: {e}")
             return {"success": False, "error": str(e)}
     
     async def _cancel_related_orders(self, trade):

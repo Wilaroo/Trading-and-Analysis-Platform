@@ -115,6 +115,119 @@ _pushed_ib_data = {
     "connected": False
 }
 
+# ===================== Order Queue for Remote Execution =====================
+# Orders queued by cloud trading bot, executed by local pusher
+_order_queue = {
+    "pending": {},      # order_id -> order details (waiting for execution)
+    "executing": {},    # order_id -> order details (being executed)
+    "completed": {},    # order_id -> result (filled/rejected/cancelled)
+    "last_poll": None   # When pusher last checked for orders
+}
+
+import uuid
+from enum import Enum
+
+class OrderStatus(str, Enum):
+    PENDING = "pending"
+    EXECUTING = "executing" 
+    FILLED = "filled"
+    PARTIALLY_FILLED = "partial"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+
+
+class QueuedOrderRequest(BaseModel):
+    """Request to queue an order for remote execution"""
+    symbol: str
+    action: str  # BUY or SELL
+    quantity: int
+    order_type: str = "MKT"  # MKT, LMT, STP, STP_LMT
+    limit_price: Optional[float] = None
+    stop_price: Optional[float] = None
+    time_in_force: str = "DAY"  # DAY, GTC, IOC
+    trade_id: Optional[str] = None  # Reference to trading bot's trade
+
+
+class OrderExecutionResult(BaseModel):
+    """Result of order execution from local pusher"""
+    order_id: str
+    status: str  # filled, rejected, cancelled, partial
+    fill_price: Optional[float] = None
+    filled_qty: Optional[int] = None
+    remaining_qty: Optional[int] = None
+    error: Optional[str] = None
+    ib_order_id: Optional[int] = None  # IB's internal order ID
+    executed_at: Optional[str] = None
+
+
+def get_order_queue() -> dict:
+    """Get the order queue (for other modules to access)"""
+    return _order_queue
+
+
+def queue_order(order: dict) -> str:
+    """Queue an order for execution by local pusher. Returns order_id."""
+    order_id = str(uuid.uuid4())[:8]
+    _order_queue["pending"][order_id] = {
+        **order,
+        "order_id": order_id,
+        "status": OrderStatus.PENDING,
+        "queued_at": datetime.now(timezone.utc).isoformat(),
+        "attempts": 0
+    }
+    return order_id
+
+
+def get_pending_orders() -> list:
+    """Get all pending orders (for pusher to poll)"""
+    return list(_order_queue["pending"].values())
+
+
+def mark_order_executing(order_id: str) -> bool:
+    """Mark an order as being executed"""
+    if order_id in _order_queue["pending"]:
+        order = _order_queue["pending"].pop(order_id)
+        order["status"] = OrderStatus.EXECUTING
+        order["started_at"] = datetime.now(timezone.utc).isoformat()
+        _order_queue["executing"][order_id] = order
+        return True
+    return False
+
+
+def complete_order(order_id: str, result: dict) -> bool:
+    """Mark an order as completed with result"""
+    order = None
+    if order_id in _order_queue["executing"]:
+        order = _order_queue["executing"].pop(order_id)
+    elif order_id in _order_queue["pending"]:
+        order = _order_queue["pending"].pop(order_id)
+    
+    if order:
+        order["status"] = result.get("status", OrderStatus.FILLED)
+        order["result"] = result
+        order["completed_at"] = datetime.now(timezone.utc).isoformat()
+        _order_queue["completed"][order_id] = order
+        
+        # Keep only last 100 completed orders
+        if len(_order_queue["completed"]) > 100:
+            oldest = sorted(_order_queue["completed"].keys())[0]
+            del _order_queue["completed"][oldest]
+        
+        return True
+    return False
+
+
+def get_order_result(order_id: str, timeout: float = 30.0) -> Optional[dict]:
+    """Get the result of an order (blocking wait with timeout)"""
+    import time
+    start = time.time()
+    while time.time() - start < timeout:
+        if order_id in _order_queue["completed"]:
+            return _order_queue["completed"][order_id]
+        time.sleep(0.5)
+    return None
+
 
 # ===================== Connection Endpoints =====================
 
@@ -919,6 +1032,158 @@ async def get_historical_data(
 
 
 # ===================== Trading Endpoints =====================
+
+# ==================== Order Queue Endpoints (for remote execution) ====================
+
+@router.post("/orders/queue")
+async def queue_order_for_execution(request: QueuedOrderRequest):
+    """
+    Queue an order for execution by the local IB pusher.
+    The trading bot calls this to submit orders.
+    Returns immediately with order_id - use /orders/result/{order_id} to get execution result.
+    """
+    # Validate action
+    if request.action.upper() not in ["BUY", "SELL"]:
+        raise HTTPException(status_code=400, detail="Action must be BUY or SELL")
+    
+    # Validate order type
+    valid_order_types = ["MKT", "LMT", "STP", "STP_LMT"]
+    if request.order_type.upper() not in valid_order_types:
+        raise HTTPException(status_code=400, detail=f"Order type must be one of: {valid_order_types}")
+    
+    # Queue the order
+    order_id = queue_order({
+        "symbol": request.symbol.upper(),
+        "action": request.action.upper(),
+        "quantity": request.quantity,
+        "order_type": request.order_type.upper(),
+        "limit_price": request.limit_price,
+        "stop_price": request.stop_price,
+        "time_in_force": request.time_in_force,
+        "trade_id": request.trade_id
+    })
+    
+    return {
+        "success": True,
+        "order_id": order_id,
+        "status": "pending",
+        "message": "Order queued for execution by local pusher"
+    }
+
+
+@router.get("/orders/pending")
+async def get_pending_orders_endpoint():
+    """
+    Get all pending orders waiting for execution.
+    The local pusher polls this endpoint to get orders to execute.
+    """
+    pending = get_pending_orders()
+    _order_queue["last_poll"] = datetime.now(timezone.utc).isoformat()
+    
+    return {
+        "success": True,
+        "orders": pending,
+        "count": len(pending)
+    }
+
+
+@router.post("/orders/claim/{order_id}")
+async def claim_order_for_execution(order_id: str):
+    """
+    Mark an order as being executed (prevents duplicate execution).
+    The pusher calls this before executing an order.
+    """
+    success = mark_order_executing(order_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Order {order_id} not found or already claimed")
+    
+    return {
+        "success": True,
+        "order_id": order_id,
+        "status": "executing"
+    }
+
+
+@router.post("/orders/result")
+async def report_order_result(result: OrderExecutionResult):
+    """
+    Report the result of an order execution.
+    The pusher calls this after executing an order via IB Gateway.
+    """
+    success = complete_order(result.order_id, {
+        "status": result.status,
+        "fill_price": result.fill_price,
+        "filled_qty": result.filled_qty,
+        "remaining_qty": result.remaining_qty,
+        "error": result.error,
+        "ib_order_id": result.ib_order_id,
+        "executed_at": result.executed_at or datetime.now(timezone.utc).isoformat()
+    })
+    
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Order {result.order_id} not found")
+    
+    return {
+        "success": True,
+        "order_id": result.order_id,
+        "status": result.status
+    }
+
+
+@router.get("/orders/result/{order_id}")
+async def get_order_result_endpoint(order_id: str, wait: bool = False, timeout: float = 30.0):
+    """
+    Get the result of an order.
+    If wait=True, blocks until the order completes or timeout expires.
+    """
+    if wait:
+        result = get_order_result(order_id, timeout)
+        if result:
+            return {"success": True, "order": result}
+        else:
+            return {"success": False, "error": "Timeout waiting for order result", "order_id": order_id}
+    
+    # Check all queues
+    if order_id in _order_queue["completed"]:
+        return {"success": True, "order": _order_queue["completed"][order_id]}
+    if order_id in _order_queue["executing"]:
+        return {"success": True, "order": _order_queue["executing"][order_id], "status": "executing"}
+    if order_id in _order_queue["pending"]:
+        return {"success": True, "order": _order_queue["pending"][order_id], "status": "pending"}
+    
+    raise HTTPException(status_code=404, detail=f"Order {order_id} not found")
+
+
+@router.get("/orders/queue/status")
+async def get_order_queue_status():
+    """Get the current status of the order queue"""
+    return {
+        "success": True,
+        "pending_count": len(_order_queue["pending"]),
+        "executing_count": len(_order_queue["executing"]),
+        "completed_count": len(_order_queue["completed"]),
+        "last_poll": _order_queue["last_poll"],
+        "pusher_active": _order_queue["last_poll"] is not None and (
+            datetime.now(timezone.utc) - datetime.fromisoformat(_order_queue["last_poll"].replace('Z', '+00:00'))
+        ).total_seconds() < 30 if _order_queue["last_poll"] else False
+    }
+
+
+@router.delete("/orders/queue/{order_id}")
+async def cancel_queued_order(order_id: str):
+    """Cancel a pending order (only works if not yet executing)"""
+    if order_id in _order_queue["pending"]:
+        order = _order_queue["pending"].pop(order_id)
+        complete_order(order_id, {"status": "cancelled", "error": "Cancelled by user"})
+        return {"success": True, "order_id": order_id, "status": "cancelled"}
+    
+    if order_id in _order_queue["executing"]:
+        raise HTTPException(status_code=400, detail="Order is already executing, cannot cancel")
+    
+    raise HTTPException(status_code=404, detail=f"Order {order_id} not found in pending queue")
+
+
+# ==================== Direct IB Trading (for local connections) ====================
 
 @router.post("/order")
 async def place_order(request: OrderRequest):
