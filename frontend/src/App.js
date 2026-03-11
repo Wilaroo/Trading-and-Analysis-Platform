@@ -18,6 +18,7 @@ import {
 import CommandCenterPage from './pages/CommandCenterPage';
 import GlossaryPage from './pages/GlossaryPage';
 import SettingsPage from './pages/SettingsPage';
+import MockupPreviewPage from './pages/MockupPreviewPage';
 
 import './App.css';
 
@@ -92,6 +93,10 @@ function App() {
   
   // Persist activeTab in localStorage so it survives page refresh
   const [activeTab, setActiveTab] = useState(() => {
+    // Check URL hash for direct navigation (e.g., #mockups)
+    const hash = window.location.hash.replace('#', '');
+    if (hash === 'mockups') return 'mockups';
+    
     const saved = localStorage.getItem('tradecommand_activeTab');
     return saved || 'command-center';
   });
@@ -328,6 +333,7 @@ function App() {
       case 'ib-trading': return <IBTradingPage {...ibProps} />;
       case 'glossary': return <GlossaryPage />;
       case 'settings': return <SettingsPage />;
+      case 'mockups': return <MockupPreviewPage />;
       default: return <CommandCenterPage {...ibProps} isActiveTab={activeTab === 'command-center'} />;
     }
   };
