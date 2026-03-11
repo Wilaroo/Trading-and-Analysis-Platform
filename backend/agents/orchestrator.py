@@ -102,14 +102,15 @@ class AgentOrchestrator:
             "learning_loop_service": services.get("learning_loop_service")
         })
         
-        # Inject into analyst (needs market data services)
+        # Inject into analyst (needs market data services + TQS)
         self.analyst.inject_services({
             "ib_router": services.get("ib_router"),
             "scanner": services.get("scanner"),
             "technical_service": services.get("technical_service"),
             "sector_service": services.get("sector_service"),
             "sentiment_service": services.get("sentiment_service"),
-            "db": services.get("db")
+            "db": services.get("db"),
+            "tqs_engine": services.get("tqs_engine")  # Trade Quality Score
         })
         
         logger.info(f"Services injected: {list(services.keys())}")

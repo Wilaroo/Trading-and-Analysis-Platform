@@ -47,6 +47,14 @@ class AnalysisContext:
     # News/sentiment
     sentiment_score: float = 0
     recent_news: List[str] = None
+    
+    # TQS (Trade Quality Score) - NEW
+    tqs_score: float = 0
+    tqs_grade: str = ""
+    tqs_action: str = ""
+    tqs_breakdown: Dict = None
+    tqs_key_factors: List[str] = None
+    tqs_concerns: List[str] = None
 
 
 class AnalystAgent(BaseAgent):
@@ -63,11 +71,16 @@ class AnalystAgent(BaseAgent):
     def __init__(self, llm_provider: LLMProvider):
         super().__init__(AgentType.ANALYST, llm_provider)
         self.data_fetcher: Optional[DataFetcher] = None
+        self._tqs_engine = None
         
     def inject_services(self, services: Dict[str, Any]):
         """Inject required services"""
         self.data_fetcher = DataFetcher(services)
         self._services = services
+        # Wire up TQS engine for Trade Quality Scores
+        self._tqs_engine = services.get("tqs_engine")
+        if self._tqs_engine:
+            logger.info("Analyst Agent: TQS Engine connected")
     
     def get_system_prompt(self) -> str:
         return """You are a professional market analyst assistant. Your role is to synthesize 
@@ -181,15 +194,18 @@ Format your analysis with clear sections using **bold** headers."""
             if tech_service:
                 snapshot = await tech_service.get_technical_snapshot(symbol)
                 if snapshot:
-                    context.rsi = snapshot.get("rsi", {}).get("value", 0)
-                    context.trend = snapshot.get("trend", "unknown")
-                    context.support = snapshot.get("support", 0)
-                    context.resistance = snapshot.get("resistance", 0)
+                    # TechnicalSnapshot is a dataclass, access attributes directly
+                    context.rsi = getattr(snapshot, "rsi_14", 0)
+                    context.trend = getattr(snapshot, "trend", "unknown")
+                    context.support = getattr(snapshot, "support", 0)
+                    context.resistance = getattr(snapshot, "resistance", 0)
                     
-                    macd = snapshot.get("macd", {})
-                    if macd.get("histogram", 0) > 0:
+                    # MACD is not directly available on TechnicalSnapshot
+                    # Infer from squeeze_fire (positive = bullish momentum)
+                    squeeze_fire = getattr(snapshot, "squeeze_fire", 0)
+                    if squeeze_fire > 0:
                         context.macd_signal = "bullish"
-                    elif macd.get("histogram", 0) < 0:
+                    elif squeeze_fire < 0:
                         context.macd_signal = "bearish"
                     else:
                         context.macd_signal = "neutral"
@@ -231,6 +247,37 @@ Format your analysis with clear sections using **bold** headers."""
                     context.recent_news = sentiment.get("headlines", [])[:3]
         except Exception as e:
             logger.warning(f"Error getting sentiment: {e}")
+        
+        # Get TQS (Trade Quality Score) - NEW
+        if self._tqs_engine:
+            try:
+                # Determine setup type from scanner alerts if available
+                setup_type = "momentum"  # Default
+                if context.active_setups:
+                    setup_type = context.active_setups[0].get("setup", "momentum")
+                
+                tqs_result = await self._tqs_engine.calculate_tqs(
+                    symbol=symbol,
+                    setup_type=setup_type,
+                    direction="long"  # Default, could be inferred from context
+                )
+                
+                if tqs_result:
+                    context.tqs_score = tqs_result.score
+                    context.tqs_grade = tqs_result.grade
+                    context.tqs_action = tqs_result.action
+                    context.tqs_breakdown = {
+                        "setup": getattr(tqs_result.setup_score, 'score', 0) if tqs_result.setup_score else 0,
+                        "technical": getattr(tqs_result.technical_score, 'score', 0) if tqs_result.technical_score else 0,
+                        "fundamental": getattr(tqs_result.fundamental_score, 'score', 0) if tqs_result.fundamental_score else 0,
+                        "context": getattr(tqs_result.context_score, 'score', 0) if tqs_result.context_score else 0,
+                        "execution": getattr(tqs_result.execution_score, 'score', 0) if tqs_result.execution_score else 0
+                    }
+                    context.tqs_key_factors = tqs_result.key_factors[:3] if tqs_result.key_factors else []
+                    context.tqs_concerns = tqs_result.concerns[:3] if tqs_result.concerns else []
+                    logger.debug(f"TQS for {symbol}: {context.tqs_score:.0f} ({context.tqs_grade}) - {context.tqs_action}")
+            except Exception as e:
+                logger.warning(f"Error getting TQS: {e}")
         
         return context
     
@@ -301,6 +348,20 @@ Format your analysis with clear sections using **bold** headers."""
             for setup in ctx.active_setups[:3]:
                 lines.append(f"- {setup['setup']} @ ${setup['price']:.2f}")
         
+        # TQS (Trade Quality Score) - NEW
+        if ctx.tqs_score > 0:
+            tqs_emoji = "🟢" if ctx.tqs_score >= 65 else "🟡" if ctx.tqs_score >= 50 else "🔴"
+            lines.append("\n**Trade Quality Score (TQS):**")
+            lines.append(f"{tqs_emoji} **Score:** {ctx.tqs_score:.0f}/100 ({ctx.tqs_grade}) - {ctx.tqs_action}")
+            if ctx.tqs_breakdown:
+                lines.append("Pillars:")
+                for pillar, score in ctx.tqs_breakdown.items():
+                    lines.append(f"  - {pillar.title()}: {score:.0f}")
+            if ctx.tqs_key_factors:
+                lines.append(f"Key Factors: {', '.join(ctx.tqs_key_factors)}")
+            if ctx.tqs_concerns:
+                lines.append(f"⚠️ Concerns: {', '.join(ctx.tqs_concerns)}")
+        
         # Bias
         bias = "NEUTRAL"
         if ctx.rsi and ctx.rsi < 30:
@@ -311,6 +372,14 @@ Format your analysis with clear sections using **bold** headers."""
             bias = "BULLISH"
         elif ctx.current_price < ctx.vwap and ctx.macd_signal == "bearish":
             bias = "BEARISH"
+        
+        # Factor in TQS for bias
+        if ctx.tqs_score >= 70:
+            bias += " (TQS: STRONG)"
+        elif ctx.tqs_score >= 50:
+            bias += " (TQS: OK)"
+        elif ctx.tqs_score > 0:
+            bias += " (TQS: WEAK)"
         
         lines.append(f"\n**Bias:** {bias}")
         
@@ -345,6 +414,11 @@ ACTIVE SCANNER SETUPS: {len(ctx.active_setups) if ctx.active_setups else 0}
 {chr(10).join([f"- {s['setup']} ({s['priority']})" for s in (ctx.active_setups or [])[:3]])}
 
 SENTIMENT SCORE: {ctx.sentiment_score:.2f}
+
+TRADE QUALITY SCORE (TQS): {ctx.tqs_score:.0f}/100 ({ctx.tqs_grade}) - {ctx.tqs_action}
+TQS Pillars: {ctx.tqs_breakdown if ctx.tqs_breakdown else 'N/A'}
+TQS Key Factors: {', '.join(ctx.tqs_key_factors) if ctx.tqs_key_factors else 'N/A'}
+TQS Concerns: {', '.join(ctx.tqs_concerns) if ctx.tqs_concerns else 'None'}
 """
         
         if analysis_type == "technical":
@@ -381,5 +455,14 @@ Provide your analysis in a clear, structured format with **bold** headers."""
             "sector": ctx.sector,
             "sector_performance": ctx.sector_performance,
             "active_setups": ctx.active_setups,
-            "sentiment": ctx.sentiment_score
+            "sentiment": ctx.sentiment_score,
+            # TQS (Trade Quality Score)
+            "tqs": {
+                "score": ctx.tqs_score,
+                "grade": ctx.tqs_grade,
+                "action": ctx.tqs_action,
+                "breakdown": ctx.tqs_breakdown,
+                "key_factors": ctx.tqs_key_factors,
+                "concerns": ctx.tqs_concerns
+            } if ctx.tqs_score > 0 else None
         }

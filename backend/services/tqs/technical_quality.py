@@ -111,32 +111,35 @@ class TechnicalQualityService:
         # Fetch technical data if not provided
         if self._technical_service and any(v is None for v in [rsi, ma_stack, atr_percent, rvol]):
             try:
-                snapshot = self._technical_service.get_technical_snapshot(symbol)
+                snapshot = await self._technical_service.get_technical_snapshot(symbol)
                 if snapshot:
-                    rsi = rsi if rsi is not None else snapshot.get("rsi", 50)
-                    atr_percent = atr_percent if atr_percent is not None else snapshot.get("atr_percent", 2.0)
-                    rvol = rvol if rvol is not None else snapshot.get("rvol", 1.0)
-                    vwap_distance_pct = vwap_distance_pct if vwap_distance_pct is not None else snapshot.get("vwap_distance_percent", 0)
+                    # TechnicalSnapshot is a dataclass, access attributes directly
+                    rsi = rsi if rsi is not None else getattr(snapshot, "rsi_14", 50)
+                    atr_percent = atr_percent if atr_percent is not None else getattr(snapshot, "atr_percent", 2.0)
+                    rvol = rvol if rvol is not None else getattr(snapshot, "rvol", 1.0)
+                    vwap_distance_pct = vwap_distance_pct if vwap_distance_pct is not None else getattr(snapshot, "dist_from_vwap", 0)
                     
                     # MA stack from moving averages
-                    mas = snapshot.get("moving_averages", {})
-                    if mas:
-                        sma20 = mas.get("sma_20", 0)
-                        sma50 = mas.get("sma_50", 0)
-                        sma200 = mas.get("sma_200", 0)
-                        if sma20 > sma50 > sma200:
-                            ma_stack = "bullish"
-                        elif sma20 < sma50 < sma200:
-                            ma_stack = "bearish"
-                        else:
-                            ma_stack = "neutral"
+                    ema20 = getattr(snapshot, "ema_20", 0)
+                    ema50 = getattr(snapshot, "ema_50", 0)
+                    sma200 = getattr(snapshot, "sma_200", 0)
+                    if ema20 > ema50 > sma200:
+                        ma_stack = "bullish"
+                    elif ema20 < ema50 < sma200:
+                        ma_stack = "bearish"
+                    else:
+                        ma_stack = "neutral"
                     
-                    squeeze = snapshot.get("squeeze", {})
-                    squeeze_active = squeeze_active if squeeze_active is not None else squeeze.get("is_squeezed", False)
+                    squeeze_active = squeeze_active if squeeze_active is not None else getattr(snapshot, "squeeze_on", False)
                     
-                    levels = snapshot.get("levels", {})
-                    support_distance_pct = support_distance_pct if support_distance_pct is not None else levels.get("support_distance_pct", 5)
-                    resistance_distance_pct = resistance_distance_pct if resistance_distance_pct is not None else levels.get("resistance_distance_pct", 5)
+                    # Calculate distance percentages from levels
+                    price = getattr(snapshot, "current_price", 0)
+                    support = getattr(snapshot, "support", 0)
+                    resistance = getattr(snapshot, "resistance", 0)
+                    if price > 0 and support > 0:
+                        support_distance_pct = support_distance_pct if support_distance_pct is not None else ((price - support) / price) * 100
+                    if price > 0 and resistance > 0:
+                        resistance_distance_pct = resistance_distance_pct if resistance_distance_pct is not None else ((resistance - price) / price) * 100
             except Exception as e:
                 logger.debug(f"Could not fetch technicals for {symbol}: {e}")
                 

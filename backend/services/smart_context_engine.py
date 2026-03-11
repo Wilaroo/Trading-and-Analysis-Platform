@@ -956,10 +956,11 @@ class SmartContextEngine:
             for symbol in symbols[:2]:  # Limit to 2
                 snapshot = await technical_service.get_technical_snapshot(symbol)
                 if snapshot:
-                    price = snapshot.get("price", 0)
-                    vwap = snapshot.get("vwap", 0)
-                    hod = snapshot.get("hod", 0)
-                    lod = snapshot.get("lod", 0)
+                    # TechnicalSnapshot is a dataclass, access attributes directly
+                    price = getattr(snapshot, "current_price", 0)
+                    vwap = getattr(snapshot, "vwap", 0)
+                    hod = getattr(snapshot, "high_of_day", 0)
+                    lod = getattr(snapshot, "low_of_day", 0)
                     
                     # Position relative to key levels
                     vwap_pos = "ABOVE" if price > vwap else "BELOW"
