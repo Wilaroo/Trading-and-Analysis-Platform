@@ -322,6 +322,7 @@ class AdvancedBacktestEngine:
         self._historical_data_service = None
         self._alpaca_service = None
         self._tqs_engine = None
+        self._hybrid_data_service = None  # IB + Alpaca hybrid data
         
         # Background jobs
         self._running_jobs: Dict[str, BacktestJob] = {}
@@ -342,6 +343,11 @@ class AdvancedBacktestEngine:
         self._historical_data_service = historical_data_service
         self._alpaca_service = alpaca_service
         self._tqs_engine = tqs_engine
+    
+    def set_hybrid_data_service(self, hybrid_data_service):
+        """Set hybrid data service (IB + Alpaca fallback)"""
+        self._hybrid_data_service = hybrid_data_service
+        logger.info("Advanced Backtest Engine: Hybrid data service connected")
 
     # ========================================================================
     # Multi-Strategy Backtesting
@@ -843,9 +849,24 @@ class AdvancedBacktestEngine:
         start_date: str,
         end_date: str
     ) -> List[Dict]:
-        """Get bars from cache or fetch from API"""
+        """Get bars from hybrid data service (cache -> IB -> Alpaca)"""
         
-        # Try cache first
+        # Try hybrid data service first (it handles caching internally)
+        if self._hybrid_data_service is not None:
+            try:
+                result = await self._hybrid_data_service.get_bars(
+                    symbol=symbol,
+                    timeframe=timeframe.lower(),
+                    start_date=start_date,
+                    end_date=end_date
+                )
+                if result.success and result.bars:
+                    logger.debug(f"Hybrid data: {symbol} {timeframe} -> {result.bar_count} bars from {result.source}")
+                    return result.bars
+            except Exception as e:
+                logger.warning(f"Hybrid data service error for {symbol}: {e}")
+        
+        # Fallback to legacy cache
         if self._backtest_cache_col is not None:
             cached = list(self._backtest_cache_col.find(
                 {
@@ -859,7 +880,7 @@ class AdvancedBacktestEngine:
             if cached and len(cached) > 10:  # Have meaningful cached data
                 return cached
         
-        # Fetch from Alpaca
+        # Fetch from Alpaca directly as last resort
         bars = []
         try:
             if self._alpaca_service:
