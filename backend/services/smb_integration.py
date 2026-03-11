@@ -24,15 +24,23 @@ logger = logging.getLogger(__name__)
 
 class TradeStyle(Enum):
     """
-    SMB Capital execution styles that determine how to manage the trade.
+    Trade execution styles that determine how to manage the trade.
     
-    Move2Move (M2M): Scalp - capture immediate next move, exit quickly
-    Trade2Hold (T2H): Intraday swing - hold for Reason2Sell trigger
-    A_PLUS: Max conviction when all 5 variables align
+    SCALP: Quick in-and-out capturing immediate move (minutes to 1 hour)
+    INTRADAY: Hold for intraday swing until Reason2Sell trigger (1-6 hours)
+    MULTI_DAY: Max conviction multi-day hold when all 5 variables align (1-5 days)
+    
+    Note: "A+" now refers to GRADE (quality) not STYLE.
+    A scalp can be A+ quality, and a multi-day hold can be C quality.
     """
-    MOVE_2_MOVE = "move_2_move"      # Target 1R, 60-70% win rate
-    TRADE_2_HOLD = "trade_2_hold"    # Target 3-5R, 40-50% win rate
-    A_PLUS = "a_plus"                # Target 10R+, max conviction
+    SCALP = "scalp"              # Target 1R, 60-70% win rate, minutes to 1 hour
+    INTRADAY = "intraday"        # Target 3-5R, 40-50% win rate, 1-6 hours  
+    MULTI_DAY = "multi_day"      # Target 10R+, max conviction, 1-5 days
+    
+    # Backwards compatibility aliases (deprecated - will be removed)
+    MOVE_2_MOVE = "scalp"        # DEPRECATED: Use SCALP
+    TRADE_2_HOLD = "intraday"    # DEPRECATED: Use INTRADAY
+    A_PLUS = "multi_day"         # DEPRECATED: Use MULTI_DAY
 
 
 class SetupDirection(Enum):
@@ -85,7 +93,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="first_vwap_pullback",
         display_name="First VWAP Pullback",
         category=SetupCategory.CATALYST_DRIVEN,
-        default_style=TradeStyle.TRADE_2_HOLD,
+        default_style=TradeStyle.INTRADAY,
         direction=SetupDirection.BOTH,
         typical_r_target=2.5,
         requires_catalyst=True,
@@ -97,7 +105,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="first_move_up",
         display_name="First Move Up (Fade)",
         category=SetupCategory.REVERSAL,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.SHORT,  # Fade the first move UP = short
         typical_r_target=1.5,
         valid_time_windows=["opening_auction"],
@@ -108,7 +116,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="first_move_down",
         display_name="First Move Down (Fade)",
         category=SetupCategory.REVERSAL,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.LONG,  # Fade the first move DOWN = long
         typical_r_target=1.5,
         valid_time_windows=["opening_auction"],
@@ -119,7 +127,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="bella_fade",
         display_name="Bella Fade",
         category=SetupCategory.REVERSAL,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.BOTH,  # Fade extreme in either direction
         typical_r_target=2.0,
         valid_time_windows=["opening_auction", "opening_drive"],
@@ -130,7 +138,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="back_through_open",
         display_name="Back Through Open",
         category=SetupCategory.CATALYST_DRIVEN,
-        default_style=TradeStyle.TRADE_2_HOLD,
+        default_style=TradeStyle.INTRADAY,
         direction=SetupDirection.LONG,  # Gap up, dip, back through = long
         smb_aliases=["back_through"],
         typical_r_target=3.0,
@@ -143,7 +151,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="up_through_open",
         display_name="Up Through Open",
         category=SetupCategory.CATALYST_DRIVEN,
-        default_style=TradeStyle.TRADE_2_HOLD,
+        default_style=TradeStyle.INTRADAY,
         direction=SetupDirection.LONG,  # Gap down, reverse up through open = long
         typical_r_target=3.0,
         requires_catalyst=True,
@@ -155,7 +163,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="opening_drive",
         display_name="Opening Drive",
         category=SetupCategory.TREND_MOMENTUM,
-        default_style=TradeStyle.TRADE_2_HOLD,
+        default_style=TradeStyle.INTRADAY,
         direction=SetupDirection.BOTH,  # Go with strong directional open
         typical_r_target=3.0,
         requires_catalyst=True,
@@ -170,7 +178,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="orb",
         display_name="Opening Range Breakout",
         category=SetupCategory.TREND_MOMENTUM,
-        default_style=TradeStyle.TRADE_2_HOLD,
+        default_style=TradeStyle.INTRADAY,
         direction=SetupDirection.BOTH,
         smb_aliases=["opening_range_breakout"],
         typical_r_target=2.5,
@@ -183,7 +191,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="hitchhiker",
         display_name="HitchHiker Scalp",
         category=SetupCategory.TREND_MOMENTUM,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.LONG,  # Ride strong momentum leaders
         smb_aliases=["market_play"],
         typical_r_target=1.9,
@@ -197,7 +205,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="gap_give_go",
         display_name="Gap Give and Go",
         category=SetupCategory.CATALYST_DRIVEN,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.LONG,  # Gap up, pullback, continue up
         smb_aliases=["gap_and_go"],
         typical_r_target=2.0,
@@ -210,7 +218,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="gap_pick_roll",
         display_name="Gap Pick and Roll",
         category=SetupCategory.CATALYST_DRIVEN,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.SHORT,  # Gap down, pop, fail, roll down
         typical_r_target=2.0,
         requires_catalyst=True,
@@ -224,7 +232,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="spencer_scalp",
         display_name="Spencer Scalp",
         category=SetupCategory.CONSOLIDATION,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.BOTH,
         smb_aliases=["scalp"],  # Removed dr_s, elite_101 as requested
         typical_r_target=1.5,
@@ -237,7 +245,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="second_chance",
         display_name="Second Chance Scalp",
         category=SetupCategory.SPECIALIZED,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.BOTH,  # Re-entry after pullback
         typical_r_target=2.0,
         typical_win_rate=0.55,
@@ -249,7 +257,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="backside",
         display_name="Backside Scalp",
         category=SetupCategory.REVERSAL,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.LONG,  # Reversal after extended down move
         typical_r_target=1.5,
         valid_time_windows=["morning_session", "late_morning", "midday"],
@@ -260,7 +268,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="off_sides",
         display_name="Off Sides Scalp",
         category=SetupCategory.REVERSAL,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.BOTH,  # Fade extreme intraday move
         smb_aliases=["stuffed"],
         typical_r_target=1.5,
@@ -272,7 +280,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="fashionably_late",
         display_name="Fashionably Late",
         category=SetupCategory.SPECIALIZED,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.LONG,  # Late entry after 9 EMA crosses VWAP
         typical_r_target=3.0,
         typical_win_rate=0.60,
@@ -286,7 +294,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="rubber_band_long",
         display_name="Rubber Band Scalp (Long)",
         category=SetupCategory.REVERSAL,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.LONG,  # Snapback from oversold
         smb_aliases=["bounce"],
         typical_r_target=1.5,
@@ -298,7 +306,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="rubber_band_short",
         display_name="Rubber Band Scalp (Short)",
         category=SetupCategory.REVERSAL,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.SHORT,  # Snapback from overbought
         typical_r_target=1.5,
         valid_time_windows=["morning_momentum", "morning_session", "late_morning", "midday", "afternoon"],
@@ -310,7 +318,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="rubber_band",
         display_name="Rubber Band Scalp",
         category=SetupCategory.REVERSAL,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.BOTH,
         smb_aliases=["bounce"],
         typical_r_target=1.5,
@@ -322,7 +330,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="vwap_bounce",
         display_name="VWAP Bounce",
         category=SetupCategory.REVERSAL,
-        default_style=TradeStyle.TRADE_2_HOLD,
+        default_style=TradeStyle.INTRADAY,
         direction=SetupDirection.LONG,  # Bounce off VWAP support
         typical_r_target=2.0,
         valid_time_windows=["morning_momentum", "morning_session", "late_morning", "midday", "afternoon"],
@@ -333,7 +341,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="vwap_fade",
         display_name="VWAP Fade",
         category=SetupCategory.REVERSAL,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.BOTH,  # Fade extension from VWAP
         typical_r_target=1.5,
         valid_time_windows=["morning_session", "late_morning", "midday", "afternoon"],
@@ -344,7 +352,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="tidal_wave",
         display_name="Tidal Wave / Bouncy Ball",
         category=SetupCategory.REVERSAL,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.SHORT,  # Short after weaker bounces
         typical_r_target=2.5,
         valid_time_windows=["morning_session", "late_morning", "midday", "afternoon"],
@@ -355,7 +363,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="mean_reversion",
         display_name="Mean Reversion",
         category=SetupCategory.REVERSAL,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.BOTH,
         typical_r_target=1.5,
         valid_time_windows=["morning_momentum", "morning_session", "late_morning", "midday", "afternoon"],
@@ -368,7 +376,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="big_dog",
         display_name="Big Dog Consolidation",
         category=SetupCategory.CONSOLIDATION,
-        default_style=TradeStyle.TRADE_2_HOLD,
+        default_style=TradeStyle.INTRADAY,
         direction=SetupDirection.BOTH,
         smb_aliases=["big_dawg"],
         typical_r_target=3.0,
@@ -380,7 +388,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="puppy_dog",
         display_name="Puppy Dog Consolidation",
         category=SetupCategory.CONSOLIDATION,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.BOTH,
         typical_r_target=2.0,
         valid_time_windows=["morning_session", "late_morning", "midday"],
@@ -391,7 +399,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="9_ema_scalp",
         display_name="9 EMA Scalp",
         category=SetupCategory.SPECIALIZED,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.BOTH,  # Scalp bounces off 9 EMA
         typical_r_target=1.5,
         valid_time_windows=["morning_momentum", "morning_session", "late_morning"],
@@ -402,7 +410,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="abc_scalp",
         display_name="ABC Scalp",
         category=SetupCategory.SPECIALIZED,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.BOTH,
         typical_r_target=1.5,
         valid_time_windows=["morning_session", "late_morning", "midday"],
@@ -413,7 +421,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="squeeze",
         display_name="Volatility Squeeze",
         category=SetupCategory.CONSOLIDATION,
-        default_style=TradeStyle.TRADE_2_HOLD,
+        default_style=TradeStyle.INTRADAY,
         direction=SetupDirection.BOTH,
         typical_r_target=2.5,
         valid_time_windows=["morning_session", "late_morning", "midday", "afternoon"],
@@ -426,7 +434,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="hod_breakout",
         display_name="HOD Breakout (Above the Clouds)",
         category=SetupCategory.TREND_MOMENTUM,
-        default_style=TradeStyle.TRADE_2_HOLD,
+        default_style=TradeStyle.INTRADAY,
         direction=SetupDirection.LONG,  # Break of high of day
         smb_aliases=["above_the_clouds", "afternoon_to_light"],
         typical_r_target=2.5,
@@ -439,7 +447,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="lod_breakdown",
         display_name="LOD Breakdown",
         category=SetupCategory.TREND_MOMENTUM,
-        default_style=TradeStyle.TRADE_2_HOLD,
+        default_style=TradeStyle.INTRADAY,
         direction=SetupDirection.SHORT,  # Break of low of day
         typical_r_target=2.5,
         requires_catalyst=True,
@@ -451,7 +459,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="time_of_day_fade",
         display_name="Time of Day Fade",
         category=SetupCategory.REVERSAL,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.BOTH,  # Fade extended move into close
         typical_r_target=1.5,
         valid_time_windows=["close"],
@@ -464,7 +472,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="breaking_news",
         display_name="Breaking News",
         category=SetupCategory.CATALYST_DRIVEN,
-        default_style=TradeStyle.TRADE_2_HOLD,
+        default_style=TradeStyle.INTRADAY,
         direction=SetupDirection.BOTH,
         smb_aliases=["changing_fundamentals"],
         typical_r_target=3.0,
@@ -479,7 +487,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="volume_capitulation",
         display_name="Volume Capitulation",
         category=SetupCategory.REVERSAL,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.BOTH,  # Reversal after volume spike
         typical_r_target=2.0,
         min_rvol=5.0,
@@ -491,7 +499,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="range_break",
         display_name="Range Break",
         category=SetupCategory.CONSOLIDATION,
-        default_style=TradeStyle.TRADE_2_HOLD,
+        default_style=TradeStyle.INTRADAY,
         direction=SetupDirection.BOTH,
         typical_r_target=2.0,
         valid_time_windows=["morning_session", "late_morning", "midday", "afternoon"],
@@ -502,7 +510,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="breakout",
         display_name="Breakout",
         category=SetupCategory.TREND_MOMENTUM,
-        default_style=TradeStyle.TRADE_2_HOLD,
+        default_style=TradeStyle.INTRADAY,
         direction=SetupDirection.LONG,  # Classic breakout above resistance
         typical_r_target=2.5,
         valid_time_windows=["morning_session", "late_morning", "midday", "afternoon"],
@@ -513,7 +521,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="breakdown",
         display_name="Breakdown",
         category=SetupCategory.TREND_MOMENTUM,
-        default_style=TradeStyle.TRADE_2_HOLD,
+        default_style=TradeStyle.INTRADAY,
         direction=SetupDirection.SHORT,  # Classic breakdown below support
         typical_r_target=2.5,
         valid_time_windows=["morning_session", "late_morning", "midday", "afternoon"],
@@ -524,7 +532,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="relative_strength",
         display_name="Relative Strength",
         category=SetupCategory.TREND_MOMENTUM,
-        default_style=TradeStyle.TRADE_2_HOLD,
+        default_style=TradeStyle.INTRADAY,
         direction=SetupDirection.LONG,  # Outperforming SPY
         typical_r_target=2.0,
         valid_time_windows=["morning_momentum", "morning_session", "late_morning", "midday", "afternoon"],
@@ -535,7 +543,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="relative_weakness",
         display_name="Relative Weakness",
         category=SetupCategory.TREND_MOMENTUM,
-        default_style=TradeStyle.TRADE_2_HOLD,
+        default_style=TradeStyle.INTRADAY,
         direction=SetupDirection.SHORT,  # Underperforming SPY
         typical_r_target=2.0,
         valid_time_windows=["morning_momentum", "morning_session", "late_morning", "midday", "afternoon"],
@@ -546,7 +554,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="gap_fade",
         display_name="Gap Fade",
         category=SetupCategory.REVERSAL,
-        default_style=TradeStyle.MOVE_2_MOVE,
+        default_style=TradeStyle.SCALP,
         direction=SetupDirection.BOTH,  # Fade failing gap
         typical_r_target=1.5,
         valid_time_windows=["opening_drive", "morning_momentum"],
@@ -557,7 +565,7 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         name="chart_pattern",
         display_name="Chart Pattern",
         category=SetupCategory.CONSOLIDATION,
-        default_style=TradeStyle.TRADE_2_HOLD,
+        default_style=TradeStyle.INTRADAY,
         direction=SetupDirection.BOTH,
         typical_r_target=2.0,
         valid_time_windows=["morning_session", "late_morning", "midday", "afternoon"],
@@ -661,11 +669,11 @@ class SMBVariableScore:
     def trade_style_recommendation(self) -> TradeStyle:
         """Recommend trade style based on score"""
         if self.is_a_plus:
-            return TradeStyle.A_PLUS
+            return TradeStyle.MULTI_DAY
         elif self.total_score >= 30:
-            return TradeStyle.TRADE_2_HOLD
+            return TradeStyle.INTRADAY
         else:
-            return TradeStyle.MOVE_2_MOVE
+            return TradeStyle.SCALP
     
     @property
     def size_multiplier(self) -> float:
@@ -861,7 +869,7 @@ def get_default_trade_style(setup_name: str, context: Dict = None) -> TradeStyle
     """
     config = get_setup_config(setup_name)
     if not config:
-        return TradeStyle.MOVE_2_MOVE  # Safe default
+        return TradeStyle.SCALP  # Safe default
     
     default_style = config.default_style
     
@@ -870,22 +878,22 @@ def get_default_trade_style(setup_name: str, context: Dict = None) -> TradeStyle
         smb_score = context.get("smb_score")
         if smb_score and isinstance(smb_score, SMBVariableScore):
             if smb_score.is_a_plus:
-                return TradeStyle.A_PLUS
+                return TradeStyle.MULTI_DAY
             elif smb_score.total_score >= 35:
-                return TradeStyle.TRADE_2_HOLD
+                return TradeStyle.INTRADAY
         
         # Override based on market regime
         regime = context.get("market_regime", "").lower()
         if regime in ["momentum", "strong_uptrend", "strong_downtrend"]:
             # Trending markets favor T2H
-            if default_style == TradeStyle.MOVE_2_MOVE:
+            if default_style == TradeStyle.SCALP:
                 tape_score = context.get("tape_score", 50)
                 if tape_score >= 70:  # Strong tape = hold longer
-                    return TradeStyle.TRADE_2_HOLD
+                    return TradeStyle.INTRADAY
         elif regime in ["range_bound", "fade", "volatile"]:
             # Choppy markets favor M2M
-            if default_style == TradeStyle.TRADE_2_HOLD:
-                return TradeStyle.MOVE_2_MOVE
+            if default_style == TradeStyle.INTRADAY:
+                return TradeStyle.SCALP
     
     return default_style
 
@@ -955,21 +963,21 @@ def get_all_short_setups() -> List[str]:
 # ==================== TRADE STYLE R-MULTIPLE TARGETS ====================
 
 TRADE_STYLE_TARGETS = {
-    TradeStyle.MOVE_2_MOVE: {
+    TradeStyle.SCALP: {
         "target_r": 1.0,
         "max_r": 1.5,
         "typical_win_rate": 0.65,
         "exit_rule": "Exit on first momentum pause or target",
         "management": "Full exit at target, tight trail if extended"
     },
-    TradeStyle.TRADE_2_HOLD: {
+    TradeStyle.INTRADAY: {
         "target_r": 3.0,
         "max_r": 5.0,
         "typical_win_rate": 0.45,
         "exit_rule": "Only exit on Reason2Sell trigger",
         "management": "Partial at 1R, hold core for 3R+, trail with 9 EMA"
     },
-    TradeStyle.A_PLUS: {
+    TradeStyle.MULTI_DAY: {
         "target_r": 5.0,
         "max_r": 10.0,
         "typical_win_rate": 0.50,
@@ -981,7 +989,7 @@ TRADE_STYLE_TARGETS = {
 
 def get_style_targets(style: TradeStyle) -> Dict:
     """Get target R-multiples and management rules for a trade style"""
-    return TRADE_STYLE_TARGETS.get(style, TRADE_STYLE_TARGETS[TradeStyle.MOVE_2_MOVE])
+    return TRADE_STYLE_TARGETS.get(style, TRADE_STYLE_TARGETS[TradeStyle.SCALP])
 
 
 # ==================== LOGGING ====================

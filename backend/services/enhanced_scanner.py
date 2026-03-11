@@ -383,7 +383,7 @@ class LiveAlert:
     auto_execute_eligible: bool = False
     
     # NEW: SMB Integration fields
-    trade_style: str = "move_2_move"     # "move_2_move", "trade_2_hold", "a_plus"
+    trade_style: str = "intraday"     # scalp, intraday, multi_day, swing, position
     setup_category: str = "consolidation" # "trend_momentum", "catalyst_driven", "reversal", "consolidation", "specialized"
     direction_bias: str = "both"         # "long", "short", "both" - primary setup direction
     
@@ -544,7 +544,7 @@ class LiveAlert:
                         self.smb_is_a_plus = smb_score.is_a_plus
                         
                         if smb_score.is_a_plus:
-                            self.trade_style = "a_plus"
+                            self.trade_style = "multi_day"
                             self.target_r_multiple = 5.0
                     
                     # Earnings score if available
