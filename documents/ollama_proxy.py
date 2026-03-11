@@ -8,7 +8,7 @@ Receives Ollama requests, calls local Ollama, returns responses.
 No ngrok needed - this initiates the connection outbound.
 
 Usage:
-    python ollama_proxy.py --cloud-url https://ib-trading-engine.preview.emergentagent.com
+    python ollama_proxy.py --cloud-url https://ai-trader-bot-25.preview.emergentagent.com
 """
 
 import asyncio

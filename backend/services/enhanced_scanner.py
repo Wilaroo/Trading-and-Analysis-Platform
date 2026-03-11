@@ -11,6 +11,11 @@ Features:
 - SMB 5-Variable Scoring integration
 - Trade Style classification (M2M/T2H/A+)
 - Direction bias (Long/Short/Both) per setup
+
+Data Source Hierarchy:
+- QUOTES: IB pusher (primary) -> Alpaca (fallback)
+- HISTORICAL BARS: Alpaca (IB pusher doesn't provide historical)
+- LEVEL 2: IB pusher (when available)
 """
 
 import asyncio
@@ -1021,7 +1026,7 @@ class EnhancedBackgroundScanner:
             
         except Exception as e:
             logger.warning(f"Wave scanner unavailable, falling back to static watchlist: {e}")
-            # Fallback to static watchlist
+            # Fallback to static watchlist - prioritize IB data
             for symbol in self._watchlist:
                 try:
                     # Check cache first
@@ -1034,9 +1039,9 @@ class EnhancedBackgroundScanner:
                                 skipped += 1
                             continue
                     
-                    # Quick RVOL check via Alpaca
-                    quote = await self.alpaca_service.get_quote(symbol)
-                    if quote:
+                    # Quick quote check - IB first, then Alpaca
+                    quote = await self._get_quote_with_ib_priority(symbol)
+                    if quote and quote.get("price", 0) > 0:
                         active_symbols.append(symbol)
                         self._rvol_cache[symbol] = (1.0, datetime.now(timezone.utc))
                     else:
@@ -1052,9 +1057,15 @@ class EnhancedBackgroundScanner:
     # ==================== TAPE READING ====================
     
     async def _get_tape_reading(self, symbol: str, snapshot) -> TapeReading:
-        """Analyze tape for confirmation signals, incorporating Level 2 if available"""
+        """
+        Analyze tape for confirmation signals, incorporating Level 2 if available.
+        PRIORITIZES IB pushed data for real-time quotes, falls back to Alpaca.
+        """
         try:
-            quote = await self.alpaca_service.get_quote(symbol)
+            # Get quote with IB priority
+            quote = await self._get_quote_with_ib_priority(symbol)
+            if not quote:
+                quote = {}
             
             bid_price = quote.get("bid", snapshot.current_price * 0.999)
             ask_price = quote.get("ask", snapshot.current_price * 1.001)
@@ -1418,6 +1429,64 @@ class EnhancedBackgroundScanner:
             self._alpaca_service = get_alpaca_service()
         return self._alpaca_service
     
+    # ==================== IB DATA HELPERS ====================
+    
+    def _get_ib_quote(self, symbol: str) -> Optional[Dict]:
+        """
+        Get quote from IB pushed data (non-async, fast).
+        Prioritizes IB data over Alpaca for real-time accuracy.
+        Returns None if IB data not available.
+        """
+        try:
+            from routers.ib import get_pushed_quotes, is_pusher_connected
+            if is_pusher_connected():
+                quotes = get_pushed_quotes()
+                symbol_upper = symbol.upper()
+                if symbol_upper in quotes:
+                    q = quotes[symbol_upper]
+                    return {
+                        "symbol": symbol_upper,
+                        "price": q.get("last") or q.get("close") or 0,
+                        "bid": q.get("bid") or 0,
+                        "ask": q.get("ask") or 0,
+                        "bid_size": q.get("bidSize") or q.get("bid_size") or 100,
+                        "ask_size": q.get("askSize") or q.get("ask_size") or 100,
+                        "volume": q.get("volume") or 0,
+                        "high": q.get("high") or 0,
+                        "low": q.get("low") or 0,
+                        "open": q.get("open") or 0,
+                        "close": q.get("close") or 0,
+                        "source": "ib_pusher"
+                    }
+        except Exception as e:
+            logger.debug(f"IB quote not available for {symbol}: {e}")
+        return None
+    
+    def _is_ib_connected(self) -> bool:
+        """Check if IB pusher is connected (non-async)."""
+        try:
+            from routers.ib import is_pusher_connected
+            return is_pusher_connected()
+        except Exception:
+            return False
+    
+    async def _get_quote_with_ib_priority(self, symbol: str) -> Optional[Dict]:
+        """
+        Get quote with IB pusher as primary source, Alpaca as fallback.
+        This ensures scanner uses live IB data when available.
+        """
+        # Try IB first (fast, non-async)
+        ib_quote = self._get_ib_quote(symbol)
+        if ib_quote and ib_quote.get("price", 0) > 0:
+            return ib_quote
+        
+        # Fallback to Alpaca
+        try:
+            return await self.alpaca_service.get_quote(symbol)
+        except Exception as e:
+            logger.debug(f"Alpaca quote failed for {symbol}: {e}")
+            return None
+    
     # ==================== LIFECYCLE ====================
     
     async def start(self):
@@ -1625,8 +1694,13 @@ class EnhancedBackgroundScanner:
         return adv_data
     
     async def _fetch_single_adv(self, symbol: str) -> int:
-        """Fetch ADV for a single symbol"""
+        """
+        Fetch ADV (Average Daily Volume) for a single symbol.
+        Note: Historical bar data still comes from Alpaca as IB pusher
+        primarily provides real-time quotes, not historical bars.
+        """
         try:
+            # Use Alpaca for historical bars (IB pusher doesn't push historical)
             bars = await self.alpaca_service.get_bars(symbol, timeframe="1Day", limit=20)
             if bars:
                 volumes = [bar.get("volume", 0) for bar in bars]
