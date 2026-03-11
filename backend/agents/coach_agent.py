@@ -99,6 +99,7 @@ Keep responses concise but insightful. Use their actual numbers."""
         if query_type == "position":
             # Build position summary from CODE (no LLM needed)
             position_text = self._format_positions_for_display(context)
+            model_used = "code_only"
             
             # Try to get LLM commentary (but don't fail if unavailable)
             try:
@@ -110,6 +111,7 @@ Keep responses concise but insightful. Use their actual numbers."""
                 )
                 if response.success:
                     position_text = response.content
+                    model_used = response.model
             except Exception as e:
                 logger.warning(f"LLM unavailable for position commentary: {e}")
             
@@ -125,7 +127,7 @@ Keep responses concise but insightful. Use their actual numbers."""
                     "positions": context.positions  # Include raw position data
                 },
                 latency_ms=(time.time() - start) * 1000,
-                model_used="code_only" if not response.success else response.model,
+                model_used=model_used,
                 metadata={"query_type": query_type}
             )
         
@@ -273,7 +275,7 @@ You have no open positions at this time."""
             try:
                 patterns = await learning_service.get_mistake_patterns()
                 return patterns
-            except:
+            except (ValueError, TypeError, AttributeError):
                 pass
         return []
     
@@ -292,10 +294,10 @@ You have no open positions at this time."""
             positions_text = "YOUR CURRENT POSITIONS (VERIFIED FROM IB):\n"
             for pos in context.positions:
                 symbol = pos.get("symbol", "?")
-                shares = pos.get("position", pos.get("shares", 0))
-                price = pos.get("marketPrice", pos.get("current_price", 0))
-                avg_cost = pos.get("avgCost", pos.get("averageCost", 0))
-                pnl = pos.get("unrealizedPNL", pos.get("unrealized_pnl", 0))
+                shares = pos.get("position", pos.get("shares", 0)) or 0
+                price = pos.get("marketPrice", pos.get("current_price", 0)) or 0
+                avg_cost = pos.get("avgCost", pos.get("averageCost", 0)) or 0
+                pnl = pos.get("unrealizedPNL", pos.get("unrealized_pnl", 0)) or 0
                 
                 positions_text += f"  - {symbol}: {shares:,.0f} shares @ ${avg_cost:.2f} avg | "
                 positions_text += f"Current: ${price:.2f} | P&L: ${pnl:,.2f}\n"
@@ -331,20 +333,25 @@ YOUR PERFORMANCE STATS (VERIFIED):
                 mistakes_text += f"  - {pattern}\n"
         
         # Portfolio summary
+        total_pnl = context.total_pnl if context.total_pnl is not None else 0
+        winning = context.winning_positions if context.winning_positions is not None else 0
+        losing = context.losing_positions if context.losing_positions is not None else 0
+        exposure = context.portfolio_exposure if context.portfolio_exposure is not None else 0
+        
         summary = f"""
 PORTFOLIO SUMMARY (VERIFIED):
-  - Total Unrealized P&L: ${context.total_pnl:,.2f}
-  - Winning Positions: {context.winning_positions}
-  - Losing Positions: {context.losing_positions}
-  - Portfolio Exposure: ${context.portfolio_exposure:,.2f}
+  - Total Unrealized P&L: ${total_pnl:,.2f}
+  - Winning Positions: {winning}
+  - Losing Positions: {losing}
+  - Portfolio Exposure: ${exposure:,.2f}
 """
         
         if context.largest_winner:
             w = context.largest_winner
             summary += f"  - Largest Winner: {w.get('symbol')} (+${w.get('unrealizedPNL', 0):,.2f})\n"
         if context.largest_loser:
-            l = context.largest_loser
-            summary += f"  - Largest Loser: {l.get('symbol')} (${l.get('unrealizedPNL', 0):,.2f})\n"
+            loser = context.largest_loser
+            summary += f"  - Largest Loser: {loser.get('symbol')} (${loser.get('unrealizedPNL', 0):,.2f})\n"
         
         # Combine into full prompt
         prompt = f"""=== VERIFIED DATA (DO NOT MODIFY THESE NUMBERS) ===

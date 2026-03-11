@@ -196,8 +196,9 @@ class DataFetcher:
         """Get account data from IB (CODE - verified data)"""
         try:
             import routers.ib as ib_module
-            data = ib_module.get_pushed_data()
-            return data.get("account", {})
+            # Use the account summary endpoint
+            account = await ib_module.get_account_summary()
+            return account
         except Exception as e:
             logger.error(f"Error fetching account data: {e}")
             return {}
@@ -229,8 +230,8 @@ class DataFetcher:
         """Get quote for a symbol (CODE - verified data)"""
         try:
             import routers.ib as ib_module
-            data = ib_module.get_pushed_data()
-            quotes = data.get("quotes", {})
+            # Use the pushed quotes function
+            quotes = ib_module.get_pushed_quotes()
             return quotes.get(symbol)
         except Exception as e:
             logger.error(f"Error fetching quote for {symbol}: {e}")
