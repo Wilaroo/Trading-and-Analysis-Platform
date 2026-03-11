@@ -1,0 +1,681 @@
+"""
+Advanced Backtest Router
+========================
+API endpoints for the advanced backtesting system.
+
+Features:
+- Multi-strategy backtesting
+- Walk-forward optimization  
+- Monte Carlo simulation
+- Custom date range selection
+- Background job management
+"""
+
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from typing import Optional, List
+from pydantic import BaseModel, Field
+from datetime import datetime
+
+router = APIRouter(prefix="/api/backtest", tags=["advanced-backtest"])
+
+# Will be initialized from server
+_advanced_engine = None
+
+
+def init_advanced_backtest_router(engine):
+    """Initialize the router with the backtest engine"""
+    global _advanced_engine
+    _advanced_engine = engine
+
+
+# ============================================================================
+# Request/Response Models
+# ============================================================================
+
+class StrategyConfigModel(BaseModel):
+    """Strategy configuration for backtest"""
+    name: str = Field(..., description="Strategy name")
+    setup_type: str = Field(..., description="Setup type: ORB, VWAP_BOUNCE, GAP_AND_GO, BREAKOUT, MOMENTUM")
+    min_tqs_score: float = Field(60.0, description="Minimum TQS score for entry")
+    stop_pct: float = Field(2.0, description="Stop loss percentage")
+    target_pct: float = Field(4.0, description="Take profit percentage")
+    use_trailing_stop: bool = Field(False, description="Use trailing stop")
+    trailing_stop_pct: float = Field(1.5, description="Trailing stop percentage")
+    max_bars_to_hold: int = Field(20, description="Maximum bars to hold position")
+    position_size_pct: float = Field(10.0, description="Position size as % of capital")
+
+
+class BacktestFiltersModel(BaseModel):
+    """Filters for custom date range selection"""
+    start_date: Optional[str] = Field(None, description="Start date (YYYY-MM-DD)")
+    end_date: Optional[str] = Field(None, description="End date (YYYY-MM-DD)")
+    market_regimes: List[str] = Field(["all"], description="Market regime filters: all, bull, bear, high_vol, low_vol")
+    time_filters: List[str] = Field(["all_day"], description="Time of day filters")
+    days_of_week: List[int] = Field([0,1,2,3,4], description="Days to include (0=Mon, 4=Fri)")
+    exclude_earnings_days: bool = Field(False, description="Exclude earnings announcement days")
+
+
+class MultiStrategyRequest(BaseModel):
+    """Request for multi-strategy backtest"""
+    symbols: List[str] = Field(..., description="List of stock symbols")
+    strategies: List[StrategyConfigModel] = Field(..., description="List of strategies to test")
+    filters: Optional[BacktestFiltersModel] = Field(None, description="Date and market filters")
+    starting_capital: float = Field(100000.0, description="Starting capital per strategy")
+    name: Optional[str] = Field(None, description="Name for this backtest")
+    run_in_background: bool = Field(False, description="Run as background job")
+
+
+class WalkForwardRequest(BaseModel):
+    """Request for walk-forward optimization"""
+    symbol: str = Field(..., description="Stock symbol")
+    strategy: StrategyConfigModel = Field(..., description="Strategy to test")
+    in_sample_days: int = Field(180, description="Training period in days")
+    out_of_sample_days: int = Field(30, description="Testing period in days")
+    step_days: int = Field(30, description="Days to step forward each period")
+    total_days: int = Field(365, description="Total days of data to use")
+    end_date: Optional[str] = Field(None, description="End date (defaults to today)")
+    run_in_background: bool = Field(False, description="Run as background job")
+
+
+class MonteCarloRequest(BaseModel):
+    """Request for Monte Carlo simulation"""
+    backtest_id: Optional[str] = Field(None, description="ID of existing backtest to analyze")
+    num_simulations: int = Field(10000, description="Number of simulations to run")
+    starting_capital: float = Field(100000.0, description="Starting capital")
+    randomize_trade_order: bool = Field(True, description="Shuffle trade order")
+    randomize_trade_size: bool = Field(False, description="Vary position sizes")
+    size_variation_pct: float = Field(20.0, description="Position size variation (+/- %)")
+    run_in_background: bool = Field(True, description="Run as background job (recommended)")
+
+
+class QuickBacktestRequest(BaseModel):
+    """Request for quick single-strategy backtest"""
+    symbol: str = Field(..., description="Stock symbol")
+    strategy: StrategyConfigModel = Field(..., description="Strategy configuration")
+    start_date: Optional[str] = Field(None, description="Start date")
+    end_date: Optional[str] = Field(None, description="End date")
+    starting_capital: float = Field(100000.0, description="Starting capital")
+
+
+# ============================================================================
+# Multi-Strategy Endpoints
+# ============================================================================
+
+@router.post("/multi-strategy")
+async def run_multi_strategy_backtest(
+    request: MultiStrategyRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Run multiple strategies on multiple symbols and compare results.
+    
+    Returns comparison metrics including:
+    - Per-strategy performance (win rate, profit factor, Sharpe, etc.)
+    - Combined portfolio performance
+    - Strategy correlation matrix
+    """
+    if not _advanced_engine:
+        raise HTTPException(503, "Advanced backtest engine not initialized")
+    
+    # Convert Pydantic models to dataclasses
+    from services.slow_learning.advanced_backtest_engine import (
+        StrategyConfig, BacktestFilters
+    )
+    
+    strategies = [
+        StrategyConfig(
+            name=s.name,
+            setup_type=s.setup_type,
+            min_tqs_score=s.min_tqs_score,
+            stop_pct=s.stop_pct,
+            target_pct=s.target_pct,
+            use_trailing_stop=s.use_trailing_stop,
+            trailing_stop_pct=s.trailing_stop_pct,
+            max_bars_to_hold=s.max_bars_to_hold,
+            position_size_pct=s.position_size_pct
+        ) for s in request.strategies
+    ]
+    
+    filters = None
+    if request.filters:
+        filters = BacktestFilters(
+            start_date=request.filters.start_date,
+            end_date=request.filters.end_date,
+            market_regimes=request.filters.market_regimes,
+            time_filters=request.filters.time_filters,
+            days_of_week=request.filters.days_of_week,
+            exclude_earnings_days=request.filters.exclude_earnings_days
+        )
+    
+    if request.run_in_background:
+        # Create background job
+        job = await _advanced_engine.create_background_job(
+            "multi_strategy",
+            {
+                "symbols": request.symbols,
+                "strategies": [s.to_dict() for s in strategies],
+                "filters": filters.to_dict() if filters else None,
+                "starting_capital": request.starting_capital,
+                "name": request.name
+            }
+        )
+        
+        # Run in background
+        background_tasks.add_task(
+            _run_multi_strategy_job,
+            job.id,
+            request.symbols,
+            strategies,
+            filters,
+            request.starting_capital,
+            request.name
+        )
+        
+        return {
+            "success": True,
+            "job_id": job.id,
+            "message": "Backtest started in background. Poll /api/backtest/job/{job_id} for status."
+        }
+    
+    # Run synchronously
+    try:
+        result = await _advanced_engine.run_multi_strategy_backtest(
+            symbols=request.symbols,
+            strategies=strategies,
+            filters=filters,
+            starting_capital=request.starting_capital,
+            name=request.name
+        )
+        
+        return {
+            "success": True,
+            "result": result.to_dict()
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Backtest failed: {str(e)}")
+
+
+async def _run_multi_strategy_job(job_id, symbols, strategies, filters, capital, name):
+    """Background task for multi-strategy backtest"""
+    try:
+        result = await _advanced_engine.run_multi_strategy_backtest(
+            symbols=symbols,
+            strategies=strategies,
+            filters=filters,
+            starting_capital=capital,
+            name=name,
+            job_id=job_id
+        )
+        
+        # Update job with result
+        _advanced_engine._running_jobs[job_id].status = "completed"
+        _advanced_engine._running_jobs[job_id].result_id = result.id
+        _advanced_engine._running_jobs[job_id].result = result.to_dict()
+        _advanced_engine._running_jobs[job_id].completed_at = datetime.utcnow().isoformat()
+        
+    except Exception as e:
+        _advanced_engine._running_jobs[job_id].status = "failed"
+        _advanced_engine._running_jobs[job_id].error = str(e)
+
+
+# ============================================================================
+# Walk-Forward Endpoints
+# ============================================================================
+
+@router.post("/walk-forward")
+async def run_walk_forward_optimization(
+    request: WalkForwardRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Run walk-forward optimization to test strategy robustness.
+    
+    Splits data into rolling training/testing periods to detect overfitting.
+    Returns efficiency ratio comparing in-sample vs out-of-sample performance.
+    
+    - Efficiency >= 90%: Excellent robustness
+    - Efficiency 70-90%: Good robustness
+    - Efficiency 50-70%: Moderate (possible overfitting)
+    - Efficiency < 50%: Poor (likely overfit)
+    """
+    if not _advanced_engine:
+        raise HTTPException(503, "Advanced backtest engine not initialized")
+    
+    from services.slow_learning.advanced_backtest_engine import (
+        StrategyConfig, WalkForwardConfig
+    )
+    
+    strategy = StrategyConfig(
+        name=request.strategy.name,
+        setup_type=request.strategy.setup_type,
+        min_tqs_score=request.strategy.min_tqs_score,
+        stop_pct=request.strategy.stop_pct,
+        target_pct=request.strategy.target_pct,
+        use_trailing_stop=request.strategy.use_trailing_stop,
+        trailing_stop_pct=request.strategy.trailing_stop_pct,
+        max_bars_to_hold=request.strategy.max_bars_to_hold,
+        position_size_pct=request.strategy.position_size_pct
+    )
+    
+    wf_config = WalkForwardConfig(
+        in_sample_days=request.in_sample_days,
+        out_of_sample_days=request.out_of_sample_days,
+        step_days=request.step_days
+    )
+    
+    if request.run_in_background:
+        job = await _advanced_engine.create_background_job(
+            "walk_forward",
+            {
+                "symbol": request.symbol,
+                "strategy": strategy.to_dict(),
+                "wf_config": wf_config.to_dict(),
+                "total_days": request.total_days,
+                "end_date": request.end_date
+            }
+        )
+        
+        background_tasks.add_task(
+            _run_walk_forward_job,
+            job.id,
+            request.symbol,
+            strategy,
+            wf_config,
+            request.total_days,
+            request.end_date
+        )
+        
+        return {
+            "success": True,
+            "job_id": job.id,
+            "message": "Walk-forward optimization started. Poll /api/backtest/job/{job_id} for status."
+        }
+    
+    try:
+        result = await _advanced_engine.run_walk_forward(
+            symbol=request.symbol,
+            strategy=strategy,
+            wf_config=wf_config,
+            total_days=request.total_days,
+            end_date=request.end_date
+        )
+        
+        return {
+            "success": True,
+            "result": result.to_dict()
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Walk-forward failed: {str(e)}")
+
+
+async def _run_walk_forward_job(job_id, symbol, strategy, wf_config, total_days, end_date):
+    """Background task for walk-forward optimization"""
+    try:
+        result = await _advanced_engine.run_walk_forward(
+            symbol=symbol,
+            strategy=strategy,
+            wf_config=wf_config,
+            total_days=total_days,
+            end_date=end_date,
+            job_id=job_id
+        )
+        
+        _advanced_engine._running_jobs[job_id].status = "completed"
+        _advanced_engine._running_jobs[job_id].result_id = result.id
+        _advanced_engine._running_jobs[job_id].result = result.to_dict()
+        _advanced_engine._running_jobs[job_id].completed_at = datetime.utcnow().isoformat()
+        
+    except Exception as e:
+        _advanced_engine._running_jobs[job_id].status = "failed"
+        _advanced_engine._running_jobs[job_id].error = str(e)
+
+
+# ============================================================================
+# Monte Carlo Endpoints
+# ============================================================================
+
+@router.post("/monte-carlo")
+async def run_monte_carlo_simulation(
+    request: MonteCarloRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Run Monte Carlo simulation on backtest results.
+    
+    Shuffles trade order thousands of times to understand:
+    - Range of possible P&L outcomes
+    - Realistic drawdown expectations
+    - Probability of profit/ruin
+    - Win/loss streak distributions
+    """
+    if not _advanced_engine:
+        raise HTTPException(503, "Advanced backtest engine not initialized")
+    
+    if not request.backtest_id:
+        raise HTTPException(400, "backtest_id is required")
+    
+    from services.slow_learning.advanced_backtest_engine import MonteCarloConfig
+    
+    mc_config = MonteCarloConfig(
+        num_simulations=request.num_simulations,
+        randomize_trade_order=request.randomize_trade_order,
+        randomize_trade_size=request.randomize_trade_size,
+        size_variation_pct=request.size_variation_pct
+    )
+    
+    if request.run_in_background:
+        job = await _advanced_engine.create_background_job(
+            "monte_carlo",
+            {
+                "backtest_id": request.backtest_id,
+                "mc_config": mc_config.to_dict(),
+                "starting_capital": request.starting_capital
+            }
+        )
+        
+        background_tasks.add_task(
+            _run_monte_carlo_job,
+            job.id,
+            request.backtest_id,
+            mc_config,
+            request.starting_capital
+        )
+        
+        return {
+            "success": True,
+            "job_id": job.id,
+            "message": "Monte Carlo simulation started. Poll /api/backtest/job/{job_id} for status."
+        }
+    
+    try:
+        result = await _advanced_engine.run_monte_carlo(
+            backtest_id=request.backtest_id,
+            mc_config=mc_config,
+            starting_capital=request.starting_capital
+        )
+        
+        return {
+            "success": True,
+            "result": result.to_dict()
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Monte Carlo simulation failed: {str(e)}")
+
+
+async def _run_monte_carlo_job(job_id, backtest_id, mc_config, starting_capital):
+    """Background task for Monte Carlo simulation"""
+    try:
+        result = await _advanced_engine.run_monte_carlo(
+            backtest_id=backtest_id,
+            mc_config=mc_config,
+            starting_capital=starting_capital,
+            job_id=job_id
+        )
+        
+        _advanced_engine._running_jobs[job_id].status = "completed"
+        _advanced_engine._running_jobs[job_id].result_id = result.id
+        _advanced_engine._running_jobs[job_id].result = result.to_dict()
+        _advanced_engine._running_jobs[job_id].completed_at = datetime.utcnow().isoformat()
+        
+    except Exception as e:
+        _advanced_engine._running_jobs[job_id].status = "failed"
+        _advanced_engine._running_jobs[job_id].error = str(e)
+
+
+# ============================================================================
+# Quick Single Backtest
+# ============================================================================
+
+@router.post("/quick")
+async def run_quick_backtest(request: QuickBacktestRequest):
+    """
+    Run a quick single-strategy backtest on one symbol.
+    For fast iteration and testing.
+    """
+    if not _advanced_engine:
+        raise HTTPException(503, "Advanced backtest engine not initialized")
+    
+    from services.slow_learning.advanced_backtest_engine import (
+        StrategyConfig, BacktestFilters
+    )
+    
+    strategy = StrategyConfig(
+        name=request.strategy.name,
+        setup_type=request.strategy.setup_type,
+        min_tqs_score=request.strategy.min_tqs_score,
+        stop_pct=request.strategy.stop_pct,
+        target_pct=request.strategy.target_pct,
+        use_trailing_stop=request.strategy.use_trailing_stop,
+        trailing_stop_pct=request.strategy.trailing_stop_pct,
+        max_bars_to_hold=request.strategy.max_bars_to_hold,
+        position_size_pct=request.strategy.position_size_pct
+    )
+    
+    filters = BacktestFilters(
+        start_date=request.start_date,
+        end_date=request.end_date
+    )
+    
+    try:
+        result = await _advanced_engine.run_multi_strategy_backtest(
+            symbols=[request.symbol],
+            strategies=[strategy],
+            filters=filters,
+            starting_capital=request.starting_capital,
+            name=f"Quick: {strategy.name} on {request.symbol}"
+        )
+        
+        # Return simplified result for quick backtest
+        if result.strategy_results:
+            strategy_result = result.strategy_results[0]
+            return {
+                "success": True,
+                "result": {
+                    "id": result.id,
+                    "symbol": request.symbol,
+                    "strategy": strategy.name,
+                    "start_date": result.start_date,
+                    "end_date": result.end_date,
+                    "total_trades": strategy_result.get("total_trades", 0),
+                    "win_rate": strategy_result.get("win_rate", 0),
+                    "total_pnl": strategy_result.get("total_pnl", 0),
+                    "profit_factor": strategy_result.get("profit_factor", 0),
+                    "sharpe_ratio": strategy_result.get("sharpe_ratio", 0),
+                    "max_drawdown_pct": strategy_result.get("max_drawdown_pct", 0),
+                    "avg_r": strategy_result.get("avg_r", 0),
+                    "trades": strategy_result.get("trades", [])[:20]  # First 20 trades
+                }
+            }
+        
+        return {"success": True, "result": result.to_dict()}
+        
+    except Exception as e:
+        raise HTTPException(500, f"Quick backtest failed: {str(e)}")
+
+
+# ============================================================================
+# Job Management
+# ============================================================================
+
+@router.get("/job/{job_id}")
+async def get_job_status(job_id: str):
+    """
+    Get status of a background backtest job.
+    
+    Returns:
+    - status: pending, running, completed, failed
+    - progress: 0-100
+    - result: Full result when completed
+    """
+    if not _advanced_engine:
+        raise HTTPException(503, "Advanced backtest engine not initialized")
+    
+    job = await _advanced_engine.get_job_status(job_id)
+    
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+    
+    return {
+        "success": True,
+        "job": job.to_dict()
+    }
+
+
+@router.get("/jobs")
+async def list_recent_jobs(
+    limit: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None, description="Filter by status")
+):
+    """List recent backtest jobs"""
+    if not _advanced_engine:
+        raise HTTPException(503, "Advanced backtest engine not initialized")
+    
+    jobs = list(_advanced_engine._running_jobs.values())
+    
+    if status:
+        jobs = [j for j in jobs if j.status == status]
+    
+    jobs.sort(key=lambda x: x.created_at or "", reverse=True)
+    
+    return {
+        "success": True,
+        "jobs": [j.to_dict() for j in jobs[:limit]]
+    }
+
+
+# ============================================================================
+# Results
+# ============================================================================
+
+@router.get("/results")
+async def list_backtest_results(
+    limit: int = Query(20, ge=1, le=100),
+    result_type: Optional[str] = Query(None, description="Filter: multi, walk_forward, monte_carlo")
+):
+    """List recent backtest results"""
+    if not _advanced_engine:
+        raise HTTPException(503, "Advanced backtest engine not initialized")
+    
+    results = await _advanced_engine.get_recent_results(limit, result_type)
+    
+    return {
+        "success": True,
+        "results": results
+    }
+
+
+@router.get("/results/{result_id}")
+async def get_backtest_result(result_id: str):
+    """Get a specific backtest result by ID"""
+    if not _advanced_engine:
+        raise HTTPException(503, "Advanced backtest engine not initialized")
+    
+    result = await _advanced_engine.get_backtest_result(result_id)
+    
+    if not result:
+        raise HTTPException(404, f"Result {result_id} not found")
+    
+    return {
+        "success": True,
+        "result": result
+    }
+
+
+# ============================================================================
+# Strategy Templates
+# ============================================================================
+
+@router.get("/strategy-templates")
+async def get_strategy_templates():
+    """
+    Get pre-configured strategy templates for common setups.
+    Use these as starting points for your backtests.
+    """
+    templates = [
+        {
+            "name": "ORB Conservative",
+            "setup_type": "ORB",
+            "description": "Opening Range Breakout with tight stops",
+            "config": {
+                "min_tqs_score": 65,
+                "stop_pct": 1.5,
+                "target_pct": 3.0,
+                "use_trailing_stop": False,
+                "max_bars_to_hold": 10,
+                "position_size_pct": 8
+            }
+        },
+        {
+            "name": "ORB Aggressive",
+            "setup_type": "ORB",
+            "description": "Opening Range Breakout with wider targets",
+            "config": {
+                "min_tqs_score": 60,
+                "stop_pct": 2.0,
+                "target_pct": 5.0,
+                "use_trailing_stop": True,
+                "trailing_stop_pct": 1.5,
+                "max_bars_to_hold": 20,
+                "position_size_pct": 10
+            }
+        },
+        {
+            "name": "VWAP Bounce",
+            "setup_type": "VWAP_BOUNCE",
+            "description": "Mean reversion plays off VWAP",
+            "config": {
+                "min_tqs_score": 60,
+                "stop_pct": 1.0,
+                "target_pct": 2.0,
+                "use_trailing_stop": False,
+                "max_bars_to_hold": 5,
+                "position_size_pct": 10
+            }
+        },
+        {
+            "name": "Gap and Go",
+            "setup_type": "GAP_AND_GO",
+            "description": "Momentum play on gapping stocks",
+            "config": {
+                "min_tqs_score": 70,
+                "stop_pct": 2.5,
+                "target_pct": 6.0,
+                "use_trailing_stop": True,
+                "trailing_stop_pct": 2.0,
+                "max_bars_to_hold": 15,
+                "position_size_pct": 8
+            }
+        },
+        {
+            "name": "Breakout Swing",
+            "setup_type": "BREAKOUT",
+            "description": "Multi-day breakout for swing trading",
+            "config": {
+                "min_tqs_score": 65,
+                "stop_pct": 3.0,
+                "target_pct": 8.0,
+                "use_trailing_stop": True,
+                "trailing_stop_pct": 2.5,
+                "max_bars_to_hold": 40,
+                "position_size_pct": 6
+            }
+        },
+        {
+            "name": "Momentum Scalp",
+            "setup_type": "MOMENTUM",
+            "description": "Quick momentum plays with tight risk",
+            "config": {
+                "min_tqs_score": 55,
+                "stop_pct": 1.0,
+                "target_pct": 1.5,
+                "use_trailing_stop": False,
+                "max_bars_to_hold": 3,
+                "position_size_pct": 12
+            }
+        }
+    ]
+    
+    return {
+        "success": True,
+        "templates": templates
+    }
