@@ -2032,7 +2032,8 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
         
         # 5b. Get CURRENT POSITIONS context (always include if positions exist)
         position_keywords = ['position', 'positions', 'holding', 'portfolio', 'what do i have',
-                           'my trades', 'what am i in', 'open position', 'unrealized', 'p&l']
+                           'my trades', 'what am i in', 'open position', 'unrealized', 'p&l',
+                           'close', 'exit', 'sell', 'buy', 'tmc', 'intc', 'tsla', 'shares']
         wants_position_info = any(keyword in user_message.lower() for keyword in position_keywords)
         
         # Always try to include positions context for trading relevance
@@ -2179,7 +2180,8 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                     # For position queries, use smart_context directly which has the IB data
                     # For other queries, use the full context but with higher limit
                     is_position_query = any(kw in messages[-1].get("content", "").lower() 
-                                           for kw in ["position", "holdings", "shares", "average cost", "p&l"])
+                                           for kw in ["position", "holdings", "shares", "average cost", "p&l", 
+                                                      "close", "exit", "sell", "tmc", "intc", "tsla", "bldp", "nio"])
                     
                     if is_position_query and hasattr(self, '_last_context_data') and self._last_context_data:
                         # For position queries, use just the smart context with positions
