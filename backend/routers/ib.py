@@ -14,6 +14,10 @@ from services.stock_data import get_stock_service
 from services.alpaca_service import get_alpaca_service
 from services.news_service import get_news_service
 from services.support_resistance_service import get_sr_service
+from services.order_queue_service import get_order_queue_service, init_order_queue_service, OrderStatus
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ib", tags=["Interactive Brokers"])
 
@@ -28,6 +32,9 @@ def init_ib_service(service: IBService):
     """Initialize the IB service for this router"""
     global _ib_service, _stock_service, _alpaca_service, _news_service
     _ib_service = service
+    
+    # Initialize MongoDB-backed order queue
+    init_order_queue_service()
     _stock_service = get_stock_service()
     _alpaca_service = get_alpaca_service()
     _news_service = get_news_service()
@@ -117,24 +124,18 @@ _pushed_ib_data = {
 
 # ===================== Order Queue for Remote Execution =====================
 # Orders queued by cloud trading bot, executed by local pusher
-_order_queue = {
-    "pending": {},      # order_id -> order details (waiting for execution)
-    "executing": {},    # order_id -> order details (being executed)
-    "completed": {},    # order_id -> result (filled/rejected/cancelled)
-    "last_poll": None   # When pusher last checked for orders
-}
+# NOW BACKED BY MONGODB for persistence
 
 import uuid
 from enum import Enum
 
-class OrderStatus(str, Enum):
-    PENDING = "pending"
-    EXECUTING = "executing" 
-    FILLED = "filled"
-    PARTIALLY_FILLED = "partial"
-    REJECTED = "rejected"
-    CANCELLED = "cancelled"
-    EXPIRED = "expired"
+# Legacy in-memory fallback (kept for backwards compatibility during migration)
+_order_queue_legacy = {
+    "pending": {},
+    "executing": {},
+    "completed": {},
+    "last_poll": None
+}
 
 
 class QueuedOrderRequest(BaseModel):
@@ -162,60 +163,88 @@ class OrderExecutionResult(BaseModel):
 
 
 def get_order_queue() -> dict:
-    """Get the order queue (for other modules to access)"""
-    return _order_queue
+    """Get the order queue status (for other modules to access)"""
+    try:
+        service = get_order_queue_service()
+        return service.get_queue_status()
+    except Exception as e:
+        logger.warning(f"MongoDB order queue unavailable, using legacy: {e}")
+        return _order_queue_legacy
 
 
 def queue_order(order: dict) -> str:
     """Queue an order for execution by local pusher. Returns order_id."""
-    order_id = str(uuid.uuid4())[:8]
-    _order_queue["pending"][order_id] = {
-        **order,
-        "order_id": order_id,
-        "status": OrderStatus.PENDING,
-        "queued_at": datetime.now(timezone.utc).isoformat(),
-        "attempts": 0
-    }
-    return order_id
+    try:
+        service = get_order_queue_service()
+        return service.queue_order(order)
+    except Exception as e:
+        # Fallback to in-memory if MongoDB fails
+        logger.warning(f"MongoDB queue failed, using in-memory: {e}")
+        order_id = str(uuid.uuid4())[:8]
+        _order_queue_legacy["pending"][order_id] = {
+            **order,
+            "order_id": order_id,
+            "status": "pending",
+            "queued_at": datetime.now(timezone.utc).isoformat(),
+            "attempts": 0
+        }
+        return order_id
 
 
 def get_pending_orders() -> list:
     """Get all pending orders (for pusher to poll)"""
-    return list(_order_queue["pending"].values())
+    try:
+        service = get_order_queue_service()
+        return service.get_pending_orders()
+    except Exception as e:
+        logger.warning(f"MongoDB get_pending failed, using legacy: {e}")
+        return list(_order_queue_legacy["pending"].values())
 
 
 def mark_order_executing(order_id: str) -> bool:
-    """Mark an order as being executed"""
-    if order_id in _order_queue["pending"]:
-        order = _order_queue["pending"].pop(order_id)
-        order["status"] = OrderStatus.EXECUTING
-        order["started_at"] = datetime.now(timezone.utc).isoformat()
-        _order_queue["executing"][order_id] = order
-        return True
-    return False
+    """Mark an order as being executed (claim it)"""
+    try:
+        service = get_order_queue_service()
+        order = service.claim_order(order_id)
+        return order is not None
+    except Exception as e:
+        logger.warning(f"MongoDB claim failed, using legacy: {e}")
+        if order_id in _order_queue_legacy["pending"]:
+            order = _order_queue_legacy["pending"].pop(order_id)
+            order["status"] = "executing"
+            order["started_at"] = datetime.now(timezone.utc).isoformat()
+            _order_queue_legacy["executing"][order_id] = order
+            return True
+        return False
 
 
 def complete_order(order_id: str, result: dict) -> bool:
     """Mark an order as completed with result"""
-    order = None
-    if order_id in _order_queue["executing"]:
-        order = _order_queue["executing"].pop(order_id)
-    elif order_id in _order_queue["pending"]:
-        order = _order_queue["pending"].pop(order_id)
-    
-    if order:
-        order["status"] = result.get("status", OrderStatus.FILLED)
-        order["result"] = result
-        order["completed_at"] = datetime.now(timezone.utc).isoformat()
-        _order_queue["completed"][order_id] = order
+    try:
+        service = get_order_queue_service()
+        return service.update_order_status(
+            order_id=order_id,
+            status=result.get("status", "filled"),
+            fill_price=result.get("fill_price"),
+            filled_qty=result.get("filled_qty"),
+            ib_order_id=result.get("ib_order_id"),
+            error=result.get("error")
+        )
+    except Exception as e:
+        logger.warning(f"MongoDB complete failed, using legacy: {e}")
+        order = None
+        if order_id in _order_queue_legacy["executing"]:
+            order = _order_queue_legacy["executing"].pop(order_id)
+        elif order_id in _order_queue_legacy["pending"]:
+            order = _order_queue_legacy["pending"].pop(order_id)
         
-        # Keep only last 100 completed orders
-        if len(_order_queue["completed"]) > 100:
-            oldest = sorted(_order_queue["completed"].keys())[0]
-            del _order_queue["completed"][oldest]
-        
-        return True
-    return False
+        if order:
+            order["status"] = result.get("status", "filled")
+            order["result"] = result
+            order["completed_at"] = datetime.now(timezone.utc).isoformat()
+            _order_queue_legacy["completed"][order_id] = order
+            return True
+        return False
 
 
 def get_order_result(order_id: str, timeout: float = 30.0) -> Optional[dict]:
@@ -223,8 +252,15 @@ def get_order_result(order_id: str, timeout: float = 30.0) -> Optional[dict]:
     import time
     start = time.time()
     while time.time() - start < timeout:
-        if order_id in _order_queue["completed"]:
-            return _order_queue["completed"][order_id]
+        try:
+            service = get_order_queue_service()
+            order = service.get_order(order_id)
+            if order and order.get("status") in ["filled", "rejected", "cancelled", "expired", "partial"]:
+                return order
+        except Exception as e:
+            # Fallback to legacy
+            if order_id in _order_queue_legacy["completed"]:
+                return _order_queue_legacy["completed"][order_id]
         time.sleep(0.5)
     return None
 
@@ -1078,7 +1114,6 @@ async def get_pending_orders_endpoint():
     The local pusher polls this endpoint to get orders to execute.
     """
     pending = get_pending_orders()
-    _order_queue["last_poll"] = datetime.now(timezone.utc).isoformat()
     
     return {
         "success": True,
@@ -1143,13 +1178,22 @@ async def get_order_result_endpoint(order_id: str, wait: bool = False, timeout: 
         else:
             return {"success": False, "error": "Timeout waiting for order result", "order_id": order_id}
     
-    # Check all queues
-    if order_id in _order_queue["completed"]:
-        return {"success": True, "order": _order_queue["completed"][order_id]}
-    if order_id in _order_queue["executing"]:
-        return {"success": True, "order": _order_queue["executing"][order_id], "status": "executing"}
-    if order_id in _order_queue["pending"]:
-        return {"success": True, "order": _order_queue["pending"][order_id], "status": "pending"}
+    # Check MongoDB first
+    try:
+        service = get_order_queue_service()
+        order = service.get_order(order_id)
+        if order:
+            return {"success": True, "order": order, "status": order.get("status")}
+    except Exception as e:
+        logger.warning(f"MongoDB get order failed, checking legacy: {e}")
+    
+    # Fallback to legacy in-memory
+    if order_id in _order_queue_legacy.get("completed", {}):
+        return {"success": True, "order": _order_queue_legacy["completed"][order_id]}
+    if order_id in _order_queue_legacy.get("executing", {}):
+        return {"success": True, "order": _order_queue_legacy["executing"][order_id], "status": "executing"}
+    if order_id in _order_queue_legacy.get("pending", {}):
+        return {"success": True, "order": _order_queue_legacy["pending"][order_id], "status": "pending"}
     
     raise HTTPException(status_code=404, detail=f"Order {order_id} not found")
 
@@ -1157,30 +1201,70 @@ async def get_order_result_endpoint(order_id: str, wait: bool = False, timeout: 
 @router.get("/orders/queue/status")
 async def get_order_queue_status():
     """Get the current status of the order queue"""
-    return {
-        "success": True,
-        "pending_count": len(_order_queue["pending"]),
-        "executing_count": len(_order_queue["executing"]),
-        "completed_count": len(_order_queue["completed"]),
-        "last_poll": _order_queue["last_poll"],
-        "pusher_active": _order_queue["last_poll"] is not None and (
-            datetime.now(timezone.utc) - datetime.fromisoformat(_order_queue["last_poll"].replace('Z', '+00:00'))
-        ).total_seconds() < 30 if _order_queue["last_poll"] else False
-    }
+    try:
+        service = get_order_queue_service()
+        status = service.get_queue_status()
+        recent_orders = service.get_recent_orders(limit=20)
+        
+        return {
+            "success": True,
+            "pending": [o for o in recent_orders if o.get("status") in ["pending", "claimed"]],
+            "executing": [o for o in recent_orders if o.get("status") == "executing"],
+            "completed": [o for o in recent_orders if o.get("status") in ["filled", "rejected", "cancelled", "expired"]],
+            "counts": status,
+            "storage": "mongodb"
+        }
+    except Exception as e:
+        logger.warning(f"MongoDB status failed, using legacy: {e}")
+        return {
+            "success": True,
+            "pending": list(_order_queue_legacy["pending"].values()),
+            "executing": list(_order_queue_legacy["executing"].values()),
+            "completed": list(_order_queue_legacy["completed"].values())[-20:],
+            "counts": {
+                "pending": len(_order_queue_legacy["pending"]),
+                "executing": len(_order_queue_legacy["executing"]),
+                "completed": len(_order_queue_legacy["completed"])
+            },
+            "storage": "memory"
+        }
 
 
 @router.delete("/orders/queue/{order_id}")
 async def cancel_queued_order(order_id: str):
     """Cancel a pending order (only works if not yet executing)"""
-    if order_id in _order_queue["pending"]:
-        order = _order_queue["pending"].pop(order_id)
-        complete_order(order_id, {"status": "cancelled", "error": "Cancelled by user"})
-        return {"success": True, "order_id": order_id, "status": "cancelled"}
-    
-    if order_id in _order_queue["executing"]:
-        raise HTTPException(status_code=400, detail="Order is already executing, cannot cancel")
-    
-    raise HTTPException(status_code=404, detail=f"Order {order_id} not found in pending queue")
+    try:
+        service = get_order_queue_service()
+        order = service.get_order(order_id)
+        
+        if not order:
+            raise HTTPException(status_code=404, detail=f"Order {order_id} not found")
+        
+        if order.get("status") == "executing":
+            raise HTTPException(status_code=400, detail="Order is already executing, cannot cancel")
+        
+        if order.get("status") not in ["pending", "claimed"]:
+            raise HTTPException(status_code=400, detail=f"Order status is {order.get('status')}, cannot cancel")
+        
+        success = service.cancel_order(order_id)
+        if success:
+            return {"success": True, "order_id": order_id, "status": "cancelled"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to cancel order")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Fallback to legacy
+        if order_id in _order_queue_legacy["pending"]:
+            _order_queue_legacy["pending"].pop(order_id)
+            complete_order(order_id, {"status": "cancelled", "error": "Cancelled by user"})
+            return {"success": True, "order_id": order_id, "status": "cancelled"}
+        
+        if order_id in _order_queue_legacy["executing"]:
+            raise HTTPException(status_code=400, detail="Order is already executing, cannot cancel")
+        
+        raise HTTPException(status_code=404, detail=f"Order {order_id} not found in pending queue")
 
 
 # ==================== Direct IB Trading (for local connections) ====================
