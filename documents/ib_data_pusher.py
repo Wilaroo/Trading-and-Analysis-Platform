@@ -712,6 +712,8 @@ class IBDataPusher:
         push_count = 0
         l2_update_interval = 30
         last_l2_update = 0
+        order_poll_interval = 2  # Check for orders every 2 seconds
+        last_order_poll = 0
         current_time = time.time()
         
         # Force initial push immediately
@@ -721,6 +723,7 @@ class IBDataPusher:
         logger.info(f"    Positions: {len(self.positions_data)}")
         logger.info(f"    Quotes: {len(self.quotes_buffer)}")
         logger.info(f"    Level 2 Subscriptions: {len(self.depth_subscriptions)}")
+        logger.info(f"    Order Execution: ENABLED")
         logger.info(f"========================================")
         logger.info(f"")
         
@@ -754,6 +757,11 @@ class IBDataPusher:
                     if enable_level2 and self.level2_enabled and (current_time - last_l2_update >= l2_update_interval):
                         self.update_level2_subscriptions()
                         last_l2_update = current_time
+                    
+                    # Poll for pending orders from cloud trading bot
+                    if current_time - last_order_poll >= order_poll_interval:
+                        self.poll_and_execute_orders()
+                        last_order_poll = current_time
                         
                 except Exception as e:
                     logger.error(f"Loop error: {e}")
@@ -773,6 +781,163 @@ class IBDataPusher:
     def stop(self):
         """Stop the pusher"""
         self.running = False
+    
+    # ==================== ORDER EXECUTION ====================
+    
+    def poll_and_execute_orders(self):
+        """
+        Poll cloud for pending orders and execute them via IB Gateway.
+        This enables the cloud trading bot to execute trades through the local IB connection.
+        """
+        try:
+            # Poll for pending orders
+            response = requests.get(
+                f"{self.cloud_url}/api/ib/orders/pending",
+                timeout=5
+            )
+            
+            if response.status_code != 200:
+                return
+            
+            result = response.json()
+            orders = result.get("orders", [])
+            
+            if not orders:
+                return
+            
+            logger.info(f"[OrderQueue] Found {len(orders)} pending orders")
+            
+            for order in orders:
+                self._execute_queued_order(order)
+                
+        except requests.Timeout:
+            pass  # Silent timeout, will retry next cycle
+        except Exception as e:
+            logger.error(f"[OrderQueue] Poll error: {e}")
+    
+    def _execute_queued_order(self, order: dict):
+        """Execute a single queued order via IB Gateway"""
+        order_id = order.get("order_id")
+        symbol = order.get("symbol")
+        action = order.get("action")  # BUY or SELL
+        quantity = order.get("quantity")
+        order_type = order.get("order_type", "MKT")
+        limit_price = order.get("limit_price")
+        stop_price = order.get("stop_price")
+        
+        logger.info(f"[OrderQueue] Executing: {order_id} - {action} {quantity} {symbol}")
+        
+        try:
+            # Claim the order first (prevents duplicate execution)
+            claim_response = requests.post(
+                f"{self.cloud_url}/api/ib/orders/claim/{order_id}",
+                timeout=5
+            )
+            
+            if claim_response.status_code != 200:
+                logger.warning(f"[OrderQueue] Could not claim order {order_id}: {claim_response.text}")
+                return
+            
+            # Create IB contract
+            contract = Stock(symbol, "SMART", "USD")
+            
+            # Create IB order
+            from ib_insync import MarketOrder, LimitOrder, StopOrder, StopLimitOrder
+            
+            if order_type == "MKT":
+                ib_order = MarketOrder(action, quantity)
+            elif order_type == "LMT":
+                ib_order = LimitOrder(action, quantity, limit_price)
+            elif order_type == "STP":
+                ib_order = StopOrder(action, quantity, stop_price)
+            elif order_type == "STP_LMT":
+                ib_order = StopLimitOrder(action, quantity, stop_price, limit_price)
+            else:
+                logger.error(f"[OrderQueue] Unknown order type: {order_type}")
+                self._report_order_result(order_id, "rejected", error=f"Unknown order type: {order_type}")
+                return
+            
+            # Place the order
+            trade = self.ib.placeOrder(contract, ib_order)
+            
+            # Wait for fill (with timeout)
+            max_wait = 30
+            start_time = time.time()
+            
+            while time.time() - start_time < max_wait:
+                self.ib.sleep(0.5)
+                
+                if trade.orderStatus.status == "Filled":
+                    logger.info(f"[OrderQueue] Order {order_id} FILLED @ ${trade.orderStatus.avgFillPrice}")
+                    self._report_order_result(
+                        order_id, 
+                        "filled",
+                        fill_price=float(trade.orderStatus.avgFillPrice),
+                        filled_qty=int(trade.orderStatus.filled),
+                        ib_order_id=trade.order.orderId
+                    )
+                    return
+                    
+                elif trade.orderStatus.status in ["Cancelled", "ApiCancelled"]:
+                    logger.warning(f"[OrderQueue] Order {order_id} CANCELLED")
+                    self._report_order_result(order_id, "cancelled", error="Order cancelled")
+                    return
+                    
+                elif trade.orderStatus.status == "Inactive":
+                    logger.warning(f"[OrderQueue] Order {order_id} REJECTED")
+                    self._report_order_result(order_id, "rejected", error="Order rejected by IB")
+                    return
+            
+            # Timeout - order may still be working
+            if trade.orderStatus.status == "Submitted" or trade.orderStatus.status == "PreSubmitted":
+                logger.warning(f"[OrderQueue] Order {order_id} still pending after {max_wait}s")
+                # Report as partial/pending
+                self._report_order_result(
+                    order_id,
+                    "pending",
+                    fill_price=float(trade.orderStatus.avgFillPrice) if trade.orderStatus.avgFillPrice else None,
+                    filled_qty=int(trade.orderStatus.filled) if trade.orderStatus.filled else 0,
+                    remaining_qty=int(trade.orderStatus.remaining) if trade.orderStatus.remaining else quantity,
+                    ib_order_id=trade.order.orderId,
+                    error="Order still pending"
+                )
+            else:
+                self._report_order_result(order_id, "rejected", error=f"Unknown status: {trade.orderStatus.status}")
+                
+        except Exception as e:
+            logger.error(f"[OrderQueue] Execution error for {order_id}: {e}")
+            self._report_order_result(order_id, "rejected", error=str(e))
+    
+    def _report_order_result(self, order_id: str, status: str, fill_price: float = None, 
+                            filled_qty: int = None, remaining_qty: int = None,
+                            ib_order_id: int = None, error: str = None):
+        """Report order execution result back to cloud"""
+        try:
+            payload = {
+                "order_id": order_id,
+                "status": status,
+                "fill_price": fill_price,
+                "filled_qty": filled_qty,
+                "remaining_qty": remaining_qty,
+                "ib_order_id": ib_order_id,
+                "error": error,
+                "executed_at": datetime.now().isoformat()
+            }
+            
+            response = requests.post(
+                f"{self.cloud_url}/api/ib/orders/result",
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                logger.info(f"[OrderQueue] Result reported: {order_id} -> {status}")
+            else:
+                logger.warning(f"[OrderQueue] Failed to report result: {response.text}")
+                
+        except Exception as e:
+            logger.error(f"[OrderQueue] Error reporting result: {e}")
 
 
 def main():

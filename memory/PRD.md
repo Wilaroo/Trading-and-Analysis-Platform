@@ -22,18 +22,43 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 - ✅ Updated TradingBotPanel: "IB Gateway (Paper Account)" instead of "Alpaca Account (Paper)"
 - ✅ Updated useCommandCenterData comments to reflect IB-first architecture
 
-**Trading Bot Automation:**
-- ✅ Bot already supports AUTONOMOUS mode (auto-executes trades without confirmation)
-- ✅ Enhanced logging: Shows mode (AUTO/CONFIRMATION), open/pending counts
-- ✅ Trade executor updated: Detects IB pusher connection, uses SIMULATED mode for cloud
-- ✅ Trades marked with [SIMULATED] tag when not using real broker
-- ✅ Bot uses live IB data for decisions, scanner for alerts
+### Phase 2.8 Complete: IB Order Queue System (March 11, 2026)
+**Full Order Execution via IB Gateway:**
+The trading bot can now execute real trades through IB Gateway using a cloud↔local order queue system.
 
-**Note on Full Automation:**
-The trading bot is fully automated in terms of logic (scans, evaluates, decides, executes).
-However, since IB Gateway runs locally and the cloud can't directly place orders through
-the pusher pipeline, actual orders are currently SIMULATED. The bot tracks all trades
-as if they were real. Future enhancement: Add order queue to pusher for true IB execution.
+**Architecture:**
+```
+Cloud Trading Bot                    Local Machine
+┌─────────────────┐                 ┌─────────────────────┐
+│ Queue Order     │ ─── POLL ────► │ ib_data_pusher.py   │
+│ (POST /orders/  │                 │   ↓                 │
+│  queue)         │                 │ Execute via IB GW   │
+│                 │                 │   ↓                 │
+│ Get Result ◄────│ ◄── REPORT ──  │ Report fill/error   │
+│ (GET /orders/   │                 │                     │
+│  result/{id})   │                 │                     │
+└─────────────────┘                 └─────────────────────┘
+```
+
+**New Backend Endpoints:**
+- `POST /api/ib/orders/queue` - Queue order for execution
+- `GET /api/ib/orders/pending` - Pusher polls for pending orders  
+- `POST /api/ib/orders/claim/{id}` - Claim order (prevent duplicates)
+- `POST /api/ib/orders/result` - Report execution result
+- `GET /api/ib/orders/result/{id}` - Get order result (with optional wait)
+- `GET /api/ib/orders/queue/status` - Queue status overview
+- `DELETE /api/ib/orders/queue/{id}` - Cancel pending order
+
+**Updated Services:**
+- `trade_executor_service.py`: `_ib_entry()`, `_ib_stop()`, `_ib_close_position()` now use order queue
+- `ib_data_pusher.py`: Added `poll_and_execute_orders()` to execute queued orders locally
+
+**How It Works:**
+1. Trading bot calls `queue_order()` which adds order to pending queue
+2. Local pusher polls `/api/ib/orders/pending` every 2 seconds
+3. Pusher claims order, executes via IB Gateway, reports result
+4. Trade executor waits for result (up to 60s timeout)
+5. Trade marked as filled/rejected based on IB response
 
 ### Phase 2.5 Complete: Scanner IB Data Priority (March 11, 2026)
 - ✅ Refactored `enhanced_scanner.py` to prioritize IB pushed data for quotes
