@@ -5,6 +5,47 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### Phase 3.7 Ready: Market Regime Engine (March 11, 2026)
+**Status: BUILT - NOT DEPLOYED** (Ready to connect when desired)
+
+**What It Is:** A sophisticated "Fear & Greed" style market analyzer inspired by VectorVest and IBD methodologies.
+
+**Outputs:**
+- **Market State**: `CONFIRMED_UP` | `HOLD` | `CONFIRMED_DOWN`
+- **Risk Level**: 0-100 scale (inverse of bullishness)
+- **Confidence Score**: 0-100 scale (how certain the signal is)
+
+**Four Signal Blocks:**
+| Block | Weight | What It Measures |
+|-------|--------|------------------|
+| Trend | 35% | SPY vs moving averages (21 EMA, 50 SMA, 200 SMA), price structure |
+| Breadth | 25% | Market participation via sector ETF analysis |
+| FTD | 20% | IBD-style Follow-Through Day detection, distribution day counting |
+| Volume/VIX | 20% | Fear gauge (VIX level/trend), volume patterns |
+
+**Files Created:**
+- `/app/backend/services/market_regime_engine.py` - Core engine (770+ lines)
+- `/app/backend/routers/market_regime.py` - API endpoints
+- `/app/frontend/src/components/MarketRegimeWidget.jsx` - Dashboard widget
+
+**API Endpoints (when deployed):**
+- `GET /api/market-regime/current` - Full regime analysis
+- `GET /api/market-regime/summary` - Concise summary for UI
+- `GET /api/market-regime/signals/{block}` - Individual signal block details
+- `GET /api/market-regime/history` - Historical regime data
+- `POST /api/market-regime/refresh` - Force refresh
+
+**Configuration:**
+- Update Frequency: Every 30 minutes
+- State Change Notifications: Toast + widget update
+- Data Sources: IB Gateway (primary), Alpaca (fallback)
+
+**Deployment Guide:** See `/app/documents/MARKET_REGIME_DEPLOYMENT_GUIDE.md`
+
+**To Deploy:** Add 3 lines to `server.py` and import widget in dashboard.
+
+
+
 ### Phase 3.6 Complete: Trade Style Renaming for Clarity (March 11, 2026)
 **Refactor:** Renamed trade styles to eliminate confusion between "A+" as grade vs style.
 
