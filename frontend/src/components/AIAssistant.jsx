@@ -279,7 +279,8 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
     setShowTradeCheck(false);
 
     try {
-      const res = await api.post('/api/assistant/chat', {
+      // Use new multi-agent system
+      const res = await api.post('/api/agents/chat', {
         message: text,
         session_id: sessionId
       });
@@ -288,12 +289,16 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
         const assistantMessage = {
           role: 'assistant',
           content: res.data.response,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          agent_used: res.data.agent_used,
+          intent: res.data.intent
         };
         setMessages(prev => [...prev, assistantMessage]);
         
-        if (res.data.session_id && !sessionId) {
-          setSessionId(res.data.session_id);
+        // Handle trade confirmation flow
+        if (res.data.requires_confirmation && res.data.pending_trade) {
+          // Store pending trade for confirmation
+          sessionStorage.setItem('pending_trade', JSON.stringify(res.data.pending_trade));
         }
       } else {
         throw new Error(res.data?.error || 'Failed to get response');
@@ -314,9 +319,11 @@ const AIAssistant = ({ isOpen, onClose, initialPrompt = null }) => {
     if (!sessionId) return;
     
     try {
-      await api.delete(`/api/assistant/history/${sessionId}`);
+      // Use new agents session clear endpoint
+      await api.delete(`/api/agents/session/${sessionId}`);
       setMessages([]);
       setSessionId(`session_${Date.now()}`);
+      sessionStorage.removeItem('pending_trade');
       toast.success('Conversation cleared');
     } catch (err) {
       toast.error('Failed to clear conversation');

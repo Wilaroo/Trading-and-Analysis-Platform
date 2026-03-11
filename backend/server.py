@@ -70,6 +70,7 @@ from routers.simulator import router as simulator_router
 from routers.ev_tracking import router as ev_tracking_router
 from routers.smb_router import router as smb_router
 from routers.journal_router import router as journal_router
+from routers.agents import router as agents_router, init_agents_router
 from services.market_intel_service import get_market_intel_service
 from services.learning_loop_service import get_learning_loop_service, init_learning_loop_service
 from services.trade_context_service import get_trade_context_service, init_trade_context_service
@@ -290,6 +291,7 @@ app.include_router(medium_learning_router)
 app.include_router(slow_learning_router)
 app.include_router(scheduler_router)
 app.include_router(circuit_breaker_router)
+app.include_router(agents_router)  # Multi-agent system
 
 # Collections
 strategies_col = db["strategies"]
@@ -545,6 +547,29 @@ try:
 except Exception as e:
     print(f"Trading Scheduler initialization deferred: {e}")
     trading_scheduler = None
+
+# ===================== MULTI-AGENT SYSTEM =====================
+# Initialize the new multi-agent architecture for AI-powered trading
+try:
+    from services.order_queue_service import get_order_queue_service
+    
+    # Initialize agent system with all required services
+    init_agents_router({
+        "ib_router": ib_router,
+        "scanner": background_scanner,
+        "order_queue": get_order_queue_service(),
+        "db": db,
+        "performance_analyzer": globals().get('perf_service'),
+        "learning_service": globals().get('learning_loop_service'),
+        "trading_bot": trading_bot,
+        "alpaca_service": alpaca_service
+    })
+    print("Multi-Agent System initialized")
+    print("  - Agents: Router, Trade Executor, Coach")
+    print("  - LLM: GPT-OSS cloud → llama3.5 8b fallback")
+    print("  - Endpoints: /api/agents/chat, /api/agents/status, /api/agents/metrics")
+except Exception as e:
+    print(f"Multi-Agent System initialization deferred: {e}")
 
 # ===================== STRATEGY HELPERS =====================
 # Strategies are now stored in MongoDB and accessed via strategy_service

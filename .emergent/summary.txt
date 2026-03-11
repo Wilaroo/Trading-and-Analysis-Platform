@@ -9,152 +9,121 @@ After initial setup, the user requested a large set of features and fixes, which
 - A UI tracker for Ollama Pro cloud credits.
 
 PRODUCT REQUIREMENTS:
-- A stable, real-time data pipeline from the user's local IB Gateway to the cloud application.
-- A user interface that accurately displays live data from the IB feed.
-- A trading bot and AI assistant that use the live IB data stream for all decisions and context.
-- A background scanner optimized for performance that does not cause timeouts or disconnects.
-- A UI component to track Ollama Pro credit usage.
-- Intelligent query processing to reduce AI hallucinations.
-- A robust  script that reliably automates the local setup process.
-- A dedicated Live Trading Dashboard for active trade management.
-- A mechanism for the cloud-hosted bot to execute trades on the user's local IB Gateway.
+The user has approved a major architectural refactor to move from a single AI service to a multi-agent system. This system should be safer, more performant, and cost-effective, with specialized agents for different tasks (e.g., trade execution, analysis, coaching). A key requirement is a hybrid safety pattern where LLMs are only used for language understanding, while all numerical data, state, and quantities are handled by deterministic, auditable code.
 
 **User's preferred language**: English
 
 **what currently exists?**
 - A full-stack application (React, FastAPI, MongoDB) with a stable, real-time data pipeline from the user's local Interactive Brokers (IB) Gateway.
-- The AI assistant () now accurately uses live IB data for context after a critical hallucination bug was fixed.
-- The background scanner () has been refactored to prioritize the live IB data feed over the Alpaca API.
-- A new asynchronous order queue system has been implemented. The cloud-based trading bot queues orders via a new API endpoint (), and the user's local  script polls this queue, executes trades, and reports the status back. This solves the challenge of executing trades from the cloud on a local machine.
-- Most UI text has been updated to reflect the IB-first architecture.
-- Visual mockups for a new Live Trading Dashboard have been created and approved by the user for implementation.
+- An autonomous trading bot that detects market setups, evaluates them against user-defined risk parameters, and queues trades for execution.
+- A persistent, MongoDB-backed order queue that allows a local script () to execute trades on behalf of the cloud application.
+- A Live Trading Dashboard page that displays live IB positions, P&L, account data, and an order pipeline.
+- The folder structure and placeholder files for a new multi-agent architecture have been created in .
 
 **Last working item**:
--   **Last item agent was working**: The user approved the design for a new Live Trading Dashboard (Option D from the mockups) and requested its implementation, including an integrated charts feature. The agent was preparing to start development.
--   **Status**: NOT STARTED
--   **Agent Testing Done**: N/A
--   **Which testing method agent to use?**: frontend testing agent. This is a large, new UI feature. The agent should verify that the new dashboard page renders, fetches data from all relevant endpoints (positions, orders, account summary), and that the integrated chart component loads and functions correctly.
+-   **Last item agent was working**: Implementing the new multi-agent architecture. The agent had just finished creating the directory () and all the necessary placeholder Python files (, , , , , , , and ).
+-   **Status**: IN PROGRESS
+-   **Agent Testing Done**: N
+-   **Which testing method agent to use?**: both. This is a major backend refactoring. The backend agents and their integration with existing services need to be tested. The frontend chat UI must be updated to call the new agent orchestrator endpoint and tested to ensure it works correctly.
 -   **User Testing Done**: N
 
 **All Pending/In progress Issue list**:
--   **Issue 1: Missing API Endpoints (P2)**
-    -   **Description**: Several API endpoints return 404s: , , .
-    -   **Status**: NOT STARTED
-    -   **Is recurring issue?**: Y
-    -   **Should Test frontend/backend/both after fix?**: backend
--   **Issue 2: Fragile Service Initialization in  (P2)**
+-   **Issue 1: Fragile Service Initialization in  (P2)**
     -   **Description**: The use of  blocks and  for service setup in  is considered technical debt and could cause future initialization issues.
     -   **Status**: NOT STARTED
     -   **Is recurring issue?**: Y
     -   **Should Test frontend/backend/both after fix?**: backend
+    -   **Why fix this issue and what will be achieved with the fix?**: Refactoring this will make the application startup more robust, predictable, and easier to debug.
 
 **In progress Task List**:
--   None.
+-   **Task 1: Implement Multi-Agent Architecture (P0)**
+    -   **Where to resume**: The placeholder files have been created in . The next step is to populate these files with the Python code for the LLM abstraction layer, the base agent class, the individual agents (starting with the Router and Trade Executor), and the orchestrator. Then, integrate the new agent system into  and replace the old  endpoint with the new  endpoint.
+    -   **What will be achieved with this?**: This will deliver the user-approved architecture, leading to a more scalable, cost-effective, and reliable AI system. It will also make AI-driven trade execution significantly safer by separating LLM intent parsing from deterministic code that handles numbers and state.
+    -   **Status**: IN PROGRESS
+    -   **Should Test frontend/backend/both after fix?**: Both.
 
 **Upcoming and Future Tasks**
 -   **Upcoming Tasks:**
-    -   **(P0) Implement Live Trading Dashboard**: Build the new, full-screen trading dashboard as a dedicated page/tab based on the approved Option D mockup. This includes:
-        - Creating a new page at a  route.
-        - Building UI components for: Open Positions, Order Pipeline, Recent Executions, In-Trade Guidance, Today's Performance, and Risk Status.
-        - Integrating a chart feature, similar to the one on the Command Tab.
-        - Connecting all components to their respective backend APIs (, , ).
-    -   **(P1) Implement Backend for In-Trade Guidance**: The dashboard UI will have a spot for this, but the backend logic to analyze trade state and generate real-time coaching alerts needs to be created.
-    -   **(P1) Enhancement: Fear and Greed Index**: Implement a market-wide fear and greed index based on real-time market breadth from the scanner data and display it on the dashboard.
+    -   **(P1) Implement AI Trade Execution via Chat**: After the Trade Executor agent is built, implement the full conversational flow where the user can confirm a trade suggested by the AI (e.g., by saying yes), which then triggers the agent to queue the trade for execution.
+    -   **(P1) Implement the Coach and Analyst Agents**: Once the core framework is working, flesh out the  and  with their specific logic and connections to the learning/data layers.
+    -   **(P1) Implement the Learning Layer**: Create the database models and services (e.g., , , ) that the Coach Agent will use to provide personalized advice based on the user's actual trading history.
+    -   **(P2) Enhancement: Fear and Greed Index**: Implement a market-wide fear and greed index based on real-time market breadth from the scanner data and display it on the dashboard.
 
 -   **Future Tasks:**
     -   **(P2)** Restructure the Trade Journal tabs and sub-tabs.
     -   **(P3)** Update the IB Trading Tab and its connections.
 
 **Completed work in this session**
--   **Trading Bot Automation & Order Queue**: Implemented a full, asynchronous order queue system, allowing the cloud bot to securely execute trades on the user's local IB Gateway. This involved major changes to , , and the local  script.
--   **Critical AI Hallucination Fix**: Resolved a persistent bug where the AI ignored live position data. The root cause was the large system prompt truncating the context. The fix in  now prioritizes dynamic position data for relevant queries.
--   **Python Module State Bug Fix**: Corrected a bug where services failed to see live IB data due to module import behavior. The fix was to import the module directly () to access the shared global state.
--   **Scanner Refactor**: Completed the refactoring of  to use the live IB data feed as its primary data source.
--   **UI/UX Mockups**: Generated and presented several UI designs for a trading dashboard, leading to user approval of the Option D design for implementation.
--   **UI Text Cleanup**: Updated various frontend components (, ) to remove outdated references to Alpaca as the primary data source.
-
-**Earlier issues found/mentioned but not fixed**
--   **Issue 1: Missing API Endpoints**: 404s for , , . Status: NOT STARTED.
--   **Issue 2: Fragile Service Initialization in **: Technical debt related to  and  usage. Status: NOT STARTED.
+-   **Architectural Design**: Designed and received user approval for a new multi-agent architecture featuring a hybrid safety pattern (LLM for intent, code for numbers) and an LLM abstraction layer for provider-agnosticism.
+-   **Live Trading Dashboard Implementation**: A new dashboard at the  route was implemented, tested, and connected to backend APIs. It correctly displays live positions, account summary, P&L, and chart data.
+-   **Autonomous Trading Bot Configuration**: The trading bot was configured to run in  mode with user-defined parameters. It was successfully debugged to detect setups, evaluate them, and queue trades for execution.
+-   **AI Hallucination Bug Fix**: Resolved another instance where the AI ignored live position data by expanding keyword detection in the context-building engine.
+-   **In-Memory Order Queue to MongoDB Migration**: The volatile in-memory order queue was successfully migrated to a persistent MongoDB collection, making the trade execution pipeline robust against server restarts.
+-   **Missing API Endpoints Implemented**: Created and implemented three missing API endpoints: , , and .
 
 **Known issue recurrence from previous fork**
 -   **Issue recurrence in previous fork**: AI Hallucinating Position Data.
--   **Recurrence count**: 1 (a persistent and complex bug this session).
--   **Status**: RESOLVED. The fix involved re-architecting the LLM context construction in  to prevent position data from being truncated. This is a critical fix to be aware of, as it relates to prompt engineering and context limits.
+-   **Recurrence count**: 2
+-   **Status**: RESOLVED. The latest fix involved expanding keyword detection. The new multi-agent architecture is the definitive long-term solution designed to eliminate this class of bug.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **Asynchronous Order Queue**: An architectural pattern was implemented to solve NAT/firewall traversal. The cloud backend queues trade orders, which are then polled for, executed, and reported on by a client script () running on the user's local machine.
--   **LLM Context Engineering**: A critical AI hallucination issue was debugged and fixed by re-architecting how prompt context is built. The fix in  conditionally builds the context based on query intent, ensuring dynamic data (like user positions) is prioritized and not truncated by large, static system prompts.
--   **Python Module State Management**: A recurring bug related to accessing shared global state across different modules in FastAPI was solved. The solution was to import the module itself () rather than its functions, ensuring access to the live, in-process state of the global  variable.
--   **UI/UX Prototyping**: Visual mockups were generated and presented within a temporary React page to facilitate a user decision on a major new feature, leading to the selection and approval of the Live Trading Dashboard design.
+-   **Multi-Agent Architecture**: The new design paradigm for the AI system, involving a Router Agent for intent classification, and specialized agents for tasks like Trade Execution, Analysis, and Coaching.
+-   **Hybrid AI/Code Safety Pattern**: A core principle where LLMs are restricted to language understanding (e.g., parsing intent from close TMC). All stateful information, numbers, and quantities are handled exclusively by deterministic code that interacts directly with data sources, preventing numerical hallucinations in critical operations.
+-   **LLM Abstraction Layer**: An  component designed to decouple the agents from any specific LLM provider. This allows for hot-swapping between services like Ollama, OpenAI, and Anthropic without altering agent logic.
+-   **MongoDB Persistence for Order Queue**: The trade execution pipeline was made robust against server restarts by migrating the order queue from a volatile in-memory dictionary to a persistent MongoDB collection.
 
 **key DB schema**
--   No new DB schemas were added. The new order queue is currently managed in-memory in .
-
-**changes in tech stack**
--   None.
+-   **orders** (new collection in MongoDB): 
 
 **All files of reference**
--   : **CRITICAL**. Contains the fix for AI hallucination by rebuilding the LLM context. Future changes must be made with care.
--   : Contains the new in-memory order queue logic and API endpoints.
--   : The user's local script, which was modified to include the order execution polling loop. This file is user-facing.
--   : The service that now queues trades instead of attempting direct execution.
--   : Contains the approved design and component breakdown for the next major feature, the Live Trading Dashboard.
+-   **/app/backend/agents/**: This new directory is the primary focus for the next steps. It will house the entire multi-agent system.
+-   **/app/backend/app/services/order_queue_service.py**: This new service manages the persistent order queue in MongoDB, forming a critical part of the trade execution pipeline.
+-   **/app/backend/app/routers/ib_router.py**: This file shows how the  is consumed by the API endpoints.
 
 **Areas that need refactoring**:
--   The in-memory order queue in  is not persistent. If the backend server restarts, any pending orders are lost. This should be migrated to MongoDB for production robustness.
--   The  component was temporarily added to . This should be removed, as its functionality is being merged into the new Live Trading Dashboard.
+-   The original monolithic AI services (, ) need to be deprecated. The  endpoint should be re-routed to the new  orchestrator endpoint once the new system is functional.
+-   The service initialization logic in  using  remains a piece of technical debt that should be addressed.
 
 **key api endpoints**
--   : **(New)** Adds a trade order to the in-memory queue for the local pusher to execute.
--   : **(New)** Allows the frontend to poll for the status of all orders in the queue.
--   : **(New)** Used by the local pusher to report the result of an executed order (e.g., 'filled', 'cancelled').
+-   : **(New, In-Progress)** The new entry point for all user chat interactions, to be handled by the agent orchestrator.
+-   : **(New)** Returns the status of the real-time market scanner.
+-   : **(New)** Returns historical trades executed by the trading bot.
+-   : **(New)** Returns the status of the trading circuit breaker.
+-   : **(Modified)** Now reads from the persistent MongoDB order queue instead of an in-memory dictionary.
 
 **Critical Info for New Agent**
--   The user has approved the Option D mockup for a Live Trading Dashboard. Your highest priority is to implement this as a new, dedicated page in the application.
--   A critical AI hallucination bug was fixed by changing how the LLM context is constructed in . The fix prevents large system prompts from truncating dynamic data like positions. Be extremely cautious when modifying this file.
--   Trade execution is now handled via an asynchronous, in-memory order queue. The cloud backend queues an order, and the user's local  script polls, executes, and reports back. Understand this flow before modifying any trading logic.
--   The user wants to consolidate UI elements. The  that was added to the  should be removed, and its features should be integrated into the new Trading Dashboard.
-
-**documents and test reports created in this job**
--    (and associated image assets)
--   
+-   Your immediate and highest priority is to **complete the implementation of the multi-agent architecture**. The user has approved this major refactor, and the placeholder files have been created in . You must populate these files with the discussed logic, integrate them into the application startup, and replace the old AI chat endpoint with the new agent orchestrator.
+-   Strictly adhere to the **Hybrid AI/Code Safety Pattern**: LLMs parse intent, but deterministic code must handle all numbers, quantities, and state lookups. This is a non-negotiable safety requirement for trade execution.
+-   Utilize the  abstraction layer for all LLM calls from the agents to ensure the system remains provider-agnostic.
+-   The AI hallucination bug is a recurring theme. The new architecture is the long-term fix. Be vigilant about separating LLM reasoning from data facts.
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User**: Asks for mockups of two different UI layout options. (Request)
-2.  **Agent**: Creates mockups and presents them. (Completed)
-3.  **User**: Yes lets do Option D. i like your design. lets also add in a charts feature into it like we have in the Command Tab (DECISION & NEW REQUIREMENT).
-4.  **Agent**: Acknowledged and was about to start implementation. (Task pending)
-5.  **User**: I don't want another panel right now, can you suggest better ways to combine these UI elements? (Feedback & Request)
-6.  **Agent**: Proposed four detailed UI/UX options for combining trading components. (Completed)
-7.  **User**: Please add an order status UI and explain In-Trade Guidance and Live Trading Dashboard. (Request)
-8.  **Agent**: Explained concepts and began implementing a temporary UI panel. (Completed)
-9.  **User**: Okay, let's do Option B (the order queue). (DECISION)
-10. **Agent**: Acknowledged and began implementation of the order queue system. (Completed)
+-   1. User asks if the multi-agent architecture will affect scanning or data retrieval. (Clarification)
+-   2. Agent explains the hybrid safety pattern where code handles all numbers. (Completed)
+-   3. User asks where the AI coaching and learning layers fit in. (Clarification)
+-   4. Agent details the Intelligence Layer for personalized coaching. (Completed)
+-   5. User asks how this custom build compares to using a framework like CrewAI. (Clarification)
+-   6. Agent recommends the custom build for better performance, control, and integration. (Completed)
+-   7. User asks about agent code location and the ability to swap LLMs. (Clarification)
+-   8. Agent confirms agents are in the codebase and an abstraction layer makes them LLM-agnostic. (Completed)
+-   9. **User**: **ok great lets build it out** (DECISION & INSTRUCTION)
+-   10. Agent acknowledges and begins creating the file structure for the new architecture. (In Progress)
 
 **Project Health Check:**
--   **Working**: Core UI, IB data pipeline, AI chat (accurate), Ollama credit tracker, Enhanced Scanner, Trading Bot with Asynchronous Order Queue.
--   **Broken**: No services are broken.
--   **Mocked**: The Live Trading Dashboard and its features exist only as approved mockups.
+-   **Working**: Core UI, IB data pipeline, Autonomous Trading Bot (detects & queues trades), Live Trading Dashboard, Persistent Order Queue.
+-   **Broken**: None.
+-   **Mocked**: The multi-agent architecture is currently mocked (files created, but logic is not yet implemented). The Learning Layer for the Coach agent is purely conceptual.
 
 **3rd Party Integrations**
--   **Interactive Brokers (IB Gateway)**: **Working**. Integrated for real-time quotes, positions, and account data via the local  script. Also used for trade execution via the new order queue system.
--   **Ollama**: **Working**. Connects via a local  proxy. The default model is , with  as a local fallback. A UI tracks cloud usage.
--   **Alpaca**: **Working**. Now configured as a secondary data source (fallback) for all key services.
--   **Tavily**: **Working**. Used for web searches by the AI.
+-   **Interactive Brokers (IB Gateway)**: **Working**. Integrated for real-time data and trade execution via an asynchronous order queue.
+-   **Ollama**: **Working**. Connects via a local proxy, supporting both local and cloud models.
+-   **Alpaca**: **Working**. Used as a secondary/fallback data source.
+-   **Tavily**: **Working**. Used for web search capabilities by the AI.
 
 **Testing status**
--   **Testing agent used after significant changes**: NO
--   **Troubleshoot agent used after agent stuck in loop**: NO
+-   **Testing agent used after significant changes**: YES (for the Trading Dashboard)
 -   **Test files created**: []
--   **Known regressions**: None.
-
-**Credentials to test flow:**
--   The user's IB paper trading credentials are in .
--   No other credentials are required for the current tasks.
-
-**What agent forgot to execute**
--   The agent added the  to the . After the user expressed a desire to consolidate panels, the agent created mockups for a new dashboard but did not explicitly plan to remove the now-redundant panel from the sidebar. This should be part of the new dashboard implementation task.</analysis>
+-   **Known regressions**: None.</analysis>

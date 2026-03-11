@@ -2141,7 +2141,8 @@ const AICommandPanel = ({
     setIsLoading(true);
 
     try {
-      const response = await api.post('/api/assistant/chat', {
+      // Use new multi-agent system
+      const response = await api.post('/api/agents/chat', {
         message: text,
         session_id: sessionId
       });
@@ -2151,8 +2152,16 @@ const AICommandPanel = ({
           role: 'assistant',
           content: response.data.response,
           timestamp: new Date().toISOString(),
+          agent_used: response.data.agent_used,
+          intent: response.data.intent,
           validation: response.data.validation
         }]);
+        
+        // Handle trade confirmation flow
+        if (response.data.requires_confirmation && response.data.pending_trade) {
+          sessionStorage.setItem('pending_trade', JSON.stringify(response.data.pending_trade));
+        }
+        
         // Refresh accuracy stats after each response
         fetchAccuracyStats();
       }
