@@ -32,7 +32,7 @@ const getFullSymbol = (ticker) => {
   if (etfs.includes(upper)) return `AMEX:${upper}`;
   
   // Major NASDAQ stocks
-  const nasdaq = ['AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'META', 'NVDA', 'TSLA', 'AMD', 'INTC', 'NFLX', 'COST', 'PYPL', 'ADBE', 'CMCSA', 'PEP', 'CSCO', 'AVGO', 'TXN', 'QCOM'];
+  const nasdaq = ['AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'META', 'NVDA', 'TSLA', 'AMD', 'INTC', 'NFLX', 'COST', 'PYPL', 'ADBE', 'CMCSA', 'PEP', 'CSCO', 'AVGO', 'TXN', 'QCOM', 'TMC', 'BLDP', 'KOS'];
   if (nasdaq.includes(upper)) return `NASDAQ:${upper}`;
   
   // Default to NYSE for unknown symbols
@@ -477,10 +477,20 @@ const TradingDashboardPage = () => {
       
       // Also get account data
       if (data.account) {
+        // Handle nested account data format: {"value": "123.45", "currency": "USD"}
+        const getAccountValue = (key) => {
+          const val = data.account[key] || data.account[`${key}-S`];
+          if (!val) return 0;
+          if (typeof val === 'object' && val.value) {
+            return parseFloat(val.value) || 0;
+          }
+          return parseFloat(val) || 0;
+        };
+        
         setAccountData({
-          equity: data.account.NetLiquidation || data.account['NetLiquidation-S'] || 0,
-          buying_power: data.account.BuyingPower || data.account['BuyingPower-S'] || 0,
-          day_pnl: data.account.UnrealizedPnL || 0
+          equity: getAccountValue('NetLiquidation'),
+          buying_power: getAccountValue('BuyingPower'),
+          day_pnl: getAccountValue('UnrealizedPnL')
         });
       }
     } catch (err) {
