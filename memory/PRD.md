@@ -5,6 +5,33 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### Phase 3.1 Complete: Analyst Agent & Learning Layer (March 11, 2026)
+**New Features:** Added Analyst agent for market analysis and Learning Layer for personalized coaching.
+
+**Analyst Agent (`analyst_agent.py`):**
+- Technical analysis with key levels (VWAP, HOD, LOD, Support, Resistance)
+- Sector context integration
+- Scanner alerts correlation
+- Sentiment analysis integration
+- Fallback to code-only analysis when LLM unavailable
+- Routes via: "analyze NVDA", "technical analysis on AAPL"
+
+**Learning Layer (`learning_layer.py`):**
+- `TradeOutcomesDB`: Persistent storage for trade outcomes (wins, losses, R-multiples)
+- `PerformanceAnalyzer`: Analyzes performance by setup type and time of day
+- `MistakeTracker`: Tracks common trading mistakes for improvement suggestions
+- Ready for integration with Coach agent
+
+**Trade Confirmation Flow Enhanced:**
+- User says "buy 100 AAPL" → Confirmation dialog with details
+- User says "yes" → Order queued for execution
+- Session context preserves pending_trade between messages
+
+**Testing Results (Iteration 63):**
+- 15/15 backend tests passed (100%)
+- All 4 agents working: router, trade_executor, coach, analyst
+- Pattern matching handles all buy formats: "buy 100 AAPL", "buy 100 shares of AAPL"
+
 ### Phase 3.0 Complete: Multi-Agent Architecture (March 11, 2026)
 **Major Refactor:** Implemented user-approved multi-agent AI system with hybrid safety pattern.
 
