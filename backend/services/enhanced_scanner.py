@@ -3556,6 +3556,11 @@ class EnhancedBackgroundScanner:
             return True
         return False
     
+    def get_alerts_for_symbol(self, symbol: str) -> List[LiveAlert]:
+        """Get all live alerts for a specific symbol"""
+        symbol = symbol.upper()
+        return [a for a in self._live_alerts.values() if a.symbol == symbol]
+    
     def set_watchlist(self, symbols: List[str]):
         self._watchlist = [s.upper() for s in symbols]
         logger.info(f"Watchlist updated: {len(self._watchlist)} symbols")

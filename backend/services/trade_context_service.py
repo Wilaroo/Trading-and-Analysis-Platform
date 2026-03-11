@@ -305,32 +305,38 @@ class TradeContextService:
         
         try:
             if self._technical_service is not None:
-                snapshot = self._technical_service.get_technical_snapshot(symbol)
+                snapshot = await self._technical_service.get_technical_snapshot(symbol)
                 
                 if snapshot:
-                    technicals.rsi = snapshot.get('rsi', 50.0)
-                    technicals.atr = snapshot.get('atr', 0.0)
-                    technicals.atr_percent = snapshot.get('atr_percent', 0.0)
-                    technicals.vwap_distance_percent = snapshot.get('vwap_distance_percent', 0.0)
-                    technicals.relative_volume = snapshot.get('rvol', 1.0)
+                    # TechnicalSnapshot is a dataclass, access attributes directly
+                    technicals.rsi = getattr(snapshot, 'rsi_14', 50.0)
+                    technicals.atr = getattr(snapshot, 'atr', 0.0)
+                    technicals.atr_percent = getattr(snapshot, 'atr_percent', 0.0)
+                    technicals.vwap_distance_percent = getattr(snapshot, 'dist_from_vwap', 0.0)
+                    technicals.relative_volume = getattr(snapshot, 'rvol', 1.0)
                     
-                    # MA stack
-                    mas = snapshot.get('moving_averages', {})
-                    if mas.get('sma_20', 0) > mas.get('sma_50', 0) > mas.get('sma_200', 0):
+                    # MA stack from moving averages
+                    ema_20 = getattr(snapshot, 'ema_20', 0)
+                    ema_50 = getattr(snapshot, 'ema_50', 0)
+                    sma_200 = getattr(snapshot, 'sma_200', 0)
+                    if ema_20 > ema_50 > sma_200:
                         technicals.ma_stack = "bullish"
-                    elif mas.get('sma_20', 0) < mas.get('sma_50', 0) < mas.get('sma_200', 0):
+                    elif ema_20 < ema_50 < sma_200:
                         technicals.ma_stack = "bearish"
                     else:
                         technicals.ma_stack = "neutral"
                         
                     # Squeeze
-                    squeeze = snapshot.get('squeeze', {})
-                    technicals.squeeze_active = squeeze.get('is_squeezed', False)
+                    technicals.squeeze_active = getattr(snapshot, 'squeeze_on', False)
                     
-                    # Support/Resistance
-                    levels = snapshot.get('levels', {})
-                    technicals.support_distance_percent = levels.get('support_distance_pct', 0.0)
-                    technicals.resistance_distance_percent = levels.get('resistance_distance_pct', 0.0)
+                    # Support/Resistance distances (calculate from levels)
+                    price = getattr(snapshot, 'current_price', 0)
+                    support = getattr(snapshot, 'support', 0)
+                    resistance = getattr(snapshot, 'resistance', 0)
+                    if price > 0 and support > 0:
+                        technicals.support_distance_percent = ((price - support) / price) * 100
+                    if price > 0 and resistance > 0:
+                        technicals.resistance_distance_percent = ((resistance - price) / price) * 100
                     
         except Exception as e:
             logger.warning(f"Error capturing technical context for {symbol}: {e}")
