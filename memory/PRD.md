@@ -5,6 +5,32 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### Phase 3.4 Complete: Timeframe-Aware TQS & Scanner Integration (March 11, 2026)
+**Major Feature:** TQS scoring now weights pillars based on trade timeframe. Scanner alerts include TQS with high-quality highlighting.
+
+**Timeframe-Aware TQS Weights:**
+| Trade Style | Technical | Setup | Fundamental | Context | Execution |
+|------------|-----------|-------|-------------|---------|-----------|
+| Scalp (M2M) | **35%** | 30% | 5% | 20% | 10% |
+| Swing (T2H) | 25% | 25% | 15% | 20% | 15% |
+| A+ Trade | 15% | 20% | **30%** | 20% | 15% |
+| Swing | 20% | 20% | 25% | 20% | 15% |
+| Investment | 10% | 15% | **40%** | 20% | 15% |
+
+**Scanner TQS Integration:**
+- Every alert now includes: `tqs_score`, `tqs_grade`, `tqs_action`, `tqs_trade_style`, `tqs_timeframe`
+- High-quality alerts (TQS >= 70) flagged with `tqs_is_high_quality: true` for UI highlighting
+- Trade style auto-inferred from setup type using SMB config
+
+**TQS API Updated:**
+- `POST /api/tqs/score` now accepts `trade_style` parameter
+- Returns weights used and timeframe explanation
+- Example: `{"trade_style": "scalp", "trade_timeframe": "Scalp (minutes to 1 hour)"}`
+
+**Testing Results (Iteration 66):**
+- 28/28 tests passed (100%)
+- 1 bug fixed: Added trade_style to TQS API endpoint
+
 ### Phase 3.3 Complete: TQS Integration & Learning Verification (March 11, 2026)
 **New Features:** TQS (Trade Quality Score) integrated with Analyst agent. Auto-recording verified.
 
