@@ -1021,11 +1021,25 @@ const PipelineOpportunityCard = ({ opportunity, rank, onExecute, onPass, onTicke
         </div>
       </div>
       
-      {/* Setup Type & Stats */}
-      <div className="flex items-center gap-2 text-[10px] text-zinc-400 mb-1.5">
+      {/* Setup Type & Stats + TQS */}
+      <div className="flex items-center gap-2 text-[10px] text-zinc-400 mb-1.5 flex-wrap">
         <span>{opportunity.setup_type?.replace(/_/g, ' ')}</span>
         {opportunity.alert_data?.risk_reward > 0 && (
           <span className="text-zinc-500">R:R {opportunity.alert_data.risk_reward.toFixed(1)}:1</span>
+        )}
+        {(opportunity.alert_data?.tqs_score > 0 || opportunity.tqs_score > 0) && (
+          <span className={`font-bold ${
+            (opportunity.alert_data?.tqs_score || opportunity.tqs_score) >= 70 ? 'text-emerald-400' :
+            (opportunity.alert_data?.tqs_score || opportunity.tqs_score) >= 50 ? 'text-yellow-400' : 'text-orange-400'
+          }`}>
+            TQS {(opportunity.alert_data?.tqs_score || opportunity.tqs_score)?.toFixed(0)}
+          </span>
+        )}
+        {(opportunity.alert_data?.tqs_is_high_quality || opportunity.tqs_is_high_quality) && (
+          <span className="px-1 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold text-[8px] flex items-center gap-0.5">
+            <Zap className="w-2 h-2" />
+            HQ
+          </span>
         )}
       </div>
       

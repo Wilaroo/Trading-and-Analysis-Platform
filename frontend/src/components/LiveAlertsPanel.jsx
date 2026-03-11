@@ -98,6 +98,20 @@ const AlertCard = ({ alert, onDismiss, onSelect }) => {
   const PriorityIcon = priority.icon;
   const DirectionIcon = direction.icon;
   
+  // Check if this is a high-quality TQS alert (>= 70)
+  const isHighTQS = alert.tqs_is_high_quality || (alert.tqs_score && alert.tqs_score >= 70);
+  
+  // TQS grade color mapping
+  const getTQSColor = (grade) => {
+    if (!grade) return 'text-zinc-400';
+    const g = grade.toUpperCase();
+    if (g.startsWith('A')) return 'text-emerald-400';
+    if (g.startsWith('B')) return 'text-blue-400';
+    if (g.startsWith('C')) return 'text-yellow-400';
+    if (g.startsWith('D')) return 'text-orange-400';
+    return 'text-red-400';
+  };
+  
   const formatTime = (minutes) => {
     if (minutes < 60) return `${minutes}m`;
     return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
@@ -130,13 +144,15 @@ const AlertCard = ({ alert, onDismiss, onSelect }) => {
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 20 }}
-      className={`p-3 rounded-lg ${priority.bg} border ${priority.border} mb-2 cursor-pointer hover:scale-[1.01] transition-transform`}
+      className={`p-3 rounded-lg ${priority.bg} border ${priority.border} mb-2 cursor-pointer hover:scale-[1.01] transition-transform ${
+        isHighTQS ? 'ring-2 ring-emerald-500/50 shadow-lg shadow-emerald-500/20' : ''
+      }`}
       onClick={() => onSelect?.(alert)}
       data-testid={`alert-card-${alert.id}`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          {/* Timestamp */}
+          {/* Timestamp + High TQS Badge */}
           <div className="flex items-center gap-2 mb-1 text-xs text-zinc-500">
             <Clock className="w-3 h-3" />
             <span>{formatTimestamp(alert.created_at)}</span>
@@ -156,6 +172,12 @@ const AlertCard = ({ alert, onDismiss, onSelect }) => {
                 CONFIRMED
               </span>
             )}
+            {isHighTQS && (
+              <span className="px-1.5 py-0.5 rounded bg-gradient-to-r from-emerald-500/30 to-teal-500/30 text-emerald-300 font-bold flex items-center gap-1 animate-pulse">
+                <Zap className="w-3 h-3" />
+                HIGH QUALITY
+              </span>
+            )}
           </div>
           
           {/* Header: Symbol + Direction */}
@@ -170,9 +192,16 @@ const AlertCard = ({ alert, onDismiss, onSelect }) => {
             </span>
           </div>
           
-          {/* Setup Type */}
-          <div className="text-sm text-zinc-300 mb-1 truncate">
-            {alert.setup_type?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+          {/* Setup Type + Trade Timeframe */}
+          <div className="flex items-center gap-2 text-sm text-zinc-300 mb-1">
+            <span className="truncate">
+              {alert.setup_type?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+            </span>
+            {alert.tqs_timeframe && (
+              <span className="text-xs text-zinc-500 shrink-0">
+                ({alert.tqs_timeframe})
+              </span>
+            )}
           </div>
           
           {/* Headline */}
@@ -180,8 +209,8 @@ const AlertCard = ({ alert, onDismiss, onSelect }) => {
             {alert.headline}
           </div>
           
-          {/* Key Stats */}
-          <div className="flex items-center gap-3 mt-2 text-xs">
+          {/* Key Stats + TQS */}
+          <div className="flex items-center gap-3 mt-2 text-xs flex-wrap">
             <div className="flex items-center gap-1">
               <span className="text-zinc-500">Price:</span>
               <span className="text-white font-medium">${alert.current_price?.toFixed(2)}</span>
@@ -194,7 +223,28 @@ const AlertCard = ({ alert, onDismiss, onSelect }) => {
               <span className="text-zinc-500">R:R</span>
               <span className="text-emerald-400 font-medium">{alert.risk_reward?.toFixed(1)}:1</span>
             </div>
+            {alert.tqs_score > 0 && (
+              <div className="flex items-center gap-1">
+                <span className="text-zinc-500">TQS:</span>
+                <span className={`font-bold ${getTQSColor(alert.tqs_grade)}`}>
+                  {alert.tqs_score?.toFixed(0)}
+                </span>
+                <span className={`text-xs ${getTQSColor(alert.tqs_grade)}`}>
+                  ({alert.tqs_grade})
+                </span>
+              </div>
+            )}
           </div>
+          
+          {/* TQS Details (only for high-quality alerts) */}
+          {isHighTQS && alert.tqs_key_factors?.length > 0 && (
+            <div className="mt-2 p-2 rounded bg-emerald-500/10 border border-emerald-500/20">
+              <div className="text-xs text-emerald-400 font-medium mb-1">Key Factors:</div>
+              <div className="text-xs text-zinc-300">
+                {alert.tqs_key_factors.slice(0, 2).join(' • ')}
+              </div>
+            </div>
+          )}
           
           {/* Timing */}
           <div className="flex items-center gap-2 mt-2">
