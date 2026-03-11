@@ -26,6 +26,7 @@ class ScoreRequest(BaseModel):
     symbol: str
     setup_type: str
     direction: str = "long"
+    trade_style: Optional[str] = None  # NEW: move_2_move, trade_2_hold, a_plus, swing, investment
     tape_score: float = 0.0
     tape_confirmation: bool = False
     smb_grade: str = "B"
@@ -76,6 +77,7 @@ async def calculate_tqs_score(request: ScoreRequest):
     - Tape reading data
     - SMB grades
     - Position sizing info
+    - Trade style (move_2_move, trade_2_hold, a_plus, swing, investment)
     """
     tqs = get_tqs_engine()
     
@@ -83,6 +85,7 @@ async def calculate_tqs_score(request: ScoreRequest):
         symbol=request.symbol.upper(),
         setup_type=request.setup_type,
         direction=request.direction,
+        trade_style=request.trade_style,  # NEW: Pass trade style for timeframe-aware weighting
         tape_score=request.tape_score,
         tape_confirmation=request.tape_confirmation,
         smb_grade=request.smb_grade,

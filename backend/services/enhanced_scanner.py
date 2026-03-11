@@ -414,6 +414,16 @@ class LiveAlert:
     actual_pnl: Optional[float] = None
     actual_r_multiple: Optional[float] = None  # Actual R-multiple achieved
     
+    # NEW: TQS (Trade Quality Score) integration
+    tqs_score: float = 0.0                # 0-100 overall score
+    tqs_grade: str = ""                   # A/B/C/D/F
+    tqs_action: str = ""                  # STRONG_BUY/BUY/HOLD/AVOID
+    tqs_trade_style: str = ""             # Inferred trade style
+    tqs_timeframe: str = ""               # Human-readable timeframe
+    tqs_key_factors: List[str] = field(default_factory=list)
+    tqs_concerns: List[str] = field(default_factory=list)
+    tqs_is_high_quality: bool = False     # TQS >= 70 (highlighted in UI)
+    
     def calculate_r_multiple(self) -> float:
         """Calculate the R-multiple for this alert (target/risk ratio)"""
         risk_per_share = abs(self.current_price - self.stop_loss)
@@ -1786,8 +1796,11 @@ class EnhancedBackgroundScanner:
                     
                     alerts.append(alert)
             
-            # Process all alerts for this symbol
+            # Process all alerts for this symbol - ADD TQS SCORING
             for alert in alerts:
+                # Calculate TQS for this alert (async)
+                await self._enrich_alert_with_tqs(alert)
+                
                 await self._process_new_alert(alert)
                 
                 # Auto-execute if eligible
@@ -3573,6 +3586,55 @@ class EnhancedBackgroundScanner:
     def unsubscribe(self, queue: asyncio.Queue):
         if queue in self._alert_subscribers:
             self._alert_subscribers.remove(queue)
+    
+    async def _enrich_alert_with_tqs(self, alert: LiveAlert) -> None:
+        """
+        Calculate TQS for an alert and add the scores.
+        High-quality alerts (TQS >= 70) are flagged for UI highlighting.
+        """
+        try:
+            from services.tqs.tqs_engine import get_tqs_engine
+            tqs_engine = get_tqs_engine()
+            
+            # Determine trade style from alert
+            trade_style = alert.trade_style or "trade_2_hold"
+            
+            # Calculate TQS with all available context
+            tqs_result = await tqs_engine.calculate_tqs(
+                symbol=alert.symbol,
+                setup_type=alert.setup_type,
+                direction=alert.direction,
+                trade_style=trade_style,
+                tape_score=alert.tape_score,
+                tape_confirmation=alert.tape_confirmation,
+                smb_grade=alert.trade_grade,
+                smb_5var_score=alert.smb_score_total,
+                risk_reward=alert.risk_reward,
+                alert_priority=alert.priority.value if hasattr(alert.priority, 'value') else str(alert.priority)
+            )
+            
+            if tqs_result:
+                # Populate alert with TQS data
+                alert.tqs_score = tqs_result.score
+                alert.tqs_grade = tqs_result.grade
+                alert.tqs_action = tqs_result.action
+                alert.tqs_trade_style = tqs_result.trade_style
+                alert.tqs_timeframe = tqs_result.trade_timeframe
+                alert.tqs_key_factors = tqs_result.key_factors[:3] if tqs_result.key_factors else []
+                alert.tqs_concerns = tqs_result.concerns[:3] if tqs_result.concerns else []
+                
+                # Flag high-quality alerts (TQS >= 70)
+                alert.tqs_is_high_quality = tqs_result.score >= 70
+                
+                logger.debug(
+                    f"TQS for {alert.symbol} {alert.setup_type}: "
+                    f"{tqs_result.score:.0f} ({tqs_result.grade}) - {tqs_result.action} "
+                    f"[{tqs_result.trade_style}: {tqs_result.trade_timeframe}]"
+                )
+                
+        except Exception as e:
+            logger.warning(f"Could not calculate TQS for alert {alert.symbol}: {e}")
+            # Leave TQS fields at defaults (0, empty)
     
     def get_stats(self) -> Dict:
         # Get wave scanner info if available
