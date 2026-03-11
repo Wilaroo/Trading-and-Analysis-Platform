@@ -10,6 +10,11 @@ Architecture:
 - Chat Agent: General conversation (TBD)
 
 All agents use the LLM Provider abstraction for easy provider swapping.
+Learning is powered by the existing Three-Speed Learning Architecture:
+- Fast: LearningLoopService (real-time trade tracking)
+- Medium: CalibrationService, ContextPerformanceService, EdgeDecayService
+- Slow: BacktestEngine, ShadowModeService
+- Provider: LearningContextProvider (aggregates all insights for AI)
 """
 
 from agents.llm_provider import (
@@ -47,18 +52,6 @@ from agents.coach_agent import (
 from agents.analyst_agent import (
     AnalystAgent,
     AnalysisContext
-)
-
-from agents.learning_layer import (
-    TradeOutcomesDB,
-    PerformanceAnalyzer,
-    MistakeTracker,
-    TradeOutcome,
-    TradingMistake,
-    get_outcomes_db,
-    get_performance_analyzer,
-    get_mistake_tracker,
-    init_learning_layer
 )
 
 from agents.orchestrator import (
@@ -99,17 +92,6 @@ __all__ = [
     # Analyst
     "AnalystAgent",
     "AnalysisContext",
-    
-    # Learning Layer
-    "TradeOutcomesDB",
-    "PerformanceAnalyzer",
-    "MistakeTracker",
-    "TradeOutcome",
-    "TradingMistake",
-    "get_outcomes_db",
-    "get_performance_analyzer",
-    "get_mistake_tracker",
-    "init_learning_layer",
     
     # Orchestrator
     "AgentOrchestrator",

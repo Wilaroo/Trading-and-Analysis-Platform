@@ -2,6 +2,10 @@
 Coach Agent
 Provides personalized trading guidance based on YOUR data and learning layers.
 Uses the larger model for reasoning but all data comes from CODE.
+
+Integrates with Three-Speed Learning Architecture:
+- LearningLoopService: Trade outcomes, execution tracking, trader profile
+- LearningContextProvider: Aggregates TQS, edge decay, calibration, RAG
 """
 import time
 import logging
@@ -28,6 +32,10 @@ class TradingContext:
     similar_past_trades: List[Dict]
     mistake_patterns: List[str]
     market_regime: str
+    # New: Learning context from Three-Speed Architecture
+    learning_insights: str = ""
+    trader_profile: Dict = None
+    session_summary: Dict = None
 
 
 class CoachAgent(BaseAgent):
@@ -35,10 +43,11 @@ class CoachAgent(BaseAgent):
     Trading coach agent - provides personalized guidance.
     
     Data Flow:
-    1. CODE fetches all position/performance data
-    2. CODE builds context from learning layers
-    3. LLM reasons over verified data
-    4. LLM provides personalized guidance
+    1. CODE fetches all position/performance data via DataFetcher
+    2. LearningContextProvider builds personalized insights (TQS, edge decay, etc.)
+    3. LearningLoopService provides trader profile and session stats
+    4. LLM reasons over verified data
+    5. LLM provides personalized guidance
     
     The LLM never invents numbers - it explains and advises based on real data.
     """
@@ -51,11 +60,23 @@ class CoachAgent(BaseAgent):
         )
         
         self.data_fetcher: Optional[DataFetcher] = None
+        # Learning services from Three-Speed Architecture
+        self._learning_context_provider = None
+        self._learning_loop_service = None
     
     def inject_services(self, services: Dict[str, Any]):
         """Inject services and create data fetcher"""
         super().inject_services(services)
         self.data_fetcher = DataFetcher(services)
+        
+        # Wire up learning services
+        self._learning_context_provider = services.get("learning_context_provider")
+        self._learning_loop_service = services.get("learning_loop_service")
+        
+        if self._learning_context_provider:
+            logger.info("Coach Agent: LearningContextProvider connected")
+        if self._learning_loop_service:
+            logger.info("Coach Agent: LearningLoopService connected")
     
     def get_system_prompt(self) -> str:
         """System prompt for coaching"""
@@ -194,7 +215,7 @@ You have no open positions at this time."""
             emoji = "🟢" if pnl >= 0 else "🔴"
             lines.append(f"{emoji} **{symbol}**: {shares:,.0f} shares @ ${avg_cost:.2f} → ${price:.2f} | P&L: ${pnl:,.2f} ({pnl_pct:+.1f}%)")
         
-        lines.append(f"\n**Portfolio Summary**:")
+        lines.append("\n**Portfolio Summary**:")
         lines.append(f"- Total P&L: ${context.total_pnl:,.2f}")
         lines.append(f"- Winners: {context.winning_positions} | Losers: {context.losing_positions}")
         lines.append(f"- Exposure: ${context.portfolio_exposure:,.2f}")
@@ -204,6 +225,7 @@ You have no open positions at this time."""
     async def _build_coaching_context(self, symbol: str = None) -> TradingContext:
         """
         Build coaching context from CODE (verified data only).
+        Integrates with Three-Speed Learning Architecture for personalized insights.
         """
         # Fetch positions from IB
         positions = await self.data_fetcher.get_positions()
@@ -252,6 +274,49 @@ You have no open positions at this time."""
         # Detect market regime
         market_regime = await self._detect_market_regime()
         
+        # ===== NEW: Get personalized learning insights from Three-Speed Architecture =====
+        learning_insights = ""
+        trader_profile = None
+        session_summary = None
+        
+        # 1. Get full learning context from LearningContextProvider
+        if self._learning_context_provider:
+            try:
+                # Get personalized insights (TQS, edge decay, RAG)
+                learning_insights = await self._learning_context_provider.build_full_learning_context(
+                    user_query=symbol or "",
+                    symbol=symbol,
+                    include_tqs=bool(symbol),
+                    include_performance=True,
+                    include_edge_decay=True,
+                    include_confirmations=True,
+                    include_rag=bool(symbol)
+                )
+                logger.debug(f"Got learning insights: {len(learning_insights)} chars")
+            except Exception as e:
+                logger.warning(f"Could not get learning context: {e}")
+        
+        # 2. Get trader profile from LearningLoopService
+        if self._learning_loop_service:
+            try:
+                profile = await self._learning_loop_service.get_trader_profile()
+                if profile:
+                    trader_profile = {
+                        "win_rate": getattr(profile, 'overall_win_rate', 0),
+                        "avg_r": getattr(profile, 'avg_r_multiple', 0),
+                        "best_setups": getattr(profile, 'best_setups', []),
+                        "worst_setups": getattr(profile, 'worst_setups', []),
+                        "tilt_state": getattr(profile, 'tilt_state', None),
+                        "hot_streak": getattr(profile, 'hot_streak', 0),
+                        "cold_streak": getattr(profile, 'cold_streak', 0)
+                    }
+                    logger.debug(f"Got trader profile: win_rate={trader_profile.get('win_rate')}")
+            except Exception as e:
+                logger.warning(f"Could not get trader profile: {e}")
+            
+            # Note: session_summary could be populated from learning_loop_service 
+            # when get_session_summary() is implemented in a future iteration
+        
         return TradingContext(
             positions=positions,
             total_pnl=total_pnl,
@@ -263,7 +328,10 @@ You have no open positions at this time."""
             performance_stats=performance_stats,
             similar_past_trades=similar_trades,
             mistake_patterns=mistake_patterns,
-            market_regime=market_regime
+            market_regime=market_regime,
+            learning_insights=learning_insights,
+            trader_profile=trader_profile,
+            session_summary=session_summary
         )
     
     async def _get_mistake_patterns(self) -> List[str]:
@@ -353,14 +421,50 @@ PORTFOLIO SUMMARY (VERIFIED):
             loser = context.largest_loser
             summary += f"  - Largest Loser: {loser.get('symbol')} (${loser.get('unrealizedPNL', 0):,.2f})\n"
         
+        # NEW: Add trader profile from Three-Speed Learning
+        profile_text = ""
+        if context.trader_profile:
+            p = context.trader_profile
+            profile_text = f"""
+YOUR TRADER PROFILE (FROM LEARNING SYSTEM):
+  - Overall Win Rate: {p.get('win_rate', 0):.1f}%
+  - Average R-Multiple: {p.get('avg_r', 0):.2f}
+  - Best Setups: {', '.join(p.get('best_setups', [])[:3]) or 'N/A'}
+  - Worst Setups: {', '.join(p.get('worst_setups', [])[:3]) or 'N/A'}
+"""
+            if p.get('hot_streak'):
+                profile_text += f"  - 🔥 Hot Streak: {p['hot_streak']} wins in a row\n"
+            if p.get('cold_streak'):
+                profile_text += f"  - ❄️ Cold Streak: {p['cold_streak']} losses in a row\n"
+            if p.get('tilt_state'):
+                profile_text += f"  - ⚠️ Tilt State: {p['tilt_state']}\n"
+        
+        # NEW: Add session summary
+        session_text = ""
+        if context.session_summary:
+            s = context.session_summary
+            session_text = f"""
+TODAY'S SESSION:
+  - Trades: {s.get('trades', 0)} | PnL: ${s.get('pnl', 0):,.2f}
+  - Win Rate: {s.get('win_rate', 0):.0f}%
+"""
+        
+        # NEW: Include learning insights from LearningContextProvider
+        learning_text = ""
+        if context.learning_insights:
+            learning_text = f"\n{context.learning_insights}\n"
+        
         # Combine into full prompt
         prompt = f"""=== VERIFIED DATA (DO NOT MODIFY THESE NUMBERS) ===
 
 {positions_text}
 {summary}
+{profile_text}
+{session_text}
 {perf_text}
 {similar_text}
 {mistakes_text}
+{learning_text}
 
 === USER QUESTION ===
 {message}
@@ -368,6 +472,7 @@ PORTFOLIO SUMMARY (VERIFIED):
 === YOUR TASK ===
 Provide personalized coaching based ONLY on the verified data above.
 Reference their specific numbers and patterns.
+Use insights from the learning system to personalize your advice.
 Be concise but insightful."""
         
         return prompt
