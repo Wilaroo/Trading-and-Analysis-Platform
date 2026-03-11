@@ -3680,6 +3680,16 @@ async def startup_event():
     # Start market intel scheduler (auto-generates reports at scheduled times)
     asyncio.create_task(market_intel_service.start_scheduler())
     print("Market intel scheduler started")
+    
+    # Auto-start trading bot in autonomous mode
+    try:
+        await trading_bot.start()
+        print(f"🤖 Trading bot auto-started in {trading_bot.get_mode().value.upper()} mode")
+        print(f"   Trading hours: 7:30 AM - 5:00 PM ET")
+        print(f"   Max position: {trading_bot.risk_params.max_position_pct}% of account")
+        print(f"   Max daily loss: {trading_bot.risk_params.max_daily_loss_pct}% of account")
+    except Exception as e:
+        print(f"⚠️ Trading bot auto-start failed: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
