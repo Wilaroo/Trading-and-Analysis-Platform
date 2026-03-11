@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://multi-agent-trader-1.preview.emergentagent.com
+https://backtest-hub-18.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://multi-agent-trader-1.preview.emergentagent.com
+https://backtest-hub-18.preview.emergentagent.com
 ```

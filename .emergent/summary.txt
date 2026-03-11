@@ -9,128 +9,152 @@ After initial setup, the user requested a large set of features and fixes, which
 - A UI tracker for Ollama Pro cloud credits.
 
 PRODUCT REQUIREMENTS:
-The user has approved a major architectural refactor to move from a single AI service to a multi-agent system. This system should be safer, more performant, and cost-effective, with specialized agents for different tasks (e.g., trade execution, analysis, coaching). A key requirement is a hybrid safety pattern where LLMs are only used for language understanding, while all numerical data, state, and quantities are handled by deterministic, auditable code. Most recently, the user has requested the implementation of a Market Regime Engine based on extensive research provided, which functions as a sophisticated Fear and Greed index to guide trading decisions.
+The user has approved a major architectural refactor to move from a single AI service to a multi-agent system. This system should be safer, more performant, and cost-effective, with specialized agents for different tasks (e.g., trade execution, analysis, coaching). A key requirement is a hybrid safety pattern where LLMs are only used for language understanding, while all numerical data, state, and quantities are handled by deterministic, auditable code. The user has also requested the implementation of a Market Regime Engine and a comprehensive Advanced Backtesting System.
 
 **User's preferred language**: English
 
 **what currently exists?**
 - A full-stack application (React, FastAPI, MongoDB) with a stable, real-time data pipeline from the user's local Interactive Brokers (IB) Gateway.
-- A fully implemented multi-agent architecture () featuring a Router, Trade Executor, Coach, and Analyst agent, which handles all chat-based interactions.
-- An autonomous trading bot that detects setups, evaluates them, and queues trades to a persistent MongoDB  collection.
-- A Live Trading Dashboard that displays live IB data, P&L, and scanner alerts.
-- A sophisticated, pre-existing Three-Speed Learning Architecture that the new Coach Agent is now fully integrated with.
-- A timeframe-aware Trade Quality Score (TQS) engine that dynamically adjusts pillar weights based on trade style (, , ).
-- Scanner alerts are enriched with TQS data, and the UI highlights alerts with a high TQS score.
+- A fully implemented multi-agent architecture () featuring a Router, Trade Executor, Coach, and Analyst agent.
+- A Live Trading Dashboard that displays live IB data, P&L, and scanner alerts enriched with a timeframe-aware Trade Quality Score (TQS).
+- A refactored backend service initialization in  that now uses a robust  pattern instead of .
+- A **Learning Intelligence Hub**: A new, comprehensive UI that replaces the old Analytics tab, providing a centralized view of performance metrics, edge health, and AI recommendations. It includes a compact Learning Insights widget on the main command tab for at-a-glance information.
+- An **Advanced Backtesting System**: The full backend infrastructure and frontend UI have been built. This includes support for Multi-Strategy, Walk-Forward, Monte Carlo, and Custom Date Range testing.
+- A **Market Regime Engine**: The core service, API, and UI widget have been built but are *not yet deployed* or integrated into the live application.
 
 **Last working item**:
--   **Last item agent was working**: The agent was analyzing the user's extensive research on building a Market Regime Engine (a sophisticated Fear & Greed index). The user provided detailed notes on how systems like VectorVest and IBD determine market conditions (Confirmed Up/Down). The agent's last action was to begin exploring the codebase to formulate a plan for designing and implementing this new engine.
--   **Status**: NOT STARTED
+-   **Last item agent was working**: Fixing two UI issues in the newly created Advanced Backtesting Panel that the user identified:
+    1. The results list in the UI was not clickable to show detailed results.
+    2. The Multi-Strategy tab was showing only 6 hardcoded strategy templates, not the 77 actual strategies available in the system.
+    The agent had just created a new backend API endpoint () to list all available strategies and was about to modify the frontend.
+-   **Status**: IN PROGRESS
 -   **Agent Testing Done**: N
--   **Which testing method agent to use?**: both. This is a major new feature. A new backend service () will need to be created and tested. A corresponding UI component will also be needed to display the market state on the dashboard, which will require frontend testing.
+-   **Which testing method agent to use?**: both. The new backend endpoint () should be tested with . The frontend changes to the  and its sub-components should be validated with the frontend testing agent to ensure the strategy list is populated dynamically and result items are interactive.
 -   **User Testing Done**: N
 
 **All Pending/In progress Issue list**:
--   **Issue 1: Fragile Service Initialization in  (P2)**
-    -   **Description**: The use of  blocks and  for service setup in  is considered technical debt and could cause future initialization issues.
-    -   **Status**: NOT STARTED
-    -   **Is recurring issue?**: Y
-    -   **Should Test frontend/backend/both after fix?**: backend
-    -   **Why fix this issue and what will be achieved with the fix?**: Refactoring this will make the application startup more robust, predictable, and easier to debug.
+-   **Issue 1: Fix Advanced Backtesting Panel UI (P0)**
+    -   **Description**: The backtesting panel is not fully interactive. The results are not clickable, and the strategy list is static and incomplete.
+    -   **Attempted fixes**: A backend endpoint () was created in  to provide the dynamic list of strategies.
+    -   **Next debug checklist**:
+        1.  In , replace the hardcoded strategy options by fetching the list from the  endpoint.
+        2.  In , wrap each result item in a clickable element.
+        3.  Create a new component (e.g., ) to display the detailed results of a selected backtest.
+        4.  Implement the  handler in  to open the modal with the corresponding result data.
+    -   **Why fix this issue and what will be achieved with the fix?**: This will make the Advanced Backtesting System fully usable, allowing the user to run tests with any of their strategies and analyze the results in detail.
+    -   **Status**: IN PROGRESS
+    -   **Is recurring issue?**: N
+    -   **Should Test frontend/backend/both after fix?**: both
+    -   **Blocked on other issue**: None
 
 **In progress Task List**:
-(None)
+(None - The only in-progress item is the issue listed above)
 
 **Upcoming and Future Tasks**
 -   **Upcoming Tasks:**
-    -   **(P0) Implement Market Regime Engine**: Based on the user's research (VectorVest, IBD), build a service that determines the overall market state (, , ), a risk level, and a confidence score. This involves creating signal blocks for trend, breadth, follow-through days, and volume. The engine's output should be exposed via an API.
-    -   **(P1) UI for Market Regime Engine**: Create a new UI component on the dashboard to display the output of the Market Regime Engine (e.g., a traffic light indicator for market state, gauges for risk and confidence).
+    -   **(P0) Deploy Market Regime Engine**: The engine's backend and UI are built but are not yet wired into the live application. The next step is to connect its outputs to the Trading Bot, AI Agents, and Scanner, following the guide in .
+    -   **(P1) Activate Alpaca Data for Backtesting**: Connect the  to a live Alpaca data source to enable end-to-end backtesting. This will likely require the user to provide API keys.
 
 -   **Future Tasks:**
-    -   **(P2)** Implement a **Learning Dashboard** to visualize the outputs of the Three-Speed Learning Architecture.
-    -   **(P2)** Implement **Voice Commands** for hands-free interaction with the bot.
-    -   **(P2)** Implement a **Trade Style Selector** for the bot, allowing users to configure its focus (scalps, swings) with automatic TQS threshold and position sizing adjustments.
-    -   **(P2)** Restructure the Trade Journal tabs and sub-tabs.
+    -   **(P2)** Enhance the bot's learning integration (auto-adjustments based on edge decay alerts, calibration recommendations, trader profile, etc.). The user has explicitly asked to hold on to this.
+    -   **(P2)** Implement **Voice Commands** for hands-free interaction.
+    -   **(P2)** Implement a **Trade Style Selector** for the bot.
+    -   **(P2)** Deprecate and remove old monolithic services (, ) once all their functionality has been migrated to newer, specialized services.
     -   **(P3)** Update the IB Trading Tab and its connections.
 
 **Completed work in this session**
--   **Multi-Agent Architecture**: Successfully implemented and integrated the full multi-agent system (Router, Trade Executor, Coach, Analyst), replacing the old monolithic AI service. The frontend was updated to use the new  endpoint.
--   **AI Trade Confirmation Flow**: Implemented and tested the conversational trade confirmation flow (e.g., User says yes to confirm a trade), which now successfully queues orders in MongoDB.
--   **Learning System Consolidation**: Identified a redundant , removed it, and successfully wired the new Coach Agent into the existing sophisticated Three-Speed Learning Architecture.
--   **Timeframe-Aware TQS Engine**: Refactored the TQS engine () to use dynamic pillar weights based on trade style, making TQS scores more meaningful across different timeframes.
--   **Trade Style Enum Refactoring**: Renamed confusing  enums for clarity (e.g.,  -> ,  -> ) across the entire codebase.
--   **Scanner & UI TQS Integration**: Enriched scanner alerts with TQS data and updated the frontend (, ) to display TQS scores and highlight high-quality alerts.
--   **Comprehensive Testing**: Used the testing agent multiple times to validate major changes, fixing several bugs related to API mismatches and component logic.
+-   **Service Initialization Refactor**: Successfully replaced the  pattern in  with a robust , making the application startup safer and more maintainable.
+-   **Learning Intelligence Hub**: Designed and implemented a new, centralized UI for learning and analytics, replacing the old . This includes a compact widget for the main command view and a full dashboard.
+-   **Advanced Backtesting System (Infrastructure)**: Built the complete backend and frontend for a powerful backtesting suite, including Multi-Strategy, Walk-Forward, and Monte Carlo capabilities.
+-   **Market Regime Engine (Scaffolding)**: Created the core backend service, API router, and frontend widget for the Market Regime Engine. It is ready for deployment and integration.
+-   **Deprecated Endpoint Notice**: Added a formal  flag to the old  endpoint to guide future cleanup.
+
+**Earlier issues found/mentioned but not fixed**
+-   None.
 
 **Known issue recurrence from previous fork**
 -   **Issue recurrence in previous fork**: AI Hallucinating Position Data.
 -   **Recurrence count**: 2
--   **Status**: RESOLVED. The new multi-agent architecture with its hybrid safety pattern is the definitive long-term solution designed to eliminate this class of bug by separating LLM language processing from deterministic code that handles data and state.
+-   **Status**: RESOLVED. This has not recurred since the implementation of the multi-agent architecture.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **Multi-Agent Architecture**: A fully operational system with a Router Agent and specialized agents for trading, coaching, and analysis. This is the new core of the AI interaction model.
--   **Timeframe-Aware TQS**: The TQS engine now dynamically weights its five pillars (Setup, Technical, Fundamental, Context, Execution) based on the inferred trade style (, , ), providing a more accurate quality score.
--   **Three-Speed Learning Architecture**: A pre-existing, complex learning system was rediscovered. The new Coach Agent was integrated with it to provide data-driven, personalized coaching without creating redundant services.
--   **Hybrid AI/Code Safety Pattern**: Enforced throughout the new agent architecture to prevent numerical hallucinations in critical operations like trade execution.
+-   **Service Registry Pattern**: A centralized class () is now used in  to manage service dependencies and initialization, improving robustness and removing reliance on .
+-   **Decoupled Feature Development**: New features like the Market Regime Engine and Advanced Backtesting System were built as complete, self-contained modules first, allowing them to be tested independently before being integrated into the live application.
+-   **Advanced Backtesting Techniques**: The new system is designed to support industry-standard validation methods like Walk-Forward Optimization and Monte Carlo Simulation to prevent overfitting and provide realistic performance expectations.
+-   **Dynamic UI Generation**: The backtesting panel is being updated to dynamically load its configuration (e.g., strategy list) from a backend API, making the UI more flexible and maintainable.
 
 **key DB schema**
--   **orders**: . Used for the persistent trade execution queue.
--   **trade_outcomes**: Part of the existing learning loop, now used by the Coach Agent to analyze performance.
+-   **backtest_results** (Implicitly created): This collection will store the outputs of the new backtesting engine. A suggested schema is .
 
 **All files of reference**
--   : Contains the timeframe-aware TQS logic and the refactored  weights.
--   : Shows how TQS is calculated and added to every scanner alert.
--   : The directory containing the completed, operational multi-agent system.
--   : Shows the UI implementation for TQS highlighting on scanner alerts.
+-   : The core logic for the new backtesting system.
+-   : The main UI component for the new backtesting system, which needs fixing.
+-   : The new centralized learning dashboard.
+-   : The service container that replaced .
+-   : Shows the new, cleaner service initialization flow.
+-   : The directory containing the 77 user strategies that need to be loaded dynamically.
+-   : The new API endpoint created to list all strategies.
 
 **Areas that need refactoring**:
--   The service initialization logic in  using  remains a piece of technical debt.
--   The original monolithic AI services (, ) and the  endpoint are now fully deprecated and can be scheduled for removal.
+-   The old backtesting service () is now functionally superseded by the . A future task should be to migrate any remaining unique functionality and remove the old service.
+-   The  still contains legacy endpoints. A plan should be made to migrate them to more specific services and fully deprecate the monolithic service.
 
 **key api endpoints**
--   : The new primary endpoint for all user chat interactions, handled by the .
--   : Returns scanner alerts, which are now enriched with TQS data (e.g., , , ).
+-   : Runs a single strategy backtest.
+-   : Runs a multi-strategy comparison.
+-   : Runs a walk-forward optimization.
+-   : Runs a Monte Carlo simulation.
+-   : Fetches backtest results.
+-   : **(Newly Added)** Fetches the list of all available strategy names.
+-   : Fetches the trader profile data for the Learning Hub.
 
 **Critical Info for New Agent**
--   Your immediate and highest priority is to **design and implement the Market Regime Engine**. The user has provided detailed research from Perplexity AI on how systems like VectorVest and IBD work; use this as your primary blueprint. The engine should output a clear market state (, , ), risk level, and confidence score.
--   The user has already confirmed that TQS **action thresholds** (e.g., 70+ is a good trade) should remain static, as the dynamic pillar **weights** already account for the trade's timeframe. Do not add complexity by making the thresholds dynamic.
--   Use the refactored  names (, , , etc.) which are now consistent across the backend.
--   The entire chat/AI functionality now runs through the new multi-agent system. The old system is deprecated.
+-   Your immediate and highest priority is to **fix the Advanced Backtesting Panel UI**.
+    1.  Fetch the strategy list from the  endpoint and populate the Multi-Strategy tab's selection UI.
+    2.  Make the results in the Results tab clickable to open a modal or detail view showing comprehensive backtest results.
+-   The user has explicitly decided to **postpone** enhancing the bot's auto-adjustment logic and wants to focus entirely on building out the backtesting system.
+-   The **Market Regime Engine** is built but **not deployed**. Do not attempt to integrate it until the user gives the go-ahead.
+-   The backend service initialization in  has been successfully refactored. Use the  to access services.
 
 **documents and test reports created in this job**
--    was updated multiple times to reflect completed work and add new items to the backlog.
--   Multiple test reports were generated by the testing agent in . The most recent report validates the trade style refactoring and TQS integrations.
+-   
+-   
+-    (updated multiple times)
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User**: Asks if  needs changes for all the new features. (Completed)
-2.  **Agent**: Explains no changes are needed as all updates are on the cloud-side backend/frontend. (Completed)
-3.  **User**: Asks for a detailed explanation of the A+ trade style and all five TQS pillars. (Completed)
-4.  **Agent**: Provides a detailed breakdown of each pillar and how weights change per style. (Completed)
-5.  **User**: Points out a logical flaw: an A+ quality grade shouldn't be a timeframe/style. (Completed)
-6.  **Agent**: Agrees and proposes renaming trade styles for clarity (e.g.,  -> ). (Completed)
-7.  **User**: Approves the refactoring: yes lets rename them.... (Completed)
-8.  **Agent**: Systematically refactors trade style names across the codebase and tests for regressions. (Completed)
-9.  **User**: Provides extensive research on building a Fear and Greed Index (Market Regime Engine) based on VectorVest/IBD models. (Instruction)
-10. **Agent**: Acknowledges the excellent research and begins exploring the codebase to design the new engine. (In Progress)
+-   **User**: ok the results are showing recent results but it isnt clickable. also im only seeing 6 strategies in the multi strategy as options. we have may more (Instruction - This is the current task to be solved).
+-   **User**: yes proceed and build it with all of these options: Multi-strategy backtesting, Walk-forward optimization, Monte Carlo simulation, Custom date range selection (Completed - The infrastructure has been built).
+-   **User**: i like the plan. now how would long roughly would running these backtests take and how much compute credits would be used roughly? (Clarification - Answered by the agent).
+-   **User**: for your enhancement suggestions for backtesting explain what all of those options are please and how they work? (Clarification - Answered by the agent).
+-   **User**: ok proceed with option B+C hybrid and lets hold on [enhancing the bot] for now. I want to do extensive backtesting first and build out our backtesting system next (Completed - Learning Hub built, next task is backtesting).
+-   **User**: ok if we do this, will our trading bot and ai assistant have access to all of this data so that it can learn and adjust as well? (Clarification - Answered by the agent).
+-   **User**: not sure... Design some mockups for all the options and send me screenshots (Completed - Mockups were designed and sent).
+-   **User**: (On learning hub) 1. end of day or weekly 2. all of those and more 3. not sure (Clarification - Guided agent to create mockups).
+-   **User**: ok lets do red P2 and cleanup deprecated ai services. dont break anything. Next, give me your thoughts on incorporating the learning dashboard... (Completed -  refactored, thoughts provided).
+-   **User**: ok (Acknowledged agent's summary).
 
 **Project Health Check:**
--   **Working**: Core UI, IB data pipeline, Autonomous Trading Bot, Live Trading Dashboard, Persistent Order Queue, Multi-Agent System (Router, Executor, Coach, Analyst), Timeframe-Aware TQS, TQS-enriched alerts.
--   **Broken**: None.
--   **Mocked**: The Market Regime Engine is purely conceptual at this point, awaiting implementation.
+-   **Working**: Core UI, IB Data Pipeline, Multi-Agent System, Live Trading Dashboard, TQS Engine, Learning Intelligence Hub (UI), Advanced Backtesting System (UI/backend infrastructure).
+-   **Broken**: The Alpaca data connection is not configured in this preview environment, so live backtests will fail. This is an environmental constraint, not a code bug.
+-   **Mocked**: The Advanced Backtesting Panel displays empty/mock data until a backtest is run with a live data connection. The Market Regime Engine widget is also using mocked data.
 
 **3rd Party Integrations**
 -   **Interactive Brokers (IB Gateway)**: **Working**. Integrated for real-time data and trade execution.
 -   **Ollama**: **Working**. Connects via a local proxy for LLM access.
--   **Alpaca**: **Working**. Used as a secondary data source.
+-   **Alpaca**: **Partially Working**. Integrated in code, but requires API keys to be configured to fetch historical data for the backtester.
 -   **Tavily**: **Working**. Used for web search by agents.
 
 **Testing status**
--   **Testing agent used after significant changes**: YES. It was used multiple times to validate the multi-agent system, learning layer consolidation, TQS UI changes, and trade style refactoring.
--   **Test files created**: None manually, but the testing agent likely modified existing test files to fix issues.
+-   **Testing agent used after significant changes**: NO (Not for the most recent changes).
+-   **Troubleshoot agent used after agent stuck in loop**: NO
+-   **Test files created**: None in this session.
 -   **Known regressions**: None.
 
+**Credentials to test flow:**
+-   Alpaca API keys will be needed to fully test the backtesting system end-to-end. The agent should inform the user when it's time to configure them.
+
 **What agent forgot to execute**
--   The agent has not yet addressed the technical debt in  related to service initialization.
--   The agent was about to start the Market Regime Engine but has not yet implemented any part of it. This is the primary pending task.</analysis>
+-   The agent was in the middle of implementing the user's request to fix the backtesting UI. It has not yet modified the frontend files (, ) to complete the task. This is the highest priority item for the next agent.</analysis>

@@ -679,3 +679,97 @@ async def get_strategy_templates():
         "success": True,
         "templates": templates
     }
+
+
+@router.get("/strategies")
+async def get_all_strategies():
+    """
+    Get all trading strategies from the database.
+    These are the full 77+ strategies available for backtesting.
+    """
+    try:
+        from data.strategies_data import ALL_STRATEGIES_DATA, TRADING_STRATEGIES_DATA
+        
+        # Format strategies for backtest use
+        strategies = []
+        for strategy in ALL_STRATEGIES_DATA:
+            # Map strategy data to backtest config
+            setup_type = _map_strategy_to_setup_type(strategy.get("name", ""))
+            
+            strategies.append({
+                "id": strategy.get("id", ""),
+                "name": strategy.get("name", ""),
+                "category": strategy.get("category", "intraday"),
+                "setup_type": setup_type,
+                "description": ", ".join(strategy.get("criteria", [])[:2]),
+                "timeframe": strategy.get("timeframe", "5min"),
+                "indicators": strategy.get("indicators", []),
+                "config": {
+                    "min_tqs_score": 60,
+                    "stop_pct": 2.0,
+                    "target_pct": 4.0,
+                    "use_trailing_stop": False,
+                    "max_bars_to_hold": 20 if strategy.get("category") == "intraday" else 60,
+                    "position_size_pct": 10
+                }
+            })
+        
+        # Group by category
+        grouped = {
+            "intraday": [s for s in strategies if s["category"] == "intraday"],
+            "swing": [s for s in strategies if s["category"] == "swing"],
+            "investment": [s for s in strategies if s["category"] == "investment"]
+        }
+        
+        return {
+            "success": True,
+            "total": len(strategies),
+            "strategies": strategies,
+            "grouped": grouped
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "strategies": []
+        }
+
+
+def _map_strategy_to_setup_type(name: str) -> str:
+    """Map strategy name to a backtest setup type"""
+    name_lower = name.lower()
+    
+    if "orb" in name_lower or "opening range" in name_lower:
+        return "ORB"
+    elif "vwap" in name_lower:
+        if "reversion" in name_lower or "fade" in name_lower:
+            return "VWAP_FADE"
+        return "VWAP_BOUNCE"
+    elif "gap" in name_lower:
+        return "GAP_AND_GO"
+    elif "breakout" in name_lower:
+        return "BREAKOUT"
+    elif "pullback" in name_lower or "dip" in name_lower:
+        return "PULLBACK"
+    elif "reversal" in name_lower:
+        return "REVERSAL"
+    elif "scalp" in name_lower:
+        return "SCALP"
+    elif "flag" in name_lower:
+        return "FLAG"
+    elif "momentum" in name_lower:
+        return "MOMENTUM"
+    elif "mean reversion" in name_lower:
+        return "MEAN_REVERSION"
+    elif "range" in name_lower:
+        return "RANGE"
+    elif "trend" in name_lower:
+        return "TREND_CONTINUATION"
+    elif "swing" in name_lower:
+        return "SWING"
+    elif "pivot" in name_lower:
+        return "PIVOT"
+    elif "hod" in name_lower or "high of day" in name_lower:
+        return "HOD_BREAK"
+    else:
+        return "MOMENTUM"  # Default

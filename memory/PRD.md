@@ -5,6 +5,56 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### Phase 4.1 Complete: Hybrid Data Service (March 11, 2026)
+**Feature:** Intelligent data fetcher with IB primary + Alpaca fallback, automatic caching
+
+**Problem Solved:** The user needed backtesting to work regardless of whether the local IB Gateway was running, with data consistency and zero additional costs when IB is connected.
+
+**Solution Architecture:**
+```
+┌────────────────────────────────────────────────────────┐
+│           HybridDataService                            │
+├────────────────────────────────────────────────────────┤
+│  1. Check MongoDB cache first (instant, free)          │
+│  2. If cache miss + IB connected → Fetch from IB       │
+│  3. If IB unavailable → Fall back to Alpaca            │
+│  4. Cache all fetched data in MongoDB                  │
+├────────────────────────────────────────────────────────┤
+│  Rate Limiters (conservative to stay within limits):   │
+│  • IB: 6 requests/minute                               │
+│  • Alpaca: 150 requests/minute                         │
+├────────────────────────────────────────────────────────┤
+│  Cache Strategy:                                       │
+│  • Daily bars: Cache indefinitely                      │
+│  • Intraday: 7-day TTL                                 │
+│  • 80%+ coverage check before using cache              │
+└────────────────────────────────────────────────────────┘
+```
+
+**Files Created:**
+- `/app/backend/services/hybrid_data_service.py` - Core service (650+ lines)
+- `/app/backend/routers/hybrid_data.py` - API endpoints
+
+**API Endpoints:**
+- `GET /api/data/status` - Service status, rate limits, stats
+- `GET /api/data/bars/{symbol}` - Simple GET for bars
+- `POST /api/data/bars` - Advanced bar fetch with options
+- `POST /api/data/prefetch` - Batch prefetch for multiple symbols
+- `GET /api/data/cache/symbols` - List cached symbols
+- `GET /api/data/cache/stats` - Cache statistics
+- `DELETE /api/data/cache` - Clear cache
+
+**Integration:**
+- Advanced Backtest Engine now uses Hybrid Data Service as primary data source
+- Wired into server.py under Phase 6 (Slow Learning)
+
+**Benefits:**
+- Free data when IB connected (you're already paying for it)
+- 24/7 availability via Alpaca fallback (nights, weekends)
+- MongoDB caching = repeat tests are instant
+- Rate limiting prevents API bans
+- Data consistency: backtest uses same source as live trading when IB connected
+
 ### Phase 3.7 Ready: Market Regime Engine (March 11, 2026)
 **Status: BUILT - NOT DEPLOYED** (Ready to connect when desired)
 
@@ -500,7 +550,7 @@ Local PC                              Cloud Backend
 | **Ollama** | Free AI for chat, summaries, market intel | Via ngrok tunnel |
 
 ## Startup Modes
-- **Cloud Dev**: Ollama + ngrok → `https://multi-agent-trader-1.preview.emergentagent.com`
+- **Cloud Dev**: Ollama + ngrok → `https://backtest-hub-18.preview.emergentagent.com`
 - **Full Local**: All services on PC → `http://localhost:3000`
 - See `/documents/STARTUP_GUIDE.md` for detailed instructions
 
@@ -2683,10 +2733,10 @@ This data is logged for analysis. Once we confirm it improves accuracy without b
 ### Usage
 ```bash
 # Run IB Data Pusher with Level 2 enabled (default)
-python ib_data_pusher.py --cloud-url https://multi-agent-trader-1.preview.emergentagent.com
+python ib_data_pusher.py --cloud-url https://backtest-hub-18.preview.emergentagent.com
 
 # Disable Level 2 if needed
-python ib_data_pusher.py --cloud-url https://multi-agent-trader-1.preview.emergentagent.com --no-level2
+python ib_data_pusher.py --cloud-url https://backtest-hub-18.preview.emergentagent.com --no-level2
 ```
 
 **Status**: ✅ IMPLEMENTED - Monitoring mode active

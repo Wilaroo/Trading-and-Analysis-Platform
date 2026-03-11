@@ -24,11 +24,14 @@ const AdvancedBacktestPanel = () => {
   const [results, setResults] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [templates, setTemplates] = useState([]);
+  const [allStrategies, setAllStrategies] = useState([]);
   const [recentResults, setRecentResults] = useState([]);
+  const [selectedResult, setSelectedResult] = useState(null);
 
-  // Fetch templates on mount
+  // Fetch templates and strategies on mount
   useEffect(() => {
     fetchTemplates();
+    fetchAllStrategies();
     fetchRecentResults();
     fetchJobs();
     
@@ -45,6 +48,17 @@ const AdvancedBacktestPanel = () => {
       }
     } catch (err) {
       console.error('Error fetching templates:', err);
+    }
+  };
+
+  const fetchAllStrategies = async () => {
+    try {
+      const res = await api.get('/api/backtest/strategies');
+      if (res.data?.success) {
+        setAllStrategies(res.data.strategies || []);
+      }
+    } catch (err) {
+      console.error('Error fetching strategies:', err);
     }
   };
 
@@ -120,6 +134,7 @@ const AdvancedBacktestPanel = () => {
       {activeTab === 'multi' && (
         <MultiStrategyTab 
           templates={templates}
+          allStrategies={allStrategies}
           onJobStarted={fetchJobs}
           setLoading={setLoading}
           loading={loading}
@@ -149,6 +164,15 @@ const AdvancedBacktestPanel = () => {
           jobs={jobs}
           recentResults={recentResults}
           onRefresh={() => { fetchJobs(); fetchRecentResults(); }}
+          onSelectResult={setSelectedResult}
+        />
+      )}
+
+      {/* Result Detail Modal */}
+      {selectedResult && (
+        <ResultDetailModal 
+          result={selectedResult} 
+          onClose={() => setSelectedResult(null)} 
         />
       )}
     </div>
@@ -397,11 +421,13 @@ const MetricBox = ({ label, value, positive }) => (
 // Multi-Strategy Tab
 // ============================================================================
 
-const MultiStrategyTab = ({ templates, onJobStarted, setLoading, loading }) => {
+const MultiStrategyTab = ({ templates, allStrategies, onJobStarted, setLoading, loading }) => {
   const [symbols, setSymbols] = useState('SPY,QQQ,IWM,AAPL,MSFT');
-  const [selectedTemplates, setSelectedTemplates] = useState([]);
+  const [selectedStrategies, setSelectedStrategies] = useState([]);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     const end = new Date();
@@ -411,18 +437,27 @@ const MultiStrategyTab = ({ templates, onJobStarted, setLoading, loading }) => {
     setStartDate(start.toISOString().split('T')[0]);
   }, []);
 
-  const toggleTemplate = (template) => {
-    setSelectedTemplates(prev => {
-      const exists = prev.find(t => t.name === template.name);
+  const toggleStrategy = (strategy) => {
+    setSelectedStrategies(prev => {
+      const exists = prev.find(s => s.id === strategy.id || s.name === strategy.name);
       if (exists) {
-        return prev.filter(t => t.name !== template.name);
+        return prev.filter(s => s.id !== strategy.id && s.name !== strategy.name);
       }
-      return [...prev, template];
+      return [...prev, strategy];
     });
   };
 
+  // Filter strategies
+  const filteredStrategies = allStrategies.filter(s => {
+    const matchesCategory = categoryFilter === 'all' || s.category === categoryFilter;
+    const matchesSearch = !searchTerm || 
+      s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      s.setup_type?.toLowerCase().includes(searchTerm.toLowerCase());
+    return matchesCategory && matchesSearch;
+  });
+
   const handleRun = async () => {
-    if (selectedTemplates.length === 0) {
+    if (selectedStrategies.length === 0) {
       toast.error('Select at least one strategy');
       return;
     }
@@ -431,10 +466,10 @@ const MultiStrategyTab = ({ templates, onJobStarted, setLoading, loading }) => {
     try {
       const res = await api.post('/api/backtest/multi-strategy', {
         symbols: symbols.split(',').map(s => s.trim().toUpperCase()),
-        strategies: selectedTemplates.map(t => ({
-          name: t.name,
-          setup_type: t.setup_type,
-          ...t.config
+        strategies: selectedStrategies.map(s => ({
+          name: s.name,
+          setup_type: s.setup_type,
+          ...(s.config || {})
         })),
         filters: {
           start_date: startDate || null,
@@ -458,7 +493,7 @@ const MultiStrategyTab = ({ templates, onJobStarted, setLoading, loading }) => {
     <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 p-4">
       <h3 className="text-sm font-medium text-white mb-4 flex items-center gap-2">
         <Layers className="w-4 h-4 text-purple-400" />
-        Multi-Strategy Comparison
+        Multi-Strategy Comparison ({allStrategies.length} strategies available)
       </h3>
 
       <div className="space-y-4">
@@ -496,36 +531,87 @@ const MultiStrategyTab = ({ templates, onJobStarted, setLoading, loading }) => {
           </div>
         </div>
 
-        {/* Strategy Selection */}
-        <div>
-          <label className="text-xs text-slate-400 block mb-2">
-            Select Strategies to Compare ({selectedTemplates.length} selected)
-          </label>
-          <div className="grid grid-cols-3 gap-2">
-            {templates.map((t, i) => (
-              <button
-                key={i}
-                onClick={() => toggleTemplate(t)}
-                className={`p-3 text-left rounded-lg border text-xs transition-colors ${
-                  selectedTemplates.find(s => s.name === t.name)
-                    ? 'bg-purple-500/20 border-purple-500/50 text-purple-400'
-                    : 'bg-slate-900/50 border-slate-700 text-slate-400 hover:border-slate-600'
-                }`}
-              >
-                <div className="font-medium text-white">{t.name}</div>
-                <div className="text-slate-500">{t.description}</div>
-              </button>
-            ))}
+        {/* Strategy Filters */}
+        <div className="flex gap-2">
+          <div className="flex-1">
+            <label className="text-xs text-slate-400 block mb-1">Search Strategies</label>
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-900/50 border border-slate-700 rounded-lg text-white text-sm"
+              placeholder="Search by name..."
+            />
+          </div>
+          <div>
+            <label className="text-xs text-slate-400 block mb-1">Category</label>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="px-3 py-2 bg-slate-900/50 border border-slate-700 rounded-lg text-white text-sm"
+            >
+              <option value="all">All ({allStrategies.length})</option>
+              <option value="intraday">Intraday ({allStrategies.filter(s => s.category === 'intraday').length})</option>
+              <option value="swing">Swing ({allStrategies.filter(s => s.category === 'swing').length})</option>
+              <option value="investment">Investment ({allStrategies.filter(s => s.category === 'investment').length})</option>
+            </select>
           </div>
         </div>
 
+        {/* Strategy Selection */}
+        <div>
+          <label className="text-xs text-slate-400 block mb-2">
+            Select Strategies to Compare ({selectedStrategies.length} selected)
+          </label>
+          <div className="max-h-64 overflow-y-auto border border-slate-700/50 rounded-lg p-2 space-y-1">
+            {filteredStrategies.map((s, i) => (
+              <button
+                key={s.id || i}
+                onClick={() => toggleStrategy(s)}
+                className={`w-full p-2 text-left rounded-lg border text-xs transition-colors flex items-center justify-between ${
+                  selectedStrategies.find(sel => sel.id === s.id || sel.name === s.name)
+                    ? 'bg-purple-500/20 border-purple-500/50 text-purple-400'
+                    : 'bg-slate-900/50 border-slate-700/50 text-slate-400 hover:border-slate-600'
+                }`}
+              >
+                <div>
+                  <div className="font-medium text-white">{s.name}</div>
+                  <div className="text-slate-500">{s.setup_type} • {s.category}</div>
+                </div>
+                <div className="text-slate-600">{s.timeframe}</div>
+              </button>
+            ))}
+            {filteredStrategies.length === 0 && (
+              <div className="text-center py-4 text-slate-500">No strategies match your filters</div>
+            )}
+          </div>
+        </div>
+
+        {/* Selected Summary */}
+        {selectedStrategies.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {selectedStrategies.map((s, i) => (
+              <span 
+                key={i} 
+                className="px-2 py-1 bg-purple-500/20 text-purple-400 text-xs rounded-full flex items-center gap-1"
+              >
+                {s.name}
+                <button 
+                  onClick={() => toggleStrategy(s)}
+                  className="hover:text-white"
+                >×</button>
+              </span>
+            ))}
+          </div>
+        )}
+
         <button
           onClick={handleRun}
-          disabled={loading || selectedTemplates.length === 0}
+          disabled={loading || selectedStrategies.length === 0}
           className="w-full py-3 bg-purple-500 hover:bg-purple-600 disabled:bg-slate-600 rounded-lg text-white font-medium flex items-center justify-center gap-2"
         >
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          Run Multi-Strategy Backtest
+          Run Multi-Strategy Backtest ({selectedStrategies.length} strategies)
         </button>
       </div>
     </div>
@@ -793,7 +879,7 @@ const MonteCarloTab = ({ recentResults, onJobStarted, setLoading, loading }) => 
 // Results Tab
 // ============================================================================
 
-const ResultsTab = ({ jobs, recentResults, onRefresh }) => {
+const ResultsTab = ({ jobs, recentResults, onRefresh, onSelectResult }) => {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -812,7 +898,7 @@ const ResultsTab = ({ jobs, recentResults, onRefresh }) => {
           <h4 className="text-xs text-slate-400 mb-3">Active Jobs</h4>
           <div className="space-y-2">
             {jobs.map(job => (
-              <JobRow key={job.id} job={job} />
+              <JobRow key={job.id} job={job} onSelect={job.status === 'completed' ? () => onSelectResult(job.result) : undefined} />
             ))}
           </div>
         </div>
@@ -820,22 +906,22 @@ const ResultsTab = ({ jobs, recentResults, onRefresh }) => {
 
       {/* Recent Results */}
       <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 p-4">
-        <h4 className="text-xs text-slate-400 mb-3">Recent Results</h4>
+        <h4 className="text-xs text-slate-400 mb-3">Recent Results (Click to view details)</h4>
         {recentResults.length > 0 ? (
           <div className="space-y-2">
             {recentResults.map(result => (
-              <ResultRow key={result.id} result={result} />
+              <ResultRow key={result.id} result={result} onClick={() => onSelectResult(result)} />
             ))}
           </div>
         ) : (
-          <p className="text-sm text-slate-500 text-center py-4">No results yet</p>
+          <p className="text-sm text-slate-500 text-center py-4">No results yet. Run a backtest to see results here.</p>
         )}
       </div>
     </div>
   );
 };
 
-const JobRow = ({ job }) => {
+const JobRow = ({ job, onSelect }) => {
   const statusColors = {
     pending: 'text-yellow-400',
     running: 'text-cyan-400',
@@ -844,7 +930,10 @@ const JobRow = ({ job }) => {
   };
 
   return (
-    <div className="flex items-center justify-between p-2 bg-slate-900/50 rounded-lg">
+    <div 
+      className={`flex items-center justify-between p-2 bg-slate-900/50 rounded-lg ${onSelect ? 'cursor-pointer hover:bg-slate-800/50' : ''}`}
+      onClick={onSelect}
+    >
       <div>
         <div className="text-sm text-white">{job.job_type}</div>
         <div className="text-xs text-slate-500">{job.progress_message || job.id}</div>
@@ -854,32 +943,289 @@ const JobRow = ({ job }) => {
           <div className="text-xs text-cyan-400">{Math.round(job.progress || 0)}%</div>
         )}
         <span className={`text-xs ${statusColors[job.status]}`}>{job.status}</span>
+        {onSelect && <ChevronRight className="w-4 h-4 text-slate-500" />}
       </div>
     </div>
   );
 };
 
-const ResultRow = ({ result }) => {
+const ResultRow = ({ result, onClick }) => {
   const typeLabels = {
-    'mbt_': { label: 'Multi-Strategy', color: 'text-purple-400' },
-    'wf_': { label: 'Walk-Forward', color: 'text-emerald-400' },
-    'mc_': { label: 'Monte Carlo', color: 'text-orange-400' }
+    'mbt_': { label: 'Multi-Strategy', color: 'text-purple-400', bg: 'bg-purple-500/20' },
+    'wf_': { label: 'Walk-Forward', color: 'text-emerald-400', bg: 'bg-emerald-500/20' },
+    'mc_': { label: 'Monte Carlo', color: 'text-orange-400', bg: 'bg-orange-500/20' }
   };
 
   const type = Object.entries(typeLabels).find(([prefix]) => result.id?.startsWith(prefix));
   
   return (
-    <div className="flex items-center justify-between p-2 bg-slate-900/50 rounded-lg">
-      <div>
-        <div className="text-sm text-white">{result.name || result.strategy_name || result.id}</div>
-        <div className="flex items-center gap-2 text-xs">
-          {type && <span className={type[1].color}>{type[1].label}</span>}
+    <div 
+      className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg cursor-pointer hover:bg-slate-800/50 transition-colors"
+      onClick={onClick}
+    >
+      <div className="flex-1">
+        <div className="text-sm text-white font-medium">{result.name || result.strategy_name || result.id}</div>
+        <div className="flex items-center gap-2 text-xs mt-1">
+          {type && <span className={`${type[1].color} ${type[1].bg} px-2 py-0.5 rounded`}>{type[1].label}</span>}
           <span className="text-slate-500">{result.created_at?.split('T')[0]}</span>
+          {result.combined_total_trades && (
+            <span className="text-slate-400">{result.combined_total_trades} trades</span>
+          )}
+          {result.combined_win_rate && (
+            <span className={result.combined_win_rate >= 50 ? 'text-emerald-400' : 'text-red-400'}>
+              {result.combined_win_rate.toFixed(1)}% win
+            </span>
+          )}
         </div>
       </div>
-      <ChevronRight className="w-4 h-4 text-slate-500" />
+      <ChevronRight className="w-5 h-5 text-slate-500" />
     </div>
   );
 };
+
+// ============================================================================
+// Result Detail Modal
+// ============================================================================
+
+const ResultDetailModal = ({ result, onClose }) => {
+  if (!result) return null;
+
+  const isMultiStrategy = result.id?.startsWith('mbt_');
+  const isWalkForward = result.id?.startsWith('wf_');
+  const isMonteCarlo = result.id?.startsWith('mc_');
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div 
+        className="bg-slate-900 rounded-xl border border-slate-700 max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-slate-700">
+          <div>
+            <h2 className="text-lg font-semibold text-white">{result.name || result.strategy_name || 'Backtest Result'}</h2>
+            <p className="text-xs text-slate-400">{result.id} • {result.created_at?.split('T')[0]}</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-slate-800 rounded-lg">
+            <XCircle className="w-5 h-5 text-slate-400" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-4 space-y-4">
+          {isMultiStrategy && <MultiStrategyResultDetail result={result} />}
+          {isWalkForward && <WalkForwardResultDetail result={result} />}
+          {isMonteCarlo && <MonteCarloResultDetail result={result} />}
+          {!isMultiStrategy && !isWalkForward && !isMonteCarlo && <GenericResultDetail result={result} />}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const MultiStrategyResultDetail = ({ result }) => (
+  <div className="space-y-4">
+    {/* Combined Metrics */}
+    <div className="grid grid-cols-4 gap-3">
+      <MetricBox label="Total Trades" value={result.combined_total_trades} />
+      <MetricBox label="Win Rate" value={`${result.combined_win_rate?.toFixed(1)}%`} positive={result.combined_win_rate >= 50} />
+      <MetricBox label="Total P&L" value={`$${result.combined_total_pnl?.toFixed(0)}`} positive={result.combined_total_pnl >= 0} />
+      <MetricBox label="Profit Factor" value={result.combined_profit_factor?.toFixed(2)} positive={result.combined_profit_factor >= 1.5} />
+    </div>
+
+    {/* Per-Strategy Results */}
+    {result.strategy_results?.length > 0 && (
+      <div>
+        <h4 className="text-sm font-medium text-slate-300 mb-2">Strategy Comparison</h4>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-slate-400 border-b border-slate-700">
+                <th className="text-left py-2 px-2">Strategy</th>
+                <th className="text-right py-2 px-2">Trades</th>
+                <th className="text-right py-2 px-2">Win Rate</th>
+                <th className="text-right py-2 px-2">P&L</th>
+                <th className="text-right py-2 px-2">PF</th>
+                <th className="text-right py-2 px-2">Sharpe</th>
+                <th className="text-right py-2 px-2">Max DD</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.strategy_results.map((sr, i) => (
+                <tr key={i} className="border-b border-slate-800 hover:bg-slate-800/30">
+                  <td className="py-2 px-2 text-white">{sr.strategy_name}</td>
+                  <td className="py-2 px-2 text-right text-slate-300">{sr.total_trades}</td>
+                  <td className={`py-2 px-2 text-right ${sr.win_rate >= 50 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {sr.win_rate?.toFixed(1)}%
+                  </td>
+                  <td className={`py-2 px-2 text-right ${sr.total_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    ${sr.total_pnl?.toFixed(0)}
+                  </td>
+                  <td className="py-2 px-2 text-right text-slate-300">{sr.profit_factor?.toFixed(2)}</td>
+                  <td className="py-2 px-2 text-right text-slate-300">{sr.sharpe_ratio?.toFixed(2)}</td>
+                  <td className="py-2 px-2 text-right text-red-400">{sr.max_drawdown_pct?.toFixed(1)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )}
+
+    {/* Correlation Matrix */}
+    {result.correlation_matrix && Object.keys(result.correlation_matrix).length > 0 && (
+      <div>
+        <h4 className="text-sm font-medium text-slate-300 mb-2">Strategy Correlations</h4>
+        <div className="grid grid-cols-2 gap-2">
+          {Object.entries(result.correlation_matrix).map(([pair, corr]) => (
+            <div key={pair} className="flex items-center justify-between p-2 bg-slate-800/50 rounded">
+              <span className="text-xs text-slate-400">{pair.replace('_vs_', ' vs ')}</span>
+              <span className={`text-xs font-medium ${
+                Math.abs(corr) > 0.7 ? 'text-red-400' : 
+                Math.abs(corr) > 0.4 ? 'text-yellow-400' : 'text-emerald-400'
+              }`}>
+                {corr.toFixed(2)}
+              </span>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-slate-500 mt-1">Low correlation between strategies = better diversification</p>
+      </div>
+    )}
+  </div>
+);
+
+const WalkForwardResultDetail = ({ result }) => (
+  <div className="space-y-4">
+    {/* Efficiency Summary */}
+    <div className={`p-4 rounded-lg border ${
+      result.is_robust ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-red-500/10 border-red-500/30'
+    }`}>
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-lg font-semibold text-white">
+            Efficiency Ratio: {result.efficiency_ratio?.toFixed(1)}%
+          </div>
+          <div className={`text-sm ${result.is_robust ? 'text-emerald-400' : 'text-red-400'}`}>
+            {result.is_robust ? 'Strategy is Robust' : 'Strategy May Be Overfit'}
+          </div>
+        </div>
+        {result.is_robust ? (
+          <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+        ) : (
+          <AlertTriangle className="w-8 h-8 text-red-400" />
+        )}
+      </div>
+      <p className="text-xs text-slate-400 mt-2">{result.recommendation}</p>
+    </div>
+
+    {/* Metrics Comparison */}
+    <div className="grid grid-cols-2 gap-4">
+      <div className="bg-slate-800/50 rounded-lg p-3">
+        <h4 className="text-xs text-slate-400 mb-2">In-Sample (Training)</h4>
+        <div className="text-xl font-bold text-white">{result.in_sample_win_rate?.toFixed(1)}%</div>
+        <div className="text-xs text-slate-500">Win Rate</div>
+      </div>
+      <div className="bg-slate-800/50 rounded-lg p-3">
+        <h4 className="text-xs text-slate-400 mb-2">Out-of-Sample (Testing)</h4>
+        <div className="text-xl font-bold text-white">{result.out_of_sample_win_rate?.toFixed(1)}%</div>
+        <div className="text-xs text-slate-500">Win Rate</div>
+      </div>
+    </div>
+
+    {/* Period Details */}
+    {result.periods?.length > 0 && (
+      <div>
+        <h4 className="text-sm font-medium text-slate-300 mb-2">Period Details ({result.total_periods} periods)</h4>
+        <div className="max-h-48 overflow-y-auto space-y-1">
+          {result.periods.map((p, i) => (
+            <div key={i} className="flex items-center justify-between p-2 bg-slate-800/30 rounded text-xs">
+              <span className="text-slate-400">Period {p.period}</span>
+              <span className="text-slate-500">{p.in_sample_trades} → {p.out_sample_trades} trades</span>
+              <span className={p.out_sample_win_rate >= p.in_sample_win_rate * 0.7 ? 'text-emerald-400' : 'text-red-400'}>
+                {p.in_sample_win_rate}% → {p.out_sample_win_rate}%
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+  </div>
+);
+
+const MonteCarloResultDetail = ({ result }) => (
+  <div className="space-y-4">
+    {/* Risk Assessment */}
+    <div className={`p-4 rounded-lg border ${
+      result.risk_assessment === 'LOW' ? 'bg-emerald-500/10 border-emerald-500/30' :
+      result.risk_assessment === 'MEDIUM' ? 'bg-yellow-500/10 border-yellow-500/30' :
+      result.risk_assessment === 'HIGH' ? 'bg-orange-500/10 border-orange-500/30' :
+      'bg-red-500/10 border-red-500/30'
+    }`}>
+      <div className="text-lg font-semibold text-white">
+        Risk Assessment: {result.risk_assessment}
+      </div>
+      <p className="text-xs text-slate-400 mt-1">{result.recommendation}</p>
+    </div>
+
+    {/* Key Metrics */}
+    <div className="grid grid-cols-3 gap-3">
+      <MetricBox label="Prob. of Profit" value={`${result.probability_of_profit?.toFixed(1)}%`} positive={result.probability_of_profit >= 70} />
+      <MetricBox label="Prob. of Ruin" value={`${result.probability_of_ruin?.toFixed(1)}%`} positive={result.probability_of_ruin < 5} />
+      <MetricBox label="Expected Max DD" value={`${result.expected_max_drawdown?.toFixed(1)}%`} positive={result.expected_max_drawdown < 20} />
+    </div>
+
+    {/* Distributions */}
+    <div className="grid grid-cols-2 gap-4">
+      <div className="bg-slate-800/50 rounded-lg p-3">
+        <h4 className="text-xs text-slate-400 mb-2">P&L Distribution</h4>
+        {result.pnl_distribution && Object.entries(result.pnl_distribution).map(([pct, val]) => (
+          <div key={pct} className="flex justify-between text-xs py-1">
+            <span className="text-slate-500">{pct}th percentile</span>
+            <span className={val >= 0 ? 'text-emerald-400' : 'text-red-400'}>${val?.toFixed(0)}</span>
+          </div>
+        ))}
+      </div>
+      <div className="bg-slate-800/50 rounded-lg p-3">
+        <h4 className="text-xs text-slate-400 mb-2">Drawdown Distribution</h4>
+        {result.drawdown_distribution && Object.entries(result.drawdown_distribution).map(([pct, val]) => (
+          <div key={pct} className="flex justify-between text-xs py-1">
+            <span className="text-slate-500">{pct}th percentile</span>
+            <span className="text-red-400">{val?.toFixed(1)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    {/* Original vs Simulated */}
+    <div className="bg-slate-800/50 rounded-lg p-3">
+      <h4 className="text-xs text-slate-400 mb-2">Original Backtest vs Monte Carlo</h4>
+      <div className="grid grid-cols-3 gap-3 text-xs">
+        <div>
+          <span className="text-slate-500">Original P&L</span>
+          <div className={`font-medium ${result.original_total_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            ${result.original_total_pnl?.toFixed(0)}
+          </div>
+        </div>
+        <div>
+          <span className="text-slate-500">Original Max DD</span>
+          <div className="font-medium text-red-400">{result.original_max_drawdown?.toFixed(1)}%</div>
+        </div>
+        <div>
+          <span className="text-slate-500">Worst Case DD (95th)</span>
+          <div className="font-medium text-red-400">{result.worst_case_drawdown?.toFixed(1)}%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+const GenericResultDetail = ({ result }) => (
+  <div>
+    <pre className="text-xs text-slate-400 bg-slate-800/50 p-4 rounded-lg overflow-auto max-h-96">
+      {JSON.stringify(result, null, 2)}
+    </pre>
+  </div>
+);
 
 export default AdvancedBacktestPanel;

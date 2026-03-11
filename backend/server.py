@@ -72,7 +72,9 @@ from routers.smb_router import router as smb_router
 from routers.journal_router import router as journal_router
 from routers.agents import router as agents_router, init_agents_router
 from routers.advanced_backtest_router import router as advanced_backtest_router, init_advanced_backtest_router
+from routers.hybrid_data import router as hybrid_data_router, init_hybrid_data_router
 from services.market_intel_service import get_market_intel_service
+from services.hybrid_data_service import get_hybrid_data_service, init_hybrid_data_service
 from services.learning_loop_service import get_learning_loop_service, init_learning_loop_service
 from services.trade_context_service import get_trade_context_service, init_trade_context_service
 from services.execution_tracker_service import get_execution_tracker, init_execution_tracker
@@ -298,6 +300,7 @@ app.include_router(scheduler_router)
 app.include_router(circuit_breaker_router)
 app.include_router(agents_router)  # Multi-agent system
 app.include_router(advanced_backtest_router)  # Advanced backtesting system
+app.include_router(hybrid_data_router)  # Hybrid IB/Alpaca data service
 
 # Collections
 strategies_col = db["strategies"]
@@ -516,12 +519,25 @@ try:
     register_service('backtest_engine', backtest_engine)
     register_service('advanced_backtest_engine', advanced_backtest_engine)
     
+    # Initialize Hybrid Data Service (IB primary, Alpaca fallback)
+    hybrid_data_service = init_hybrid_data_service(
+        db=db,
+        ib_service=ib_service,
+        alpaca_service=alpaca_service
+    )
+    init_hybrid_data_router(hybrid_data_service)
+    register_service('hybrid_data_service', hybrid_data_service)
+    
+    # Wire hybrid data service to advanced backtest engine
+    advanced_backtest_engine.set_hybrid_data_service(hybrid_data_service)
+    
     print("Slow Learning (Phase 6) initialized")
     print("  - Historical Data Service: Alpaca data download and storage")
+    print("  - Hybrid Data Service: IB primary, Alpaca fallback, MongoDB cache")
     print("  - Backtest Engine: Strategy backtesting on historical data")
     print("  - Advanced Backtest Engine: Multi-strategy, Walk-forward, Monte Carlo")
     print("  - Shadow Mode: Paper trading filter validation")
-    print("  - Endpoints: /api/slow-learning/*, /api/backtest/*")
+    print("  - Endpoints: /api/slow-learning/*, /api/backtest/*, /api/data/*")
 except Exception as e:
     print(f"Slow Learning initialization deferred: {e}")
     historical_data_service = None
