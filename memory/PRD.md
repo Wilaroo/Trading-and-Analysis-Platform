@@ -5,6 +5,77 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### Phase 4.2 Complete: Market-Wide Strategy Scanner (March 11, 2026)
+**Feature:** Full US market scanning for strategy signals across all 77 strategies
+
+**Problem Solved:** The user wanted to scan the entire US market (12,500+ stocks) to find which stocks would trigger their strategies, with pre-filters for intraday/swing/investment styles.
+
+**Solution Architecture:**
+```
+┌────────────────────────────────────────────────────────┐
+│           MarketScannerService                         │
+├────────────────────────────────────────────────────────┤
+│  Stock Universe:                                       │
+│  • 12,571 US tradeable stocks from Alpaca              │
+│  • Cached in MongoDB for fast access                   │
+├────────────────────────────────────────────────────────┤
+│  Trade Style Presets:                                  │
+│  • Intraday: 47 strategies, 500K min ADV               │
+│  • Swing: 15 strategies, 100K min ADV                  │
+│  • Investment: 15 strategies, 50K min ADV              │
+│  • All: 77 strategies combined                         │
+├────────────────────────────────────────────────────────┤
+│  Pre-Filters:                                          │
+│  • Price range ($5-$500)                               │
+│  • Exclude OTC/Penny stocks                            │
+│  • Sector filtering                                    │
+│  • RVOL minimum                                        │
+├────────────────────────────────────────────────────────┤
+│  Signal Detection:                                     │
+│  • Momentum (3%+ moves)                                │
+│  • Breakout (20-day highs)                             │
+│  • Mean Reversion (oversold bounce)                    │
+│  • Swing (trend + pullback)                            │
+│  • Investment (golden cross, value)                    │
+├────────────────────────────────────────────────────────┤
+│  Output:                                               │
+│  • Top 20 setups ranked by Expected R-multiple         │
+│  • Signals grouped by strategy                         │
+│  • Signals grouped by sector (heat map)                │
+│  • Background job with progress tracking               │
+└────────────────────────────────────────────────────────┘
+```
+
+**Files Created:**
+- `/app/backend/services/market_scanner_service.py` - Core service (970+ lines)
+- `/app/backend/routers/market_scanner.py` - API endpoints
+- `/app/frontend/src/components/MarketScannerPanel.jsx` - Full UI
+
+**API Endpoints:**
+- `GET /api/scanner/status` - Service status
+- `GET /api/scanner/symbols` - Symbol universe (12,571 stocks)
+- `POST /api/scanner/start` - Start market scan
+- `GET /api/scanner/scan/{id}` - Get scan status/results
+- `GET /api/scanner/scan/{id}/signals` - Get signals with filters
+- `GET /api/scanner/scans` - List recent scans
+- `DELETE /api/scanner/scan/{id}` - Cancel running scan
+- `GET /api/scanner/filters/presets` - Get filter presets
+- `GET /api/scanner/sectors` - Get available sectors
+
+**UI Features:**
+- Trade style selection cards (Intraday/Swing/Investment/All)
+- Pre-filter configuration (price, OTC, penny stocks)
+- Scan name input and Start/Cancel buttons
+- Real-time progress bar during scan
+- Recent scans list with status indicators
+- Scan results with top setups and signals by strategy
+- Full signals table with entry/stop/target prices
+
+**Note:** Full market scans of 12,500+ stocks require significant API calls and may hit rate limits on Alpaca's free tier. For best results:
+1. Connect IB Gateway for unlimited data
+2. Run scans during off-hours to use cached data
+3. Enable nightly auto-scans (future feature)
+
 ### Phase 4.1 Complete: Hybrid Data Service (March 11, 2026)
 **Feature:** Intelligent data fetcher with IB primary + Alpaca fallback, automatic caching
 
