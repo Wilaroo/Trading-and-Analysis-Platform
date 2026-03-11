@@ -7,7 +7,7 @@ import requests
 import os
 import time
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://ib-trading-engine.preview.emergentagent.com')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://ai-trader-bot-25.preview.emergentagent.com')
 
 class TestHealthAndBasics:
     """Health check and basic API tests"""

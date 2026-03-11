@@ -1,57 +1,71 @@
-<analysis>**original_problem_statement**: The user wants to build a sophisticated AI trading bot. Key requirements include using a local Ollama instance, connecting to an Interactive Brokers (IB) Gateway paper account for real-time data (including Level 2) and trade execution, and having a robust local script () to manage the connections.
+<analysis>**original_problem_statement**: The user wants to build a sophisticated AI trading bot using a local Ollama instance, connected to an Interactive Brokers (IB) Gateway paper account for real-time data and trade execution.
 
-After resolving initial connection issues, the user provided a comprehensive list of new features and fixes:
-- Refine  for robustness.
-- Fix P&L and percentage change displays throughout the UI.
-- Pull and display IB paper account portfolio details (Net Liquidation, Buying Power).
-- Restructure the Trade Journal to connect with live trading data.
-- Update settings, glossary, and logic to reflect recent architectural changes.
-- Ensure the Trading Bot and AI services use the new IB Gateway connection for data and execution.
-- Implement data-driven in-trade guidance and a live trading dashboard.
-- Ensure the system can handle the data load without timeouts or disconnects.
+After initial setup, the user requested a large set of features and fixes, which were organized into phases. The core goals are:
+- A stable, real-time data feed from the user's local IB Gateway to the cloud application.
+- A UI that accurately displays live IB data (Net Liquidation, Buying Power, P&L).
+- An AI assistant that uses live data for accurate reasoning and avoids hallucination.
+- A trading bot and background scanner that use live IB data by default.
+- A robust local script () to manage connections.
+- A UI tracker for Ollama Pro cloud credits.
 
 PRODUCT REQUIREMENTS:
-- A stable, real-time data feed from the user's local IB Gateway to the cloud application, including Level 1 quotes, Level 2 order books, and account/position data.
-- A user interface that accurately displays live data from the IB feed, including Net Liquidation, Buying Power, P&L, and correct percentage changes.
-- A trading bot that executes trades against the user's IB paper account by default.
-- A refactored Trade Journal that integrates live account data.
+- A stable, real-time data pipeline from the user's local IB Gateway to the cloud application.
+- A user interface that accurately displays live data from the IB feed.
+- A trading bot and AI assistant that use the live IB data stream for all decisions and context.
+- A background scanner optimized for performance that does not cause timeouts or disconnects.
+- A UI component to track Ollama Pro credit usage.
+- Intelligent query processing to reduce AI hallucinations.
 - A robust  script that reliably automates the local setup process.
-- All AI and learning systems should be powered by the live IB data stream.
 
 **User's preferred language**: English
 
 **what currently exists?**
-A full-stack trading platform (React, FastAPI, MongoDB) with a now-stable data pipeline. A local Python script () successfully connects to the user's IB Gateway paper account (), streams real-time data (quotes, positions, Level 2 order book for 3 symbols), and pushes it to the cloud backend. A  script automates the launch of local components.
+A full-stack trading application (React, FastAPI, MongoDB) with a stable data pipeline from the user's local Interactive Brokers (IB) Gateway. A local script, , pushes real-time quotes, positions, and account data to the cloud backend.
 
-The backend has been significantly refactored to prioritize this live IB data, using Alpaca as a fallback. The UI's VIX display has been fixed, and the Trading Bot now defaults to executing orders via the IB Gateway connection.
+The application has been significantly refactored:
+- **UI Data:** All major data displays (Net Liquidation, Buying Power, Positions, P&L) are now correctly showing live data from the IB pusher.
+- **AI Assistant:** The AI now defaults to using a powerful  model via the user's local  proxy. This has resolved major hallucination issues. The system includes a smart fallback to a local  model if the cloud model fails.
+- **Data Prioritization:** Multiple backend services (, , ) have been updated to prioritize live IB data over the Alpaca API fallback.
+- **Ollama Credit Tracker:** A new UI feature has been added to the header, showing a modal with detailed usage statistics for the user's Ollama Pro account, including session and weekly request counts.
+- **Query Preprocessing:** A query preprocessor has been implemented to reframe user queries and inject structured data to improve AI accuracy.
 
 **Last working item**:
--   **Last item agent was working**: The agent organized the user's extensive feature list into a multi-phase plan and completed **Phase 1: Core Data & Display Fixes**. This included fixing P&L displays, creating an IB account summary endpoint, connecting the portfolio page to IB data, and setting the trading bot's default executor to IB.
--   **Status**: USER VERIFICATION PENDING
--   **Agent Testing Done**: Y
--   **Which testing method agent to use?**: both. The testing agent should be used for backend logic for the next phase, and the screenshot tool should be used to verify UI changes.
--   **User Testing Done**: N (The user confirmed the app was running and changes look good so far but has not performed a detailed verification of all Phase 1 fixes.)
+-   **Last item agent was working**: The agent began investigating and refactoring the . It was discovered that the scanner was still using the Alpaca API directly for market data instead of prioritizing the live IB data feed. The agent started modifying the service to fetch quotes from the IB pusher first.
+-   **Status**: IN PROGRESS
+-   **Agent Testing Done**: N
+-   **Which testing method agent to use?**: backend testing agent. The agent should verify that the scanner service correctly fetches data from the IB stream when available and only falls back to Alpaca when necessary. Performance testing should also be considered to ensure the changes do not introduce new timeouts.
+-   **User Testing Done**: N
 
 **All Pending/In progress Issue list**:
-There are no outstanding bugs. The following are planned feature/enhancement tasks based on user requests.
+-   **Issue 1: Scanner Performance and Data Source (P0)**
+    -   **Description**: The  currently relies on the Alpaca API for fetching quotes and bars, bypassing the live IB data feed. This can lead to data discrepancies and potential rate-limiting or performance issues. The service needs to be refactored to prioritize the live IB data stream.
+    -   **Attempted fixes**: The agent started modifying the service to add a helper function for fetching IB quotes.
+    -   **Next debug checklist**:
+        -   Continue modifying .
+        -   Ensure both  and any bar data retrieval logic attempts to use the  first.
+        -   Review the main scan loop in  to ensure batches are processed efficiently and  calls are appropriate to prevent timeouts.
+        -   Test the scanner's functionality after the refactor to confirm it's using IB data.
+    -   **Why fix this issue and what will be achieved with the fix?**: This will ensure data consistency across the entire application and may improve the scanner's performance by using the real-time, pushed data stream instead of making numerous external API calls to Alpaca.
+    -   **Status**: IN PROGRESS
+    -   **Is recurring issue?**: N
+    -   **Should Test frontend/backend/both after fix?**: backend
+    -   **Blocked on other issue**: None
 
 **In progress Task List**:
--   **Task 1: Complete User Verification for Phase 1 (P0)**
-    -   **Where to resume**: The user has the latest scripts running. The next agent should ask the user to confirm that P&L values for positions, Net Liquidation, and Buying Power are displaying correctly in the UI.
-    -   **What will be achieved with this?**: Confirms that the foundational data display fixes are working as expected before building on top of them.
-    -   **Status**: USER VERIFICATION PENDING
-    -   **Should Test frontend/backend/both after fix?**: frontend
-    -   **Blocked on something**: User confirmation.
+-   **Task 1: Complete Scanner Performance Refactor (P0)**
+    -   **Where to resume**: Continue editing  to fully integrate the IB data feed as the primary source for market data.
+    -   **What will be achieved with this?**: A more performant and data-consistent background scanner.
+    -   **Status**: IN PROGRESS
+    -   **Should Test frontend/backend/both after fix?**: backend
+    -   **Blocked on something**: None
 
 **Upcoming and Future Tasks**
-
--   **Upcoming Tasks (Phase 2 - Performance & AI Integration):**
-    -   (P0) Ensure scans and data gathering do not cause timeouts or disconnects. This involves reviewing the current push frequency and data payload size.
-    -   (P1) Ensure the Trading Bot and AI are correctly using the new IB gateway connections for all decisions and context generation.
-    -   (P1) Adjust any settings, glossary, and logic to be up-to-date with all the new architectural changes.
+-   **Upcoming Tasks:**
+    -   (P1) **Enhancement:** Implement a market-wide fear and greed index based on real-time market breadth (advancers/decliners) from the scanner data, and display it on the dashboard. (Saved from user suggestion).
+    -   (P1) Adjust any remaining settings, glossary, and logic to be up-to-date with all the new architectural changes (e.g., UI text that still mentions Alpaca as primary).
     -   (P2) Further refine and test the  VRAM model selection logic on the user's machine.
 
--   **Future Tasks (Phase 3 & 4):**
+-   **Future Tasks:**
     -   (P2) Restructure the Trade Journal tabs and sub-tabs to better connect with the live trading accounts and data.
     -   (P2) Implement the data-driven In-Trade Guidance frontend component.
     -   (P3) Update the IB Trading Tab and its connections.
@@ -59,14 +73,21 @@ There are no outstanding bugs. The following are planned feature/enhancement tas
     -   (P3) Build the Live Trading Dashboard.
 
 **Completed work in this session**
--   **IB Data Pusher Stabilized**: Fixed numerous critical bugs in , including blocking calls,  value serialization errors, and a crucial timezone mismatch that caused data to appear stale. The script now reliably pushes UTC-timestamped data.
--   **Level 2 Data Implemented**: Enabled Level 2 order book streaming for SPY, QQQ, and IWM, respecting the paper account's 3-symbol limit and using specific exchange routing (, ) to avoid errors.
--   **UI Data Corrected**:
-    -   Fixed the top ticker tape to show the correct VIX price from the CBOE feed via the IB pusher, instead of /bin/bash.00.
-    -   Refactored the portfolio display to prioritize and show live positions and account values from the IB paper account ().
--   **Trading Bot Execution Switched**: The default trade executor is now the  IB Gateway connection, not the Alpaca paper account. Endpoints were added to view and change the executor mode.
--   **Data Service Refactoring**: All backend services that require market data (stock quotes, VIX, etc.) were updated to prioritize the live IB push data and use Alpaca as a fallback.
--   ** Enhanced**: The script was updated to use the correct paper trading credentials () and the VRAM detection logic was improved.
+-   **Critical UI Bug Fix**: Resolved an issue where Net Liquidation and Positions were showing as zero. This involved a multi-step debugging process:
+    -   Identified and fixed an incorrect pusher URL in the user's local setup.
+    -   Fixed a data structure mismatch in the backend () to correctly parse nested account data from the pusher.
+    -   Fixed frontend logic in  that incorrectly prioritized Alpaca data.
+-   **AI System Overhaul**:
+    -   Fixed the AI context engine () to use live IB position data, resolving an issue where the AI was blind to the user's portfolio.
+    -   Diagnosed and switched the default LLM from smaller local models (which were hallucinating) to the user's  model, resulting in highly accurate, context-aware responses.
+    -   Implemented a smart fallback system to use a local model if the cloud model fails.
+-   **Ollama Pro Credit Tracker**:
+    -   Built a backend endpoint () to track Ollama API requests locally.
+    -   Created a new UI component in the header () that displays a button with the request count and opens a modal with detailed session/weekly usage statistics.
+-   **UI Status Display Fix**:
+    -   Updated the backend health check endpoint () and the frontend UI () to correctly reflect the status of the new  proxy connection.
+-   **AI Query Preprocessing**:
+    -   Created and integrated a  service to reframe user queries with structured data, aiming to reduce model hallucinations.
 
 **Earlier issues found/mentioned but not fixed**
 -   **Issue 1: Missing API Endpoints (404s)** for , , . These remain low priority.
@@ -74,86 +95,79 @@ There are no outstanding bugs. The following are planned feature/enhancement tas
 
 **Known issue recurrence from previous fork**
 -   **Issue recurrence in previous fork**: IB Data Pusher Not Pushing Data.
--   **Recurrence count**: High (at least 3 distinct root causes were found and fixed in this session).
--   **Status**: RESOLVED. The final root cause was a timezone mismatch between the local pusher (sending local time) and the cloud server (expecting UTC). This has been fixed by forcing the pusher to send UTC timestamps.
+-   **Recurrence count**: 1 (in this session).
+-   **Status**: RESOLVED. The root cause was the user's local script pointing to an old deployment URL. The agent identified this and guided the user to fix it.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **UTC Timestamp Synchronization**: The critical fix was ensuring the local Python script sends timestamps in UTC to match the server, resolving data staleness issues.
--   **Dynamic Data Source Prioritization**: Backend services were refactored to create a data hierarchy: try to get data from the live IB pusher first, and only if it's unavailable, fall back to the Alpaca API.
--   **Resilient Data Handling**: The pusher script was modified to handle  values from the API by converting them to  before JSON serialization.
--   **Specific Exchange Routing for L2 Data**: Resolved data not supported errors from IB by requesting Level 2 data from specific exchanges (e.g., , ) instead of the generic  router.
+-   **AI Model Selection & Evaluation**: Systematically tested multiple local and cloud-based LLMs (, , , ) to find one that met the user's accuracy requirements for financial data extraction.
+-   **Full-Stack Feature Implementation**: Built the Ollama credit tracker feature end-to-end, involving backend state management and a new API endpoint in , plus frontend data fetching and a new React modal component in .
+-   **AI Anti-Hallucination**: Implemented a query preprocessor () and refined system prompts to inject structured data, forcing the LLM to use provided facts instead of generating plausible but incorrect information.
+-   **Data Source Prioritization**: Refactored multiple backend services to follow a consistent pattern: attempt to get data from the live IB pusher first, and only use the Alpaca API as a fallback.
+-   **Remote Debugging**: Successfully diagnosed issues on the user's local machine (incorrect pusher URL, offline ngrok tunnel) by analyzing logs and asking targeted questions.
 
 **key DB schema**
--   No new schemas were added. The application primarily reads from the live IB data pushed to the backend's memory/cache.
+-   No new schemas were added.
 
 **changes in tech stack**
--   None.
+-   None. The stack remains React, FastAPI, MongoDB. The primary LLM for the AI assistant was effectively changed to .
 
 **All files of reference**
--   : The local script the user runs. It is now stable and feature-complete for the current requirements.
--   : The local startup script. Contains credentials and automation logic.
--   : Handles all incoming data from the pusher and serves it to the rest of the app.
--   : Contains the logic for switching between Alpaca and IB for trade execution. The default is now IB.
--   : Was updated to include a new tab for IB account history.
--   : The React hook responsible for fetching and displaying the main account and market data on the UI.
+-   : **Currently being worked on** to fix performance and data source issues.
+-   : Contains the core logic for model selection, timeouts, and the smart fallback system.
+-   : Builds the context for the AI, now using IB data.
+-   : Contains the Ollama usage tracking logic and the status endpoint.
+-   : Contains the UI for system status and the new Ollama usage tracker.
+-   : The central React hook for fetching application-wide data.
 
 **Areas that need refactoring**:
--   The  script has grown large and complex. It could be refactored into smaller, more manageable classes (e.g., , , ).
+-   The  file is becoming very large, containing routing, service initialization, and now helper functions for status checks and usage tracking. Some of this logic could be moved to more appropriate modules.
 
 **key api endpoints**
--   : The endpoint the local  script sends all real-time data to.
--   : Provides live IB account values like Net Liquidation and Buying Power.
--   : Provides the user's current positions, prioritizing the live IB feed over manual entries.
--   : Returns the current trading broker ( for IB,  for Alpaca).
--   : Allows switching the active trading broker.
+-   : Receives all real-time data from the user's local pusher.
+-   : Provides live IB account values.
+-   : The primary endpoint for interacting with the AI.
+-   : Returns the connection status of the Ollama proxy.
+-   : **(New)** Returns JSON data with Ollama Pro request counts.
 
 **Critical Info for New Agent**
--   The user's local setup ( and ) is CRITICAL for the application to receive live data. The market being closed is not a blocker, as the pusher will send the last known data.
--   The trading bot is now configured to execute trades via the user's IB paper account by default.
--   The core data pipeline (Local IB -> Pusher Script -> Cloud Backend -> UI) is now stable. Future work should build upon this architecture.
--   The user has provided a clear, phased plan for the next set of features. You should start with Phase 2.
+-   The user's AI setup now relies on the  proxy running locally to connect to the  model. This is the default and preferred model for accuracy.
+-   The most pressing task is to complete the refactor of the  to use live IB data. This is part of the Phase 2 plan.
+-   The UI data display issues are fully resolved. Do not revisit them unless the user reports a new bug. The problem was a combination of backend parsing, frontend logic, and browser caching.
+-   The user is technically savvy and can provide logs from their local machine when asked.
 
 **documents and test reports created in this job**
 -   
--   
--   
--   
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User:** Lists a large number of new features and fixes required. (Completed)
-2.  **Agent:** Asks a clarifying question about AI model learning persistence.
-3.  **User:** Asks if AI learning is lost when switching models. (Completed)
-4.  **Agent:** Explains that learning is stored in the database (RAG vectors, trade history) and is not lost, as it's injected as context into any new model. (Completed)
-5.  **User:** Expresses relief that learning is not lost. (Completed)
-6.  **Agent:** Asks for priorities and confirmation on the implementation plan. (Completed)
-7.  **User:** Approves the plan (Phase 1 first), confirms the trading bot should use the IB account, and the journal should be combined. States the pusher is not running but can be started. (Completed)
-8.  **Agent:** Begins and completes implementation of Phase 1.
-9.  **User:** Confirms they have restarted the pusher and , and that the changes look good so far. Asks the agent to continue and will keep the app/pusher running. (Completed)
-10. **Agent:** Acknowledges the user's confirmation and prepares to start Phase 2. (Completed)
+1.  **User**: Asks to add an intelligent query preprocessor and an Ollama credit tracker UI. Asks if Tavily is still in use. (In Progress)
+2.  **Agent**: Acknowledges and starts work on the features. (Completed)
+3.  **User**: Decides to stick with the  model and asks to move on to fixing the scanner performance. (Completed)
+4.  **Agent**: Acknowledges and begins investigating the scanner service. (Last Action)
+
+The next step is to continue the work on .
 
 **Project Health Check:**
--   **Working**: The entire data pipeline from local IB Gateway to the cloud UI, including Level 2 data, account values, and VIX. Trading bot execution is correctly routed to IB.
+-   **Working**: Core UI, IB data pipeline, AI chat with the accurate cloud model, Ollama credit tracking UI.
+-   **Broken**: The  is not using the correct live data source, which is the current P0 task.
 
 **3rd Party Integrations**
--   **Interactive Brokers (IB Gateway)**: **Working**. Fully integrated for real-time quotes, positions, account data, and Level 2 order books via the local  script.
--   **Ollama**: Working. Connected via a stable local HTTP proxy.
--   **Alpaca**: Working. Now configured as a secondary data source (fallback) when the IB connection is offline.
--   **Finnhub**: Working. Used for supplementary data like earnings calendars.
--   **OpenAI GPT-4o**: Working. Fallback for the AI assistant.
--   **Tavily**: Working. For AI web searches.
--   **ChromaDB / SentenceTransformers**: Working. For the RAG system.
+-   **Interactive Brokers (IB Gateway)**: **Working**. Integrated for real-time quotes, positions, and account data via the local  script.
+-   **Ollama**: **Working**. Now connects via a local  proxy. The default model has been switched to  for accuracy, with  as a local fallback. A new UI tracks cloud usage.
+-   **Alpaca**: **Working**. Now configured as a secondary data source (fallback) for all key services.
+-   **Tavily**: **Working**. Still used for web searches by the AI.
 
 **Testing status**
--   **Testing agent used after significant changes**: YES. A comprehensive test suite was run and passed after the major refactoring.
+-   **Testing agent used after significant changes**: NO. Agent has been self-testing via  and .
 -   **Troubleshoot agent used after agent stuck in loop**: NO
 -   **Test files created**: None.
 -   **Known regressions**: None.
 
 **Credentials to test flow:**
-The user's paper trading credentials ( / ) are present in the  script. This is a security risk, but was done at the user's explicit request after they shared the password.
+-   User's IB paper trading credentials are in .
+-   No other credentials are required for the current tasks.
 
 **What agent forgot to execute**
--   The agent has completed all explicitly requested tasks from the user's plan up to the end of Phase 1. The next step is to begin Phase 2, which has not been forgotten.</analysis>
+-   The agent has been following the user's priorities closely and has not forgotten any requested tasks. The current work on the scanner is the logical next step from the user's last message.</analysis>
