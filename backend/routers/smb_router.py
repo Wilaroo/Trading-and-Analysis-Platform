@@ -232,10 +232,12 @@ async def get_setups_summary():
             for cat in SetupCategory
         },
         "by_style": {
-            "move_2_move": len([n for n, c in SETUP_REGISTRY.items() 
-                              if c.default_style == TradeStyle.MOVE_2_MOVE]),
-            "trade_2_hold": len([n for n, c in SETUP_REGISTRY.items() 
-                               if c.default_style == TradeStyle.TRADE_2_HOLD]),
+            "scalp": len([n for n, c in SETUP_REGISTRY.items() 
+                              if c.default_style == TradeStyle.SCALP]),
+            "intraday": len([n for n, c in SETUP_REGISTRY.items() 
+                               if c.default_style == TradeStyle.INTRADAY]),
+            "multi_day": len([n for n, c in SETUP_REGISTRY.items() 
+                               if c.default_style == TradeStyle.MULTI_DAY]),
         },
         "aliases_count": len(SMB_SETUP_ALIASES)
     }
@@ -279,6 +281,10 @@ async def get_trade_styles():
         style.value: {
             **targets,
             "description": {
+                "scalp": "Scalp - capture immediate next move, exit quickly. Target 1R.",
+                "intraday": "Intraday swing - hold for Reason2Sell trigger. Target 3-5R.",
+                "multi_day": "Max conviction when all 5 variables align. Target 10R+.",
+                # Backwards compatibility
                 "move_2_move": "Scalp - capture immediate next move, exit quickly. Target 1R.",
                 "trade_2_hold": "Intraday swing - hold for Reason2Sell trigger. Target 3-5R.",
                 "a_plus": "Max conviction when all 5 variables align. Target 10R+."
@@ -384,7 +390,7 @@ class Reason2SellRequest(BaseModel):
     peak_price: Optional[float] = None
     ema_9: Optional[float] = None
     vwap: Optional[float] = None
-    trade_style: str = "trade_2_hold"
+    trade_style: str = "intraday"
 
 
 @router.post("/reasons-to-sell/check")
@@ -451,6 +457,10 @@ async def list_reasons_to_sell():
             {"code": "time_stop", "name": "Time Stop", "description": "Trade not working within expected time window"}
         ],
         "by_trade_style": {
+            "scalp": ["price_target", "tape_exhaustion", "time_stop"],
+            "intraday": ["price_target", "trend_violation", "thesis_invalid", "give_back_rule"],
+            "multi_day": ["trend_violation", "thesis_invalid", "market_resistance"],
+            # Backwards compatibility
             "move_2_move": ["price_target", "tape_exhaustion", "time_stop"],
             "trade_2_hold": ["price_target", "trend_violation", "thesis_invalid", "give_back_rule"],
             "a_plus": ["trend_violation", "thesis_invalid", "market_resistance"]
@@ -464,7 +474,7 @@ class TieredEntryRequest(BaseModel):
     risk_per_trade: float  # e.g., $200
     entry_price: float
     stop_price: float
-    trade_style: str = "trade_2_hold"
+    trade_style: str = "intraday"
     smb_grade: str = "B"
 
 

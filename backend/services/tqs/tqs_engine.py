@@ -148,35 +148,64 @@ class TQSEngine:
     
     # Timeframe-specific weights
     STYLE_WEIGHTS = {
-        "move_2_move": {  # Scalp - prioritize technicals, de-prioritize fundamentals
+        "scalp": {  # Quick in-and-out - prioritize technicals, de-prioritize fundamentals
             "setup": 0.30,
             "technical": 0.35,
             "fundamental": 0.05,
             "context": 0.20,
             "execution": 0.10
         },
-        "trade_2_hold": {  # Intraday swing - balanced
+        "intraday": {  # Intraday swing - balanced
             "setup": 0.25,
             "technical": 0.25,
             "fundamental": 0.15,
             "context": 0.20,
             "execution": 0.15
         },
-        "a_plus": {  # Investment/multi-day - prioritize fundamentals
+        "multi_day": {  # Multi-day hold - prioritize fundamentals
             "setup": 0.20,
             "technical": 0.15,
             "fundamental": 0.30,
             "context": 0.20,
             "execution": 0.15
         },
-        "swing": {  # Multi-day swing (alias)
+        "swing": {  # Multi-day swing (2-10 days)
             "setup": 0.20,
             "technical": 0.20,
             "fundamental": 0.25,
             "context": 0.20,
             "execution": 0.15
         },
-        "investment": {  # Long-term (alias)
+        "position": {  # Long-term position (weeks to months)
+            "setup": 0.15,
+            "technical": 0.10,
+            "fundamental": 0.40,
+            "context": 0.20,
+            "execution": 0.15
+        },
+        # Backwards compatibility aliases (deprecated)
+        "move_2_move": {  # DEPRECATED: Use "scalp"
+            "setup": 0.30,
+            "technical": 0.35,
+            "fundamental": 0.05,
+            "context": 0.20,
+            "execution": 0.10
+        },
+        "trade_2_hold": {  # DEPRECATED: Use "intraday"
+            "setup": 0.25,
+            "technical": 0.25,
+            "fundamental": 0.15,
+            "context": 0.20,
+            "execution": 0.15
+        },
+        "a_plus": {  # DEPRECATED: Use "multi_day"
+            "setup": 0.20,
+            "technical": 0.15,
+            "fundamental": 0.30,
+            "context": 0.20,
+            "execution": 0.15
+        },
+        "investment": {  # DEPRECATED: Use "position"
             "setup": 0.15,
             "technical": 0.10,
             "fundamental": 0.40,
@@ -252,7 +281,7 @@ class TQSEngine:
         symbol: str,
         setup_type: str,
         direction: str = "long",
-        trade_style: str = None,  # NEW: move_2_move, trade_2_hold, a_plus, swing, investment
+        trade_style: str = None,  # scalp, intraday, multi_day, swing, position
         # Optional pre-fetched data for performance
         tape_score: float = 0.0,
         tape_confirmation: bool = False,
@@ -272,9 +301,11 @@ class TQSEngine:
         
         TIMEFRAME-AWARE SCORING:
         - trade_style determines pillar weights:
-          * move_2_move (scalp): Technical 35%, Setup 30%, Context 20%, Execution 10%, Fundamental 5%
-          * trade_2_hold (swing): Setup 25%, Technical 25%, Context 20%, Fundamental 15%, Execution 15%
-          * a_plus/investment: Fundamental 30-40%, Setup 15-20%, Context 20%, Technical 10-15%
+          * scalp: Technical 35%, Setup 30%, Context 20%, Execution 10%, Fundamental 5%
+          * intraday: Setup 25%, Technical 25%, Context 20%, Fundamental 15%, Execution 15%
+          * multi_day: Fundamental 30%, Setup 20%, Context 20%, Technical 15%, Execution 15%
+          * swing: Fundamental 25%, Setup 20%, Technical 20%, Context 20%, Execution 15%
+          * position: Fundamental 40%, Setup 15%, Context 20%, Technical 10%, Execution 15%
         
         Returns a TQSResult with:
         - Overall score (0-100) and grade (A/B/C/D/F)
@@ -362,10 +393,15 @@ class TQSEngine:
             
             # Map trade style to human-readable timeframe
             timeframe_map = {
+                "scalp": "Scalp (minutes to 1 hour)",
+                "intraday": "Intraday Swing (1-6 hours)",
+                "multi_day": "Multi-day (1-5 days)",
+                "swing": "Swing Trade (2-10 days)",
+                "position": "Position (weeks to months)",
+                # Backwards compatibility
                 "move_2_move": "Scalp (minutes to 1 hour)",
                 "trade_2_hold": "Intraday Swing (1-6 hours)",
                 "a_plus": "Multi-day (1-5 days)",
-                "swing": "Swing Trade (2-10 days)",
                 "investment": "Position (weeks to months)"
             }
             result.trade_timeframe = timeframe_map.get(trade_style, "Intraday")
@@ -515,7 +551,7 @@ class TQSEngine:
         """
         Infer trade style from setup type using SMB setup configuration.
         
-        Returns: move_2_move, trade_2_hold, a_plus, swing, or investment
+        Returns: scalp, intraday, multi_day, swing, or position
         """
         try:
             from services.smb_integration import get_setup_config, TradeStyle
@@ -524,25 +560,29 @@ class TQSEngine:
             if config:
                 # Map TradeStyle enum to string
                 style_map = {
-                    TradeStyle.MOVE_2_MOVE: "move_2_move",
-                    TradeStyle.TRADE_2_HOLD: "trade_2_hold",
-                    TradeStyle.A_PLUS: "a_plus"
+                    TradeStyle.SCALP: "scalp",
+                    TradeStyle.INTRADAY: "intraday",
+                    TradeStyle.MULTI_DAY: "multi_day",
+                    # Backwards compatibility
+                    TradeStyle.MOVE_2_MOVE: "scalp",
+                    TradeStyle.TRADE_2_HOLD: "intraday",
+                    TradeStyle.A_PLUS: "multi_day"
                 }
-                return style_map.get(config.default_style, "trade_2_hold")
+                return style_map.get(config.default_style, "intraday")
         except Exception as e:
             logger.warning(f"Could not infer trade style for {setup_type}: {e}")
         
         # Fallback: infer from setup name
         setup_lower = setup_type.lower()
         if any(kw in setup_lower for kw in ["scalp", "m2m", "quick", "9_ema"]):
-            return "move_2_move"
-        elif any(kw in setup_lower for kw in ["swing", "investment", "position"]):
+            return "scalp"
+        elif any(kw in setup_lower for kw in ["swing", "position"]):
             return "swing"
-        elif any(kw in setup_lower for kw in ["a_plus", "conviction", "hold"]):
-            return "a_plus"
+        elif any(kw in setup_lower for kw in ["multi_day", "conviction", "hold"]):
+            return "multi_day"
         
-        # Default to balanced swing trade
-        return "trade_2_hold"
+        # Default to balanced intraday trade
+        return "intraday"
     
     def _get_weights_for_style(self, trade_style: str) -> Dict[str, float]:
         """
@@ -566,19 +606,19 @@ class TQSEngine:
         weights = self._get_weights_for_style(trade_style)
         
         explanations = {
-            "move_2_move": {
+            "scalp": {
                 "timeframe": "Scalp (minutes to 1 hour)",
                 "description": "Quick in-and-out trade capturing the next immediate move",
                 "rationale": "Technical timing and setup quality matter most. Fundamentals rarely move the needle on a 15-minute scalp.",
                 "key_factors": ["RVOL", "Tape reading", "Level 2", "Short-term technicals", "Setup pattern"]
             },
-            "trade_2_hold": {
+            "intraday": {
                 "timeframe": "Intraday Swing (1-6 hours)",
                 "description": "Hold until a clear Reason2Sell trigger",
                 "rationale": "Balanced approach - technicals for entry, fundamentals for thesis, context for environment.",
                 "key_factors": ["Technical levels", "Catalyst strength", "Market regime", "Sector alignment"]
             },
-            "a_plus": {
+            "multi_day": {
                 "timeframe": "Multi-day (1-5 days)",
                 "description": "Max conviction trade with all 5 variables aligned",
                 "rationale": "Fundamental story and higher timeframe technicals drive multi-day moves.",
@@ -590,11 +630,36 @@ class TQSEngine:
                 "rationale": "Fundamentals and macro context become increasingly important over days.",
                 "key_factors": ["Earnings/catalyst", "Sector momentum", "Weekly chart levels", "Float/SI"]
             },
-            "investment": {
+            "position": {
                 "timeframe": "Position/Investment (weeks to months)",
                 "description": "Long-term position based on fundamental value",
                 "rationale": "Fundamentals dominate. Technical entry matters less than thesis quality.",
                 "key_factors": ["Valuation", "Growth metrics", "Institutional ownership", "Industry trends"]
+            },
+            # Backwards compatibility aliases
+            "move_2_move": {
+                "timeframe": "Scalp (minutes to 1 hour)",
+                "description": "Quick in-and-out trade capturing the next immediate move",
+                "rationale": "Technical timing and setup quality matter most.",
+                "key_factors": ["RVOL", "Tape reading", "Level 2", "Short-term technicals"]
+            },
+            "trade_2_hold": {
+                "timeframe": "Intraday Swing (1-6 hours)",
+                "description": "Hold until a clear Reason2Sell trigger",
+                "rationale": "Balanced approach - technicals for entry, fundamentals for thesis.",
+                "key_factors": ["Technical levels", "Catalyst strength", "Market regime"]
+            },
+            "a_plus": {
+                "timeframe": "Multi-day (1-5 days)",
+                "description": "Max conviction trade with all 5 variables aligned",
+                "rationale": "Fundamental story and higher timeframe technicals drive multi-day moves.",
+                "key_factors": ["Fundamental catalyst", "Institutional interest", "Higher TF trend"]
+            },
+            "investment": {
+                "timeframe": "Position/Investment (weeks to months)",
+                "description": "Long-term position based on fundamental value",
+                "rationale": "Fundamentals dominate. Technical entry matters less than thesis quality.",
+                "key_factors": ["Valuation", "Growth metrics", "Institutional ownership"]
             }
         }
         
