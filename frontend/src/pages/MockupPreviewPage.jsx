@@ -1,20 +1,29 @@
 import React, { useState } from 'react';
 import { OptionABHybridMockup, OptionDTradingDashboardMockup } from '../mockups/TradingMockups';
+import LearningIntelligenceMockups from '../components/mockups/LearningIntelligenceMockups';
 
 const MockupPreviewPage = () => {
-  const [activeView, setActiveView] = useState('hybrid');
+  const [activeView, setActiveView] = useState('learning');
   
   return (
     <div className="min-h-screen bg-zinc-950">
       {/* Selector */}
       <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-zinc-900 border border-zinc-700 rounded-lg p-1 flex gap-1">
         <button
+          onClick={() => setActiveView('learning')}
+          className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
+            activeView === 'learning' ? 'bg-purple-500 text-white' : 'text-zinc-400 hover:text-white'
+          }`}
+        >
+          Learning Intelligence
+        </button>
+        <button
           onClick={() => setActiveView('hybrid')}
           className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
             activeView === 'hybrid' ? 'bg-cyan-500 text-white' : 'text-zinc-400 hover:text-white'
           }`}
         >
-          Option A+B: Hybrid
+          Trading Hybrid
         </button>
         <button
           onClick={() => setActiveView('dashboard')}
@@ -22,17 +31,19 @@ const MockupPreviewPage = () => {
             activeView === 'dashboard' ? 'bg-cyan-500 text-white' : 'text-zinc-400 hover:text-white'
           }`}
         >
-          Option D: Trading Dashboard
+          Trading Dashboard
         </button>
       </div>
       
       {/* Mockup Content */}
       <div className="pt-16">
+        {activeView === 'learning' && <LearningIntelligenceMockups />}
         {activeView === 'hybrid' && <OptionABHybridMockup />}
         {activeView === 'dashboard' && <OptionDTradingDashboardMockup />}
       </div>
       
       {/* Description */}
+      {activeView !== 'learning' && (
       <div className="fixed bottom-4 left-4 right-4 bg-zinc-900/95 border border-zinc-700 rounded-lg p-4 max-w-2xl mx-auto">
         {activeView === 'hybrid' && (
           <div>
@@ -57,6 +68,7 @@ const MockupPreviewPage = () => {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 };
