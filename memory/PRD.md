@@ -65,6 +65,40 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 - `smart_context_engine.py` - Still used by assistant for response validation
 
 
+### Phase 3.9 Complete: Learning Intelligence Hub (March 11, 2026)
+**Feature:** Unified dashboard for all learning insights (Option B+C hybrid)
+
+**Components Built:**
+1. **Learning Intelligence Hub** (`/app/frontend/src/components/LearningIntelligenceHub.jsx`)
+   - Trader Profile header (best time, setup, regime, avg hold)
+   - Performance Metrics card (win rate, profit factor, expectancy)
+   - Edge Health Monitor (strategy status with decay alerts)
+   - AI Recommendations panel
+   - This Week calendar view
+   - Collapsible Backtest Results and Shadow Mode sections
+
+2. **Learning Insights Widget** (`/app/frontend/src/components/LearningInsightsWidget.jsx`)
+   - Compact widget for AI Coach tab
+   - Shows: Win Rate, Today P&L, Avg R, Edge Score
+   - Quick alert row for edge warnings/successes
+   - Click to navigate to full Intelligence Hub
+
+**Integration:**
+- Analytics Tab restructured: "Intelligence Hub" | "Backtest" | "Shadow Mode"
+- AI Coach Tab now shows Learning Insights Widget at top
+- All data comes from existing backend services (no new endpoints needed)
+
+**Data Sources (All Pre-existing):**
+- `/api/learning/strategy-stats` - Performance metrics
+- `/api/learning/loop/profile` - Trader profile
+- `/api/learning/recommendations` - AI recommendations
+- `/api/medium-learning/edge-decay/alerts` - Edge health
+- `/api/medium-learning/calibration/current` - Calibration status
+
+**Next Priority:** Backtesting system enhancement (user-requested)
+
+
+
 
 
 ### Phase 3.6 Complete: Trade Style Renaming for Clarity (March 11, 2026)

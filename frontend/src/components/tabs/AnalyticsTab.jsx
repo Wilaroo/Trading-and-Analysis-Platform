@@ -1,15 +1,26 @@
 import React, { useState } from 'react';
-import LearningDashboard from '../LearningDashboard';
+import LearningIntelligenceHub from '../LearningIntelligenceHub';
 import BacktestPanel from '../BacktestPanel';
 import ShadowModePanel from '../ShadowModePanel';
 import { Card } from '../shared/UIComponents';
-import { BarChart3, TestTubes, Layers, GraduationCap } from 'lucide-react';
+import { Brain, TestTubes, Layers } from 'lucide-react';
 
+/**
+ * Analytics Tab - Learning Intelligence Hub
+ * 
+ * Restructured to show:
+ * - Intelligence Hub (default): Unified view of all learning insights
+ * - Backtest: Deep-dive into strategy backtesting
+ * - Shadow Mode: Paper trading filter validation
+ * 
+ * The Intelligence Hub consolidates what was previously scattered across
+ * multiple tabs, providing a single source of truth for trader performance.
+ */
 const AnalyticsTab = () => {
-  const [activeSubTab, setActiveSubTab] = useState('learning');
+  const [activeSubTab, setActiveSubTab] = useState('hub');
   
   const subTabs = [
-    { id: 'learning', label: 'Learning', icon: GraduationCap, description: 'Performance analytics' },
+    { id: 'hub', label: 'Intelligence Hub', icon: Brain, description: 'Unified learning insights' },
     { id: 'backtest', label: 'Backtest', icon: TestTubes, description: 'Strategy backtesting' },
     { id: 'shadow', label: 'Shadow Mode', icon: Layers, description: 'Paper trading filters' }
   ];
@@ -40,10 +51,8 @@ const AnalyticsTab = () => {
       </div>
       
       {/* Sub-Tab Content */}
-      {activeSubTab === 'learning' && (
-        <Card>
-          <LearningDashboard />
-        </Card>
+      {activeSubTab === 'hub' && (
+        <LearningIntelligenceHub />
       )}
       
       {activeSubTab === 'backtest' && (
