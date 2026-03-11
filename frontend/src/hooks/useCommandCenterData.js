@@ -155,7 +155,7 @@ export function useCommandCenterData({
       console.log('IB pushed data fetch failed:', ibErr.message);
     }
     
-    // Fall back to trading-bot positions (Alpaca) if IB not connected
+    // Fall back to Alpaca positions if IB not connected
     if (!positionsFetched) {
       try {
         const botPositionsRes = await api.get('/api/trading-bot/positions');
@@ -513,8 +513,7 @@ export function useCommandCenterData({
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch positions immediately on mount - doesn't depend on IB connection
-  // Alpaca positions are always available
+  // Fetch positions immediately on mount - IB is primary, Alpaca is fallback
   useEffect(() => {
     fetchAccountData();
     // Refresh positions every 30 seconds

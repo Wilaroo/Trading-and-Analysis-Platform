@@ -1,7 +1,16 @@
 """
 Trade Executor Service
-Handles order execution via Alpaca (paper trading) and Interactive Brokers (live trading).
+Handles order execution via Interactive Brokers (primary) and Alpaca (fallback).
 Manages order placement, monitoring, and cancellation.
+
+Architecture:
+- IB Gateway: Primary broker (user's local paper account DUN615665)
+- Alpaca: Fallback broker (paper trading)
+- Simulated: Development/testing mode
+
+Note: Since IB Gateway runs locally and the cloud can't directly connect,
+orders are currently simulated in the cloud. The trading bot uses live IB data
+for decisions but actual order execution requires the local IB connection.
 """
 import os
 import asyncio
@@ -74,16 +83,32 @@ class TradeExecutorService:
         logger.info("Alpaca trading client initialized (paper mode)")
     
     def _init_ib(self):
-        """Initialize Interactive Brokers client via IB Service"""
+        """
+        Initialize Interactive Brokers client.
+        
+        Note: IB Gateway runs locally on user's machine. The cloud backend
+        receives data via the pusher but cannot directly place orders.
+        We check if the pusher is connected and use simulated mode if needed.
+        """
         try:
-            from services.ib_service import get_ib_service
-            self._ib_client = get_ib_service()
-            logger.info("IB trading client initialized via IB Service")
+            # Check if IB pusher is connected (provides live data)
+            import routers.ib as ib_module
+            if ib_module.is_pusher_connected():
+                logger.info("IB pusher connected - using IB data for trade decisions")
+                # Note: Can't place orders through pusher yet, but can use data
+                # For now, orders go to simulated mode but decisions use real IB data
+                self._mode = ExecutorMode.SIMULATED
+                logger.info("Orders in SIMULATED mode (IB order routing not yet implemented)")
+            else:
+                # Try direct IB connection (only works if running locally)
+                from services.ib_service import get_ib_service
+                self._ib_client = get_ib_service()
+                logger.info("IB trading client initialized via IB Service")
         except Exception as e:
-            logger.warning(f"IB live trading initialization failed: {e}")
+            logger.warning(f"IB initialization: {e}")
             # Fall back to simulated mode
             self._mode = ExecutorMode.SIMULATED
-            logger.info("Falling back to SIMULATED mode")
+            logger.info("Using SIMULATED mode for orders")
     
     def set_mode(self, mode: ExecutorMode):
         """Set execution mode"""
