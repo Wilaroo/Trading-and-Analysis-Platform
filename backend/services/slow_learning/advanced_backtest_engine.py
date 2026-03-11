@@ -839,6 +839,266 @@ class AdvancedBacktestEngine:
         return result
 
     # ========================================================================
+    # Market-Wide Backtest (Full US Market Scanning)
+    # ========================================================================
+    
+    async def run_market_wide_backtest(
+        self,
+        strategy: StrategyConfig,
+        filters: BacktestFilters = None,
+        symbols: List[str] = None,
+        trade_style: str = "swing",
+        starting_capital: float = 100000.0,
+        max_symbols: int = 500,
+        job_id: str = None
+    ) -> Dict[str, Any]:
+        """
+        Run a strategy against the entire US market to find all historical trades.
+        
+        This answers: "Where would this strategy have triggered across all US stocks
+        in the given time period, and what would the results have been?"
+        
+        Args:
+            strategy: Strategy configuration to test
+            filters: Date and market filters
+            symbols: Optional list of symbols (if None, fetches full market)
+            trade_style: 'intraday', 'swing', or 'investment' for pre-filtering
+            starting_capital: Capital per trade calculation
+            max_symbols: Maximum symbols to scan (for rate limit protection)
+            job_id: Optional job ID for progress tracking
+            
+        Returns:
+            Dict with all trades found, grouped by symbol, with summary stats
+        """
+        start_time = datetime.now(timezone.utc)
+        result_id = f"mw_{uuid.uuid4().hex[:12]}"
+        
+        if filters is None:
+            filters = BacktestFilters()
+            # Default to last 30 days if not specified
+            if not filters.end_date:
+                filters.end_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if not filters.start_date:
+                start = datetime.now(timezone.utc) - timedelta(days=30)
+                filters.start_date = start.strftime("%Y-%m-%d")
+        
+        # Get symbol universe if not provided
+        if symbols is None:
+            symbols = await self._get_market_symbols(trade_style, max_symbols)
+        
+        logger.info(f"Market-wide backtest starting: {strategy.name} on {len(symbols)} symbols")
+        
+        # Track progress
+        total_symbols = len(symbols)
+        processed = 0
+        
+        # Results containers
+        all_trades: List[Dict] = []
+        trades_by_symbol: Dict[str, List[Dict]] = {}
+        symbols_with_trades: List[str] = []
+        symbols_no_trades: List[str] = []
+        errors: List[str] = []
+        
+        # Volume/price filters based on trade style
+        min_price = 5.0
+        max_price = 500.0
+        min_volume = 100000
+        
+        if trade_style == "intraday":
+            min_volume = 500000
+            min_price = 10.0
+            max_price = 200.0
+        elif trade_style == "investment":
+            min_volume = 50000
+            max_price = 1000.0
+        
+        # Timeframe for data
+        timeframe = "1day"
+        if trade_style == "intraday":
+            timeframe = "5min"
+        
+        # Process symbols in batches
+        batch_size = 25
+        for i in range(0, len(symbols), batch_size):
+            batch = symbols[i:i + batch_size]
+            
+            for symbol in batch:
+                try:
+                    # Fetch historical data
+                    bars = await self._get_cached_bars(
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        start_date=filters.start_date,
+                        end_date=filters.end_date
+                    )
+                    
+                    if not bars or len(bars) < 10:
+                        continue
+                    
+                    # Apply price/volume filters
+                    last_price = bars[-1].get("close", 0)
+                    avg_volume = sum(b.get("volume", 0) for b in bars[-20:]) / min(20, len(bars))
+                    
+                    if last_price < min_price or last_price > max_price:
+                        continue
+                    if avg_volume < min_volume:
+                        continue
+                    
+                    # Run strategy simulation on this symbol
+                    trades, equity_curve = await self._simulate_strategy(
+                        bars=bars,
+                        strategy=strategy,
+                        starting_capital=starting_capital,
+                        symbol=symbol
+                    )
+                    
+                    if trades:
+                        # Convert trades to dicts
+                        trade_dicts = [t.to_dict() if hasattr(t, 'to_dict') else t for t in trades]
+                        
+                        all_trades.extend(trade_dicts)
+                        trades_by_symbol[symbol] = trade_dicts
+                        symbols_with_trades.append(symbol)
+                    else:
+                        symbols_no_trades.append(symbol)
+                        
+                except Exception as e:
+                    errors.append(f"{symbol}: {str(e)}")
+                    logger.debug(f"Error processing {symbol}: {e}")
+                
+                processed += 1
+            
+            # Update job progress
+            if job_id and job_id in self._running_jobs:
+                job = self._running_jobs[job_id]
+                job.progress = int((processed / total_symbols) * 100)
+            
+            # Small delay between batches
+            await asyncio.sleep(0.5)
+        
+        # Calculate summary statistics
+        total_trades = len(all_trades)
+        winning_trades = [t for t in all_trades if t.get("pnl", 0) > 0]
+        losing_trades = [t for t in all_trades if t.get("pnl", 0) < 0]
+        
+        total_pnl = sum(t.get("pnl", 0) for t in all_trades)
+        gross_profit = sum(t.get("pnl", 0) for t in winning_trades)
+        gross_loss = abs(sum(t.get("pnl", 0) for t in losing_trades))
+        
+        win_rate = (len(winning_trades) / total_trades * 100) if total_trades > 0 else 0
+        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else 0
+        avg_win = (gross_profit / len(winning_trades)) if winning_trades else 0
+        avg_loss = (gross_loss / len(losing_trades)) if losing_trades else 0
+        
+        # Top performers
+        top_trades = sorted(all_trades, key=lambda x: x.get("pnl", 0), reverse=True)[:20]
+        worst_trades = sorted(all_trades, key=lambda x: x.get("pnl", 0))[:10]
+        
+        # Symbols with most trades
+        symbols_by_trade_count = sorted(
+            [(s, len(trades_by_symbol.get(s, []))) for s in symbols_with_trades],
+            key=lambda x: x[1],
+            reverse=True
+        )[:20]
+        
+        # Build result
+        result = {
+            "id": result_id,
+            "type": "market_wide_backtest",
+            "strategy_name": strategy.name,
+            "strategy_config": strategy.to_dict() if hasattr(strategy, 'to_dict') else asdict(strategy),
+            "trade_style": trade_style,
+            "filters": filters.to_dict() if hasattr(filters, 'to_dict') else asdict(filters),
+            "created_at": start_time.isoformat(),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "duration_seconds": (datetime.now(timezone.utc) - start_time).total_seconds(),
+            
+            # Scan stats
+            "total_symbols_scanned": total_symbols,
+            "symbols_with_signals": len(symbols_with_trades),
+            "symbols_no_signals": len(symbols_no_trades),
+            "errors_count": len(errors),
+            
+            # Performance metrics
+            "summary": {
+                "total_trades": total_trades,
+                "winning_trades": len(winning_trades),
+                "losing_trades": len(losing_trades),
+                "win_rate": round(win_rate, 2),
+                "total_pnl": round(total_pnl, 2),
+                "gross_profit": round(gross_profit, 2),
+                "gross_loss": round(gross_loss, 2),
+                "profit_factor": round(profit_factor, 2),
+                "avg_win": round(avg_win, 2),
+                "avg_loss": round(avg_loss, 2),
+                "expectancy": round((win_rate/100 * avg_win) - ((100-win_rate)/100 * avg_loss), 2)
+            },
+            
+            # Top performers
+            "top_trades": top_trades,
+            "worst_trades": worst_trades,
+            "most_active_symbols": symbols_by_trade_count,
+            
+            # All trades (can be filtered client-side)
+            "all_trades": all_trades,
+            "trades_by_symbol": trades_by_symbol,
+            
+            # Lists
+            "symbols_traded": symbols_with_trades,
+        }
+        
+        # Store result
+        if self._backtest_results_col is not None:
+            # Store without full trade list to save space (trades stored separately)
+            store_result = {k: v for k, v in result.items() if k not in ['all_trades', 'trades_by_symbol']}
+            store_result["trade_count"] = total_trades
+            self._backtest_results_col.insert_one(store_result)
+        
+        logger.info(f"Market-wide backtest complete: {total_trades} trades on {len(symbols_with_trades)} symbols")
+        
+        return result
+    
+    async def _get_market_symbols(self, trade_style: str, max_symbols: int) -> List[str]:
+        """Get list of symbols to scan based on trade style"""
+        
+        # Try to get from market scanner service
+        if hasattr(self, '_market_scanner_service') and self._market_scanner_service:
+            try:
+                symbols_data = await self._market_scanner_service.get_symbol_universe()
+                symbols = [s.get("symbol") for s in symbols_data[:max_symbols]]
+                if symbols:
+                    return symbols
+            except Exception as e:
+                logger.warning(f"Could not get symbols from scanner service: {e}")
+        
+        # Fall back to default liquid symbols
+        default_symbols = [
+            # Large cap tech
+            "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "AVGO", "ORCL", "ADBE",
+            # Financials
+            "JPM", "V", "MA", "BAC", "WFC", "GS", "MS", "C", "AXP", "BLK",
+            # Healthcare
+            "UNH", "JNJ", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT", "DHR", "BMY",
+            # Consumer
+            "WMT", "PG", "KO", "PEP", "COST", "HD", "MCD", "NKE", "SBUX", "TGT",
+            # Industrials
+            "CAT", "BA", "GE", "HON", "UPS", "RTX", "LMT", "DE", "MMM", "UNP",
+            # Energy
+            "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "HAL",
+            # ETFs
+            "SPY", "QQQ", "IWM", "DIA", "XLF", "XLE", "XLK", "XLV", "XLI", "XLP",
+            # High beta / momentum
+            "AMD", "CRM", "NOW", "SNOW", "CRWD", "DDOG", "NET", "ZS", "PANW", "FTNT",
+            "SQ", "PYPL", "COIN", "MARA", "RIOT", "SHOP", "ABNB", "DASH", "UBER", "LYFT",
+            # Biotech
+            "MRNA", "REGN", "VRTX", "GILD", "BIIB", "ILMN", "SGEN", "ALNY", "BMRN", "INCY",
+            # Semiconductors
+            "INTC", "QCOM", "TXN", "MU", "AMAT", "LRCX", "ADI", "MRVL", "ON", "NXPI",
+        ]
+        
+        return default_symbols[:max_symbols]
+
+    # ========================================================================
     # Data Caching and Management
     # ========================================================================
     

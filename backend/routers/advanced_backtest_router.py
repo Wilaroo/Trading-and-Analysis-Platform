@@ -97,6 +97,18 @@ class QuickBacktestRequest(BaseModel):
     starting_capital: float = Field(100000.0, description="Starting capital")
 
 
+class MarketWideBacktestRequest(BaseModel):
+    """Request for market-wide backtest (scan entire US market with a strategy)"""
+    strategy: StrategyConfigModel = Field(..., description="Strategy to test across the market")
+    trade_style: str = Field("swing", description="Trade style: intraday, swing, investment")
+    start_date: Optional[str] = Field(None, description="Start date (default: 30 days ago)")
+    end_date: Optional[str] = Field(None, description="End date (default: today)")
+    starting_capital: float = Field(100000.0, description="Starting capital for trade sizing")
+    max_symbols: int = Field(200, description="Max symbols to scan (for rate limit protection)")
+    symbols: Optional[List[str]] = Field(None, description="Specific symbols (None = scan market)")
+    run_in_background: bool = Field(True, description="Run as background job")
+
+
 # ============================================================================
 # Multi-Strategy Endpoints
 # ============================================================================
@@ -415,6 +427,132 @@ async def _run_monte_carlo_job(job_id, backtest_id, mc_config, starting_capital)
         _advanced_engine._running_jobs[job_id].status = "completed"
         _advanced_engine._running_jobs[job_id].result_id = result.id
         _advanced_engine._running_jobs[job_id].result = result.to_dict()
+        _advanced_engine._running_jobs[job_id].completed_at = datetime.utcnow().isoformat()
+        
+    except Exception as e:
+        _advanced_engine._running_jobs[job_id].status = "failed"
+        _advanced_engine._running_jobs[job_id].error = str(e)
+
+
+# ============================================================================
+# Market-Wide Backtest (Full US Market Scanning)
+# ============================================================================
+
+@router.post("/market-wide")
+async def run_market_wide_backtest(
+    request: MarketWideBacktestRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Run a strategy against the entire US market to find all historical trades.
+    
+    This answers: "Where would this strategy have triggered across all US stocks
+    in the given time period, and what would the results have been?"
+    
+    Example use case:
+    - "Show me every stock where Rubberband Long Scalp would have triggered in the last 30 days"
+    - "What trades would Momentum Swing have taken across the whole market last month?"
+    
+    Returns:
+    - All trades found with entry/exit prices and P&L
+    - Summary statistics (win rate, profit factor, etc.)
+    - Top performing trades
+    - Most active symbols
+    - Trades grouped by symbol
+    """
+    if not _advanced_engine:
+        raise HTTPException(503, "Advanced backtest engine not initialized")
+    
+    from services.slow_learning.advanced_backtest_engine import (
+        StrategyConfig, BacktestFilters
+    )
+    
+    strategy = StrategyConfig(
+        name=request.strategy.name,
+        setup_type=request.strategy.setup_type,
+        min_tqs_score=request.strategy.min_tqs_score,
+        stop_pct=request.strategy.stop_pct,
+        target_pct=request.strategy.target_pct,
+        use_trailing_stop=request.strategy.use_trailing_stop,
+        trailing_stop_pct=request.strategy.trailing_stop_pct,
+        max_bars_to_hold=request.strategy.max_bars_to_hold,
+        position_size_pct=request.strategy.position_size_pct
+    )
+    
+    filters = BacktestFilters(
+        start_date=request.start_date,
+        end_date=request.end_date
+    )
+    
+    if request.run_in_background:
+        job = await _advanced_engine.create_background_job(
+            "market_wide",
+            {
+                "strategy": strategy.to_dict() if hasattr(strategy, 'to_dict') else request.strategy.dict(),
+                "trade_style": request.trade_style,
+                "max_symbols": request.max_symbols
+            }
+        )
+        
+        background_tasks.add_task(
+            _run_market_wide_job,
+            job.id,
+            strategy,
+            filters,
+            request.symbols,
+            request.trade_style,
+            request.starting_capital,
+            request.max_symbols
+        )
+        
+        return {
+            "success": True,
+            "job_id": job.id,
+            "message": f"Market-wide backtest started for {request.strategy.name}. Scanning up to {request.max_symbols} symbols. Poll /api/backtest/job/{job.id} for status."
+        }
+    
+    try:
+        result = await _advanced_engine.run_market_wide_backtest(
+            strategy=strategy,
+            filters=filters,
+            symbols=request.symbols,
+            trade_style=request.trade_style,
+            starting_capital=request.starting_capital,
+            max_symbols=request.max_symbols
+        )
+        
+        return {
+            "success": True,
+            "result": result
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Market-wide backtest failed: {str(e)}")
+
+
+async def _run_market_wide_job(
+    job_id: str,
+    strategy,
+    filters,
+    symbols,
+    trade_style: str,
+    starting_capital: float,
+    max_symbols: int
+):
+    """Background task for market-wide backtest"""
+    try:
+        result = await _advanced_engine.run_market_wide_backtest(
+            strategy=strategy,
+            filters=filters,
+            symbols=symbols,
+            trade_style=trade_style,
+            starting_capital=starting_capital,
+            max_symbols=max_symbols,
+            job_id=job_id
+        )
+        
+        _advanced_engine._running_jobs[job_id].status = "completed"
+        _advanced_engine._running_jobs[job_id].result_id = result.get("id")
+        _advanced_engine._running_jobs[job_id].result = result
         _advanced_engine._running_jobs[job_id].completed_at = datetime.utcnow().isoformat()
         
     except Exception as e:
