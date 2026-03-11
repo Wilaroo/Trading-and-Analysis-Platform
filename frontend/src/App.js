@@ -19,6 +19,7 @@ import CommandCenterPage from './pages/CommandCenterPage';
 import GlossaryPage from './pages/GlossaryPage';
 import SettingsPage from './pages/SettingsPage';
 import MockupPreviewPage from './pages/MockupPreviewPage';
+import TradingDashboardPage from './pages/TradingDashboardPage';
 
 import './App.css';
 
@@ -328,6 +329,7 @@ function App() {
     
     switch (activeTab) {
       case 'command-center': return <CommandCenterPage {...ibProps} isActiveTab={true} />;
+      case 'trading': return <TradingDashboardPage {...ibProps} />;
       case 'chart': return <ErrorBoundary><ChartsPage {...ibProps} /></ErrorBoundary>;
       case 'trade-journal': return <TradeJournalPage />;
       case 'ib-trading': return <IBTradingPage {...ibProps} />;
