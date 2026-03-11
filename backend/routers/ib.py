@@ -320,6 +320,42 @@ async def get_pushed_ib_data():
     }
 
 
+@router.get("/debug/context-ib-check")
+async def debug_context_ib_check():
+    """
+    Debug endpoint to verify smart context engine can access IB data.
+    Tests the same code path used by the AI assistant.
+    """
+    global _pushed_ib_data
+    
+    result = {
+        "direct_global_check": {
+            "connected": _pushed_ib_data.get("connected", False),
+            "last_update": _pushed_ib_data.get("last_update"),
+            "positions_count": len(_pushed_ib_data.get("positions", [])),
+            "quotes_count": len(_pushed_ib_data.get("quotes", {}))
+        },
+        "function_check": {
+            "is_pusher_connected": is_pusher_connected(),
+            "positions_count": len(get_pushed_positions()),
+            "quotes_count": len(get_pushed_quotes())
+        }
+    }
+    
+    # Also test from smart_context_engine's perspective
+    try:
+        import routers.ib as ib_module
+        result["module_import_check"] = {
+            "is_pusher_connected": ib_module.is_pusher_connected(),
+            "positions_count": len(ib_module.get_pushed_positions()),
+            "quotes_count": len(ib_module.get_pushed_quotes())
+        }
+    except Exception as e:
+        result["module_import_check"] = {"error": str(e)}
+    
+    return result
+
+
 @router.get("/level2/{symbol}")
 async def get_level2_data(symbol: str):
     """

@@ -5,6 +5,22 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### Phase 2.6 Complete: AI Position Query Fix (March 11, 2026)
+**Critical Fix:** AI was hallucinating position data due to context truncation
+- ✅ Identified root cause: SYSTEM_PROMPT (5576 chars) + 6000 char limit = positions cut off
+- ✅ Fixed `ai_assistant_service.py` to use smart_context directly for position queries
+- ✅ Position queries now bypass the huge strategy system prompt
+- ✅ AI now correctly reports exact IB positions: TMC (10K @ $7.92), INTC (1K @ $44.76), TSLA (101 @ $449.10)
+- ✅ Fixed import pattern for IB data access (`import routers.ib as ib_module`)
+- ✅ Added position keywords to deep complexity detection
+- ✅ Lowered temperature from 0.7 to 0.3 for reduced hallucination
+- ✅ Strengthened system prompts with explicit anti-hallucination instructions
+
+**Key Technical Changes:**
+- `_last_smart_context` stored for position queries
+- Position keywords trigger `is_position_query` for context selection
+- Smart context (with IB data) used directly instead of truncated full context
+
 ### Phase 2.5 Complete: Scanner IB Data Priority (March 11, 2026)
 - ✅ Refactored `enhanced_scanner.py` to prioritize IB pushed data for quotes
 - ✅ Added `_get_ib_quote()` helper method (non-async, fast)

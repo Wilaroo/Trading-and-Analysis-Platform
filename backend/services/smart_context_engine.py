@@ -687,9 +687,9 @@ class SmartContextEngine:
             
             # Try IB pushed quotes first
             try:
-                from routers.ib import get_pushed_quotes, is_pusher_connected
-                if is_pusher_connected():
-                    ib_quotes = get_pushed_quotes()
+                import routers.ib as ib_module
+                if ib_module.is_pusher_connected():
+                    ib_quotes = ib_module.get_pushed_quotes()
                     for symbol in symbols:
                         symbol_upper = symbol.upper()
                         if symbol_upper in ib_quotes:
@@ -749,10 +749,13 @@ class SmartContextEngine:
             positions = []
             
             # Try IB pushed positions first (primary source)
+            # Import the module and call functions dynamically to ensure we get current data
             try:
-                from routers.ib import get_pushed_positions, is_pusher_connected
-                if is_pusher_connected():
-                    ib_positions = get_pushed_positions()
+                import routers.ib as ib_module
+                # Call the functions directly on the module to access current global state
+                is_connected = ib_module.is_pusher_connected()
+                if is_connected:
+                    ib_positions = ib_module.get_pushed_positions()
                     if ib_positions:
                         positions = [{
                             "symbol": p.get("symbol", ""),
@@ -763,7 +766,9 @@ class SmartContextEngine:
                             "market_value": float(p.get("market_value", p.get("marketValue", 0))),
                             "source": "ib_gateway"
                         } for p in ib_positions]
-                        logger.info(f"[SmartContext] Got {len(positions)} positions from IB")
+                        logger.info(f"[SmartContext] Got {len(positions)} positions from IB pusher: {[p['symbol'] for p in positions]}")
+                else:
+                    logger.debug("[SmartContext] IB pusher not connected, falling back to Alpaca")
             except Exception as e:
                 logger.warning(f"[SmartContext] IB positions fetch error: {e}")
             
@@ -787,11 +792,11 @@ class SmartContextEngine:
                 qty = float(pos.get("qty", 0))
                 pnl = float(pos.get("unrealized_pl", pos.get("unrealized_pnl", 0)))
                 pnl_pct = float(pos.get("unrealized_plpc", 0)) * 100
+                avg_cost = float(pos.get("avg_cost", 0))
+                market_value = float(pos.get("market_value", 0))
                 
                 # Calculate P&L percentage if not provided
-                if pnl_pct == 0 and pos.get("avg_cost"):
-                    avg_cost = float(pos.get("avg_cost", 0))
-                    market_value = float(pos.get("market_value", 0))
+                if pnl_pct == 0 and avg_cost > 0:
                     if avg_cost > 0 and qty != 0:
                         cost_basis = abs(qty) * avg_cost
                         pnl_pct = (pnl / cost_basis * 100) if cost_basis else 0
@@ -800,13 +805,17 @@ class SmartContextEngine:
                 
                 direction = "LONG" if qty > 0 else "SHORT"
                 pnl_sign = "+" if pnl >= 0 else ""
-                lines.append(f"{symbol}: {direction} {abs(qty):.0f} | P&L: {pnl_sign}${pnl:.2f} ({pnl_sign}{pnl_pct:.1f}%)")
+                
+                # Include avg_cost in the output format
+                lines.append(f"{symbol}: {direction} {abs(qty):.0f} @ ${avg_cost:.2f} avg | P&L: {pnl_sign}${pnl:.2f} ({pnl_sign}{pnl_pct:.1f}%)")
                 
                 positions_data.append({
                     "symbol": symbol,
                     "qty": qty,
+                    "avg_cost": avg_cost,
                     "unrealized_pl": pnl,
                     "unrealized_plpc": pnl_pct,
+                    "market_value": market_value,
                     "direction": direction,
                     "source": pos.get("source", "alpaca")
                 })
@@ -830,9 +839,9 @@ class SmartContextEngine:
             
             # Try IB pushed quotes first
             try:
-                from routers.ib import get_pushed_quotes, is_pusher_connected
-                if is_pusher_connected():
-                    ib_quotes = get_pushed_quotes()
+                import routers.ib as ib_module
+                if ib_module.is_pusher_connected():
+                    ib_quotes = ib_module.get_pushed_quotes()
                     for symbol in indices:
                         if symbol in ib_quotes:
                             q = ib_quotes[symbol]
