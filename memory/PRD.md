@@ -8,6 +8,8 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 ### Phase 3.4 Complete: Timeframe-Aware TQS & Scanner Integration (March 11, 2026)
 **Major Feature:** TQS scoring now weights pillars based on trade timeframe. Scanner alerts include TQS with high-quality highlighting.
 
+**Design Decision:** TQS thresholds remain universal (70+ = great trade) because the weights already normalize scores per timeframe. A 70 TQS scalp means "great on scalp factors" while a 70 TQS investment means "great on investment factors."
+
 **Timeframe-Aware TQS Weights:**
 | Trade Style | Technical | Setup | Fundamental | Context | Execution |
 |------------|-----------|-------|-------------|---------|-----------|
@@ -661,6 +663,9 @@ Triggers AI Coaching Notification
 - Full bot state persistence in MongoDB
 - Weekly performance digest
 - Fix watchlist widget race condition showing "(0)" briefly on load
+- **Trade Style Selector for Bot** - UI to choose scalp/swing/investment focus, auto-adjusts TQS thresholds and position sizing
+- **Learning Dashboard Tab** - Visualize Three-Speed Learning insights (best/worst setups, edge decay alerts, trader profile)
+- **Voice Command Support** - Hands-free trading via OpenAI Whisper ("Hey TradeCommand, what are my positions?")
 
 ---
 
