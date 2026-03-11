@@ -48,6 +48,7 @@ from routers.scanner import router as scanner_router, init_scanner_router
 from routers.alerts import router as alerts_router, init_alerts_router
 from routers.technicals import router as technicals_router
 from routers.live_scanner import router as live_scanner_router, init_live_scanner_router
+from routers.circuit_breaker import router as circuit_breaker_router, init_circuit_breaker_router
 from services.ollama_proxy_manager import ollama_proxy_manager, handle_ollama_proxy_websocket
 from routers.trading_bot import router as trading_bot_router, init_trading_bot_router
 from routers.learning_dashboard import router as learning_dashboard_router, init_learning_dashboard
@@ -225,6 +226,7 @@ trading_bot.set_services(
     db=db
 )
 init_trading_bot_router(trading_bot, trade_executor)
+init_circuit_breaker_router(trading_bot)
 
 # Wire AI assistant ↔ Trading bot integration
 assistant_service.set_trading_bot(trading_bot)
@@ -287,6 +289,7 @@ app.include_router(rag_router)
 app.include_router(medium_learning_router)
 app.include_router(slow_learning_router)
 app.include_router(scheduler_router)
+app.include_router(circuit_breaker_router)
 
 # Collections
 strategies_col = db["strategies"]

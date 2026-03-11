@@ -3236,3 +3236,58 @@ All 6 phases complete:
 - `/app/backend/services/ai_assistant_service.py` - Extended keyword matching
 - `/app/backend/services/smart_context_engine.py` - Extended intent patterns and debug logging
 
+
+---
+
+## Session Log - March 11, 2026 (API Endpoints & MongoDB Migration)
+
+### 1. Fixed Missing API Endpoints
+
+**Issue**: Three API endpoints were returning 404 errors.
+
+**Fix Applied**:
+- `/api/scanner/status` - Added to `scanner.py` router
+- `/api/trading-bot/trades` - Added to `trading_bot.py` router  
+- `/api/circuit-breaker/status` - Created new `circuit_breaker.py` router with status, reset, and configure endpoints
+
+### 2. MongoDB Order Queue Migration
+
+**Issue**: Order queue was in-memory only, causing orders to be lost on server restart.
+
+**Fix Applied**:
+- Created `/app/backend/services/order_queue_service.py` - MongoDB-backed order queue service
+- Updated `/app/backend/routers/ib.py` to use the new service
+- Added automatic fallback to in-memory if MongoDB fails
+- Preserved backwards compatibility with legacy endpoints
+
+**New MongoDB Collection**: `order_queue`
+- Indexes on: `status`, `order_id` (unique), `queued_at`, `symbol`
+- Auto-cleanup of orders older than 7 days
+- Auto-expiration of stale orders (30 min default)
+
+### 3. Circuit Breaker Implementation
+
+**New Features**:
+- Real-time monitoring of daily loss limits (1% default)
+- Max drawdown tracking (5% default)
+- Consecutive loss tracking
+- Manual reset capability
+- Configurable limits via API
+
+### Files Created
+- `/app/backend/routers/circuit_breaker.py`
+- `/app/backend/services/order_queue_service.py`
+
+### Files Modified
+- `/app/backend/routers/scanner.py` - Added /status endpoint
+- `/app/backend/routers/trading_bot.py` - Added /trades endpoint
+- `/app/backend/routers/ib.py` - MongoDB queue integration
+- `/app/backend/server.py` - Router registrations
+
+### Testing Results
+All endpoints now return 200 OK:
+- ✅ `/api/scanner/status`
+- ✅ `/api/trading-bot/trades`
+- ✅ `/api/circuit-breaker/status`
+- ✅ `/api/ib/orders/queue/status` (now backed by MongoDB)
+

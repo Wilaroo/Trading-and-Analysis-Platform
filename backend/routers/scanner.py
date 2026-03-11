@@ -44,6 +44,50 @@ class AlertConfigRequest(BaseModel):
 
 # ===================== Endpoints =====================
 
+@router.get("/status")
+async def get_scanner_status():
+    """
+    Get the current status of the predictive scanner.
+    Returns running state, scan count, and active alerts.
+    """
+    if not _scanner_service:
+        return {
+            "success": True,
+            "running": False,
+            "scan_count": 0,
+            "active_alerts": 0,
+            "last_scan": None,
+            "message": "Scanner service not initialized"
+        }
+    
+    try:
+        # Try to get status from scanner service
+        if hasattr(_scanner_service, 'get_status'):
+            status = _scanner_service.get_status()
+            return {
+                "success": True,
+                **status
+            }
+        else:
+            # Fallback basic status
+            return {
+                "success": True,
+                "running": hasattr(_scanner_service, '_running') and _scanner_service._running,
+                "scan_count": getattr(_scanner_service, '_scan_count', 0),
+                "active_alerts": len(getattr(_scanner_service, '_live_alerts', {})),
+                "last_scan": None,
+                "watchlist_size": len(getattr(_scanner_service, '_watchlist', []))
+            }
+    except Exception as e:
+        logger.error(f"Error getting scanner status: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "running": False
+        }
+
+
+
 @router.post("/scan")
 async def scan_for_setups(request: ScanRequest):
     """

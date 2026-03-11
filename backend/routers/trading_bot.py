@@ -295,6 +295,45 @@ async def get_all_trades():
     return {"success": True, **summary}
 
 
+
+@router.get("/trades")
+async def get_trades_list():
+    """
+    Get a unified list of all trades (pending, open, closed).
+    This is an alias endpoint for /trades/all for API consistency.
+    """
+    if not _trading_bot:
+        return {
+            "success": True,
+            "pending": [],
+            "open": [],
+            "closed": [],
+            "total": 0,
+            "message": "Trading bot not initialized"
+        }
+    
+    try:
+        summary = _trading_bot.get_all_trades_summary()
+        return {
+            "success": True,
+            "pending": summary.get("pending_trades", []),
+            "open": summary.get("open_trades", []),
+            "closed": summary.get("closed_trades", []),
+            "total": summary.get("total_trades", 0),
+            "daily_stats": summary.get("daily_stats", {})
+        }
+    except Exception as e:
+        logger.error(f"Error getting trades: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "pending": [],
+            "open": [],
+            "closed": []
+        }
+
+
+
 @router.post("/evaluate-trade")
 async def ai_evaluate_trade(request: DemoTradeRequest):
     """Ask AI to evaluate a trade opportunity"""
