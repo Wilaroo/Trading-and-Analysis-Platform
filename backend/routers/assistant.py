@@ -133,6 +133,17 @@ async def detect_intent(request: IntentDetectRequest):
 @router.post("/chat")
 async def chat(request: ChatRequest):
     """
+    [DEPRECATED] Use /api/agents/chat instead.
+    
+    This endpoint is deprecated and will be removed in a future version.
+    The new multi-agent system at /api/agents/chat provides:
+    - Better intent routing (Router Agent)
+    - Safer trade execution (Trade Executor Agent)
+    - Personalized coaching (Coach Agent with Three-Speed Learning)
+    - Market analysis (Analyst Agent with TQS)
+    
+    ----
+    
     Chat with the AI assistant.
     
     The assistant has access to:
@@ -144,6 +155,12 @@ async def chat(request: ChatRequest):
     
     Response includes validation data when smart context is enabled.
     """
+    import warnings
+    warnings.warn(
+        "POST /api/assistant/chat is deprecated. Use POST /api/agents/chat instead.",
+        DeprecationWarning
+    )
+    
     if not _assistant_service:
         raise HTTPException(status_code=500, detail="Assistant service not initialized")
     

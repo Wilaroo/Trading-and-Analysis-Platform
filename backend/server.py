@@ -120,7 +120,11 @@ from services.wave_scanner import init_wave_scanner, get_wave_scanner
 from services.sector_analysis_service import get_sector_analysis_service
 from services.chart_pattern_service import get_chart_pattern_service
 from services.sentiment_analysis_service import get_sentiment_service
+from services.service_registry import get_service_registry, register_service, get_service_optional
 from data.strategies_data import ALL_STRATEGIES_DATA
+
+# Initialize service registry for clean dependency management
+services = get_service_registry()
 
 app = FastAPI(title="TradeCommand API")
 
@@ -361,6 +365,11 @@ learning_loop_service.set_services(
 # Wire learning loop to trading bot for trade outcome recording
 trading_bot._learning_loop = learning_loop_service
 
+# Register learning services in registry for later use
+register_service('learning_loop_service', learning_loop_service)
+register_service('trade_context_service', trade_context_service)
+register_service('execution_tracker', execution_tracker)
+
 print("Three-Speed Learning Architecture Phase 1 initialized")
 print(f"  - Collections: trade_outcomes, learning_stats, calibration_log, trader_profile")
 print(f"  - Services: LearningLoop, TradeContext, ExecutionTracker, GracefulDegradation")
@@ -380,6 +389,9 @@ tqs_engine = init_tqs_engine(
 print("TQS Engine (Phase 2) initialized")
 print(f"  - Pillars: Setup(25%), Technical(25%), Fundamental(15%), Context(20%), Execution(15%)")
 print(f"  - Endpoints: /api/tqs/score, /api/tqs/breakdown, /api/tqs/batch")
+
+# Register TQS engine
+register_service('tqs_engine', tqs_engine)
 
 # ===================== FAST LEARNING (Phase 3A & 3B) =====================
 # Initialize circuit breakers, position sizing, health monitoring, dynamic thresholds
@@ -423,6 +435,7 @@ print(f"  - Endpoints: /api/risk/circuit-breakers, /api/risk/position-sizing, /a
 
 try:
     rag_service = init_rag_service(db=db, learning_loop=learning_loop_service)
+    register_service('rag_service', rag_service)
     print("RAG Knowledge Base (Phase 4) initialized")
     print(f"  - Vector Store: ChromaDB at /app/backend/data/chromadb")
     print(f"  - Collections: trade_outcomes, playbooks, patterns, daily_insights")
@@ -451,6 +464,13 @@ try:
     edge_decay_service = get_edge_decay_service()
     edge_decay_service.set_db(db)
     
+    # Register Medium Learning services
+    register_service('calibration_service', calibration_service)
+    register_service('context_perf_service', context_perf_service)
+    register_service('confirmation_service', confirmation_service)
+    register_service('playbook_perf_service', playbook_perf_service)
+    register_service('edge_decay_service', edge_decay_service)
+    
     print("Medium Learning (Phase 5) initialized")
     print("  - Calibration Service: TQS threshold recommendations")
     print("  - Context Performance: Setup+regime+time tracking")
@@ -478,6 +498,11 @@ try:
     # Initialize Shadow Mode Service
     shadow_mode_service = init_shadow_mode_service(db=db, alpaca_service=alpaca_service)
     
+    # Register Slow Learning services
+    register_service('shadow_mode_service', shadow_mode_service)
+    register_service('historical_data_service', historical_data_service)
+    register_service('backtest_engine', backtest_engine)
+    
     print("Slow Learning (Phase 6) initialized")
     print("  - Historical Data Service: Alpaca data download and storage")
     print("  - Backtest Engine: Strategy backtesting on historical data")
@@ -495,13 +520,14 @@ try:
     
     learning_context_provider = init_learning_context_provider(
         db=db,
-        calibration_service=globals().get('calibration_service'),
-        context_performance_service=globals().get('context_perf_service'),
-        confirmation_validator_service=globals().get('confirmation_service'),
-        playbook_performance_service=globals().get('playbook_perf_service'),
-        edge_decay_service=globals().get('edge_decay_service'),
-        rag_service=globals().get('rag_service')
+        calibration_service=get_service_optional('calibration_service'),
+        context_performance_service=get_service_optional('context_perf_service'),
+        confirmation_validator_service=get_service_optional('confirmation_service'),
+        playbook_performance_service=get_service_optional('playbook_perf_service'),
+        edge_decay_service=get_service_optional('edge_decay_service'),
+        rag_service=get_service_optional('rag_service')
     )
+    register_service('learning_context_provider', learning_context_provider)
     print("Learning Context Provider initialized")
     print("  - Provides TQS + Learning insights for AI coaching")
     # Wire to AI assistant
@@ -520,22 +546,22 @@ try:
     # Initialize weekly report service with all required dependencies
     weekly_report_svc = init_weekly_report_service(
         db=db,
-        calibration_service=globals().get('calibration_service'),
-        context_performance_service=globals().get('context_perf_service'),
-        confirmation_validator_service=globals().get('confirmation_service'),
-        playbook_performance_service=globals().get('playbook_perf_service'),
-        edge_decay_service=globals().get('edge_decay_service')
+        calibration_service=get_service_optional('calibration_service'),
+        context_performance_service=get_service_optional('context_perf_service'),
+        confirmation_validator_service=get_service_optional('confirmation_service'),
+        playbook_performance_service=get_service_optional('playbook_perf_service'),
+        edge_decay_service=get_service_optional('edge_decay_service')
     )
     
     trading_scheduler = init_trading_scheduler(
         db=db,
-        calibration_service=globals().get('calibration_service'),
-        context_performance_service=globals().get('context_perf_service'),
-        confirmation_validator_service=globals().get('confirmation_service'),
-        playbook_performance_service=globals().get('playbook_perf_service'),
-        edge_decay_service=globals().get('edge_decay_service'),
+        calibration_service=get_service_optional('calibration_service'),
+        context_performance_service=get_service_optional('context_perf_service'),
+        confirmation_validator_service=get_service_optional('confirmation_service'),
+        playbook_performance_service=get_service_optional('playbook_perf_service'),
+        edge_decay_service=get_service_optional('edge_decay_service'),
         weekly_report_service=weekly_report_svc,
-        shadow_mode_service=globals().get('shadow_mode_service'),
+        shadow_mode_service=get_service_optional('shadow_mode_service'),
         start=True  # Auto-start scheduler
     )
     print("Trading Scheduler initialized")
@@ -553,21 +579,24 @@ except Exception as e:
 try:
     from services.order_queue_service import get_order_queue_service
     
-    # Initialize agent system with all required services
+    # Register perf_service for agent access
+    register_service('perf_service', perf_service)
+    
+    # Initialize agent system with all required services (using service registry)
     init_agents_router({
         "ib_router": ib_router,
         "scanner": background_scanner,
         "order_queue": get_order_queue_service(),
         "db": db,
-        "performance_analyzer": globals().get('perf_service'),
-        "learning_service": globals().get('learning_loop_service'),
+        "performance_analyzer": perf_service,
+        "learning_service": get_service_optional('learning_loop_service'),
         "trading_bot": trading_bot,
         "alpaca_service": alpaca_service,
         # Three-Speed Learning Architecture services
-        "learning_context_provider": globals().get('learning_context_provider'),
-        "learning_loop_service": globals().get('learning_loop_service'),
+        "learning_context_provider": get_service_optional('learning_context_provider'),
+        "learning_loop_service": get_service_optional('learning_loop_service'),
         # TQS Engine for Analyst
-        "tqs_engine": globals().get('tqs_engine')
+        "tqs_engine": get_service_optional('tqs_engine')
     })
     print("Multi-Agent System initialized")
     print("  - Agents: Router, Trade Executor, Coach, Analyst")
