@@ -320,12 +320,19 @@ DEFAULT_STRATEGY_CONFIG = {
 class RiskParameters:
     """Risk management parameters with volatility-adjusted sizing"""
     max_risk_per_trade: float = 2500.0      # Maximum $ risk per trade
-    max_daily_loss: float = 5000.0           # Maximum daily loss before stopping
-    starting_capital: float = 1000000.0      # Account capital for position sizing
-    max_position_pct: float = 10.0           # Maximum % of capital per position
-    max_open_positions: int = 5              # Maximum concurrent positions
-    min_risk_reward: float = 1.5             # Minimum risk/reward ratio
+    max_daily_loss_pct: float = 1.0          # Maximum daily loss as % of account (1% = stop trading)
+    max_daily_loss: float = 0.0              # Calculated from account value (set dynamically)
+    starting_capital: float = 100000.0       # Account capital for position sizing (updated from IB)
+    max_position_pct: float = 50.0           # Maximum % of capital per position (user requested 50%)
+    max_open_positions: int = 10             # Maximum concurrent positions (unlimited = high number)
+    min_risk_reward: float = 0.8             # Minimum risk/reward ratio (lowered to allow more trades)
     max_slippage_pct: float = 0.5           # Maximum acceptable slippage %
+    
+    # Trading hours (Eastern Time)
+    trading_start_hour: int = 7              # Start trading at 7:30 AM ET
+    trading_start_minute: int = 30
+    trading_end_hour: int = 17               # Stop trading at 5:00 PM ET
+    trading_end_minute: int = 0
     
     # Volatility-adjusted position sizing
     use_volatility_sizing: bool = True       # Enable ATR-based position sizing
@@ -432,6 +439,9 @@ class BotTrade:
     # Explanation
     explanation: Optional[TradeExplanation] = None
     
+    # Notes for tracking (e.g., [SIMULATED], error messages, etc.)
+    notes: Optional[str] = None
+    
     # Order IDs (from broker)
     entry_order_id: Optional[str] = None
     stop_order_id: Optional[str] = None
@@ -469,7 +479,7 @@ class TradingBotService:
     """
     
     def __init__(self):
-        self._mode = BotMode.CONFIRMATION  # Start in confirmation mode for safety
+        self._mode = BotMode.AUTONOMOUS  # Start in autonomous mode for auto-trading
         self._running = False
         self._scan_task: Optional[asyncio.Task] = None
         
@@ -482,9 +492,27 @@ class TradingBotService:
         self._closed_trades: List[BotTrade] = []
         self._daily_stats = DailyStats(date=datetime.now(timezone.utc).strftime("%Y-%m-%d"))
         
-        # Configuration
-        self._enabled_setups = ["rubber_band", "breakout", "vwap_bounce", "squeeze"]
-        self._scan_interval = 60  # seconds (was 30 - reduced to avoid API overload)
+        # Configuration - Enable all major strategies for autonomous trading
+        self._enabled_setups = [
+            # Opening strategies
+            "first_vwap_pullback", "opening_drive", "first_move_up", "first_move_down", "bella_fade",
+            # Morning momentum
+            "orb", "orb_long", "orb_short", "hitchhiker", "gap_give_go", "gap_pick_roll",
+            # Core session
+            "spencer_scalp", "second_chance", "backside", "off_sides", "fashionably_late",
+            # Mean reversion
+            "rubber_band", "vwap_bounce", "vwap_fade", "tidal_wave",
+            # Consolidation
+            "big_dog", "puppy_dog", "nine_ema_scalp", "abc_scalp", "9_ema_scalp",
+            # Afternoon
+            "hod_breakout", "time_of_day_fade",
+            # Special
+            "breaking_news", "volume_capitulation", "range_break", "breakout",
+            # New strategies
+            "squeeze", "relative_strength", "relative_strength_leader", "relative_strength_laggard",
+            "mean_reversion", "gap_fade", "chart_pattern"
+        ]
+        self._scan_interval = 30  # seconds - faster scanning for autonomous trading
         self._watchlist: List[str] = []
         
         # Services (injected)
@@ -507,7 +535,7 @@ class TradingBotService:
         # Callbacks for real-time updates
         self._trade_callbacks: List[callable] = []
         
-        logger.info("TradingBotService initialized")
+        logger.info("TradingBotService initialized in AUTONOMOUS mode")
     
     def set_services(self, alert_system, trading_intelligence, alpaca_service, trade_executor, db):
         """Inject service dependencies"""
@@ -535,19 +563,21 @@ class TradingBotService:
                 saved_watchlist = state.get("watchlist", [])
                 saved_setups = state.get("enabled_setups", [])
                 
-                # Restore mode
+                # Restore mode - but prefer AUTONOMOUS if that's the default
                 if saved_mode in ["autonomous", "confirmation", "paused"]:
                     self._mode = BotMode(saved_mode)
                 
                 # Restore watchlist
                 if saved_watchlist:
                     self._watchlist = saved_watchlist
-                    logger.info(f"📋 Restored watchlist: {', '.join(saved_watchlist)}")
+                    logger.info(f"📋 Restored watchlist: {', '.join(saved_watchlist[:5])}{'...' if len(saved_watchlist) > 5 else ''}")
                 
-                # Restore enabled setups
-                if saved_setups:
+                # Restore enabled setups only if more than defaults were saved
+                if saved_setups and len(saved_setups) > 10:  # Only restore if significant customization
                     self._enabled_setups = saved_setups
-                    logger.info(f"🎯 Restored strategies: {', '.join(saved_setups)}")
+                    logger.info(f"🎯 Restored {len(saved_setups)} strategies")
+                else:
+                    logger.info(f"🎯 Using default {len(self._enabled_setups)} strategies (no saved customization)")
                 
                 # Auto-restart if bot was running before
                 if was_running and saved_watchlist:
@@ -555,6 +585,8 @@ class TradingBotService:
                     await self.start()
                 
                 logger.info(f"✅ Bot state restored: mode={self._mode.value}, running={self._running}, watchlist={len(self._watchlist)} symbols")
+            else:
+                logger.info(f"🆕 No saved bot state - using defaults: {len(self._enabled_setups)} strategies enabled")
         except Exception as e:
             logger.warning(f"Could not restore bot state: {e}")
     
@@ -784,15 +816,56 @@ class TradingBotService:
     
     # ==================== BOT CONTROL ====================
     
+    def is_within_trading_hours(self) -> bool:
+        """Check if current time is within allowed trading hours (Eastern Time)"""
+        try:
+            from datetime import timezone
+            import pytz
+            
+            et_tz = pytz.timezone('America/New_York')
+            now_et = datetime.now(et_tz)
+            
+            start_time = now_et.replace(
+                hour=self.risk_params.trading_start_hour,
+                minute=self.risk_params.trading_start_minute,
+                second=0,
+                microsecond=0
+            )
+            end_time = now_et.replace(
+                hour=self.risk_params.trading_end_hour,
+                minute=self.risk_params.trading_end_minute,
+                second=0,
+                microsecond=0
+            )
+            
+            # Check if it's a weekday (Monday=0, Sunday=6)
+            if now_et.weekday() >= 5:  # Saturday or Sunday
+                return False
+            
+            return start_time <= now_et <= end_time
+        except Exception as e:
+            logger.warning(f"Error checking trading hours: {e}")
+            return True  # Default to allowing trades if timezone check fails
+    
+    def update_account_value_from_ib(self, account_value: float):
+        """Update risk parameters based on current account value from IB"""
+        if account_value > 0:
+            self.risk_params.starting_capital = account_value
+            # Calculate max daily loss as 1% of account
+            self.risk_params.max_daily_loss = account_value * (self.risk_params.max_daily_loss_pct / 100.0)
+            logger.info(f"Updated account value: ${account_value:,.2f}, max daily loss: ${self.risk_params.max_daily_loss:,.2f}")
+    
     async def start(self):
         """Start the trading bot"""
         if self._running:
             return
         
         self._running = True
-        self._mode = BotMode.CONFIRMATION if self._mode == BotMode.PAUSED else self._mode
+        self._mode = BotMode.AUTONOMOUS if self._mode == BotMode.PAUSED else self._mode
         self._scan_task = asyncio.create_task(self._scan_loop())
-        logger.info(f"Trading bot started in {self._mode.value} mode")
+        logger.info(f"🤖 Trading bot started in {self._mode.value} mode")
+        logger.info(f"📊 Trading hours: {self.risk_params.trading_start_hour}:{self.risk_params.trading_start_minute:02d} - {self.risk_params.trading_end_hour}:{self.risk_params.trading_end_minute:02d} ET")
+        logger.info(f"💰 Max position: {self.risk_params.max_position_pct}% of account, Max daily loss: {self.risk_params.max_daily_loss_pct}%")
         
         # Persist state
         await self._save_state()
@@ -814,14 +887,26 @@ class TradingBotService:
     async def _scan_loop(self):
         """Main scanning loop - runs when bot is active"""
         scan_count = 0
+        print(f"🤖 [TradingBot] Scan loop started - interval: {self._scan_interval}s")
         while self._running:
             try:
-                # Check if daily loss limit hit
-                if self._daily_stats.net_pnl <= -self.risk_params.max_daily_loss:
+                # Update account value from IB if connected
+                await self._update_account_from_ib()
+                
+                # Check daily loss limit (1% of account)
+                if self.risk_params.max_daily_loss > 0 and self._daily_stats.net_pnl <= -self.risk_params.max_daily_loss:
                     if not self._daily_stats.daily_limit_hit:
                         self._daily_stats.daily_limit_hit = True
-                        logger.warning(f"Daily loss limit hit: ${self._daily_stats.net_pnl:.2f}")
+                        print(f"🛑 [TradingBot] Daily loss limit hit: ${self._daily_stats.net_pnl:.2f}")
                     await asyncio.sleep(60)
+                    continue
+                
+                # Check trading hours (7:30 AM - 5:00 PM ET)
+                if not self.is_within_trading_hours():
+                    if scan_count % 60 == 0:  # Log every ~30 min
+                        print("⏰ [TradingBot] Outside trading hours (7:30 AM - 5:00 PM ET)")
+                    await asyncio.sleep(self._scan_interval)
+                    scan_count += 1
                     continue
                 
                 # Skip if paused
@@ -831,11 +916,12 @@ class TradingBotService:
                 
                 # Log scan activity periodically
                 scan_count += 1
-                if scan_count % 10 == 1:  # Log every 10th scan
-                    mode_str = "AUTO" if self._mode == BotMode.AUTONOMOUS else "CONFIRMATION"
+                if scan_count % 10 == 1:  # Log every 10th scan (~5 min)
+                    mode_str = "🟢 AUTO" if self._mode == BotMode.AUTONOMOUS else "🟡 CONFIRM"
                     open_count = len(self._open_trades)
                     pending_count = len(self._pending_trades)
-                    logger.info(f"[TradingBot] Scan #{scan_count} | Mode: {mode_str} | Open: {open_count} | Pending: {pending_count}")
+                    pnl_str = f"${self._daily_stats.net_pnl:+,.2f}" if self._daily_stats.net_pnl != 0 else "$0"
+                    print(f"[TradingBot] Scan #{scan_count} | {mode_str} | Open: {open_count} | Pending: {pending_count} | P&L: {pnl_str}")
                 
                 # Scan for opportunities
                 await self._scan_for_opportunities()
@@ -847,15 +933,40 @@ class TradingBotService:
                 await self._check_eod_close()
                 
             except Exception as e:
-                logger.error(f"Scan loop error: {e}")
+                print(f"❌ [TradingBot] Scan loop error: {e}")
             
             await asyncio.sleep(self._scan_interval)
+    
+    async def _update_account_from_ib(self):
+        """Update account value from IB pushed data"""
+        try:
+            import routers.ib as ib_module
+            ib_data = ib_module.get_pushed_data()
+            if ib_data.get("connected"):
+                account = ib_data.get("account", {})
+                # Try to get NetLiquidation from account data (handles nested dict format)
+                net_liq_data = account.get("NetLiquidation-S") or account.get("NetLiquidation")
+                if net_liq_data:
+                    try:
+                        # Handle nested dict format: {"value": "997162.22", "currency": "USD", ...}
+                        if isinstance(net_liq_data, dict):
+                            value = float(net_liq_data.get("value", 0))
+                        else:
+                            value = float(net_liq_data)
+                        
+                        if value > 0 and abs(value - self.risk_params.starting_capital) > 100:  # Only update if changed by more than $100
+                            self.update_account_value_from_ib(value)
+                    except (ValueError, TypeError) as e:
+                        logger.debug(f"Could not parse NetLiquidation: {e}")
+        except Exception as e:
+            logger.debug(f"Could not update account from IB: {e}")
     
     # ==================== OPPORTUNITY SCANNING ====================
     
     async def _scan_for_opportunities(self):
         """Scan for trade opportunities using alert system"""
         if not self._alert_system:
+            print("⚠️ [TradingBot] No alert system configured - skipping scan")
             return
         
         # Check max open positions
@@ -866,7 +977,13 @@ class TradingBotService:
             # Get alerts from existing system
             alerts = await self._get_trade_alerts()
             
+            if alerts:
+                print(f"📡 [TradingBot] Found {len(alerts)} eligible alerts to evaluate")
+            
             for alert in alerts:
+                symbol = alert.get('symbol', 'UNKNOWN')
+                setup = alert.get('setup_type', 'unknown')
+                
                 # Skip if already have position in this symbol
                 if any(t.symbol == alert.get('symbol') for t in self._open_trades.values()):
                     continue
@@ -876,34 +993,46 @@ class TradingBotService:
                     continue
                 
                 # Evaluate and create trade opportunity
+                print(f"🔍 [TradingBot] Evaluating {symbol} {setup}...")
                 trade = await self._evaluate_opportunity(alert)
                 
                 # Yield to event loop to prevent blocking (keeps WebSocket alive)
                 await asyncio.sleep(0)
                 
                 if trade:
+                    print(f"✅ [TradingBot] Trade created for {symbol}: {trade.direction.value} {trade.shares} shares @ ${trade.entry_price:.2f}")
                     if self._mode == BotMode.AUTONOMOUS:
                         # Execute immediately
+                        print(f"🚀 [TradingBot] AUTONOMOUS MODE: Executing {symbol} trade...")
                         await self._execute_trade(trade)
                     else:
                         # Add to pending for confirmation
                         self._pending_trades[trade.id] = trade
                         await self._notify_trade_update(trade, "pending")
+                        print(f"⏸️ [TradingBot] Added {symbol} to pending trades")
+                else:
+                    print(f"❌ [TradingBot] {symbol} {setup} did not meet criteria")
                     
         except Exception as e:
-            logger.error(f"Scan error: {e}")
+            print(f"❌ [TradingBot] Scan error: {e}")
+            import traceback
+            traceback.print_exc()
     
     async def _get_trade_alerts(self) -> List[Dict]:
         """Get trade alerts from enhanced scanner"""
         alerts = []
         
         try:
-            # Use enhanced scanner (primary)
+            # Use enhanced scanner (primary) - same instance as live scanner API
             from services.enhanced_scanner import get_enhanced_scanner
             scanner = get_enhanced_scanner()
             
             # Get current live alerts
             scanner_alerts = scanner.get_live_alerts()
+            print(f"📊 [TradingBot] Scanner ID: {id(scanner)}, has {len(scanner_alerts)} raw alerts, running: {scanner._running}")
+            
+            # Debug: show live alerts dict size
+            print(f"   Live alerts dict size: {len(scanner._live_alerts)}")
             
             for alert in scanner_alerts:
                 # Convert LiveAlert to dict format for trading bot
@@ -930,36 +1059,17 @@ class TradingBotService:
                 base_setup = alert.setup_type.split("_long")[0].split("_short")[0]
                 if base_setup in self._enabled_setups or alert.setup_type in self._enabled_setups:
                     alerts.append(alert_dict)
+                    print(f"   ✅ {alert.symbol} {alert.setup_type} passed filter")
+                else:
+                    print(f"   ⏭️ {alert.symbol} {alert.setup_type} not in enabled setups")
             
         except Exception as e:
-            logger.error(f"Error getting alerts from enhanced scanner: {e}")
-            
-            # Fallback to old background scanner
-            try:
-                from services.background_scanner import get_background_scanner
-                scanner = get_background_scanner()
-                scanner_alerts = scanner.get_live_alerts()
-                
-                for alert in scanner_alerts:
-                    alert_dict = {
-                        'symbol': alert.symbol,
-                        'setup_type': alert.setup_type,
-                        'direction': alert.direction,
-                        'current_price': alert.current_price,
-                        'trigger_price': alert.trigger_price,
-                        'stop_price': alert.stop_loss,
-                        'targets': [alert.target],
-                        'score': int(alert.trigger_probability * 100),
-                        'trigger_probability': alert.trigger_probability,
-                        'headline': alert.headline,
-                        'technical_reasons': alert.reasoning,
-                        'warnings': []
-                    }
-                    
-                    if alert_dict.get('setup_type') in self._enabled_setups:
-                        alerts.append(alert_dict)
-            except:
-                pass
+            print(f"❌ [TradingBot] Error getting alerts: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        if alerts:
+            print(f"✅ [TradingBot] {len(alerts)} alerts ready for evaluation")
         
         return alerts[:20]  # Top 20 alerts
     
@@ -990,7 +1100,10 @@ class TradingBotService:
                 current_price = quote.get('price', 0) if quote else 0
             
             if not current_price:
+                print(f"   ❌ No price available for {symbol}")
                 return None
+            
+            print(f"   📈 {symbol}: price=${current_price:.2f}")
             
             # ==================== ENHANCED INTELLIGENCE GATHERING ====================
             # Gather all available real-time data to make informed decision
@@ -1034,7 +1147,10 @@ class TradingBotService:
             shares, risk_amount = self._calculate_position_size(entry_price, stop_price, direction, atr, atr_percent)
             
             if shares <= 0:
+                print(f"   ❌ Position size = 0 (entry=${entry_price:.2f}, stop=${stop_price:.2f}, risk=${risk_amount:.2f})")
                 return None
+            
+            print(f"   📊 {symbol}: {shares} shares, entry=${entry_price:.2f}, stop=${stop_price:.2f}, risk=${risk_amount:.2f}")
             
             # Calculate risk/reward
             primary_target = target_prices[0] if target_prices else entry_price
@@ -1043,8 +1159,10 @@ class TradingBotService:
             
             # Check minimum risk/reward
             if risk_reward_ratio < self.risk_params.min_risk_reward:
-                logger.debug(f"Skipping {symbol}: R:R {risk_reward_ratio:.2f} below minimum {self.risk_params.min_risk_reward}")
+                print(f"   ❌ R:R {risk_reward_ratio:.2f} < {self.risk_params.min_risk_reward} min required")
                 return None
+            
+            print(f"   ✅ {symbol}: R:R={risk_reward_ratio:.2f}, target=${primary_target:.2f}, reward=${potential_reward:.2f}")
             
             # Get quality score with intelligence adjustment
             base_score = alert.get('score', 70)
@@ -1110,6 +1228,7 @@ class TradingBotService:
             )
             
             logger.info(f"Trade opportunity created: {symbol} {direction.value} {shares} shares @ ${entry_price:.2f}")
+            print(f"   🎯 Trade object created: {trade.id} {symbol} {direction.value}")
             
             # AI evaluation - enrich trade with AI analysis
             if hasattr(self, '_ai_assistant') and self._ai_assistant:
@@ -1119,15 +1238,24 @@ class TradingBotService:
                         trade.explanation.ai_evaluation = ai_result.get("analysis", "")
                         trade.explanation.ai_verdict = ai_result.get("verdict", "CAUTION")
                         if ai_result.get("verdict") == "REJECT":
+                            print(f"   🤖 AI REJECTED trade: {ai_result.get('analysis', '')[:150]}")
                             logger.info(f"AI REJECTED trade {symbol}: {ai_result.get('analysis', '')[:100]}")
-                            return None
+                            # In AUTONOMOUS mode, ignore AI rejections and proceed with trade
+                            if self._mode != BotMode.AUTONOMOUS:
+                                return None
+                            else:
+                                print(f"   ⚠️ Overriding AI rejection in AUTONOMOUS mode")
                 except Exception as e:
                     logger.warning(f"AI evaluation failed (proceeding anyway): {e}")
             
+            print(f"   ✅ Returning trade object {trade.id}")
             return trade
             
         except Exception as e:
+            print(f"   ❌ Exception in _evaluate_opportunity: {e}")
             logger.error(f"Error evaluating opportunity: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def _calculate_position_size(self, entry_price: float, stop_price: float, direction: TradeDirection, atr: float = None, atr_percent: float = None) -> Tuple[int, float]:
@@ -1672,30 +1800,38 @@ class TradingBotService:
         - Currently executes in SIMULATED mode (orders tracked but not sent to broker)
         - Full IB order execution requires local IB Gateway order routing (future enhancement)
         """
+        print(f"   📤 [_execute_trade] Starting execution for {trade.symbol}")
+        
         if not self._trade_executor:
+            print(f"   ❌ Trade executor not configured")
             logger.error("Trade executor not configured")
             return
         
         try:
             # Log execution mode
             executor_mode = self._trade_executor.get_mode() if self._trade_executor else "unknown"
+            print(f"   📤 [_execute_trade] Executor mode: {executor_mode.value if hasattr(executor_mode, 'value') else executor_mode}")
             logger.info(f"[TradingBot] Executing {trade.symbol} {trade.direction.value.upper()} | Mode: {executor_mode.value}")
             
             # Start execution tracking (Phase 1 Learning)
             if hasattr(self, '_learning_loop') and self._learning_loop:
                 try:
+                    # Use target_prices instead of targets
+                    planned_r = (trade.target_prices[0] / trade.entry_price - 1) if trade.target_prices else 2.0
                     self._learning_loop.start_execution_tracking(
                         trade_id=trade.id,
                         alert_id=getattr(trade, 'alert_id', trade.id),
                         intended_entry=trade.entry_price,
                         intended_size=trade.shares,
-                        planned_r=trade.targets[0] / trade.entry_price - 1 if trade.targets else 2.0
+                        planned_r=planned_r
                     )
                 except Exception as e:
                     logger.warning(f"Failed to start execution tracking: {e}")
             
             # Execute entry order
+            print(f"   📤 [_execute_trade] Calling trade_executor.execute_entry...")
             result = await self._trade_executor.execute_entry(trade)
+            print(f"   📤 [_execute_trade] Result: {result}")
             
             if result.get('success'):
                 trade.status = TradeStatus.OPEN
