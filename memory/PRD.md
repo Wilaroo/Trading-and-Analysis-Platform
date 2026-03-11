@@ -3125,3 +3125,87 @@ All 6 phases complete:
 - [ ] Data-Driven In-Trade Guidance (real-time advice during trades)
 - [ ] Live Trading Dashboard (combined view of market data, positions, AI feedback)
 - [ ] Monthly/Quarterly Performance Reviews
+
+---
+
+## Session Log - March 11, 2026 (Live Trading Dashboard Implementation)
+
+### Feature: Live Trading Dashboard (Option D Design)
+**Goal**: Implement the user-approved "Option D" mockup as a dedicated Trading Dashboard page with integrated TradingView chart.
+
+### Implementation Details
+
+**1. New Trading Dashboard Page** (`/app/frontend/src/pages/TradingDashboardPage.jsx`)
+- Full-screen dedicated trading view accessible via `/trading` route
+- 3-column layout:
+  - **Left Column**: Open Positions with live P&L, clickable for chart navigation
+  - **Center Column**: TradingView chart + Order Pipeline + In-Trade Guidance
+  - **Right Column**: Today's Performance stats + Risk Status
+
+**2. Key Components Implemented**:
+- **TradingViewChart**: Embedded widget with proper exchange prefix mapping (AMEX:SPY, NASDAQ:AAPL, etc.)
+- **PositionCard**: Position cards with P&L display, stop/target price bar, inline guidance alerts
+- **OrderPipeline**: Visual pipeline showing Pending → Executing → Filled order flow with IB connection status
+- **InTradeGuidance**: Real-time coaching alerts based on position state (loss warnings, target approach, winner management)
+- **PerformanceStats**: Daily stats including trades executed, win rate, winners/losers, realized/unrealized P&L
+- **RiskStatus**: Daily loss limit progress bar, position exposure indicator
+
+**3. Navigation Integration**:
+- Added "Trading Dashboard" nav item to `Sidebar.js` (data-testid="nav-trading")
+- Added route mapping in `App.js` for 'trading' tab → `TradingDashboardPage`
+- Dashboard accessible via sidebar click or localStorage `activeTab='trading'`
+
+**4. TradingBotPanel Consolidation**:
+- Removed `TradingBotPanel` from `RightSidebar.jsx` 
+- Order queue and execution status functionality now integrated into Trading Dashboard
+- Command Center sidebar now cleaner without redundant trading panel
+
+**5. Chart Symbol Fix**:
+- Fixed TradingView chart symbol prefix from hardcoded `NASDAQ:${symbol}` to proper exchange mapping
+- Added `getFullSymbol()` helper that routes ETFs to AMEX, tech stocks to NASDAQ, others to NYSE
+- SPY now correctly loads as `AMEX:SPY` (was showing "symbol doesn't exist")
+
+### API Endpoints Used
+| Endpoint | Purpose |
+|----------|---------|
+| GET /api/ib/pushed-data | Fetch IB positions, quotes, account data |
+| GET /api/ib/orders/queue/status | Order pipeline status (pending/executing/completed) |
+| GET /api/trading-bot/status | Bot running status, daily stats, risk params |
+
+### Files Modified
+- `/app/frontend/src/pages/TradingDashboardPage.jsx` - Fixed chart symbol mapping
+- `/app/frontend/src/components/Sidebar.js` - Added 'trading' nav item
+- `/app/frontend/src/App.js` - Added route for 'trading' tab, imported TradingDashboardPage
+- `/app/frontend/src/components/RightSidebar.jsx` - Removed TradingBotPanel import and usage
+
+### Testing Results (iteration_61.json)
+- **Backend**: 100% (7/7 API tests passed)
+- **Frontend**: 100% (all components verified rendering correctly)
+
+### Features Verified
+| Feature | Status |
+|---------|--------|
+| Trading Dashboard navigation | ✅ PASS |
+| Open Positions component | ✅ PASS |
+| SPY Chart (TradingView) | ✅ PASS |
+| Order Pipeline | ✅ PASS |
+| In-Trade Guidance | ✅ PASS |
+| Today's Performance | ✅ PASS |
+| Risk Status | ✅ PASS |
+| TradingBotPanel removed from sidebar | ✅ PASS |
+| Command Center still works | ✅ PASS |
+
+### Completed
+- [x] Live Trading Dashboard implementation (Option D design)
+- [x] TradingView chart integration with proper exchange prefixes
+- [x] Consolidated trading functionality from sidebar to dedicated page
+- [x] Full testing verification
+
+### Remaining Tasks (From Handoff)
+- [ ] **P1**: Implement backend logic for "In-Trade Guidance" coaching alerts (currently client-side only)
+- [ ] **P1**: Add "Fear and Greed" market index based on scanner/market breadth data
+- [ ] **P2**: Fix missing API endpoints (`/api/scanner/status`, `/api/trading-bot/trades`, `/api/circuit-breaker/status`)
+- [ ] **P2**: Refactor fragile service initialization in `server.py`
+- [ ] **Future**: Restructure Trade Journal tabs
+- [ ] **Future**: Migrate in-memory order queue to MongoDB for persistence
+
