@@ -3209,3 +3209,30 @@ All 6 phases complete:
 - [ ] **Future**: Restructure Trade Journal tabs
 - [ ] **Future**: Migrate in-memory order queue to MongoDB for persistence
 
+
+---
+
+## Session Log - March 11, 2026 (AI Position Context Fix)
+
+### Bug Fix: AI Not Seeing Live IB Positions
+**Issue**: When user said "close TMC position please", the AI responded "I cannot close a non-existent position" even though TMC was visible in the Trading Dashboard.
+
+**Root Cause**: The query intent classifier wasn't recognizing "close TMC" as a position-related query. The keyword matching was too narrow.
+
+**Fix Applied**:
+1. Added keywords to `ai_assistant_service.py`:
+   - `position_keywords`: Added "close", "exit", "sell", "buy", ticker symbols (tmc, intc, tsla)
+   - `is_position_query`: Added same keywords for response validation
+
+2. Added patterns to `smart_context_engine.py`:
+   - `POSITION_REVIEW` intent patterns: Added regex for "close/exit/sell [symbol]"
+   - `POSITION_REVIEW` keywords: Added "close position", "exit position", specific ticker combinations
+
+3. Added debug logging to `_get_positions_with_data` to trace context building
+
+**Result**: AI now correctly identifies position queries and includes live IB positions in its context. Tested with "close TMC position please" - AI now responds with the actual TMC position data (10,000 shares @ $7.92).
+
+### Files Modified
+- `/app/backend/services/ai_assistant_service.py` - Extended keyword matching
+- `/app/backend/services/smart_context_engine.py` - Extended intent patterns and debug logging
+

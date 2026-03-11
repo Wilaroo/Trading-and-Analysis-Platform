@@ -238,8 +238,11 @@ class SmartContextEngine:
                 r"what (?:positions?|trades?) do i have",
                 r"(?:show|list|display) (?:my )?positions?",
                 r"(?:current|open) positions?",
+                r"close (?:my )?(?:position in |)([A-Z]{1,5})",
+                r"exit (?:my )?(?:position in |)([A-Z]{1,5})",
+                r"sell (?:my )?([A-Z]{1,5})",
             ],
-            "keywords": ["my position", "my trades", "portfolio", "p&l", "pnl", "holdings", "how am i doing", "unrealized", "show positions", "list positions", "current positions", "open positions", "what positions"],
+            "keywords": ["my position", "my trades", "portfolio", "p&l", "pnl", "holdings", "how am i doing", "unrealized", "show positions", "list positions", "current positions", "open positions", "what positions", "close position", "exit position", "close tmc", "close intc", "close tsla", "close bldp"],
             "weight": 1.0
         },
         QueryIntent.MARKET_OVERVIEW: {
@@ -577,7 +580,9 @@ class SmartContextEngine:
             # POSITIONS (IB first, then Alpaca fallback)
             # Use QueryPreprocessor to inject exact data and reduce hallucinations
             if sources["positions"]:
+                print(f"[SmartContext] Getting positions...")
                 positions_str, positions_data = await self._get_positions_with_data(services.get("alpaca"))
+                print(f"[SmartContext] Positions result: str={len(positions_str) if positions_str else 0} chars, data={len(positions_data) if positions_data else 0} items")
                 if positions_str and positions_data:
                     # Use preprocessor to create structured, exact data injection
                     _, data_injection = _query_preprocessor.preprocess_for_positions("", positions_data)
@@ -585,12 +590,15 @@ class SmartContextEngine:
                     context_parts.append(data_injection)
                     context_parts.append("")
                     context_data.positions = positions_data
+                    print(f"[SmartContext] Added {len(positions_data)} positions to context")
                 elif positions_str:
                     context_parts.append("=== YOUR POSITIONS (LIVE FROM IB GATEWAY) ===")
                     context_parts.append("The following are the user's REAL open positions from their brokerage account:")
                     context_parts.append(positions_str)
                     context_parts.append("")
                     context_data.positions = positions_data
+            else:
+                print(f"[SmartContext] Positions source not enabled")
             
             # PORTFOLIO RISK
             if sources["portfolio_risk"] and services.get("alpaca"):
