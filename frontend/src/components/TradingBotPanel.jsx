@@ -558,6 +558,69 @@ const DailyStatsSummary = ({ stats }) => {
   );
 };
 
+// Order Queue Status - Shows IB execution pipeline status
+const OrderQueueStatus = ({ queue }) => {
+  const { pending, executing, completed, pusher_active } = queue;
+  const hasActivity = pending > 0 || executing > 0;
+  
+  return (
+    <div className={`p-3 rounded-lg border ${
+      pusher_active 
+        ? 'bg-cyan-500/10 border-cyan-500/30' 
+        : 'bg-zinc-800/50 border-zinc-700/50'
+    }`}>
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <Activity className={`w-4 h-4 ${pusher_active ? 'text-cyan-400' : 'text-zinc-500'}`} />
+          <span className="text-sm font-medium text-white">IB Order Queue</span>
+        </div>
+        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+          pusher_active 
+            ? 'bg-cyan-500/20 text-cyan-400' 
+            : 'bg-zinc-600/30 text-zinc-500'
+        }`}>
+          {pusher_active ? 'CONNECTED' : 'OFFLINE'}
+        </span>
+      </div>
+      
+      <div className="grid grid-cols-3 gap-2 text-xs">
+        <div className="text-center p-2 bg-black/20 rounded">
+          <span className="text-zinc-500 block">Pending</span>
+          <p className={`font-mono text-lg ${pending > 0 ? 'text-yellow-400' : 'text-zinc-400'}`}>
+            {pending}
+          </p>
+        </div>
+        <div className="text-center p-2 bg-black/20 rounded">
+          <span className="text-zinc-500 block">Executing</span>
+          <p className={`font-mono text-lg ${executing > 0 ? 'text-cyan-400 animate-pulse' : 'text-zinc-400'}`}>
+            {executing}
+          </p>
+        </div>
+        <div className="text-center p-2 bg-black/20 rounded">
+          <span className="text-zinc-500 block">Filled</span>
+          <p className="font-mono text-lg text-emerald-400">{completed}</p>
+        </div>
+      </div>
+      
+      {hasActivity && (
+        <div className="mt-2 flex items-center gap-2 text-xs">
+          <RefreshCw className="w-3 h-3 text-cyan-400 animate-spin" />
+          <span className="text-cyan-400">
+            {executing > 0 ? 'Executing order via IB Gateway...' : 'Orders waiting for execution'}
+          </span>
+        </div>
+      )}
+      
+      {!pusher_active && (
+        <div className="mt-2 p-2 bg-yellow-500/10 rounded text-xs text-yellow-400 flex items-center gap-1">
+          <AlertTriangle className="w-3 h-3" />
+          Start ib_data_pusher.py locally for live execution
+        </div>
+      )}
+    </div>
+  );
+};
+
 // Main Component
 const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const [status, setStatus] = useState(null);
@@ -571,6 +634,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const [editingStrategy, setEditingStrategy] = useState(null);
   const [strategyForm, setStrategyForm] = useState({});
   const [liveSignals, setLiveSignals] = useState([]);
+  const [orderQueue, setOrderQueue] = useState({ pending: 0, executing: 0, completed: 0, pusher_active: false });
   
   const eventSourceRef = useRef(null);
   const signalSourceRef = useRef(null);
@@ -585,6 +649,25 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
       }
     } catch (err) {
       console.error('Failed to fetch bot status:', err);
+    }
+  }, []);
+  
+  // Fetch order queue status (IB execution queue)
+  const fetchOrderQueue = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/ib/orders/queue/status`);
+      const data = await res.json();
+      if (data.success) {
+        setOrderQueue({
+          pending: data.pending_count || 0,
+          executing: data.executing_count || 0,
+          completed: data.completed_count || 0,
+          pusher_active: data.pusher_active || false,
+          last_poll: data.last_poll
+        });
+      }
+    } catch (err) {
+      console.error('Failed to fetch order queue:', err);
     }
   }, []);
   
@@ -758,6 +841,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   useEffect(() => {
     fetchStatus();
     fetchTrades();
+    fetchOrderQueue();
     
     // Fetch live scanner signals
     const fetchSignals = async () => {
@@ -777,10 +861,17 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
       fetchStatus();
       fetchTrades();
       fetchSignals();
+      fetchOrderQueue();
     }, 20000);
     
-    return () => clearInterval(interval);
-  }, [fetchStatus, fetchTrades]);
+    // Poll order queue more frequently (every 3 seconds)
+    const orderQueueInterval = setInterval(fetchOrderQueue, 3000);
+    
+    return () => {
+      clearInterval(interval);
+      clearInterval(orderQueueInterval);
+    };
+  }, [fetchStatus, fetchTrades, fetchOrderQueue]);
   
   const isRunning = status?.running;
   const mode = status?.mode || 'confirmation';
@@ -801,6 +892,13 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
             }`}>
               {isRunning ? 'ACTIVE' : 'STOPPED'}
             </span>
+            {/* IB Connection indicator */}
+            {orderQueue.pusher_active && (
+              <span className="px-2 py-0.5 rounded text-xs font-medium bg-cyan-500/20 text-cyan-400 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                IB LIVE
+              </span>
+            )}
           </div>
           
           <div className="flex items-center gap-2">
@@ -1056,6 +1154,11 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
       {/* Daily Stats */}
       <div className="p-4 border-b border-zinc-700/50">
         <DailyStatsSummary stats={dailyStats} />
+      </div>
+      
+      {/* Order Queue Status */}
+      <div className="p-4 border-b border-zinc-700/50">
+        <OrderQueueStatus queue={orderQueue} />
       </div>
       
       {/* Live Signal Bubbles */}
