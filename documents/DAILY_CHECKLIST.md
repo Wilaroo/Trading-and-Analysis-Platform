@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://ib-live-dashboard.preview.emergentagent.com
+https://agent-orchestrator-36.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://ib-live-dashboard.preview.emergentagent.com
+https://agent-orchestrator-36.preview.emergentagent.com
 ```
