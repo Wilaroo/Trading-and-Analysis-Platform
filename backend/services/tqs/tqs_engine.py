@@ -58,6 +58,11 @@ class TQSResult:
     direction: str = "long"
     calculated_at: str = ""
     
+    # NEW: Trade style and timeframe info
+    trade_style: str = "trade_2_hold"
+    trade_timeframe: str = "Intraday Swing"
+    weights_used: Dict[str, float] = field(default_factory=dict)
+    
     def to_dict(self) -> Dict:
         return {
             "score": round(self.score, 1),
@@ -66,6 +71,10 @@ class TQSResult:
             "symbol": self.symbol,
             "setup_type": self.setup_type,
             "direction": self.direction,
+            # NEW: Trade style and timeframe
+            "trade_style": self.trade_style,
+            "trade_timeframe": self.trade_timeframe,
+            "weights_used": {k: f"{v*100:.0f}%" for k, v in self.weights_used.items()} if self.weights_used else None,
             "pillar_scores": {
                 "setup": round(self.setup_score.score, 1) if self.setup_score else 50,
                 "technical": round(self.technical_score.score, 1) if self.technical_score else 50,
@@ -93,6 +102,8 @@ class TQSResult:
             "score": round(self.score, 1),
             "grade": self.grade,
             "action": self.action,
+            "trade_style": self.trade_style,
+            "trade_timeframe": self.trade_timeframe,
             "pillar_scores": {
                 "setup": round(self.setup_score.score, 1) if self.setup_score else 50,
                 "technical": round(self.technical_score.score, 1) if self.technical_score else 50,
@@ -118,15 +129,60 @@ class TQSEngine:
     - Execution Quality: 15%
     
     Total: 100%
+    
+    TIMEFRAME-AWARE WEIGHTS:
+    The weights dynamically adjust based on trade style:
+    - Scalp (M2M): Technical (35%), Setup (30%), Context (20%), Execution (10%), Fundamental (5%)
+    - Swing (T2H): Setup (25%), Technical (25%), Context (20%), Fundamental (15%), Execution (15%)
+    - Investment (A+): Fundamental (30%), Setup (20%), Context (20%), Technical (15%), Execution (15%)
     """
     
-    # Pillar weights
+    # Default pillar weights (for T2H - balanced)
     WEIGHTS = {
         "setup": 0.25,
         "technical": 0.25,
         "fundamental": 0.15,
         "context": 0.20,
         "execution": 0.15
+    }
+    
+    # Timeframe-specific weights
+    STYLE_WEIGHTS = {
+        "move_2_move": {  # Scalp - prioritize technicals, de-prioritize fundamentals
+            "setup": 0.30,
+            "technical": 0.35,
+            "fundamental": 0.05,
+            "context": 0.20,
+            "execution": 0.10
+        },
+        "trade_2_hold": {  # Intraday swing - balanced
+            "setup": 0.25,
+            "technical": 0.25,
+            "fundamental": 0.15,
+            "context": 0.20,
+            "execution": 0.15
+        },
+        "a_plus": {  # Investment/multi-day - prioritize fundamentals
+            "setup": 0.20,
+            "technical": 0.15,
+            "fundamental": 0.30,
+            "context": 0.20,
+            "execution": 0.15
+        },
+        "swing": {  # Multi-day swing (alias)
+            "setup": 0.20,
+            "technical": 0.20,
+            "fundamental": 0.25,
+            "context": 0.20,
+            "execution": 0.15
+        },
+        "investment": {  # Long-term (alias)
+            "setup": 0.15,
+            "technical": 0.10,
+            "fundamental": 0.40,
+            "context": 0.20,
+            "execution": 0.15
+        }
     }
     
     # Action thresholds
@@ -196,6 +252,7 @@ class TQSEngine:
         symbol: str,
         setup_type: str,
         direction: str = "long",
+        trade_style: str = None,  # NEW: move_2_move, trade_2_hold, a_plus, swing, investment
         # Optional pre-fetched data for performance
         tape_score: float = 0.0,
         tape_confirmation: bool = False,
@@ -213,17 +270,31 @@ class TQSEngine:
         """
         Calculate complete Trade Quality Score for a trade idea.
         
+        TIMEFRAME-AWARE SCORING:
+        - trade_style determines pillar weights:
+          * move_2_move (scalp): Technical 35%, Setup 30%, Context 20%, Execution 10%, Fundamental 5%
+          * trade_2_hold (swing): Setup 25%, Technical 25%, Context 20%, Fundamental 15%, Execution 15%
+          * a_plus/investment: Fundamental 30-40%, Setup 15-20%, Context 20%, Technical 10-15%
+        
         Returns a TQSResult with:
         - Overall score (0-100) and grade (A/B/C/D/F)
         - Action recommendation (STRONG_BUY/BUY/HOLD/AVOID/STRONG_AVOID)
         - Detailed breakdown by pillar
         - Key factors, concerns, and warnings
+        - trade_style used for weight calculation
         """
         result = TQSResult()
         result.symbol = symbol
         result.setup_type = setup_type
         result.direction = direction
         result.calculated_at = datetime.now(timezone.utc).isoformat()
+        
+        # Determine trade style from setup config if not provided
+        if not trade_style:
+            trade_style = self._infer_trade_style(setup_type)
+        
+        # Get weights for this trade style
+        weights = self._get_weights_for_style(trade_style)
         
         try:
             # Calculate all 5 pillar scores (could parallelize these)
@@ -276,14 +347,28 @@ class TQSEngine:
             )
             result.pillar_grades["execution"] = result.execution_score.grade
             
-            # Calculate weighted total
+            # Calculate weighted total using TIMEFRAME-AWARE WEIGHTS
             result.score = (
-                result.setup_score.score * self.WEIGHTS["setup"] +
-                result.technical_score.score * self.WEIGHTS["technical"] +
-                result.fundamental_score.score * self.WEIGHTS["fundamental"] +
-                result.context_score.score * self.WEIGHTS["context"] +
-                result.execution_score.score * self.WEIGHTS["execution"]
+                result.setup_score.score * weights["setup"] +
+                result.technical_score.score * weights["technical"] +
+                result.fundamental_score.score * weights["fundamental"] +
+                result.context_score.score * weights["context"] +
+                result.execution_score.score * weights["execution"]
             )
+            
+            # Store trade style and weights used for transparency
+            result.trade_style = trade_style
+            result.weights_used = weights
+            
+            # Map trade style to human-readable timeframe
+            timeframe_map = {
+                "move_2_move": "Scalp (minutes to 1 hour)",
+                "trade_2_hold": "Intraday Swing (1-6 hours)",
+                "a_plus": "Multi-day (1-5 days)",
+                "swing": "Swing Trade (2-10 days)",
+                "investment": "Position (weeks to months)"
+            }
+            result.trade_timeframe = timeframe_map.get(trade_style, "Intraday")
             
             # Assign overall grade
             if result.score >= 85:
@@ -425,6 +510,102 @@ class TQSEngine:
                 "sizing": "Do not trade",
                 "guidance": "Poor setup. Do not trade. Wait for better opportunities."
             }
+    
+    def _infer_trade_style(self, setup_type: str) -> str:
+        """
+        Infer trade style from setup type using SMB setup configuration.
+        
+        Returns: move_2_move, trade_2_hold, a_plus, swing, or investment
+        """
+        try:
+            from services.smb_integration import get_setup_config, TradeStyle
+            
+            config = get_setup_config(setup_type)
+            if config:
+                # Map TradeStyle enum to string
+                style_map = {
+                    TradeStyle.MOVE_2_MOVE: "move_2_move",
+                    TradeStyle.TRADE_2_HOLD: "trade_2_hold",
+                    TradeStyle.A_PLUS: "a_plus"
+                }
+                return style_map.get(config.default_style, "trade_2_hold")
+        except Exception as e:
+            logger.warning(f"Could not infer trade style for {setup_type}: {e}")
+        
+        # Fallback: infer from setup name
+        setup_lower = setup_type.lower()
+        if any(kw in setup_lower for kw in ["scalp", "m2m", "quick", "9_ema"]):
+            return "move_2_move"
+        elif any(kw in setup_lower for kw in ["swing", "investment", "position"]):
+            return "swing"
+        elif any(kw in setup_lower for kw in ["a_plus", "conviction", "hold"]):
+            return "a_plus"
+        
+        # Default to balanced swing trade
+        return "trade_2_hold"
+    
+    def _get_weights_for_style(self, trade_style: str) -> Dict[str, float]:
+        """
+        Get pillar weights for a given trade style.
+        
+        Scalp (M2M): Technical & Setup heavy, Fundamental minimal
+        Swing (T2H): Balanced across all pillars
+        Investment (A+): Fundamental heavy, Technical lighter
+        """
+        # Normalize style name
+        style_key = trade_style.lower().replace("-", "_").replace(" ", "_")
+        
+        # Return style-specific weights or default
+        return self.STYLE_WEIGHTS.get(style_key, self.WEIGHTS)
+    
+    def get_style_weight_explanation(self, trade_style: str) -> Dict[str, Any]:
+        """
+        Get explanation of why certain weights are used for this trade style.
+        Useful for bot trade explanations.
+        """
+        weights = self._get_weights_for_style(trade_style)
+        
+        explanations = {
+            "move_2_move": {
+                "timeframe": "Scalp (minutes to 1 hour)",
+                "description": "Quick in-and-out trade capturing the next immediate move",
+                "rationale": "Technical timing and setup quality matter most. Fundamentals rarely move the needle on a 15-minute scalp.",
+                "key_factors": ["RVOL", "Tape reading", "Level 2", "Short-term technicals", "Setup pattern"]
+            },
+            "trade_2_hold": {
+                "timeframe": "Intraday Swing (1-6 hours)",
+                "description": "Hold until a clear Reason2Sell trigger",
+                "rationale": "Balanced approach - technicals for entry, fundamentals for thesis, context for environment.",
+                "key_factors": ["Technical levels", "Catalyst strength", "Market regime", "Sector alignment"]
+            },
+            "a_plus": {
+                "timeframe": "Multi-day (1-5 days)",
+                "description": "Max conviction trade with all 5 variables aligned",
+                "rationale": "Fundamental story and higher timeframe technicals drive multi-day moves.",
+                "key_factors": ["Fundamental catalyst", "Institutional interest", "Higher TF trend", "Sector rotation"]
+            },
+            "swing": {
+                "timeframe": "Swing Trade (2-10 days)",
+                "description": "Catch a multi-day trend or sector move",
+                "rationale": "Fundamentals and macro context become increasingly important over days.",
+                "key_factors": ["Earnings/catalyst", "Sector momentum", "Weekly chart levels", "Float/SI"]
+            },
+            "investment": {
+                "timeframe": "Position/Investment (weeks to months)",
+                "description": "Long-term position based on fundamental value",
+                "rationale": "Fundamentals dominate. Technical entry matters less than thesis quality.",
+                "key_factors": ["Valuation", "Growth metrics", "Institutional ownership", "Industry trends"]
+            }
+        }
+        
+        style_key = trade_style.lower().replace("-", "_").replace(" ", "_")
+        
+        return {
+            "trade_style": trade_style,
+            "weights": weights,
+            "weight_percentages": {k: f"{v*100:.0f}%" for k, v in weights.items()},
+            **explanations.get(style_key, explanations["trade_2_hold"])
+        }
 
 
 # Singleton
