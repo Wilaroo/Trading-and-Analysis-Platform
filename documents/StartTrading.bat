@@ -15,7 +15,7 @@ echo.
 set GITHUB_RAW=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents
 
 :: Cloud platform URL
-set CLOUD_URL=https://agent-orchestrator-36.preview.emergentagent.com
+set CLOUD_URL=https://multi-agent-trader-1.preview.emergentagent.com
 
 :: Script directory (where this bat file is located)
 set SCRIPT_DIR=%~dp0
