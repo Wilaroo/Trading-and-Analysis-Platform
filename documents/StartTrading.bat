@@ -121,25 +121,29 @@ if defined OLLAMA_MODEL_OVERRIDE (
 )
 
 :: Auto-select based on VRAM (use GOTO to break after first match)
-:: Note: Using qwen2.5:7b for 16GB+ because deepseek-r1:8b is too heavy with other apps running
+:: Default to gpt-oss:120b-cloud (via ollama_http proxy) for best accuracy
+:: Local fallback models based on VRAM
 if %GPU_VRAM% GEQ 16000 (
-    set OLLAMA_MODEL=qwen2.5:7b
-    echo       16GB+ VRAM - Using qwen2.5:7b
+    set OLLAMA_MODEL=gpt-oss:120b-cloud
+    echo       16GB+ VRAM - Using gpt-oss:120b-cloud (accurate)
+    echo       Fallback: llama3:8b (local)
     goto model_selected
 )
 if %GPU_VRAM% GEQ 12000 (
-    set OLLAMA_MODEL=qwen2.5:7b
-    echo       12GB+ VRAM - Using qwen2.5:7b
+    set OLLAMA_MODEL=gpt-oss:120b-cloud
+    echo       12GB+ VRAM - Using gpt-oss:120b-cloud (accurate)
+    echo       Fallback: llama3:8b (local)
     goto model_selected
 )
 if %GPU_VRAM% GEQ 8000 (
-    set OLLAMA_MODEL=qwen2.5:7b
-    echo       8GB+ VRAM - Using qwen2.5:7b
+    set OLLAMA_MODEL=gpt-oss:120b-cloud
+    echo       8GB+ VRAM - Using gpt-oss:120b-cloud (accurate)
+    echo       Fallback: qwen2.5:7b (local)
     goto model_selected
 )
 if %GPU_VRAM% GEQ 6000 (
-    set OLLAMA_MODEL=gemma3:4b
-    echo       6GB+ VRAM - Using gemma3:4b
+    set OLLAMA_MODEL=llama3:8b
+    echo       6GB+ VRAM - Using llama3:8b
     goto model_selected
 )
 if %GPU_VRAM% GEQ 4000 (
