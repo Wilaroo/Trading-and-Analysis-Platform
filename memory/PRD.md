@@ -5,6 +5,27 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### Phase 3.5 Complete: High-TQS Alert UI Highlighting (March 11, 2026)
+**UI Feature:** Scanner alerts now display TQS scores with special styling for high-quality setups (TQS >= 70).
+
+**LiveAlertsPanel Enhancements:**
+- TQS Score/Grade display inline (e.g., "TQS: 72 (B+)")
+- Grade colors: A=emerald, B=blue, C=yellow, D=orange, F=red
+- High-TQS alerts (>=70) get:
+  - Emerald ring glow: `ring-2 ring-emerald-500/50 shadow-lg shadow-emerald-500/20`
+  - "HIGH QUALITY" badge with Zap icon and pulse animation
+  - Key Factors panel showing top contributing factors
+- Trade timeframe displayed (e.g., "Scalp (minutes to 1 hour)")
+
+**AICommandPanel Pipeline Cards:**
+- TQS score with color coding (emerald >=70, yellow >=50, orange <50)
+- "HQ" badge with Zap icon for high-quality setups
+
+**Testing Results (Iteration 67):**
+- 8/8 TQS UI features verified in code review
+- 100% UI testing pass (app loads, navigation, trade cards)
+- Live TQS display pending real-time alert generation
+
 ### Phase 3.4 Complete: Timeframe-Aware TQS & Scanner Integration (March 11, 2026)
 **Major Feature:** TQS scoring now weights pillars based on trade timeframe. Scanner alerts include TQS with high-quality highlighting.
 
