@@ -1438,9 +1438,9 @@ class EnhancedBackgroundScanner:
         Returns None if IB data not available.
         """
         try:
-            from routers.ib import get_pushed_quotes, is_pusher_connected
-            if is_pusher_connected():
-                quotes = get_pushed_quotes()
+            import routers.ib as ib_module
+            if ib_module.is_pusher_connected():
+                quotes = ib_module.get_pushed_quotes()
                 symbol_upper = symbol.upper()
                 if symbol_upper in quotes:
                     q = quotes[symbol_upper]
@@ -1465,8 +1465,8 @@ class EnhancedBackgroundScanner:
     def _is_ib_connected(self) -> bool:
         """Check if IB pusher is connected (non-async)."""
         try:
-            from routers.ib import is_pusher_connected
-            return is_pusher_connected()
+            import routers.ib as ib_module
+            return ib_module.is_pusher_connected()
         except Exception:
             return False
     

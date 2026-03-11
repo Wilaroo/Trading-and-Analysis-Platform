@@ -1429,6 +1429,7 @@ DECISION: {score_result['trade_or_skip']}
             # Store context data for validation after LLM response
             self._last_context_data = context_data
             self._last_intent = intent_result
+            self._last_smart_context = smart_context  # Store for position queries
             
             # Add base system prompt (use class attribute)
             base_prompt = self.SYSTEM_PROMPT
@@ -2175,8 +2176,22 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                         model = self.llm_clients[LLMProvider.OLLAMA].get("model", "qwen2.5:7b")
                     
                     # Build context for proxy - allow more context for position queries
-                    max_context = 6000 if complexity == "deep" else 4000
-                    truncated_context = context[:max_context] if len(context) > max_context else context
+                    # For position queries, use smart_context directly which has the IB data
+                    # For other queries, use the full context but with higher limit
+                    is_position_query = any(kw in messages[-1].get("content", "").lower() 
+                                           for kw in ["position", "holdings", "shares", "average cost", "p&l"])
+                    
+                    if is_position_query and hasattr(self, '_last_context_data') and self._last_context_data:
+                        # For position queries, use just the smart context with positions
+                        # This avoids truncating the position data
+                        position_context = getattr(self, '_last_smart_context', context)
+                        if len(position_context) < 3000:  # Smart context is typically small
+                            truncated_context = position_context
+                        else:
+                            truncated_context = context[:8000]  # Allow more for position queries
+                    else:
+                        max_context = 8000 if complexity == "deep" else 6000
+                        truncated_context = context[:max_context] if len(context) > max_context else context
                     
                     proxy_messages = [
                         {"role": "system", "content": f"""You are an expert trading assistant with REAL-TIME market data.
@@ -2305,12 +2320,16 @@ Be concise and reference the data above."""},
                 truncated_context = context[:max_context] if len(context) > max_context else context
                 
                 ollama_system = f"""You are an expert trading assistant with REAL-TIME market data access.
-IMPORTANT: The market data below is LIVE and CURRENT - use it to answer questions!
-Do NOT say you don't have access to real-time data - YOU DO, it's provided below.
+
+CRITICAL INSTRUCTIONS:
+1. The data below is LIVE and CURRENT from the user's ACTUAL brokerage account
+2. Report ONLY the EXACT values shown - do NOT invent, estimate, or hallucinate ANY numbers
+3. If you see "TMC: LONG 10,000 shares @ $7.92 avg" - report EXACTLY those values
+4. NEVER make up share counts, prices, or P&L values
 
 {truncated_context}
 
-Be concise, direct, and reference the specific data above when answering."""
+REMEMBER: Use ONLY the exact data above. Any invented numbers will be WRONG."""
                 
                 ollama_messages = [{"role": "system", "content": ollama_system}]
                 ollama_messages.extend(messages[-3:] if len(messages) > 3 else messages)
@@ -2321,7 +2340,7 @@ Be concise, direct, and reference the specific data above when answering."""
                     "stream": False,
                     "options": {
                         "num_ctx": 2048,  # Fixed at 2048 for 4GB VRAM stability
-                        "temperature": 0.7,
+                        "temperature": 0.3,  # Lower temp to reduce hallucination
                         "num_predict": 512  # Limit output tokens
                     }
                 }
@@ -2528,7 +2547,9 @@ Be concise, direct, and reference the specific data above when answering."""
                 "earnings play", "swing trade", "position size", "thesis",
                 "research", "news", "what's happening", "whats happening", "latest",
                 "market today", "market doing", "how is the market", "hows the market",
-                "market overview", "market conditions", "happening in the market"
+                "market overview", "market conditions", "happening in the market",
+                "my positions", "positions", "holdings", "average cost", "avg cost",
+                "p&l", "profit", "loss", "unrealized", "share count", "shares"
             ]
             complexity = "deep" if any(kw in msg_lower for kw in deep_keywords) else "standard"
             
