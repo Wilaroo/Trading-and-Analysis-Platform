@@ -2,14 +2,16 @@ import React, { useState } from 'react';
 import LearningIntelligenceHub from '../LearningIntelligenceHub';
 import BacktestPanel from '../BacktestPanel';
 import ShadowModePanel from '../ShadowModePanel';
+import MarketScannerPanel from '../MarketScannerPanel';
 import { Card } from '../shared/UIComponents';
-import { Brain, TestTubes, Layers } from 'lucide-react';
+import { Brain, TestTubes, Layers, Search } from 'lucide-react';
 
 /**
  * Analytics Tab - Learning Intelligence Hub
  * 
  * Restructured to show:
  * - Intelligence Hub (default): Unified view of all learning insights
+ * - Market Scanner: Full US market strategy scanning
  * - Backtest: Deep-dive into strategy backtesting
  * - Shadow Mode: Paper trading filter validation
  * 
@@ -21,6 +23,7 @@ const AnalyticsTab = () => {
   
   const subTabs = [
     { id: 'hub', label: 'Intelligence Hub', icon: Brain, description: 'Unified learning insights' },
+    { id: 'scanner', label: 'Market Scanner', icon: Search, description: 'Full market scanning' },
     { id: 'backtest', label: 'Backtest', icon: TestTubes, description: 'Strategy backtesting' },
     { id: 'shadow', label: 'Shadow Mode', icon: Layers, description: 'Paper trading filters' }
   ];
@@ -53,6 +56,10 @@ const AnalyticsTab = () => {
       {/* Sub-Tab Content */}
       {activeSubTab === 'hub' && (
         <LearningIntelligenceHub />
+      )}
+      
+      {activeSubTab === 'scanner' && (
+        <MarketScannerPanel />
       )}
       
       {activeSubTab === 'backtest' && (
