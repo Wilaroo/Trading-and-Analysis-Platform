@@ -71,6 +71,7 @@ from routers.ev_tracking import router as ev_tracking_router
 from routers.smb_router import router as smb_router
 from routers.journal_router import router as journal_router
 from routers.agents import router as agents_router, init_agents_router
+from routers.advanced_backtest_router import router as advanced_backtest_router, init_advanced_backtest_router
 from services.market_intel_service import get_market_intel_service
 from services.learning_loop_service import get_learning_loop_service, init_learning_loop_service
 from services.trade_context_service import get_trade_context_service, init_trade_context_service
@@ -296,6 +297,7 @@ app.include_router(slow_learning_router)
 app.include_router(scheduler_router)
 app.include_router(circuit_breaker_router)
 app.include_router(agents_router)  # Multi-agent system
+app.include_router(advanced_backtest_router)  # Advanced backtesting system
 
 # Collections
 strategies_col = db["strategies"]
@@ -498,16 +500,28 @@ try:
     # Initialize Shadow Mode Service
     shadow_mode_service = init_shadow_mode_service(db=db, alpaca_service=alpaca_service)
     
+    # Initialize Advanced Backtest Engine (new!)
+    from services.slow_learning.advanced_backtest_engine import init_advanced_backtest_engine
+    advanced_backtest_engine = init_advanced_backtest_engine(
+        db=db,
+        historical_data_service=historical_data_service,
+        alpaca_service=alpaca_service,
+        tqs_engine=get_service_optional('tqs_engine')
+    )
+    init_advanced_backtest_router(advanced_backtest_engine)
+    
     # Register Slow Learning services
     register_service('shadow_mode_service', shadow_mode_service)
     register_service('historical_data_service', historical_data_service)
     register_service('backtest_engine', backtest_engine)
+    register_service('advanced_backtest_engine', advanced_backtest_engine)
     
     print("Slow Learning (Phase 6) initialized")
     print("  - Historical Data Service: Alpaca data download and storage")
     print("  - Backtest Engine: Strategy backtesting on historical data")
+    print("  - Advanced Backtest Engine: Multi-strategy, Walk-forward, Monte Carlo")
     print("  - Shadow Mode: Paper trading filter validation")
-    print("  - Endpoints: /api/slow-learning/*")
+    print("  - Endpoints: /api/slow-learning/*, /api/backtest/*")
 except Exception as e:
     print(f"Slow Learning initialization deferred: {e}")
     historical_data_service = None

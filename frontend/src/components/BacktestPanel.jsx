@@ -14,9 +14,14 @@ import {
   ChevronDown,
   ChevronUp,
   Activity,
-  Percent
+  Percent,
+  Sparkles
 } from 'lucide-react';
 import api from '../utils/api';
+import AdvancedBacktestPanel from './AdvancedBacktestPanel';
+
+// Toggle to use advanced backtesting
+const USE_ADVANCED_BACKTEST = true;
 
 // Card component
 const Card = ({ children, className = '' }) => (
@@ -410,4 +415,15 @@ const BacktestPanel = () => {
   );
 };
 
-export default BacktestPanel;
+// Export the appropriate panel based on feature flag
+const BacktestPanelWrapper = (props) => {
+  if (USE_ADVANCED_BACKTEST) {
+    return <AdvancedBacktestPanel {...props} />;
+  }
+  return <LegacyBacktestPanel {...props} />;
+};
+
+// Rename original to Legacy
+const LegacyBacktestPanel = BacktestPanel;
+
+export default BacktestPanelWrapper;

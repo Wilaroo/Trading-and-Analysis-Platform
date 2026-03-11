@@ -93,6 +93,53 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 - `/api/learning/loop/profile` - Trader profile
 - `/api/learning/recommendations` - AI recommendations
 - `/api/medium-learning/edge-decay/alerts` - Edge health
+
+### Phase 4.0 Complete: Advanced Backtesting System (March 11, 2026)
+**Feature:** Comprehensive backtesting with multi-strategy, walk-forward, Monte Carlo
+
+**Backend (`/app/backend/services/slow_learning/advanced_backtest_engine.py`):**
+- **Multi-Strategy Backtesting**: Compare multiple strategies on multiple symbols
+- **Walk-Forward Optimization**: Rolling in-sample/out-of-sample testing to detect overfitting
+- **Monte Carlo Simulation**: 10,000+ trade shuffles to understand outcome distributions
+- **Custom Date Range**: Filter by date, regime, day of week
+- **Data Caching**: MongoDB caching for fast repeat runs
+- **Background Jobs**: Long-running backtests don't block the UI
+
+**API Endpoints (`/app/backend/routers/advanced_backtest_router.py`):**
+- `POST /api/backtest/quick` - Fast single-strategy test
+- `POST /api/backtest/multi-strategy` - Compare strategies
+- `POST /api/backtest/walk-forward` - Robustness testing
+- `POST /api/backtest/monte-carlo` - Risk distribution analysis
+- `GET /api/backtest/job/{id}` - Background job status
+- `GET /api/backtest/results` - List recent results
+- `GET /api/backtest/strategy-templates` - Pre-built strategy configs
+
+**Frontend (`/app/frontend/src/components/AdvancedBacktestPanel.jsx`):**
+- 5-tab interface: Quick Test, Multi-Strategy, Walk-Forward, Monte Carlo, Results
+- 6 strategy templates: ORB Conservative/Aggressive, VWAP Bounce, Gap & Go, Breakout Swing, Momentum Scalp
+- Real-time progress for background jobs
+- Result visualization with key metrics
+
+**Strategy Templates:**
+| Template | Setup Type | Stop | Target | Hold |
+|----------|-----------|------|--------|------|
+| ORB Conservative | ORB | 1.5% | 3% | 10 bars |
+| ORB Aggressive | ORB | 2% | 5% | 20 bars |
+| VWAP Bounce | VWAP_BOUNCE | 1% | 2% | 5 bars |
+| Gap and Go | GAP_AND_GO | 2.5% | 6% | 15 bars |
+| Breakout Swing | BREAKOUT | 3% | 8% | 40 bars |
+| Momentum Scalp | MOMENTUM | 1% | 1.5% | 3 bars |
+
+**Output Metrics:**
+- Win Rate, Profit Factor, Sharpe Ratio, Max Drawdown
+- R-Multiple tracking, Expectancy
+- Equity curves, Trade logs
+- Walk-forward efficiency ratio
+- Monte Carlo percentile distributions (5th, 25th, 50th, 75th, 95th)
+
+**Requires:** Alpaca API connection for historical data (already integrated)
+
+
 - `/api/medium-learning/calibration/current` - Calibration status
 
 **Next Priority:** Backtesting system enhancement (user-requested)
