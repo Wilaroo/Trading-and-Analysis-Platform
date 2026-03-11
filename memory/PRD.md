@@ -5,6 +5,32 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### Phase 3.6 Complete: Trade Style Renaming for Clarity (March 11, 2026)
+**Refactor:** Renamed trade styles to eliminate confusion between "A+" as grade vs style.
+
+**Old → New Names:**
+| Old Name | New Name | Timeframe |
+|----------|----------|-----------|
+| `move_2_move` | `scalp` | Minutes to 1 hour |
+| `trade_2_hold` | `intraday` | 1-6 hours |
+| `a_plus` | `multi_day` | 1-5 days |
+
+**Key Clarification:**
+- **"A+"** now ONLY refers to quality GRADE (like A+, A, B, C, D, F)
+- A scalp can be A+ quality, an investment can be C quality
+- Style = timeframe, Grade = quality
+
+**Backwards Compatibility:**
+- Old names (`move_2_move`, `trade_2_hold`, `a_plus`) still work via aliases
+- Existing code using old names will continue to function
+- Gradually deprecate old names over time
+
+**Testing Results (Iteration 68):**
+- 22/22 tests passed (100%)
+- New names work: scalp, intraday, multi_day, swing, position
+- Old names still work: move_2_move, trade_2_hold, a_plus
+- API accepts both old and new names
+
 ### Phase 3.5 Complete: High-TQS Alert UI Highlighting (March 11, 2026)
 **UI Feature:** Scanner alerts now display TQS scores with special styling for high-quality setups (TQS >= 70).
 
