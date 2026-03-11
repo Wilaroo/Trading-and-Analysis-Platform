@@ -45,6 +45,27 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 **To Deploy:** Add 3 lines to `server.py` and import widget in dashboard.
 
 
+### Phase 3.8 Complete: Service Registry & Deprecations (March 11, 2026)
+**Refactor:** Replaced fragile `globals()` pattern with proper service registry.
+
+**Changes Made:**
+- Created `/app/backend/services/service_registry.py` - Singleton service container
+- Replaced 15+ `globals().get()` calls in `server.py` with `get_service_optional()`
+- Services now registered via `register_service('name', instance)`
+- Marked `/api/assistant/chat` as DEPRECATED (use `/api/agents/chat` instead)
+
+**Why This Matters:**
+- Cleaner dependency injection
+- Easier testing (can mock services)
+- Clear service availability checks
+- No more fragile string lookups in globals dict
+
+**NOT Removed (Still in Use):**
+- `ai_assistant_service.py` - Still has active endpoints: `/check-ollama`, `/coach/*`, `/accuracy-stats`, `/history/*`, `/sessions`
+- `smart_context_engine.py` - Still used by assistant for response validation
+
+
+
 
 ### Phase 3.6 Complete: Trade Style Renaming for Clarity (March 11, 2026)
 **Refactor:** Renamed trade styles to eliminate confusion between "A+" as grade vs style.
