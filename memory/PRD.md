@@ -5,6 +5,49 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### Phase 3.2 Complete: Learning System Consolidation (March 11, 2026)
+**Consolidation:** Removed duplicate learning_layer.py and integrated Coach Agent with existing Three-Speed Learning Architecture.
+
+**Changes Made:**
+- ✅ Deleted `/app/backend/agents/learning_layer.py` (was duplicate of existing services)
+- ✅ Coach Agent now uses `LearningContextProvider.build_full_learning_context()` for personalized insights
+- ✅ Coach Agent now uses `LearningLoopService.get_trader_profile()` for trader profile data
+- ✅ Updated `orchestrator.py` to pass `learning_context_provider` and `learning_loop_service` to Coach
+- ✅ Updated `server.py` to include learning services in agent initialization
+
+**Three-Speed Learning Architecture (Existing - Now Fully Integrated):**
+```
+Fast Learning (Real-time):
+├── LearningLoopService: Trade tracking, context capture, outcome recording
+├── ExecutionTrackerService: Execution quality metrics
+└── TradeContextService: Context snapshots at trade time
+
+Medium Learning (End-of-Day):
+├── CalibrationService: Threshold adjustments
+├── ContextPerformanceService: Win rates by setup+regime+time
+├── EdgeDecayService: Detects when setups stop working
+├── ConfirmationValidatorService: Signal effectiveness
+└── PlaybookPerformanceService: Playbook effectiveness
+
+Slow Learning (Weekly):
+├── BacktestEngine: Strategy backtesting
+├── ShadowModeService: Paper trade validation
+└── HistoricalDataService: Historical data management
+
+Provider Layer:
+└── LearningContextProvider: Aggregates all insights for AI prompts
+    ├── TQS scores
+    ├── Edge decay warnings
+    ├── Calibration recommendations
+    ├── Confirmation guidance
+    └── RAG (similar past trades)
+```
+
+**Testing Results (Iteration 64):**
+- 6/6 backend tests passed (100%)
+- 2 API mismatches fixed by testing agent
+- Coach agent gracefully handles null learning services
+
 ### Phase 3.1 Complete: Analyst Agent & Learning Layer (March 11, 2026)
 **New Features:** Added Analyst agent for market analysis and Learning Layer for personalized coaching.
 
