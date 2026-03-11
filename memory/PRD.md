@@ -5,6 +5,25 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### Phase 3.3 Complete: TQS Integration & Learning Verification (March 11, 2026)
+**New Features:** TQS (Trade Quality Score) integrated with Analyst agent. Auto-recording verified.
+
+**TQS in Analyst Agent:**
+- Analyst now shows TQS score (0-100) with grade (A/B/C/D/F) and action (STRONG_BUY/BUY/HOLD/AVOID)
+- All 5 pillars displayed: Setup, Technical, Fundamental, Context, Execution
+- Key factors and concerns highlighted in analysis
+- Example output: "TQS Score: 59/100 (C+) - HOLD"
+
+**Auto-Recording Trade Outcomes (Verified):**
+- Already implemented in `trading_bot_service.py` line 2324-2347
+- Wired in `server.py` line 362: `trading_bot._learning_loop = learning_loop_service`
+- When trade closes → `record_trade_outcome()` called → stored in `trade_outcomes` collection
+
+**Testing Results (Iteration 65):**
+- 9/11 tests passed (82%)
+- 4 bugs fixed: TechnicalSnapshot.get() → getattr() in 5 files
+- TQS scores appearing in analyst responses for NVDA, AAPL, TSLA
+
 ### Phase 3.2 Complete: Learning System Consolidation (March 11, 2026)
 **Consolidation:** Removed duplicate learning_layer.py and integrated Coach Agent with existing Three-Speed Learning Architecture.
 
