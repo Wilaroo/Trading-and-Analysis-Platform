@@ -12,6 +12,7 @@ from agents.llm_provider import LLMProvider, get_llm_provider, init_llm_provider
 from agents.router_agent import RouterAgent, Intent
 from agents.trade_executor_agent import TradeExecutorAgent
 from agents.coach_agent import CoachAgent
+from agents.analyst_agent import AnalystAgent
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class AgentOrchestrator:
     - Router: Classifies intent
     - TradeExecutor: Executes trades safely
     - Coach: Provides personalized guidance
-    - Analyst: Market analysis (to be added)
+    - Analyst: Market analysis and stock research
     - Chat: General conversation (to be added)
     """
     
@@ -50,12 +51,14 @@ class AgentOrchestrator:
         self.router = RouterAgent(self.llm)
         self.trade_executor = TradeExecutorAgent(self.llm)
         self.coach = CoachAgent(self.llm)
+        self.analyst = AnalystAgent(self.llm)
         
         # Agent registry
         self._agents = {
             AgentType.ROUTER: self.router,
             AgentType.TRADE_EXECUTOR: self.trade_executor,
             AgentType.COACH: self.coach,
+            AgentType.ANALYST: self.analyst,
         }
         
         # Session context for multi-turn conversations
@@ -64,7 +67,7 @@ class AgentOrchestrator:
         # Services (injected)
         self._services: Dict[str, Any] = {}
         
-        logger.info("AgentOrchestrator initialized")
+        logger.info("AgentOrchestrator initialized with Analyst agent")
     
     def inject_services(self, services: Dict[str, Any]):
         """
@@ -94,6 +97,16 @@ class AgentOrchestrator:
             "db": services.get("db"),
             "performance_analyzer": services.get("performance_analyzer"),
             "learning_service": services.get("learning_service")
+        })
+        
+        # Inject into analyst (needs market data services)
+        self.analyst.inject_services({
+            "ib_router": services.get("ib_router"),
+            "scanner": services.get("scanner"),
+            "technical_service": services.get("technical_service"),
+            "sector_service": services.get("sector_service"),
+            "sentiment_service": services.get("sentiment_service"),
+            "db": services.get("db")
         })
         
         logger.info(f"Services injected: {list(services.keys())}")
@@ -180,9 +193,33 @@ class AgentOrchestrator:
             # Clear any pending trade confirmation
             context["awaiting_confirmation"] = False
             context["pending_trade"] = None
+        
+        elif intent == Intent.ANALYSIS:
+            # Route to analyst agent for market analysis
+            agent_response = await self.analyst.process({
+                "message": message,
+                "symbol": symbols[0] if symbols else None,
+                "symbols": symbols,
+                "analysis_type": "full"
+            })
+            
+            context["awaiting_confirmation"] = False
+            context["pending_trade"] = None
+        
+        elif intent == Intent.MARKET_INFO:
+            # Quick quote/price info - use analyst with quick mode
+            agent_response = await self.analyst.process({
+                "message": message,
+                "symbol": symbols[0] if symbols else None,
+                "symbols": symbols,
+                "analysis_type": "quick"
+            })
+            
+            context["awaiting_confirmation"] = False
+            context["pending_trade"] = None
             
         else:
-            # Default to coach for now (analyst and chat agents TBD)
+            # Default to coach for general conversation
             agent_response = await self.coach.process({
                 "message": message,
                 "query_type": "general",
@@ -248,6 +285,7 @@ class AgentOrchestrator:
             "router": self.router.get_metrics(),
             "trade_executor": self.trade_executor.get_metrics(),
             "coach": self.coach.get_metrics(),
+            "analyst": self.analyst.get_metrics(),
         }
     
     def clear_session(self, session_id: str):

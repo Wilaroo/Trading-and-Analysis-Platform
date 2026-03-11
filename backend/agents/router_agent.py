@@ -73,16 +73,16 @@ class RouterAgent(BaseAgent):
             r"(?:what|show|list|display)(?:\s+are)?\s+(?:my\s+)?positions?",
             r"(?:my|current)\s+(?:open\s+)?positions?",
             r"what\s+(?:am\s+i|do\s+i)\s+(?:holding|have|own)",
-            r"portfolio",
-            r"p&?l|pnl|profit|loss",
+            r"\bportfolio\b",
+            r"\bp&?l\b|\bpnl\b|\bprofit\b|\bloss\b",
         ]
         
         # Analysis patterns
         self.analysis_patterns = [
-            r"(?:analyze|analysis|analyse)\s+([A-Z]{1,5})",
-            r"(?:what|how)\s+(?:is|does)\s+([A-Z]{1,5})\s+look",
-            r"(?:technical|technicals|chart)\s+(?:on|for)\s+([A-Z]{1,5})",
-            r"(?:support|resistance|levels)\s+(?:on|for)\s+([A-Z]{1,5})",
+            r"(?:analyze|analysis|analyse)\s+([a-z]{1,5})",
+            r"(?:what|how)\s+(?:is|does)\s+([a-z]{1,5})\s+look",
+            r"(?:technical|technicals|chart)\s+(?:on|for)\s+([a-z]{1,5})",
+            r"(?:support|resistance|levels)\s+(?:on|for)\s+([a-z]{1,5})",
         ]
         
         # Scanner patterns

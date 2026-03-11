@@ -143,8 +143,8 @@ async def get_agent_status():
         "orchestrator_ready": orchestrator is not None,
         "llm_provider": llm.primary_provider if llm else None,
         "available_providers": llm.get_available_providers() if llm else [],
-        "agents": ["router", "trade_executor", "coach"],
-        "agents_coming_soon": ["analyst", "chat"]
+        "agents": ["router", "trade_executor", "coach", "analyst"],
+        "agents_coming_soon": ["chat"]
     }
 
 

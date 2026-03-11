@@ -205,23 +205,7 @@ ONLY output JSON, nothing else."""
         """Simple fallback parser for common patterns"""
         import re
         
-        message_lower = message.lower()
-        
-        # Pattern 1: close/sell/buy SYMBOL (e.g., "close TMC", "sell NVDA")
-        match = re.search(r'(close|sell|buy|exit)\s+([A-Z]{1,5})\b', message, re.IGNORECASE)
-        if match:
-            action = match.group(1).lower()
-            if action == "exit":
-                action = "close"
-            symbol = match.group(2).upper()
-            
-            return TradeIntent(
-                action=action,
-                symbol=symbol,
-                quantity_type="all"
-            )
-        
-        # Pattern 2: buy/sell N shares of SYMBOL (e.g., "buy 100 shares of AAPL")
+        # Pattern 1: buy/sell N shares of SYMBOL (e.g., "buy 100 shares of AAPL")
         match = re.search(r'(buy|sell)\s+(\d+)\s+shares?\s+(?:of\s+)?([A-Z]{1,5})\b', message, re.IGNORECASE)
         if match:
             action = match.group(1).lower()
@@ -233,6 +217,34 @@ ONLY output JSON, nothing else."""
                 symbol=symbol,
                 quantity_type="shares",
                 quantity_value=quantity
+            )
+        
+        # Pattern 2: buy/sell N SYMBOL (e.g., "buy 100 AAPL", "sell 50 NVDA")
+        match = re.search(r'(buy|sell)\s+(\d+)\s+([A-Z]{1,5})\b', message, re.IGNORECASE)
+        if match:
+            action = match.group(1).lower()
+            quantity = int(match.group(2))
+            symbol = match.group(3).upper()
+            
+            return TradeIntent(
+                action=action,
+                symbol=symbol,
+                quantity_type="shares",
+                quantity_value=quantity
+            )
+        
+        # Pattern 3: close/sell/buy SYMBOL (e.g., "close TMC", "sell NVDA", "buy AAPL")
+        match = re.search(r'(close|sell|buy|exit)\s+([A-Z]{1,5})\b', message, re.IGNORECASE)
+        if match:
+            action = match.group(1).lower()
+            if action == "exit":
+                action = "close"
+            symbol = match.group(2).upper()
+            
+            return TradeIntent(
+                action=action,
+                symbol=symbol,
+                quantity_type="all"
             )
         
         return None
@@ -259,7 +271,7 @@ ONLY output JSON, nothing else."""
             # Get quantity from CODE (verified position data)
             total_shares = abs(float(position.get("position", position.get("shares", 0))))
             current_price = float(position.get("marketPrice", position.get("current_price", 0)))
-            avg_cost = float(position.get("avgCost", position.get("averageCost", position.get("avg_cost", 0))))
+            position_avg_cost = float(position.get("avgCost", position.get("averageCost", position.get("avg_cost", 0))))
             
             if total_shares == 0:
                 return None
