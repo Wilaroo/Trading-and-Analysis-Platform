@@ -28,7 +28,6 @@ import {
 import MarketIntelPanel from './MarketIntelPanel';
 import QuickActionsMenu from './QuickActionsMenu';
 import SimulatorControl from './SimulatorControl';
-import TradingBotPanel from './TradingBotPanel';
 import api from '../utils/api';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
@@ -836,12 +835,6 @@ const RightSidebar = ({
 }) => {
   return (
     <div className="space-y-3" data-testid="right-sidebar">
-      {/* Trading Bot Panel - Order Queue & Execution Status */}
-      <TradingBotPanel 
-        className="max-h-[400px] overflow-auto"
-        onTickerSelect={onTickerSelect}
-      />
-      
       {/* Market Intelligence Panel */}
       <MarketIntelPanel onTickerSelect={onTickerSelect} onViewChart={onViewChart} />
       

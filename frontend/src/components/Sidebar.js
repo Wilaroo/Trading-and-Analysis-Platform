@@ -13,6 +13,7 @@ import {
 
 const navItems = [
   { id: 'command-center', icon: Target, label: 'Command Center', highlight: true },
+  { id: 'trading', icon: Activity, label: 'Trading Dashboard', highlight: true },
   { id: 'trade-journal', icon: ClipboardList, label: 'Trade Journal' },
   { id: 'chart', icon: LineChart, label: 'Charts' },
   { id: 'ib-trading', icon: Zap, label: 'IB Trading' },
