@@ -876,7 +876,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
               
               {account && (
                 <div className="mt-3 p-2 bg-zinc-700/30 rounded">
-                  <span className="text-xs text-zinc-500">Alpaca Account (Paper)</span>
+                  <span className="text-xs text-zinc-500">IB Gateway (Paper Account)</span>
                   <div className="flex items-center justify-between mt-1">
                     <span className="text-sm text-white">${account.equity?.toLocaleString()}</span>
                     <span className="text-xs text-emerald-400">Buying Power: ${account.buying_power?.toLocaleString()}</span>

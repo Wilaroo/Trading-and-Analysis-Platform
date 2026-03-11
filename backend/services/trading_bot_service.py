@@ -812,7 +812,8 @@ class TradingBotService:
         await self._save_state()
     
     async def _scan_loop(self):
-        """Main scanning loop"""
+        """Main scanning loop - runs when bot is active"""
+        scan_count = 0
         while self._running:
             try:
                 # Check if daily loss limit hit
@@ -827,6 +828,14 @@ class TradingBotService:
                 if self._mode == BotMode.PAUSED:
                     await asyncio.sleep(self._scan_interval)
                     continue
+                
+                # Log scan activity periodically
+                scan_count += 1
+                if scan_count % 10 == 1:  # Log every 10th scan
+                    mode_str = "AUTO" if self._mode == BotMode.AUTONOMOUS else "CONFIRMATION"
+                    open_count = len(self._open_trades)
+                    pending_count = len(self._pending_trades)
+                    logger.info(f"[TradingBot] Scan #{scan_count} | Mode: {mode_str} | Open: {open_count} | Pending: {pending_count}")
                 
                 # Scan for opportunities
                 await self._scan_for_opportunities()
@@ -1655,12 +1664,23 @@ class TradingBotService:
     # ==================== TRADE EXECUTION ====================
     
     async def _execute_trade(self, trade: BotTrade):
-        """Execute a trade via the trade executor"""
+        """
+        Execute a trade via the trade executor.
+        
+        In AUTONOMOUS mode with IB data:
+        - Uses live IB prices for decision-making
+        - Currently executes in SIMULATED mode (orders tracked but not sent to broker)
+        - Full IB order execution requires local IB Gateway order routing (future enhancement)
+        """
         if not self._trade_executor:
             logger.error("Trade executor not configured")
             return
         
         try:
+            # Log execution mode
+            executor_mode = self._trade_executor.get_mode() if self._trade_executor else "unknown"
+            logger.info(f"[TradingBot] Executing {trade.symbol} {trade.direction.value.upper()} | Mode: {executor_mode.value}")
+            
             # Start execution tracking (Phase 1 Learning)
             if hasattr(self, '_learning_loop') and self._learning_loop:
                 try:
@@ -1682,6 +1702,10 @@ class TradingBotService:
                 trade.fill_price = result.get('fill_price', trade.entry_price)
                 trade.executed_at = datetime.now(timezone.utc).isoformat()
                 trade.entry_order_id = result.get('order_id')
+                
+                # Mark if simulated
+                if result.get('simulated'):
+                    trade.notes = (trade.notes or "") + " [SIMULATED]"
                 
                 # Record actual entry (Phase 1 Learning)
                 if hasattr(self, '_learning_loop') and self._learning_loop:
@@ -1710,7 +1734,8 @@ class TradingBotService:
                 await self._notify_trade_update(trade, "executed")
                 await self._save_trade(trade)
                 
-                logger.info(f"Trade executed: {trade.symbol} {trade.shares} @ ${trade.fill_price:.2f}")
+                sim_tag = " (SIMULATED)" if result.get('simulated') else ""
+                logger.info(f"✅ Trade executed{sim_tag}: {trade.symbol} {trade.shares} @ ${trade.fill_price:.2f}")
             else:
                 trade.status = TradeStatus.REJECTED
                 logger.warning(f"Trade rejected: {result.get('error')}")

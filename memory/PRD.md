@@ -16,10 +16,24 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 - ✅ Lowered temperature from 0.7 to 0.3 for reduced hallucination
 - ✅ Strengthened system prompts with explicit anti-hallucination instructions
 
-**Key Technical Changes:**
-- `_last_smart_context` stored for position queries
-- Position keywords trigger `is_position_query` for context selection
-- Smart context (with IB data) used directly instead of truncated full context
+### Phase 2.7 Complete: UI Text + Trading Bot Automation (March 11, 2026)
+**UI Text Updates:**
+- ✅ Updated StartupModal: IB Gateway now listed as primary data source, Alpaca as fallback
+- ✅ Updated TradingBotPanel: "IB Gateway (Paper Account)" instead of "Alpaca Account (Paper)"
+- ✅ Updated useCommandCenterData comments to reflect IB-first architecture
+
+**Trading Bot Automation:**
+- ✅ Bot already supports AUTONOMOUS mode (auto-executes trades without confirmation)
+- ✅ Enhanced logging: Shows mode (AUTO/CONFIRMATION), open/pending counts
+- ✅ Trade executor updated: Detects IB pusher connection, uses SIMULATED mode for cloud
+- ✅ Trades marked with [SIMULATED] tag when not using real broker
+- ✅ Bot uses live IB data for decisions, scanner for alerts
+
+**Note on Full Automation:**
+The trading bot is fully automated in terms of logic (scans, evaluates, decides, executes).
+However, since IB Gateway runs locally and the cloud can't directly place orders through
+the pusher pipeline, actual orders are currently SIMULATED. The bot tracks all trades
+as if they were real. Future enhancement: Add order queue to pusher for true IB execution.
 
 ### Phase 2.5 Complete: Scanner IB Data Priority (March 11, 2026)
 - ✅ Refactored `enhanced_scanner.py` to prioritize IB pushed data for quotes

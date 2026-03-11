@@ -71,9 +71,9 @@ const FEATURES = [
 // Startup processes to track
 const STARTUP_PROCESSES = [
   { id: 'backend', label: 'Connecting to backend...', successLabel: 'Backend connected' },
-  { id: 'alpaca', label: 'Connecting to Alpaca for real-time data...', successLabel: 'Alpaca connected' },
+  { id: 'ibpusher', label: 'Connecting to IB Gateway (primary data)...', successLabel: 'IB Gateway connected' },
+  { id: 'alpaca', label: 'Checking Alpaca (fallback data)...', successLabel: 'Alpaca available' },
   { id: 'ollama', label: 'Connecting to AI Trading Assistant...', successLabel: 'AI Assistant ready' },
-  { id: 'ibpusher', label: 'Checking IB Gateway connection...', successLabel: 'IB Gateway data available' },
   { id: 'market', label: 'Fetching market status...', successLabel: 'Market data loaded' },
   { id: 'portfolio', label: 'Loading portfolio...', successLabel: 'Portfolio loaded' },
   { id: 'watchlist', label: 'Loading smart watchlist...', successLabel: 'Watchlist ready' }
@@ -118,7 +118,7 @@ const StartupModal = ({ onComplete }) => {
       }
     }
 
-    // Check Alpaca (parallel with others)
+    // Check Alpaca (fallback data source)
     setProcesses(prev => ({ ...prev, alpaca: 'loading' }));
     fetch(`${API_URL}/api/alpaca/status`)
       .then(res => res.json())
