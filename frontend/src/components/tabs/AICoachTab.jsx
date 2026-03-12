@@ -4,6 +4,7 @@ import RightSidebar from '../RightSidebar';
 import LearningInsightsWidget from '../LearningInsightsWidget';
 import MarketRegimeWidget from '../MarketRegimeWidget';
 import NewDashboard from '../NewDashboard';
+import BriefMeModal from '../BriefMeModal';
 import { useTickerModal } from '../../hooks/useTickerModal';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
@@ -41,6 +42,9 @@ const AICoachTab = ({
   // State for regime data (fetch from API)
   const [regime, setRegime] = useState(null);
   const [marketSession, setMarketSession] = useState(null);
+  
+  // State for Brief Me modal
+  const [isBriefMeOpen, setIsBriefMeOpen] = useState(false);
   
   // Fetch regime data
   const fetchRegimeData = useCallback(async () => {
@@ -110,15 +114,20 @@ const AICoachTab = ({
   };
   
   // Handle "Brief Me" button click
-  const handleBriefMe = async () => {
-    // TODO: Implement Brief Me agent call
-    console.log('Brief Me clicked - triggering AI market report');
+  const handleBriefMe = () => {
+    setIsBriefMeOpen(true);
   };
 
   // --- NEW DASHBOARD LAYOUT ---
   if (layoutMode === 'new') {
     return (
       <div className="space-y-3" data-testid="ai-coach-tab-content">
+        {/* Brief Me Modal */}
+        <BriefMeModal 
+          isOpen={isBriefMeOpen} 
+          onClose={() => setIsBriefMeOpen(false)} 
+        />
+        
         <NewDashboard
           botStatus={wsBotStatus}
           botTrades={wsBotTrades}

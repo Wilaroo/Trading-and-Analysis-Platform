@@ -54,6 +54,10 @@ from agents.analyst_agent import (
     AnalysisContext
 )
 
+from agents.brief_me_agent import (
+    BriefMeAgent
+)
+
 from agents.orchestrator import (
     AgentOrchestrator,
     OrchestrationResult,
@@ -92,6 +96,9 @@ __all__ = [
     # Analyst
     "AnalystAgent",
     "AnalysisContext",
+    
+    # Brief Me
+    "BriefMeAgent",
     
     # Orchestrator
     "AgentOrchestrator",
