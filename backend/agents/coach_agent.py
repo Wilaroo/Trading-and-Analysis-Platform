@@ -249,6 +249,7 @@ Please ensure your local IB Gateway and data pusher are running."""
         regime_emoji = {
             "RISK_ON": "🟢",
             "CAUTION": "🟡", 
+            "HOLD": "🟡",
             "RISK_OFF": "🟠",
             "CONFIRMED_DOWN": "🔴"
         }.get(regime_state, "⚪")
