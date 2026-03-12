@@ -7,6 +7,43 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### P2 Complete: Smart Stop Service (Anti-Hunt Protection) (March 12, 2026)
+
+**Status:** ✅ COMPLETE - Tested and Verified (iteration_73.json - 30/30 tests passed)
+
+**Features Delivered:**
+
+Based on research into institutional stop-hunting tactics, implemented a comprehensive Smart Stop system with 6 modes:
+
+1. **Original** - Traditional stop below support with small buffer (HIGH hunt risk)
+2. **ATR Dynamic** - 1.5x ATR buffer from entry (MEDIUM hunt risk) - DEFAULT
+3. **Anti-Hunt** - Stops placed BEYOND obvious levels (support, round numbers) with extra buffer (LOW hunt risk)
+4. **Volatility Adjusted** - Widens in high vol (2.5x), tightens in low vol (1.0x)
+5. **Layered** - Multiple stop levels for partial exits (40%/30%/30% at 1.0/1.5/2.0 ATR depths)
+6. **Chandelier** - ATR-based trailing from recent high/low (3.0x ATR)
+
+**Key Anti-Hunt Features:**
+- Avoids round numbers (adds 0.2% buffer from $50, $100, etc.)
+- Identifies obvious stop zones (swing lows, support, prior day levels)
+- Places stops DEEPER than these zones by 1-2x ATR
+- Recommends mode based on stock characteristics (float, volume, time of day)
+- Stop hunt pattern detection (spike through level + high volume + close back inside)
+
+**API Endpoints:**
+- `GET /api/smart-stops/modes` - All 6 modes with descriptions
+- `GET /api/smart-stops/compare` - Side-by-side comparison for trade setup
+- `GET /api/smart-stops/recommend/{symbol}` - AI recommendation based on stock
+- `POST /api/smart-stops/calculate` - Calculate stop for specific mode
+
+**Files Created:**
+- `/app/backend/services/smart_stop_service.py` - SmartStopService class (700+ lines)
+- `/app/backend/routers/smart_stops.py` - API endpoints
+- `/app/frontend/src/components/SmartStopSelector.jsx` - Frontend selector component
+- `/app/backend/scripts/migrate_trade_regimes.py` - Trade regime migration script
+- `/app/backend/tests/test_smart_stop_service.py` - Comprehensive test suite
+
+---
+
 ### Sprint 1 Complete: Brief Me + Enhanced Regime Widget (March 12, 2026)
 
 **Status:** ✅ COMPLETE - Tested and Verified (iteration_72.json)
