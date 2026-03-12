@@ -4304,6 +4304,11 @@ async def get_script(script_name: str):
     with open(script_path, "r", encoding="utf-8", errors="ignore") as f:
         content = f.read()
     
+    # Serve HTML files with correct content type
+    if script_name.endswith(".html"):
+        from starlette.responses import HTMLResponse
+        return HTMLResponse(content)
+    
     return PlainTextResponse(content, media_type="text/plain")
 
 
