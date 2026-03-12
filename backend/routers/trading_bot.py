@@ -382,7 +382,7 @@ async def submit_trade(request: TradeSubmitRequest):
                 alpaca = get_alpaca_service()
                 quote = alpaca.get_latest_quote(symbol)
                 entry_price = float(quote.get('price', 0)) if quote else 0
-            except:
+            except Exception:
                 entry_price = 0
         
         # Calculate shares based on risk
@@ -908,4 +908,229 @@ async def simulate_closed_trade(request: SimulateClosedRequest):
         "message": f"Simulated closed trade: {symbol} P&L=${pnl:.2f}",
         "trade": trade.to_dict()
     }
+
+
+
+# ==================== POSITION IMPORT ====================
+
+class ImportPositionRequest(BaseModel):
+    """Request to import an existing IB position into bot management"""
+    symbol: str
+    shares: int
+    entry_price: float
+    stop_price: float
+    direction: str = "long"  # "long" or "short"
+    setup_type: str = "imported"
+    target_prices: Optional[List[float]] = None
+    notes: Optional[str] = None
+
+
+@router.post("/import-position")
+async def import_position(request: ImportPositionRequest):
+    """
+    Import an existing IB position into bot management.
+    
+    This allows the bot to manage stops for positions that were:
+    - Opened manually in IB
+    - Opened before the bot was restarted
+    - Opened when the bot had connectivity issues
+    
+    The bot will then monitor the position and execute stop/target orders.
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    try:
+        from services.trading_bot_service import BotTrade, TradeDirection, TradeStatus
+        
+        # Validate direction
+        direction = TradeDirection.LONG if request.direction.lower() == "long" else TradeDirection.SHORT
+        
+        # Calculate additional required fields
+        risk_per_share = abs(request.entry_price - request.stop_price)
+        risk_amount = risk_per_share * request.shares
+        target_prices = request.target_prices or [request.entry_price * 1.03, request.entry_price * 1.06]
+        reward_per_share = abs(target_prices[0] - request.entry_price)
+        potential_reward = reward_per_share * request.shares
+        risk_reward_ratio = (reward_per_share / risk_per_share) if risk_per_share > 0 else 2.0
+        
+        # Create trade object with ALL required fields
+        trade = BotTrade(
+            id=str(uuid.uuid4()),
+            symbol=request.symbol.upper(),
+            direction=direction,
+            status=TradeStatus.OPEN,
+            setup_type=request.setup_type,
+            timeframe="imported",
+            quality_score=70,
+            quality_grade="B",
+            entry_price=request.entry_price,
+            current_price=request.entry_price,
+            stop_price=request.stop_price,
+            target_prices=target_prices,
+            shares=request.shares,
+            risk_amount=risk_amount,
+            potential_reward=potential_reward,
+            risk_reward_ratio=risk_reward_ratio
+        )
+        
+        # Set additional fields
+        trade.fill_price = request.entry_price
+        trade.executed_at = datetime.now(timezone.utc).isoformat()
+        trade.notes = f"[IMPORTED] Imported from IB - {request.notes or 'manual import'}"
+        
+        # Initialize trailing stop config
+        trade.trailing_stop_config = {
+            "mode": "initial",
+            "current_stop": request.stop_price,
+            "original_stop": request.stop_price,
+            "highest_price": request.entry_price,
+            "lowest_price": request.entry_price,
+            "stop_adjustments": []
+        }
+        
+        # Add to bot's open trades
+        _trading_bot._open_trades[trade.id] = trade
+        
+        # Save to database for persistence
+        await _trading_bot._save_trade(trade)
+        
+        logger.info(f"✅ Imported position: {trade.symbol} {trade.shares} shares {direction.value} @ ${trade.entry_price:.2f}, stop=${trade.stop_price:.2f}")
+        
+        return {
+            "success": True,
+            "message": f"Successfully imported {request.symbol} position into bot management",
+            "trade": trade.to_dict(),
+            "stop_monitoring": True
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to import position: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to import position: {str(e)}")
+
+
+@router.get("/sync-positions")
+async def sync_with_ib_positions():
+    """
+    Sync bot's tracked trades with actual IB positions.
+    
+    This will:
+    1. Update prices/P&L for tracked trades
+    2. Identify orphaned trades (in bot but not in IB)
+    3. Identify untracked positions (in IB but not in bot)
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    try:
+        from routers.ib import get_pushed_positions
+        
+        ib_positions = get_pushed_positions()
+        ib_symbols = {p.get("symbol"): p for p in ib_positions if p.get("position", 0) != 0}
+        
+        bot_trades = _trading_bot._open_trades
+        bot_symbols = {t.symbol: t for t in bot_trades.values()}
+        
+        # Find discrepancies
+        orphaned = []  # In bot but not in IB
+        untracked = []  # In IB but not in bot
+        synced = []  # Matched positions
+        
+        # Check bot trades against IB
+        for symbol, trade in bot_symbols.items():
+            if symbol in ib_symbols:
+                ib_pos = ib_symbols[symbol]
+                synced.append({
+                    "symbol": symbol,
+                    "bot_shares": trade.shares,
+                    "ib_shares": abs(ib_pos.get("position", 0)),
+                    "bot_entry": trade.fill_price,
+                    "ib_avg_cost": ib_pos.get("avgCost", 0),
+                    "current_price": ib_pos.get("marketPrice", 0),
+                    "stop_price": trade.stop_price
+                })
+            else:
+                orphaned.append({
+                    "symbol": symbol,
+                    "shares": trade.shares,
+                    "note": "Position not found in IB - may have been closed"
+                })
+        
+        # Check IB positions not in bot
+        for symbol, ib_pos in ib_symbols.items():
+            if symbol not in bot_symbols:
+                shares = ib_pos.get("position", 0)
+                untracked.append({
+                    "symbol": symbol,
+                    "shares": abs(shares),
+                    "direction": "long" if shares > 0 else "short",
+                    "avg_cost": ib_pos.get("avgCost", 0),
+                    "note": "Position not tracked by bot - no stop protection"
+                })
+        
+        return {
+            "success": True,
+            "synced_positions": synced,
+            "orphaned_trades": orphaned,
+            "untracked_positions": untracked,
+            "summary": {
+                "bot_tracking": len(bot_trades),
+                "ib_positions": len(ib_symbols),
+                "synced": len(synced),
+                "orphaned": len(orphaned),
+                "untracked": len(untracked)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Position sync error: {e}")
+        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
+
+
+@router.post("/clear-orphaned")
+async def clear_orphaned_trades():
+    """
+    Remove trades from bot tracking that no longer exist in IB.
+    
+    This is useful after:
+    - Manual closes in IB that the bot didn't track
+    - App restarts where old phantom trades remain
+    - Database sync issues
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    try:
+        from routers.ib import get_pushed_positions
+        
+        ib_positions = get_pushed_positions()
+        ib_symbols = {p.get("symbol") for p in ib_positions if p.get("position", 0) != 0}
+        
+        # Find orphaned trades (in bot but not in IB)
+        orphaned_ids = []
+        orphaned_symbols = []
+        
+        for trade_id, trade in list(_trading_bot._open_trades.items()):
+            if trade.symbol not in ib_symbols:
+                orphaned_ids.append(trade_id)
+                orphaned_symbols.append(trade.symbol)
+        
+        # Remove orphaned trades
+        for trade_id in orphaned_ids:
+            if trade_id in _trading_bot._open_trades:
+                del _trading_bot._open_trades[trade_id]
+        
+        logger.info(f"🧹 Cleared {len(orphaned_ids)} orphaned trades: {orphaned_symbols[:10]}...")
+        
+        return {
+            "success": True,
+            "cleared_count": len(orphaned_ids),
+            "cleared_symbols": orphaned_symbols,
+            "remaining_trades": len(_trading_bot._open_trades),
+            "message": f"Cleared {len(orphaned_ids)} orphaned trades that no longer exist in IB"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to clear orphaned trades: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to clear orphaned trades: {str(e)}")
 

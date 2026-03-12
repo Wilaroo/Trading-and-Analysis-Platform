@@ -629,16 +629,112 @@ class TradingBotService:
                 else:
                     logger.info(f"🎯 Using default {len(self._enabled_setups)} strategies (no saved customization)")
                 
+                # CRITICAL: Restore open trades from database
+                await self._restore_open_trades()
+                
                 # Auto-restart if bot was running before
                 if was_running:
                     logger.info("🔄 Bot was running before restart - auto-resuming...")
                     await self.start()
                 
-                logger.info(f"✅ Bot state restored: mode={self._mode.value}, running={self._running}, watchlist={len(self._watchlist)} symbols")
+                logger.info(f"✅ Bot state restored: mode={self._mode.value}, running={self._running}, watchlist={len(self._watchlist)} symbols, open_trades={len(self._open_trades)}")
             else:
                 logger.info(f"🆕 No saved bot state - using defaults: {len(self._enabled_setups)} strategies enabled")
+                # Still try to restore any orphaned open trades
+                await self._restore_open_trades()
         except Exception as e:
             logger.warning(f"Could not restore bot state: {e}")
+    
+    async def _restore_open_trades(self):
+        """Restore open trades from database - CRITICAL for persistence across restarts"""
+        try:
+            if self._db is None:
+                return
+            
+            # Find all trades with open or pending status
+            open_trades = list(self._db.bot_trades.find({
+                "status": {"$in": ["open", "pending", "filled"]}
+            }))
+            
+            restored_count = 0
+            for trade_doc in open_trades:
+                try:
+                    # Get all required fields with defaults for missing data
+                    symbol = trade_doc.get("symbol", "UNKNOWN")
+                    entry_price = trade_doc.get("entry_price", 0) or trade_doc.get("fill_price", 0)
+                    stop_price = trade_doc.get("stop_price", 0)
+                    target_prices = trade_doc.get("target_prices", [entry_price * 1.02])
+                    shares = trade_doc.get("shares", 0)
+                    risk_amount = trade_doc.get("risk_amount", 0)
+                    
+                    # Calculate missing fields
+                    if not target_prices:
+                        target_prices = [entry_price * 1.02, entry_price * 1.05]
+                    
+                    risk_per_share = abs(entry_price - stop_price) if stop_price else entry_price * 0.02
+                    if risk_amount == 0:
+                        risk_amount = risk_per_share * shares
+                    
+                    reward_per_share = abs(target_prices[0] - entry_price) if target_prices else entry_price * 0.04
+                    potential_reward = reward_per_share * shares
+                    risk_reward_ratio = (reward_per_share / risk_per_share) if risk_per_share > 0 else 2.0
+                    
+                    # Reconstruct BotTrade object with ALL required fields
+                    trade = BotTrade(
+                        id=str(trade_doc.get("id", trade_doc.get("_id", str(uuid.uuid4())))),
+                        symbol=symbol,
+                        direction=TradeDirection(trade_doc.get("direction", "long")),
+                        status=TradeStatus(trade_doc.get("status", "open")),
+                        setup_type=trade_doc.get("setup_type", "restored"),
+                        timeframe=trade_doc.get("timeframe", "intraday"),
+                        quality_score=trade_doc.get("quality_score", 70),
+                        quality_grade=trade_doc.get("quality_grade", "B"),
+                        entry_price=entry_price,
+                        current_price=trade_doc.get("current_price", entry_price),
+                        stop_price=stop_price,
+                        target_prices=target_prices,
+                        shares=shares,
+                        risk_amount=risk_amount,
+                        potential_reward=potential_reward,
+                        risk_reward_ratio=risk_reward_ratio
+                    )
+                    
+                    # Restore optional fields via direct assignment
+                    trade.fill_price = trade_doc.get("fill_price", entry_price)
+                    trade.executed_at = trade_doc.get("executed_at")
+                    trade.entry_order_id = trade_doc.get("entry_order_id")
+                    trade.stop_order_id = trade_doc.get("stop_order_id")
+                    trade.notes = trade_doc.get("notes", "") or trade_doc.get("rationale", "")
+                    trade.market_regime = trade_doc.get("market_regime", "UNKNOWN")
+                    trade.regime_score = trade_doc.get("regime_score", 50.0)
+                    
+                    # Restore trailing stop config
+                    if trade_doc.get("trailing_stop_config"):
+                        trade.trailing_stop_config = trade_doc["trailing_stop_config"]
+                    else:
+                        # Initialize trailing stop with current stop
+                        trade.trailing_stop_config["current_stop"] = stop_price
+                        trade.trailing_stop_config["original_stop"] = stop_price
+                    
+                    # Add to appropriate dict
+                    if trade.status == TradeStatus.PENDING:
+                        self._pending_trades[trade.id] = trade
+                    else:
+                        self._open_trades[trade.id] = trade
+                    
+                    restored_count += 1
+                    logger.info(f"📥 Restored trade: {trade.symbol} {trade.direction.value} {trade.shares} shares @ ${trade.fill_price:.2f}, stop=${trade.stop_price:.2f}")
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to restore trade {trade_doc.get('symbol')}: {e}")
+            
+            if restored_count > 0:
+                logger.info(f"✅ Restored {restored_count} open trades from database")
+            else:
+                logger.info("📭 No open trades to restore from database")
+                
+        except Exception as e:
+            logger.warning(f"Could not restore open trades: {e}")
     
     async def _save_state(self):
         """Save bot state to MongoDB"""
@@ -1317,7 +1413,7 @@ class TradingBotService:
                             if self._mode != BotMode.AUTONOMOUS:
                                 return None
                             else:
-                                print(f"   ⚠️ Overriding AI rejection in AUTONOMOUS mode")
+                                print("   ⚠️ Overriding AI rejection in AUTONOMOUS mode")
                 except Exception as e:
                     logger.warning(f"AI evaluation failed (proceeding anyway): {e}")
             
@@ -1713,9 +1809,9 @@ class TradingBotService:
         news = intelligence.get("news")
         if news:
             if news.get("sentiment") == "negative":
-                warnings.append(f"⚠️ Negative news sentiment detected")
+                warnings.append("⚠️ Negative news sentiment detected")
             elif news.get("sentiment") == "positive":
-                enhancements.append(f"✅ Positive news sentiment")
+                enhancements.append("✅ Positive news sentiment")
             
             topics = news.get("key_topics", [])
             if "earnings" in topics:
@@ -1901,7 +1997,7 @@ class TradingBotService:
         print(f"   📤 [_execute_trade] Starting execution for {trade.symbol}")
         
         if not self._trade_executor:
-            print(f"   ❌ Trade executor not configured")
+            print("   ❌ Trade executor not configured")
             logger.error("Trade executor not configured")
             return
         
@@ -1927,7 +2023,7 @@ class TradingBotService:
                     logger.warning(f"Failed to start execution tracking: {e}")
             
             # Execute entry order
-            print(f"   📤 [_execute_trade] Calling trade_executor.execute_entry...")
+            print("   📤 [_execute_trade] Calling trade_executor.execute_entry...")
             result = await self._trade_executor.execute_entry(trade)
             print(f"   📤 [_execute_trade] Result: {result}")
             
@@ -1970,6 +2066,27 @@ class TradingBotService:
                 
                 sim_tag = " (SIMULATED)" if result.get('simulated') else ""
                 logger.info(f"✅ Trade executed{sim_tag}: {trade.symbol} {trade.shares} @ ${trade.fill_price:.2f}")
+            
+            elif result.get('status') == 'timeout':
+                # TIMEOUT HANDLING: Order may still execute - save as pending for sync
+                trade.status = TradeStatus.OPEN  # Assume it went through
+                trade.fill_price = trade.entry_price  # Use intended price
+                trade.executed_at = datetime.now(timezone.utc).isoformat()
+                trade.entry_order_id = result.get('order_id')
+                trade.notes = (trade.notes or "") + " [TIMEOUT-NEEDS-SYNC]"
+                
+                # Move to open trades so bot tracks it
+                if trade.id in self._pending_trades:
+                    del self._pending_trades[trade.id]
+                self._open_trades[trade.id] = trade
+                
+                # Update stats
+                self._daily_stats.trades_executed += 1
+                
+                await self._save_trade(trade)
+                
+                logger.warning(f"⚠️ Trade timeout but saved for sync: {trade.symbol} {trade.shares} shares - will verify with IB")
+            
             else:
                 trade.status = TradeStatus.REJECTED
                 logger.warning(f"Trade rejected: {result.get('error')}")
@@ -2658,7 +2775,7 @@ class TradingBotService:
                 'headline': f"Auto-execute: {setup_type} on {symbol}",
                 'technical_reasons': [
                     f"Tape confirmed {setup_type} setup",
-                    f"Auto-executed from scanner alert"
+                    "Auto-executed from scanner alert"
                 ],
                 'warnings': [],
                 'source': 'scanner_auto_execute',
