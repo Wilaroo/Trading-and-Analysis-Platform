@@ -359,7 +359,11 @@ Respond ONLY with JSON, no other text:
                        "AT", "FOR", "AND", "OR", "NOT", "YES", "NO", "HOW", "WHAT",
                        "WHEN", "WHERE", "WHY", "CAN", "DO", "DOES", "AM", "ARE", "WAS",
                        "WILL", "WOULD", "SHOULD", "COULD", "MAY", "MIGHT", "MUST",
-                       "PLS", "PLZ", "ASAP", "FYI", "IMO", "TBH", "BTW", "ATM"}
+                       "PLS", "PLZ", "ASAP", "FYI", "IMO", "TBH", "BTW", "ATM",
+                       "YOUR", "YOU", "RIGHT", "NOW", "LIKE", "JUST", "THINK", "GOOD",
+                       "BAD", "UP", "DOWN", "BUY", "SELL", "TRADE", "LONG", "SHORT",
+                       "IF", "SO", "BE", "AS", "BY", "HAS", "HAD", "HAVE", "BEEN",
+                       "ALL", "ANY", "OUT", "GET", "GOT", "SET", "LET", "PUT"}
         
         symbols = [s for s in potential if s not in common_words and len(s) >= 2]
         

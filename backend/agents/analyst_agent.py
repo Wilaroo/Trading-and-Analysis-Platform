@@ -111,7 +111,7 @@ Format your analysis with clear sections using **bold** headers."""
         symbols = input_data.get("symbols", [])
         analysis_type = input_data.get("analysis_type", "full")  # full, technical, sector, quick
         
-        logger.info(f"Analyst received: symbol={symbol}, symbols={symbols}, message={message[:50]}...")
+        print(f"[ANALYST] Received: symbol={symbol}, symbols={symbols}")
         
         # Handle multiple symbols
         if not symbol and symbols:
@@ -127,7 +127,7 @@ Format your analysis with clear sections using **bold** headers."""
         
         # If multiple symbols, analyze each and combine
         if len(symbols) > 1:
-            logger.info(f"Multi-symbol analysis for: {symbols}")
+            print(f"[ANALYST] Multi-symbol analysis for: {symbols}")
             return await self._analyze_multiple(symbols, message, start)
         
         # Gather all data from CODE
