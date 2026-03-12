@@ -431,7 +431,11 @@ print("  - Wired to Trading Bot: Position sizing adjusts based on regime")
 regime_performance_service = init_regime_performance_service(db=db)
 init_regime_performance_router(regime_performance_service)
 register_service('regime_performance_service', regime_performance_service)
+
+# Wire Regime Performance Service to Trading Bot for trade logging
+trading_bot.set_regime_performance_service(regime_performance_service)
 print("  - Regime Performance Tracking: Strategy performance by market regime")
+print("  - Wired to Trading Bot: Closed trades logged with regime data")
 print("  - Endpoints: /api/regime-performance/summary, /api/regime-performance/best-for-regime/{regime}")
 
 # ===================== FAST LEARNING (Phase 3A & 3B) =====================
