@@ -3,7 +3,113 @@
 ## Original Problem Statement
 Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading coach, autonomous trading bot, and mutual learning loop.
 
+---
 
+## 📋 FULL PRIORITY ROADMAP (March 2026)
+
+### 🔴 P0 - CRITICAL (Data Integrity & Core Functionality)
+
+1. **Session Persistence & Data Continuity**
+   - **What**: Ensure ALL bot data persists across sessions (app restarts, browser closes)
+   - **Scope**:
+     - Open trades (positions, entries, stops, targets)
+     - Trade history (closed trades, P&L, setup types)
+     - Daily/weekly/monthly performance stats
+     - Bot thoughts/reasoning log
+     - Learning insights (what worked, what didn't)
+     - Market regime history
+     - Stop adjustments history
+   - **Current State**: Partially implemented (trades save to MongoDB but may not reload properly)
+   - **Action**: Audit `_save_state()` and `_restore_state()` in `trading_bot_service.py`, ensure all data flows through MongoDB
+   - **Why Critical**: Without this, you lose all context on restart - defeats the purpose of a learning bot
+
+2. **One-Click Stop Fix** (Enhancement from today)
+   - **What**: When bot detects risky stop, add button to auto-adjust to recommended level
+   - **Where**: BotBrainPanel stop warnings, BotTakeCard
+   - **API**: `POST /api/trading-bot/trades/{trade_id}/adjust-stop`
+
+---
+
+### 🟠 P1 - HIGH PRIORITY (UX & Architecture Cleanup)
+
+3. **UI Consolidation: Trader Dashboard Tab Review**
+   - **What**: Evaluate if "Trader Dashboard" tab is still needed or can be merged into new AI Coach/Dashboard
+   - **Current State**: 
+     - `AICoachTab.jsx` now contains `NewDashboard` with bot status, performance, thoughts
+     - Old "Trader Dashboard" may have overlapping features
+   - **Action**: 
+     - Inventory features in Trader Dashboard vs NewDashboard
+     - Consolidate into single cohesive view
+     - Remove redundant tab if features are duplicated
+   - **Why**: Cleaner UX, less confusion, easier maintenance
+
+4. **Live Chart Data Loading**
+   - **What**: Fix chart in EnhancedTickerModal to show live intraday data
+   - **Dependency**: Requires stable IB Gateway connection
+   - **Current State**: Chart shows historical Alpaca data, not real-time IB bars
+   - **Action**: Wire IB pushed bars to chart component when IB connected
+
+5. **Deep Analysis API Integration**
+   - **What**: Wire "Ask AI for Deep Analysis" button in EnhancedTickerModal
+   - **Current State**: Button exists but may not call comprehensive analysis endpoint
+   - **Action**: Connect to multi-agent analysis or create dedicated deep analysis agent
+
+---
+
+### 🟡 P2 - MEDIUM PRIORITY (Feature Enhancement)
+
+6. **AI Improvement Plan Phase 3: Proactive Intelligence**
+   - Alerts on triggered setups (not just when you open a ticker)
+   - Profit-taking suggestions when position hits R-multiple targets
+   - "Bot wants to tell you something" notification system
+   - Pre-market briefing automation
+
+7. **Smart Strategy Filtering**
+   - Only show alerts for setups matching your historical win rate
+   - Filter by confidence score, regime appropriateness
+   - Personalized setup recommendations based on past performance
+
+8. **Exit Optimization**
+   - Enhanced trailing stop modes (already have 6, refine them)
+   - Scale-out automation based on R-multiples
+   - "Let winners run" vs "Take profits" AI decision
+
+9. **Bot's Take for Non-Position Tickers**
+   - Show AI analysis even for tickers you don't have positions in
+   - "If I were to trade this..." scenario analysis
+
+---
+
+### 🟢 P3 - LOW PRIORITY (Nice to Have)
+
+10. **Market Scanner Alpaca Rate Limiting Fix**
+    - Full scan on 12,000+ symbols is impractically slow
+    - Solutions: Pre-filtered universe, aggressive caching, background job queue
+
+11. **Deprecate Old Monolithic Services**
+    - Remove: `ai_assistant_service.py`, `slow_learning_service.py`
+    - Replace with agent-based architecture
+
+12. **Voice Commands**
+    - "Hey bot, what's my P&L today?"
+    - "Brief me on the market"
+    - "Close my NVDA position"
+
+13. **Multi-Timeframe Analysis**
+    - Daily, Weekly, Monthly chart overlays
+    - Higher timeframe trend context in analysis
+
+---
+
+### 💡 SAVED ENHANCEMENT IDEAS
+
+- **One-Click Stop Fix**: Button in stop warnings to auto-adjust stop to optimal level
+- **Pre-Market Checklist**: Automated morning routine (regime check, overnight gaps, earnings calendar)
+- **Trade Journal Integration**: Auto-generate trade journal entries with screenshots
+- **Strategy Backtesting**: Test stop modes and setups against historical data
+- **Alert Throttling**: Don't spam alerts, consolidate similar opportunities
+
+---
 
 ## Recent Updates (March 2026)
 
