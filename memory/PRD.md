@@ -3,6 +3,48 @@
 ## Original Problem Statement
 Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading coach, autonomous trading bot, and mutual learning loop.
 
+
+## Recent Updates (March 2026)
+
+### Phase 5.0 Complete: AI Prompt Intelligence Plan - Phase 1 (March 12, 2026)
+
+**Features Delivered:**
+
+1. **New Intent Detection Categories** (`/app/backend/agents/router_agent.py`)
+   - **SCANNER**: Detects "find me a trade", "any setups", "trade ideas" type queries
+   - **QUICK_QUOTE**: Detects "price of AAPL", "where is TSLA", "MSFT quote" type queries  
+   - **RISK_CHECK**: Detects "what's my risk exposure", "check my risk", "portfolio risk" type queries
+
+2. **New Intent Handlers** (`/app/backend/agents/orchestrator.py`)
+   - **`_handle_scanner_request()`**: Returns formatted scanner alerts with setup details, entry/stop/target prices, R:R ratio, and trigger probability
+   - **`_handle_quick_quote()`**: Returns real-time price quotes with bid/ask spread, uses midpoint fallback when last price unavailable
+   - **`_handle_risk_check()`**: Returns comprehensive portfolio risk analysis including total exposure, long/short breakdown, concentration risk, and warnings
+
+3. **Pattern Matching Improvements**
+   - Reordered pattern matching: Scanner and Risk check patterns now checked before Analysis and Position patterns
+   - Fixed "where is TSLA" pattern to correctly capture symbol instead of "IS"
+   - Fixed "portfolio risk" routing from position_query to risk_check
+   - Added more phrase variations for each intent type
+
+**Testing Results:**
+- 31/31 backend tests passed (100%)
+- All new intents correctly routed via pattern matching
+- Existing intents (ANALYSIS, POSITION_QUERY, COACHING, MARKET_INFO, TRADE_EXECUTE) still work correctly
+
+**Technical Details:**
+- Pattern matching uses regex with confidence scoring
+- High confidence (≥0.8) routes directly, lower confidence falls back to LLM classification
+- All handlers return structured responses with metadata for frontend consumption
+- Handlers are code-only (no LLM required) for fast response times
+
+**Files Modified:**
+- `/app/backend/agents/router_agent.py` - Added new intents and patterns
+- `/app/backend/agents/orchestrator.py` - Added handler methods and routing logic
+- `/app/backend/tests/test_ai_prompt_intelligence_phase1.py` - New test file
+
+---
+
+
 ## Recent Updates (March 2026)
 
 ### Phase 4.6 Complete: Comprehensive Hover-Over Tooltip System (March 12, 2026)
