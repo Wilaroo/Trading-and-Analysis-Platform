@@ -2506,6 +2506,43 @@ class TradingBotService:
         """Get daily trading statistics"""
         return asdict(self._daily_stats)
     
+    # ==================== REGIME PERFORMANCE LOGGING ====================
+    
+    async def _log_trade_to_regime_performance(self, trade: BotTrade):
+        """
+        Log a closed trade to the regime performance tracking service.
+        This allows analysis of strategy performance across different market regimes.
+        """
+        if self._regime_performance_service is None:
+            logger.debug("Regime performance service not available - skipping trade logging")
+            return
+        
+        try:
+            # Build trade data for logging
+            trade_data = {
+                "trade_id": trade.id,
+                "setup_type": trade.setup_type,
+                "market_regime": trade.market_regime,
+                "direction": trade.direction.value if hasattr(trade.direction, 'value') else trade.direction,
+                "realized_pnl": trade.realized_pnl,
+                "shares": trade.shares,
+                "entry_price": trade.entry_price,
+                "exit_price": trade.exit_price,
+                "regime_score": trade.regime_score,
+                "regime_position_multiplier": trade.regime_position_multiplier,
+                "risk_amount": trade.risk_amount,
+                "closed_at": trade.closed_at
+            }
+            
+            # Log to the regime performance service
+            await self._regime_performance_service.log_trade(trade_data)
+            
+            logger.info(f"📊 Trade logged to regime performance: {trade.symbol} {trade.setup_type} "
+                       f"in {trade.market_regime} regime, P&L: ${trade.realized_pnl:.2f}")
+            
+        except Exception as e:
+            logger.error(f"Error logging trade to regime performance: {e}")
+    
     # ==================== PERSISTENCE ====================
     
     async def _save_trade(self, trade: BotTrade):
