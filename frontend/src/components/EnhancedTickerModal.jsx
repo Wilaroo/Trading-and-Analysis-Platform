@@ -39,6 +39,7 @@ import api from '../utils/api';
 import { HelpTooltip } from './HelpTooltip';
 import { formatPrice, formatPercent, formatVolume } from '../utils/tradingUtils';
 import QuickActionsMenu from './QuickActionsMenu';
+import SmartStopSelector from './SmartStopSelector';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -222,6 +223,8 @@ const EnhancedTickerModal = ({
   const [chartError, setChartError] = useState(null);
   const [companyInfoExpanded, setCompanyInfoExpanded] = useState(false);
   const [tickerInput, setTickerInput] = useState(ticker?.symbol || '');
+  const [selectedStopMode, setSelectedStopMode] = useState('atr_dynamic');
+  const [selectedStopData, setSelectedStopData] = useState(null);
   
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
@@ -766,11 +769,29 @@ const EnhancedTickerModal = ({
                     {/* Progress Bar */}
                     <PositionProgressBar 
                       entry={trade?.fill_price || trade?.entry_price || tradingSummary.entry}
-                      stop={trade?.stop_price || tradingSummary.stop_loss}
+                      stop={selectedStopData?.stop_price || trade?.stop_price || tradingSummary.stop_loss}
                       target={trade?.target_prices?.[0] || tradingSummary.target}
                       current={quote?.price}
                     />
                   </div>
+                  
+                  {/* Smart Stop Selector */}
+                  <SmartStopSelector
+                    symbol={ticker?.symbol}
+                    entryPrice={trade?.fill_price || trade?.entry_price || tradingSummary.entry || quote?.price}
+                    direction={hasBotPosition && trade?.quantity < 0 ? 'short' : 'long'}
+                    atr={analysis?.atr || (quote?.price * 0.02)}
+                    support={tradingSummary.stop_loss}
+                    swingLow={analysis?.support_levels?.[0]}
+                    swingHigh={analysis?.resistance_levels?.[0]}
+                    floatShares={fundamentals?.float_shares}
+                    avgVolume={fundamentals?.avg_volume}
+                    selectedMode={selectedStopMode}
+                    onModeSelect={(mode, data) => {
+                      setSelectedStopMode(mode);
+                      setSelectedStopData(data);
+                    }}
+                  />
                   
                   {/* Analysis Scores */}
                   <div className="bg-zinc-900/50 border border-white/10 rounded-xl p-3">
