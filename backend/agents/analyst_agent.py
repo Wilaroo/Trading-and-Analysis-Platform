@@ -53,6 +53,9 @@ class AnalysisContext:
     tqs_grade: str = ""
     tqs_action: str = ""
     tqs_breakdown: Dict = None
+    
+    # Bias/direction
+    bias: str = ""
     tqs_key_factors: List[str] = None
     tqs_concerns: List[str] = None
 
