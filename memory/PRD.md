@@ -7,6 +7,60 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### Phase 2 Complete: Full Dashboard UI Overhaul (March 12, 2026)
+
+**Status:** ✅ COMPLETE - Tested and Verified
+
+**Features Delivered:**
+
+1. **New Backend API Endpoints** (`/app/backend/routers/trading_bot.py`)
+   - `GET /api/trading-bot/dashboard-data` - All-in-one dashboard data endpoint
+     - Returns: bot_status, today_pnl, open_pnl, open_trades, watching_setups, recent_thoughts, performance_summary
+   - `GET /api/trading-bot/performance/equity-curve?period=[today|week|month|ytd|all]` - Equity curve data
+     - Returns: equity_curve array, trade_markers, summary stats (total_pnl, trades_count, win_rate, avg_r, best_trade, worst_trade)
+   - `GET /api/trading-bot/thoughts?limit=N` - Bot's thoughts in first person
+     - Returns: thoughts array with text, timestamp, confidence, action_type, symbol
+
+2. **NewDashboard Component** (`/app/frontend/src/components/NewDashboard.jsx`)
+   - Bot-centric layout matching V2 approved mockup
+   - Dashboard header with bot status (HUNTING/PAUSED/LOADING), session, regime, "Brief Me" button
+   - Auto-refresh every 15 seconds for dashboard data
+   - P&L display (TODAY'S P&L and OPEN P&L)
+   - Grid layout: Left (8 cols) for main content, Right (4 cols) for AI Assistant
+
+3. **BotPerformanceChart Component** (`/app/frontend/src/components/BotPerformanceChart.jsx`)
+   - Equity curve visualization with time range toggles (Today/Week/Month/YTD/All)
+   - Auto-refresh every 30 seconds
+   - Quick stats display: Trades, Win Rate, Avg R, Best, Worst
+   - TradingView Lightweight Charts integration
+
+4. **BotBrainPanel Component** (`/app/frontend/src/components/BotBrainPanel.jsx`)
+   - Bot's thoughts in first person (as requested: "I detected...", "I'm monitoring...")
+   - Recent trade decisions with reasoning (Priority A)
+   - Real-time thoughts as bot processes data (Priority B)
+   - Processing indicator and "View History" link
+   - Auto-refresh every 30 seconds
+
+5. **ActivePositionsCard** - Shows all open positions with P&L
+6. **WatchingSetupsCard** - Shows pending setups the bot is watching
+7. **ScannerAlertsStrip** - Live scanner alerts at bottom
+
+**Testing Results (Iteration 71):**
+- ✅ All 25 backend API tests passed (100%)
+- ✅ All 10 frontend UI elements verified (100%)
+- ✅ No critical issues found
+- ✅ No action items required
+
+**Files Created/Modified:**
+- `/app/backend/routers/trading_bot.py` - Added 3 new endpoints (lines 537-730)
+- `/app/frontend/src/components/NewDashboard.jsx` - Main dashboard component
+- `/app/frontend/src/components/BotPerformanceChart.jsx` - Equity curve chart
+- `/app/frontend/src/components/BotBrainPanel.jsx` - Bot thoughts panel
+- `/app/frontend/src/components/tabs/AICoachTab.jsx` - Integrated NewDashboard
+- `/app/backend/tests/test_new_dashboard_apis.py` - Test file
+
+---
+
 ### UI Redesign - FINAL APPROVED (March 12, 2026)
 
 **Status:** ✅ APPROVED - Ready for Implementation
