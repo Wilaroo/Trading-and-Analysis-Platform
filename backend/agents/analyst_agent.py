@@ -232,8 +232,8 @@ End with which stock looks better right now and why. Keep it actionable and unde
         lines = [f"**{ctx.symbol}** @ ${ctx.current_price:.2f}"]
         
         # Price action
-        change_emoji = "🟢" if ctx.change_pct >= 0 else "🔴"
-        lines.append(f"Change: {change_emoji} {ctx.change_pct:+.2f}%")
+        change_emoji = "🟢" if ctx.change_percent >= 0 else "🔴"
+        lines.append(f"Change: {change_emoji} {ctx.change_percent:+.2f}%")
         
         # Key technicals
         if ctx.vwap > 0:
