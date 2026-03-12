@@ -30,6 +30,7 @@ import {
   Zap
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { Tip, TipIcon, CustomTip } from './shared/Tooltip';
 
 // Update interval: 30 minutes
 const UPDATE_INTERVAL = 30 * 60 * 1000;
@@ -208,7 +209,12 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/30">
         <div className="flex items-center gap-2">
           <Activity className="w-4 h-4 text-slate-400" />
-          <span className="text-sm font-medium text-slate-300">MARKET REGIME</span>
+          <CustomTip 
+            label="Market Regime" 
+            description="Overall market condition based on SPY/QQQ breadth, VIX, sector rotation, and volume analysis. Determines position sizing and strategy selection."
+          >
+            <span className="text-sm font-medium text-slate-300">MARKET REGIME</span>
+          </CustomTip>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-500">
@@ -219,6 +225,7 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
             disabled={loading}
             className="p-1 hover:bg-slate-700/50 rounded transition-colors"
             data-testid="regime-refresh-btn"
+            title="Refresh market regime data"
           >
             <RefreshCw className={`w-4 h-4 text-slate-400 ${loading ? 'animate-spin' : ''}`} />
           </button>
@@ -236,14 +243,18 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
               {stateConfig.label}
             </h3>
             <div className="flex items-center gap-3 text-sm">
-              <span className="text-slate-400">
-                Score: <span className={getScoreColor(regime?.composite_score || 0)}>
-                  {regime?.composite_score || 0}
-                </span>/100
-              </span>
-              <span className="text-slate-400">
-                Confidence: <span className="text-slate-300">{regime?.confidence || 0}%</span>
-              </span>
+              <CustomTip label="Composite Score" description="Overall market health score (0-100). >60 = bullish conditions, <40 = bearish conditions, 40-60 = neutral/mixed.">
+                <span className="text-slate-400">
+                  Score: <span className={getScoreColor(regime?.composite_score || 0)}>
+                    {regime?.composite_score || 0}
+                  </span>/100
+                </span>
+              </CustomTip>
+              <CustomTip label="Confidence" description="How reliable this assessment is based on data quality and signal agreement. Higher = more trustworthy.">
+                <span className="text-slate-400">
+                  Confidence: <span className="text-slate-300">{regime?.confidence || 0}%</span>
+                </span>
+              </CustomTip>
             </div>
           </div>
         </div>
@@ -251,33 +262,36 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
         {/* Signal Block Scores */}
         <div className="grid grid-cols-4 gap-2 mb-4">
           {[
-            { key: 'trend', label: 'TREND', icon: TrendingUp },
-            { key: 'breadth', label: 'BREADTH', icon: BarChart3 },
-            { key: 'ftd', label: 'FTD', icon: Zap },
-            { key: 'volume_vix', label: 'VOL/VIX', icon: Gauge }
-          ].map(({ key, label, icon: Icon }) => (
-            <div 
-              key={key}
-              className={`
-                text-center p-2 rounded-lg 
-                ${getScoreBgColor(signalScores[key] || 0)}
-                border border-slate-700/30
-              `}
-              data-testid={`signal-block-${key}`}
-            >
-              <Icon className="w-4 h-4 mx-auto mb-1 text-slate-400" />
-              <div className="text-xs text-slate-500 mb-1">{label}</div>
-              <div className={`text-lg font-bold ${getScoreColor(signalScores[key] || 0)}`}>
-                {signalScores[key] || 0}
+            { key: 'trend', label: 'TREND', icon: TrendingUp, tip: 'SPY & QQQ price trend relative to key moving averages (20, 50, 200 EMA). >50 = uptrending.' },
+            { key: 'breadth', label: 'BREADTH', icon: BarChart3, tip: 'Market breadth: how many stocks/sectors are participating in the move. Confirms or warns of divergence.' },
+            { key: 'ftd', label: 'FTD', icon: Zap, tip: 'Follow-Through Day status. Tracks rally attempts and distribution days to identify trend changes.' },
+            { key: 'volume_vix', label: 'VOL/VIX', icon: Gauge, tip: 'VIX fear gauge + volume analysis. Low VIX + healthy volume = bullish, high VIX = caution.' }
+          ].map(({ key, label, icon: Icon, tip }) => (
+            <CustomTip key={key} label={label} description={tip}>
+              <div 
+                className={`
+                  text-center p-2 rounded-lg w-full
+                  ${getScoreBgColor(signalScores[key] || 0)}
+                  border border-slate-700/30
+                `}
+                data-testid={`signal-block-${key}`}
+              >
+                <Icon className="w-4 h-4 mx-auto mb-1 text-slate-400" />
+                <div className="text-xs text-slate-500 mb-1">{label}</div>
+                <div className={`text-lg font-bold ${getScoreColor(signalScores[key] || 0)}`}>
+                  {signalScores[key] || 0}
+                </div>
               </div>
-            </div>
+            </CustomTip>
           ))}
         </div>
 
         {/* Risk Level Bar */}
         <div className="mb-3">
           <div className="flex items-center justify-between text-xs mb-1">
-            <span className="text-slate-400">Risk Level</span>
+            <CustomTip label="Risk Level" description="Inverse of regime score. Higher = more caution needed. Used to automatically adjust position sizes. >60% = reduce exposure.">
+              <span className="text-slate-400">Risk Level</span>
+            </CustomTip>
             <span className={`font-medium ${
               (regime?.risk_level || 0) <= 30 ? 'text-emerald-400' :
               (regime?.risk_level || 0) <= 60 ? 'text-yellow-400' : 'text-red-400'

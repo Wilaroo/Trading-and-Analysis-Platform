@@ -36,6 +36,7 @@ import {
   FlaskConical
 } from 'lucide-react';
 import SimulatorControl from './SimulatorControl';
+import { Tip, TipIcon, CustomTip } from './shared/Tooltip';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -211,28 +212,36 @@ const AlertCard = ({ alert, onDismiss, onSelect }) => {
           
           {/* Key Stats + TQS */}
           <div className="flex items-center gap-3 mt-2 text-xs flex-wrap">
-            <div className="flex items-center gap-1">
-              <span className="text-zinc-500">Price:</span>
-              <span className="text-white font-medium">${alert.current_price?.toFixed(2)}</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-zinc-500">Trigger:</span>
-              <span className="text-primary font-medium">${alert.trigger_price?.toFixed(2)}</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-zinc-500">R:R</span>
-              <span className="text-emerald-400 font-medium">{alert.risk_reward?.toFixed(1)}:1</span>
-            </div>
-            {alert.tqs_score > 0 && (
+            <CustomTip label="Current Price" description="Last traded price of the stock. Live data from market.">
               <div className="flex items-center gap-1">
-                <span className="text-zinc-500">TQS:</span>
-                <span className={`font-bold ${getTQSColor(alert.tqs_grade)}`}>
-                  {alert.tqs_score?.toFixed(0)}
-                </span>
-                <span className={`text-xs ${getTQSColor(alert.tqs_grade)}`}>
-                  ({alert.tqs_grade})
-                </span>
+                <span className="text-zinc-500">Price:</span>
+                <span className="text-white font-medium">${alert.current_price?.toFixed(2)}</span>
               </div>
+            </CustomTip>
+            <CustomTip label="Trigger Price" description="Price level where the setup confirms. Entry signal fires when price crosses this level.">
+              <div className="flex items-center gap-1">
+                <span className="text-zinc-500">Trigger:</span>
+                <span className="text-primary font-medium">${alert.trigger_price?.toFixed(2)}</span>
+              </div>
+            </CustomTip>
+            <CustomTip label="Risk:Reward" description="Potential profit vs potential loss. 2:1 means risking $1 to make $2. Higher is better.">
+              <div className="flex items-center gap-1">
+                <span className="text-zinc-500">R:R</span>
+                <span className="text-emerald-400 font-medium">{alert.risk_reward?.toFixed(1)}:1</span>
+              </div>
+            </CustomTip>
+            {alert.tqs_score > 0 && (
+              <CustomTip label="Trade Quality Score" description="Composite score (0-100) measuring setup quality. 70+ is high quality. Based on pattern, volume, risk/reward, and context.">
+                <div className="flex items-center gap-1">
+                  <span className="text-zinc-500">TQS:</span>
+                  <span className={`font-bold ${getTQSColor(alert.tqs_grade)}`}>
+                    {alert.tqs_score?.toFixed(0)}
+                  </span>
+                  <span className={`text-xs ${getTQSColor(alert.tqs_grade)}`}>
+                    ({alert.tqs_grade})
+                  </span>
+                </div>
+              </CustomTip>
             )}
           </div>
           
@@ -249,13 +258,17 @@ const AlertCard = ({ alert, onDismiss, onSelect }) => {
           {/* Timing */}
           <div className="flex items-center gap-2 mt-2">
             <Clock className="w-3 h-3 text-zinc-500" />
-            <span className="text-xs text-zinc-400">
-              ~{formatTime(alert.minutes_to_trigger)} to trigger
-            </span>
+            <CustomTip label="Time to Trigger" description="Estimated time until price reaches the trigger level based on current momentum.">
+              <span className="text-xs text-zinc-400">
+                ~{formatTime(alert.minutes_to_trigger)} to trigger
+              </span>
+            </CustomTip>
             <span className="text-xs text-zinc-500">|</span>
-            <span className="text-xs text-emerald-400">
-              {Math.round(alert.trigger_probability * 100)}% prob
-            </span>
+            <CustomTip label="Trigger Probability" description="Likelihood the setup will trigger based on momentum, volume, and historical patterns.">
+              <span className="text-xs text-emerald-400">
+                {Math.round(alert.trigger_probability * 100)}% prob
+              </span>
+            </CustomTip>
           </div>
         </div>
         

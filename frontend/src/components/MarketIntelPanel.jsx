@@ -19,6 +19,7 @@ import {
 import api from '../utils/api';
 import { toast } from 'sonner';
 import { renderTickerAwareContent } from '../utils/tickerUtils';
+import { CustomTip } from './shared/Tooltip';
 
 const REPORT_ICONS = {
   sunrise: Sunrise,
@@ -35,6 +36,14 @@ const REPORT_COLORS = {
   midday: { bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', text: 'text-yellow-400', dot: 'bg-yellow-400' },
   power_hour: { bg: 'bg-orange-500/10', border: 'border-orange-500/30', text: 'text-orange-400', dot: 'bg-orange-400' },
   post_market: { bg: 'bg-purple-500/10', border: 'border-purple-500/30', text: 'text-purple-400', dot: 'bg-purple-400' },
+};
+
+const REPORT_TIPS = {
+  premarket: 'Pre-market analysis (7:00-9:30 AM ET). Covers overnight news, earnings, and gap setups.',
+  early_market: 'Early session report (9:30-11:00 AM ET). ORB setups, opening momentum, and initial trends.',
+  midday: 'Midday analysis (11:30 AM-1:00 PM ET). Mean reversion setups, lunch lull patterns.',
+  power_hour: 'Power hour report (3:00-4:00 PM ET). End-of-day momentum and positioning for close.',
+  post_market: 'Post-market wrap (4:00 PM+ ET). Summary of day, earnings reactions, setup for tomorrow.'
 };
 
 const MarketIntelPanel = ({ onTickerSelect }) => {

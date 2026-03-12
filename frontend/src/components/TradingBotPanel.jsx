@@ -31,6 +31,7 @@ import {
   Power,
   Ban
 } from 'lucide-react';
+import { Tip, TipIcon, CustomTip } from './shared/Tooltip';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -148,11 +149,11 @@ const Reasons2SellMonitor = ({ trade }) => {
 };
 
 // P&L display component
-const PnLDisplay = ({ pnl, pnlPct, size = 'sm' }) => {
+const PnLDisplay = ({ pnl, pnlPct, size = 'sm', showTip = false }) => {
   const isPositive = pnl >= 0;
   const textSize = size === 'lg' ? 'text-lg' : 'text-sm';
   
-  return (
+  const content = (
     <div className={`flex items-center gap-1 ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
       <span className={`font-mono font-bold ${textSize}`}>
         {isPositive ? '+' : ''}{pnl?.toFixed(2) || '0.00'}
@@ -162,6 +163,15 @@ const PnLDisplay = ({ pnl, pnlPct, size = 'sm' }) => {
       </span>
     </div>
   );
+  
+  if (showTip) {
+    return (
+      <CustomTip label="P&L" description="Profit or Loss on this position. Dollar amount and percentage return.">
+        {content}
+      </CustomTip>
+    );
+  }
+  return content;
 };
 
 // Trade Card Component
@@ -950,26 +960,36 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
             <div className="p-4 bg-zinc-800/50 space-y-3">
               <h4 className="text-sm font-medium text-zinc-300 flex items-center gap-2">
                 <Shield className="w-4 h-4 text-cyan-400" />
-                Risk Parameters
+                <CustomTip label="Risk Parameters" description="Your position sizing and loss limits. These protect your capital and enforce discipline.">
+                  Risk Parameters
+                </CustomTip>
               </h4>
               
               <div className="grid grid-cols-2 gap-3 text-xs">
-                <div className="p-2 bg-zinc-700/50 rounded">
-                  <span className="text-zinc-500">Max Risk/Trade</span>
-                  <p className="text-white font-mono">${status?.risk_params?.max_risk_per_trade?.toLocaleString()}</p>
-                </div>
-                <div className="p-2 bg-zinc-700/50 rounded">
-                  <span className="text-zinc-500">Max Daily Loss</span>
-                  <p className="text-white font-mono">${status?.risk_params?.max_daily_loss?.toLocaleString()}</p>
-                </div>
-                <div className="p-2 bg-zinc-700/50 rounded">
-                  <span className="text-zinc-500">Capital</span>
-                  <p className="text-white font-mono">${status?.risk_params?.starting_capital?.toLocaleString()}</p>
-                </div>
-                <div className="p-2 bg-zinc-700/50 rounded">
-                  <span className="text-zinc-500">Min R:R</span>
-                  <p className="text-white font-mono">{status?.risk_params?.min_risk_reward}:1</p>
-                </div>
+                <CustomTip label="Max Risk/Trade" description="Maximum dollar amount you can lose on any single trade. Determines position size based on stop distance.">
+                  <div className="p-2 bg-zinc-700/50 rounded w-full">
+                    <span className="text-zinc-500">Max Risk/Trade</span>
+                    <p className="text-white font-mono">${status?.risk_params?.max_risk_per_trade?.toLocaleString()}</p>
+                  </div>
+                </CustomTip>
+                <CustomTip label="Max Daily Loss" description="Daily loss limit. Bot pauses when hit to prevent tilt trading. Usually 2-3x max risk per trade.">
+                  <div className="p-2 bg-zinc-700/50 rounded w-full">
+                    <span className="text-zinc-500">Max Daily Loss</span>
+                    <p className="text-white font-mono">${status?.risk_params?.max_daily_loss?.toLocaleString()}</p>
+                  </div>
+                </CustomTip>
+                <CustomTip label="Trading Capital" description="Account capital used for position sizing calculations. May differ from actual account balance.">
+                  <div className="p-2 bg-zinc-700/50 rounded w-full">
+                    <span className="text-zinc-500">Capital</span>
+                    <p className="text-white font-mono">${status?.risk_params?.starting_capital?.toLocaleString()}</p>
+                  </div>
+                </CustomTip>
+                <CustomTip label="Minimum R:R" description="Minimum Risk:Reward ratio required to take a trade. 2:1 means potential profit must be 2x potential loss.">
+                  <div className="p-2 bg-zinc-700/50 rounded w-full">
+                    <span className="text-zinc-500">Min R:R</span>
+                    <p className="text-white font-mono">{status?.risk_params?.min_risk_reward}:1</p>
+                  </div>
+                </CustomTip>
               </div>
               
               {account && (

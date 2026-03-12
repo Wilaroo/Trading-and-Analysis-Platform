@@ -5,6 +5,38 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### Phase 4.6 Complete: Comprehensive Hover-Over Tooltip System (March 12, 2026)
+
+**Features Delivered:**
+
+1. **Comprehensive Tooltip Definition System** (`/app/frontend/src/components/shared/Tooltip.jsx`)
+   - 180+ trading terms with clear, educational explanations
+   - Organized by category: Market Regime, Scores, Technical, Volume, Levels, Risk Management, Trade Types, Strategies, Bot, Backtesting, Learning, and more
+   - Reusable components: `Tip`, `TipIcon`, `CustomTip`, `MetricTip`
+   - Smooth animations with framer-motion
+
+2. **Components Enhanced with Tooltips:**
+   - **MarketRegimeWidget** - Score, Confidence, Signal Blocks (Trend, Breadth, FTD, Vol/VIX), Risk Level
+   - **TradingBotPanel** - Risk Parameters (Max Risk/Trade, Max Daily Loss, Capital, Min R:R)
+   - **LiveAlertsPanel** - Price, Trigger Price, R:R, TQS, Time to Trigger, Probability
+   - **LearningIntelligenceHub** - Profile Stats (Best Time, Setup, Regime, Avg Hold), Metrics (Win Rate, Profit Factor, Expectancy, Avg Winner/Loser)
+   - **TradingDashboardPage** - Today's Performance, Trades, Win Rate, Daily Loss Limit, Position Exposure
+   - **AdvancedBacktestPanel** - Tab explanations (Quick Test, Market-Wide, Walk-Forward, Monte Carlo)
+   - **MarketIntelPanel** - Report time period explanations
+   - **MarketScannerPanel** - Trade style descriptions
+
+3. **HelpTooltip Integration**
+   - Updated existing `HelpTooltip.js` to use comprehensive definitions
+   - Backwards compatible with all existing termId references
+
+**Technical Details:**
+- Tooltips appear on hover with 120ms fade animation
+- Positioned dynamically to stay in viewport
+- Category badges show context (Market, Technical, Risk, etc.)
+- Dark theme with cyan accent colors for consistency
+
+---
+
 ### Phase 4.5 Complete: Regime-Aware Strategy Performance Tracking (March 12, 2026)
 
 **Features Delivered:**

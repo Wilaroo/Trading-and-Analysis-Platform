@@ -81,4 +81,7 @@ export const EmptyState = ({ icon: Icon, title, description }) => (
   </div>
 );
 
+// Re-export tooltip components
+export { Tip, TipIcon, CustomTip, MetricTip, tooltipDefinitions } from './Tooltip';
+
 export default Card;
