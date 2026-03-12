@@ -7,7 +7,7 @@ import requests
 import os
 import time
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://backtest-hub-18.preview.emergentagent.com')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://regime-aware-bot.preview.emergentagent.com')
 
 class TestHealthAndBasics:
     """Health check and basic API tests"""

@@ -75,10 +75,12 @@ from routers.advanced_backtest_router import router as advanced_backtest_router,
 from routers.hybrid_data import router as hybrid_data_router, init_hybrid_data_router
 from routers.market_scanner import router as market_scanner_router, init_market_scanner_router
 from routers.market_regime import router as market_regime_router, init_market_regime_engine
+from routers.regime_performance import router as regime_performance_router, init_regime_performance_router
 from services.market_intel_service import get_market_intel_service
 from services.hybrid_data_service import get_hybrid_data_service, init_hybrid_data_service
 from services.market_scanner_service import get_market_scanner_service, init_market_scanner_service
 from services.market_regime_engine import MarketRegimeEngine, get_market_regime_engine
+from services.regime_performance_service import get_regime_performance_service, init_regime_performance_service
 from services.learning_loop_service import get_learning_loop_service, init_learning_loop_service
 from services.trade_context_service import get_trade_context_service, init_trade_context_service
 from services.execution_tracker_service import get_execution_tracker, init_execution_tracker
@@ -307,6 +309,7 @@ app.include_router(advanced_backtest_router)  # Advanced backtesting system
 app.include_router(hybrid_data_router)  # Hybrid IB/Alpaca data service
 app.include_router(market_scanner_router)  # Market-wide strategy scanner
 app.include_router(market_regime_router)  # Market regime engine
+app.include_router(regime_performance_router)  # Regime-based performance tracking
 
 # Collections
 strategies_col = db["strategies"]
@@ -423,6 +426,13 @@ print(f"  - Endpoints: /api/market-regime/current, /api/market-regime/summary")
 # Wire Market Regime to Trading Bot for regime-aware position sizing
 trading_bot.set_market_regime_engine(market_regime_engine)
 print("  - Wired to Trading Bot: Position sizing adjusts based on regime")
+
+# Initialize Regime Performance Tracking Service
+regime_performance_service = init_regime_performance_service(db=db)
+init_regime_performance_router(regime_performance_service)
+register_service('regime_performance_service', regime_performance_service)
+print("  - Regime Performance Tracking: Strategy performance by market regime")
+print("  - Endpoints: /api/regime-performance/summary, /api/regime-performance/best-for-regime/{regime}")
 
 # ===================== FAST LEARNING (Phase 3A & 3B) =====================
 # Initialize circuit breakers, position sizing, health monitoring, dynamic thresholds

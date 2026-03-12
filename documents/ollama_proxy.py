@@ -8,7 +8,7 @@ Receives Ollama requests, calls local Ollama, returns responses.
 No ngrok needed - this initiates the connection outbound.
 
 Usage:
-    python ollama_proxy.py --cloud-url https://backtest-hub-18.preview.emergentagent.com
+    python ollama_proxy.py --cloud-url https://regime-aware-bot.preview.emergentagent.com
 """
 
 import asyncio

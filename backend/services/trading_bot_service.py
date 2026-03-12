@@ -442,6 +442,11 @@ class BotTrade:
     # Notes for tracking (e.g., [SIMULATED], error messages, etc.)
     notes: Optional[str] = None
     
+    # Market regime at time of trade entry
+    market_regime: str = "UNKNOWN"  # RISK_ON, CAUTION, RISK_OFF, CONFIRMED_DOWN
+    regime_score: float = 50.0      # Composite score at entry (0-100)
+    regime_position_multiplier: float = 1.0  # Position size adjustment applied
+    
     # Order IDs (from broker)
     entry_order_id: Optional[str] = None
     stop_order_id: Optional[str] = None
@@ -454,6 +459,10 @@ class BotTrade:
         d['status'] = self.status.value if isinstance(self.status, TradeStatus) else self.status
         d['timeframe'] = self.timeframe
         d['close_at_eod'] = self.close_at_eod
+        # Ensure regime fields are included
+        d['market_regime'] = self.market_regime
+        d['regime_score'] = self.regime_score
+        d['regime_position_multiplier'] = self.regime_position_multiplier
         return d
 
 
@@ -542,6 +551,9 @@ class TradingBotService:
             "CONFIRMED_DOWN": 0.25    # Reduce by 75% for longs, normal for shorts
         }
         
+        # Regime Performance Tracking
+        self._regime_performance_service = None
+        
         # Callbacks for real-time updates
         self._trade_callbacks: List[callable] = []
         
@@ -563,6 +575,11 @@ class TradingBotService:
         """Set market regime engine for regime-aware position sizing"""
         self._market_regime_engine = regime_engine
         logger.info("TradingBotService: Market Regime Engine connected")
+    
+    def set_regime_performance_service(self, performance_service):
+        """Set regime performance service for trade logging"""
+        self._regime_performance_service = performance_service
+        logger.info("TradingBotService: Regime Performance Service connected")
     
     async def _update_market_regime(self):
         """Fetch current market regime for position sizing adjustments"""
@@ -1213,6 +1230,25 @@ class TradingBotService:
             scale_pcts = strategy_cfg.get("scale_out_pcts", [0.33, 0.33, 0.34])
             close_at_eod = strategy_cfg.get("close_at_eod", True)
             
+            # Get current market regime for position sizing and logging
+            current_regime = self._current_regime or "UNKNOWN"
+            regime_score = 50.0
+            regime_multiplier = self._regime_position_multipliers.get(current_regime, 1.0)
+            
+            # Adjust regime multiplier for shorts in CONFIRMED_DOWN (they benefit)
+            if current_regime == "CONFIRMED_DOWN" and direction == TradeDirection.SHORT:
+                regime_multiplier = 1.0
+            elif current_regime == "RISK_ON" and direction == TradeDirection.SHORT:
+                regime_multiplier = 0.7  # Counter-trend shorts reduced
+            
+            # Try to get regime score from engine
+            if self._market_regime_engine is not None:
+                try:
+                    regime_data = await self._market_regime_engine.get_current_regime()
+                    regime_score = regime_data.get("composite_score", 50.0)
+                except Exception:
+                    pass
+            
             # Create trade
             trade = BotTrade(
                 id=str(uuid.uuid4())[:8],
@@ -1241,6 +1277,10 @@ class TradingBotService:
                 estimated_duration=self._estimate_duration(setup_type),
                 explanation=explanation,
                 close_at_eod=close_at_eod,
+                # Market regime at entry
+                market_regime=current_regime,
+                regime_score=regime_score,
+                regime_position_multiplier=regime_multiplier,
                 scale_out_config={
                     "enabled": True,
                     "targets_hit": [],
@@ -2284,6 +2324,9 @@ class TradingBotService:
                         await self._notify_trade_update(trade, "closed")
                         await self._save_trade(trade)
                         
+                        # Log to regime performance tracking
+                        await self._log_trade_to_regime_performance(trade)
+                        
                         logger.info(f"Trade fully closed at Target {i+1}: {trade.symbol} Total P&L: ${trade.realized_pnl:.2f}")
                         return
     
@@ -2403,6 +2446,9 @@ class TradingBotService:
                     ))
                 except Exception as e:
                     logger.warning(f"Failed to record trade to learning loop: {e}")
+            
+            # Log to regime performance tracking
+            await self._log_trade_to_regime_performance(trade)
             
             logger.info(f"Trade closed ({reason}): {trade.symbol} P&L: ${trade.realized_pnl:.2f}")
             return True
