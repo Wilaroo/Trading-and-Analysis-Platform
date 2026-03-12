@@ -70,6 +70,57 @@ const HUNT_RISK_COLORS = {
   'LOW to MEDIUM': 'text-purple-400 bg-purple-500/20'
 };
 
+// Layered stops visualizer sub-component
+const LayeredStopsVisualizer = ({ entryPrice, atr, direction }) => {
+  // Calculate layered stops locally (matching backend defaults: 40%/30%/30% at 1.0/1.5/2.0 ATR)
+  const layerConfig = [
+    { level: 1, pct: 0.40, depth: 1.0 },
+    { level: 2, pct: 0.30, depth: 1.5 },
+    { level: 3, pct: 0.30, depth: 2.0 }
+  ];
+  
+  if (!entryPrice || !atr) return null;
+  
+  const layers = layerConfig.map(config => {
+    const buffer = atr * config.depth;
+    const stopPrice = direction === 'long' 
+      ? entryPrice - buffer 
+      : entryPrice + buffer;
+    return {
+      ...config,
+      stopPrice: Math.round(stopPrice * 100) / 100
+    };
+  });
+  
+  return (
+    <div className="mt-3 space-y-1">
+      <span className="text-xs text-zinc-500 flex items-center gap-2">
+        <Layers className="w-3 h-3" />
+        Layered Exit Plan:
+      </span>
+      {layers.map((layer) => (
+        <div key={layer.level} className="flex justify-between text-xs bg-black/30 px-2 py-1.5 rounded items-center">
+          <div className="flex items-center gap-2">
+            <span className={`w-1.5 h-1.5 rounded-full ${
+              layer.level === 1 ? 'bg-red-400' :
+              layer.level === 2 ? 'bg-orange-400' : 'bg-yellow-400'
+            }`} />
+            <span>Layer {layer.level}</span>
+            <span className="text-zinc-500">({layer.pct * 100}%)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-zinc-500">{layer.depth}× ATR</span>
+            <span className="font-mono font-medium text-white">${layer.stopPrice.toFixed(2)}</span>
+          </div>
+        </div>
+      ))}
+      <p className="text-[10px] text-zinc-500 mt-2">
+        Hardest to hunt - exit 40% at first stop, survive brief sweeps with remaining 60%
+      </p>
+    </div>
+  );
+};
+
 const SmartStopSelector = ({
   symbol,
   entryPrice,
@@ -309,16 +360,12 @@ const SmartStopSelector = ({
                   </p>
                   
                   {/* Show layered stops if applicable */}
-                  {selectedMode === 'layered' && comparison[selectedMode].layered_stops && (
-                    <div className="mt-3 space-y-1">
-                      <span className="text-xs text-zinc-500">Layered Exit Plan:</span>
-                      {comparison[selectedMode].layered_stops.map((layer, i) => (
-                        <div key={i} className="flex justify-between text-xs bg-black/30 px-2 py-1 rounded">
-                          <span>Layer {layer.level} ({layer.position_pct * 100}%)</span>
-                          <span className="font-mono">${layer.stop_price.toFixed(2)}</span>
-                        </div>
-                      ))}
-                    </div>
+                  {selectedMode === 'layered' && (
+                    <LayeredStopsVisualizer 
+                      entryPrice={entryPrice}
+                      atr={atr}
+                      direction={direction}
+                    />
                   )}
                 </div>
               )}
