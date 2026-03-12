@@ -7,6 +7,44 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### Sprint 1 Complete: Brief Me + Enhanced Regime Widget (March 12, 2026)
+
+**Status:** ✅ COMPLETE - Tested and Verified (iteration_72.json)
+
+**Features Delivered:**
+
+1. **Brief Me Feature** - AI-generated personalized market briefings
+   - Backend: `/app/backend/agents/brief_me_agent.py` - BriefMeAgent class
+   - API: `POST /api/agents/brief-me` with `detail_level` param ("quick" or "detailed")
+   - Frontend: `/app/frontend/src/components/BriefMeModal.jsx`
+   - **Quick Mode**: 2-3 sentence summary with regime, bot status, P&L, top opportunity
+   - **Detailed Mode**: Multi-section report (Market Overview, Bot Status, Personalized Insights, Opportunities, Recommendation)
+   - Option C implemented: Quick by default, expandable to detailed
+
+2. **Enhanced Market Regime Widget** - Personalized performance stats
+   - API: `GET /api/market-regime/performance` - Returns user's trading performance by regime
+   - Frontend: Updated `/app/frontend/src/components/MarketRegimeWidget.jsx`
+   - **YOUR PERFORMANCE IN THIS REGIME** section shows:
+     - Win Rate, Trade Count, Average P&L
+     - Best setup for current regime
+   - Note: Section only appears when trades have `market_regime` field tagged
+
+**Testing Results (iteration_72.json):**
+- ✅ Backend API tests: 13/13 passed (100%)
+- ✅ Frontend UI tests: 11/12 verified (92% - performance section hidden when no data)
+
+**Files Created/Modified:**
+- `/app/backend/agents/brief_me_agent.py` - NEW
+- `/app/backend/routers/agents.py` - Added /api/agents/brief-me endpoint
+- `/app/backend/routers/market_regime.py` - Added /api/market-regime/performance endpoint
+- `/app/backend/server.py` - Inject dependencies for regime performance
+- `/app/frontend/src/components/BriefMeModal.jsx` - NEW
+- `/app/frontend/src/components/MarketRegimeWidget.jsx` - Enhanced with performance section
+- `/app/frontend/src/components/tabs/AICoachTab.jsx` - Integrated BriefMeModal
+- `/app/backend/tests/test_sprint1_brief_me_regime.py` - Test file
+
+---
+
 ### Phase 2 Complete: Full Dashboard UI Overhaul (March 12, 2026)
 
 **Status:** ✅ COMPLETE - Tested and Verified
