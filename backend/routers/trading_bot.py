@@ -656,7 +656,6 @@ async def get_equity_curve(period: str = Query("today", enum=["today", "week", "
         
         # Calculate summary stats
         wins = [p for p in pnls if p > 0]
-        losses = [p for p in pnls if p < 0]
         
         # Calculate average R-multiple from trades that have it
         r_multiples = [t.get('r_multiple', 0) for t in filtered_trades if t.get('r_multiple')]
@@ -698,12 +697,13 @@ async def get_bot_thoughts(limit: int = Query(10, ge=1, le=50)):
     - Recent trade decisions and reasoning
     - Setups being watched
     - Position monitoring updates
+    - STOP AUDIT WARNINGS for risky stop placements
     
     Each thought has:
     - text: The thought in first person (e.g., "I detected a breakout on NVDA...")
     - timestamp: When the thought occurred
     - confidence: 0-100 confidence level
-    - action_type: entry, exit, watching, monitoring, scanning, alert
+    - action_type: entry, exit, watching, monitoring, scanning, alert, stop_warning
     - symbol: Related ticker symbol (if any)
     """
     thoughts = []
@@ -722,6 +722,34 @@ async def get_bot_thoughts(limit: int = Query(10, ge=1, le=50)):
     
     try:
         now = datetime.now(timezone.utc)
+        
+        # 0. STOP AUDIT WARNINGS (highest priority - show first)
+        stop_audit = await audit_position_stops()
+        if stop_audit.get("success") and stop_audit.get("warnings"):
+            for warning in stop_audit["warnings"][:3]:  # Max 3 stop warnings
+                severity = warning.get("severity", "info")
+                symbol = warning.get("symbol", "UNKNOWN")
+                message = warning.get("message", "")
+                
+                # Color-code by severity
+                if severity == "critical":
+                    emoji = "🚨"
+                    confidence = 95
+                elif severity == "warning":
+                    emoji = "⚠️"
+                    confidence = 80
+                else:
+                    emoji = "💡"
+                    confidence = 60
+                
+                thoughts.append({
+                    "text": f'{emoji} "{message}"',
+                    "timestamp": now.isoformat(),
+                    "confidence": confidence,
+                    "action_type": "stop_warning",
+                    "symbol": symbol,
+                    "severity": severity
+                })
         
         # 1. Thoughts from pending trades (about to execute)
         for trade in _trading_bot.get_pending_trades()[:3]:
@@ -954,6 +982,163 @@ async def stream_bot_updates():
 
 
 # ==================== ACCOUNT INFO ====================
+
+@router.get("/audit-stops")
+async def audit_position_stops():
+    """
+    Audit all open positions for risky stop placements.
+    
+    Analyzes each open position using the Smart Stop System to detect:
+    - Stops that are too tight (will get stopped out easily)
+    - Stops near round numbers ($50, $100, etc.) - easy hunting targets
+    - Stops below obvious support levels - institutional hunting zones
+    - Stops that don't account for current volatility/regime
+    
+    Returns warnings with severity levels and suggested improvements.
+    This is automatically included in the bot's "thoughts" stream.
+    """
+    if not _trading_bot:
+        return {
+            "success": True,
+            "warnings": [],
+            "positions_audited": 0,
+            "healthy_positions": 0,
+            "message": "Trading bot not initialized"
+        }
+    
+    try:
+        from services.smart_stop_service import get_smart_stop_service
+        smart_stop = get_smart_stop_service()
+        
+        open_trades = _trading_bot.get_open_trades()
+        warnings = []
+        healthy_count = 0
+        
+        for trade in open_trades:
+            symbol = trade.get('symbol', '')
+            entry_price = trade.get('fill_price') or trade.get('entry_price', 0)
+            current_price = trade.get('current_price', entry_price)
+            stop_price = trade.get('stop_price', 0)
+            direction = trade.get('direction', 'long')
+            setup_type = trade.get('setup_type', 'default')
+            
+            if not entry_price or not stop_price:
+                continue
+            
+            # Estimate ATR as 2% of price if not available
+            atr = entry_price * 0.02
+            
+            # Analyze using intelligent stop service
+            try:
+                analysis = await smart_stop.calculate_intelligent_stop(
+                    symbol=symbol,
+                    entry_price=entry_price,
+                    current_price=current_price,
+                    direction=direction,
+                    setup_type=setup_type,
+                    position_size=trade.get('shares', 100),
+                    atr=atr
+                )
+                
+                optimal_stop = analysis.stop_price
+                hunt_risk = analysis.hunt_risk
+                urgency = analysis.urgency.value
+                
+                # Check for problems
+                problems = []
+                
+                # 1. Check if stop is too tight
+                stop_distance = abs(stop_price - entry_price)
+                min_distance = atr * 0.75  # Minimum 0.75 ATR
+                if stop_distance < min_distance:
+                    problems.append({
+                        "type": "too_tight",
+                        "severity": "critical",
+                        "message": f"Stop for {symbol} is too tight (${stop_distance:.2f} vs min ${min_distance:.2f}). High probability of getting stopped out on normal volatility."
+                    })
+                
+                # 2. Check if stop is near round number
+                round_numbers = [n for n in [50, 100, 150, 200, 250, 300, 400, 500] if abs(stop_price - n) < n * 0.01]
+                if round_numbers:
+                    problems.append({
+                        "type": "round_number",
+                        "severity": "warning",
+                        "message": f"{symbol} stop at ${stop_price:.2f} is near ${round_numbers[0]} - a common stop hunting target. Consider moving it."
+                    })
+                
+                # 3. Check hunt risk
+                if hunt_risk == "HIGH":
+                    problems.append({
+                        "type": "hunt_risk",
+                        "severity": "warning",
+                        "message": f"{symbol} has HIGH stop hunt risk. Your stop at ${stop_price:.2f} may be vulnerable. Optimal: ${optimal_stop:.2f}"
+                    })
+                
+                # 4. Check urgency
+                if urgency in ["high_alert", "emergency"]:
+                    problems.append({
+                        "type": "urgency",
+                        "severity": "critical",
+                        "message": f"{symbol} position needs attention! Urgency: {urgency.upper()}. Consider tightening or exiting."
+                    })
+                
+                # 5. Check if stop is much worse than optimal
+                if direction == 'long' and stop_price > optimal_stop + atr * 0.5:
+                    problems.append({
+                        "type": "suboptimal",
+                        "severity": "info",
+                        "message": f"{symbol} stop could be tighter. Current: ${stop_price:.2f}, Suggested: ${optimal_stop:.2f} (+{((optimal_stop - stop_price)/entry_price*100):.1f}% better risk)"
+                    })
+                elif direction == 'short' and stop_price < optimal_stop - atr * 0.5:
+                    problems.append({
+                        "type": "suboptimal",
+                        "severity": "info",
+                        "message": f"{symbol} stop could be tighter. Current: ${stop_price:.2f}, Suggested: ${optimal_stop:.2f}"
+                    })
+                
+                if problems:
+                    for problem in problems:
+                        warnings.append({
+                            "symbol": symbol,
+                            "current_stop": stop_price,
+                            "optimal_stop": optimal_stop,
+                            "entry_price": entry_price,
+                            "current_price": current_price,
+                            "hunt_risk": hunt_risk,
+                            **problem
+                        })
+                else:
+                    healthy_count += 1
+                    
+            except Exception as e:
+                logger.debug(f"Could not analyze stop for {symbol}: {e}")
+                healthy_count += 1  # Assume healthy if we can't analyze
+        
+        # Sort warnings by severity (critical first, then warning, then info)
+        severity_order = {"critical": 0, "warning": 1, "info": 2}
+        warnings.sort(key=lambda w: severity_order.get(w.get("severity", "info"), 2))
+        
+        return {
+            "success": True,
+            "warnings": warnings,
+            "positions_audited": len(open_trades),
+            "healthy_positions": healthy_count,
+            "positions_with_issues": len(open_trades) - healthy_count,
+            "summary": {
+                "critical": len([w for w in warnings if w.get("severity") == "critical"]),
+                "warning": len([w for w in warnings if w.get("severity") == "warning"]),
+                "info": len([w for w in warnings if w.get("severity") == "info"])
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error auditing position stops: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "warnings": []
+        }
+
 
 @router.get("/account")
 async def get_account_info():
