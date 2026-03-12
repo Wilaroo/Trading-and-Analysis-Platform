@@ -78,7 +78,6 @@ from routers.market_regime import router as market_regime_router, init_market_re
 from routers.regime_performance import router as regime_performance_router, init_regime_performance_router
 from routers.context_awareness import router as context_awareness_router, init_context_router
 from routers.smart_stops import router as smart_stops_router, init_smart_stop_router
-from routers.intelligent_stops import router as intelligent_stops_router, get_manager as get_intelligent_stop_manager
 from services.market_intel_service import get_market_intel_service
 from services.hybrid_data_service import get_hybrid_data_service, init_hybrid_data_service
 from services.market_scanner_service import get_market_scanner_service, init_market_scanner_service
@@ -315,10 +314,8 @@ app.include_router(market_scanner_router)  # Market-wide strategy scanner
 app.include_router(market_regime_router)  # Market regime engine
 app.include_router(regime_performance_router)  # Regime-based performance tracking
 app.include_router(context_awareness_router)  # Phase 2 AI context awareness
-app.include_router(smart_stops_router)  # Smart stop loss service (anti-hunt)
+app.include_router(smart_stops_router)  # Unified Smart Stop System
 init_smart_stop_router()  # Initialize smart stop service
-
-app.include_router(intelligent_stops_router)  # Intelligent stop manager (advanced)
 
 # Collections
 strategies_col = db["strategies"]
@@ -466,21 +463,22 @@ print("  - Regime awareness: Integrated with Market Regime Engine")
 print("  - Position awareness: Real-time position and exposure tracking")
 print("  - Endpoints: /api/context/session, /api/context/regime, /api/context/full")
 
-# ===================== INTELLIGENT STOP MANAGER =====================
-# Initialize Intelligent Stop Manager with all services
-from services.intelligent_stop_manager import init_intelligent_stop_manager
-intelligent_stop_mgr = init_intelligent_stop_manager(
+# ===================== UNIFIED SMART STOP SYSTEM =====================
+# Initialize Smart Stop Service with all external services for intelligent analysis
+from services.smart_stop_service import get_smart_stop_service, init_smart_stop_service
+smart_stop_service = init_smart_stop_service(
     regime_service=market_regime_engine,
     sector_service=sector_service,
     data_service=alpaca_service
 )
-register_service('intelligent_stop_manager', intelligent_stop_mgr)
-print("Intelligent Stop Manager initialized")
+register_service('smart_stop_service', smart_stop_service)
+print("Unified Smart Stop System initialized")
+print("  - 6 Stop Modes: original, atr_dynamic, anti_hunt, volatility_adjusted, layered, chandelier")
+print("  - 8 Setup Rules: breakout, pullback, momentum, mean_reversion, gap_and_go, vwap_reversal, earnings_play, default")
 print("  - Volume Profile Analysis: POC, VAH/VAL, HVN/LVN detection")
 print("  - Sector Correlation: Relative strength-based adjustments")
-print("  - Setup-Based Rules: 7 setup types with custom stop strategies")
 print("  - Stop Hunt Protection: Anti-hunt, layered stops, round number avoidance")
-print("  - Endpoints: /api/intelligent-stops/calculate, /api/intelligent-stops/analyze-trade")
+print("  - Endpoints: /api/smart-stops/calculate, /api/smart-stops/intelligent-calculate, /api/smart-stops/analyze-trade")
 
 # ===================== FAST LEARNING (Phase 3A & 3B) =====================
 # Initialize circuit breakers, position sizing, health monitoring, dynamic thresholds

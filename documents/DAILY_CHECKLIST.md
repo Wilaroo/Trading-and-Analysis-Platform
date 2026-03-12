@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://ai-trading-hub-55.preview.emergentagent.com
+https://brief-me-dash.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://ai-trading-hub-55.preview.emergentagent.com
+https://brief-me-dash.preview.emergentagent.com
 ```
