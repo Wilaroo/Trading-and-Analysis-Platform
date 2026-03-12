@@ -83,6 +83,10 @@ class RouterAgent(BaseAgent):
             r"(?:what|how)\s+(?:is|does)\s+([a-z]{1,5})\s+look",
             r"(?:technical|technicals|chart)\s+(?:on|for)\s+([a-z]{1,5})",
             r"(?:support|resistance|levels)\s+(?:on|for)\s+([a-z]{1,5})",
+            r"(?:thoughts?|opinion|view)\s+(?:on|about)\s+([a-z]{1,5})",
+            r"([a-z]{1,5})\s+(?:for\s+)?(?:a\s+)?trades?\b",
+            r"(?:should\s+i|would\s+you)\s+(?:buy|sell|trade)\s+([a-z]{1,5})",
+            r"(?:is|does)\s+([a-z]{1,5})\s+(?:look|seem)\s+(?:good|bullish|bearish)",
         ]
         
         # Scanner patterns
@@ -288,6 +292,17 @@ Respond in JSON format:
                 )
         
         # No strong pattern match
+        # But if there are 2+ symbols mentioned with opinion-like words, route to analysis
+        symbols = self._extract_symbols(message)
+        opinion_words = ["thoughts", "think", "opinion", "view", "take", "like", "about", "recommend", "suggest"]
+        if len(symbols) >= 2 and any(word in message_lower for word in opinion_words):
+            return RoutingResult(
+                intent=Intent.ANALYSIS,
+                confidence=0.75,
+                symbols=symbols,
+                metadata={"multi_symbol": True}
+            )
+        
         return None
     
     async def _llm_classify(self, message: str) -> Optional[RoutingResult]:
