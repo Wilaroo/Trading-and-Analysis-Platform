@@ -3,6 +3,7 @@ import AICommandPanel from '../AICommandPanel';
 import RightSidebar from '../RightSidebar';
 import LearningInsightsWidget from '../LearningInsightsWidget';
 import MarketRegimeWidget from '../MarketRegimeWidget';
+import { useTickerModal } from '../../hooks/useTickerModal';
 
 const AICoachTab = ({
   setSelectedTicker,
@@ -29,7 +30,10 @@ const AICoachTab = ({
   // Navigation callback
   onNavigateToTab = null
 }) => {
-  // Handle ticker click - updates chart and opens detail modal
+  // Use the global ticker modal hook
+  const { openTickerModal } = useTickerModal();
+  
+  // Handle ticker click - opens the enhanced chart modal
   // Can receive either a string ticker or an object { symbol, quote, ... }
   const handleTickerClick = (tickerOrObject) => {
     const symbol = typeof tickerOrObject === 'string' 
@@ -37,9 +41,8 @@ const AICoachTab = ({
       : tickerOrObject?.symbol;
     
     if (symbol) {
-      setChartSymbol(symbol); // Update chart
-      // Pass object to setSelectedTicker for modal compatibility
-      setSelectedTicker({ symbol, quote: {}, fromClick: true });
+      setChartSymbol(symbol); // Update chart in background
+      openTickerModal(symbol); // Open the new enhanced modal
     }
   };
 

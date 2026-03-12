@@ -1,11 +1,14 @@
 import React from 'react';
 import TradeSignals from '../TradeSignals';
+import { useTickerModal } from '../../hooks/useTickerModal';
 
 const TradingTab = ({
   liveAlertsExpanded,
   setLiveAlertsExpanded,
   setSelectedTicker,
 }) => {
+  const { openTickerModal } = useTickerModal();
+  
   return (
     <div className="space-y-4 mt-2" data-testid="trading-tab-content">
       {/* Trade Signals - Unified signal feed */}
@@ -13,7 +16,7 @@ const TradingTab = ({
         isExpanded={liveAlertsExpanded}
         onToggleExpand={() => setLiveAlertsExpanded(!liveAlertsExpanded)}
         onSignalSelect={(signal) => {
-          setSelectedTicker({ symbol: signal.symbol, quote: { price: signal.price } });
+          openTickerModal(signal.symbol);
         }}
       />
     </div>

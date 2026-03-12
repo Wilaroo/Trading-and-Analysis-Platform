@@ -6,6 +6,7 @@ import { Toaster } from 'sonner';
 // Import refactored components
 import { Sidebar, TickerTape, PriceAlertNotification, AlertSettingsPanel } from './components';
 import { useWebSocket, usePriceAlerts } from './hooks';
+import { TickerModalProvider } from './hooks/useTickerModal';
 import api from './utils/api';
 import StartupModal from './components/StartupModal';
 
@@ -341,11 +342,12 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen" style={{ background: 'var(--bg-default)' }} onClick={initializeAudio}>
-      {/* Startup Modal */}
-      {showStartupModal && (
-        <StartupModal onComplete={() => setShowStartupModal(false)} />
-      )}
+    <TickerModalProvider>
+      <div className="min-h-screen" style={{ background: 'var(--bg-default)' }} onClick={initializeAudio}>
+        {/* Startup Modal */}
+        {showStartupModal && (
+          <StartupModal onComplete={() => setShowStartupModal(false)} />
+        )}
       
       {/* Toast notifications */}
       <Toaster 
@@ -435,7 +437,8 @@ function App() {
           </AnimatePresence>
         </div>
       </main>
-    </div>
+      </div>
+    </TickerModalProvider>
   );
 }
 
