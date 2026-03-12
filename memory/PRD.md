@@ -6,6 +6,57 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### Phase 5.1 Complete: AI Prompt Intelligence Plan - Phase 2 (March 12, 2026)
+
+**Features Delivered:**
+
+1. **Context Awareness Service** (`/app/backend/services/context_awareness_service.py`)
+   - **Time-of-Day Awareness**: Detects current trading session (Pre-Market, Market Open, Morning, Midday, Afternoon, Market Close, After Hours, Weekend)
+   - **Regime Awareness**: Integrates with Market Regime Engine to provide regime-specific advice
+   - **Position Awareness**: Analyzes user's open positions, exposure, and risk warnings
+
+2. **Session Context** - Trading session intelligence:
+   - Session-specific trading advice (e.g., "ORB setups active" at market open)
+   - Risk level assessment for each session
+   - Strategy suggestions and things to avoid per session
+
+3. **Regime Context** - Market condition intelligence:
+   - Current regime state (RISK_ON, HOLD, RISK_OFF, CONFIRMED_DOWN)
+   - Position sizing multiplier recommendations (25%-100% based on regime)
+   - Favored strategies for current conditions
+
+4. **Position Context** - Portfolio intelligence:
+   - Total exposure (long/short breakdown)
+   - At-risk positions (down >3%) flagged
+   - Concentration warnings (>30% single position)
+
+5. **Context API Endpoints** (`/app/backend/routers/context_awareness.py`)
+   - `GET /api/context/session` - Current trading session data
+   - `GET /api/context/regime` - Market regime data
+   - `GET /api/context/positions` - Position analysis
+   - `GET /api/context/full` - Complete context (all combined)
+   - `GET /api/context/prompt` - Formatted context for AI prompts
+
+6. **Coach Agent Integration**
+   - Updated to use ContextAwarenessService for smarter responses
+   - System prompt updated to include context-aware coaching rules
+   - Responses now include session-specific advice even when LLM is offline
+
+**Testing Results:**
+- All context endpoints working correctly
+- Session detection accurate (Market Open detected during market hours)
+- Regime integration working (pulls from Market Regime Engine)
+- Agent responses now include context-aware advice
+
+**Files Created/Modified:**
+- `/app/backend/services/context_awareness_service.py` - NEW: Core service
+- `/app/backend/routers/context_awareness.py` - NEW: API router
+- `/app/backend/agents/coach_agent.py` - Updated for context awareness
+- `/app/backend/agents/orchestrator.py` - Updated inject_services
+- `/app/backend/server.py` - Added service initialization
+
+---
+
 ### Phase 5.0 Complete: AI Prompt Intelligence Plan - Phase 1 (March 12, 2026)
 
 **Features Delivered:**
