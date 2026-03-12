@@ -279,3 +279,141 @@ def _get_state_display(state: str) -> dict:
         }
     }
     return displays.get(state, displays["HOLD"])
+
+
+# Database and trading bot will be injected
+_db = None
+_trading_bot = None
+
+
+def inject_dependencies(db=None, trading_bot=None):
+    """Inject database and trading bot dependencies for performance tracking."""
+    global _db, _trading_bot
+    if db is not None:
+        _db = db
+    if trading_bot is not None:
+        _trading_bot = trading_bot
+
+
+@router.get("/performance")
+async def get_regime_performance(regime: Optional[str] = Query(None, description="Specific regime to get performance for")):
+    """
+    Get the user's trading performance broken down by market regime.
+    
+    This is personalized data showing how YOU perform in each regime.
+    
+    Returns:
+    - performance_by_regime: Dict with RISK_ON, HOLD, RISK_OFF, CONFIRMED_DOWN stats
+    - current_regime: Current regime state
+    - your_edge_in_current: Your historical performance in the current regime
+    """
+    try:
+        from datetime import datetime, timezone, timedelta
+        
+        # Get current regime
+        current_regime = "HOLD"
+        if _market_regime_engine:
+            regime_data = await _market_regime_engine.get_current_regime()
+            current_regime = regime_data.get("state", "HOLD")
+        
+        # If specific regime requested, only return that
+        if regime:
+            current_regime = regime
+        
+        # Get trades from database
+        performance = {
+            "RISK_ON": {"trades": 0, "wins": 0, "total_pnl": 0, "win_rate": 0, "avg_pnl": 0, "best_setup": None},
+            "HOLD": {"trades": 0, "wins": 0, "total_pnl": 0, "win_rate": 0, "avg_pnl": 0, "best_setup": None},
+            "RISK_OFF": {"trades": 0, "wins": 0, "total_pnl": 0, "win_rate": 0, "avg_pnl": 0, "best_setup": None},
+            "CONFIRMED_DOWN": {"trades": 0, "wins": 0, "total_pnl": 0, "win_rate": 0, "avg_pnl": 0, "best_setup": None}
+        }
+        
+        # Try to get trades from trading bot first
+        if _trading_bot:
+            closed_trades = _trading_bot.get_closed_trades(limit=500)
+            
+            # Also track setup performance per regime
+            setup_performance = {}
+            
+            for trade in closed_trades:
+                trade_regime = trade.get("market_regime", "HOLD")
+                if trade_regime not in performance:
+                    trade_regime = "HOLD"
+                
+                pnl = trade.get("realized_pnl", 0)
+                setup_type = trade.get("setup_type", "unknown")
+                
+                performance[trade_regime]["trades"] += 1
+                performance[trade_regime]["total_pnl"] += pnl
+                
+                if pnl > 0:
+                    performance[trade_regime]["wins"] += 1
+                
+                # Track setup performance in this regime
+                key = (trade_regime, setup_type)
+                if key not in setup_performance:
+                    setup_performance[key] = {"trades": 0, "wins": 0}
+                setup_performance[key]["trades"] += 1
+                if pnl > 0:
+                    setup_performance[key]["wins"] += 1
+            
+            # Calculate win rates and averages
+            for reg in performance:
+                stats = performance[reg]
+                if stats["trades"] > 0:
+                    stats["win_rate"] = round(stats["wins"] / stats["trades"] * 100, 1)
+                    stats["avg_pnl"] = round(stats["total_pnl"] / stats["trades"], 2)
+                
+                # Find best setup for this regime
+                best_setup = None
+                best_win_rate = 0
+                for (r, s), sp in setup_performance.items():
+                    if r == reg and sp["trades"] >= 3:  # Minimum 3 trades
+                        wr = sp["wins"] / sp["trades"]
+                        if wr > best_win_rate:
+                            best_win_rate = wr
+                            best_setup = s
+                
+                stats["best_setup"] = best_setup
+        
+        # Or try database directly
+        elif _db:
+            trades_col = _db.get_collection("bot_trades")
+            pipeline = [
+                {"$match": {"status": "closed"}},
+                {"$group": {
+                    "_id": {"$ifNull": ["$market_regime", "HOLD"]},
+                    "trades": {"$sum": 1},
+                    "wins": {"$sum": {"$cond": [{"$gt": ["$realized_pnl", 0]}, 1, 0]}},
+                    "total_pnl": {"$sum": "$realized_pnl"}
+                }}
+            ]
+            
+            results = list(trades_col.aggregate(pipeline))
+            for r in results:
+                regime_name = r["_id"]
+                if regime_name in performance:
+                    performance[regime_name]["trades"] = r["trades"]
+                    performance[regime_name]["wins"] = r["wins"]
+                    performance[regime_name]["total_pnl"] = r["total_pnl"]
+                    if r["trades"] > 0:
+                        performance[regime_name]["win_rate"] = round(r["wins"] / r["trades"] * 100, 1)
+                        performance[regime_name]["avg_pnl"] = round(r["total_pnl"] / r["trades"], 2)
+        
+        return {
+            "success": True,
+            "current_regime": current_regime,
+            "performance_by_regime": performance,
+            "your_edge_in_current": performance.get(current_regime, {})
+        }
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e),
+            "current_regime": "HOLD",
+            "performance_by_regime": {},
+            "your_edge_in_current": {}
+        }

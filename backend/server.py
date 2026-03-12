@@ -430,6 +430,11 @@ print(f"  - Endpoints: /api/market-regime/current, /api/market-regime/summary")
 trading_bot.set_market_regime_engine(market_regime_engine)
 print("  - Wired to Trading Bot: Position sizing adjusts based on regime")
 
+# Inject dependencies for regime performance endpoint
+from routers.market_regime import inject_dependencies as inject_market_regime_deps
+inject_market_regime_deps(db=db, trading_bot=trading_bot)
+print("  - Regime Performance: Personalized stats wired to /api/market-regime/performance")
+
 # Initialize Regime Performance Tracking Service
 regime_performance_service = init_regime_performance_service(db=db)
 init_regime_performance_router(regime_performance_service)

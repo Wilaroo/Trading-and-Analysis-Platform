@@ -55,7 +55,7 @@ def init_agents_router(services: Dict[str, Any]):
     _services = services
     
     # Initialize the orchestrator with services
-    orchestrator = init_orchestrator(services=services)
+    _ = init_orchestrator(services=services)
     
     logger.info("Agents router initialized with services")
 
@@ -172,3 +172,90 @@ async def switch_llm_provider(provider: str):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# BriefMe Agent instance
+_brief_me_agent = None
+
+
+def get_brief_me_agent():
+    """Get or create the BriefMeAgent instance."""
+    global _brief_me_agent
+    
+    if _brief_me_agent is None:
+        from agents.brief_me_agent import BriefMeAgent
+        
+        llm = get_llm_provider()
+        _brief_me_agent = BriefMeAgent(llm_provider=llm)
+        
+        # Inject services
+        _brief_me_agent.inject_services(
+            context_service=_services.get("context_service"),
+            learning_provider=_services.get("learning_provider"),
+            trading_bot=_services.get("trading_bot"),
+            scanner_service=_services.get("scanner"),
+            regime_performance_service=_services.get("regime_performance_service"),
+            market_intel_service=_services.get("market_intel_service")
+        )
+        
+        logger.info("BriefMeAgent initialized")
+    
+    return _brief_me_agent
+
+
+class BriefMeRequest(BaseModel):
+    """Request for market briefing"""
+    detail_level: str = "quick"  # "quick" or "detailed"
+
+
+class BriefMeResponse(BaseModel):
+    """Response with market briefing"""
+    success: bool
+    detail_level: str
+    generated_at: str
+    summary: Any  # Can be string (quick) or dict (detailed)
+    data: Optional[Dict] = None
+    error: Optional[str] = None
+
+
+@router.post("/brief-me", response_model=BriefMeResponse)
+async def generate_market_brief(request: BriefMeRequest):
+    """
+    Generate a personalized market briefing.
+    
+    detail_level options:
+    - "quick": 2-3 sentence summary
+    - "detailed": Full report with sections (Market Overview, Bot Status, Insights, Opportunities, Recommendation)
+    
+    The briefing is personalized based on:
+    - Current market regime
+    - Your bot's state and performance
+    - Your historical trading patterns
+    - Top scanner opportunities
+    """
+    try:
+        agent = get_brief_me_agent()
+        
+        if not agent:
+            raise HTTPException(
+                status_code=500,
+                detail="BriefMe agent not initialized"
+            )
+        
+        result = await agent.generate_brief(detail_level=request.detail_level)
+        
+        return BriefMeResponse(
+            success=result.get("success", False),
+            detail_level=result.get("detail_level", request.detail_level),
+            generated_at=result.get("generated_at", ""),
+            summary=result.get("summary", ""),
+            data=result.get("data"),
+            error=result.get("error")
+        )
+        
+    except Exception as e:
+        logger.error(f"Brief Me generation error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )

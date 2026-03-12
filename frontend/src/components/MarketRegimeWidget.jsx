@@ -41,6 +41,7 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
   const [error, setError] = useState(null);
   const [expanded, setExpanded] = useState(false);
   const [lastState, setLastState] = useState(null);
+  const [regimePerformance, setRegimePerformance] = useState(null);
 
   const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -84,6 +85,21 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
       setLoading(false);
     }
   }, [API_URL, lastState, onStateChange]);
+  
+  // Fetch personalized regime performance (only when expanded)
+  const fetchRegimePerformance = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/market-regime/performance`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setRegimePerformance(data);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching regime performance:', err);
+    }
+  }, [API_URL]);
 
   // Initial fetch and interval
   useEffect(() => {
@@ -95,6 +111,13 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
     
     return () => clearInterval(interval);
   }, [fetchRegime]);
+  
+  // Fetch performance when expanded
+  useEffect(() => {
+    if (expanded && !regimePerformance) {
+      fetchRegimePerformance();
+    }
+  }, [expanded, regimePerformance, fetchRegimePerformance]);
 
   const handleRefresh = () => {
     fetchRegime(true);
@@ -338,6 +361,54 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
       {expanded && (
         <div className="px-4 pb-4 border-t border-slate-700/30">
           <div className="mt-3 space-y-3">
+            {/* YOUR PERFORMANCE IN THIS REGIME - Personalized Stats */}
+            {regimePerformance?.your_edge_in_current && (
+              <div className="bg-gradient-to-r from-purple-500/10 to-pink-500/10 p-3 rounded-lg border border-purple-500/20">
+                <h4 className="text-xs font-semibold text-purple-400 mb-2 flex items-center gap-1">
+                  <BarChart3 className="w-3 h-3" />
+                  YOUR PERFORMANCE IN THIS REGIME
+                </h4>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="text-center">
+                    <div className="text-slate-400">Win Rate</div>
+                    <div className={`text-lg font-bold ${
+                      (regimePerformance.your_edge_in_current.win_rate || 0) >= 60 ? 'text-emerald-400' :
+                      (regimePerformance.your_edge_in_current.win_rate || 0) >= 45 ? 'text-yellow-400' : 'text-red-400'
+                    }`}>
+                      {regimePerformance.your_edge_in_current.win_rate || 0}%
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-slate-400">Trades</div>
+                    <div className="text-lg font-bold text-slate-300">
+                      {regimePerformance.your_edge_in_current.trades || 0}
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-slate-400">Avg P&L</div>
+                    <div className={`text-lg font-bold ${
+                      (regimePerformance.your_edge_in_current.avg_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'
+                    }`}>
+                      ${(regimePerformance.your_edge_in_current.avg_pnl || 0).toFixed(0)}
+                    </div>
+                  </div>
+                </div>
+                {regimePerformance.your_edge_in_current.best_setup && (
+                  <div className="mt-2 text-xs text-center">
+                    <span className="text-slate-400">Best setup: </span>
+                    <span className="text-purple-300 font-medium">
+                      {regimePerformance.your_edge_in_current.best_setup.replace(/_/g, ' ').toUpperCase()}
+                    </span>
+                  </div>
+                )}
+                {regimePerformance.your_edge_in_current.trades === 0 && (
+                  <div className="text-xs text-center text-slate-500 mt-1">
+                    No trades yet in this regime - build your history!
+                  </div>
+                )}
+              </div>
+            )}
+          
             {/* Trading Implications */}
             <div>
               <h4 className="text-xs font-semibold text-slate-400 mb-2">TRADING IMPLICATIONS</h4>
