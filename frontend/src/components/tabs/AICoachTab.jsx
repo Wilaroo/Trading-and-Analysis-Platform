@@ -2,6 +2,7 @@ import React from 'react';
 import AICommandPanel from '../AICommandPanel';
 import RightSidebar from '../RightSidebar';
 import LearningInsightsWidget from '../LearningInsightsWidget';
+import MarketRegimeWidget from '../MarketRegimeWidget';
 
 const AICoachTab = ({
   setSelectedTicker,
@@ -51,10 +52,21 @@ const AICoachTab = ({
 
   return (
     <div className="space-y-3" data-testid="ai-coach-tab-content">
-      {/* Learning Insights Widget - Compact overview */}
-      <LearningInsightsWidget 
-        onNavigateToHub={handleNavigateToHub}
-      />
+      {/* Top Row: Learning Insights + Market Regime */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {/* Learning Insights Widget - Compact overview */}
+        <LearningInsightsWidget 
+          onNavigateToHub={handleNavigateToHub}
+        />
+        
+        {/* Market Regime Widget - Current market state */}
+        <MarketRegimeWidget 
+          className="h-full"
+          onStateChange={(newState, oldState) => {
+            console.log(`Market regime changed: ${oldState} -> ${newState}`);
+          }}
+        />
+      </div>
       
       {/* Main Content Grid */}
       <div className="grid lg:grid-cols-12 gap-4">

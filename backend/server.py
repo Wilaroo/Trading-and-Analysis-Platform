@@ -420,6 +420,10 @@ print(f"  - Signal Blocks: SPY/QQQ breadth, VIX, sector rotation, volume, intern
 print(f"  - States: RISK_ON, CAUTION, RISK_OFF, CONFIRMED_DOWN")
 print(f"  - Endpoints: /api/market-regime/current, /api/market-regime/summary")
 
+# Wire Market Regime to Trading Bot for regime-aware position sizing
+trading_bot.set_market_regime_engine(market_regime_engine)
+print("  - Wired to Trading Bot: Position sizing adjusts based on regime")
+
 # ===================== FAST LEARNING (Phase 3A & 3B) =====================
 # Initialize circuit breakers, position sizing, health monitoring, dynamic thresholds
 
