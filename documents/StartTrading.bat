@@ -4,25 +4,25 @@ color 0A
 
 echo ============================================
 echo    TradeCommand Trading Platform Startup
-echo         (Updated March 10, 2026)
+echo         (Updated March 12, 2026)
 echo ============================================
 echo.
 
 :: =====================================================
-:: CONFIGURATION
+:: CONFIGURATION - EDIT THESE AS NEEDED
 :: =====================================================
-:: GitHub repo for auto-updates
-set GITHUB_RAW=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents
-
 :: Cloud platform URL
 set CLOUD_URL=https://ai-trading-bot-55.preview.emergentagent.com
+
+:: GitHub repo for auto-updates
+set GITHUB_RAW=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents
 
 :: Script directory (where this bat file is located)
 set SCRIPT_DIR=%~dp0
 
 :: IB Gateway settings
 set IB_GATEWAY_PATH=C:\Jts\ibgateway\1037\ibgateway.exe
-set IB_SYMBOLS=VIX SPY QQQ IWM DIA XOM CVX CF NTR NVDA AAPL MSFT TSLA AMD
+set IB_SYMBOLS=VIX SPY QQQ IWM DIA NVDA AAPL MSFT TSLA AMD
 
 :: Model override (leave empty for auto-detect based on GPU)
 set OLLAMA_MODEL_OVERRIDE=
@@ -30,7 +30,7 @@ set OLLAMA_MODEL_OVERRIDE=
 :: =====================================================
 :: STEP 1: AUTO-UPDATE FROM GITHUB
 :: =====================================================
-echo [1/8] Checking for updates from GitHub...
+echo [1/9] Checking for updates from GitHub...
 
 :: Update StartTrading.bat itself
 curl -s -f "%GITHUB_RAW%/StartTrading.bat" > "%TEMP%\StartTrading_new.bat" 2>nul
@@ -88,7 +88,7 @@ echo.
 :: =====================================================
 :: STEP 2: DETECT COMPUTER AND GPU
 :: =====================================================
-echo [2/8] Detecting system...
+echo [2/9] Detecting system...
 
 :: Get computer name
 set COMPUTER_NAME=%COMPUTERNAME%
@@ -110,7 +110,7 @@ echo       VRAM: %GPU_VRAM% MB
 :: STEP 3: SELECT OPTIMAL MODEL BASED ON GPU
 :: =====================================================
 echo.
-echo [3/8] Selecting AI model for your GPU...
+echo [3/9] Selecting AI model for your GPU...
 
 if defined OLLAMA_MODEL_OVERRIDE (
     if not "%OLLAMA_MODEL_OVERRIDE%"=="" (
@@ -120,47 +120,56 @@ if defined OLLAMA_MODEL_OVERRIDE (
     )
 )
 
-:: Auto-select based on VRAM (use GOTO to break after first match)
-:: Default to gpt-oss:120b-cloud (via ollama_http proxy) for best accuracy
-:: Local fallback models based on VRAM
-if %GPU_VRAM% GEQ 16000 (
-    set OLLAMA_MODEL=gpt-oss:120b-cloud
-    echo       16GB+ VRAM - Using gpt-oss:120b-cloud (accurate)
-    echo       Fallback: llama3:8b (local)
-    goto model_selected
-)
-if %GPU_VRAM% GEQ 12000 (
-    set OLLAMA_MODEL=gpt-oss:120b-cloud
-    echo       12GB+ VRAM - Using gpt-oss:120b-cloud (accurate)
-    echo       Fallback: llama3:8b (local)
-    goto model_selected
-)
-if %GPU_VRAM% GEQ 8000 (
-    set OLLAMA_MODEL=gpt-oss:120b-cloud
-    echo       8GB+ VRAM - Using gpt-oss:120b-cloud (accurate)
-    echo       Fallback: qwen2.5:7b (local)
-    goto model_selected
-)
-if %GPU_VRAM% GEQ 6000 (
-    set OLLAMA_MODEL=llama3:8b
-    echo       6GB+ VRAM - Using llama3:8b
-    goto model_selected
-)
-if %GPU_VRAM% GEQ 4000 (
-    set OLLAMA_MODEL=gemma3:4b
-    echo       4GB+ VRAM - Using gemma3:4b
-    goto model_selected
-)
-set OLLAMA_MODEL=qwen2.5:1.5b
-echo       Low VRAM - Using qwen2.5:1.5b
+:: Auto-select based on VRAM
+set OLLAMA_MODEL=gpt-oss:120b-cloud
+echo       Using gpt-oss:120b-cloud (cloud AI for accuracy)
+echo       Fallback: llama3:8b (local)
 
 :model_selected
 echo.
 
 :: =====================================================
-:: STEP 4: START OLLAMA
+:: STEP 4: INSTALL PYTHON DEPENDENCIES
 :: =====================================================
-echo [4/8] Starting Ollama...
+echo [4/9] Checking Python dependencies...
+
+python -c "import ib_insync" >nul 2>&1
+if errorlevel 1 (
+    echo       Installing ib_insync...
+    pip install ib_insync >nul 2>&1
+) else (
+    echo       ib_insync: OK
+)
+
+python -c "import aiohttp" >nul 2>&1
+if errorlevel 1 (
+    echo       Installing aiohttp...
+    pip install aiohttp >nul 2>&1
+) else (
+    echo       aiohttp: OK
+)
+
+python -c "import httpx" >nul 2>&1
+if errorlevel 1 (
+    echo       Installing httpx...
+    pip install httpx >nul 2>&1
+) else (
+    echo       httpx: OK
+)
+
+python -c "import requests" >nul 2>&1
+if errorlevel 1 (
+    echo       Installing requests...
+    pip install requests >nul 2>&1
+) else (
+    echo       requests: OK
+)
+echo.
+
+:: =====================================================
+:: STEP 5: START OLLAMA
+:: =====================================================
+echo [5/9] Starting Ollama...
 
 curl -s http://localhost:11434/api/tags >nul 2>&1
 if %errorlevel%==0 (
@@ -172,59 +181,68 @@ if %errorlevel%==0 (
     timeout /t 8 /nobreak >nul
 )
 
-:: Pre-load model to GPU
-echo       Loading %OLLAMA_MODEL% to GPU...
-curl -s -X POST http://localhost:11434/api/generate -d "{\"model\":\"%OLLAMA_MODEL%\",\"prompt\":\"hi\",\"stream\":false}" >nul 2>&1
-if %errorlevel%==0 (
-    echo       Model ready!
+:: Pre-load model to GPU (only for local models)
+if "%OLLAMA_MODEL%"=="gpt-oss:120b-cloud" (
+    echo       Cloud model selected - local model preload skipped
 ) else (
-    echo       Model will load on first use
-    echo       (Run: ollama pull %OLLAMA_MODEL%)
+    echo       Loading %OLLAMA_MODEL% to GPU...
+    curl -s -X POST http://localhost:11434/api/generate -d "{\"model\":\"%OLLAMA_MODEL%\",\"prompt\":\"hi\",\"stream\":false}" >nul 2>&1
+    if %errorlevel%==0 (
+        echo       Model ready!
+    ) else (
+        echo       Model will load on first use
+    )
 )
 echo.
 
 :: =====================================================
-:: STEP 5: START IB GATEWAY
+:: STEP 6: START IB GATEWAY
 :: =====================================================
-echo [5/8] Starting IB Gateway...
+echo [6/9] Starting IB Gateway...
 
 if exist "%IB_GATEWAY_PATH%" (
-    start "" "%IB_GATEWAY_PATH%"
-    echo       Waiting for IB Gateway...
-    timeout /t 12 /nobreak >nul
+    :: Check if IB Gateway is already running
+    tasklist /FI "IMAGENAME eq ibgateway.exe" 2>NUL | find /I /N "ibgateway.exe">NUL
+    if "%ERRORLEVEL%"=="0" (
+        echo       IB Gateway already running!
+    ) else (
+        start "" "%IB_GATEWAY_PATH%"
+        echo       Waiting for IB Gateway...
+        timeout /t 12 /nobreak >nul
 
-    :: Auto-login with PAPER TRADING account
-    echo       Logging in to PAPER account...
-    (
-    echo Set WshShell = CreateObject^("WScript.Shell"^)
-    echo WScript.Sleep 2000
-    echo WshShell.AppActivate "IBKR Gateway"
-    echo WScript.Sleep 1000
-    echo WshShell.SendKeys "paperesw100000"
-    echo WScript.Sleep 500
-    echo WshShell.SendKeys "{TAB}"
-    echo WScript.Sleep 400
-    echo WshShell.SendKeys "Socr1025!@!?"
-    echo WScript.Sleep 500
-    echo WshShell.SendKeys "{ENTER}"
-    ) > "%TEMP%\ib_login.vbs"
-    cscript //nologo "%TEMP%\ib_login.vbs"
-    del "%TEMP%\ib_login.vbs" 2>nul
+        :: Auto-login with PAPER TRADING account
+        echo       Logging in to PAPER account...
+        (
+        echo Set WshShell = CreateObject^("WScript.Shell"^)
+        echo WScript.Sleep 2000
+        echo WshShell.AppActivate "IBKR Gateway"
+        echo WScript.Sleep 1000
+        echo WshShell.SendKeys "paperesw100000"
+        echo WScript.Sleep 500
+        echo WshShell.SendKeys "{TAB}"
+        echo WScript.Sleep 400
+        echo WshShell.SendKeys "Socr1025!@!?"
+        echo WScript.Sleep 500
+        echo WshShell.SendKeys "{ENTER}"
+        ) > "%TEMP%\ib_login.vbs"
+        cscript //nologo "%TEMP%\ib_login.vbs"
+        del "%TEMP%\ib_login.vbs" 2>nul
 
-    :: Dismiss warnings
-    timeout /t 10 /nobreak >nul
-    (
-    echo Set WshShell = CreateObject^("WScript.Shell"^)
-    echo WScript.Sleep 1000
-    echo WshShell.AppActivate "IBKR"
-    echo WScript.Sleep 500
-    echo WshShell.SendKeys "{ENTER}"
-    echo WScript.Sleep 2000
-    echo WshShell.SendKeys "{ENTER}"
-    ) > "%TEMP%\ib_dismiss.vbs"
-    cscript //nologo "%TEMP%\ib_dismiss.vbs"
-    del "%TEMP%\ib_dismiss.vbs" 2>nul
-    echo       IB Gateway ready!
+        :: Dismiss warnings
+        timeout /t 10 /nobreak >nul
+        (
+        echo Set WshShell = CreateObject^("WScript.Shell"^)
+        echo WScript.Sleep 1000
+        echo WshShell.AppActivate "IBKR"
+        echo WScript.Sleep 500
+        echo WshShell.SendKeys "{ENTER}"
+        echo WScript.Sleep 2000
+        echo WshShell.SendKeys "{ENTER}"
+        ) > "%TEMP%\ib_dismiss.vbs"
+        cscript //nologo "%TEMP%\ib_dismiss.vbs"
+        del "%TEMP%\ib_dismiss.vbs" 2>nul
+        echo       IB Gateway started!
+    )
 ) else (
     echo       [SKIP] IB Gateway not found at:
     echo              %IB_GATEWAY_PATH%
@@ -232,45 +250,34 @@ if exist "%IB_GATEWAY_PATH%" (
 echo.
 
 :: =====================================================
-:: STEP 6: START IB DATA PUSHER
+:: STEP 7: START IB DATA PUSHER
 :: =====================================================
-echo [6/8] Starting IB Data Pusher...
+echo [7/9] Starting IB Data Pusher...
 
-:: Check dependencies
-python -c "import ib_insync" >nul 2>&1
-if errorlevel 1 (
-    echo       Installing ib_insync...
-    pip install ib_insync >nul 2>&1
-)
-python -c "import aiohttp" >nul 2>&1
-if errorlevel 1 (
-    echo       Installing aiohttp...
-    pip install aiohttp >nul 2>&1
-)
+:: Kill existing pusher if running (to avoid duplicate connections)
+taskkill /F /FI "WINDOWTITLE eq IB Data Pusher*" >nul 2>&1
 
 if exist "%SCRIPT_DIR%ib_data_pusher.py" (
     timeout /t 3 /nobreak >nul
-    start "IB Data Pusher" cmd /k "title IB Data Pusher && color 0B && echo ============================== && echo   IB Data Pusher Running && echo   Cloud: %CLOUD_URL% && echo   Symbols: %IB_SYMBOLS% && echo ============================== && python "%SCRIPT_DIR%ib_data_pusher.py" --cloud-url %CLOUD_URL% --symbols %IB_SYMBOLS%"
+    start "IB Data Pusher" cmd /k "title IB Data Pusher && color 0B && echo ============================== && echo   IB Data Pusher Running && echo   Cloud: %CLOUD_URL% && echo   Symbols: %IB_SYMBOLS% && echo   STOP LOSS MONITORING ACTIVE && echo ============================== && python "%SCRIPT_DIR%ib_data_pusher.py" --cloud-url %CLOUD_URL% --symbols %IB_SYMBOLS%"
     echo       IB Data Pusher started!
+    echo       Symbols: %IB_SYMBOLS%
 ) else (
-    echo       [SKIP] ib_data_pusher.py not found
+    echo       [ERROR] ib_data_pusher.py not found
+    echo       Download from: %GITHUB_RAW%/ib_data_pusher.py
 )
 echo.
 
 :: =====================================================
-:: STEP 7: START OLLAMA HTTP PROXY
+:: STEP 8: START OLLAMA HTTP PROXY
 :: =====================================================
-echo [7/8] Starting Ollama HTTP Proxy...
+echo [8/9] Starting Ollama HTTP Proxy...
 
-:: Check dependencies
-python -c "import httpx" >nul 2>&1
-if errorlevel 1 (
-    echo       Installing httpx...
-    pip install httpx >nul 2>&1
-)
+:: Kill existing proxy if running
+taskkill /F /FI "WINDOWTITLE eq Ollama AI Proxy*" >nul 2>&1
 
 if exist "%SCRIPT_DIR%ollama_http.py" (
-    start "Ollama HTTP Proxy" cmd /k "title Ollama AI Proxy && color 0D && echo ============================================ && echo   Ollama HTTP Proxy (Stable) && echo   Cloud: %CLOUD_URL% && echo   Model: %OLLAMA_MODEL% && echo   No disconnects - HTTP polling! && echo ============================================ && python "%SCRIPT_DIR%ollama_http.py""
+    start "Ollama AI Proxy" cmd /k "title Ollama AI Proxy && color 0D && echo ============================================ && echo   Ollama HTTP Proxy (Stable) && echo   Cloud: %CLOUD_URL% && echo   Model: %OLLAMA_MODEL% && echo   No disconnects - HTTP polling! && echo ============================================ && python "%SCRIPT_DIR%ollama_http.py""
     echo       Ollama Proxy started!
 ) else (
     echo       [ERROR] ollama_http.py not found
@@ -279,10 +286,26 @@ if exist "%SCRIPT_DIR%ollama_http.py" (
 echo.
 
 :: =====================================================
-:: STEP 8: VERIFY AND LAUNCH
+:: STEP 9: VERIFY AND LAUNCH
 :: =====================================================
-echo [8/8] Verifying connections...
-timeout /t 5 /nobreak >nul
+echo [9/9] Verifying connections...
+timeout /t 8 /nobreak >nul
+
+:: Check IB Data Pusher connection
+set IB_CONNECTED=NO
+curl -s -f -m 5 "%CLOUD_URL%/api/ib/pushed-data" > "%TEMP%\ib_check.tmp" 2>nul
+if %errorlevel%==0 (
+    findstr /C:"\"connected\":true" "%TEMP%\ib_check.tmp" >nul 2>&1
+    if %errorlevel%==0 (
+        echo       IB Data Pusher: CONNECTED
+        set IB_CONNECTED=YES
+    ) else (
+        echo       IB Data Pusher: Waiting for connection...
+    )
+) else (
+    echo       IB Data Pusher: Starting...
+)
+del "%TEMP%\ib_check.tmp" 2>nul
 
 :: Check Ollama HTTP Proxy
 curl -s -f -m 5 "%CLOUD_URL%/api/ollama-proxy/status" > "%TEMP%\proxy_check.tmp" 2>nul
@@ -297,20 +320,6 @@ if %errorlevel%==0 (
     echo       Ollama Proxy: Starting...
 )
 del "%TEMP%\proxy_check.tmp" 2>nul
-
-:: Check IB
-curl -s -f -m 5 "%CLOUD_URL%/api/ib/status" > "%TEMP%\ib_check.tmp" 2>nul
-if %errorlevel%==0 (
-    findstr /C:"\"connected\":true" "%TEMP%\ib_check.tmp" >nul 2>&1
-    if %errorlevel%==0 (
-        echo       IB Gateway: CONNECTED
-    ) else (
-        echo       IB Gateway: Connecting...
-    )
-) else (
-    echo       IB Gateway: Waiting...
-)
-del "%TEMP%\ib_check.tmp" 2>nul
 echo.
 
 :: Open browser
@@ -333,11 +342,52 @@ echo.
 echo    Running Services:
 echo    * Ollama Server (local AI)
 echo    * Ollama HTTP Proxy (stable connection)
-echo    * IB Data Pusher (market data)
+echo    * IB Data Pusher (market data + stops)
 echo    * IB Gateway (broker connection)
 echo.
-echo    KEEP ALL WINDOWS OPEN!
+echo    IMPORTANT: Keep all windows open!
+echo    The IB Data Pusher window must stay open
+echo    for stop-loss monitoring to work!
 echo.
 echo ============================================
 echo.
-pause
+
+:: =====================================================
+:: HEALTH CHECK LOOP (Optional - runs in background)
+:: =====================================================
+:health_loop
+echo Press any key to run a connection health check...
+echo (or close this window to exit)
+pause >nul
+
+echo.
+echo === CONNECTION HEALTH CHECK ===
+echo.
+
+:: Check IB Pushed Data
+curl -s -f -m 5 "%CLOUD_URL%/api/ib/pushed-data" > "%TEMP%\health_ib.tmp" 2>nul
+if %errorlevel%==0 (
+    echo IB Data: 
+    type "%TEMP%\health_ib.tmp" | findstr /C:"connected" /C:"positions" /C:"quotes"
+) else (
+    echo IB Data: NOT CONNECTED
+)
+del "%TEMP%\health_ib.tmp" 2>nul
+
+echo.
+
+:: Check Bot Status
+curl -s -f -m 5 "%CLOUD_URL%/api/trading-bot/status" > "%TEMP%\health_bot.tmp" 2>nul
+if %errorlevel%==0 (
+    echo Bot Status:
+    type "%TEMP%\health_bot.tmp" | findstr /C:"running" /C:"open_trades" /C:"mode"
+) else (
+    echo Bot Status: Unable to check
+)
+del "%TEMP%\health_bot.tmp" 2>nul
+
+echo.
+echo ================================
+echo.
+
+goto health_loop
