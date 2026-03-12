@@ -77,6 +77,7 @@ from routers.market_scanner import router as market_scanner_router, init_market_
 from routers.market_regime import router as market_regime_router, init_market_regime_engine
 from routers.regime_performance import router as regime_performance_router, init_regime_performance_router
 from routers.context_awareness import router as context_awareness_router, init_context_router
+from routers.smart_stops import router as smart_stops_router, init_smart_stop_router
 from services.market_intel_service import get_market_intel_service
 from services.hybrid_data_service import get_hybrid_data_service, init_hybrid_data_service
 from services.market_scanner_service import get_market_scanner_service, init_market_scanner_service
@@ -313,6 +314,8 @@ app.include_router(market_scanner_router)  # Market-wide strategy scanner
 app.include_router(market_regime_router)  # Market regime engine
 app.include_router(regime_performance_router)  # Regime-based performance tracking
 app.include_router(context_awareness_router)  # Phase 2 AI context awareness
+app.include_router(smart_stops_router)  # Smart stop loss service (anti-hunt)
+init_smart_stop_router()  # Initialize smart stop service
 
 # Collections
 strategies_col = db["strategies"]
