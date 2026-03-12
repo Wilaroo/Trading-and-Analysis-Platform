@@ -15,7 +15,14 @@ import { useTickerModal } from '../hooks/useTickerModal';
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
 // Confidence badge colors
-const getConfidenceBadge = (confidence) => {
+const getConfidenceBadge = (confidence, actionType = '') => {
+  // Special handling for stop warnings
+  if (actionType === 'stop_warning') {
+    if (confidence >= 90) return { text: 'CRITICAL', bg: 'bg-red-500/30', color: 'text-red-400' };
+    if (confidence >= 70) return { text: 'WARNING', bg: 'bg-amber-500/30', color: 'text-amber-400' };
+    return { text: 'HEADS UP', bg: 'bg-blue-500/20', color: 'text-blue-400' };
+  }
+  
   if (confidence >= 80) return { text: 'HIGH CONFIDENCE', bg: 'bg-emerald-500/20', color: 'text-emerald-400' };
   if (confidence >= 60) return { text: 'MONITORING', bg: 'bg-purple-500/20', color: 'text-purple-400' };
   if (confidence >= 40) return { text: 'WATCHING', bg: 'bg-amber-500/20', color: 'text-amber-400' };
@@ -23,8 +30,12 @@ const getConfidenceBadge = (confidence) => {
 };
 
 // Action type icons
-const ActionIcon = ({ type }) => {
+const ActionIcon = ({ type, severity }) => {
   switch (type) {
+    case 'stop_warning':
+      return severity === 'critical' 
+        ? <AlertCircle className="w-4 h-4 text-red-400 animate-pulse" />
+        : <AlertCircle className="w-4 h-4 text-amber-400" />;
     case 'entry':
     case 'buy':
       return <Zap className="w-4 h-4 text-emerald-400" />;
@@ -85,29 +96,46 @@ const ThoughtText = ({ text, onTickerClick }) => {
 // Single thought entry
 const ThoughtEntry = ({ thought, index, onTickerClick }) => {
   const confidence = thought.confidence || 50;
-  const badge = getConfidenceBadge(confidence);
+  const actionType = thought.action_type || '';
+  const severity = thought.severity || '';
+  const badge = getConfidenceBadge(confidence, actionType);
   const timestamp = thought.timestamp 
     ? new Date(thought.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : null;
+  
+  // Special styling for stop warnings
+  const isStopWarning = actionType === 'stop_warning';
+  const borderColor = isStopWarning 
+    ? (severity === 'critical' ? 'border-red-500' : severity === 'warning' ? 'border-amber-500' : 'border-blue-400')
+    : 'border-cyan-400';
+  const bgGradient = isStopWarning
+    ? (severity === 'critical' ? 'from-red-500/20' : severity === 'warning' ? 'from-amber-500/15' : 'from-blue-400/10')
+    : 'from-cyan-400/10';
   
   return (
     <motion.div
       initial={{ opacity: 0, x: -10 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.05 }}
-      className={`border-l-[3px] border-cyan-400 bg-gradient-to-r from-cyan-400/10 to-transparent p-3 rounded-r-lg ${
+      className={`border-l-[3px] ${borderColor} bg-gradient-to-r ${bgGradient} to-transparent p-3 rounded-r-lg ${
         index > 0 ? 'opacity-80' : ''
       }`}
     >
       <div className="flex items-start gap-3">
         <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${
-          index === 0 ? 'bg-cyan-400/30' : 'bg-cyan-400/20'
+          isStopWarning 
+            ? (severity === 'critical' ? 'bg-red-500/30' : 'bg-amber-500/30')
+            : (index === 0 ? 'bg-cyan-400/30' : 'bg-cyan-400/20')
         }`}>
-          <span className="text-xs text-cyan-400">{index + 1}</span>
+          {isStopWarning ? (
+            <ActionIcon type={actionType} severity={severity} />
+          ) : (
+            <span className="text-xs text-cyan-400">{index + 1}</span>
+          )}
         </div>
         
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-zinc-200 leading-relaxed">
+          <p className={`text-sm leading-relaxed ${isStopWarning ? 'text-zinc-100' : 'text-zinc-200'}`}>
             <ThoughtText text={thought.text} onTickerClick={onTickerClick} />
           </p>
           
@@ -121,7 +149,7 @@ const ThoughtEntry = ({ thought, index, onTickerClick }) => {
             <span className={`px-2 py-0.5 rounded ${badge.bg} ${badge.color}`}>
               {badge.text}
             </span>
-            {thought.action_type && (
+            {thought.action_type && !isStopWarning && (
               <span className="flex items-center gap-1 text-zinc-400">
                 <ActionIcon type={thought.action_type} />
                 {thought.action_type}
@@ -159,7 +187,8 @@ const BotBrainPanel = ({
           setThoughts(data.thoughts.slice(0, maxThoughts));
           // Check if bot is actively processing based on thought types
           const hasActiveThoughts = data.thoughts.some(t => 
-            t.action_type === 'scanning' || t.action_type === 'entry' || t.action_type === 'monitoring'
+            t.action_type === 'scanning' || t.action_type === 'entry' || 
+            t.action_type === 'monitoring' || t.action_type === 'stop_warning'
           );
           setIsProcessing(hasActiveThoughts);
         }

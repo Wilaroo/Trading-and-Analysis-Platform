@@ -132,17 +132,58 @@ const ScoreRing = ({ score, size = 64 }) => {
   );
 };
 
-// Bot's Take Card
+// Bot's Take Card - Enhanced with stop analysis
 const BotTakeCard = ({ trade, symbol }) => {
+  const [stopAnalysis, setStopAnalysis] = useState(null);
+  
+  useEffect(() => {
+    if (!trade || !symbol) return;
+    
+    // Fetch stop analysis for this position
+    const fetchStopAnalysis = async () => {
+      try {
+        const entryPrice = trade.fill_price || trade.entry_price;
+        const currentPrice = trade.current_price || entryPrice;
+        const stopPrice = trade.stop_price;
+        const direction = trade.direction || 'long';
+        const atr = entryPrice * 0.02; // Estimate
+        
+        if (!entryPrice || !stopPrice) return;
+        
+        const response = await fetch(
+          `${API_URL}/api/smart-stops/analyze-trade?symbol=${symbol}&entry_price=${entryPrice}&current_price=${currentPrice}&stop_price=${stopPrice}&direction=${direction}&atr=${atr}`,
+          { method: 'POST' }
+        );
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success) {
+            setStopAnalysis(data);
+          }
+        }
+      } catch (err) {
+        console.debug('Stop analysis fetch error:', err);
+      }
+    };
+    
+    fetchStopAnalysis();
+  }, [trade, symbol]);
+  
   if (!trade) return null;
   
   const timestamp = trade.entry_time ? new Date(trade.entry_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
+  const hasStopWarnings = stopAnalysis?.recommendations?.some(r => r.severity === 'warning' || r.severity === 'critical');
   
   return (
-    <div className="border-l-[3px] border-cyan-400 bg-gradient-to-r from-cyan-400/10 to-transparent p-3 rounded-r-xl">
+    <div className={`border-l-[3px] ${hasStopWarnings ? 'border-amber-400' : 'border-cyan-400'} bg-gradient-to-r ${hasStopWarnings ? 'from-amber-400/10' : 'from-cyan-400/10'} to-transparent p-3 rounded-r-xl`}>
       <div className="flex items-center gap-2 mb-2">
-        <div className="w-2 h-2 rounded-full bg-cyan-400" />
-        <span className="text-xs font-bold text-cyan-400">BOT'S TAKE</span>
+        <div className={`w-2 h-2 rounded-full ${hasStopWarnings ? 'bg-amber-400' : 'bg-cyan-400'}`} />
+        <span className={`text-xs font-bold ${hasStopWarnings ? 'text-amber-400' : 'text-cyan-400'}`}>BOT'S TAKE</span>
+        {hasStopWarnings && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">
+            Stop needs attention
+          </span>
+        )}
         {timestamp && <span className="text-[10px] text-zinc-500 ml-auto">{timestamp}</span>}
       </div>
       <p className="text-xs text-zinc-300 leading-relaxed">
@@ -154,6 +195,25 @@ const BotTakeCard = ({ trade, symbol }) => {
           }"`
         }
       </p>
+      
+      {/* Stop Analysis Recommendations */}
+      {stopAnalysis?.recommendations?.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-white/10">
+          {stopAnalysis.recommendations.slice(0, 2).map((rec, i) => (
+            <div key={i} className={`text-[10px] flex items-start gap-1 ${
+              rec.severity === 'warning' || rec.severity === 'critical' ? 'text-amber-400' : 'text-zinc-400'
+            }`}>
+              {rec.severity === 'warning' || rec.severity === 'critical' ? '⚠️' : '💡'}
+              <span>{rec.message}</span>
+            </div>
+          ))}
+          {stopAnalysis.optimal_stop && (
+            <div className="text-[10px] text-cyan-400 mt-1">
+              Optimal stop: ${stopAnalysis.optimal_stop.price?.toFixed(2)} ({stopAnalysis.optimal_stop.confidence}% confidence)
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
