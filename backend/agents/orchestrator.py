@@ -211,12 +211,11 @@ class AgentOrchestrator:
             context["pending_trade"] = None
         
         elif intent == Intent.MARKET_INFO:
-            # Quick quote/price info - use analyst with quick mode
-            agent_response = await self.analyst.process({
+            # General market overview - use coach agent
+            agent_response = await self.coach.process({
                 "message": message,
-                "symbol": symbols[0] if symbols else None,
-                "symbols": symbols,
-                "analysis_type": "quick"
+                "query_type": "market_context",
+                "symbol": symbols[0] if symbols else None
             })
             
             context["awaiting_confirmation"] = False
