@@ -249,7 +249,7 @@ End with which stock looks better right now and why. Keep it actionable and unde
         
         # TQS
         if ctx.tqs_score > 0:
-            lines.append(f"TQS: {ctx.tqs_score}/100 ({ctx.tqs_grade}) - {ctx.tqs_recommendation}")
+            lines.append(f"TQS: {ctx.tqs_score}/100 ({ctx.tqs_grade}) - {ctx.tqs_action}")
         
         # Bias
         if ctx.bias:
