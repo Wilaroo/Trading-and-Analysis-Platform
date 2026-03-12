@@ -4,6 +4,67 @@
 Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading coach, autonomous trading bot, and mutual learning loop.
 
 
+
+## Recent Updates (March 2026)
+
+### UI Redesign V2 Mockup Complete (March 12, 2026)
+
+**Deliverable:** Detailed hybrid UI mockup with distinct Bot/AI personalities
+
+**View Mockup:** `https://bot-hub-7.preview.emergentagent.com/api/scripts/ui_mockups_v2.html`
+
+**Key Design Features:**
+
+1. **Bot's Brain Panel** - Shows real-time first-person thoughts
+   - "I detected a breakout forming on NVDA..."
+   - "I'm monitoring my LABD position..."
+   - "I'll enter if price breaks $122.50 with volume"
+   - Timestamped thoughts with confidence badges
+
+2. **Rich Position Cards** - Detailed trade visualization
+   - Entry/Current/Stop/Target prices in grid format
+   - Visual progress bar from Stop → Entry → Targets
+   - Bot reasoning per trade ("My reasoning: I entered based on...")
+   - Quick action buttons (Take Partial, Trail Stop, Close)
+
+3. **AI Copilot Chat** - Second-person advisory
+   - "Your current risk exposure is well managed"
+   - "You should consider taking 50% off at $20.00"
+   - Risk breakdown cards with clear metrics
+   - Quick action buttons (Risk Check, Find Trades, Bot Status)
+
+4. **Setups I'm Watching** - Pending entries panel
+   - Shows bot's target setups with probability indicators
+   - Entry conditions in first person ("I'll enter if...")
+   - R:R ratios and setup types
+
+5. **Performance Metrics Dashboard**
+   - Realized P&L, Win Rate, Avg R-Multiple, Daily Risk Used
+   - Color-coded progress indicators
+
+6. **Market Regime Integration**
+   - Compact regime panel with signal bars
+   - Bot awareness: "I'm using 75% position sizing due to HOLD regime"
+
+7. **Live Scanner Alerts Strip**
+   - High-quality setups highlighted (HQ badge)
+   - TQS scores and grades visible
+   - "Watch" status for approaching triggers
+
+**Design Principles Documented:**
+- **Bot Personality (1st Person)**: "I detected...", "I'm monitoring...", "My reasoning..."
+- **AI Personality (2nd Person)**: "Your risk is...", "You should...", "Here's what you need..."
+- **Data Visualization**: Rich cards, progress bars, probability indicators
+
+**Files Created:**
+- `/app/documents/ui_mockups_v2.html` - Complete V2 mockup
+- Updated `/app/backend/server.py` - Added to allowed scripts
+
+**Next Step:** User approval of mockup, then begin implementation
+
+---
+
+
 ## Recent Updates (March 2026)
 
 ### Phase 5.1 Complete: AI Prompt Intelligence Plan - Phase 2 (March 12, 2026)
@@ -835,7 +896,7 @@ Local PC                              Cloud Backend
 | **Ollama** | Free AI for chat, summaries, market intel | Via ngrok tunnel |
 
 ## Startup Modes
-- **Cloud Dev**: Ollama + ngrok → `https://ai-trading-bot-55.preview.emergentagent.com`
+- **Cloud Dev**: Ollama + ngrok → `https://bot-hub-7.preview.emergentagent.com`
 - **Full Local**: All services on PC → `http://localhost:3000`
 - See `/documents/STARTUP_GUIDE.md` for detailed instructions
 
@@ -3018,10 +3079,10 @@ This data is logged for analysis. Once we confirm it improves accuracy without b
 ### Usage
 ```bash
 # Run IB Data Pusher with Level 2 enabled (default)
-python ib_data_pusher.py --cloud-url https://ai-trading-bot-55.preview.emergentagent.com
+python ib_data_pusher.py --cloud-url https://bot-hub-7.preview.emergentagent.com
 
 # Disable Level 2 if needed
-python ib_data_pusher.py --cloud-url https://ai-trading-bot-55.preview.emergentagent.com --no-level2
+python ib_data_pusher.py --cloud-url https://bot-hub-7.preview.emergentagent.com --no-level2
 ```
 
 **Status**: ✅ IMPLEMENTED - Monitoring mode active
