@@ -2171,32 +2171,9 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                 if is_http_ollama_proxy_connected():
                     logger.info("🔌 Using Local Ollama Proxy (HTTP polling)")
                     
-                    # Get model from config or auto-detect from proxy
-                    model = "deepseek-r1:8b"  # Default
-                    
-                    # Try to auto-detect available model from proxy
-                    try:
-                        from server import get_http_proxy_info
-                        proxy_info = get_http_proxy_info()
-                        for session in proxy_info.get("sessions", []):
-                            available_models = session.get("ollama_status", {}).get("models", [])
-                            if available_models:
-                                # Prefer larger/better models
-                                for preferred in ["gpt-oss:120b-cloud", "deepseek-r1:8b", "deepseek-r1:7b", "llama3:8b", "qwen2.5:7b"]:
-                                    if preferred in available_models:
-                                        model = preferred
-                                        break
-                                else:
-                                    model = available_models[0]  # Use first available
-                                break
-                    except Exception as e:
-                        logger.debug(f"Could not auto-detect model: {e}")
-                    
-                    # Override with config if set (but not if it's the default placeholder)
-                    if LLMProvider.OLLAMA in self.llm_clients:
-                        config_model = self.llm_clients[LLMProvider.OLLAMA].get("model", "")
-                        if config_model and "cloud" not in config_model.lower():
-                            model = config_model
+                    # Primary model: gpt-oss:120b-cloud (cloud model via local Ollama)
+                    # Fallback: llama3:8b (pure local)
+                    model = os.environ.get("OLLAMA_MODEL", "gpt-oss:120b-cloud")
                     
                     logger.info(f"📦 Using model: {model}")
                     
@@ -2259,27 +2236,10 @@ REMEMBER: Only use the EXACT data provided above. Do not invent positions or pri
                         logger.warning(f"⚠️ Ollama Cloud failed: {error_msg}")
                         
                         # If cloud model failed, try local fallback
-                        if "120b" in model.lower() or "cloud" in model.lower():
-                            # Get available models from proxy to find best fallback
-                            fallback_model = "deepseek-r1:8b"  # Default fallback
-                            try:
-                                from server import get_http_proxy_info
-                                proxy_info = get_http_proxy_info()
-                                available_models = []
-                                for session in proxy_info.get("sessions", []):
-                                    available_models.extend(session.get("ollama_status", {}).get("models", []))
-                                if available_models:
-                                    # Prefer deepseek > llama > qwen
-                                    for preferred in ["deepseek-r1:8b", "deepseek-r1:7b", "llama3:8b", "qwen2.5:7b", "qwen2.5:3b"]:
-                                        if preferred in available_models:
-                                            fallback_model = preferred
-                                            break
-                                    if fallback_model not in available_models:
-                                        fallback_model = available_models[0]  # Use whatever is available
-                            except:
-                                pass
+                        if "120b" in model.lower() or "cloud" in model.lower() or "gpt-oss" in model.lower():
+                            fallback_model = "llama3:8b"  # Local fallback
                             
-                            logger.info(f"🔄 Trying local fallback model ({fallback_model})...")
+                            logger.info(f"🔄 Cloud model failed, trying local fallback ({fallback_model})...")
                             fallback_result = await call_ollama_via_http_proxy(
                                 model=fallback_model,
                                 messages=proxy_messages,
