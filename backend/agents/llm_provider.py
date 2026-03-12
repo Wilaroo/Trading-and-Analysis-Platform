@@ -110,10 +110,66 @@ class OllamaProvider(BaseLLMProvider):
     
     async def _call_via_proxy(self, prompt: str, model: str, system_prompt: str = None,
                              temperature: float = 0.7, max_tokens: int = 1000) -> LLMResponse:
-        """Call Ollama through the WebSocket proxy manager"""
+        """Call Ollama through the proxy (HTTP or WebSocket)"""
         import time
         start = time.time()
         
+        # Try HTTP proxy first (more reliable)
+        try:
+            from server import is_http_ollama_proxy_connected, call_ollama_via_http_proxy
+            
+            if is_http_ollama_proxy_connected():
+                logger.info(f"🔌 Agent using HTTP Ollama proxy for model: {model}")
+                
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                messages.append({"role": "user", "content": prompt})
+                
+                result = await call_ollama_via_http_proxy(
+                    model=model,
+                    messages=messages,
+                    options={"temperature": temperature, "num_predict": max_tokens},
+                    timeout=120.0
+                )
+                
+                if result.get("success"):
+                    content = result.get("response", {}).get("message", {}).get("content", "")
+                    return LLMResponse(
+                        content=content,
+                        model=model,
+                        provider="ollama",
+                        latency_ms=(time.time() - start) * 1000,
+                        success=True
+                    )
+                else:
+                    error = result.get("error", "HTTP proxy call failed")
+                    logger.warning(f"HTTP proxy failed: {error}")
+                    
+                    # Try fallback model if primary failed
+                    if model != self.fallback_model and ("cloud" in model.lower() or "120b" in model.lower()):
+                        logger.info(f"🔄 Trying fallback model: {self.fallback_model}")
+                        fallback_result = await call_ollama_via_http_proxy(
+                            model=self.fallback_model,
+                            messages=messages,
+                            options={"temperature": temperature, "num_predict": max_tokens},
+                            timeout=60.0
+                        )
+                        if fallback_result.get("success"):
+                            content = fallback_result.get("response", {}).get("message", {}).get("content", "")
+                            return LLMResponse(
+                                content=content,
+                                model=f"{self.fallback_model} (fallback)",
+                                provider="ollama",
+                                latency_ms=(time.time() - start) * 1000,
+                                success=True
+                            )
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.warning(f"HTTP proxy error: {e}")
+        
+        # Fallback to WebSocket proxy
         try:
             from services.ollama_proxy_manager import ollama_proxy_manager
             
@@ -156,7 +212,7 @@ class OllamaProvider(BaseLLMProvider):
                 )
                 
         except Exception as e:
-            logger.error(f"Proxy call error: {e}")
+            logger.error(f"WebSocket proxy call error: {e}")
             return LLMResponse(
                 content="",
                 model=model,
