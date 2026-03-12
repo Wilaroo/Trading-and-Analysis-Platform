@@ -7,97 +7,61 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
-### Intelligent Stop Manager - Advanced Stop Loss System (March 12, 2026)
+### Unified Smart Stop System (March 12, 2026)
 
-**Status:** ✅ COMPLETE - Tested and Verified (iteration_74.json - 32/32 tests passed)
+**Status:** ✅ COMPLETE - P0 and P1 Verified (iteration_75.json: 98%, iteration_76.json: 100%)
 
-**Major Enhancement:** Extended the Smart Stop Service into a comprehensive Intelligent Stop Manager that combines 7 analysis factors:
+**P0: Service Consolidation Complete**
+Merged two redundant stop-loss services (`intelligent_stop_manager.py` and `smart_stop_service.py`) into a single unified `SmartStopService`.
 
-1. **Volume Profile Analysis**
-   - POC (Point of Control): Highest volume price level
-   - VAH/VAL (Value Area High/Low): 70% of volume range
-   - HVN/LVN: High/Low Volume Nodes for S/R identification
+**Files Deleted:**
+- `/app/backend/services/intelligent_stop_manager.py` (redundant)
+- `/app/backend/routers/intelligent_stops.py` (redundant)
 
-2. **Stop Hunt Risk Detection**
-   - Float-based risk: < 10M shares = HIGH risk
-   - Volume-based risk: < 500K avg = HIGH risk  
-   - Obvious level proximity: < 2% from swing/support = add risk
-   - Round number proximity: < 1% from $50/$100 levels = add risk
+**Unified Service Features:**
+The single `/app/backend/services/smart_stop_service.py` now contains ALL stop-loss logic:
 
-3. **Setup-Based Stop Rules (8 Types)**
-   - `breakout`: Chandelier trailing, 1.0 ATR initial, BE at 1.5R
-   - `pullback`: ATR trailing, 1.5 ATR initial, BE at 1.0R
-   - `momentum`: Parabolic trailing, 1.0 ATR initial, BE at 0.5R
-   - `mean_reversion`: Percent trailing, 2.5 ATR initial (wider)
-   - `gap_and_go`: Breakeven-plus trailing, 0.75 ATR (tight)
-   - `vwap_reversal`: ATR trailing, volume profile aware
-   - `earnings_play`: Percent trailing, 3.0 ATR (widest), ignores regime
-   - `default`: ATR trailing, 1.5 ATR, balanced approach
+1. **6 Stop Modes:**
+   - `original`: Traditional stop below support (HIGH hunt risk)
+   - `atr_dynamic`: 1.5x ATR buffer (MEDIUM hunt risk) - DEFAULT
+   - `anti_hunt`: Beyond obvious levels (LOW hunt risk)
+   - `volatility_adjusted`: Adapts to volatility regime
+   - `layered`: 40%/30%/30% at 1.0/1.5/2.0 ATR depths
+   - `chandelier`: 3.0x ATR trailing from high/low
 
-4. **Sector/Market Correlation**
-   - Stock vs sector relative strength
-   - Tighten if stock underperforms sector by >1.5%
-   - Widen if stock outperforms during sector weakness
+2. **8 Setup-Based Rules:**
+   - `breakout`, `pullback`, `momentum`, `mean_reversion`
+   - `gap_and_go`, `vwap_reversal`, `earnings_play`, `default`
 
-5. **Regime Context Adjustments**
-   | Regime | Long Mult | Short Mult |
-   |--------|-----------|------------|
-   | RISK_ON | 0.9x | 1.3x |
-   | HOLD | 1.0x | 1.0x |
-   | RISK_OFF | 1.2x | 1.0x |
-   | CONFIRMED_DOWN | 1.4x | 0.85x |
+3. **Advanced Analysis Factors:**
+   - Volume Profile (POC, VAH/VAL, HVN/LVN)
+   - Stop Hunt Risk Detection
+   - Sector/Market Correlation
+   - Regime Context Adjustments
+   - Round Number Avoidance
 
-6. **Layered Stops** (40%/30%/30% at 1.0/1.5/2.0 ATR depths)
-7. **Scale-Out Plans** (R-multiple profit targets per setup)
+**Unified API Endpoints (all under `/api/smart-stops/`):**
+- `GET /modes` - 6 stop modes
+- `GET /setup-rules` - 8 setup types
+- `GET /trailing-modes` - 6 trailing modes
+- `GET /urgency-levels` - 4 urgency levels
+- `GET /compare` - Compare all modes side-by-side
+- `GET /recommend/{symbol}` - Personalized recommendation
+- `POST /calculate` - Simple mode-based stop calculation
+- `POST /intelligent-calculate` - Full multi-factor intelligent stop
+- `POST /analyze-trade` - Analyze existing trade's stop
 
-**API Endpoints:**
-- `GET /api/intelligent-stops/setup-rules` - All 8 setup configurations
-- `GET /api/intelligent-stops/trailing-modes` - 6 trailing modes
-- `GET /api/intelligent-stops/urgency-levels` - 4 urgency levels
-- `POST /api/intelligent-stops/calculate` - Full intelligent stop calculation
-- `POST /api/intelligent-stops/analyze-trade` - Analyze existing stop placement
+**P1: Smart Stops UI Complete**
+Integrated `SmartStopSelector` component into `EnhancedTickerModal` sidebar:
+- Visual comparison of all 6 stop modes
+- Hunt risk indicators (color-coded)
+- Personalized recommendations
+- Layered stops visualization (3 layers with 40/30/30 split)
+- Mode selection updates position progress bar
 
-**Files Created:**
-- `/app/backend/services/intelligent_stop_manager.py` - 1100+ line comprehensive manager
-- `/app/backend/routers/intelligent_stops.py` - API endpoints
-- `/app/backend/tests/test_intelligent_stop_manager.py` - Test suite
-
----
-
-### P2 Complete: Smart Stop Service (Anti-Hunt Protection) (March 12, 2026)
-
-**Status:** ✅ COMPLETE - Tested and Verified (iteration_73.json - 30/30 tests passed)
-
-**Features Delivered:**
-
-Based on research into institutional stop-hunting tactics, implemented a comprehensive Smart Stop system with 6 modes:
-
-1. **Original** - Traditional stop below support with small buffer (HIGH hunt risk)
-2. **ATR Dynamic** - 1.5x ATR buffer from entry (MEDIUM hunt risk) - DEFAULT
-3. **Anti-Hunt** - Stops placed BEYOND obvious levels (support, round numbers) with extra buffer (LOW hunt risk)
-4. **Volatility Adjusted** - Widens in high vol (2.5x), tightens in low vol (1.0x)
-5. **Layered** - Multiple stop levels for partial exits (40%/30%/30% at 1.0/1.5/2.0 ATR depths)
-6. **Chandelier** - ATR-based trailing from recent high/low (3.0x ATR)
-
-**Key Anti-Hunt Features:**
-- Avoids round numbers (adds 0.2% buffer from $50, $100, etc.)
-- Identifies obvious stop zones (swing lows, support, prior day levels)
-- Places stops DEEPER than these zones by 1-2x ATR
-- Recommends mode based on stock characteristics (float, volume, time of day)
-- Stop hunt pattern detection (spike through level + high volume + close back inside)
-
-**API Endpoints:**
-- `GET /api/smart-stops/modes` - All 6 modes with descriptions
-- `GET /api/smart-stops/compare` - Side-by-side comparison for trade setup
-- `GET /api/smart-stops/recommend/{symbol}` - AI recommendation based on stock
-- `POST /api/smart-stops/calculate` - Calculate stop for specific mode
-
-**Files Created:**
-- `/app/backend/services/smart_stop_service.py` - SmartStopService class (700+ lines)
-- `/app/backend/routers/smart_stops.py` - API endpoints
-- `/app/frontend/src/components/SmartStopSelector.jsx` - Frontend selector component
-- `/app/backend/scripts/migrate_trade_regimes.py` - Trade regime migration script
-- `/app/backend/tests/test_smart_stop_service.py` - Comprehensive test suite
+**Files Modified:**
+- `/app/frontend/src/components/EnhancedTickerModal.jsx` - Added SmartStopSelector
+- `/app/frontend/src/components/SmartStopSelector.jsx` - Enhanced with LayeredStopsVisualizer
 
 ---
 
