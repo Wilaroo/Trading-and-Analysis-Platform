@@ -75,7 +75,7 @@ class RouterAgent(BaseAgent):
             r"(?:what|show|list|display)(?:\s+are)?\s+(?:my\s+)?positions?",
             r"(?:my|current)\s+(?:open\s+)?positions?",
             r"what\s+(?:am\s+i|do\s+i)\s+(?:holding|have|own)",
-            r"\bportfolio\b",
+            r"portfolio\s+(?:value|holdings|positions|summary)",  # More specific - excludes "portfolio risk"
             r"\bp&?l\b|\bpnl\b|\bprofit\b|\bloss\b",
         ]
         
@@ -127,7 +127,8 @@ class RouterAgent(BaseAgent):
             r"([A-Z]{1,5})\s+(?:price|quote|bid|ask)",
             r"(?:how\s+much\s+is|what\s+is)\s+([A-Z]{1,5})",
             r"(?:get|show)\s+(?:me\s+)?(?:the\s+)?(?:price|quote)\s+(?:for\s+)?([A-Z]{1,5})",
-            r"where\s+(?:is\s+)?([A-Z]{1,5})\s+(?:trading|at)?",
+            r"where\s+is\s+([A-Z]{2,5})(?:\s|$)",  # Fixed: "where is TSLA" - requires 2+ char symbol
+            r"where\s+([A-Z]{2,5})\s+(?:trading|at)",  # "where TSLA at/trading"
         ]
         
         # Risk check patterns - portfolio risk analysis
