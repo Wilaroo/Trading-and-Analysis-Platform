@@ -359,7 +359,7 @@ Respond ONLY with JSON, no other text:
             Intent.ANALYSIS: AgentType.ANALYST,
             Intent.SCANNER: AgentType.ANALYST,
             Intent.COACHING: AgentType.COACH,
-            Intent.MARKET_INFO: AgentType.ANALYST,
+            Intent.MARKET_INFO: AgentType.COACH,  # Coach handles general market overview
             Intent.GENERAL_CHAT: AgentType.CHAT,
         }
         return mapping.get(intent, AgentType.CHAT)
