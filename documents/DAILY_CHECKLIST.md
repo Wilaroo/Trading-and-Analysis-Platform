@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://backtest-hub-18.preview.emergentagent.com
+https://regime-aware-bot.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://backtest-hub-18.preview.emergentagent.com
+https://regime-aware-bot.preview.emergentagent.com
 ```
