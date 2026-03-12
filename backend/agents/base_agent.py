@@ -230,12 +230,20 @@ class DataFetcher:
         """Get quote for a symbol (CODE - verified data)"""
         try:
             import routers.ib as ib_module
-            # Use the pushed quotes function
+            # First try pushed quotes (real-time from IB)
             quotes = ib_module.get_pushed_quotes()
-            return quotes.get(symbol)
+            if symbol in quotes:
+                return quotes.get(symbol)
+            
+            # Fall back to API call for quote
+            import httpx
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"http://localhost:8001/api/ib/quote/{symbol}", timeout=5.0)
+                if resp.status_code == 200:
+                    return resp.json()
         except Exception as e:
             logger.error(f"Error fetching quote for {symbol}: {e}")
-            return None
+        return None
     
     async def get_trade_history(self, symbol: str = None, limit: int = 20) -> List[Dict]:
         """Get trade history from database (CODE - verified data)"""
