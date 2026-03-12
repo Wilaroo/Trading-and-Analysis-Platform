@@ -22,7 +22,7 @@ set SCRIPT_DIR=%~dp0
 
 :: IB Gateway settings
 set IB_GATEWAY_PATH=C:\Jts\ibgateway\1037\ibgateway.exe
-set IB_SYMBOLS=VIX SPY QQQ IWM DIA NVDA AAPL MSFT TSLA AMD
+set IB_SYMBOLS=VIX SPY QQQ IWM DIA XOM CVX CF NTR NVDA AAPL MSFT TSLA AMD
 
 :: Model override (leave empty for auto-detect based on GPU)
 set OLLAMA_MODEL_OVERRIDE=
@@ -259,9 +259,8 @@ taskkill /F /FI "WINDOWTITLE eq IB Data Pusher*" >nul 2>&1
 
 if exist "%SCRIPT_DIR%ib_data_pusher.py" (
     timeout /t 3 /nobreak >nul
-    start "IB Data Pusher" cmd /k "title IB Data Pusher && color 0B && echo ============================== && echo   IB Data Pusher Running && echo   Cloud: %CLOUD_URL% && echo   Symbols: %IB_SYMBOLS% && echo   STOP LOSS MONITORING ACTIVE && echo ============================== && python "%SCRIPT_DIR%ib_data_pusher.py" --cloud-url %CLOUD_URL% --symbols %IB_SYMBOLS%"
+    start "IB Data Pusher" cmd /k "title IB Data Pusher && color 0B && echo ============================== && echo   IB Data Pusher Running && echo   Cloud: %CLOUD_URL% && echo   Symbols: %IB_SYMBOLS% && echo ============================== && python "%SCRIPT_DIR%ib_data_pusher.py" --cloud-url %CLOUD_URL% --symbols %IB_SYMBOLS%"
     echo       IB Data Pusher started!
-    echo       Symbols: %IB_SYMBOLS%
 ) else (
     echo       [ERROR] ib_data_pusher.py not found
     echo       Download from: %GITHUB_RAW%/ib_data_pusher.py
