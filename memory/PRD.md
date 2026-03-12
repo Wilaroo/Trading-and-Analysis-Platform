@@ -5,6 +5,34 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### Phase 4.4 Complete: Market Regime Integration (March 12, 2026)
+
+**Features Delivered:**
+
+1. **Market Regime Widget on Dashboard**
+   - Added to Command tab alongside Learning Insights
+   - Shows current state: RISK_ON, CAUTION, RISK_OFF, CONFIRMED_DOWN
+   - Signal breakdown: Trend, Breadth, FTD, Vol/VIX scores
+   - Risk Level bar and trading recommendation
+   - Auto-refresh every 60 seconds
+
+2. **Trading Bot Regime-Aware Position Sizing**
+   - Position sizing now adjusts based on market regime
+   - Multipliers:
+     - RISK_ON: 100% (full sizing)
+     - CAUTION: 75%
+     - RISK_OFF: 50%
+     - CONFIRMED_DOWN: 25% for longs, 100% for shorts
+   - Short trades get full sizing in CONFIRMED_DOWN (they benefit)
+   - Long shorts reduced in RISK_ON (counter-trend)
+
+3. **Scanner/Backtest Integration** (Smart approach)
+   - NOT blindly filtering signals by regime
+   - Recognizes that:
+     - Some long strategies work well in down markets (mean reversion)
+     - Some short strategies work in up markets (scalps with tight stops)
+   - Bot applies smarter position sizing instead of signal filtering
+
 ### Phase 4.3 Complete: Market-Wide Backtesting UI + Market Regime Deployment (March 12, 2026)
 
 **Features Delivered:**

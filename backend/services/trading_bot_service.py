@@ -532,6 +532,16 @@ class TradingBotService:
         # Learning Loop integration (Phase 1)
         self._learning_loop = None
         
+        # Market Regime Engine integration
+        self._market_regime_engine = None
+        self._current_regime = "RISK_ON"  # Default to risk-on
+        self._regime_position_multipliers = {
+            "RISK_ON": 1.0,           # Full position sizing
+            "CAUTION": 0.75,          # Reduce by 25%
+            "RISK_OFF": 0.5,          # Reduce by 50%
+            "CONFIRMED_DOWN": 0.25    # Reduce by 75% for longs, normal for shorts
+        }
+        
         # Callbacks for real-time updates
         self._trade_callbacks: List[callable] = []
         
@@ -548,6 +558,29 @@ class TradingBotService:
         
         # Restore bot state from database on startup
         asyncio.create_task(self._restore_state())
+    
+    def set_market_regime_engine(self, regime_engine):
+        """Set market regime engine for regime-aware position sizing"""
+        self._market_regime_engine = regime_engine
+        logger.info("TradingBotService: Market Regime Engine connected")
+    
+    async def _update_market_regime(self):
+        """Fetch current market regime for position sizing adjustments"""
+        if self._market_regime_engine is None:
+            return
+        
+        try:
+            regime_data = await self._market_regime_engine.get_current_regime()
+            new_regime = regime_data.get("state", "RISK_ON")
+            
+            if new_regime != self._current_regime:
+                old_regime = self._current_regime
+                self._current_regime = new_regime
+                multiplier = self._regime_position_multipliers.get(new_regime, 1.0)
+                logger.info(f"🌡️ Market regime changed: {old_regime} -> {new_regime} (position multiplier: {multiplier}x)")
+            
+        except Exception as e:
+            logger.warning(f"Could not fetch market regime: {e}")
     
     async def _restore_state(self):
         """Restore bot state from MongoDB on startup"""
@@ -1260,7 +1293,7 @@ class TradingBotService:
     
     def _calculate_position_size(self, entry_price: float, stop_price: float, direction: TradeDirection, atr: float = None, atr_percent: float = None) -> Tuple[int, float]:
         """
-        Calculate position size based on risk management rules with volatility adjustment.
+        Calculate position size based on risk management rules with volatility and market regime adjustment.
         
         Args:
             entry_price: Entry price for the trade
@@ -1301,6 +1334,31 @@ class TradingBotService:
             # Apply volatility scale factor
             volatility_multiplier *= self.risk_params.volatility_scale_factor
             adjusted_max_risk = self.risk_params.max_risk_per_trade * volatility_multiplier
+        
+        # =====================================================================
+        # MARKET REGIME ADJUSTMENT
+        # =====================================================================
+        # Adjust position sizing based on current market regime
+        regime_multiplier = 1.0
+        
+        if self._current_regime:
+            base_regime_multiplier = self._regime_position_multipliers.get(self._current_regime, 1.0)
+            
+            # For CONFIRMED_DOWN regime, allow normal sizing for SHORT trades
+            # since shorts benefit from down markets
+            if self._current_regime == "CONFIRMED_DOWN" and direction == TradeDirection.SHORT:
+                regime_multiplier = 1.0  # Full sizing for shorts in down market
+            # For RISK_ON regime, slightly reduce short sizing (counter-trend)
+            elif self._current_regime == "RISK_ON" and direction == TradeDirection.SHORT:
+                regime_multiplier = 0.7  # Reduce shorts in up market (counter-trend)
+            else:
+                regime_multiplier = base_regime_multiplier
+            
+            adjusted_max_risk *= regime_multiplier
+            
+            if regime_multiplier < 1.0:
+                logger.debug(f"Position size adjusted by regime ({self._current_regime}): {regime_multiplier:.0%}")
+        # =====================================================================
         
         # Calculate max shares based on adjusted risk per trade
         max_shares_by_risk = int(adjusted_max_risk / risk_per_share)
