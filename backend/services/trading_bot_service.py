@@ -630,7 +630,7 @@ class TradingBotService:
                     logger.info(f"🎯 Using default {len(self._enabled_setups)} strategies (no saved customization)")
                 
                 # Auto-restart if bot was running before
-                if was_running and saved_watchlist:
+                if was_running:
                     logger.info("🔄 Bot was running before restart - auto-resuming...")
                     await self.start()
                 
