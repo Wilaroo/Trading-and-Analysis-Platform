@@ -5,6 +5,45 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### Phase 4.5 Complete: Regime-Aware Strategy Performance Tracking (March 12, 2026)
+
+**Features Delivered:**
+
+1. **RegimePerformanceService** (`/app/backend/services/regime_performance_service.py`)
+   - Tracks strategy performance segmented by market regime
+   - Logs closed trades with regime state, score, and position multiplier
+   - Aggregates win rates, P&L, R-multiples per strategy/regime combo
+   - Provides analysis of position sizing impact
+
+2. **Trading Bot Integration**
+   - Added `_log_trade_to_regime_performance` method to TradingBotService
+   - Wired `RegimePerformanceService` to trading bot via `set_regime_performance_service`
+   - Closed trades now automatically log to regime_trade_log collection
+
+3. **API Endpoints**
+   - `GET /api/regime-performance/summary` - Overall performance by regime
+   - `GET /api/regime-performance/strategies` - Strategy performance with filters
+   - `GET /api/regime-performance/best-for-regime/{regime}` - Top strategies per regime
+   - `GET /api/regime-performance/position-sizing-impact` - Analyze sizing adjustments
+   - `GET /api/regime-performance/recommendations` - AI-generated suggestions
+
+4. **Testing** - 26/26 tests passed (10 unit + 16 API tests)
+   - `/app/backend/tests/test_regime_performance.py`
+   - Verified service initialization, trade logging, API responses
+
+**Database Collections:**
+- `regime_performance` - Aggregated stats by strategy/regime
+- `regime_trade_log` - Individual trade records with regime data
+
+**Data Model (BotTrade additions):**
+```python
+market_regime: str = "UNKNOWN"  # RISK_ON, CAUTION, RISK_OFF, CONFIRMED_DOWN
+regime_score: float = 50.0      # Composite score at entry (0-100)
+regime_position_multiplier: float = 1.0  # Position size adjustment applied
+```
+
+---
+
 ### Phase 4.4 Complete: Market Regime Integration (March 12, 2026)
 
 **Features Delivered:**
