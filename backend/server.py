@@ -4291,7 +4291,7 @@ SCRIPTS_DIR = "/app/documents"
 async def get_script(script_name: str):
     """Serve scripts for auto-update (StartTrading.bat, ollama_http.py, etc.)"""
     # Whitelist allowed scripts
-    allowed_scripts = ["StartTrading.bat", "ollama_http.py", "ib_data_pusher.py", "ollama_proxy.py", "ui_mockups.html", "ui_mockups_v2.html", "ui_mockups_v2_enhanced.html", "TradeCommand_Overview.html"]
+    allowed_scripts = ["StartTrading.bat", "ollama_http.py", "ib_data_pusher.py", "ollama_proxy.py", "ui_mockups.html", "ui_mockups_v2.html", "ui_mockups_v2_enhanced.html", "ui_mockups_chart_modal_v3.html", "TradeCommand_Overview.html"]
     
     if script_name not in allowed_scripts:
         return PlainTextResponse("Script not found", status_code=404)
