@@ -564,6 +564,350 @@ async def get_performance_stats():
     }
 
 
+@router.get("/performance/equity-curve")
+async def get_equity_curve(period: str = Query("today", enum=["today", "week", "month", "ytd", "all"])):
+    """
+    Get equity curve data for the bot performance chart.
+    Returns cumulative P&L over time with trade markers.
+    
+    Period options:
+    - today: Intraday (last 24 hours)
+    - week: Last 7 days
+    - month: Last 30 days
+    - ytd: Year to date
+    - all: All time
+    """
+    if not _trading_bot:
+        return {
+            "success": True,
+            "equity_curve": [],
+            "trade_markers": [],
+            "summary": {
+                "total_pnl": 0,
+                "trades_count": 0,
+                "win_rate": 0,
+                "avg_r": 0,
+                "best_trade": 0,
+                "worst_trade": 0
+            }
+        }
+    
+    try:
+        from datetime import timedelta
+        
+        # Get closed trades
+        closed = _trading_bot.get_closed_trades(limit=1000)
+        
+        # Filter by period
+        now = datetime.now(timezone.utc)
+        if period == "today":
+            cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif period == "week":
+            cutoff = now - timedelta(days=7)
+        elif period == "month":
+            cutoff = now - timedelta(days=30)
+        elif period == "ytd":
+            cutoff = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        else:  # all
+            cutoff = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        
+        # Filter and sort trades by close time
+        filtered_trades = []
+        for trade in closed:
+            close_time_str = trade.get('closed_at') or trade.get('executed_at')
+            if close_time_str:
+                try:
+                    close_time = datetime.fromisoformat(close_time_str.replace('Z', '+00:00'))
+                    if close_time >= cutoff:
+                        filtered_trades.append({
+                            **trade,
+                            '_close_time': close_time
+                        })
+                except (ValueError, TypeError):
+                    pass
+        
+        # Sort by close time
+        filtered_trades.sort(key=lambda t: t['_close_time'])
+        
+        # Build equity curve
+        cumulative_pnl = 0
+        equity_curve = []
+        trade_markers = []
+        pnls = []
+        
+        for trade in filtered_trades:
+            pnl = trade.get('realized_pnl', 0)
+            cumulative_pnl += pnl
+            pnls.append(pnl)
+            
+            timestamp = int(trade['_close_time'].timestamp() * 1000)  # JS timestamp
+            equity_curve.append({
+                "time": timestamp,
+                "value": cumulative_pnl
+            })
+            
+            trade_markers.append({
+                "time": timestamp,
+                "pnl": pnl,
+                "symbol": trade.get('symbol', ''),
+                "setup_type": trade.get('setup_type', ''),
+                "is_win": pnl > 0
+            })
+        
+        # Calculate summary stats
+        wins = [p for p in pnls if p > 0]
+        losses = [p for p in pnls if p < 0]
+        
+        # Calculate average R-multiple from trades that have it
+        r_multiples = [t.get('r_multiple', 0) for t in filtered_trades if t.get('r_multiple')]
+        avg_r = sum(r_multiples) / len(r_multiples) if r_multiples else 0
+        
+        summary = {
+            "total_pnl": cumulative_pnl,
+            "trades_count": len(filtered_trades),
+            "win_rate": (len(wins) / len(filtered_trades) * 100) if filtered_trades else 0,
+            "avg_r": avg_r,
+            "best_trade": max(pnls, default=0),
+            "worst_trade": min(pnls, default=0)
+        }
+        
+        return {
+            "success": True,
+            "period": period,
+            "equity_curve": equity_curve,
+            "trade_markers": trade_markers,
+            "summary": summary
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting equity curve: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "equity_curve": [],
+            "trade_markers": [],
+            "summary": {}
+        }
+
+
+@router.get("/thoughts")
+async def get_bot_thoughts(limit: int = Query(10, ge=1, le=50)):
+    """
+    Get the bot's recent thoughts/reasoning in first person.
+    Returns a stream of what the bot is "thinking" based on:
+    - Recent trade decisions and reasoning
+    - Setups being watched
+    - Position monitoring updates
+    
+    Each thought has:
+    - text: The thought in first person (e.g., "I detected a breakout on NVDA...")
+    - timestamp: When the thought occurred
+    - confidence: 0-100 confidence level
+    - action_type: entry, exit, watching, monitoring, scanning, alert
+    - symbol: Related ticker symbol (if any)
+    """
+    thoughts = []
+    
+    if not _trading_bot:
+        return {
+            "success": True,
+            "thoughts": [{
+                "text": "I'm currently offline. Start me to begin scanning for opportunities.",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "confidence": 0,
+                "action_type": "offline",
+                "symbol": None
+            }]
+        }
+    
+    try:
+        now = datetime.now(timezone.utc)
+        
+        # 1. Thoughts from pending trades (about to execute)
+        for trade in _trading_bot.get_pending_trades()[:3]:
+            symbol = trade.get('symbol', 'UNKNOWN')
+            setup = trade.get('setup_type', 'trade')
+            entry = trade.get('entry_price', 0)
+            rr = trade.get('risk_reward_ratio', 0)
+            
+            thoughts.append({
+                "text": f'"I\'m preparing to enter {symbol} on a {setup.replace("_", " ")} setup at ${entry:.2f}. Risk/Reward is {rr:.1f}:1. Awaiting confirmation."',
+                "timestamp": trade.get('created_at', now.isoformat()),
+                "confidence": 80,
+                "action_type": "entry",
+                "symbol": symbol
+            })
+        
+        # 2. Thoughts from open trades (monitoring)
+        for trade in _trading_bot.get_open_trades()[:3]:
+            symbol = trade.get('symbol', 'UNKNOWN')
+            pnl = trade.get('unrealized_pnl', 0)
+            pnl_pct = trade.get('pnl_pct', 0)
+            stop = trade.get('stop_price', 0)
+            target = trade.get('target_prices', [0])[0] if trade.get('target_prices') else 0
+            direction = 'up' if pnl >= 0 else 'down'
+            
+            thoughts.append({
+                "text": f'"I\'m monitoring my {symbol} position. Currently {direction} {abs(pnl_pct):.1f}%. Stop at ${stop:.2f} is safe. {f"Target 1 at ${target:.2f}." if target else ""}"',
+                "timestamp": trade.get('executed_at', now.isoformat()),
+                "confidence": 60,
+                "action_type": "monitoring",
+                "symbol": symbol
+            })
+        
+        # 3. Thoughts from recent closed trades (lessons learned)
+        recent_closed = _trading_bot.get_closed_trades(limit=2)
+        for trade in recent_closed:
+            symbol = trade.get('symbol', 'UNKNOWN')
+            pnl = trade.get('realized_pnl', 0)
+            reason = trade.get('close_reason', 'manual')
+            
+            if pnl > 0:
+                text = f'"I closed {symbol} for +${pnl:.2f}. {reason.replace("_", " ").title()} worked well."'
+            else:
+                text = f'"I closed {symbol} for -${abs(pnl):.2f}. {reason.replace("_", " ").title()}. Learning from this."'
+            
+            thoughts.append({
+                "text": text,
+                "timestamp": trade.get('closed_at', now.isoformat()),
+                "confidence": 50,
+                "action_type": "exit",
+                "symbol": symbol
+            })
+        
+        # 4. General status thought if bot is running
+        if _trading_bot._running:
+            mode = _trading_bot._mode.value
+            regime = getattr(_trading_bot, '_current_regime', 'UNKNOWN')
+            
+            if regime == 'RISK_ON':
+                regime_comment = "so I'm looking for aggressive breakout setups."
+            elif regime == 'RISK_OFF':
+                regime_comment = "so I'm being cautious and reducing position sizes."
+            elif regime == 'CONFIRMED_DOWN':
+                regime_comment = "so I'm favoring short setups and reducing long exposure."
+            else:
+                regime_comment = "so I'm using standard position sizing."
+            
+            thoughts.append({
+                "text": f'"I\'m actively scanning for opportunities in {mode} mode. Market regime is {regime}, {regime_comment}"',
+                "timestamp": now.isoformat(),
+                "confidence": 50,
+                "action_type": "scanning",
+                "symbol": None
+            })
+        
+        # Sort by timestamp (most recent first) and limit
+        thoughts.sort(key=lambda t: t['timestamp'], reverse=True)
+        
+        return {
+            "success": True,
+            "thoughts": thoughts[:limit]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting bot thoughts: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "thoughts": []
+        }
+
+
+@router.get("/dashboard-data")
+async def get_dashboard_data():
+    """
+    Get all data needed for the new bot-centric dashboard in one call.
+    Reduces API calls from the frontend.
+    
+    Returns:
+    - bot_status: Running state, mode, last action
+    - today_pnl: Today's realized P&L
+    - open_pnl: Unrealized P&L from open positions
+    - open_trades: List of open positions
+    - watching_setups: Setups the bot is watching
+    - recent_thoughts: Bot's recent reasoning (3 most recent)
+    - performance_summary: Win rate, avg R, etc.
+    """
+    if not _trading_bot:
+        return {
+            "success": True,
+            "bot_status": {"running": False, "mode": "paused", "state": "offline"},
+            "today_pnl": 0,
+            "open_pnl": 0,
+            "open_trades": [],
+            "watching_setups": [],
+            "recent_thoughts": [],
+            "performance_summary": {}
+        }
+    
+    try:
+        # Bot status
+        status = _trading_bot.get_status()
+        daily_stats = status.get('daily_stats', {})
+        
+        # Calculate open P&L
+        open_trades = _trading_bot.get_open_trades()
+        open_pnl = sum(t.get('unrealized_pnl', 0) for t in open_trades)
+        
+        # Get pending trades (watching/about to enter)
+        pending = _trading_bot.get_pending_trades()
+        
+        # Build bot status object
+        bot_status = {
+            "running": status.get('running', False),
+            "mode": status.get('mode', 'paused'),
+            "state": "hunting" if status.get('running') else "paused",
+            "last_action": None  # Could be enhanced later
+        }
+        
+        # Get thoughts (simplified - just 3 most recent)
+        thoughts_response = await get_bot_thoughts(limit=3)
+        recent_thoughts = thoughts_response.get('thoughts', [])
+        
+        # Performance summary
+        closed = _trading_bot.get_closed_trades(limit=100)
+        today_trades = [t for t in closed if _is_today(t.get('closed_at'))]
+        
+        wins = [t for t in today_trades if t.get('realized_pnl', 0) > 0]
+        performance_summary = {
+            "trades_today": len(today_trades),
+            "win_rate": (len(wins) / len(today_trades) * 100) if today_trades else 0,
+            "best_trade": max((t.get('realized_pnl', 0) for t in today_trades), default=0),
+            "worst_trade": min((t.get('realized_pnl', 0) for t in today_trades), default=0)
+        }
+        
+        return {
+            "success": True,
+            "bot_status": bot_status,
+            "today_pnl": daily_stats.get('net_pnl', 0),
+            "open_pnl": open_pnl,
+            "open_trades": open_trades,
+            "watching_setups": pending,
+            "recent_thoughts": recent_thoughts,
+            "performance_summary": performance_summary
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting dashboard data: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+def _is_today(timestamp_str: str) -> bool:
+    """Helper to check if a timestamp is from today"""
+    if not timestamp_str:
+        return False
+    try:
+        ts = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        today = datetime.now(timezone.utc).date()
+        return ts.date() == today
+    except (ValueError, TypeError):
+        return False
+
+
 # ==================== REAL-TIME STREAMING ====================
 
 @router.get("/stream")
