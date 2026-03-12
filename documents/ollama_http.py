@@ -7,7 +7,7 @@ try:
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "httpx"])
     import httpx
-CLOUD_URL = "https://ai-trading-bot-55.preview.emergentagent.com"
+CLOUD_URL = "https://bot-hub-7.preview.emergentagent.com"
 OLLAMA_URL = "http://localhost:11434"
 class OllamaProxyHTTP:
     def __init__(self):
