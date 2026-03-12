@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Search, Filter, Play, Square, Clock, TrendingUp, BarChart3, Zap, RefreshCw, ChevronRight, Target, AlertTriangle } from 'lucide-react';
+import { Tip, CustomTip } from './shared/Tooltip';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -8,6 +9,7 @@ const TRADE_STYLES = {
   intraday: {
     label: 'Intraday',
     description: 'Fast-moving stocks for day trading',
+    tip: 'Scan for scalp and intraday setups. High momentum, tight stops. Hold minutes to hours.',
     icon: Zap,
     color: 'text-yellow-400',
     bgColor: 'bg-yellow-400/10',
@@ -17,6 +19,7 @@ const TRADE_STYLES = {
   swing: {
     label: 'Swing',
     description: 'Multi-day momentum and pattern trades',
+    tip: 'Scan for swing trade setups. Hold 2-10 days. Focus on daily chart breakouts and pullbacks.',
     icon: TrendingUp,
     color: 'text-cyan-400',
     bgColor: 'bg-cyan-400/10',
@@ -26,6 +29,7 @@ const TRADE_STYLES = {
   investment: {
     label: 'Investment',
     description: 'Long-term value and growth opportunities',
+    tip: 'Scan for position trades. Hold weeks to months. Focus on fundamentals and major trends.',
     icon: Target,
     color: 'text-green-400',
     bgColor: 'bg-green-400/10',
@@ -35,6 +39,7 @@ const TRADE_STYLES = {
   all: {
     label: 'All Strategies',
     description: 'Scan with all 77 strategies',
+    tip: 'Use all available strategies. Most comprehensive scan. Takes longer to complete.',
     icon: BarChart3,
     color: 'text-purple-400',
     bgColor: 'bg-purple-400/10',

@@ -15,6 +15,7 @@ import {
   Wallet, Shield, RefreshCw, X, Maximize2, Minimize2,
   DollarSign, Percent, TrendingUp as TrendUp
 } from 'lucide-react';
+import { Tip, TipIcon, CustomTip } from '../components/shared/Tooltip';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -334,16 +335,22 @@ const PerformanceStats = ({ stats }) => {
     <div className="bg-zinc-900 border border-zinc-700 rounded-xl overflow-hidden">
       <div className="p-3 border-b border-zinc-700 bg-zinc-800/50 flex items-center gap-2">
         <BarChart3 className="w-5 h-5 text-cyan-400" />
-        <span className="font-semibold text-white">Today's Performance</span>
+        <CustomTip label="Today's Performance" description="Real-time stats from today's trading session. Resets at market open each day.">
+          <span className="font-semibold text-white">Today's Performance</span>
+        </CustomTip>
       </div>
       
       <div className="p-4 space-y-3">
         <div className="flex justify-between items-center">
-          <span className="text-zinc-400">Trades</span>
+          <CustomTip label="Trades" description="Total number of trades executed today, both wins and losses.">
+            <span className="text-zinc-400 cursor-help border-b border-dotted border-zinc-600">Trades</span>
+          </CustomTip>
           <span className="font-mono text-white">{stats.trades_executed || 0}</span>
         </div>
         <div className="flex justify-between items-center">
-          <span className="text-zinc-400">Win Rate</span>
+          <CustomTip label="Win Rate" description="Percentage of winning trades today. (Wins / Total Trades) x 100. Above 50% is good.">
+            <span className="text-zinc-400 cursor-help border-b border-dotted border-zinc-600">Win Rate</span>
+          </CustomTip>
           <span className={`font-mono ${(stats.win_rate || 0) >= 50 ? 'text-emerald-400' : 'text-red-400'}`}>
             {(stats.win_rate || 0).toFixed(1)}%
           </span>
@@ -389,13 +396,17 @@ const RiskStatus = ({ stats, positions }) => {
     <div className="bg-zinc-900 border border-zinc-700 rounded-xl overflow-hidden">
       <div className="p-3 border-b border-zinc-700 bg-zinc-800/50 flex items-center gap-2">
         <Shield className="w-5 h-5 text-yellow-400" />
-        <span className="font-semibold text-white">Risk Status</span>
+        <CustomTip label="Risk Status" description="Real-time risk exposure monitoring. Tracks daily loss limits and position sizing to protect your capital.">
+          <span className="font-semibold text-white">Risk Status</span>
+        </CustomTip>
       </div>
       
       <div className="p-4 space-y-3">
         <div>
           <div className="flex justify-between text-sm mb-1">
-            <span className="text-zinc-400">Daily Loss Limit</span>
+            <CustomTip label="Daily Loss Limit" description="Maximum loss allowed per day. Bot pauses when hit. Usually 2-3% of account. Prevents tilt trading.">
+              <span className="text-zinc-400 cursor-help border-b border-dotted border-zinc-600">Daily Loss Limit</span>
+            </CustomTip>
             <span className={dailyLossPct > 75 ? 'text-red-400' : dailyLossPct > 50 ? 'text-yellow-400' : 'text-emerald-400'}>
               {dailyLossPct.toFixed(0)}% used
             </span>
@@ -412,7 +423,9 @@ const RiskStatus = ({ stats, positions }) => {
         
         <div>
           <div className="flex justify-between text-sm mb-1">
-            <span className="text-zinc-400">Position Exposure</span>
+            <CustomTip label="Position Exposure" description="Number of open positions. High exposure = high risk. Consider closing some positions when this is high.">
+              <span className="text-zinc-400 cursor-help border-b border-dotted border-zinc-600">Position Exposure</span>
+            </CustomTip>
             <span className={exposurePct > 80 ? 'text-red-400' : 'text-emerald-400'}>
               {positions.length} positions
             </span>

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '../utils/api';
+import { Tip, TipIcon, CustomTip } from './shared/Tooltip';
 
 // ============================================================================
 // Main Component
@@ -85,12 +86,12 @@ const AdvancedBacktestPanel = () => {
   };
 
   const tabs = [
-    { id: 'quick', label: 'Quick Test', icon: Zap },
-    { id: 'market', label: 'Market-Wide', icon: Globe },
-    { id: 'multi', label: 'Multi-Strategy', icon: Layers },
-    { id: 'walkforward', label: 'Walk-Forward', icon: TrendingUp },
-    { id: 'montecarlo', label: 'Monte Carlo', icon: Shuffle },
-    { id: 'results', label: 'Results', icon: BarChart3 }
+    { id: 'quick', label: 'Quick Test', icon: Zap, tip: 'Fast single-strategy test on one symbol. Great for validating ideas.' },
+    { id: 'market', label: 'Market-Wide', icon: Globe, tip: 'Scan entire US market with a strategy. Find all historical setups across thousands of stocks.' },
+    { id: 'multi', label: 'Multi-Strategy', icon: Layers, tip: 'Test multiple strategies simultaneously to compare performance.' },
+    { id: 'walkforward', label: 'Walk-Forward', icon: TrendingUp, tip: 'Advanced optimization: train on one period, test on next. Validates robustness.' },
+    { id: 'montecarlo', label: 'Monte Carlo', icon: Shuffle, tip: 'Run thousands of random simulations to understand risk and drawdown distribution.' },
+    { id: 'results', label: 'Results', icon: BarChart3, tip: 'View and compare all your past backtest results.' }
   ];
 
   return (
@@ -101,18 +102,19 @@ const AdvancedBacktestPanel = () => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
           return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                isActive
-                  ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/30'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              <span className="hidden sm:inline">{tab.label}</span>
-            </button>
+            <CustomTip key={tab.id} label={tab.label} description={tab.tip}>
+              <button
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                  isActive
+                    ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/30'
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+                <span className="hidden sm:inline">{tab.label}</span>
+              </button>
+            </CustomTip>
           );
         })}
       </div>

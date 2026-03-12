@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '../utils/api';
+import { Tip, TipIcon, CustomTip } from './shared/Tooltip';
 
 const LearningIntelligenceHub = () => {
   const [loading, setLoading] = useState(true);
@@ -238,12 +239,23 @@ const TraderProfileHeader = ({ profile, onRefresh, refreshing }) => {
   );
 };
 
-const ProfileStat = ({ label, value }) => (
-  <div className="text-center">
-    <div className="text-xs text-slate-500">{label}</div>
-    <div className="text-sm font-medium text-white">{value}</div>
-  </div>
-);
+const ProfileStat = ({ label, value }) => {
+  const tooltips = {
+    'Best Time': 'Time of day when you have the highest win rate and profitability.',
+    'Best Setup': 'Trading setup/strategy that performs best for you based on historical results.',
+    'Best Regime': 'Market condition (Bull/Bear/Sideways) where your strategies work best.',
+    'Avg Hold': 'Average time you hold positions from entry to exit.'
+  };
+  
+  return (
+    <CustomTip label={label} description={tooltips[label] || `Your ${label.toLowerCase()} statistic.`}>
+      <div className="text-center cursor-help">
+        <div className="text-xs text-slate-500">{label}</div>
+        <div className="text-sm font-medium text-white">{value}</div>
+      </div>
+    </CustomTip>
+  );
+};
 
 const PerformanceMetricsCard = ({ metrics }) => {
   const m = metrics || {};
@@ -291,24 +303,36 @@ const PerformanceMetricsCard = ({ metrics }) => {
   );
 };
 
-const MetricRow = ({ label, value, badge, positive, negative, neutral }) => (
-  <div className="flex items-center justify-between">
-    <span className="text-sm text-slate-400">{label}</span>
-    <div className="flex items-center gap-2">
-      <span className="text-sm font-medium text-white">{value}</span>
-      {badge && (
-        <span className={`text-xs px-1.5 py-0.5 rounded ${
-          positive ? 'bg-emerald-500/20 text-emerald-400' :
-          negative ? 'bg-red-500/20 text-red-400' : 
-          neutral ? 'bg-yellow-500/20 text-yellow-400' :
-          'bg-slate-600/50 text-slate-400'
-        }`}>
-          {badge}
-        </span>
-      )}
+const MetricRow = ({ label, value, badge, positive, negative, neutral }) => {
+  const tooltips = {
+    'Win Rate': 'Percentage of winning trades. (Wins / Total Trades) x 100. Above 50% is good.',
+    'Profit Factor': 'Gross Profit / Gross Loss. >1 profitable, >2 excellent. Shows system health.',
+    'Avg Winner': 'Average profit on winning trades. Should be greater than Avg Loser.',
+    'Avg Loser': 'Average loss on losing trades. Keeping this small is key to profitability.',
+    'Expectancy': 'Expected profit per trade. (Win% x Avg Win) - (Loss% x Avg Loss). Positive = profitable.'
+  };
+  
+  return (
+    <div className="flex items-center justify-between">
+      <CustomTip label={label} description={tooltips[label] || `${label} metric.`}>
+        <span className="text-sm text-slate-400 cursor-help border-b border-dotted border-slate-600">{label}</span>
+      </CustomTip>
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-medium text-white">{value}</span>
+        {badge && (
+          <span className={`text-xs px-1.5 py-0.5 rounded ${
+            positive ? 'bg-emerald-500/20 text-emerald-400' :
+            negative ? 'bg-red-500/20 text-red-400' : 
+            neutral ? 'bg-yellow-500/20 text-yellow-400' :
+            'bg-slate-600/50 text-slate-400'
+          }`}>
+            {badge}
+          </span>
+        )}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const WeeklyCalendarCard = ({ stats }) => {
   const days = ['M', 'T', 'W', 'T', 'F'];
