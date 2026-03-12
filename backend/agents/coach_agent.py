@@ -203,16 +203,26 @@ Please ensure your local IB Gateway and data pusher are running."""
     async def _handle_market_overview(self, message: str, start: float) -> AgentResponse:
         """Handle 'what's happening in the market' type questions"""
         import httpx
+        import os
         
-        # Fetch market regime data
+        # Fetch market regime data via API (most reliable)
         regime_data = {}
         try:
-            from services.market_regime_engine import get_regime_engine
-            engine = get_regime_engine()
-            if engine:
-                regime_data = engine.get_current_state() or {}
+            async with httpx.AsyncClient() as client:
+                # Use internal API call
+                resp = await client.get("http://localhost:8001/api/market-regime/current", timeout=5.0)
+                if resp.status_code == 200:
+                    regime_data = resp.json()
         except Exception as e:
-            logger.warning(f"Could not fetch regime data: {e}")
+            logger.warning(f"Could not fetch regime data via API: {e}")
+            # Fallback to direct engine call
+            try:
+                from services.market_regime_engine import get_regime_engine
+                engine = get_regime_engine()
+                if engine:
+                    regime_data = engine.get_current_state() or {}
+            except Exception as e2:
+                logger.warning(f"Could not fetch regime from engine: {e2}")
         
         # Fetch index data from IB if available
         index_data = {}
@@ -260,14 +270,28 @@ Please ensure your local IB Gateway and data pusher are running."""
                     overview += f"- **{sym}**: ${d['price']:.2f} {emoji} {d['change_pct']:+.2f}%\n"
             overview += "\n"
         
-        # Add regime signals if available
-        signals = regime_data.get("signals", {})
-        if signals:
+        # Add regime signals from signal_blocks
+        signal_blocks = regime_data.get("signal_blocks", {})
+        if signal_blocks:
             overview += "### Regime Signals\n"
-            signal_scores = regime_data.get("signal_scores", {})
-            for key, score in signal_scores.items():
-                score_emoji = "🟢" if score >= 60 else "🟡" if score >= 40 else "🔴"
-                overview += f"- **{key.replace('_', ' ').title()}**: {score}/100 {score_emoji}\n"
+            for key in ["trend", "breadth", "ftd", "volume_vix"]:
+                if key in signal_blocks:
+                    block = signal_blocks[key]
+                    score = block.get("score", 50)
+                    score_emoji = "🟢" if score >= 60 else "🟡" if score >= 40 else "🔴"
+                    display_name = key.replace('_', '/').upper() if key == "volume_vix" else key.upper()
+                    overview += f"- **{display_name}**: {score}/100 {score_emoji}\n"
+            overview += "\n"
+        
+        # Add trading implications if available
+        implications = regime_data.get("trading_implications", {})
+        if implications:
+            overview += "### Trading Implications\n"
+            overview += f"- **Position Sizing**: {implications.get('position_sizing', 'Normal')}\n"
+            overview += f"- **Risk Tolerance**: {implications.get('risk_tolerance', 'Normal')}\n"
+            favored = implications.get('favored_strategies', [])
+            if favored:
+                overview += f"- **Favored Strategies**: {', '.join(favored[:3])}\n"
             overview += "\n"
         
         # Add recommendation
@@ -279,6 +303,7 @@ Please ensure your local IB Gateway and data pusher are running."""
 
 Market Regime: {regime_state} (Score: {regime_score}/100)
 Risk Level: {risk_level}%
+Recommendation: {recommendation}
 
 What should a trader focus on today? Be concise and actionable."""
 
