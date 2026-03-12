@@ -198,8 +198,8 @@ Based on research into institutional stop-hunting tactics, implemented a compreh
 **Status:** ✅ APPROVED - Ready for Implementation
 
 **Final Mockups:**
-- Main Dashboard: `https://ai-trading-hub-55.preview.emergentagent.com/api/scripts/ui_mockups_v2_enhanced.html`
-- Chart Modal (Final Hybrid): `https://ai-trading-hub-55.preview.emergentagent.com/api/scripts/ui_mockups_chart_modal_final.html`
+- Main Dashboard: `https://brief-me-dash.preview.emergentagent.com/api/scripts/ui_mockups_v2_enhanced.html`
+- Chart Modal (Final Hybrid): `https://brief-me-dash.preview.emergentagent.com/api/scripts/ui_mockups_chart_modal_final.html`
 
 ---
 
@@ -1146,7 +1146,7 @@ Local PC                              Cloud Backend
 | **Ollama** | Free AI for chat, summaries, market intel | Via ngrok tunnel |
 
 ## Startup Modes
-- **Cloud Dev**: Ollama + ngrok → `https://ai-trading-hub-55.preview.emergentagent.com`
+- **Cloud Dev**: Ollama + ngrok → `https://brief-me-dash.preview.emergentagent.com`
 - **Full Local**: All services on PC → `http://localhost:3000`
 - See `/documents/STARTUP_GUIDE.md` for detailed instructions
 
@@ -3329,10 +3329,10 @@ This data is logged for analysis. Once we confirm it improves accuracy without b
 ### Usage
 ```bash
 # Run IB Data Pusher with Level 2 enabled (default)
-python ib_data_pusher.py --cloud-url https://ai-trading-hub-55.preview.emergentagent.com
+python ib_data_pusher.py --cloud-url https://brief-me-dash.preview.emergentagent.com
 
 # Disable Level 2 if needed
-python ib_data_pusher.py --cloud-url https://ai-trading-hub-55.preview.emergentagent.com --no-level2
+python ib_data_pusher.py --cloud-url https://brief-me-dash.preview.emergentagent.com --no-level2
 ```
 
 **Status**: ✅ IMPLEMENTED - Monitoring mode active
