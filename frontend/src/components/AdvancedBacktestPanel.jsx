@@ -9,7 +9,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Play, Loader2, CheckCircle2, XCircle, RefreshCw, ChevronDown, ChevronRight,
   BarChart3, TrendingUp, Target, Shuffle, Calendar, Clock, Settings, 
-  AlertTriangle, Download, Filter, Layers, Zap, PieChart
+  AlertTriangle, Download, Filter, Layers, Zap, PieChart, Globe, Search
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '../utils/api';
@@ -86,6 +86,7 @@ const AdvancedBacktestPanel = () => {
 
   const tabs = [
     { id: 'quick', label: 'Quick Test', icon: Zap },
+    { id: 'market', label: 'Market-Wide', icon: Globe },
     { id: 'multi', label: 'Multi-Strategy', icon: Layers },
     { id: 'walkforward', label: 'Walk-Forward', icon: TrendingUp },
     { id: 'montecarlo', label: 'Monte Carlo', icon: Shuffle },
@@ -126,6 +127,15 @@ const AdvancedBacktestPanel = () => {
         <QuickBacktestTab 
           templates={templates} 
           onResult={setResults}
+          setLoading={setLoading}
+          loading={loading}
+        />
+      )}
+      
+      {activeTab === 'market' && (
+        <MarketWideBacktestTab 
+          allStrategies={allStrategies}
+          onJobStarted={fetchJobs}
           setLoading={setLoading}
           loading={loading}
         />
@@ -416,6 +426,386 @@ const MetricBox = ({ label, value, positive }) => (
     </div>
   </div>
 );
+
+// ============================================================================
+// Market-Wide Backtest Tab
+// ============================================================================
+
+const MarketWideBacktestTab = ({ allStrategies, onJobStarted, setLoading, loading }) => {
+  const [selectedStrategy, setSelectedStrategy] = useState(null);
+  const [tradeStyle, setTradeStyle] = useState('swing');
+  const [startDate, setStartDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().split('T')[0];
+  });
+  const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [maxSymbols, setMaxSymbols] = useState(200);
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [result, setResult] = useState(null);
+  const [jobStatus, setJobStatus] = useState(null);
+
+  const tradeStyles = [
+    { id: 'intraday', label: 'Intraday', desc: 'Fast-moving, 500K min volume' },
+    { id: 'swing', label: 'Swing', desc: 'Multi-day, 100K min volume' },
+    { id: 'investment', label: 'Investment', desc: 'Long-term, 50K min volume' }
+  ];
+
+  const filteredStrategies = allStrategies.filter(s => {
+    const matchesCategory = categoryFilter === 'all' || s.category === categoryFilter;
+    const matchesSearch = !searchTerm || 
+      s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      s.id.toLowerCase().includes(searchTerm.toLowerCase());
+    return matchesCategory && matchesSearch;
+  });
+
+  const runMarketWideBacktest = async () => {
+    if (!selectedStrategy) {
+      toast.error('Please select a strategy');
+      return;
+    }
+
+    setLoading(true);
+    setResult(null);
+    setJobStatus({ status: 'running', progress: 0 });
+
+    try {
+      const res = await api.post('/api/backtest/market-wide', {
+        strategy: {
+          name: selectedStrategy.name,
+          setup_type: selectedStrategy.id.startsWith('INT-') ? 'MOMENTUM' : 
+                      selectedStrategy.id.startsWith('SWG-') ? 'SWING' : 'BREAKOUT',
+          min_tqs_score: 55,
+          stop_pct: 3.0,
+          target_pct: 6.0,
+          use_trailing_stop: true,
+          trailing_stop_pct: 2.0,
+          max_bars_to_hold: tradeStyle === 'intraday' ? 5 : tradeStyle === 'swing' ? 15 : 30,
+          position_size_pct: 10.0
+        },
+        trade_style: tradeStyle,
+        start_date: startDate,
+        end_date: endDate,
+        max_symbols: maxSymbols,
+        run_in_background: false
+      });
+
+      if (res.data?.success) {
+        setResult(res.data.result);
+        setJobStatus({ status: 'completed' });
+        toast.success(`Found ${res.data.result?.summary?.total_trades || 0} trades across ${res.data.result?.symbols_with_signals || 0} symbols`);
+        onJobStarted?.();
+      }
+    } catch (err) {
+      console.error('Market-wide backtest error:', err);
+      toast.error('Backtest failed: ' + (err.response?.data?.detail || err.message));
+      setJobStatus({ status: 'failed' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-cyan-500/10 to-purple-500/10 rounded-lg p-4 border border-cyan-500/20">
+        <div className="flex items-center gap-2 mb-2">
+          <Globe className="w-5 h-5 text-cyan-400" />
+          <h3 className="text-lg font-semibold text-white">Market-Wide Strategy Backtest</h3>
+        </div>
+        <p className="text-sm text-slate-400">
+          Run a strategy against the entire US market to see what trades it would have taken.
+          Find which stocks triggered your strategy and analyze the results.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Left Column - Strategy Selection */}
+        <div className="lg:col-span-2 space-y-4">
+          {/* Strategy Filter */}
+          <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700/50">
+            <h4 className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
+              <Search className="w-4 h-4" />
+              Select Strategy ({filteredStrategies.length} available)
+            </h4>
+            
+            <div className="flex gap-2 mb-3">
+              <input
+                type="text"
+                placeholder="Search strategies..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="flex-1 bg-slate-900/50 border border-slate-700 rounded px-3 py-2 text-sm text-white"
+              />
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="bg-slate-900/50 border border-slate-700 rounded px-3 py-2 text-sm text-white"
+              >
+                <option value="all">All Categories</option>
+                <option value="intraday">Intraday</option>
+                <option value="swing">Swing</option>
+                <option value="investment">Investment</option>
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-64 overflow-y-auto">
+              {filteredStrategies.map(strategy => (
+                <button
+                  key={strategy.id}
+                  onClick={() => setSelectedStrategy(strategy)}
+                  className={`p-2 rounded text-left text-sm transition-all ${
+                    selectedStrategy?.id === strategy.id
+                      ? 'bg-cyan-500/20 border-cyan-500/50 border'
+                      : 'bg-slate-900/30 border border-transparent hover:border-slate-600'
+                  }`}
+                >
+                  <div className="font-medium text-white truncate">{strategy.name}</div>
+                  <div className="text-xs text-slate-500">{strategy.id}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Selected Strategy Config */}
+          {selectedStrategy && (
+            <div className="bg-emerald-500/10 rounded-lg p-4 border border-emerald-500/20">
+              <h4 className="text-sm font-medium text-emerald-400 mb-2">Selected Strategy</h4>
+              <div className="text-lg font-semibold text-white">{selectedStrategy.name}</div>
+              <div className="text-sm text-slate-400 mt-1">{selectedStrategy.id} • {selectedStrategy.category}</div>
+            </div>
+          )}
+        </div>
+
+        {/* Right Column - Parameters */}
+        <div className="space-y-4">
+          {/* Trade Style */}
+          <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700/50">
+            <h4 className="text-sm font-medium text-slate-300 mb-3">Trade Style Filter</h4>
+            <div className="space-y-2">
+              {tradeStyles.map(style => (
+                <button
+                  key={style.id}
+                  onClick={() => setTradeStyle(style.id)}
+                  className={`w-full p-3 rounded text-left transition-all ${
+                    tradeStyle === style.id
+                      ? 'bg-cyan-500/20 border-cyan-500/50 border'
+                      : 'bg-slate-900/30 border border-transparent hover:border-slate-600'
+                  }`}
+                >
+                  <div className="font-medium text-white">{style.label}</div>
+                  <div className="text-xs text-slate-500">{style.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Date Range */}
+          <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700/50">
+            <h4 className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
+              <Calendar className="w-4 h-4" />
+              Date Range
+            </h4>
+            <div className="space-y-2">
+              <div>
+                <label className="text-xs text-slate-400">Start Date</label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="w-full bg-slate-900/50 border border-slate-700 rounded px-3 py-2 text-sm text-white"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400">End Date</label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="w-full bg-slate-900/50 border border-slate-700 rounded px-3 py-2 text-sm text-white"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Max Symbols */}
+          <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700/50">
+            <h4 className="text-sm font-medium text-slate-300 mb-3">Symbols to Scan</h4>
+            <select
+              value={maxSymbols}
+              onChange={(e) => setMaxSymbols(parseInt(e.target.value))}
+              className="w-full bg-slate-900/50 border border-slate-700 rounded px-3 py-2 text-sm text-white"
+            >
+              <option value={50}>50 (Quick ~10s)</option>
+              <option value={100}>100 (Fast ~20s)</option>
+              <option value={200}>200 (Standard ~40s)</option>
+              <option value={500}>500 (Extended ~2min)</option>
+              <option value={1000}>1000 (Full ~5min)</option>
+            </select>
+          </div>
+
+          {/* Run Button */}
+          <button
+            onClick={runMarketWideBacktest}
+            disabled={loading || !selectedStrategy}
+            className={`w-full py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all ${
+              loading || !selectedStrategy
+                ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                : 'bg-gradient-to-r from-cyan-500 to-purple-500 text-white hover:opacity-90'
+            }`}
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Scanning Market...
+              </>
+            ) : (
+              <>
+                <Globe className="w-5 h-5" />
+                Run Market-Wide Backtest
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Results Section */}
+      {result && (
+        <MarketWideResultsDisplay result={result} />
+      )}
+    </div>
+  );
+};
+
+// Market-Wide Results Display Component
+const MarketWideResultsDisplay = ({ result }) => {
+  const summary = result.summary || {};
+  const topTrades = result.top_trades || [];
+  const worstTrades = result.worst_trades || [];
+  const mostActive = result.most_active_symbols || [];
+  const symbolsTraded = result.symbols_traded || [];
+
+  return (
+    <div className="space-y-4 mt-6">
+      {/* Summary Header */}
+      <div className="bg-gradient-to-r from-slate-800/50 to-slate-900/50 rounded-lg p-4 border border-slate-700/50">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-semibold text-white">{result.strategy_name}</h3>
+            <p className="text-sm text-slate-400">
+              {result.filters?.start_date} to {result.filters?.end_date} • {result.duration_seconds?.toFixed(1)}s
+            </p>
+          </div>
+          <div className="text-right">
+            <div className="text-2xl font-bold text-cyan-400">
+              {result.symbols_with_signals} / {result.total_symbols_scanned}
+            </div>
+            <div className="text-xs text-slate-400">Symbols with signals</div>
+          </div>
+        </div>
+
+        {/* Performance Metrics */}
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+          <div className="bg-slate-800/50 rounded p-3 text-center">
+            <div className="text-xs text-slate-400">Total Trades</div>
+            <div className="text-xl font-bold text-white">{summary.total_trades || 0}</div>
+          </div>
+          <div className="bg-slate-800/50 rounded p-3 text-center">
+            <div className="text-xs text-slate-400">Win Rate</div>
+            <div className={`text-xl font-bold ${summary.win_rate >= 50 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {summary.win_rate || 0}%
+            </div>
+          </div>
+          <div className="bg-slate-800/50 rounded p-3 text-center">
+            <div className="text-xs text-slate-400">Total P&L</div>
+            <div className={`text-xl font-bold ${summary.total_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              ${summary.total_pnl?.toLocaleString() || 0}
+            </div>
+          </div>
+          <div className="bg-slate-800/50 rounded p-3 text-center">
+            <div className="text-xs text-slate-400">Profit Factor</div>
+            <div className={`text-xl font-bold ${summary.profit_factor >= 1 ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {summary.profit_factor?.toFixed(2) || 0}
+            </div>
+          </div>
+          <div className="bg-slate-800/50 rounded p-3 text-center">
+            <div className="text-xs text-slate-400">Avg Win</div>
+            <div className="text-xl font-bold text-emerald-400">${summary.avg_win?.toFixed(0) || 0}</div>
+          </div>
+          <div className="bg-slate-800/50 rounded p-3 text-center">
+            <div className="text-xs text-slate-400">Expectancy</div>
+            <div className={`text-xl font-bold ${summary.expectancy >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              ${summary.expectancy?.toFixed(0) || 0}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Top & Worst Trades */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Top Trades */}
+        <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700/50">
+          <h4 className="text-sm font-medium text-emerald-400 mb-3 flex items-center gap-2">
+            <TrendingUp className="w-4 h-4" />
+            Top Winning Trades
+          </h4>
+          <div className="space-y-2 max-h-48 overflow-y-auto">
+            {topTrades.slice(0, 10).map((trade, idx) => (
+              <div key={idx} className="flex items-center justify-between bg-slate-900/30 rounded p-2">
+                <div>
+                  <span className="font-mono text-cyan-400">{trade.symbol}</span>
+                  <span className="text-xs text-slate-500 ml-2">{trade.entry_date}</span>
+                </div>
+                <div className="text-emerald-400 font-medium">
+                  +${trade.pnl?.toFixed(2)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Most Active Symbols */}
+        <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700/50">
+          <h4 className="text-sm font-medium text-purple-400 mb-3 flex items-center gap-2">
+            <BarChart3 className="w-4 h-4" />
+            Most Active Symbols
+          </h4>
+          <div className="space-y-2 max-h-48 overflow-y-auto">
+            {mostActive.slice(0, 10).map(([symbol, count], idx) => (
+              <div key={idx} className="flex items-center justify-between bg-slate-900/30 rounded p-2">
+                <span className="font-mono text-cyan-400">{symbol}</span>
+                <div className="flex items-center gap-2">
+                  <div className="w-20 bg-slate-700 rounded-full h-2">
+                    <div 
+                      className="bg-purple-500 h-2 rounded-full"
+                      style={{ width: `${Math.min(100, (count / (mostActive[0]?.[1] || 1)) * 100)}%` }}
+                    />
+                  </div>
+                  <span className="text-slate-400 text-sm w-8">{count}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* All Symbols with Trades */}
+      <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700/50">
+        <h4 className="text-sm font-medium text-slate-300 mb-3">
+          Symbols with Trades ({symbolsTraded.length})
+        </h4>
+        <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+          {symbolsTraded.map(symbol => (
+            <span key={symbol} className="px-2 py-1 bg-slate-900/50 rounded text-xs font-mono text-cyan-400">
+              {symbol}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // ============================================================================
 // Multi-Strategy Tab

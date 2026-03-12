@@ -5,6 +5,28 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### Phase 4.3 Complete: Market-Wide Backtesting UI + Market Regime Deployment (March 12, 2026)
+
+**Features Delivered:**
+
+1. **Market-Wide Backtest UI Tab**
+   - New "Market-Wide" tab in Advanced Backtest Panel
+   - Select any of 77 strategies
+   - Set trade style filter (intraday/swing/investment)
+   - Configure date range and max symbols to scan
+   - View results with full trade details, top performers, most active symbols
+   
+2. **Market Regime Engine Deployed**
+   - Now live at `/api/market-regime/*` endpoints
+   - Detects market state: RISK_ON, CAUTION, RISK_OFF, CONFIRMED_DOWN
+   - Uses SPY/QQQ breadth, VIX, sector rotation, volume analysis
+   - Provides trading recommendations based on market conditions
+
+**Endpoints Added:**
+- `GET /api/market-regime/summary` - Current market state
+- `GET /api/market-regime/current` - Full regime details
+- `GET /api/market-regime/history` - Historical regime changes
+
 ### Phase 4.2 Complete: Market-Wide Strategy Scanner (March 11, 2026)
 **Feature:** Full US market scanning for strategy signals across all 77 strategies
 
