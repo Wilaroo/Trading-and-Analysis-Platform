@@ -108,12 +108,12 @@ Format your analysis with clear sections using **bold** headers."""
         start = time.time()
         message = input_data.get("message", "")
         symbol = input_data.get("symbol", "")
+        symbols = input_data.get("symbols", [])
         analysis_type = input_data.get("analysis_type", "full")  # full, technical, sector, quick
         
-        if not symbol:
-            # Try to extract symbol from message
-            symbols = input_data.get("symbols", [])
-            symbol = symbols[0] if symbols else None
+        # Handle multiple symbols
+        if not symbol and symbols:
+            symbol = symbols[0]
         
         if not symbol:
             return self._create_response(
@@ -122,6 +122,10 @@ Format your analysis with clear sections using **bold** headers."""
                 latency_ms=(time.time() - start) * 1000,
                 error="No symbol provided"
             )
+        
+        # If multiple symbols, analyze each and combine
+        if len(symbols) > 1:
+            return await self._analyze_multiple(symbols, message, start)
         
         # Gather all data from CODE
         context = await self._build_analysis_context(symbol.upper())
@@ -172,6 +176,87 @@ Format your analysis with clear sections using **bold** headers."""
             model_used=response.model,
             metadata={"analysis_type": analysis_type}
         )
+    
+    async def _analyze_multiple(self, symbols: list, message: str, start: float) -> AgentResponse:
+        """Analyze multiple symbols and provide comparative insight"""
+        analyses = []
+        
+        for sym in symbols[:3]:  # Max 3 symbols
+            context = await self._build_analysis_context(sym.upper())
+            analyses.append({
+                "symbol": sym.upper(),
+                "context": context,
+                "summary": self._format_compact_analysis(context)
+            })
+        
+        # Build comparison prompt
+        comparison_data = "\n\n".join([a["summary"] for a in analyses])
+        
+        prompt = f"""The trader asked: "{message}"
+
+Here's the data for each stock:
+
+{comparison_data}
+
+Provide a concise comparison answering their question. For each stock:
+1. Quick verdict (BUY/SELL/WAIT)
+2. Key reason (1 sentence)
+3. Best entry if bullish, or why to avoid if bearish
+
+End with which stock looks better right now and why. Keep it actionable and under 200 words."""
+
+        response = await self._call_llm(prompt=prompt, temperature=0.5, max_tokens=600)
+        
+        if response.success:
+            return self._create_response(
+                success=True,
+                content={"message": response.content},
+                latency_ms=(time.time() - start) * 1000,
+                model_used=response.model,
+                metadata={"multi_symbol": True, "symbols": symbols}
+            )
+        else:
+            # Fallback to raw comparison
+            output = "## Stock Comparison\n\n"
+            for a in analyses:
+                output += a["summary"] + "\n---\n"
+            return self._create_response(
+                success=True,
+                content={"message": output},
+                latency_ms=(time.time() - start) * 1000,
+                model_used="code_only"
+            )
+    
+    def _format_compact_analysis(self, ctx: AnalysisContext) -> str:
+        """Compact analysis format for multi-symbol comparison"""
+        lines = [f"**{ctx.symbol}** @ ${ctx.current_price:.2f}"]
+        
+        # Price action
+        change_emoji = "🟢" if ctx.change_pct >= 0 else "🔴"
+        lines.append(f"Change: {change_emoji} {ctx.change_pct:+.2f}%")
+        
+        # Key technicals
+        if ctx.vwap > 0:
+            vwap_status = "above" if ctx.current_price > ctx.vwap else "below"
+            lines.append(f"VWAP: ${ctx.vwap:.2f} (trading {vwap_status})")
+        
+        if ctx.rsi > 0:
+            rsi_status = "overbought" if ctx.rsi > 70 else "oversold" if ctx.rsi < 30 else "neutral"
+            lines.append(f"RSI: {ctx.rsi:.0f} ({rsi_status})")
+        
+        # TQS
+        if ctx.tqs_score > 0:
+            lines.append(f"TQS: {ctx.tqs_score}/100 ({ctx.tqs_grade}) - {ctx.tqs_recommendation}")
+        
+        # Bias
+        if ctx.bias:
+            lines.append(f"Bias: {ctx.bias}")
+        
+        # Active setups
+        if ctx.active_setups:
+            lines.append(f"Active Setups: {', '.join(ctx.active_setups[:3])}")
+        
+        return "\n".join(lines)
     
     async def _build_analysis_context(self, symbol: str) -> AnalysisContext:
         """Gather all analysis data from CODE (services)"""
@@ -422,20 +507,29 @@ TQS Concerns: {', '.join(ctx.tqs_concerns) if ctx.tqs_concerns else 'None'}
 """
         
         if analysis_type == "technical":
-            instruction = "Provide a focused technical analysis with key levels and trading bias."
+            instruction = """Provide a focused technical analysis:
+1. Current bias (BULLISH/BEARISH/NEUTRAL) with one-line reason
+2. Key level to watch (support or resistance)
+3. Trade idea if any (entry, stop, target) or why to stay out"""
         elif analysis_type == "sector":
-            instruction = "Focus on sector rotation and relative strength analysis."
+            instruction = "Focus on sector rotation and relative strength. Is this stock leading or lagging its sector?"
         else:
-            instruction = "Provide a comprehensive analysis covering technicals, sector context, and any active setups."
+            instruction = """Provide a concise, actionable analysis:
+1. **Verdict**: BUY / SELL / WAIT (with confidence: high/medium/low)
+2. **Why**: 1-2 sentences on the main driver
+3. **If trading**: Entry zone, stop loss, target
+4. **Risk**: Main concern or reason to avoid
+
+Keep it under 150 words. Be direct - traders need quick decisions."""
         
-        return f"""Analyze the following stock data and {instruction}
+        return f"""You are a trading analyst. Be direct and actionable.
 
-User request: {message}
+User asked: "{message}"
 
-VERIFIED DATA (use only this):
+VERIFIED DATA:
 {data_block}
 
-Provide your analysis in a clear, structured format with **bold** headers."""
+{instruction}"""
     
     def _context_to_dict(self, ctx: AnalysisContext) -> Dict:
         """Convert context to dictionary for API response"""
