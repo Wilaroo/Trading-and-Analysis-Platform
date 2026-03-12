@@ -110,8 +110,12 @@ Keep responses concise but insightful. Use their actual numbers."""
         """
         start = time.time()
         message = input_data.get("message", "")
-        query_type = input_data.get("query_type", "general")  # general, position, performance, trade_decision
+        query_type = input_data.get("query_type", "general")  # general, position, performance, trade_decision, market_context
         symbol = input_data.get("symbol")
+        
+        # Handle market overview requests separately
+        if query_type == "market_context":
+            return await self._handle_market_overview(message, start)
         
         # Step 1: Fetch verified data from CODE
         context = await self._build_coaching_context(symbol)
@@ -194,6 +198,102 @@ Please ensure your local IB Gateway and data pusher are running."""
             latency_ms=(time.time() - start) * 1000,
             model_used=response.model,
             metadata={"query_type": query_type}
+        )
+    
+    async def _handle_market_overview(self, message: str, start: float) -> AgentResponse:
+        """Handle 'what's happening in the market' type questions"""
+        import httpx
+        
+        # Fetch market regime data
+        regime_data = {}
+        try:
+            from services.market_regime_engine import get_regime_engine
+            engine = get_regime_engine()
+            if engine:
+                regime_data = engine.get_current_state() or {}
+        except Exception as e:
+            logger.warning(f"Could not fetch regime data: {e}")
+        
+        # Fetch index data from IB if available
+        index_data = {}
+        try:
+            if self._ib_router:
+                quotes = await self._ib_router.get_quotes(["SPY", "QQQ", "IWM", "DIA"])
+                for q in quotes:
+                    sym = q.get("symbol", "")
+                    index_data[sym] = {
+                        "price": q.get("last", q.get("close", 0)),
+                        "change": q.get("change", 0),
+                        "change_pct": q.get("changePercent", 0)
+                    }
+        except Exception as e:
+            logger.debug(f"Could not fetch index quotes: {e}")
+        
+        # Build market overview text
+        regime_state = regime_data.get("state", "UNKNOWN")
+        regime_score = regime_data.get("composite_score", 50)
+        risk_level = regime_data.get("risk_level", 50)
+        recommendation = regime_data.get("recommendation", "No recommendation available")
+        
+        # Format regime display
+        regime_emoji = {
+            "RISK_ON": "🟢",
+            "CAUTION": "🟡", 
+            "RISK_OFF": "🟠",
+            "CONFIRMED_DOWN": "🔴"
+        }.get(regime_state, "⚪")
+        
+        overview = f"""## Market Overview
+
+### Market Regime: {regime_emoji} {regime_state}
+- **Composite Score**: {regime_score}/100
+- **Risk Level**: {risk_level}%
+
+"""
+        # Add index data if available
+        if index_data:
+            overview += "### Major Indices\n"
+            for sym in ["SPY", "QQQ", "IWM", "DIA"]:
+                if sym in index_data:
+                    d = index_data[sym]
+                    emoji = "🟢" if d["change_pct"] >= 0 else "🔴"
+                    overview += f"- **{sym}**: ${d['price']:.2f} {emoji} {d['change_pct']:+.2f}%\n"
+            overview += "\n"
+        
+        # Add regime signals if available
+        signals = regime_data.get("signals", {})
+        if signals:
+            overview += "### Regime Signals\n"
+            signal_scores = regime_data.get("signal_scores", {})
+            for key, score in signal_scores.items():
+                score_emoji = "🟢" if score >= 60 else "🟡" if score >= 40 else "🔴"
+                overview += f"- **{key.replace('_', ' ').title()}**: {score}/100 {score_emoji}\n"
+            overview += "\n"
+        
+        # Add recommendation
+        overview += f"### Recommendation\n{recommendation}\n"
+        
+        # Try to get LLM commentary on the market
+        try:
+            prompt = f"""Based on this market data, provide a brief 2-3 sentence market outlook:
+
+Market Regime: {regime_state} (Score: {regime_score}/100)
+Risk Level: {risk_level}%
+
+What should a trader focus on today? Be concise and actionable."""
+
+            response = await self._call_llm(prompt=prompt, temperature=0.7, max_tokens=200)
+            if response.success and response.content:
+                overview += f"\n### AI Insight\n{response.content}\n"
+        except Exception as e:
+            logger.debug(f"LLM commentary not available: {e}")
+        
+        return self._create_response(
+            success=True,
+            content={"message": overview},
+            latency_ms=(time.time() - start) * 1000,
+            model_used="code_hybrid",
+            metadata={"query_type": "market_context"}
         )
     
     def _format_positions_for_display(self, context: TradingContext) -> str:
