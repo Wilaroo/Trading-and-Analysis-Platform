@@ -7,6 +7,63 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## Recent Updates (March 2026)
 
+### Intelligent Stop Manager - Advanced Stop Loss System (March 12, 2026)
+
+**Status:** ✅ COMPLETE - Tested and Verified (iteration_74.json - 32/32 tests passed)
+
+**Major Enhancement:** Extended the Smart Stop Service into a comprehensive Intelligent Stop Manager that combines 7 analysis factors:
+
+1. **Volume Profile Analysis**
+   - POC (Point of Control): Highest volume price level
+   - VAH/VAL (Value Area High/Low): 70% of volume range
+   - HVN/LVN: High/Low Volume Nodes for S/R identification
+
+2. **Stop Hunt Risk Detection**
+   - Float-based risk: < 10M shares = HIGH risk
+   - Volume-based risk: < 500K avg = HIGH risk  
+   - Obvious level proximity: < 2% from swing/support = add risk
+   - Round number proximity: < 1% from $50/$100 levels = add risk
+
+3. **Setup-Based Stop Rules (8 Types)**
+   - `breakout`: Chandelier trailing, 1.0 ATR initial, BE at 1.5R
+   - `pullback`: ATR trailing, 1.5 ATR initial, BE at 1.0R
+   - `momentum`: Parabolic trailing, 1.0 ATR initial, BE at 0.5R
+   - `mean_reversion`: Percent trailing, 2.5 ATR initial (wider)
+   - `gap_and_go`: Breakeven-plus trailing, 0.75 ATR (tight)
+   - `vwap_reversal`: ATR trailing, volume profile aware
+   - `earnings_play`: Percent trailing, 3.0 ATR (widest), ignores regime
+   - `default`: ATR trailing, 1.5 ATR, balanced approach
+
+4. **Sector/Market Correlation**
+   - Stock vs sector relative strength
+   - Tighten if stock underperforms sector by >1.5%
+   - Widen if stock outperforms during sector weakness
+
+5. **Regime Context Adjustments**
+   | Regime | Long Mult | Short Mult |
+   |--------|-----------|------------|
+   | RISK_ON | 0.9x | 1.3x |
+   | HOLD | 1.0x | 1.0x |
+   | RISK_OFF | 1.2x | 1.0x |
+   | CONFIRMED_DOWN | 1.4x | 0.85x |
+
+6. **Layered Stops** (40%/30%/30% at 1.0/1.5/2.0 ATR depths)
+7. **Scale-Out Plans** (R-multiple profit targets per setup)
+
+**API Endpoints:**
+- `GET /api/intelligent-stops/setup-rules` - All 8 setup configurations
+- `GET /api/intelligent-stops/trailing-modes` - 6 trailing modes
+- `GET /api/intelligent-stops/urgency-levels` - 4 urgency levels
+- `POST /api/intelligent-stops/calculate` - Full intelligent stop calculation
+- `POST /api/intelligent-stops/analyze-trade` - Analyze existing stop placement
+
+**Files Created:**
+- `/app/backend/services/intelligent_stop_manager.py` - 1100+ line comprehensive manager
+- `/app/backend/routers/intelligent_stops.py` - API endpoints
+- `/app/backend/tests/test_intelligent_stop_manager.py` - Test suite
+
+---
+
 ### P2 Complete: Smart Stop Service (Anti-Hunt Protection) (March 12, 2026)
 
 **Status:** ✅ COMPLETE - Tested and Verified (iteration_73.json - 30/30 tests passed)
