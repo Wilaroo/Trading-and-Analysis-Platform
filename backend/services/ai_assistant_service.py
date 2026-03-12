@@ -2171,10 +2171,34 @@ Warnings: {'; '.join(analysis.get('warnings', [])[:3])}
                 if is_http_ollama_proxy_connected():
                     logger.info("🔌 Using Local Ollama Proxy (HTTP polling)")
                     
-                    # Get model from config or use default
-                    model = "qwen2.5:7b"
+                    # Get model from config or auto-detect from proxy
+                    model = "deepseek-r1:8b"  # Default
+                    
+                    # Try to auto-detect available model from proxy
+                    try:
+                        from server import get_http_proxy_info
+                        proxy_info = get_http_proxy_info()
+                        for session in proxy_info.get("sessions", []):
+                            available_models = session.get("ollama_status", {}).get("models", [])
+                            if available_models:
+                                # Prefer larger/better models
+                                for preferred in ["gpt-oss:120b-cloud", "deepseek-r1:8b", "deepseek-r1:7b", "llama3:8b", "qwen2.5:7b"]:
+                                    if preferred in available_models:
+                                        model = preferred
+                                        break
+                                else:
+                                    model = available_models[0]  # Use first available
+                                break
+                    except Exception as e:
+                        logger.debug(f"Could not auto-detect model: {e}")
+                    
+                    # Override with config if set (but not if it's the default placeholder)
                     if LLMProvider.OLLAMA in self.llm_clients:
-                        model = self.llm_clients[LLMProvider.OLLAMA].get("model", "qwen2.5:7b")
+                        config_model = self.llm_clients[LLMProvider.OLLAMA].get("model", "")
+                        if config_model and "cloud" not in config_model.lower():
+                            model = config_model
+                    
+                    logger.info(f"📦 Using model: {model}")
                     
                     # Build context for proxy - allow more context for position queries
                     # For position queries, use smart_context directly which has the IB data
@@ -2236,9 +2260,28 @@ REMEMBER: Only use the EXACT data provided above. Do not invent positions or pri
                         
                         # If cloud model failed, try local fallback
                         if "120b" in model.lower() or "cloud" in model.lower():
-                            logger.info("🔄 Trying local fallback model (llama3:8b)...")
+                            # Get available models from proxy to find best fallback
+                            fallback_model = "deepseek-r1:8b"  # Default fallback
+                            try:
+                                from server import get_http_proxy_info
+                                proxy_info = get_http_proxy_info()
+                                available_models = []
+                                for session in proxy_info.get("sessions", []):
+                                    available_models.extend(session.get("ollama_status", {}).get("models", []))
+                                if available_models:
+                                    # Prefer deepseek > llama > qwen
+                                    for preferred in ["deepseek-r1:8b", "deepseek-r1:7b", "llama3:8b", "qwen2.5:7b", "qwen2.5:3b"]:
+                                        if preferred in available_models:
+                                            fallback_model = preferred
+                                            break
+                                    if fallback_model not in available_models:
+                                        fallback_model = available_models[0]  # Use whatever is available
+                            except:
+                                pass
+                            
+                            logger.info(f"🔄 Trying local fallback model ({fallback_model})...")
                             fallback_result = await call_ollama_via_http_proxy(
-                                model="llama3:8b",
+                                model=fallback_model,
                                 messages=proxy_messages,
                                 options={"num_ctx": 4096, "temperature": 0.7, "num_predict": 1024},
                                 timeout=60.0
@@ -2246,7 +2289,7 @@ REMEMBER: Only use the EXACT data provided above. Do not invent positions or pri
                             if fallback_result.get("success"):
                                 content = fallback_result.get("response", {}).get("message", {}).get("content", "")
                                 if content:
-                                    logger.info(f"✅ Local fallback (llama3:8b) response OK")
+                                    logger.info(f"✅ Local fallback ({fallback_model}) response OK")
                                     return content
             except ImportError:
                 pass  # HTTP proxy not available
