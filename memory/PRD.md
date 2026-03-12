@@ -23,7 +23,17 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
    - **Action**: Audit `_save_state()` and `_restore_state()` in `trading_bot_service.py`, ensure all data flows through MongoDB
    - **Why Critical**: Without this, you lose all context on restart - defeats the purpose of a learning bot
 
-2. **One-Click Stop Fix** (Enhancement from today)
+2. **EOD Auto-Close for Intraday Trades**
+   - **What**: Bot MUST close all intraday/scalp trades at end of trading day (3:50 PM ET) regardless of P&L
+   - **Current State**: `_check_eod_close()` exists in `trading_bot_service.py` but needs verification
+   - **Action**: 
+     - Verify `close_at_eod` flag is set correctly for scalp/intraday setups
+     - Ensure EOD close runs reliably at 3:50 PM ET
+     - Add logging/notification when EOD close triggers
+     - Handle partial positions (scale-outs)
+   - **Why Critical**: Holding intraday trades overnight = unintended risk exposure
+
+3. **One-Click Stop Fix** (Enhancement from today)
    - **What**: When bot detects risky stop, add button to auto-adjust to recommended level
    - **Where**: BotBrainPanel stop warnings, BotTakeCard
    - **API**: `POST /api/trading-bot/trades/{trade_id}/adjust-stop`
@@ -32,7 +42,7 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ### 🟠 P1 - HIGH PRIORITY (UX & Architecture Cleanup)
 
-3. **UI Consolidation: Trader Dashboard Tab Review**
+4. **UI Consolidation: Trader Dashboard Tab Review**
    - **What**: Evaluate if "Trader Dashboard" tab is still needed or can be merged into new AI Coach/Dashboard
    - **Current State**: 
      - `AICoachTab.jsx` now contains `NewDashboard` with bot status, performance, thoughts
@@ -43,13 +53,33 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
      - Remove redundant tab if features are duplicated
    - **Why**: Cleaner UX, less confusion, easier maintenance
 
-4. **Live Chart Data Loading**
+5. **Bot Performance Panel - More Space & Prominence**
+   - **What**: Give BotPerformanceChart more screen real estate in the dashboard
+   - **Current State**: Performance chart may be cramped or hidden in smaller viewport
+   - **Action**:
+     - Increase default height of BotPerformanceChart
+     - Consider making it expandable/full-screen
+     - Add more detailed stats (Sharpe ratio, max drawdown, streak info)
+     - Better mobile responsiveness
+   - **Why**: Performance is the most important metric - should be prominent
+
+6. **Market Regime Panel Redesign**
+   - **What**: Redesign Market Regime Widget to match the Analysis Score panel style in EnhancedTickerModal
+   - **Current State**: Basic card with text info
+   - **Desired Style**: 
+     - Score ring/radial visualization for regime strength
+     - Progress bars for individual indicators (VIX, breadth, trend)
+     - Color-coded severity badges
+     - "Your Performance in This Regime" as expandable section
+   - **Reference**: `/app/frontend/src/components/EnhancedTickerModal.jsx` - ScoreRing component and score bars
+
+7. **Live Chart Data Loading**
    - **What**: Fix chart in EnhancedTickerModal to show live intraday data
    - **Dependency**: Requires stable IB Gateway connection
    - **Current State**: Chart shows historical Alpaca data, not real-time IB bars
    - **Action**: Wire IB pushed bars to chart component when IB connected
 
-5. **Deep Analysis API Integration**
+8. **Deep Analysis API Integration**
    - **What**: Wire "Ask AI for Deep Analysis" button in EnhancedTickerModal
    - **Current State**: Button exists but may not call comprehensive analysis endpoint
    - **Action**: Connect to multi-agent analysis or create dedicated deep analysis agent
