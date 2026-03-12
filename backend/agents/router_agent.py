@@ -21,11 +21,13 @@ class Intent(str, Enum):
     """Possible user intents that route to different agents"""
     TRADE_EXECUTE = "trade_execute"      # "close TMC", "buy NVDA"
     TRADE_QUERY = "trade_query"          # "should I close TMC?"
-    POSITION_QUERY = "position_query"    # "what are my positions?"
+    POSITION_QUERY = "position_query"    # "what are my positions?", "how's my P&L?"
     ANALYSIS = "analysis"                # "analyze NVDA", "what's the setup?"
-    SCANNER = "scanner"                  # "what setups are forming?"
-    COACHING = "coaching"                # "how am I doing?", "what should I improve?"
-    MARKET_INFO = "market_info"          # "what's AAPL trading at?"
+    SCANNER = "scanner"                  # "what setups are forming?", "find me a trade"
+    COACHING = "coaching"                # "how can I improve?", "review my trading"
+    MARKET_INFO = "market_info"          # "what's happening in the market?"
+    QUICK_QUOTE = "quick_quote"          # "price of NVDA", "where's AAPL at?"
+    RISK_CHECK = "risk_check"            # "what's my exposure?", "how much am I risking?"
     GENERAL_CHAT = "general_chat"        # General questions, greetings
 
 
@@ -84,17 +86,22 @@ class RouterAgent(BaseAgent):
             r"(?:technical|technicals|chart)\s+(?:on|for)\s+([a-z]{1,5})",
             r"(?:support|resistance|levels)\s+(?:on|for)\s+([a-z]{1,5})",
             r"(?:thoughts?|opinion|view)\s+(?:on|about)\s+([a-z]{1,5})",
-            r"([a-z]{1,5})\s+(?:for\s+)?(?:a\s+)?trades?\b",
             r"(?:should\s+i|would\s+you)\s+(?:buy|sell|trade)\s+([a-z]{1,5})",
             r"(?:is|does)\s+([a-z]{1,5})\s+(?:look|seem)\s+(?:good|bullish|bearish)",
         ]
         
-        # Scanner patterns
+        # Scanner patterns - FIND TRADES intent
         self.scanner_patterns = [
             r"(?:what|any|show)\s+(?:setups?|alerts?|opportunities)",
             r"scanner",
             r"(?:what.s|whats)\s+(?:forming|setting up)",
             r"trade\s+ideas?",
+            r"find\s+(?:me\s+)?(?:a\s+)?trades?",
+            r"(?:looking|look)\s+for\s+(?:a\s+)?trades?",
+            r"(?:any|what)\s+(?:good\s+)?(?:trades?|plays?|setups?)\s+(?:right\s+now|today|out there)?",
+            r"what\s+should\s+i\s+(?:trade|buy)",
+            r"give\s+me\s+(?:some?\s+)?(?:trade\s+)?ideas?",
+            r"(?:show|get)\s+(?:me\s+)?(?:scanner|alerts?)",
         ]
         
         # Coaching patterns
@@ -106,11 +113,32 @@ class RouterAgent(BaseAgent):
             r"(?:review|analyze)\s+(?:my\s+)?(?:trading|performance)",
         ]
         
-        # Market info patterns
+        # Market info patterns - general market overview
         self.market_info_patterns = [
+            r"(?:what|how).s\s+(?:the\s+)?market",
+            r"market\s+(?:overview|summary|status)",
+            r"how\s+(?:is|are)\s+(?:the\s+)?markets?\s+(?:doing|looking)?",
+        ]
+        
+        # Quick quote patterns - specific price queries
+        self.quick_quote_patterns = [
             r"(?:what.s|whats|where.s|where\s+is)\s+([A-Z]{1,5})\s+(?:trading|at|price)",
             r"(?:price|quote)\s+(?:of|for|on)\s+([A-Z]{1,5})",
             r"([A-Z]{1,5})\s+(?:price|quote|bid|ask)",
+            r"(?:how\s+much\s+is|what\s+is)\s+([A-Z]{1,5})",
+            r"(?:get|show)\s+(?:me\s+)?(?:the\s+)?(?:price|quote)\s+(?:for\s+)?([A-Z]{1,5})",
+            r"where\s+(?:is\s+)?([A-Z]{1,5})\s+(?:trading|at)?",
+        ]
+        
+        # Risk check patterns - portfolio risk analysis
+        self.risk_check_patterns = [
+            r"(?:what|how\s+much).s\s+my\s+(?:risk|exposure)",
+            r"(?:check|show)\s+(?:my\s+)?risk",
+            r"risk\s+(?:exposure|analysis|check|level)",
+            r"(?:how\s+much\s+)?(?:am\s+i|i.m)\s+risking",
+            r"portfolio\s+risk",
+            r"(?:total|current)\s+(?:risk|exposure)",
+            r"(?:what|how).s\s+my\s+(?:total\s+)?exposure",
         ]
         
         # Symbol extraction pattern
@@ -124,9 +152,11 @@ Classify the user's message into ONE of these intents:
 - trade_query: User is asking WHETHER they should trade (not actually executing)
 - position_query: User wants to see their current positions
 - analysis: User wants technical analysis on a stock
-- scanner: User wants to see scanner alerts/setups
+- scanner: User wants to see scanner alerts/setups or find trade opportunities
 - coaching: User wants trading coaching or performance review
-- market_info: User wants current price/quote information
+- market_info: User wants general market overview (how's the market doing)
+- quick_quote: User wants current price/quote for a specific stock
+- risk_check: User wants to check their portfolio risk/exposure
 - general_chat: General questions, greetings, other
 
 Also extract any stock symbols mentioned (1-5 letter tickers).
@@ -245,6 +275,24 @@ Respond in JSON format:
                     symbols=self._extract_symbols(message)
                 )
         
+        # Check risk check patterns BEFORE quick quote (higher priority)
+        for pattern in self.risk_check_patterns:
+            if re.search(pattern, message_lower):
+                return RoutingResult(
+                    intent=Intent.RISK_CHECK,
+                    confidence=0.9,
+                    symbols=[]
+                )
+        
+        # Check scanner patterns BEFORE analysis (explicit trade finding)
+        for pattern in self.scanner_patterns:
+            if re.search(pattern, message_lower):
+                return RoutingResult(
+                    intent=Intent.SCANNER,
+                    confidence=0.9,
+                    symbols=[]
+                )
+        
         # Check analysis patterns
         for pattern in self.analysis_patterns:
             match = re.search(pattern, message_lower, re.IGNORECASE)
@@ -258,15 +306,6 @@ Respond in JSON format:
                     symbols=symbols
                 )
         
-        # Check scanner patterns
-        for pattern in self.scanner_patterns:
-            if re.search(pattern, message_lower):
-                return RoutingResult(
-                    intent=Intent.SCANNER,
-                    confidence=0.85,
-                    symbols=[]
-                )
-        
         # Check coaching patterns
         for pattern in self.coaching_patterns:
             if re.search(pattern, message_lower):
@@ -276,11 +315,25 @@ Respond in JSON format:
                     symbols=self._extract_symbols(message)
                 )
         
-        # Check market info patterns
-        for pattern in self.market_info_patterns:
+        # Check quick quote patterns (before general market info)
+        for pattern in self.quick_quote_patterns:
             match = re.search(pattern, message_lower, re.IGNORECASE)
             if match:
                 groups = match.groups()
+                symbol = groups[0].upper() if groups else None
+                symbols = [symbol] if symbol else self._extract_symbols(message)
+                
+                return RoutingResult(
+                    intent=Intent.QUICK_QUOTE,
+                    confidence=0.9,
+                    symbols=symbols
+                )
+        
+        # Check general market info patterns
+        for pattern in self.market_info_patterns:
+            match = re.search(pattern, message_lower, re.IGNORECASE)
+            if match:
+                groups = match.groups() if hasattr(match, 'groups') else ()
                 symbol = groups[0].upper() if groups else None
                 symbols = [symbol] if symbol else self._extract_symbols(message)
                 
@@ -375,9 +428,11 @@ Respond ONLY with JSON, no other text:
             Intent.TRADE_QUERY: AgentType.COACH,  # Coach advises on trade decisions
             Intent.POSITION_QUERY: AgentType.COACH,  # Coach handles position info
             Intent.ANALYSIS: AgentType.ANALYST,
-            Intent.SCANNER: AgentType.ANALYST,
+            Intent.SCANNER: AgentType.ANALYST,  # Scanner handled by orchestrator directly
             Intent.COACHING: AgentType.COACH,
             Intent.MARKET_INFO: AgentType.COACH,  # Coach handles general market overview
+            Intent.QUICK_QUOTE: AgentType.ANALYST,  # Quick quote handled by orchestrator
+            Intent.RISK_CHECK: AgentType.COACH,  # Risk check handled by orchestrator
             Intent.GENERAL_CHAT: AgentType.CHAT,
         }
         return mapping.get(intent, AgentType.CHAT)
