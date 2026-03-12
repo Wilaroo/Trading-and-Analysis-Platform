@@ -249,9 +249,8 @@ Respond in JSON format:
         for pattern in self.analysis_patterns:
             match = re.search(pattern, message_lower, re.IGNORECASE)
             if match:
-                groups = match.groups()
-                symbol = groups[0].upper() if groups else None
-                symbols = [symbol] if symbol else self._extract_symbols(message)
+                # Always extract all symbols from the full message
+                symbols = self._extract_symbols(message)
                 
                 return RoutingResult(
                     intent=Intent.ANALYSIS,
