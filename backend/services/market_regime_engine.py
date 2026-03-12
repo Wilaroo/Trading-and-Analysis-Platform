@@ -963,7 +963,7 @@ class MarketRegimeEngine:
     
     async def _store_regime(self, regime: Dict):
         """Store regime data in MongoDB for history tracking."""
-        if not self.db:
+        if self.db is None:
             return
         
         try:
@@ -1005,7 +1005,7 @@ class MarketRegimeEngine:
     
     async def _load_ftd_state(self) -> Dict:
         """Load FTD state from MongoDB."""
-        if not self.db:
+        if self.db is None:
             return {}
         
         try:
@@ -1022,7 +1022,7 @@ class MarketRegimeEngine:
     
     async def get_history(self, days: int = 30) -> List[Dict]:
         """Get regime history for the specified number of days."""
-        if not self.db:
+        if self.db is None:
             return []
         
         try:

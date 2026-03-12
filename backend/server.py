@@ -74,9 +74,11 @@ from routers.agents import router as agents_router, init_agents_router
 from routers.advanced_backtest_router import router as advanced_backtest_router, init_advanced_backtest_router
 from routers.hybrid_data import router as hybrid_data_router, init_hybrid_data_router
 from routers.market_scanner import router as market_scanner_router, init_market_scanner_router
+from routers.market_regime import router as market_regime_router, init_market_regime_engine
 from services.market_intel_service import get_market_intel_service
 from services.hybrid_data_service import get_hybrid_data_service, init_hybrid_data_service
 from services.market_scanner_service import get_market_scanner_service, init_market_scanner_service
+from services.market_regime_engine import MarketRegimeEngine, get_market_regime_engine
 from services.learning_loop_service import get_learning_loop_service, init_learning_loop_service
 from services.trade_context_service import get_trade_context_service, init_trade_context_service
 from services.execution_tracker_service import get_execution_tracker, init_execution_tracker
@@ -304,6 +306,7 @@ app.include_router(agents_router)  # Multi-agent system
 app.include_router(advanced_backtest_router)  # Advanced backtesting system
 app.include_router(hybrid_data_router)  # Hybrid IB/Alpaca data service
 app.include_router(market_scanner_router)  # Market-wide strategy scanner
+app.include_router(market_regime_router)  # Market regime engine
 
 # Collections
 strategies_col = db["strategies"]
@@ -400,6 +403,22 @@ print(f"  - Endpoints: /api/tqs/score, /api/tqs/breakdown, /api/tqs/batch")
 
 # Register TQS engine
 register_service('tqs_engine', tqs_engine)
+
+# ===================== MARKET REGIME ENGINE (Phase 2.5) =====================
+# Initialize Market Regime Engine for market state detection
+
+market_regime_engine = MarketRegimeEngine(
+    alpaca_service=alpaca_service,
+    ib_service=ib_service,
+    db=db
+)
+init_market_regime_engine(market_regime_engine)
+register_service('market_regime_engine', market_regime_engine)
+
+print("Market Regime Engine (Phase 2.5) initialized")
+print(f"  - Signal Blocks: SPY/QQQ breadth, VIX, sector rotation, volume, internals")
+print(f"  - States: RISK_ON, CAUTION, RISK_OFF, CONFIRMED_DOWN")
+print(f"  - Endpoints: /api/market-regime/current, /api/market-regime/summary")
 
 # ===================== FAST LEARNING (Phase 3A & 3B) =====================
 # Initialize circuit breakers, position sizing, health monitoring, dynamic thresholds
