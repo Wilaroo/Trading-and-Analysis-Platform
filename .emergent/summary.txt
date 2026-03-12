@@ -8,29 +8,28 @@ The project has evolved significantly to include:
 - A Market Regime Engine to assess market conditions.
 - A Market-Wide Scanner to find trading opportunities across all US stocks.
 - A Market-Wide Backtesting feature to test strategies against the entire market historically.
+- A comprehensive tooltip system for UI/UX enhancement.
+- An intelligent AI routing system to handle diverse user prompts.
 
 PRODUCT REQUIREMENTS:
-The core architecture is a hybrid safety pattern where LLMs handle language, and deterministic code manages all numerical data and state. The system should be robust, performant, and provide deep analytical capabilities to the user. The latest requirement is to make the trading bot and performance analytics regime-aware, meaning they should factor in the current market condition (e.g., Bull, Bear, Sideways) into their logic.
+The core architecture is a hybrid safety pattern where LLMs handle language, and deterministic code manages all numerical data and state. The system should be robust, performant, and provide deep analytical capabilities to the user. The latest requirement is to make the AI assistant smarter and more context-aware, capable of handling a wider variety of user prompts related to trading, analysis, and risk management.
 
 **User's preferred language**: English
 
 **what currently exists?**
-- A full-stack application (React, FastAPI, MongoDB) with a stable, real-time IB data pipeline.
-- A multi-agent architecture with specialized agents for trading, analysis, and coaching.
+- A full-stack application (React, FastAPI, MongoDB) with a stable, real-time IB data pipeline and a local Ollama connection via an HTTP proxy.
+- A multi-agent architecture with specialized agents for trading, analysis, and coaching. The routing logic for these agents has been significantly improved.
 - A Learning Intelligence Hub and Live Trading Dashboard for analytics and real-time data display.
-- An **Advanced Backtesting System** with a UI for Quick, Multi-Strategy, Walk-Forward, Monte Carlo, and now **Market-Wide** backtesting.
-- A **Hybrid Data Service** that uses Alpaca for historical data (with existing keys) and is architected to use IB as a fallback/primary source.
-- A **Market-Wide Scanner** to find strategy signals across ~12,000 US stocks.
-- A fully **deployed Market Regime Engine** that analyzes market health and provides a real-time score/recommendation.
-- The Market Regime data is integrated into the main dashboard via a widget and used by the trading bot to adjust position sizing dynamically.
+- An **Advanced Backtesting System** and a **Market-Wide Scanner**.
+- A fully **deployed Market Regime Engine** that analyzes market health, with its data integrated into the main dashboard and AI assistant responses.
+- A comprehensive **tooltip system** providing hover-over explainers for most UI elements, icons, and abbreviations.
+- A marketing document () explaining the app's features.
 
 **Last working item**:
--   **Last item agent was working**: Implementing the user's request to make the system's performance tracking regime-aware. This involved two parts:
-    1.  Adding the market regime state to the trade history whenever a trade is executed.
-    2.  Creating a new backend service () to aggregate and track how strategies perform under different market regimes.
+-   **Last item agent was working**: Implementing Phase 1 of the AI Prompt Intelligence Plan. The goal is to make the AI assistant smarter by adding new intent detection categories. The agent has defined the new intents and added the regex patterns to the router service.
 -   **Status**: IN PROGRESS
 -   **Agent Testing Done**: N
--   **Which testing method agent to use?**: backend testing agent. The agent needs to simulate a trade closing, then verify that the  is called and correctly logs the performance data against the current market regime. It should also test the new  endpoint to ensure data is retrieved correctly.
+-   **Which testing method agent to use?**: backend testing agent. The agent needs to write tests that send various prompts (e.g., find me a trade, what is my risk exposure?) and assert that the  correctly identifies the new intents (, , ). Then, it needs to implement and test the handlers for these intents in the .
 -   **User Testing Done**: N
 
 **All Pending/In progress Issue list**:
@@ -48,121 +47,114 @@ The core architecture is a hybrid safety pattern where LLMs handle language, and
     -   **Blocked on other issue**: None
 
 **In progress Task List**:
--   **Task 1: Test and Verify New Regime-Aware Features (P0)**
-    -   **Where to resume**: The code for , the updated  model, and the  modifications are complete. The next step is to write and execute a test to validate the functionality.
-    -   **What will be achieved with this?**: This will complete the feature, allowing the user to analyze which strategies work best in which market conditions, a key piece of analytical feedback.
+-   **Task 1: Complete Phase 1 of AI Prompt Intelligence Plan (P0)**
+    -   **Where to resume**: The agent has added new intents (, , , ) and patterns to . The next step is to implement the logic in  to handle these new intents and route them to the appropriate agent with the correct context. For example, a  intent should trigger the market scanner and return the results.
+    -   **What will be achieved with this?**: The AI assistant will be able to handle a wider range of user queries accurately, such as finding trade opportunities, checking risk, and providing quick quotes, making it much more useful.
     -   **Status**: IN PROGRESS
     -   **Should Test frontend/backend/both after fix?**: backend
     -   **Blocked on something**: None
 
 **Upcoming and Future Tasks**
 -   **Upcoming Tasks:**
-    -   **(P0) Create UI for Regime-Based Strategy Performance**: The user requested to see the data from the new . A new UI component needs to be created, and the user suggested finding a good spot for it, likely within the Learning Intelligence Hub or the Analytics tab.
-    -   **(P1) User Verification of Live Position Sizing**: The user wants to test the regime-aware position sizing feature during open market hours tomorrow. The agent should be prepared to monitor the bot's behavior and logs.
-    -   **(P2) Finalize IB Data Integration in Hybrid Service**: The  is built but primarily uses Alpaca. The logic to check for a live IB connection and use it for historical data needs to be completed and tested.
+    -   **(P0) AI Improvement Plan - Phase 2**: Implement context-aware responses (time-of-day, regime-aware, position-aware).
+    -   **(P1) Create UI for Regime-Based Strategy Performance**: A key feature that was planned but postponed. A new UI component is needed to display the data from the .
+    -   **(P1) Live Trading Monitoring & Refinement**: The user is actively trading. Continue to monitor the bot's live performance, especially the regime-aware position sizing, and fix any issues that arise.
+    -   **(P2) Finalize IB Data Integration in Hybrid Service**: Complete the logic to use IB as the primary source for historical data in the .
 
 -   **Future Tasks:**
-    -   **(P2)** Enhance the bot's learning integration (auto-adjustments based on edge decay alerts, etc.).
+    -   **(P2)** AI Improvement Plan - Phase 3: Implement proactive intelligence (e.g., alerts on triggered setups, profit-taking suggestions).
+    -   **(P2)** Implement Smart Strategy Filtering to only show alerts for high-quality, personalized setups.
+    -   **(P2)** Implement Exit Optimization with trailing stops and scale-out rules.
     -   **(P2)** Implement Voice Commands for hands-free interaction.
-    -   **(P2)** Implement a Trade Style Selector for the bot.
-    -   **(P2)** Deprecate and remove old monolithic services (, ).
-    -   **(P3)** Update the IB Trading Tab and its connections.
+    -   **(P3)** Deprecate and remove old monolithic services (, ).
 
 **Completed work in this session**
--   Verified that the previously reported backtesting UI issues were already resolved.
--   **Hybrid Data Service**: Designed and implemented a service for historical data using Alpaca, with an architecture ready for IB integration.
--   **End-to-End Backtesting**: Fully tested the backtesting pipeline, including Quick Test and Multi-Strategy modes, confirming data fetching, caching, execution, and UI reporting are all functional.
--   **Market-Wide Scanner**: Built the backend service, API, and a full frontend UI to allow the user to scan the entire US market for strategy signals.
--   **Market-Wide Backtesting**: Integrated a feature into the backtesting engine and UI to run a single strategy against hundreds of stocks over a date range.
--   **Market Regime Engine Deployment**: Successfully deployed the engine and integrated its data into the main dashboard via a new widget.
--   **Regime-Aware Position Sizing**: Modified the  to use live market regime data to adjust trade position sizes.
--   **Regime-Aware Trade Logging**: Modified the  data model to include the market regime state at the time of execution.
--   **Regime-Aware Performance Tracking**: Created a new  and API to track strategy performance across different market regimes.
+-   **Regime-Aware Feature Completion**: Fixed, tested, and verified the entire regime-aware performance tracking feature, including database logging and API endpoints.
+-   **Comprehensive Tooltip System**: Implemented hover-over tooltips across the entire application for improved usability.
+-   **AI Agent & Routing Overhaul**:
+    -   Fixed numerous bugs in the AI agent routing logic, ensuring questions are sent to the correct agent (Coach vs. Analyst).
+    -   Successfully enabled multi-symbol analysis (e.g., thoughts on CF and USO).
+    -   Fixed data fetching to ensure correct prices are shown for all symbols.
+-   **Local Environment Troubleshooting & Stabilization**:
+    -   Resolved a series of complex issues related to the user's local Ollama connection, including fixing proxy usage (HTTP vs. WebSocket), model name resolution, and startup script errors.
+    -   Provided the user with a step-by-step guide to reinstall and fix their local startup scripts.
+-   **Bot Stability Fix**: Fixed a bug that prevented the trading bot from auto-resuming after a restart by removing the dependency on a saved watchlist.
+-   **Documentation**: Created a professional, multi-page HTML document () to showcase the application's features.
 
 **Earlier issues found/mentioned but not fixed**
--   None.
+-   The Market Scanner Alpaca Rate Limiting issue remains open and has not been addressed.
 
 **Known issue recurrence from previous fork**
--   **Issue recurrence in previous fork**: AI Hallucinating Position Data.
--   **Recurrence count**: 2
--   **Status**: RESOLVED.
+-   None. The previous issue of AI Hallucinating Position Data did not recur.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **Hybrid Data Fetcher**: A service that abstracts data sourcing, checking a cache first, then attempting to fetch from a primary source (IB, when connected) before falling back to a secondary source (Alpaca).
--   **Market-Wide Backtesting**: The ability to run a trading strategy against a large universe of symbols over a historical period to find all potential trades and aggregate performance.
--   **Regime-Aware Trading**: A system where bot behavior (like position sizing) and performance analysis are dynamically adjusted based on the broader market condition (e.g., Bull, Bear, Sideways).
--   **Background Task Architecture**: Services like the Market Scanner are designed as background tasks with status-checking endpoints to handle long-running operations without blocking the UI.
+-   **AI Prompt Intelligence**: A multi-layered system for intent detection and routing user prompts. It uses regex patterns and keyword matching to classify user input into categories like , , , and now , , etc.
+-   **Centralized Tooltip System**: A scalable UI pattern where all tooltip text is defined in a single file () and applied throughout the frontend using a reusable component, making it easy to maintain and expand.
+-   **Local Proxy for LLMs**: The architecture relies on a local Python script () that the user runs. This script acts as a bridge, polling the cloud backend for requests and forwarding them to the user's local Ollama instance. This was a major point of debugging and stabilization.
 
 **key DB schema**
--   **trades**:  (This field has been added).
--   **regime_performance_stats**:  (New collection).
--   **backtest_results**: Stores outputs of the backtesting engine.
--   **historical_data_cache**: Stores cached price bars from Alpaca/IB.
+-   No changes to the DB schema in this session.
 
 **All files of reference**
--   : The new service to test.
--   : The updated trade data model.
--   : The updated bot logic that logs trades to the new service.
--   : Shows initialization of all new services.
--   : The UI for the new market scanner.
--   : The UI for the new market-wide backtesting feature.
--   : The main command dashboard where the Market Regime widget was placed.
+-   : Core of the AI intent detection; where new patterns were added.
+-   : Where the logic for handling the new intents needs to be built.
+-   : Was heavily modified to support multi-symbol analysis.
+-   : Was modified to fix the auto-resume bug.
+-   : The new central file for all tooltip content.
+-   : The new marketing document.
 
 **Areas that need refactoring**:
--   The Market Scanner's performance could be improved by optimizing how it fetches its initial symbol universe to avoid hitting Alpaca rate limits so aggressively.
--   The old monolithic services (, ) are still present and should be scheduled for deprecation and removal.
+-   The  is becoming a large collection of regex patterns and  statements. This could be refactored into a more maintainable, rule-based engine or a configuration-driven system to make adding new intents easier.
 
 **key api endpoints**
--   : Starts a new market-wide scan.
--   : Checks the progress of a scan.
--   : Runs a historical market-wide backtest.
--   : Gets the current market regime state.
--   : **(New)** Gets performance stats for a strategy, broken down by market regime.
+-   : The primary endpoint for all AI assistant interactions. Its internal logic was heavily debugged and modified.
+-   : Used to serve the local proxy and startup scripts to the user.
 
 **Critical Info for New Agent**
--   Your immediate priority is to **test the new regime-aware features**. Simulate a trade closing and verify that the  logs the data correctly.
--   After testing, the next task is to **build a UI** to display the regime-based performance data for the user.
--   Be prepared to assist the user **tomorrow during market hours** to test the live, regime-aware position sizing.
--   The market scanner works but is slow on full scans due to API rate limits. This is a known constraint and a target for future optimization.
+-   Your immediate priority is to **complete the Phase 1 AI Improvement Plan**. The patterns are defined in , but you must now implement the handling logic in  and potentially other agents.
+-   The user is actively using the app during market hours. Any changes to the backend must be done carefully to avoid disrupting their workflow.
+-   The local Ollama connection via  is now stable, but be mindful of this architecture. Any changes to the AI agent communication must be compatible with this HTTP polling mechanism.
+-   The trading bot is set to auto-resume on restart. This was a specific user request.
 
 **documents and test reports created in this job**
--   None.
+-   
+-   
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User**: Confirmed the plan to implement regime-aware strategy performance logging and create a UI for it. (Instruction - This is the current task).
-2.  **User**: Asked to place the  in a good spot on the dashboard. (Completed).
-3.  **User**: Agreed to test the regime-aware position sizing during market hours tomorrow. (Upcoming Task).
-4.  **User**: Clarified he wants **historical market-wide backtesting**, not just a live scanner. (Completed - This feature was built).
-5.  **User**: ok i guess that will work but you misunderstood me. - Corrected the agent's interpretation of the market scanner request.
-6.  **User**: yes add this, add this now - Approved implementing regime-aware trade logging and performance tracking.
-7.  **User**: ok now i want you to set up our backtesting so that i scan the entire US markets... - Requested the Market-Wide Scanner/Backtester feature. (Completed).
-8.  **User**: yes, yes - Confirmed to run backtests with both intraday data and a different strategy. (Completed).
-9.  **User**: Approved the hybrid data approach for backtesting. (Completed).
-10. **User**: Asked if the app needs to be running to use IB/Alpaca for backtesting. (Clarification provided).
+1.  **User**: Requested the agent to start Phase 1 of the AI improvement plan. (IN PROGRESS)
+2.  **User**: Confirmed they want to improve the AI, check the bot workflow, and do live testing. (Acknowledged)
+3.  **User**: Confirmed the multi-symbol analysis is working correctly now. (Completed)
+4.  **User**: Asked to remove the watchlist requirement for the bot's auto-resume feature. (Completed)
+5.  **User**: Noted that the trading bot seems to be turning itself off. (Fixed)
+6.  **User**: Asked if they need to refresh the browser after backend changes. (Clarified: No)
+7.  **User**: Provided feedback that the AI's analysis of CF and USO was poor and incomplete. (Fixed)
+8.  **User**: The markets are open, wants to get back to the bot workflow. (Acknowledged)
+9.  **User**: Confirmed the trade execution flow is working. (Completed)
+10. **User**: Confirmed the Market button now provides a correct market overview. (Completed)
 
 **Project Health Check:**
--   **Working**: Core UI, IB Data Pipeline, Multi-Agent System, Live Trading Dashboard, Advanced Backtesting (all modes), Market-Wide Scanner, Hybrid Data Service (Alpaca), Deployed Market Regime Engine, Regime-aware position sizing.
+-   **Working**: Core UI, IB Data Pipeline, Trade Execution, Multi-Agent System (with improved routing), Live Trading Dashboard, Advanced Backtesting, Market Scanner, Hybrid Data Service, Market Regime Engine, Comprehensive Tooltips, Ollama HTTP Proxy connection.
 -   **Broken**: None.
--   **Mocked**: The Market Scanner's full 12k+ symbol scan is impractically slow due to API rate limits, so smaller scans are used for testing. This is an environmental constraint.
+-   **Mocked**: The Market Scanner's full 12k+ symbol scan remains impractically slow due to Alpaca rate limiting, making it a known environmental constraint.
 
 **3rd Party Integrations**
 -   **Interactive Brokers (IB Gateway)**: **Working**. Integrated for real-time data and trade execution.
--   **Ollama**: **Working**. Connects via a local proxy for LLM access.
--   **Alpaca**: **Working**. Integrated in the  and used for all historical data fetching. Keys are configured in .
+-   **Ollama**: **Working**. Connects via a local user-run HTTP proxy for LLM access.
+-   **Alpaca**: **Working**. Integrated in the  and used for historical data. Keys are configured in .
 -   **Tavily**: **Working**. Used for web search by agents.
 
 **Testing status**
--   **Testing agent used after significant changes**: NO
+-   **Testing agent used after significant changes**: YES (for the regime performance service).
 -   **Troubleshoot agent used after agent stuck in loop**: NO
--   **Test files created**: None.
+-   **Test files created**: 
 -   **Known regressions**: None.
 
 **Credentials to test flow:**
--   Alpaca API keys are configured in  and are working.
--   IB Gateway connection is required for live trading and will be needed to fully test the hybrid data service's fallback logic.
+-   Alpaca API keys are configured in .
+-   IB Gateway connection is managed by the user on their local machine.
 
 **What agent forgot to execute**
--   The agent implemented the  and the associated trade logging but did not run any tests to verify its functionality. This is the highest priority action item for the next agent.</analysis>
+-   The agent defined the new intents and patterns for Phase 1 of the AI Improvement plan but did not implement the corresponding handling logic in the orchestrator and other agents. This is the main piece of unfinished work and the highest priority for the next agent.</analysis>

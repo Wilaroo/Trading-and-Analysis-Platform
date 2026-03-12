@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://regime-aware-bot.preview.emergentagent.com
+https://ai-trading-bot-55.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://regime-aware-bot.preview.emergentagent.com
+https://ai-trading-bot-55.preview.emergentagent.com
 ```
