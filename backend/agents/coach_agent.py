@@ -63,6 +63,8 @@ class CoachAgent(BaseAgent):
         # Learning services from Three-Speed Architecture
         self._learning_context_provider = None
         self._learning_loop_service = None
+        # Phase 2: Context Awareness Service
+        self._context_awareness = None
     
     def inject_services(self, services: Dict[str, Any]):
         """Inject services and create data fetcher"""
@@ -73,14 +75,19 @@ class CoachAgent(BaseAgent):
         self._learning_context_provider = services.get("learning_context_provider")
         self._learning_loop_service = services.get("learning_loop_service")
         
+        # Wire up context awareness service (Phase 2)
+        self._context_awareness = services.get("context_awareness")
+        
         if self._learning_context_provider:
             logger.info("Coach Agent: LearningContextProvider connected")
         if self._learning_loop_service:
             logger.info("Coach Agent: LearningLoopService connected")
+        if self._context_awareness:
+            logger.info("Coach Agent: ContextAwarenessService connected (Phase 2)")
     
     def get_system_prompt(self) -> str:
-        """System prompt for coaching"""
-        return """You are an expert trading coach. Your role is to provide personalized guidance based on the trader's ACTUAL data.
+        """System prompt for coaching - now context-aware (Phase 2)"""
+        return """You are an expert trading coach. Your role is to provide personalized guidance based on the trader's ACTUAL data AND current market context.
 
 CRITICAL RULES:
 1. ONLY reference numbers that appear in the VERIFIED DATA section below
@@ -88,6 +95,13 @@ CRITICAL RULES:
 3. Reference the trader's specific patterns and history
 4. Be encouraging but honest about areas for improvement
 5. Give actionable advice based on their actual performance
+6. Consider the CURRENT TRADING CONTEXT (time of day, market regime, open positions)
+
+CONTEXT-AWARE COACHING (Phase 2):
+- Adjust advice based on the current trading session (pre-market, open, midday, close)
+- Factor in the market regime (bullish/bearish/neutral) when recommending trades
+- Consider the trader's existing positions before suggesting new entries
+- Warn about timing-specific risks (e.g., midday chop, close volatility)
 
 Your coaching should:
 - Reference their specific win rate, not general statistics
@@ -95,6 +109,7 @@ Your coaching should:
 - Suggest improvements based on THEIR mistakes
 - Celebrate THEIR wins with specific examples
 - Warn about THEIR common pitfalls
+- Consider current market conditions in all advice
 
 Keep responses concise but insightful. Use their actual numbers."""
     
@@ -156,8 +171,8 @@ Keep responses concise but insightful. Use their actual numbers."""
                 metadata={"query_type": query_type}
             )
         
-        # Step 2: Build prompt with verified data
-        prompt = self._build_coaching_prompt(message, context, query_type)
+        # Step 2: Build prompt with verified data (async to include trading context)
+        prompt = await self._build_coaching_prompt_async(message, context, query_type)
         
         # Step 3: Get LLM guidance (reasoning over verified data)
         response = await self._call_llm(
@@ -168,12 +183,22 @@ Keep responses concise but insightful. Use their actual numbers."""
         
         if not response.success:
             # Return basic info when LLM is unavailable
+            # Also include session info from context awareness
+            session_info = ""
+            if self._context_awareness:
+                try:
+                    session_ctx = self._context_awareness.get_session_context()
+                    session_info = f"\n**Current Session**: {session_ctx.session_name}\n- {session_ctx.trading_advice}"
+                except Exception:
+                    pass
+            
             basic_response = f"""**Connection Status**: Your local trading system appears to be offline.
 
 **Portfolio Summary (from last sync)**:
 - Total Positions: {len(context.positions)}
 - Total P&L: ${context.total_pnl:,.2f}
 - Winning: {context.winning_positions} | Losing: {context.losing_positions}
+{session_info}
 
 Please ensure your local IB Gateway and data pusher are running."""
             
@@ -182,7 +207,7 @@ Please ensure your local IB Gateway and data pusher are running."""
                 content={"message": basic_response},
                 latency_ms=(time.time() - start) * 1000,
                 error=response.error,
-                metadata={"llm_available": False}
+                metadata={"llm_available": False, "context_aware": bool(session_info)}
             )
         
         return self._create_response(
@@ -479,8 +504,33 @@ You have no open positions at this time."""
         # For now, return a default
         return "unknown"
     
+    async def _get_trading_context(self) -> str:
+        """Get current trading context from ContextAwarenessService (Phase 2)"""
+        if not self._context_awareness:
+            return ""
+        
+        try:
+            context_str = await self._context_awareness.get_context_for_prompt()
+            return context_str
+        except Exception as e:
+            logger.warning(f"Could not get trading context: {e}")
+            return ""
+    
+    async def _build_coaching_prompt_async(self, message: str, context: TradingContext, query_type: str) -> str:
+        """Build prompt with verified data for LLM (async version with context awareness)"""
+        
+        # Get trading context (Phase 2)
+        trading_context = await self._get_trading_context()
+        
+        # Build the rest of the prompt synchronously
+        return self._build_coaching_prompt_with_context(message, context, query_type, trading_context)
+    
     def _build_coaching_prompt(self, message: str, context: TradingContext, query_type: str) -> str:
-        """Build prompt with verified data for LLM"""
+        """Build prompt with verified data for LLM (sync fallback, no context awareness)"""
+        return self._build_coaching_prompt_with_context(message, context, query_type, "")
+    
+    def _build_coaching_prompt_with_context(self, message: str, context: TradingContext, query_type: str, trading_context: str = "") -> str:
+        """Build prompt with verified data and optional trading context for LLM"""
         
         # Build position summary
         positions_text = ""
@@ -580,6 +630,14 @@ TODAY'S SESSION:
         if context.learning_insights:
             learning_text = f"\n{context.learning_insights}\n"
         
+        # Phase 2: Include trading context (time-of-day, regime, positions awareness)
+        context_section = ""
+        if trading_context:
+            context_section = f"""
+{trading_context}
+
+"""
+        
         # Combine into full prompt
         prompt = f"""=== VERIFIED DATA (DO NOT MODIFY THESE NUMBERS) ===
 
@@ -591,7 +649,7 @@ TODAY'S SESSION:
 {similar_text}
 {mistakes_text}
 {learning_text}
-
+{context_section}
 === USER QUESTION ===
 {message}
 
@@ -599,6 +657,7 @@ TODAY'S SESSION:
 Provide personalized coaching based ONLY on the verified data above.
 Reference their specific numbers and patterns.
 Use insights from the learning system to personalize your advice.
+IMPORTANT: Factor in the current trading context (session, regime, positions) when giving advice.
 Be concise but insightful."""
         
         return prompt

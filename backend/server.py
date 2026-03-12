@@ -76,6 +76,7 @@ from routers.hybrid_data import router as hybrid_data_router, init_hybrid_data_r
 from routers.market_scanner import router as market_scanner_router, init_market_scanner_router
 from routers.market_regime import router as market_regime_router, init_market_regime_engine
 from routers.regime_performance import router as regime_performance_router, init_regime_performance_router
+from routers.context_awareness import router as context_awareness_router, init_context_router
 from services.market_intel_service import get_market_intel_service
 from services.hybrid_data_service import get_hybrid_data_service, init_hybrid_data_service
 from services.market_scanner_service import get_market_scanner_service, init_market_scanner_service
@@ -91,6 +92,7 @@ from services.position_sizer import get_position_sizer_service, init_position_si
 from services.health_monitor import get_health_monitor_service, init_health_monitor_service
 from services.dynamic_thresholds import get_dynamic_threshold_service, init_dynamic_threshold_service
 from services.rag import get_rag_service, init_rag_service
+from services.context_awareness_service import get_context_awareness_service, init_context_awareness_service
 from services.medium_learning import (
     get_calibration_service, init_calibration_service,
     get_context_performance_service,
@@ -310,6 +312,7 @@ app.include_router(hybrid_data_router)  # Hybrid IB/Alpaca data service
 app.include_router(market_scanner_router)  # Market-wide strategy scanner
 app.include_router(market_regime_router)  # Market regime engine
 app.include_router(regime_performance_router)  # Regime-based performance tracking
+app.include_router(context_awareness_router)  # Phase 2 AI context awareness
 
 # Collections
 strategies_col = db["strategies"]
@@ -437,6 +440,20 @@ trading_bot.set_regime_performance_service(regime_performance_service)
 print("  - Regime Performance Tracking: Strategy performance by market regime")
 print("  - Wired to Trading Bot: Closed trades logged with regime data")
 print("  - Endpoints: /api/regime-performance/summary, /api/regime-performance/best-for-regime/{regime}")
+
+# ===================== CONTEXT AWARENESS SERVICE (Phase 2 AI) =====================
+# Initialize Context Awareness Service for smarter AI responses
+context_awareness_service = init_context_awareness_service(
+    regime_engine=market_regime_engine,
+    db=db
+)
+init_context_router(context_awareness_service)
+register_service('context_awareness', context_awareness_service)
+print("Context Awareness Service (Phase 2 AI) initialized")
+print("  - Time-of-day awareness: Pre-market, Open, Midday, Close, After-hours")
+print("  - Regime awareness: Integrated with Market Regime Engine")
+print("  - Position awareness: Real-time position and exposure tracking")
+print("  - Endpoints: /api/context/session, /api/context/regime, /api/context/full")
 
 # ===================== FAST LEARNING (Phase 3A & 3B) =====================
 # Initialize circuit breakers, position sizing, health monitoring, dynamic thresholds
@@ -676,13 +693,16 @@ try:
         "learning_context_provider": get_service_optional('learning_context_provider'),
         "learning_loop_service": get_service_optional('learning_loop_service'),
         # TQS Engine for Analyst
-        "tqs_engine": get_service_optional('tqs_engine')
+        "tqs_engine": get_service_optional('tqs_engine'),
+        # Phase 2 AI: Context Awareness Service
+        "context_awareness": get_service_optional('context_awareness')
     })
     print("Multi-Agent System initialized")
     print("  - Agents: Router, Trade Executor, Coach, Analyst")
     print("  - LLM: GPT-OSS cloud → llama3.5 8b fallback")
     print("  - Learning: Integrated with Three-Speed Architecture")
     print("  - TQS: Trade Quality Score integrated with Analyst")
+    print("  - Context Awareness: Phase 2 AI (time/regime/position aware)")
     print("  - Endpoints: /api/agents/chat, /api/agents/status, /api/agents/metrics")
 except Exception as e:
     print(f"Multi-Agent System initialization deferred: {e}")

@@ -6,6 +6,10 @@ Phase 1 AI Prompt Intelligence Plan:
 - SCANNER: Find trade opportunities via market scanner
 - QUICK_QUOTE: Get quick price quotes for symbols
 - RISK_CHECK: Analyze current risk exposure
+
+Phase 2 AI Prompt Intelligence Plan:
+- Context-aware responses (time-of-day, regime, positions)
+- Integrated ContextAwarenessService for smarter AI
 """
 import time
 import logging
@@ -90,6 +94,7 @@ class AgentOrchestrator:
         - db: MongoDB database
         - performance_analyzer: Performance stats
         - learning_service: Trading patterns/learning
+        - context_awareness: Phase 2 context-aware service
         """
         self._services = services
         
@@ -103,16 +108,18 @@ class AgentOrchestrator:
             "db": services.get("db")
         })
         
-        # Inject into coach (needs everything for guidance + learning services)
+        # Inject into coach (needs everything for guidance + learning services + context awareness)
         self.coach.inject_services({
             "ib_router": services.get("ib_router"),
             "scanner": services.get("scanner"),
             "db": services.get("db"),
             "performance_analyzer": services.get("performance_analyzer"),
             "learning_service": services.get("learning_service"),
-            # NEW: Three-Speed Learning Architecture services
+            # Three-Speed Learning Architecture services
             "learning_context_provider": services.get("learning_context_provider"),
-            "learning_loop_service": services.get("learning_loop_service")
+            "learning_loop_service": services.get("learning_loop_service"),
+            # Phase 2: Context Awareness
+            "context_awareness": services.get("context_awareness")
         })
         
         # Inject into analyst (needs market data services + TQS)
