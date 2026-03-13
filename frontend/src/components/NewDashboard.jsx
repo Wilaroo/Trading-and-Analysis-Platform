@@ -5,7 +5,7 @@
  * - Header: Bot status, compact info (Session/Regime/Brief Me), Account data, Risk Status, P&L
  * - Bot Performance Chart (always visible)
  * - Main Grid:
- *   - Left (8 cols): Team Brain (with Order Pipeline), Active Positions, Setups We're Watching
+ *   - Left (8 cols): SentCom (with Order Pipeline), Active Positions, Setups We're Watching
  *   - Right (4 cols): AI Assistant, Market Regime, Quick Stats
  * - Scanner Alerts strip at bottom
  */

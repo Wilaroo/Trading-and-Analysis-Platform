@@ -1,5 +1,7 @@
 /**
- * TeamBrain Mockups V2 - Enhanced Visual Design
+ * SentCom Mockups V2 - Enhanced Visual Design
+ * 
+ * SentCom = Sentinel Command - Unified AI Command Center
  * 
  * Improvements:
  * - More visually appealing Option C with glass effects and gradients
@@ -220,7 +222,7 @@ const EnhancedMessage = ({ type, content, time, confidence, symbol }) => {
 };
 
 const mockMessages = [
-  { type: 'assistant', content: "Team Brain online. We're monitoring 3 active positions and scanning for setups. Market regime is RISK_ON - conditions favor momentum plays.", time: '09:31', confidence: 85 },
+  { type: 'assistant', content: "SentCom online. We're monitoring 3 active positions and scanning for setups. Market regime is RISK_ON - conditions favor momentum plays.", time: '09:31', confidence: 85 },
   { type: 'system', content: "We detected momentum building in NVDA. Volume 2.3x average with price holding above VWAP.", time: '09:32' },
   { type: 'user', content: "What do we think about AAPL today?", time: '09:33' },
   { type: 'assistant', content: "We're seeing AAPL consolidate near $185 resistance. Our pullback win rate is 67% - if it dips to $182 support with volume, that's our zone. Risk/reward would be 2.4:1.", time: '09:33', confidence: 78 },
@@ -353,7 +355,7 @@ const DedicatedPageV2 = () => {
               </div>
             </div>
             <div>
-              <h1 className="text-xl font-bold text-white tracking-tight">TEAM BRAIN</h1>
+              <h1 className="text-xl font-bold text-white tracking-tight">SENTCOM</h1>
               <div className="flex items-center gap-2 mt-0.5">
                 <PulsingDot color="emerald" />
                 <span className="text-[11px] text-emerald-400 font-medium">CONNECTED</span>
@@ -1013,8 +1015,8 @@ const TeamBrainMockupsV2 = () => {
                 <Brain className="w-5 h-5 text-cyan-400" />
               </div>
               <div>
-                <h1 className="text-xl font-bold">Team Brain Mockups <span className="text-cyan-400">V2</span></h1>
-                <p className="text-xs text-zinc-500">Enhanced visual design based on your feedback</p>
+                <h1 className="text-xl font-bold">SentCom Mockups <span className="text-cyan-400">V2</span></h1>
+                <p className="text-xs text-zinc-500">Sentinel Command - Enhanced visual design based on your feedback</p>
               </div>
             </div>
             <div className="flex gap-2">

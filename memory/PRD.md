@@ -7,29 +7,41 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## RECENT UPDATES (March 13, 2026)
 
-### P0 ACTIVE: Team Brain Unification Project
+### P0 ACTIVE: SentCom Unification Project
 
-**Status:** 🟡 IN PROGRESS - Phase 1 Complete, Phase 2 Starting
+**Status:** 🟡 IN PROGRESS - Phase 1 & 2 Complete, Phase 3 Next
 
-**Project Goal:** Unify the AI Assistant and Bot Brain into a single "Team Brain" that uses "we" language throughout, creating a partnership feeling between the trader and the AI system.
+**Project Goal:** Unify the AI Assistant and Bot Brain into a single "SentCom" (Sentinel Command) that uses "we" language throughout, creating a partnership feeling between the trader and the AI system.
 
 **Phase 1: Backend & Frontend Voice Unification** ✅ COMPLETE
 - Updated all backend agent prompts (coach_agent.py, analyst_agent.py, brief_me_agent.py) to use "we/our" voice
 - Updated frontend fallback messages in BotBrainPanel.jsx and NewDashboard.jsx
 - Changed "SETUPS I'M WATCHING" → "SETUPS WE'RE WATCHING"
+- Changed "TEAM BRAIN" → "SENTCOM" throughout the UI
 - EnhancedTickerModal already has "OUR TAKE" language and GlassCard V2 styling
 
-**V2 Interactive Mockups Created:**
-- `/app/frontend/src/pages/TeamBrainMockupsV2.jsx` - 3 tab mockup (Option C Enhanced, Our Performance, Our Take Modal)
-- Accessible via sidebar "Team Brain V2" menu item
+**Phase 2: Backend Wiring** ✅ COMPLETE
+- Created `/app/backend/services/sentcom_service.py` - Unified orchestrator with "we" voice
+- Created `/app/backend/routers/sentcom.py` with endpoints:
+  - GET `/api/sentcom/health` - Health check
+  - GET `/api/sentcom/status` - Full operational status
+  - GET `/api/sentcom/stream` - Unified message stream
+  - POST `/api/sentcom/chat` - Chat interface
+  - GET `/api/sentcom/context` - Market context
+  - GET `/api/sentcom/positions` - Our positions
+  - GET `/api/sentcom/setups` - Setups we're watching
+  - GET `/api/sentcom/alerts` - Recent alerts
+- Wired into server.py with service injection
+
+**V2 Interactive Mockups (Renamed to SentCom):**
+- `/app/frontend/src/pages/TeamBrainMockupsV2.jsx` - Now labeled "SentCom Mockups V2"
+- Accessible via sidebar "SentCom V2" menu item
 - Shows glass effects, gradient backgrounds, sparkline charts, unified voice
 
-**Next: Phase 2 - Backend Wiring**
-1. Create `TeamBrainOrchestrator` service - unified AI logic
-2. Create `team_brain_router.py` with new API endpoints:
-   - POST /api/team-brain/chat - Unified chat endpoint
-   - GET /api/team-brain/stream - Combined thoughts + chat stream
-3. Wire TeamBrain.jsx mockup to real APIs
+**Next: Phase 3 - UI Implementation**
+1. Wire the SentCom mockup component to real APIs (`/api/sentcom/*`)
+2. Replace BotBrainPanel.jsx with new SentCom.jsx component
+3. Update NewDashboard.jsx to use new SentCom component
 
 **Implementation Plan:** See `/app/memory/TEAM_BRAIN_IMPLEMENTATION_PLAN.md`
 
