@@ -9,7 +9,7 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ### P0 ACTIVE: SentCom Unification Project
 
-**Status:** ✅ COMPLETE - Phase 1, 2 & 3 Done
+**Status:** ✅ COMPLETE - Phase 1, 2, 3 & 3.5 Done
 
 **Project Goal:** Unify the AI Assistant and Bot Brain into a single "SentCom" (Sentient Command) that uses "we" language throughout, creating a partnership feeling between the trader and the AI system.
 
@@ -40,14 +40,36 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 - Wired to real `/api/sentcom/*` endpoints with polling hooks
 - Removed separate AICommandPanel from right sidebar (chat now in SentCom)
 
+**Phase 3.5: Trading Bot Header Merge & Glassy Styling** ✅ COMPLETE (March 13, 2026)
+- **Merged Trading Bot Panel Header into SentCom Header:**
+  - Added `useTradingBotControl()` hook for bot status (start/stop, mode changes)
+  - Added `useIBConnectionStatus()` hook for IB connection monitoring
+  - Unified header now shows: SENTCOM branding, CONNECTED/OFFLINE status, Bot Status (ACTIVE/STOPPED), Mode (AUTONOMOUS/CONFIRMATION/PAUSED), IB status (IB LIVE/OFFLINE), Order Pipeline (Pending→Executing→Filled), Settings button, Start/Stop button
+  - Added Trading Mode selector panel (collapsible via Settings button)
+- **Applied Glassy Mockup Styling:**
+  - Glass-morphism effects: `bg-gradient-to-br from-white/[0.08] to-white/[0.02]`, `backdrop-blur-xl`, `border border-white/10`
+  - Ambient background effects with cyan/violet gradient blurs
+  - Updated "Our Positions" panel with glassy styling and sparklines
+  - Updated "Setups We're Watching" panel with glassy styling
+  - Updated Live Team Stream with enhanced message styling
+  - Enhanced chat input with improved placeholder and send button
+  - Improved Position Detail Modal with more data and "Our Take" section
+- **Simplified DashboardHeader:**
+  - Changed from "TRADING BOT" branding to "Command Center" branding
+  - Removed redundant bot status (now in SentCom)
+  - Added AI Credits indicator
+  - Shows: Command Center branding, AI Credits, Session status, Account, Buying Power, Today P&L, Open P&L, Time
+  - Applied glassy gradient background
+
 **V2 Interactive Mockups (For Reference):**
 - `/app/frontend/src/pages/TeamBrainMockupsV2.jsx` - Now labeled "SentCom Mockups"
 - Accessible via sidebar "SentCom Mockups" menu item
 
 **Next: Phase 4 - Deprecation & Polish**
 1. Remove old AIAssistant.jsx component (no longer needed)
-2. Consider replacing BotBrainPanel in Command Center with SentCom compact mode
-3. Remove mockup pages once production SentCom is validated
+2. Remove BotBrainPanel.jsx (replaced by SentCom)
+3. Remove AICommandPanel.jsx (merged into SentCom)
+4. Remove mockup pages once production SentCom is validated
 
 ---
 
