@@ -88,7 +88,19 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ### 🟡 P2 - MEDIUM PRIORITY (Feature Enhancement)
 
-6. **AI Improvement Plan Phase 3: Proactive Intelligence**
+6. **Enhanced Brief Me Feature** *(Added March 13)*
+   - **What**: Make Brief Me more useful with real news, more gappers, smarter insights
+   - **Current State**: Shows basic index data, VIX, gappers from IB symbols, bot status
+   - **Needed**:
+     - Real news/catalysts from Finnhub
+     - Scan more symbols for gappers (not just IB watchlist)
+     - Smarter personalized insights from learning data
+     - Sector rotation analysis
+     - Earnings calendar integration
+     - "IN PLAY" stocks with RVOL data
+   - **Reference**: MarketIntelService has much of this data but needs better integration
+
+7. **AI Improvement Plan Phase 3: Proactive Intelligence**
    - Alerts on triggered setups (not just when you open a ticker)
    - Profit-taking suggestions when position hits R-multiple targets
    - "Bot wants to tell you something" notification system
