@@ -1514,37 +1514,83 @@ const SentCom = ({ compact = false, embedded = false }) => {
                     <p className="text-[10px] text-zinc-600 mt-1">We're scanning for setups...</p>
                   </div>
                 ) : (
-                  <div className="space-y-3 max-h-[220px] overflow-y-auto pr-1 custom-scrollbar">
+                  <div className="space-y-3 max-h-[280px] overflow-y-auto pr-1 custom-scrollbar">
                     {positions.slice(0, 5).map((pos, i) => (
                       <div 
                         key={pos.symbol || i}
                         onClick={() => setSelectedPosition(pos)}
                         className="relative p-3 rounded-xl bg-black/40 border border-white/5 hover:border-white/10 cursor-pointer transition-all group"
                       >
-                        <div className="flex items-center justify-between mb-2">
+                        {/* Row 1: Symbol, Type, P&L */}
+                        <div className="flex items-center justify-between mb-1.5">
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-white">{pos.symbol}</span>
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                            {pos.position_type && (
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                                pos.position_type === 'short' ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'
+                              }`}>
+                                {pos.position_type?.toUpperCase()}
+                              </span>
+                            )}
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
                               pos.status === 'running' ? 'bg-emerald-500/20 text-emerald-400' :
                               pos.status === 'trailing' ? 'bg-cyan-500/20 text-cyan-400' :
                               pos.status === 'watching' ? 'bg-amber-500/20 text-amber-400' :
                               'bg-zinc-500/20 text-zinc-400'
                             }`}>
-                              {pos.status || 'open'}
+                              {pos.status || pos.source || 'open'}
                             </span>
                           </div>
                           <div className="text-right">
                             <p className={`font-bold ${pos.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                               {pos.pnl >= 0 ? '+' : ''}{pos.pnl?.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) || '$0'}
                             </p>
-                            {pos.r_multiple && (
-                              <p className="text-[10px] text-zinc-500">{pos.r_multiple}R</p>
-                            )}
                           </div>
                         </div>
                         
+                        {/* Row 2: Shares, Entry, Current, P&L % */}
+                        <div className="flex items-center justify-between text-[10px] mb-1.5">
+                          <div className="flex items-center gap-3">
+                            <span className="text-zinc-400">
+                              <span className="text-zinc-500">Qty:</span> <span className="text-white font-medium">{pos.shares?.toLocaleString() || '—'}</span>
+                            </span>
+                            <span className="text-zinc-400">
+                              <span className="text-zinc-500">Entry:</span> <span className="text-white">${pos.entry_price?.toFixed(2) || '—'}</span>
+                            </span>
+                            <span className="text-zinc-400">
+                              <span className="text-zinc-500">Now:</span> <span className="text-cyan-400">${pos.current_price?.toFixed(2) || '—'}</span>
+                            </span>
+                          </div>
+                          <span className={`font-medium ${pos.pnl_percent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {pos.pnl_percent >= 0 ? '+' : ''}{pos.pnl_percent?.toFixed(2) || '0.00'}%
+                          </span>
+                        </div>
+                        
+                        {/* Row 3: Stop & Risk info (if available) */}
+                        {(pos.stop_price || pos.r_multiple) && (
+                          <div className="flex items-center justify-between text-[10px] mb-1">
+                            <div className="flex items-center gap-3">
+                              {pos.stop_price && (
+                                <span className="text-zinc-400">
+                                  <span className="text-zinc-500">Stop:</span> <span className="text-rose-400">${pos.stop_price?.toFixed(2)}</span>
+                                </span>
+                              )}
+                              {pos.target_prices?.[0] && (
+                                <span className="text-zinc-400">
+                                  <span className="text-zinc-500">Target:</span> <span className="text-emerald-400">${pos.target_prices[0]?.toFixed(2)}</span>
+                                </span>
+                              )}
+                            </div>
+                            {pos.r_multiple && (
+                              <span className={`font-medium ${parseFloat(pos.r_multiple) >= 0 ? 'text-cyan-400' : 'text-rose-400'}`}>
+                                {pos.r_multiple}R
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        
                         {/* Mini Sparkline */}
-                        <div className="h-6 mt-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                        <div className="h-5 mt-1 opacity-60 group-hover:opacity-100 transition-opacity">
                           <Sparkline 
                             data={pos.sparkline_data || [50, 52, 48, 55, 53, 58, 56, 60]} 
                             color={pos.pnl >= 0 ? 'emerald' : 'rose'} 
@@ -1794,14 +1840,30 @@ const SentCom = ({ compact = false, embedded = false }) => {
                 onClick={e => e.stopPropagation()}
               >
                 <GlassCard glow className="p-6">
+                  {/* Header */}
                   <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center gap-4">
-                      <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-cyan-500/30 to-violet-500/30 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                      <div className={`w-14 h-14 rounded-xl flex items-center justify-center shadow-lg ${
+                        selectedPosition.pnl >= 0 
+                          ? 'bg-gradient-to-br from-emerald-500/30 to-cyan-500/30 shadow-emerald-500/20' 
+                          : 'bg-gradient-to-br from-rose-500/30 to-orange-500/30 shadow-rose-500/20'
+                      }`}>
                         <span className="text-xl font-bold text-white">{selectedPosition.symbol}</span>
                       </div>
                       <div>
-                        <h2 className="text-2xl font-bold text-white">Our {selectedPosition.symbol} Position</h2>
-                        <p className="text-sm text-zinc-400">Detailed view • {selectedPosition.status || 'Open'}</p>
+                        <div className="flex items-center gap-2">
+                          <h2 className="text-2xl font-bold text-white">Our {selectedPosition.symbol} Position</h2>
+                          {selectedPosition.position_type && (
+                            <span className={`text-xs px-2 py-0.5 rounded ${
+                              selectedPosition.position_type === 'short' ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'
+                            }`}>
+                              {selectedPosition.position_type?.toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-zinc-400">
+                          {selectedPosition.shares?.toLocaleString()} shares • {selectedPosition.status || 'Open'} • {selectedPosition.source === 'ib' ? 'IB Position' : 'Bot Managed'}
+                        </p>
                       </div>
                     </div>
                     <button 
@@ -1812,56 +1874,107 @@ const SentCom = ({ compact = false, embedded = false }) => {
                     </button>
                   </div>
                   
-                  {/* Position Stats */}
-                  <div className="grid grid-cols-4 gap-4 mb-6">
+                  {/* P&L Summary - Large Display */}
+                  <div className={`p-4 rounded-xl mb-6 ${
+                    selectedPosition.pnl >= 0 
+                      ? 'bg-gradient-to-r from-emerald-500/10 to-emerald-500/5 border border-emerald-500/20' 
+                      : 'bg-gradient-to-r from-rose-500/10 to-rose-500/5 border border-rose-500/20'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs text-zinc-400 uppercase mb-1">Unrealized P&L</p>
+                        <p className={`text-3xl font-bold ${selectedPosition.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {selectedPosition.pnl >= 0 ? '+' : ''}{selectedPosition.pnl?.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-zinc-400 uppercase mb-1">Return</p>
+                        <p className={`text-2xl font-bold ${selectedPosition.pnl_percent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {selectedPosition.pnl_percent >= 0 ? '+' : ''}{selectedPosition.pnl_percent?.toFixed(2)}%
+                        </p>
+                      </div>
+                      {selectedPosition.r_multiple && (
+                        <div className="text-right">
+                          <p className="text-xs text-zinc-400 uppercase mb-1">R-Multiple</p>
+                          <p className="text-2xl font-bold text-cyan-400">{selectedPosition.r_multiple}R</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {/* Position Details Grid */}
+                  <div className="grid grid-cols-4 gap-3 mb-6">
                     <div className="p-3 rounded-xl bg-black/40 text-center">
-                      <p className="text-[10px] text-zinc-500 uppercase">Entry</p>
-                      <p className="text-lg font-bold text-white">${selectedPosition.entry_price?.toFixed(2)}</p>
+                      <p className="text-[10px] text-zinc-500 uppercase mb-1">Shares</p>
+                      <p className="text-lg font-bold text-white">{selectedPosition.shares?.toLocaleString() || '--'}</p>
                     </div>
                     <div className="p-3 rounded-xl bg-black/40 text-center">
-                      <p className="text-[10px] text-zinc-500 uppercase">Current P&L</p>
-                      <p className={`text-lg font-bold ${selectedPosition.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {selectedPosition.pnl >= 0 ? '+' : ''}{selectedPosition.pnl?.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
-                      </p>
+                      <p className="text-[10px] text-zinc-500 uppercase mb-1">Entry Price</p>
+                      <p className="text-lg font-bold text-white">${selectedPosition.entry_price?.toFixed(2) || '--'}</p>
                     </div>
                     <div className="p-3 rounded-xl bg-black/40 text-center">
-                      <p className="text-[10px] text-zinc-500 uppercase">R-Multiple</p>
-                      <p className="text-lg font-bold text-cyan-400">{selectedPosition.r_multiple || '--'}R</p>
+                      <p className="text-[10px] text-zinc-500 uppercase mb-1">Current Price</p>
+                      <p className="text-lg font-bold text-cyan-400">${selectedPosition.current_price?.toFixed(2) || '--'}</p>
                     </div>
                     <div className="p-3 rounded-xl bg-black/40 text-center">
-                      <p className="text-[10px] text-zinc-500 uppercase">Status</p>
-                      <p className={`text-lg font-bold capitalize ${
-                        selectedPosition.status === 'running' ? 'text-emerald-400' :
-                        selectedPosition.status === 'trailing' ? 'text-cyan-400' :
-                        selectedPosition.status === 'watching' ? 'text-amber-400' :
-                        'text-violet-400'
-                      }`}>
-                        {selectedPosition.status || 'Open'}
+                      <p className="text-[10px] text-zinc-500 uppercase mb-1">Market Value</p>
+                      <p className="text-lg font-bold text-white">
+                        ${((selectedPosition.shares || 0) * (selectedPosition.current_price || 0)).toLocaleString('en-US', { maximumFractionDigits: 0 })}
                       </p>
                     </div>
                   </div>
                   
-                  {/* Price Levels */}
-                  <div className="grid grid-cols-3 gap-4 mb-6">
-                    <div className="p-3 rounded-xl bg-black/40 text-center">
-                      <p className="text-[10px] text-zinc-500 uppercase">Stop</p>
+                  {/* Risk Management Levels */}
+                  <div className="grid grid-cols-3 gap-3 mb-6">
+                    <div className="p-3 rounded-xl bg-black/40 border border-rose-500/20">
+                      <p className="text-[10px] text-rose-400 uppercase mb-1 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" /> Stop Loss
+                      </p>
                       <p className="text-lg font-bold text-rose-400">
-                        ${selectedPosition.stop_price?.toFixed(2) || '--'}
+                        ${selectedPosition.stop_price?.toFixed(2) || 'None Set'}
                       </p>
+                      {selectedPosition.stop_price && selectedPosition.current_price && (
+                        <p className="text-[10px] text-zinc-500">
+                          {((selectedPosition.current_price - selectedPosition.stop_price) / selectedPosition.current_price * 100).toFixed(1)}% away
+                        </p>
+                      )}
                     </div>
-                    <div className="p-3 rounded-xl bg-black/40 text-center">
-                      <p className="text-[10px] text-zinc-500 uppercase">Current</p>
-                      <p className="text-lg font-bold text-white">
-                        ${selectedPosition.current_price?.toFixed(2)}
+                    <div className="p-3 rounded-xl bg-black/40 border border-white/10">
+                      <p className="text-[10px] text-zinc-400 uppercase mb-1">Current</p>
+                      <p className="text-lg font-bold text-white">${selectedPosition.current_price?.toFixed(2) || '--'}</p>
+                      <p className="text-[10px] text-zinc-500">Live price</p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-black/40 border border-emerald-500/20">
+                      <p className="text-[10px] text-emerald-400 uppercase mb-1 flex items-center gap-1">
+                        <Target className="w-3 h-3" /> Target
                       </p>
-                    </div>
-                    <div className="p-3 rounded-xl bg-black/40 text-center">
-                      <p className="text-[10px] text-zinc-500 uppercase">Target</p>
                       <p className="text-lg font-bold text-emerald-400">
-                        ${selectedPosition.target_prices?.[0]?.toFixed(2) || '--'}
+                        ${selectedPosition.target_prices?.[0]?.toFixed(2) || 'None Set'}
                       </p>
+                      {selectedPosition.target_prices?.[0] && selectedPosition.current_price && (
+                        <p className="text-[10px] text-zinc-500">
+                          {((selectedPosition.target_prices[0] - selectedPosition.current_price) / selectedPosition.current_price * 100).toFixed(1)}% to target
+                        </p>
+                      )}
                     </div>
                   </div>
+                  
+                  {/* Entry Timestamp (if available) */}
+                  {selectedPosition.entry_time && (
+                    <div className="p-3 rounded-xl bg-black/30 mb-6">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-4 h-4 text-zinc-500" />
+                          <span className="text-xs text-zinc-400">Entry Time</span>
+                        </div>
+                        <span className="text-sm text-white font-mono">
+                          {new Date(selectedPosition.entry_time).toLocaleString('en-US', { 
+                            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true 
+                          })}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                   
                   {/* Our Take Section */}
                   <div className="p-4 rounded-xl bg-gradient-to-r from-violet-500/10 to-transparent border border-violet-500/20">
@@ -1870,10 +1983,12 @@ const SentCom = ({ compact = false, embedded = false }) => {
                       <span className="font-bold text-white">Our Take</span>
                     </div>
                     <p className="text-sm text-zinc-300">
-                      "We're {selectedPosition.pnl >= 0 ? 'running nicely on' : 'underwater on'} {selectedPosition.symbol}. 
-                      {selectedPosition.status === 'trailing' ? " We've moved our stop to breakeven and are trailing for more." : 
+                      "We're {selectedPosition.pnl >= 0 ? 'running nicely on' : 'underwater on'} {selectedPosition.symbol} with {selectedPosition.shares?.toLocaleString()} shares. 
+                      {selectedPosition.pnl_percent >= 5 ? ` Up ${selectedPosition.pnl_percent?.toFixed(1)}% - considering scaling out.` :
+                       selectedPosition.pnl_percent <= -3 ? ` Down ${Math.abs(selectedPosition.pnl_percent || 0).toFixed(1)}% - watching stop levels closely.` :
+                       selectedPosition.status === 'trailing' ? " We've moved our stop to breakeven and are trailing for more." : 
                        selectedPosition.status === 'watching' ? " We're watching for a bounce or considering cutting." :
-                       " Momentum is with us - letting it run."}
+                       " Position is within normal range - letting it work."}
                     </p>
                   </div>
                 </GlassCard>
