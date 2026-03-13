@@ -656,19 +656,19 @@ const NewDashboard = ({
       
       {/* Main Grid */}
       <div className="grid grid-cols-12 gap-4">
-        {/* Left Column (8 cols) */}
+        {/* Left Column (8 cols) - SentCom + Positions/Setups */}
         <div className="col-span-8 space-y-4">
-          {/* SentCom - Unified AI Command Center (replaces BotBrainPanel) */}
-          <SentCom compact={true} />
+          {/* SentCom Embedded (Unified AI Command Center) */}
+          <SentCom embedded={true} />
           
-          {/* Active Positions */}
-          <ActivePositionsCard positions={effectiveOpenTrades} />
-          
-          {/* Setups We're Watching */}
-          <WatchingSetupsCard setups={effectiveWatchingSetups} />
+          {/* Bottom Row: Active Positions + Setups (side by side) */}
+          <div className="grid grid-cols-2 gap-4">
+            <ActivePositionsCard positions={effectiveOpenTrades} />
+            <WatchingSetupsCard setups={effectiveWatchingSetups} />
+          </div>
         </div>
         
-        {/* Right Column (4 cols) - AI Assistant + other widgets */}
+        {/* Right Column (4 cols) - Learning Insights + Market Regime */}
         <div className="col-span-4 space-y-4">
           {children}
         </div>
