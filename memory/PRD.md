@@ -247,6 +247,37 @@ Do NOT deprecate `TradingDashboardPage`. Instead:
 
 ---
 
+## 🎯 NEXT SESSION: Smart Strategy Filtering
+
+**Priority:** P2 - MEDIUM
+
+**What to Implement:**
+Build smart strategy filtering directly into the bot's AI reasoning, NOT as a separate UI filter.
+
+**How It Works:**
+1. When bot evaluates a setup, query learning_provider for user's historical stats on that setup type
+2. Factor historical win rate into trade decision:
+   - High WR (>55%): Proceed normally
+   - Medium WR (45-55%): Require higher TQS threshold
+   - Low WR (<45%): Skip or reduce size significantly
+3. Surface reasoning in bot's thoughts:
+   - "Taking this breakout - you're 67% on these"
+   - "Passing on this pullback - you're only 38% historically"
+
+**Files to Modify:**
+- `/app/backend/services/trading_bot_service.py` - Trade evaluation logic
+- `/app/backend/agents/trade_executor_agent.py` - Decision making
+- `/app/backend/services/slow_learning_service.py` - Query historical stats
+
+**Data Already Available:**
+- learning_provider tracks win rate by setup type
+- learning_provider tracks win rate by regime
+- learning_provider tracks average R-multiple by setup
+
+**User Preference:** Bake into bot reasoning, not UI filters. Bot should explain WHY it passed on setups.
+
+---
+
 ## 📋 FULL PRIORITY ROADMAP (March 2026)
 
 ### 🔴 P0 - CRITICAL (Data Integrity & Core Functionality)
@@ -268,35 +299,45 @@ Do NOT deprecate `TradingDashboardPage`. Instead:
 
 6. **Market Regime Panel Redesign** ✅ COMPLETE
 
-7. **Live Chart Data Loading** - Needs IB connection testing
+7. **Live Chart Data Loading** ✅ COMPLETE - IB/Alpaca fallback working
 
-8. **Deep Analysis API Integration** - Wire button in modal
+8. **Deep Analysis API Integration** ✅ COMPLETE - askAIAboutStock wired
+
+9. **Enhanced Brief Me Feature** ✅ COMPLETE
+   - Real news/catalysts from Finnhub
+   - Sector rotation analysis
+   - Earnings calendar integration
+   - News sentiment analysis
 
 ---
 
 ### 🟡 P2 - MEDIUM PRIORITY (Feature Enhancement)
 
-6. **Enhanced Brief Me Feature**
-   - Real news/catalysts
-   - Scan more symbols for gappers
-   - Sector rotation analysis
-   - Earnings calendar integration
+10. **AI Proactive Intelligence** ✅ COMPLETE
+    - ProactiveIntelligence component in Bot Brain
+    - Alerts for setup triggers, profit-taking, runners, regime warnings
 
-7. **AI Improvement Plan Phase 3: Proactive Intelligence**
+11. **Exit Optimization (Trailing Stops)** ✅ COMPLETE
+    - /api/smart-stops/calculate-trailing-stop
+    - /api/smart-stops/auto-trail-positions
+    - ATR, percent, chandelier, parabolic modes
 
-8. **Smart Strategy Filtering**
+12. **Bot's Take for Non-Position Tickers** ✅ COMPLETE
+    - HypotheticalBotTakeCard in ticker modal
 
-9. **Exit Optimization**
+13. **Smart Strategy Filtering** 🔜 NEXT SESSION
+    - Build into bot's AI reasoning (not UI filters)
+    - Bot checks user's historical win rate on setup type
+    - Surfaces reasoning in thoughts
 
-10. **Bot's Take for Non-Position Tickers**
+14. **One-Click Stop Fix** ❌ NOT STARTED
+    - Auto-adjust risky stops to recommended level
 
 ---
 
 ### 🟢 P3 - LOW PRIORITY (Nice to Have)
 
-11. **Market Scanner Alpaca Rate Limiting Fix**
-
-12. **Deprecate Old Monolithic Services**
+15. **Market Scanner Alpaca Rate Limiting Fix**
     - `ai_assistant_service.py`, `slow_learning_service.py`
 
 13. **Voice Commands**
