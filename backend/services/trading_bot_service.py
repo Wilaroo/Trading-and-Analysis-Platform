@@ -711,7 +711,7 @@ class TradingBotService:
         
         # SKIP: Very low win rate (<35%) - historically losing setup
         if win_rate < config["skip_win_rate_threshold"]:
-            reasoning = f"🚫 Passing on {symbol} {setup_type} - you're only {win_rate:.0%} historically ({stats.get('wins', 0)}W/{stats.get('losses', 0)}L on {sample_size} trades)"
+            reasoning = f"🚫 Passing on {symbol} {setup_type} - we're only {win_rate:.0%} historically ({stats.get('wins', 0)}W/{stats.get('losses', 0)}L on {sample_size} trades)"
             if expected_value < 0:
                 reasoning += f". Negative EV ({expected_value:.2f}R)"
             
@@ -725,7 +725,7 @@ class TradingBotService:
         
         # REDUCE_SIZE: Low win rate (35-45%) - reduce position by 50%
         if win_rate < config["reduce_size_threshold"]:
-            reasoning = f"⚠️ Taking {symbol} {setup_type} with reduced size - you're {win_rate:.0%} historically ({sample_size} trades). Using {config['size_reduction_pct']*100:.0f}% position."
+            reasoning = f"⚠️ Taking {symbol} {setup_type} with reduced size - we're {win_rate:.0%} historically ({sample_size} trades). Using {config['size_reduction_pct']*100:.0f}% position."
             
             return {
                 "action": "REDUCE_SIZE",
@@ -738,7 +738,7 @@ class TradingBotService:
         # REQUIRE_HIGHER_TQS: Borderline (45-50%) - only take if TQS is high
         if win_rate < config["normal_threshold"]:
             if quality_score < config["high_tqs_requirement"]:
-                reasoning = f"🎯 Passing on {symbol} {setup_type} - you're {win_rate:.0%} on this setup and TQS ({quality_score}) doesn't meet threshold ({config['high_tqs_requirement']})"
+                reasoning = f"🎯 Passing on {symbol} {setup_type} - we're {win_rate:.0%} on this setup and TQS ({quality_score}) doesn't meet threshold ({config['high_tqs_requirement']})"
                 return {
                     "action": "SKIP",
                     "reasoning": reasoning,
@@ -758,7 +758,7 @@ class TradingBotService:
                 }
         
         # PROCEED: Good win rate (55%+) - full sizing
-        reasoning = f"✅ Taking {symbol} {setup_type} - you're {win_rate:.0%} historically ({stats.get('wins', 0)}W/{stats.get('losses', 0)}L)"
+        reasoning = f"✅ Taking {symbol} {setup_type} - we're {win_rate:.0%} historically ({stats.get('wins', 0)}W/{stats.get('losses', 0)}L)"
         if expected_value > 0.2:
             reasoning += f". Positive EV (+{expected_value:.2f}R)"
         

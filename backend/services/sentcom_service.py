@@ -1,5 +1,5 @@
 """
-SentCom Service - Sentinel Command
+SentCom Service - Sentient Command
 Unified AI command center that orchestrates all trading intelligence.
 
 Uses "we" voice throughout - the human trader and AI working as a team.
@@ -77,7 +77,7 @@ class SentComStatus:
 
 class SentComService:
     """
-    SentCom - Sentinel Command
+    SentCom - Sentient Command
     
     The unified AI command center that speaks with "we" voice.
     Orchestrates all trading intelligence and provides a single
@@ -313,6 +313,8 @@ class SentComService:
             ("My ", "Our "),
             (" me ", " us "),
             (" me.", " us."),
+            ("you're ", "we're "),
+            ("You're ", "We're "),
             ("your ", "our "),
             ("Your ", "Our "),
             ("you ", "we "),

@@ -10,14 +10,15 @@ import {
   BookOpen,
   Settings,
   Brain,
-  Sparkles
+  Sparkles,
+  Radio
 } from 'lucide-react';
 
 const navItems = [
   { id: 'command-center', icon: Target, label: 'Command Center', highlight: true },
-  { id: 'trading', icon: Activity, label: 'Trading Dashboard', highlight: true },
-  { id: 'team-brain-mockups-v2', icon: Sparkles, label: 'SentCom V2', highlight: true, isNew: true },
-  { id: 'team-brain-mockups', icon: Brain, label: 'SentCom V1', highlight: false },
+  { id: 'sentcom', icon: Radio, label: 'SentCom', highlight: true, isNew: true },
+  { id: 'trading', icon: Activity, label: 'Trading Dashboard', highlight: false },
+  { id: 'team-brain-mockups-v2', icon: Sparkles, label: 'SentCom Mockups', highlight: false },
   { id: 'trade-journal', icon: ClipboardList, label: 'Trade Journal' },
   { id: 'chart', icon: LineChart, label: 'Charts' },
   { id: 'ib-trading', icon: Zap, label: 'IB Trading' },

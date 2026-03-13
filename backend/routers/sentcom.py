@@ -1,5 +1,5 @@
 """
-SentCom Router - Sentinel Command API Endpoints
+SentCom Router - Sentient Command API Endpoints
 Unified AI command center for the trading team.
 
 Endpoints:
