@@ -991,6 +991,35 @@ async def get_bot_thoughts(limit: int = Query(10, ge=1, le=50)):
                     "severity": severity
                 })
         
+        # 0.5. SMART STRATEGY FILTER THOUGHTS (High priority - trade filtering reasoning)
+        filter_thoughts = _trading_bot.get_filter_thoughts(limit=5)
+        for ft in filter_thoughts:
+            action = ft.get("action", "PROCEED")
+            text = ft.get("text", "")
+            symbol = ft.get("symbol", None)
+            win_rate = ft.get("win_rate", 0)
+            
+            # Color-code by action type
+            if action == "SKIP":
+                confidence = 85
+                action_type = "filter_skip"
+            elif action == "REDUCE_SIZE":
+                confidence = 70
+                action_type = "filter_reduce"
+            else:
+                confidence = 60
+                action_type = "filter_proceed"
+            
+            thoughts.append({
+                "text": f'"{text}"',
+                "timestamp": ft.get("timestamp", now.isoformat()),
+                "confidence": confidence,
+                "action_type": action_type,
+                "symbol": symbol,
+                "win_rate": win_rate,
+                "filter_action": action
+            })
+        
         # 1. Thoughts from pending trades (about to execute)
         for trade in _trading_bot.get_pending_trades()[:3]:
             symbol = trade.get('symbol', 'UNKNOWN')
@@ -1379,6 +1408,201 @@ async def audit_position_stops():
             "error": str(e),
             "warnings": []
         }
+
+
+@router.post("/fix-stop/{trade_id}")
+async def fix_stop_to_recommended(trade_id: str):
+    """
+    One-Click Stop Fix: Automatically adjust a risky stop to the recommended level.
+    
+    Uses the Smart Stop System to calculate the optimal stop price and updates
+    the trade's stop price. This is the quick fix for stop audit warnings.
+    
+    Args:
+        trade_id: The ID of the trade to fix
+    
+    Returns:
+        Updated trade with new stop price and explanation of the fix
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    try:
+        from services.smart_stop_service import get_smart_stop_service
+        smart_stop = get_smart_stop_service()
+        
+        # Find the trade
+        trade = None
+        for t_id, t in _trading_bot._open_trades.items():
+            if t.id == trade_id or t_id == trade_id:
+                trade = t
+                break
+        
+        if not trade:
+            raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
+        
+        symbol = trade.symbol
+        entry_price = trade.fill_price or trade.entry_price
+        current_price = trade.current_price
+        stop_price = trade.stop_price
+        direction = trade.direction.value if hasattr(trade.direction, 'value') else trade.direction
+        setup_type = trade.setup_type
+        
+        # Estimate ATR as 2% of price if not available
+        atr = entry_price * 0.02
+        
+        # Calculate intelligent stop
+        analysis = await smart_stop.calculate_intelligent_stop(
+            symbol=symbol,
+            entry_price=entry_price,
+            current_price=current_price,
+            direction=direction,
+            setup_type=setup_type,
+            position_size=trade.shares,
+            atr=atr
+        )
+        
+        new_stop = analysis.stop_price
+        old_stop = stop_price
+        
+        # Update the trade's stop price
+        trade.stop_price = new_stop
+        
+        # Update trailing stop config as well
+        if hasattr(trade, 'trailing_stop_config') and trade.trailing_stop_config:
+            trade.trailing_stop_config['current_stop'] = new_stop
+            trade.trailing_stop_config['stop_adjustments'] = trade.trailing_stop_config.get('stop_adjustments', [])
+            trade.trailing_stop_config['stop_adjustments'].append({
+                'from': old_stop,
+                'to': new_stop,
+                'reason': 'one_click_fix',
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            })
+        
+        # Persist the updated trade
+        _trading_bot._persist_trade(trade)
+        
+        # Calculate improvement
+        if direction == 'long':
+            improvement_pct = ((new_stop - old_stop) / entry_price * 100)
+            improvement_desc = f"Tightened stop by {abs(improvement_pct):.1f}%" if new_stop > old_stop else f"Loosened stop by {abs(improvement_pct):.1f}%"
+        else:
+            improvement_pct = ((old_stop - new_stop) / entry_price * 100)
+            improvement_desc = f"Tightened stop by {abs(improvement_pct):.1f}%" if new_stop < old_stop else f"Loosened stop by {abs(improvement_pct):.1f}%"
+        
+        logger.info(f"🔧 One-Click Stop Fix: {symbol} stop adjusted from ${old_stop:.2f} to ${new_stop:.2f} ({improvement_desc})")
+        
+        return {
+            "success": True,
+            "trade_id": trade.id,
+            "symbol": symbol,
+            "old_stop": old_stop,
+            "new_stop": new_stop,
+            "improvement": improvement_desc,
+            "analysis": {
+                "hunt_risk": analysis.hunt_risk,
+                "urgency": analysis.urgency.value,
+                "factors_considered": analysis.factors_considered[:3] if analysis.factors_considered else []
+            },
+            "message": f"Stop for {symbol} fixed: ${old_stop:.2f} → ${new_stop:.2f}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fixing stop for trade {trade_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fix stop: {str(e)}")
+
+
+@router.post("/fix-all-risky-stops")
+async def fix_all_risky_stops():
+    """
+    Fix ALL risky stops in one click.
+    
+    Runs the stop audit, identifies all positions with critical or warning issues,
+    and automatically adjusts their stops to optimal levels.
+    
+    Returns a summary of all fixes applied.
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    try:
+        # First run the audit to identify issues
+        audit_result = await audit_position_stops()
+        
+        if not audit_result.get("success") or not audit_result.get("warnings"):
+            return {
+                "success": True,
+                "message": "No risky stops to fix",
+                "fixes_applied": 0,
+                "positions_checked": audit_result.get("positions_audited", 0)
+            }
+        
+        # Filter to critical and warning level issues only
+        risky_warnings = [
+            w for w in audit_result["warnings"]
+            if w.get("severity") in ["critical", "warning"]
+        ]
+        
+        if not risky_warnings:
+            return {
+                "success": True,
+                "message": "No critical or warning-level stop issues to fix",
+                "fixes_applied": 0,
+                "positions_checked": audit_result.get("positions_audited", 0)
+            }
+        
+        # Group warnings by symbol (one fix per symbol)
+        symbols_to_fix = {}
+        for warning in risky_warnings:
+            symbol = warning.get("symbol")
+            if symbol and symbol not in symbols_to_fix:
+                symbols_to_fix[symbol] = warning
+        
+        # Apply fixes
+        fixes = []
+        errors = []
+        
+        for symbol, warning in symbols_to_fix.items():
+            # Find the trade for this symbol
+            trade = None
+            for t in _trading_bot._open_trades.values():
+                if t.symbol == symbol:
+                    trade = t
+                    break
+            
+            if not trade:
+                errors.append({"symbol": symbol, "error": "Trade not found"})
+                continue
+            
+            try:
+                # Fix this trade's stop
+                fix_result = await fix_stop_to_recommended(trade.id)
+                if fix_result.get("success"):
+                    fixes.append({
+                        "symbol": symbol,
+                        "old_stop": fix_result["old_stop"],
+                        "new_stop": fix_result["new_stop"],
+                        "improvement": fix_result["improvement"]
+                    })
+            except Exception as e:
+                errors.append({"symbol": symbol, "error": str(e)})
+        
+        logger.info(f"🔧 Bulk Stop Fix: Applied {len(fixes)} fixes, {len(errors)} errors")
+        
+        return {
+            "success": True,
+            "message": f"Fixed {len(fixes)} risky stops",
+            "fixes_applied": len(fixes),
+            "fixes": fixes,
+            "errors": errors if errors else None,
+            "positions_checked": audit_result.get("positions_audited", 0)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fixing all risky stops: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fix stops: {str(e)}")
 
 
 @router.get("/account")
@@ -1903,4 +2127,116 @@ async def clear_orphaned_trades():
     except Exception as e:
         logger.error(f"Failed to clear orphaned trades: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to clear orphaned trades: {str(e)}")
+
+
+# ==================== SMART STRATEGY FILTERING ENDPOINTS ====================
+
+@router.get("/smart-filter/config")
+async def get_smart_filter_config():
+    """Get the current Smart Strategy Filter configuration"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    return {
+        "success": True,
+        "config": _trading_bot.get_smart_filter_config()
+    }
+
+
+@router.post("/smart-filter/config")
+async def update_smart_filter_config(updates: Dict[str, Any]):
+    """
+    Update Smart Strategy Filter configuration.
+    
+    Available settings:
+    - enabled: bool - Enable/disable smart filtering
+    - min_sample_size: int - Minimum trades needed to filter (default: 5)
+    - skip_win_rate_threshold: float - Skip if win rate below this (default: 0.35)
+    - reduce_size_threshold: float - Reduce size if below this (default: 0.45)
+    - require_higher_tqs_threshold: float - Require higher TQS if below (default: 0.50)
+    - normal_threshold: float - Normal trading above this (default: 0.55)
+    - size_reduction_pct: float - Size reduction percentage (default: 0.5)
+    - high_tqs_requirement: int - TQS required for borderline (default: 75)
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    new_config = _trading_bot.update_smart_filter_config(updates)
+    
+    return {
+        "success": True,
+        "message": "Smart filter config updated",
+        "config": new_config
+    }
+
+
+@router.get("/smart-filter/thoughts")
+async def get_filter_thoughts(limit: int = Query(10, ge=1, le=50)):
+    """
+    Get recent strategy filter thoughts/reasoning.
+    
+    These show when the bot skipped or modified trades based on historical performance.
+    Example: "Passing on NVDA breakout - you're only 38% on breakouts historically"
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    thoughts = _trading_bot.get_filter_thoughts(limit=limit)
+    
+    return {
+        "success": True,
+        "thoughts": thoughts,
+        "count": len(thoughts)
+    }
+
+
+@router.get("/smart-filter/strategy-stats/{setup_type}")
+async def get_strategy_stats(setup_type: str):
+    """
+    Get user's historical performance stats for a specific setup type.
+    
+    Returns win rate, sample size, average R, expected value, etc.
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    stats = _trading_bot.get_strategy_historical_stats(setup_type)
+    
+    return {
+        "success": True,
+        **stats
+    }
+
+
+@router.get("/smart-filter/all-strategy-stats")
+async def get_all_strategy_stats():
+    """
+    Get user's historical performance stats for ALL setup types.
+    Useful for the Learning Dashboard to show strategy performance breakdown.
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    if not _trading_bot._enhanced_scanner:
+        return {
+            "success": False,
+            "error": "Enhanced scanner not connected",
+            "stats": {}
+        }
+    
+    try:
+        all_stats = _trading_bot._enhanced_scanner.get_strategy_stats()
+        return {
+            "success": True,
+            "stats": all_stats,
+            "count": len(all_stats)
+        }
+    except Exception as e:
+        logger.error(f"Error getting all strategy stats: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "stats": {}
+        }
+
 

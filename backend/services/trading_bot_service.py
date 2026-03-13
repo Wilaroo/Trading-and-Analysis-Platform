@@ -567,6 +567,28 @@ class TradingBotService:
         # Callbacks for real-time updates
         self._trade_callbacks: List[callable] = []
         
+        # =====================================================================
+        # SMART STRATEGY FILTERING - Win rate based trade filtering
+        # =====================================================================
+        # Stores recent "skipped trade" reasoning to show in Bot's Thoughts
+        self._strategy_filter_thoughts: List[Dict] = []  # [{text, timestamp, symbol, setup_type, win_rate, action}]
+        self._max_filter_thoughts = 20  # Keep last 20 filtered trade reasons
+        
+        # Enhanced scanner reference for strategy stats
+        self._enhanced_scanner = None
+        
+        # Smart filtering thresholds (can be tuned)
+        self._smart_filter_config = {
+            "enabled": True,
+            "min_sample_size": 5,              # Need at least 5 trades to filter
+            "skip_win_rate_threshold": 0.35,   # Skip trades if win rate < 35%
+            "reduce_size_threshold": 0.45,     # Reduce size if win rate 35-45%
+            "require_higher_tqs_threshold": 0.50,  # Require TQS 75+ if win rate 45-50%
+            "normal_threshold": 0.55,          # Normal trading if win rate >= 55%
+            "size_reduction_pct": 0.5,         # Reduce to 50% size for low win rate
+            "high_tqs_requirement": 75,        # TQS required for borderline setups
+        }
+        
         logger.info("TradingBotService initialized in AUTONOMOUS mode")
     
     def set_services(self, alert_system, trading_intelligence, alpaca_service, trade_executor, db):
@@ -590,6 +612,192 @@ class TradingBotService:
         """Set regime performance service for trade logging"""
         self._regime_performance_service = performance_service
         logger.info("TradingBotService: Regime Performance Service connected")
+    
+    def set_enhanced_scanner(self, scanner):
+        """Set enhanced scanner for strategy stats access (Smart Strategy Filtering)"""
+        self._enhanced_scanner = scanner
+        logger.info("TradingBotService: Enhanced Scanner connected for Smart Strategy Filtering")
+    
+    # ==================== SMART STRATEGY FILTERING ====================
+    
+    def get_strategy_historical_stats(self, setup_type: str) -> Dict[str, Any]:
+        """
+        Get user's historical performance stats for a specific setup type.
+        Used for Smart Strategy Filtering - adjusts trade decisions based on past performance.
+        
+        Returns:
+            dict with win_rate, sample_size, avg_r, expected_value, recommendation
+        """
+        if not self._enhanced_scanner:
+            return {"available": False, "reason": "Scanner not connected"}
+        
+        try:
+            # Get base setup type (remove _long/_short suffix for stats lookup)
+            base_setup = setup_type.split("_long")[0].split("_short")[0]
+            
+            # Try to get stats from enhanced scanner
+            stats = self._enhanced_scanner.get_strategy_stats(base_setup)
+            
+            if not stats:
+                return {
+                    "available": False,
+                    "reason": "No historical data",
+                    "setup_type": base_setup
+                }
+            
+            sample_size = stats.get("alerts_triggered", 0) or stats.get("total_alerts", 0)
+            win_rate = stats.get("win_rate", 0)
+            avg_r = stats.get("avg_rr_achieved", 0)
+            expected_value = stats.get("expected_value_r", 0)
+            
+            return {
+                "available": True,
+                "setup_type": base_setup,
+                "win_rate": win_rate,
+                "sample_size": sample_size,
+                "avg_r": avg_r,
+                "expected_value": expected_value,
+                "profit_factor": stats.get("profit_factor", 0),
+                "total_pnl": stats.get("total_pnl", 0),
+                "wins": stats.get("alerts_won", 0),
+                "losses": stats.get("alerts_lost", 0)
+            }
+            
+        except Exception as e:
+            logger.warning(f"Could not get strategy stats for {setup_type}: {e}")
+            return {"available": False, "reason": str(e)}
+    
+    def _evaluate_strategy_filter(self, setup_type: str, quality_score: int, symbol: str) -> Dict[str, Any]:
+        """
+        Evaluate if a trade should be filtered based on user's historical performance.
+        
+        This is the core "Smart Strategy Filtering" logic that:
+        1. Checks user's historical win rate for this setup type
+        2. Decides: PROCEED, REDUCE_SIZE, REQUIRE_HIGHER_TQS, or SKIP
+        3. Generates reasoning for the Bot's Thoughts stream
+        
+        Returns:
+            dict with action, reasoning, adjustments
+        """
+        if not self._smart_filter_config.get("enabled", True):
+            return {"action": "PROCEED", "reasoning": "Smart filtering disabled"}
+        
+        stats = self.get_strategy_historical_stats(setup_type)
+        
+        if not stats.get("available"):
+            # No historical data - proceed with caution
+            return {
+                "action": "PROCEED",
+                "reasoning": f"No historical data for {setup_type} - proceeding with default sizing",
+                "adjustment_pct": 1.0,
+                "stats": stats
+            }
+        
+        sample_size = stats.get("sample_size", 0)
+        win_rate = stats.get("win_rate", 0)
+        expected_value = stats.get("expected_value", 0)
+        config = self._smart_filter_config
+        
+        # Not enough data to filter
+        if sample_size < config["min_sample_size"]:
+            return {
+                "action": "PROCEED",
+                "reasoning": f"Only {sample_size} trades on record for {setup_type} - need {config['min_sample_size']}+ to filter",
+                "adjustment_pct": 1.0,
+                "stats": stats
+            }
+        
+        # === SMART FILTERING DECISION TREE ===
+        
+        # SKIP: Very low win rate (<35%) - historically losing setup
+        if win_rate < config["skip_win_rate_threshold"]:
+            reasoning = f"🚫 Passing on {symbol} {setup_type} - you're only {win_rate:.0%} historically ({stats.get('wins', 0)}W/{stats.get('losses', 0)}L on {sample_size} trades)"
+            if expected_value < 0:
+                reasoning += f". Negative EV ({expected_value:.2f}R)"
+            
+            return {
+                "action": "SKIP",
+                "reasoning": reasoning,
+                "adjustment_pct": 0,
+                "stats": stats,
+                "win_rate": win_rate
+            }
+        
+        # REDUCE_SIZE: Low win rate (35-45%) - reduce position by 50%
+        if win_rate < config["reduce_size_threshold"]:
+            reasoning = f"⚠️ Taking {symbol} {setup_type} with reduced size - you're {win_rate:.0%} historically ({sample_size} trades). Using {config['size_reduction_pct']*100:.0f}% position."
+            
+            return {
+                "action": "REDUCE_SIZE",
+                "reasoning": reasoning,
+                "adjustment_pct": config["size_reduction_pct"],
+                "stats": stats,
+                "win_rate": win_rate
+            }
+        
+        # REQUIRE_HIGHER_TQS: Borderline (45-50%) - only take if TQS is high
+        if win_rate < config["normal_threshold"]:
+            if quality_score < config["high_tqs_requirement"]:
+                reasoning = f"🎯 Passing on {symbol} {setup_type} - you're {win_rate:.0%} on this setup and TQS ({quality_score}) doesn't meet threshold ({config['high_tqs_requirement']})"
+                return {
+                    "action": "SKIP",
+                    "reasoning": reasoning,
+                    "adjustment_pct": 0,
+                    "stats": stats,
+                    "win_rate": win_rate,
+                    "tqs_required": config["high_tqs_requirement"]
+                }
+            else:
+                reasoning = f"✅ Taking {symbol} {setup_type} - borderline win rate ({win_rate:.0%}) but TQS is strong ({quality_score})"
+                return {
+                    "action": "PROCEED",
+                    "reasoning": reasoning,
+                    "adjustment_pct": 1.0,
+                    "stats": stats,
+                    "win_rate": win_rate
+                }
+        
+        # PROCEED: Good win rate (55%+) - full sizing
+        reasoning = f"✅ Taking {symbol} {setup_type} - you're {win_rate:.0%} historically ({stats.get('wins', 0)}W/{stats.get('losses', 0)}L)"
+        if expected_value > 0.2:
+            reasoning += f". Positive EV (+{expected_value:.2f}R)"
+        
+        return {
+            "action": "PROCEED",
+            "reasoning": reasoning,
+            "adjustment_pct": 1.0,
+            "stats": stats,
+            "win_rate": win_rate
+        }
+    
+    def _add_filter_thought(self, thought: Dict):
+        """Add a strategy filter reasoning to the thoughts list"""
+        thought["timestamp"] = datetime.now(timezone.utc).isoformat()
+        thought["type"] = "strategy_filter"
+        
+        self._strategy_filter_thoughts.insert(0, thought)
+        
+        # Keep only recent thoughts
+        if len(self._strategy_filter_thoughts) > self._max_filter_thoughts:
+            self._strategy_filter_thoughts = self._strategy_filter_thoughts[:self._max_filter_thoughts]
+        
+        logger.info(f"📊 Strategy Filter: {thought.get('reasoning', '')[:100]}")
+    
+    def get_filter_thoughts(self, limit: int = 10) -> List[Dict]:
+        """Get recent strategy filter thoughts for Bot's Brain display"""
+        return self._strategy_filter_thoughts[:limit]
+    
+    def get_smart_filter_config(self) -> Dict:
+        """Get current smart filter configuration"""
+        return self._smart_filter_config.copy()
+    
+    def update_smart_filter_config(self, updates: Dict) -> Dict:
+        """Update smart filter configuration"""
+        for key, value in updates.items():
+            if key in self._smart_filter_config:
+                self._smart_filter_config[key] = value
+                logger.info(f"Smart filter config updated: {key} = {value}")
+        return self._smart_filter_config.copy()
     
     async def _update_market_regime(self):
         """Fetch current market regime for position sizing adjustments"""
@@ -1435,6 +1643,38 @@ class TradingBotService:
             
             print(f"   📈 {symbol}: price=${current_price:.2f}")
             
+            # ==================== SMART STRATEGY FILTERING ====================
+            # Check user's historical performance on this setup type BEFORE proceeding
+            # This is the core "learning from your trades" feature
+            strategy_filter = self._evaluate_strategy_filter(
+                setup_type=setup_type,
+                quality_score=alert.get('score', 70),
+                symbol=symbol
+            )
+            
+            filter_action = strategy_filter.get("action", "PROCEED")
+            filter_reasoning = strategy_filter.get("reasoning", "")
+            filter_adjustment = strategy_filter.get("adjustment_pct", 1.0)
+            filter_win_rate = strategy_filter.get("win_rate", 0)
+            
+            # Log the filter decision
+            if filter_action != "PROCEED" or (filter_win_rate and filter_win_rate > 0):
+                self._add_filter_thought({
+                    "text": filter_reasoning,
+                    "symbol": symbol,
+                    "setup_type": setup_type,
+                    "win_rate": filter_win_rate,
+                    "action": filter_action,
+                    "stats": strategy_filter.get("stats", {})
+                })
+            
+            # SKIP: Don't take this trade based on poor historical performance
+            if filter_action == "SKIP":
+                print(f"   📊 [SMART FILTER] {filter_reasoning}")
+                return None
+            
+            # Note: REDUCE_SIZE is handled later in position sizing
+            
             # ==================== ENHANCED INTELLIGENCE GATHERING ====================
             # Gather all available real-time data to make informed decision
             intelligence = await self._gather_trade_intelligence(symbol, alert)
@@ -1475,6 +1715,14 @@ class TradingBotService:
             
             # Calculate position size with volatility adjustment
             shares, risk_amount = self._calculate_position_size(entry_price, stop_price, direction, atr, atr_percent)
+            
+            # ==================== SMART STRATEGY FILTER SIZE ADJUSTMENT ====================
+            # Apply size reduction if strategy filter recommended it
+            if filter_action == "REDUCE_SIZE" and filter_adjustment < 1.0:
+                original_shares = shares
+                shares = max(1, int(shares * filter_adjustment))
+                risk_amount = risk_amount * filter_adjustment
+                print(f"   📊 [SMART FILTER] Reduced size: {original_shares} -> {shares} shares ({filter_adjustment*100:.0f}%)")
             
             if shares <= 0:
                 print(f"   ❌ Position size = 0 (entry=${entry_price:.2f}, stop=${stop_price:.2f}, risk=${risk_amount:.2f})")
