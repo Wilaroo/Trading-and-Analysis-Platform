@@ -7,6 +7,37 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## RECENT UPDATES (March 13, 2026)
 
+### Custom Chart & In-Trade Guidance Complete
+
+**Status:** ✅ COMPLETE - Tested and Verified (iteration_80.json - 100%)
+
+**1. Custom Proprietary Bot Performance Chart (SVG-based)**
+- Removed TradingView dependency
+- Built with pure SVG/React (no external charting library)
+- Features:
+  - Green gradient area fill for equity curve
+  - Y-axis dollar labels with auto-scaling
+  - X-axis time labels
+  - Hover tooltips with trade details
+  - Trade markers (green=win, red=loss)
+  - Time range buttons: Today, Week, Month, YTD, All
+  - Stats: Trades, Win Rate, Open, Unrealized, Realized, Best, Worst
+
+**2. In-Trade Guidance Alerts in Bot's Brain**
+- Position-specific recommendations based on:
+  - 🛑 **STOP WARNING**: Position within 2% of stop loss
+  - 🎯 **TARGET ZONE**: Position within 3% of target
+  - 🚀 **RUNNING**: Position up 5%+ (suggest trailing stop)
+  - ⚠️ **UNDERWATER**: Position down 3%+ (review thesis)
+- Clickable alerts → opens ticker modal for that symbol
+- Auto-prioritized by urgency
+
+**Files Modified:**
+- `/app/frontend/src/components/BotPerformanceChart.jsx` - Complete rewrite with CustomEquityChart SVG component
+- `/app/frontend/src/components/BotBrainPanel.jsx` - Added InTradeGuidance component
+
+---
+
 ### Dashboard Integration Complete: TradingDashboard → Command Center
 
 **Status:** ✅ COMPLETE - Tested and Verified (iteration_79.json - 100%)
