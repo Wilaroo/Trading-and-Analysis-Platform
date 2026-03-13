@@ -52,19 +52,36 @@ const getScoreColor = (score) => {
 };
 
 const getScoreBarColor = (score) => {
-  if (score >= 70) return 'bg-emerald-400';
-  if (score >= 50) return 'bg-cyan-400';
-  if (score >= 30) return 'bg-yellow-400';
-  return 'bg-red-400';
+  if (score >= 70) return 'bg-gradient-to-r from-emerald-500 to-emerald-400';
+  if (score >= 50) return 'bg-gradient-to-r from-cyan-500 to-cyan-400';
+  if (score >= 30) return 'bg-gradient-to-r from-yellow-500 to-yellow-400';
+  return 'bg-gradient-to-r from-red-500 to-red-400';
 };
 
 const getGradeBadgeColor = (grade) => {
   if (!grade) return 'bg-zinc-600 text-white';
-  if (grade.startsWith('A')) return 'bg-emerald-500 text-black';
-  if (grade.startsWith('B')) return 'bg-cyan-500 text-black';
-  if (grade.startsWith('C')) return 'bg-yellow-500 text-black';
-  return 'bg-red-500 text-white';
+  if (grade.startsWith('A')) return 'bg-gradient-to-r from-emerald-500 to-emerald-400 text-black shadow-lg shadow-emerald-500/30';
+  if (grade.startsWith('B')) return 'bg-gradient-to-r from-cyan-500 to-cyan-400 text-black shadow-lg shadow-cyan-500/30';
+  if (grade.startsWith('C')) return 'bg-gradient-to-r from-yellow-500 to-yellow-400 text-black';
+  return 'bg-gradient-to-r from-red-500 to-red-400 text-white';
 };
+
+// Glass Card Component for V2 styling
+const GlassCard = ({ children, className = '', gradient = false, glow = false }) => (
+  <div className={`
+    relative overflow-hidden rounded-xl
+    bg-gradient-to-br from-white/[0.08] to-white/[0.02]
+    border border-white/10
+    backdrop-blur-xl
+    ${glow ? 'shadow-lg shadow-cyan-500/10' : ''}
+    ${className}
+  `}>
+    {gradient && (
+      <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 via-transparent to-violet-500/5 pointer-events-none" />
+    )}
+    <div className="relative">{children}</div>
+  </div>
+);
 
 // Progress bar for position
 const PositionProgressBar = ({ entry, stop, target, current }) => {
@@ -132,7 +149,7 @@ const ScoreRing = ({ score, size = 64 }) => {
   );
 };
 
-// Bot's Take Card - Enhanced with stop analysis
+// Our Take Card - Enhanced with stop analysis (formerly Bot's Take)
 const BotTakeCard = ({ trade, symbol }) => {
   const [stopAnalysis, setStopAnalysis] = useState(null);
   
@@ -174,51 +191,93 @@ const BotTakeCard = ({ trade, symbol }) => {
   const timestamp = trade.entry_time ? new Date(trade.entry_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
   const hasStopWarnings = stopAnalysis?.recommendations?.some(r => r.severity === 'warning' || r.severity === 'critical');
   
+  // Calculate R:R
+  const entryPrice = trade.fill_price || trade.entry_price;
+  const stopPrice = trade.stop_price;
+  const targetPrice = trade.target_prices?.[0];
+  const riskPerShare = entryPrice && stopPrice ? Math.abs(entryPrice - stopPrice) : 0;
+  const rewardPerShare = entryPrice && targetPrice ? Math.abs(targetPrice - entryPrice) : 0;
+  const rrRatio = riskPerShare > 0 ? (rewardPerShare / riskPerShare).toFixed(1) : null;
+  
   return (
-    <div className={`border-l-[3px] ${hasStopWarnings ? 'border-amber-400' : 'border-cyan-400'} bg-gradient-to-r ${hasStopWarnings ? 'from-amber-400/10' : 'from-cyan-400/10'} to-transparent p-3 rounded-r-xl`}>
-      <div className="flex items-center gap-2 mb-2">
-        <div className={`w-2 h-2 rounded-full ${hasStopWarnings ? 'bg-amber-400' : 'bg-cyan-400'}`} />
-        <span className={`text-xs font-bold ${hasStopWarnings ? 'text-amber-400' : 'text-cyan-400'}`}>BOT'S TAKE</span>
-        {hasStopWarnings && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">
-            Stop needs attention
-          </span>
-        )}
-        {timestamp && <span className="text-[10px] text-zinc-500 ml-auto">{timestamp}</span>}
-      </div>
-      <p className="text-xs text-zinc-300 leading-relaxed">
-        {trade.reasoning || trade.explanation || 
-          `"I ${trade.direction === 'long' ? 'went long' : 'shorted'} ${symbol} at $${trade.fill_price?.toFixed(2) || trade.entry_price?.toFixed(2)}. ${
-            trade.setup_type ? `Setup: ${trade.setup_type}.` : ''
-          } ${trade.stop_price ? `Stop at $${trade.stop_price.toFixed(2)}.` : ''} ${
-            trade.target_prices?.[0] ? `Targeting $${trade.target_prices[0].toFixed(2)}.` : ''
-          }"`
-        }
-      </p>
-      
-      {/* Stop Analysis Recommendations */}
-      {stopAnalysis?.recommendations?.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-white/10">
-          {stopAnalysis.recommendations.slice(0, 2).map((rec, i) => (
-            <div key={i} className={`text-[10px] flex items-start gap-1 ${
-              rec.severity === 'warning' || rec.severity === 'critical' ? 'text-amber-400' : 'text-zinc-400'
-            }`}>
-              {rec.severity === 'warning' || rec.severity === 'critical' ? '⚠️' : '💡'}
-              <span>{rec.message}</span>
+    <GlassCard gradient glow={!hasStopWarnings} className="overflow-hidden">
+      <div className={`border-l-[3px] ${hasStopWarnings ? 'border-amber-400' : 'border-violet-400'} p-4`}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div className={`w-8 h-8 rounded-lg ${hasStopWarnings ? 'bg-amber-500/20' : 'bg-gradient-to-br from-violet-500/30 to-purple-600/30'} flex items-center justify-center`}>
+              <Brain className={`w-4 h-4 ${hasStopWarnings ? 'text-amber-400' : 'text-violet-400'}`} />
             </div>
-          ))}
-          {stopAnalysis.optimal_stop && (
-            <div className="text-[10px] text-cyan-400 mt-1">
-              Optimal stop: ${stopAnalysis.optimal_stop.price?.toFixed(2)} ({stopAnalysis.optimal_stop.confidence}% confidence)
+            <div>
+              <span className={`text-sm font-bold ${hasStopWarnings ? 'text-amber-400' : 'text-violet-400'}`}>OUR TAKE</span>
+              {hasStopWarnings && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 ml-2">
+                  Stop needs attention
+                </span>
+              )}
             </div>
-          )}
+          </div>
+          {timestamp && <span className="text-[10px] text-zinc-500">{timestamp}</span>}
         </div>
-      )}
-    </div>
+        
+        <p className="text-sm text-zinc-200 leading-relaxed mb-3">
+          {trade.reasoning || trade.explanation || 
+            `"We ${trade.direction === 'long' ? 'went long' : 'shorted'} ${symbol} at $${entryPrice?.toFixed(2)}. ${
+              trade.setup_type ? `Using our ${trade.setup_type} setup.` : ''
+            } ${stopPrice ? `Our stop is at $${stopPrice.toFixed(2)}.` : ''} ${
+              targetPrice ? `We're targeting $${targetPrice.toFixed(2)}.` : ''
+            }"`
+          }
+        </p>
+        
+        {/* Trade Parameters Grid */}
+        {entryPrice && (
+          <div className="grid grid-cols-4 gap-2 mb-3">
+            <div className="p-2 rounded-lg bg-black/40 text-center">
+              <p className="text-[9px] text-zinc-500 uppercase">Entry</p>
+              <p className="text-sm font-bold text-white">${entryPrice.toFixed(2)}</p>
+            </div>
+            <div className="p-2 rounded-lg bg-black/40 text-center">
+              <p className="text-[9px] text-zinc-500 uppercase">Stop</p>
+              <p className="text-sm font-bold text-rose-400">${stopPrice?.toFixed(2) || '--'}</p>
+            </div>
+            <div className="p-2 rounded-lg bg-black/40 text-center">
+              <p className="text-[9px] text-zinc-500 uppercase">Target</p>
+              <p className="text-sm font-bold text-emerald-400">${targetPrice?.toFixed(2) || '--'}</p>
+            </div>
+            <div className="p-2 rounded-lg bg-black/40 text-center">
+              <p className="text-[9px] text-zinc-500 uppercase">R:R</p>
+              <p className="text-sm font-bold text-cyan-400">{rrRatio ? `${rrRatio}:1` : '--'}</p>
+            </div>
+          </div>
+        )}
+        
+        {/* Stop Analysis Recommendations */}
+        {stopAnalysis?.recommendations?.length > 0 && (
+          <div className="pt-3 border-t border-white/10">
+            {stopAnalysis.recommendations.slice(0, 2).map((rec, i) => (
+              <div key={i} className={`text-xs flex items-start gap-2 mb-1 ${
+                rec.severity === 'warning' || rec.severity === 'critical' ? 'text-amber-400' : 'text-zinc-400'
+              }`}>
+                <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                <span>{rec.message}</span>
+              </div>
+            ))}
+            {stopAnalysis.optimal_stop && (
+              <div className="flex items-center gap-2 mt-2 p-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+                <Target className="w-3 h-3 text-cyan-400" />
+                <span className="text-xs text-cyan-400">
+                  Optimal stop: ${stopAnalysis.optimal_stop.price?.toFixed(2)} ({stopAnalysis.optimal_stop.confidence}% confidence)
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </GlassCard>
   );
 };
 
-// Hypothetical Bot's Take Card - "If I were to trade this..." for non-position tickers
+// Hypothetical Our Take Card - "If we were to trade this..." for non-position tickers
 const HypotheticalBotTakeCard = ({ analysis, symbol, onAskAI }) => {
   const [hypothetical, setHypothetical] = useState(null);
   
@@ -235,7 +294,7 @@ const HypotheticalBotTakeCard = ({ analysis, symbol, onAskAI }) => {
     const bias = tradingSummary.bias || 'NEUTRAL';
     const strategy = matchedStrategies[0];
     
-    // Determine if bot would trade this
+    // Determine if we would trade this
     const wouldTrade = overallScore >= 60 && bias !== 'NEUTRAL';
     
     // Calculate hypothetical entry, stop, target
@@ -247,26 +306,40 @@ const HypotheticalBotTakeCard = ({ analysis, symbol, onAskAI }) => {
     let hypotheticalTrade = null;
     
     if (wouldTrade && currentPrice > 0) {
+      const entryPrice = currentPrice;
+      const stopPrice = bias === 'BULLISH' 
+        ? (support > 0 ? support - (atr * 0.5) : currentPrice - (atr * 1.5))
+        : (resistance > 0 ? resistance + (atr * 0.5) : currentPrice + (atr * 1.5));
+      const targetPrice = bias === 'BULLISH'
+        ? (resistance > 0 ? resistance : currentPrice * 1.03)
+        : (support > 0 ? support : currentPrice * 0.97);
+      
+      const risk = Math.abs(entryPrice - stopPrice);
+      const reward = Math.abs(targetPrice - entryPrice);
+      const rrRatio = risk > 0 ? (reward / risk).toFixed(1) : 0;
+      
       if (bias === 'BULLISH') {
         hypotheticalTrade = {
           direction: 'long',
-          entry: currentPrice,
-          stop: support > 0 ? support - (atr * 0.5) : currentPrice - (atr * 1.5),
-          target: resistance > 0 ? resistance : currentPrice * 1.03,
-          reasoning: `I'd look to enter long near $${currentPrice.toFixed(2)}. ${
-            strategy?.name ? `Using ${strategy.name} setup.` : ''
-          } Stop below support at $${(support > 0 ? support - (atr * 0.5) : currentPrice - (atr * 1.5)).toFixed(2)}. Target near resistance.`,
+          entry: entryPrice,
+          stop: stopPrice,
+          target: targetPrice,
+          rrRatio,
+          reasoning: `We'd look to enter long near $${currentPrice.toFixed(2)}. ${
+            strategy?.name ? `This matches our ${strategy.name} setup.` : ''
+          } Stop below support, targeting resistance.`,
           confidence: overallScore
         };
       } else if (bias === 'BEARISH') {
         hypotheticalTrade = {
           direction: 'short',
-          entry: currentPrice,
-          stop: resistance > 0 ? resistance + (atr * 0.5) : currentPrice + (atr * 1.5),
-          target: support > 0 ? support : currentPrice * 0.97,
-          reasoning: `I'd look to short near $${currentPrice.toFixed(2)}. ${
-            strategy?.name ? `Using ${strategy.name} setup.` : ''
-          } Stop above resistance at $${(resistance > 0 ? resistance + (atr * 0.5) : currentPrice + (atr * 1.5)).toFixed(2)}. Target near support.`,
+          entry: entryPrice,
+          stop: stopPrice,
+          target: targetPrice,
+          rrRatio,
+          reasoning: `We'd look to short near $${currentPrice.toFixed(2)}. ${
+            strategy?.name ? `This matches our ${strategy.name} setup.` : ''
+          } Stop above resistance, targeting support.`,
           confidence: overallScore
         };
       }
@@ -274,8 +347,8 @@ const HypotheticalBotTakeCard = ({ analysis, symbol, onAskAI }) => {
       hypotheticalTrade = {
         direction: 'pass',
         reasoning: overallScore < 60 
-          ? `I'd pass on ${symbol} right now - quality score is only ${overallScore}/100. I prefer setups with 60+ quality.`
-          : `I'd wait for clearer direction on ${symbol}. Current bias is neutral - no edge.`,
+          ? `We'd pass on ${symbol} right now - quality score is only ${overallScore}/100. We prefer setups with 60+ quality.`
+          : `We'd wait for clearer direction on ${symbol}. Current bias is neutral - no edge for us here.`,
         confidence: 100 - overallScore
       };
     }
@@ -289,50 +362,76 @@ const HypotheticalBotTakeCard = ({ analysis, symbol, onAskAI }) => {
   const isLong = hypothetical.direction === 'long';
   
   return (
-    <div className={`border-l-[3px] ${
-      isPass ? 'border-zinc-500' : isLong ? 'border-emerald-400' : 'border-red-400'
-    } bg-gradient-to-r ${
-      isPass ? 'from-zinc-500/10' : isLong ? 'from-emerald-400/10' : 'from-red-400/10'
-    } to-transparent p-3 rounded-r-xl`}>
-      <div className="flex items-center gap-2 mb-2">
-        <div className={`w-2 h-2 rounded-full ${
-          isPass ? 'bg-zinc-500' : isLong ? 'bg-emerald-400' : 'bg-red-400'
-        }`} />
-        <span className={`text-xs font-bold ${
-          isPass ? 'text-zinc-400' : isLong ? 'text-emerald-400' : 'text-red-400'
-        }`}>IF I WERE TO TRADE THIS...</span>
-        <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-          isPass ? 'bg-zinc-500/20 text-zinc-400' : 
-          isLong ? 'bg-emerald-500/20 text-emerald-400' : 
-          'bg-red-500/20 text-red-400'
-        }`}>
-          {isPass ? 'PASS' : isLong ? 'LONG' : 'SHORT'}
-        </span>
-        <span className="text-[10px] text-zinc-500 ml-auto">{hypothetical.confidence}% conf</span>
-      </div>
-      
-      <p className="text-xs text-zinc-300 leading-relaxed mb-2">
-        "{hypothetical.reasoning}"
-      </p>
-      
-      {!isPass && (
-        <div className="flex gap-3 text-[10px]">
-          <span className="text-zinc-500">Entry: <span className="text-white font-mono">${hypothetical.entry?.toFixed(2)}</span></span>
-          <span className="text-zinc-500">Stop: <span className="text-red-400 font-mono">${hypothetical.stop?.toFixed(2)}</span></span>
-          <span className="text-zinc-500">Target: <span className="text-emerald-400 font-mono">${hypothetical.target?.toFixed(2)}</span></span>
+    <GlassCard gradient className="overflow-hidden">
+      <div className={`border-l-[3px] ${
+        isPass ? 'border-zinc-500' : isLong ? 'border-emerald-400' : 'border-rose-400'
+      } p-4`}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div className={`w-8 h-8 rounded-lg ${
+              isPass ? 'bg-zinc-500/20' : isLong ? 'bg-emerald-500/20' : 'bg-rose-500/20'
+            } flex items-center justify-center`}>
+              <Brain className={`w-4 h-4 ${
+                isPass ? 'text-zinc-400' : isLong ? 'text-emerald-400' : 'text-rose-400'
+              }`} />
+            </div>
+            <div>
+              <span className={`text-sm font-bold ${
+                isPass ? 'text-zinc-400' : isLong ? 'text-emerald-400' : 'text-rose-400'
+              }`}>IF WE WERE TO TRADE THIS...</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`text-xs px-2 py-1 rounded-lg font-bold ${
+              isPass ? 'bg-zinc-500/20 text-zinc-400' : 
+              isLong ? 'bg-emerald-500/20 text-emerald-400' : 
+              'bg-rose-500/20 text-rose-400'
+            }`}>
+              {isPass ? 'PASS' : isLong ? 'LONG' : 'SHORT'}
+            </span>
+            <span className="text-[10px] text-zinc-500">{hypothetical.confidence}% conf</span>
+          </div>
         </div>
-      )}
-      
-      {onAskAI && (
-        <button 
-          onClick={() => onAskAI(symbol, isPass ? 'quality' : 'analyze')}
-          className="w-full mt-2 flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-purple-500/20 text-purple-400 rounded text-xs hover:bg-purple-500/30 border border-purple-500/30 transition-colors"
-        >
-          <Brain className="w-3 h-3" />
-          {isPass ? 'Ask Why Not Trade This?' : 'Get Full Analysis'}
-        </button>
-      )}
-    </div>
+        
+        <p className="text-sm text-zinc-200 leading-relaxed mb-3">
+          "{hypothetical.reasoning}"
+        </p>
+        
+        {!isPass && (
+          <>
+            {/* Trade Parameters Grid */}
+            <div className="grid grid-cols-4 gap-2 mb-3">
+              <div className="p-2 rounded-lg bg-black/40 text-center">
+                <p className="text-[9px] text-zinc-500 uppercase">Entry</p>
+                <p className="text-sm font-bold text-white">${hypothetical.entry?.toFixed(2)}</p>
+              </div>
+              <div className="p-2 rounded-lg bg-black/40 text-center">
+                <p className="text-[9px] text-zinc-500 uppercase">Stop</p>
+                <p className="text-sm font-bold text-rose-400">${hypothetical.stop?.toFixed(2)}</p>
+              </div>
+              <div className="p-2 rounded-lg bg-black/40 text-center">
+                <p className="text-[9px] text-zinc-500 uppercase">Target</p>
+                <p className="text-sm font-bold text-emerald-400">${hypothetical.target?.toFixed(2)}</p>
+              </div>
+              <div className="p-2 rounded-lg bg-black/40 text-center">
+                <p className="text-[9px] text-zinc-500 uppercase">R:R</p>
+                <p className="text-sm font-bold text-cyan-400">{hypothetical.rrRatio}:1</p>
+              </div>
+            </div>
+          </>
+        )}
+        
+        {onAskAI && (
+          <button 
+            onClick={() => onAskAI(symbol, isPass ? 'quality' : 'analyze')}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-gradient-to-r from-violet-500/20 to-purple-500/20 text-violet-400 rounded-xl text-sm font-medium hover:from-violet-500/30 hover:to-purple-500/30 border border-violet-500/30 transition-all"
+          >
+            <Sparkles className="w-4 h-4" />
+            {isPass ? 'Ask Why We\'d Pass' : 'Get Our Full Analysis'}
+          </button>
+        )}
+      </div>
+    </GlassCard>
   );
 };
 
@@ -759,7 +858,7 @@ const EnhancedTickerModal = ({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+          className="absolute inset-0 bg-black/80 backdrop-blur-md"
           onClick={onClose}
         />
         
@@ -772,13 +871,19 @@ const EnhancedTickerModal = ({
           className="absolute right-0 top-0 h-full w-[75%] max-w-[1200px] bg-[#050505] border-l border-white/10 flex flex-col overflow-hidden"
           onClick={e => e.stopPropagation()}
         >
+          {/* Ambient Background Effects */}
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            <div className="absolute top-0 right-1/4 w-96 h-96 bg-cyan-500/5 rounded-full blur-3xl" />
+            <div className="absolute bottom-1/3 left-0 w-96 h-96 bg-violet-500/5 rounded-full blur-3xl" />
+          </div>
+          
           {/* HEADER */}
-          <div className="p-3 border-b border-white/10 flex justify-between items-center flex-shrink-0">
+          <div className="relative p-3 border-b border-white/10 flex justify-between items-center flex-shrink-0 bg-black/40 backdrop-blur-xl">
             <div className="flex items-center gap-3">
               {/* Close */}
               <button 
                 onClick={onClose}
-                className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 transition-colors border border-white/5"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -787,20 +892,20 @@ const EnhancedTickerModal = ({
               <div className="flex items-center gap-2">
                 <span className="text-xl font-bold text-white">{ticker.symbol}</span>
                 {scores.overall && (
-                  <span className={`px-2 py-0.5 rounded text-xs font-bold ${getGradeBadgeColor(scores.grade)}`}>
+                  <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${getGradeBadgeColor(scores.grade)}`}>
                     {scores.overall?.toFixed(0)} {scores.grade || ''}
                   </span>
                 )}
                 {quality.grade && (
-                  <span className={`px-2 py-0.5 rounded text-xs font-bold ${getGradeBadgeColor(quality.grade)}`}>
+                  <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${getGradeBadgeColor(quality.grade)}`}>
                     Q:{quality.grade}
                   </span>
                 )}
                 {tradingSummary.bias && (
-                  <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                    tradingSummary.bias === 'BULLISH' ? 'bg-emerald-500/20 text-emerald-400' :
-                    tradingSummary.bias === 'BEARISH' ? 'bg-red-500/20 text-red-400' :
-                    'bg-zinc-500/20 text-zinc-400'
+                  <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                    tradingSummary.bias === 'BULLISH' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                    tradingSummary.bias === 'BEARISH' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' :
+                    'bg-zinc-500/20 text-zinc-400 border border-zinc-500/30'
                   }`}>
                     {tradingSummary.bias === 'BULLISH' ? 'LONG' : tradingSummary.bias === 'BEARISH' ? 'SHORT' : 'NEUTRAL'}
                   </span>
@@ -815,14 +920,14 @@ const EnhancedTickerModal = ({
                   onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
                   onKeyPress={(e) => e.key === 'Enter' && handleTickerChange(tickerInput)}
                   placeholder="Symbol..." 
-                  className="w-20 bg-black/50 border border-zinc-700 rounded px-2 py-1.5 text-xs uppercase font-mono focus:border-cyan-400 focus:outline-none" 
+                  className="w-20 bg-black/50 border border-white/10 rounded-lg px-2 py-1.5 text-xs uppercase font-mono focus:border-cyan-400 focus:outline-none" 
                 />
                 {quickTickers.slice(0, 5).map(t => (
                   <button 
                     key={t}
                     onClick={() => handleTickerChange(t)}
-                    className={`px-2 py-1.5 rounded text-xs hover:bg-white/20 transition-colors ${
-                      t === 'SPY' || t === 'QQQ' ? 'bg-purple-500/20 text-purple-400' : 'bg-white/10 text-zinc-300'
+                    className={`px-2 py-1.5 rounded-lg text-xs hover:bg-white/10 transition-colors ${
+                      t === 'SPY' || t === 'QQQ' ? 'bg-violet-500/20 text-violet-400' : 'bg-white/5 text-zinc-300'
                     }`}
                   >
                     {t}
@@ -835,7 +940,7 @@ const EnhancedTickerModal = ({
             <div className="flex items-center gap-4">
               <div className="text-right">
                 <div className="font-mono text-xl text-white">${formatPrice(quote?.price)}</div>
-                <div className={`text-xs ${quote?.change_percent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                <div className={`text-xs font-medium ${quote?.change_percent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {formatPercent(quote?.change_percent)}
                 </div>
               </div>
@@ -843,15 +948,15 @@ const EnhancedTickerModal = ({
           </div>
           
           {/* TABS */}
-          <div className="px-4 border-b border-white/10 flex-shrink-0">
-            <nav className="flex">
+          <div className="relative px-4 border-b border-white/10 flex-shrink-0 bg-black/20">
+            <nav className="flex gap-1">
               {tabs.map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`py-2.5 px-5 text-sm font-medium rounded-t-lg transition-colors ${
+                  className={`py-2.5 px-5 text-sm font-medium rounded-t-xl transition-all ${
                     activeTab === tab.id 
-                      ? 'text-cyan-400 bg-cyan-400/10 border-b-2 border-cyan-400' 
+                      ? 'text-cyan-400 bg-gradient-to-b from-cyan-500/20 to-transparent border-b-2 border-cyan-400' 
                       : 'text-zinc-400 hover:text-white hover:bg-white/5'
                   }`}
                 >
