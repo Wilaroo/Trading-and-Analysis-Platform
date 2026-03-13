@@ -151,7 +151,7 @@ const BotPerformanceChart = ({
     
     const container = chartContainerRef.current;
     const width = container.clientWidth || 600;
-    const height = 100;
+    const height = 200;  // Increased from 100 for better visibility
     
     try {
       const chart = LightweightCharts.createChart(container, {
@@ -291,7 +291,7 @@ const BotPerformanceChart = ({
       {/* Chart */}
       <div 
         ref={chartContainerRef} 
-        className="w-full h-[100px] bg-gradient-to-b from-emerald-400/5 to-transparent rounded-lg"
+        className="w-full h-[200px] bg-gradient-to-b from-emerald-400/5 to-transparent rounded-lg"
       />
       
       {/* Stats Row */}

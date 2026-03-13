@@ -1,18 +1,8 @@
 /**
- * Market Regime Widget
- * ====================
- * Displays the current market regime (Fear & Greed style) with signal blocks.
- * 
- * TO DEPLOY:
- * ----------
- * 1. Import this component in your dashboard:
- *    import MarketRegimeWidget from '../components/MarketRegimeWidget';
- * 
- * 2. Add to your layout:
- *    <MarketRegimeWidget />
- * 
- * 3. Ensure the backend endpoint is available:
- *    GET /api/market-regime/summary
+ * Market Regime Widget (Redesigned)
+ * ==================================
+ * Matches the Analysis Score Panel style from EnhancedTickerModal.
+ * Compact, dark theme with progress bars and score rings.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -27,13 +17,94 @@ import {
   Activity,
   BarChart3,
   Gauge,
-  Zap
+  Zap,
+  Brain
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { Tip, TipIcon, CustomTip } from './shared/Tooltip';
+import { CustomTip } from './shared/Tooltip';
 
-// Update interval: 30 minutes
 const UPDATE_INTERVAL = 30 * 60 * 1000;
+
+// Score Ring Component - matching the EnhancedTickerModal style
+const ScoreRing = ({ score, size = 56, label }) => {
+  const radius = (size - 8) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const progress = ((score || 0) / 100) * circumference;
+  
+  const getColor = (s) => {
+    if (s >= 70) return { stroke: '#10B981', text: 'text-emerald-400' };
+    if (s >= 40) return { stroke: '#FBBF24', text: 'text-yellow-400' };
+    return { stroke: '#EF4444', text: 'text-red-400' };
+  };
+  
+  const colors = getColor(score);
+  
+  return (
+    <div className="relative flex flex-col items-center">
+      <svg width={size} height={size} className="transform -rotate-90">
+        <circle
+          cx={size/2}
+          cy={size/2}
+          r={radius}
+          fill="none"
+          stroke="rgba(255,255,255,0.1)"
+          strokeWidth="4"
+        />
+        <circle
+          cx={size/2}
+          cy={size/2}
+          r={radius}
+          fill="none"
+          stroke={colors.stroke}
+          strokeWidth="4"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference - progress}
+          strokeLinecap="round"
+          className="transition-all duration-700"
+        />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className={`font-bold text-lg ${colors.text}`}>{score || 0}</span>
+      </div>
+      {label && <span className="text-[10px] text-zinc-500 mt-1">{label}</span>}
+    </div>
+  );
+};
+
+// Progress Bar Component
+const ScoreBar = ({ label, value, tip }) => {
+  const getColor = (v) => {
+    if (v >= 70) return 'bg-emerald-500';
+    if (v >= 40) return 'bg-yellow-500';
+    return 'bg-red-500';
+  };
+  
+  const getTextColor = (v) => {
+    if (v >= 70) return 'text-emerald-400';
+    if (v >= 40) return 'text-yellow-400';
+    return 'text-red-400';
+  };
+  
+  const content = (
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] text-zinc-500 w-16 flex-shrink-0">{label}</span>
+      <div className="flex-1 h-1.5 bg-black/40 rounded-full overflow-hidden">
+        <div 
+          className={`h-full rounded-full transition-all duration-500 ${getColor(value)}`}
+          style={{ width: `${value || 0}%` }}
+        />
+      </div>
+      <span className={`font-mono text-[10px] w-6 text-right ${getTextColor(value)}`}>
+        {value?.toFixed(0) || '--'}
+      </span>
+    </div>
+  );
+  
+  if (tip) {
+    return <CustomTip label={label} description={tip}>{content}</CustomTip>;
+  }
+  return content;
+};
 
 const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
   const [regime, setRegime] = useState(null);
@@ -41,7 +112,6 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
   const [error, setError] = useState(null);
   const [expanded, setExpanded] = useState(false);
   const [lastState, setLastState] = useState(null);
-  const [regimePerformance, setRegimePerformance] = useState(null);
 
   const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -50,147 +120,73 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
       setLoading(true);
       const response = await fetch(`${API_URL}/api/market-regime/summary`);
       
-      if (!response.ok) {
-        throw new Error('Failed to fetch market regime');
-      }
+      if (!response.ok) throw new Error('Failed to fetch market regime');
       
       const data = await response.json();
       setRegime(data);
       setError(null);
       
-      // Check for state change and show toast
       if (lastState && lastState !== data.state) {
-        const stateDisplay = getStateConfig(data.state);
-        toast.info(`Market Regime Changed: ${stateDisplay.label}`, {
+        const stateConfig = getStateConfig(data.state);
+        toast.info(`Market Regime: ${stateConfig.label}`, {
           description: data.recommendation,
-          duration: 8000,
-          icon: stateDisplay.icon
+          duration: 6000,
         });
-        
-        // Callback for parent components
-        if (onStateChange) {
-          onStateChange(data.state, lastState);
-        }
+        if (onStateChange) onStateChange(data.state, lastState);
       }
       
       setLastState(data.state);
-      
-      if (showToast) {
-        toast.success('Market regime updated');
-      }
+      if (showToast) toast.success('Market regime updated');
     } catch (err) {
-      console.error('Error fetching market regime:', err);
       setError(err.message);
     } finally {
       setLoading(false);
     }
   }, [API_URL, lastState, onStateChange]);
-  
-  // Fetch personalized regime performance (only when expanded)
-  const fetchRegimePerformance = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_URL}/api/market-regime/performance`);
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setRegimePerformance(data);
-        }
-      }
-    } catch (err) {
-      console.error('Error fetching regime performance:', err);
-    }
-  }, [API_URL]);
 
-  // Initial fetch and interval
   useEffect(() => {
     fetchRegime();
-    
-    const interval = setInterval(() => {
-      fetchRegime();
-    }, UPDATE_INTERVAL);
-    
+    const interval = setInterval(() => fetchRegime(), UPDATE_INTERVAL);
     return () => clearInterval(interval);
   }, [fetchRegime]);
-  
-  // Fetch performance when expanded
-  useEffect(() => {
-    if (expanded && !regimePerformance) {
-      fetchRegimePerformance();
-    }
-  }, [expanded, regimePerformance, fetchRegimePerformance]);
-
-  const handleRefresh = () => {
-    fetchRegime(true);
-  };
 
   const getStateConfig = (state) => {
     const configs = {
       CONFIRMED_UP: {
-        label: 'Confirmed Up',
+        label: 'Bullish',
+        icon: <TrendingUp className="w-4 h-4" />,
         color: 'emerald',
-        bgClass: 'bg-emerald-500/10 border-emerald-500/30',
-        textClass: 'text-emerald-400',
-        glowClass: 'shadow-emerald-500/20',
-        icon: <TrendingUp className="w-6 h-6" />,
-        gradient: 'from-emerald-500/20 to-emerald-600/5'
+        bgClass: 'bg-emerald-500/10',
+        borderClass: 'border-emerald-500/30',
+        textClass: 'text-emerald-400'
       },
       HOLD: {
-        label: 'Hold / Neutral',
+        label: 'Neutral',
+        icon: <Minus className="w-4 h-4" />,
         color: 'yellow',
-        bgClass: 'bg-yellow-500/10 border-yellow-500/30',
-        textClass: 'text-yellow-400',
-        glowClass: 'shadow-yellow-500/20',
-        icon: <Minus className="w-6 h-6" />,
-        gradient: 'from-yellow-500/20 to-yellow-600/5'
+        bgClass: 'bg-yellow-500/10',
+        borderClass: 'border-yellow-500/30',
+        textClass: 'text-yellow-400'
       },
       CONFIRMED_DOWN: {
-        label: 'Confirmed Down',
+        label: 'Bearish',
+        icon: <TrendingDown className="w-4 h-4" />,
         color: 'red',
-        bgClass: 'bg-red-500/10 border-red-500/30',
-        textClass: 'text-red-400',
-        glowClass: 'shadow-red-500/20',
-        icon: <TrendingDown className="w-6 h-6" />,
-        gradient: 'from-red-500/20 to-red-600/5'
+        bgClass: 'bg-red-500/10',
+        borderClass: 'border-red-500/30',
+        textClass: 'text-red-400'
       }
     };
     return configs[state] || configs.HOLD;
   };
 
-  const getScoreColor = (score) => {
-    if (score >= 70) return 'text-emerald-400';
-    if (score >= 50) return 'text-yellow-400';
-    return 'text-red-400';
-  };
-
-  const getScoreBgColor = (score) => {
-    if (score >= 70) return 'bg-emerald-500/20';
-    if (score >= 50) return 'bg-yellow-500/20';
-    return 'bg-red-500/20';
-  };
-
-  const getRiskBarColor = (risk) => {
-    if (risk <= 30) return 'bg-emerald-500';
-    if (risk <= 60) return 'bg-yellow-500';
-    return 'bg-red-500';
-  };
-
-  const formatTime = (isoString) => {
-    if (!isoString) return '--:--';
-    const date = new Date(isoString);
-    return date.toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: false 
-    });
-  };
-
   // Loading state
   if (loading && !regime) {
     return (
-      <div className={`bg-slate-800/50 rounded-xl border border-slate-700/50 p-4 ${className}`}>
-        <div className="flex items-center justify-center h-24">
-          <RefreshCw className="w-6 h-6 text-slate-400 animate-spin" />
-          <span className="ml-2 text-slate-400">Loading market regime...</span>
+      <div className={`bg-zinc-900/50 border border-white/10 rounded-xl p-4 ${className}`}>
+        <div className="flex items-center justify-center h-20 gap-2">
+          <RefreshCw className="w-4 h-4 text-zinc-400 animate-spin" />
+          <span className="text-sm text-zinc-500">Loading regime...</span>
         </div>
       </div>
     );
@@ -199,13 +195,13 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
   // Error state
   if (error && !regime) {
     return (
-      <div className={`bg-slate-800/50 rounded-xl border border-red-500/30 p-4 ${className}`}>
-        <div className="flex items-center justify-center h-24">
-          <AlertCircle className="w-6 h-6 text-red-400" />
-          <span className="ml-2 text-red-400">Failed to load market regime</span>
+      <div className={`bg-zinc-900/50 border border-red-500/30 rounded-xl p-4 ${className}`}>
+        <div className="flex items-center justify-center h-20 gap-2">
+          <AlertCircle className="w-4 h-4 text-red-400" />
+          <span className="text-sm text-red-400">Failed to load</span>
           <button 
-            onClick={handleRefresh}
-            className="ml-4 px-3 py-1 bg-red-500/20 rounded text-red-400 hover:bg-red-500/30"
+            onClick={() => fetchRegime(true)}
+            className="ml-2 px-2 py-1 text-xs bg-red-500/20 rounded hover:bg-red-500/30"
           >
             Retry
           </button>
@@ -215,243 +211,133 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
   }
 
   const stateConfig = getStateConfig(regime?.state);
-  const signalScores = regime?.signal_scores || {};
+  const scores = regime?.signal_scores || {};
 
   return (
     <div 
-      className={`
-        bg-gradient-to-br ${stateConfig.gradient} 
-        rounded-xl border ${stateConfig.bgClass} 
-        shadow-lg ${stateConfig.glowClass}
-        transition-all duration-300
-        ${className}
-      `}
+      className={`bg-zinc-900/50 border border-white/10 rounded-xl overflow-hidden ${className}`}
       data-testid="market-regime-widget"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/30">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-white/5">
         <div className="flex items-center gap-2">
-          <Activity className="w-4 h-4 text-slate-400" />
-          <CustomTip 
-            label="Market Regime" 
-            description="Overall market condition based on SPY/QQQ breadth, VIX, sector rotation, and volume analysis. Determines position sizing and strategy selection."
-          >
-            <span className="text-sm font-medium text-slate-300">MARKET REGIME</span>
-          </CustomTip>
+          <Activity className="w-3 h-3 text-zinc-500" />
+          <span className="text-xs font-medium text-zinc-400">MARKET REGIME</span>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-500">
-            {formatTime(regime?.last_updated)}
-          </span>
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="p-1 hover:bg-slate-700/50 rounded transition-colors"
-            data-testid="regime-refresh-btn"
-            title="Refresh market regime data"
-          >
-            <RefreshCw className={`w-4 h-4 text-slate-400 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
+        <button
+          onClick={() => fetchRegime(true)}
+          disabled={loading}
+          className="p-1 hover:bg-white/5 rounded transition-colors"
+          data-testid="regime-refresh-btn"
+        >
+          <RefreshCw className={`w-3 h-3 text-zinc-500 ${loading ? 'animate-spin' : ''}`} />
+        </button>
       </div>
 
-      {/* Main State Display */}
-      <div className="px-4 py-4">
-        <div className="flex items-center gap-3 mb-3">
-          <div className={`p-2 rounded-lg ${stateConfig.bgClass} ${stateConfig.textClass}`}>
-            {stateConfig.icon}
-          </div>
-          <div>
-            <h3 className={`text-xl font-bold ${stateConfig.textClass}`} data-testid="regime-state">
-              {stateConfig.label}
-            </h3>
-            <div className="flex items-center gap-3 text-sm">
-              <CustomTip label="Composite Score" description="Overall market health score (0-100). >60 = bullish conditions, <40 = bearish conditions, 40-60 = neutral/mixed.">
-                <span className="text-slate-400">
-                  Score: <span className={getScoreColor(regime?.composite_score || 0)}>
-                    {regime?.composite_score || 0}
-                  </span>/100
-                </span>
-              </CustomTip>
-              <CustomTip label="Confidence" description="How reliable this assessment is based on data quality and signal agreement. Higher = more trustworthy.">
-                <span className="text-slate-400">
-                  Confidence: <span className="text-slate-300">{regime?.confidence || 0}%</span>
-                </span>
-              </CustomTip>
-            </div>
-          </div>
-        </div>
-
-        {/* Signal Block Scores */}
-        <div className="grid grid-cols-4 gap-2 mb-4">
-          {[
-            { key: 'trend', label: 'TREND', icon: TrendingUp, tip: 'SPY & QQQ price trend relative to key moving averages (20, 50, 200 EMA). >50 = uptrending.' },
-            { key: 'breadth', label: 'BREADTH', icon: BarChart3, tip: 'Market breadth: how many stocks/sectors are participating in the move. Confirms or warns of divergence.' },
-            { key: 'ftd', label: 'FTD', icon: Zap, tip: 'Follow-Through Day status. Tracks rally attempts and distribution days to identify trend changes.' },
-            { key: 'volume_vix', label: 'VOL/VIX', icon: Gauge, tip: 'VIX fear gauge + volume analysis. Low VIX + healthy volume = bullish, high VIX = caution.' }
-          ].map(({ key, label, icon: Icon, tip }) => (
-            <CustomTip key={key} label={label} description={tip}>
-              <div 
-                className={`
-                  text-center p-2 rounded-lg w-full
-                  ${getScoreBgColor(signalScores[key] || 0)}
-                  border border-slate-700/30
-                `}
-                data-testid={`signal-block-${key}`}
-              >
-                <Icon className="w-4 h-4 mx-auto mb-1 text-slate-400" />
-                <div className="text-xs text-slate-500 mb-1">{label}</div>
-                <div className={`text-lg font-bold ${getScoreColor(signalScores[key] || 0)}`}>
-                  {signalScores[key] || 0}
-                </div>
-              </div>
-            </CustomTip>
-          ))}
-        </div>
-
-        {/* Risk Level Bar */}
-        <div className="mb-3">
-          <div className="flex items-center justify-between text-xs mb-1">
-            <CustomTip label="Risk Level" description="Inverse of regime score. Higher = more caution needed. Used to automatically adjust position sizes. >60% = reduce exposure.">
-              <span className="text-slate-400">Risk Level</span>
-            </CustomTip>
-            <span className={`font-medium ${
-              (regime?.risk_level || 0) <= 30 ? 'text-emerald-400' :
-              (regime?.risk_level || 0) <= 60 ? 'text-yellow-400' : 'text-red-400'
-            }`}>
-              {regime?.risk_level || 0}%
-            </span>
-          </div>
-          <div className="h-2 bg-slate-700/50 rounded-full overflow-hidden">
-            <div 
-              className={`h-full ${getRiskBarColor(regime?.risk_level || 0)} transition-all duration-500`}
-              style={{ width: `${regime?.risk_level || 0}%` }}
+      {/* Main Content */}
+      <div className="p-3">
+        <div className="flex items-center gap-4">
+          {/* Score Ring */}
+          <ScoreRing score={regime?.composite_score} size={56} />
+          
+          {/* Score Bars */}
+          <div className="flex-1 space-y-1.5">
+            <ScoreBar 
+              label="Trend" 
+              value={scores.trend} 
+              tip="SPY & QQQ price trend relative to key moving averages"
+            />
+            <ScoreBar 
+              label="Breadth" 
+              value={scores.breadth} 
+              tip="Market breadth - how many stocks are participating"
+            />
+            <ScoreBar 
+              label="Vol/VIX" 
+              value={scores.volume_vix} 
+              tip="VIX fear gauge and volume analysis"
+            />
+            <ScoreBar 
+              label="FTD" 
+              value={scores.ftd} 
+              tip="Follow-Through Day status for trend changes"
             />
           </div>
         </div>
-
-        {/* Recommendation */}
-        <div className="flex items-start gap-2 p-2 bg-slate-900/30 rounded-lg">
-          <span className="text-lg">💡</span>
-          <p className="text-sm text-slate-300 leading-relaxed">
-            {regime?.recommendation || 'Loading recommendation...'}
-          </p>
+        
+        {/* State Badge & Risk */}
+        <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/5">
+          <div className={`flex items-center gap-2 px-2 py-1 rounded-md ${stateConfig.bgClass} ${stateConfig.borderClass} border`}>
+            <span className={stateConfig.textClass}>{stateConfig.icon}</span>
+            <span className={`text-xs font-semibold ${stateConfig.textClass}`}>{stateConfig.label}</span>
+          </div>
+          
+          <CustomTip label="Risk Level" description="Higher = more caution needed. Used to adjust position sizes.">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-zinc-500">Risk:</span>
+              <span className={`text-xs font-mono font-medium ${
+                (regime?.risk_level || 0) <= 30 ? 'text-emerald-400' :
+                (regime?.risk_level || 0) <= 60 ? 'text-yellow-400' : 'text-red-400'
+              }`}>
+                {regime?.risk_level || 0}%
+              </span>
+            </div>
+          </CustomTip>
         </div>
       </div>
 
       {/* Expandable Details */}
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-center gap-1 py-2 border-t border-slate-700/30 
-                   text-xs text-slate-400 hover:text-slate-300 hover:bg-slate-800/30 transition-colors"
+        className="w-full flex items-center justify-center gap-1 py-2 border-t border-white/5 
+                   text-[10px] text-zinc-500 hover:text-zinc-400 hover:bg-white/5 transition-colors"
         data-testid="regime-expand-btn"
       >
-        {expanded ? (
-          <>
-            <ChevronUp className="w-4 h-4" /> Hide Details
-          </>
-        ) : (
-          <>
-            <ChevronDown className="w-4 h-4" /> Show Details
-          </>
-        )}
+        {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+        {expanded ? 'Hide' : 'Details'}
       </button>
 
-      {/* Expanded Details Panel */}
+      {/* Expanded Panel */}
       {expanded && (
-        <div className="px-4 pb-4 border-t border-slate-700/30">
-          <div className="mt-3 space-y-3">
-            {/* YOUR PERFORMANCE IN THIS REGIME - Personalized Stats */}
-            {regimePerformance?.your_edge_in_current && (
-              <div className="bg-gradient-to-r from-purple-500/10 to-pink-500/10 p-3 rounded-lg border border-purple-500/20">
-                <h4 className="text-xs font-semibold text-purple-400 mb-2 flex items-center gap-1">
-                  <BarChart3 className="w-3 h-3" />
-                  YOUR PERFORMANCE IN THIS REGIME
-                </h4>
-                <div className="grid grid-cols-3 gap-2 text-xs">
-                  <div className="text-center">
-                    <div className="text-slate-400">Win Rate</div>
-                    <div className={`text-lg font-bold ${
-                      (regimePerformance.your_edge_in_current.win_rate || 0) >= 60 ? 'text-emerald-400' :
-                      (regimePerformance.your_edge_in_current.win_rate || 0) >= 45 ? 'text-yellow-400' : 'text-red-400'
-                    }`}>
-                      {regimePerformance.your_edge_in_current.win_rate || 0}%
-                    </div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-slate-400">Trades</div>
-                    <div className="text-lg font-bold text-slate-300">
-                      {regimePerformance.your_edge_in_current.trades || 0}
-                    </div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-slate-400">Avg P&L</div>
-                    <div className={`text-lg font-bold ${
-                      (regimePerformance.your_edge_in_current.avg_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'
-                    }`}>
-                      ${(regimePerformance.your_edge_in_current.avg_pnl || 0).toFixed(0)}
-                    </div>
-                  </div>
-                </div>
-                {regimePerformance.your_edge_in_current.best_setup && (
-                  <div className="mt-2 text-xs text-center">
-                    <span className="text-slate-400">Best setup: </span>
-                    <span className="text-purple-300 font-medium">
-                      {regimePerformance.your_edge_in_current.best_setup.replace(/_/g, ' ').toUpperCase()}
-                    </span>
-                  </div>
-                )}
-                {regimePerformance.your_edge_in_current.trades === 0 && (
-                  <div className="text-xs text-center text-slate-500 mt-1">
-                    No trades yet in this regime - build your history!
-                  </div>
-                )}
-              </div>
-            )}
+        <div className="px-3 pb-3 space-y-3 border-t border-white/5">
+          {/* Recommendation */}
+          <div className="flex items-start gap-2 p-2 bg-black/30 rounded-lg mt-3">
+            <Brain className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-zinc-300 leading-relaxed">
+              {regime?.recommendation || 'Loading...'}
+            </p>
+          </div>
           
-            {/* Trading Implications */}
-            <div>
-              <h4 className="text-xs font-semibold text-slate-400 mb-2">TRADING IMPLICATIONS</h4>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="p-2 bg-slate-900/30 rounded">
-                  <span className="text-slate-500">Position Sizing:</span>
-                  <span className="ml-1 text-slate-300">
-                    {regime?.state === 'CONFIRMED_UP' ? 'Normal to Aggressive' :
-                     regime?.state === 'CONFIRMED_DOWN' ? 'Minimal (25-50%)' : 'Reduced (50-75%)'}
-                  </span>
-                </div>
-                <div className="p-2 bg-slate-900/30 rounded">
-                  <span className="text-slate-500">Risk Tolerance:</span>
-                  <span className="ml-1 text-slate-300">
-                    {regime?.state === 'CONFIRMED_UP' ? 'Higher' :
-                     regime?.state === 'CONFIRMED_DOWN' ? 'Very Low' : 'Lower'}
-                  </span>
-                </div>
-              </div>
+          {/* Trading Implications */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="p-2 bg-black/30 rounded-lg">
+              <span className="text-[10px] text-zinc-500 block">Position Size</span>
+              <span className="text-xs text-zinc-300">
+                {regime?.state === 'CONFIRMED_UP' ? 'Normal-Aggressive' :
+                 regime?.state === 'CONFIRMED_DOWN' ? 'Minimal (25-50%)' : 'Reduced (50-75%)'}
+              </span>
             </div>
-
-            {/* Favored Strategies */}
-            <div>
-              <h4 className="text-xs font-semibold text-emerald-400 mb-1">FAVORED STRATEGIES</h4>
-              <p className="text-xs text-slate-300">
-                {regime?.state === 'CONFIRMED_UP' 
-                  ? 'Momentum breakouts, Pullback entries, Trend continuation'
-                  : regime?.state === 'CONFIRMED_DOWN'
-                  ? 'Short selling rallies, Put options, Inverse ETFs'
-                  : 'Selective high-quality setups, Quick scalps'}
-              </p>
+            <div className="p-2 bg-black/30 rounded-lg">
+              <span className="text-[10px] text-zinc-500 block">Confidence</span>
+              <span className="text-xs text-zinc-300">{regime?.confidence || 0}%</span>
             </div>
-
-            {/* Strategies to Avoid */}
-            <div>
-              <h4 className="text-xs font-semibold text-red-400 mb-1">AVOID</h4>
-              <p className="text-xs text-slate-300">
-                {regime?.state === 'CONFIRMED_UP' 
-                  ? 'Counter-trend shorts, Mean reversion fades'
-                  : regime?.state === 'CONFIRMED_DOWN'
-                  ? 'Buying dips, Averaging down'
-                  : 'Swing trades, Overnight holds'}
-              </p>
+          </div>
+          
+          {/* Favored/Avoid */}
+          <div className="grid grid-cols-2 gap-2 text-[10px]">
+            <div className="p-2 bg-emerald-500/5 border border-emerald-500/20 rounded-lg">
+              <span className="text-emerald-400 font-medium block mb-1">Favored</span>
+              <span className="text-zinc-400">
+                {regime?.state === 'CONFIRMED_UP' ? 'Breakouts, Pullbacks' :
+                 regime?.state === 'CONFIRMED_DOWN' ? 'Shorts, Puts' : 'Quick scalps'}
+              </span>
+            </div>
+            <div className="p-2 bg-red-500/5 border border-red-500/20 rounded-lg">
+              <span className="text-red-400 font-medium block mb-1">Avoid</span>
+              <span className="text-zinc-400">
+                {regime?.state === 'CONFIRMED_UP' ? 'Counter-trend shorts' :
+                 regime?.state === 'CONFIRMED_DOWN' ? 'Buying dips' : 'Swing trades'}
+              </span>
             </div>
           </div>
         </div>
