@@ -5,8 +5,8 @@
  * - Header: Bot status, compact info (Session/Regime/Brief Me), Account data, Risk Status, P&L
  * - Bot Performance Chart (always visible)
  * - Main Grid:
- *   - Left (8 cols): SentCom (with Order Pipeline), Active Positions, Setups We're Watching
- *   - Right (4 cols): AI Assistant, Market Regime, Quick Stats
+ *   - Left (8 cols): SentCom (Unified AI with Order Pipeline + Chat), Active Positions, Setups We're Watching
+ *   - Right (4 cols): Learning Insights, Market Regime
  * - Scanner Alerts strip at bottom
  */
 import React, { useState, useEffect, useCallback } from 'react';
@@ -20,7 +20,7 @@ import {
 
 // Import new components
 import BotPerformanceChart from './BotPerformanceChart';
-import BotBrainPanel from './BotBrainPanel';
+import SentCom from './SentCom';
 import { useTickerModal } from '../hooks/useTickerModal';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
@@ -658,15 +658,8 @@ const NewDashboard = ({
       <div className="grid grid-cols-12 gap-4">
         {/* Left Column (8 cols) */}
         <div className="col-span-8 space-y-4">
-          {/* Bot's Brain Panel with Order Pipeline */}
-          <BotBrainPanel
-            botStatus={effectiveBotStatus}
-            openTrades={effectiveOpenTrades}
-            watchingSetups={effectiveWatchingSetups}
-            orderQueue={orderQueue}
-            onViewHistory={onViewHistory}
-            autoRefresh={true}
-          />
+          {/* SentCom - Unified AI Command Center (replaces BotBrainPanel) */}
+          <SentCom compact={true} />
           
           {/* Active Positions */}
           <ActivePositionsCard positions={effectiveOpenTrades} />
