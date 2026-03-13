@@ -201,95 +201,124 @@ echo.
 :: =====================================================
 echo [6/9] Starting IB Gateway...
 
-if exist "%IB_GATEWAY_PATH%" (
-    :: Check if IB Gateway is already running
-    tasklist /FI "IMAGENAME eq ibgateway.exe" 2>NUL | find /I /N "ibgateway.exe">NUL
-    if "%ERRORLEVEL%"=="0" (
-        echo       IB Gateway process detected...
-        goto check_ib_port
-    ) else (
-        echo       Starting IB Gateway...
-        start "" "%IB_GATEWAY_PATH%"
-        echo       Waiting for IB Gateway window...
-        timeout /t 12 /nobreak >nul
-        
-        :: Auto-login with PAPER TRADING account
-        echo       Logging in to PAPER account...
-        (
-            echo Set WshShell = CreateObject^("WScript.Shell"^)
-            echo WScript.Sleep 2000
-            echo WshShell.AppActivate "IBKR Gateway"
-            echo WScript.Sleep 1000
-            echo WshShell.SendKeys "paperesw100000"
-            echo WScript.Sleep 500
-            echo WshShell.SendKeys "{TAB}"
-            echo WScript.Sleep 400
-            echo WshShell.SendKeys "Socr1025!@!?"
-            echo WScript.Sleep 500
-            echo WshShell.SendKeys "{ENTER}"
-        ) > "%TEMP%\ib_login.vbs"
-        cscript //nologo "%TEMP%\ib_login.vbs"
-        del "%TEMP%\ib_login.vbs" 2>nul
-        
-        :: Dismiss warnings
-        timeout /t 10 /nobreak >nul
-        (
-            echo Set WshShell = CreateObject^("WScript.Shell"^)
-            echo WScript.Sleep 1000
-            echo WshShell.AppActivate "IBKR"
-            echo WScript.Sleep 500
-            echo WshShell.SendKeys "{ENTER}"
-            echo WScript.Sleep 2000
-            echo WshShell.SendKeys "{ENTER}"
-        ) > "%TEMP%\ib_dismiss.vbs"
-        cscript //nologo "%TEMP%\ib_dismiss.vbs"
-        del "%TEMP%\ib_dismiss.vbs" 2>nul
-    )
-    
-:check_ib_port
-    :: CRITICAL: Wait for API port to be listening before proceeding
-    echo       Waiting for IB Gateway API port %IB_PORT%...
-    set PORT_READY=NO
-    set PORT_ATTEMPTS=0
-    
-:port_wait_loop
-    set /a PORT_ATTEMPTS+=1
-    if %PORT_ATTEMPTS% GTR 30 (
-        echo       [WARNING] IB Gateway port %IB_PORT% not responding after 60 seconds
-        echo       Please check:
-        echo         1. IB Gateway is fully logged in
-        echo         2. API Settings: Enable ActiveX and Socket Clients = CHECKED
-        echo         3. Socket Port = %IB_PORT%
-        echo         4. Read-Only API = UNCHECKED
-        echo.
-        echo       Press any key to continue anyway, or Ctrl+C to abort...
-        pause >nul
-        goto ib_gateway_done
-    )
-    
-    :: Check if port is listening using netstat
-    netstat -an | findstr ":%IB_PORT% " | findstr "LISTENING" >nul 2>&1
-    if %errorlevel%==0 (
-        echo       IB Gateway API ready on port %IB_PORT%!
-        set PORT_READY=YES
-        goto ib_gateway_done
-    )
-    
-    :: Visual feedback every 5 attempts
-    set /a MOD=%PORT_ATTEMPTS% %% 5
-    if %MOD%==0 (
-        echo       Still waiting... (attempt %PORT_ATTEMPTS%/30)
-    )
-    
-    timeout /t 2 /nobreak >nul
-    goto port_wait_loop
-    
-:ib_gateway_done
-    echo       IB Gateway started!
-) else (
+if not exist "%IB_GATEWAY_PATH%" (
     echo       [SKIP] IB Gateway not found at:
     echo       %IB_GATEWAY_PATH%
+    goto skip_ib_gateway
 )
+
+:: First check if port is already listening (IB Gateway fully ready)
+netstat -an | findstr ":%IB_PORT% " | findstr "LISTENING" >nul 2>&1
+if %errorlevel%==0 (
+    echo       IB Gateway already running and API ready!
+    goto ib_gateway_done
+)
+
+:: Check if IB Gateway process is running but port not ready
+tasklist /FI "IMAGENAME eq ibgateway.exe" 2>NUL | find /I /N "ibgateway.exe">NUL
+if "%ERRORLEVEL%"=="0" (
+    echo       IB Gateway process found but API not ready...
+    echo       Waiting 10 seconds to see if it comes up...
+    
+    :: Wait 10 seconds to see if port comes up
+    set QUICK_CHECK=0
+)
+
+:quick_port_check
+netstat -an | findstr ":%IB_PORT% " | findstr "LISTENING" >nul 2>&1
+if %errorlevel%==0 (
+    echo       IB Gateway API is now ready!
+    goto ib_gateway_done
+)
+set /a QUICK_CHECK+=1
+if %QUICK_CHECK% GEQ 5 (
+    echo       Port still not ready after 10s - killing and restarting IB Gateway...
+    taskkill /F /IM ibgateway.exe >nul 2>&1
+    timeout /t 3 /nobreak >nul
+    goto start_ib_fresh
+)
+timeout /t 2 /nobreak >nul
+goto quick_port_check
+
+:start_ib_fresh
+echo       Starting IB Gateway fresh...
+start "" "%IB_GATEWAY_PATH%"
+echo       Waiting for IB Gateway window (12 seconds)...
+timeout /t 12 /nobreak >nul
+
+:: Auto-login with PAPER TRADING account
+echo       Logging in to PAPER account...
+(
+    echo Set WshShell = CreateObject^("WScript.Shell"^)
+    echo WScript.Sleep 2000
+    echo WshShell.AppActivate "IBKR Gateway"
+    echo WScript.Sleep 1000
+    echo WshShell.SendKeys "paperesw100000"
+    echo WScript.Sleep 500
+    echo WshShell.SendKeys "{TAB}"
+    echo WScript.Sleep 400
+    echo WshShell.SendKeys "Socr1025!@!?"
+    echo WScript.Sleep 500
+    echo WshShell.SendKeys "{ENTER}"
+) > "%TEMP%\ib_login.vbs"
+cscript //nologo "%TEMP%\ib_login.vbs"
+del "%TEMP%\ib_login.vbs" 2>nul
+
+:: Dismiss warnings
+echo       Waiting for login and dismissing dialogs...
+timeout /t 15 /nobreak >nul
+(
+    echo Set WshShell = CreateObject^("WScript.Shell"^)
+    echo WScript.Sleep 1000
+    echo WshShell.AppActivate "IBKR"
+    echo WScript.Sleep 500
+    echo WshShell.SendKeys "{ENTER}"
+    echo WScript.Sleep 2000
+    echo WshShell.SendKeys "{ENTER}"
+) > "%TEMP%\ib_dismiss.vbs"
+cscript //nologo "%TEMP%\ib_dismiss.vbs"
+del "%TEMP%\ib_dismiss.vbs" 2>nul
+
+:check_ib_port
+:: CRITICAL: Wait for API port to be listening before proceeding
+echo       Waiting for IB Gateway API port %IB_PORT%...
+set PORT_ATTEMPTS=0
+
+:port_wait_loop
+set /a PORT_ATTEMPTS+=1
+if %PORT_ATTEMPTS% GTR 30 (
+    echo       [WARNING] IB Gateway port %IB_PORT% not responding after 60 seconds
+    echo       Please check:
+    echo         1. IB Gateway is fully logged in
+    echo         2. API Settings: Enable ActiveX and Socket Clients = CHECKED
+    echo         3. Socket Port = %IB_PORT%
+    echo         4. Read-Only API = UNCHECKED
+    echo.
+    echo       Press any key to continue anyway, or Ctrl+C to abort...
+    pause >nul
+    goto ib_gateway_done
+)
+
+:: Check if port is listening using netstat
+netstat -an | findstr ":%IB_PORT% " | findstr "LISTENING" >nul 2>&1
+if %errorlevel%==0 (
+    echo       IB Gateway API ready on port %IB_PORT%!
+    goto ib_gateway_done
+)
+
+:: Visual feedback every 5 attempts
+set /a MOD=%PORT_ATTEMPTS% %% 5
+if %MOD%==0 (
+    echo       Still waiting... (attempt %PORT_ATTEMPTS%/30)
+)
+
+timeout /t 2 /nobreak >nul
+goto port_wait_loop
+
+:ib_gateway_done
+echo       IB Gateway ready!
+
+:skip_ib_gateway
 echo.
 
 :: =====================================================
