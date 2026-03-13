@@ -8,7 +8,7 @@
  * - Clickable ticker mentions
  * - "View History" to see full reasoning log
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Brain, Cpu, ChevronRight, Clock, Zap, Target, Eye, AlertCircle, ArrowRight, CheckCircle, Loader } from 'lucide-react';
 import { useTickerModal } from '../hooks/useTickerModal';
@@ -56,6 +56,123 @@ const OrderPipeline = ({ orderQueue }) => {
         <span className="text-xs font-mono text-emerald-400">{completed}</span>
         <span className="text-[10px] text-zinc-500">filled</span>
       </div>
+    </div>
+  );
+};
+
+// In-Trade Guidance Component - Shows position-specific alerts and recommendations
+const InTradeGuidance = ({ openTrades = [], onTickerClick }) => {
+  // Generate guidance based on position states
+  const guidanceAlerts = useMemo(() => {
+    const alerts = [];
+    
+    openTrades.forEach(trade => {
+      const currentPrice = trade.current_price || 0;
+      const entryPrice = trade.entry_price || 0;
+      const stopPrice = trade.stop_price || 0;
+      const targetPrice = trade.target_prices?.[0] || trade.target_price || 0;
+      
+      // Calculate percentages
+      const pnlPct = entryPrice > 0 ? ((currentPrice - entryPrice) / entryPrice * 100) : 0;
+      const distanceToStop = stopPrice > 0 ? ((currentPrice - stopPrice) / stopPrice * 100) : 100;
+      const distanceToTarget = targetPrice > 0 ? ((targetPrice - currentPrice) / currentPrice * 100) : 100;
+      
+      // ALERT: Near Stop Loss (within 2%)
+      if (stopPrice > 0 && Math.abs(distanceToStop) <= 2) {
+        alerts.push({
+          symbol: trade.symbol,
+          type: 'danger',
+          icon: '🛑',
+          title: 'STOP WARNING',
+          message: `${trade.symbol} is ${distanceToStop.toFixed(1)}% from stop loss. Consider tightening or exiting.`,
+          priority: 1,
+        });
+      }
+      
+      // ALERT: Approaching Target (within 3%)
+      else if (targetPrice > 0 && distanceToTarget <= 3 && distanceToTarget > 0) {
+        alerts.push({
+          symbol: trade.symbol,
+          type: 'success',
+          icon: '🎯',
+          title: 'TARGET ZONE',
+          message: `${trade.symbol} is ${distanceToTarget.toFixed(1)}% from target. Consider scaling out.`,
+          priority: 2,
+        });
+      }
+      
+      // ALERT: Big Winner (up > 5%)
+      else if (pnlPct >= 5) {
+        alerts.push({
+          symbol: trade.symbol,
+          type: 'info',
+          icon: '🚀',
+          title: 'RUNNING',
+          message: `${trade.symbol} up ${pnlPct.toFixed(1)}%. Consider trailing stop to lock gains.`,
+          priority: 3,
+        });
+      }
+      
+      // ALERT: Underwater position (down > 3%)
+      else if (pnlPct <= -3) {
+        alerts.push({
+          symbol: trade.symbol,
+          type: 'warning',
+          icon: '⚠️',
+          title: 'UNDERWATER',
+          message: `${trade.symbol} down ${Math.abs(pnlPct).toFixed(1)}%. Review thesis or cut if invalidated.`,
+          priority: 2,
+        });
+      }
+    });
+    
+    // Sort by priority (lower = more urgent)
+    return alerts.sort((a, b) => a.priority - b.priority);
+  }, [openTrades]);
+  
+  if (guidanceAlerts.length === 0) return null;
+  
+  const typeColors = {
+    danger: 'border-red-500/50 bg-red-500/10',
+    warning: 'border-yellow-500/50 bg-yellow-500/10',
+    success: 'border-emerald-500/50 bg-emerald-500/10',
+    info: 'border-cyan-500/50 bg-cyan-500/10',
+  };
+  
+  const textColors = {
+    danger: 'text-red-400',
+    warning: 'text-yellow-400',
+    success: 'text-emerald-400',
+    info: 'text-cyan-400',
+  };
+  
+  return (
+    <div className="space-y-2 mt-3 pt-3 border-t border-white/5">
+      <div className="flex items-center gap-2">
+        <AlertCircle className="w-4 h-4 text-yellow-400" />
+        <span className="text-xs text-zinc-400 font-medium uppercase">In-Trade Guidance</span>
+      </div>
+      
+      {guidanceAlerts.slice(0, 3).map((alert, i) => (
+        <motion.div
+          key={`${alert.symbol}-${alert.type}-${i}`}
+          initial={{ opacity: 0, x: -10 }}
+          animate={{ opacity: 1, x: 0 }}
+          className={`p-2 rounded-lg border cursor-pointer transition-all hover:scale-[1.01] ${typeColors[alert.type]}`}
+          onClick={() => onTickerClick?.(alert.symbol)}
+        >
+          <div className="flex items-start gap-2">
+            <span className="text-sm">{alert.icon}</span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-bold ${textColors[alert.type]}`}>{alert.title}</span>
+                <span className="text-xs font-mono text-white">{alert.symbol}</span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5 leading-relaxed">{alert.message}</p>
+            </div>
+          </div>
+        </motion.div>
+      ))}
     </div>
   );
 };
@@ -409,6 +526,12 @@ const BotBrainPanel = ({
             <p className="text-sm">Bot is idle. Start trading to see thoughts.</p>
           </div>
         )}
+        
+        {/* In-Trade Guidance Alerts */}
+        <InTradeGuidance 
+          openTrades={openTrades} 
+          onTickerClick={openTickerModal}
+        />
       </div>
     </div>
   );
