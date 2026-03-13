@@ -11,8 +11,10 @@ import {
   Send, Brain, Clock, Zap, Target, AlertCircle, ArrowRight, 
   CheckCircle, Loader, X, TrendingUp, Activity, ChevronUp, 
   ChevronDown, DollarSign, Gauge, Wifi, Eye, Crosshair,
-  MessageSquare, RefreshCw, Bell, Circle, Flame, Radio
+  MessageSquare, RefreshCw, Bell, Circle, Flame, Radio,
+  BarChart3, Newspaper, Sunrise, BookOpen, Sparkles, ChevronRight
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL;
 
@@ -70,6 +72,198 @@ const PulsingDot = ({ color = 'emerald' }) => (
     <span className={`relative inline-flex rounded-full h-2 w-2 bg-${color}-500`}></span>
   </span>
 );
+
+// Quick Action Button
+const QuickAction = ({ icon: Icon, label, onClick, loading, color = 'zinc' }) => {
+  const colorClasses = {
+    zinc: 'bg-zinc-800/50 border-white/10 text-zinc-300 hover:border-cyan-500/30 hover:bg-zinc-800',
+    cyan: 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20',
+    amber: 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20',
+    emerald: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20',
+    purple: 'bg-purple-500/10 border-purple-500/30 text-purple-400 hover:bg-purple-500/20',
+    violet: 'bg-violet-500/10 border-violet-500/30 text-violet-400 hover:bg-violet-500/20',
+  };
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={loading}
+      className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs transition-all disabled:opacity-50 ${colorClasses[color]}`}
+      data-testid={`quick-action-${label.toLowerCase().replace(/\s+/g, '-')}`}
+    >
+      {loading ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Icon className="w-3.5 h-3.5" />}
+      <span>{label}</span>
+    </button>
+  );
+};
+
+// Check My Trade Form
+const CheckMyTradeForm = ({ onSubmit, loading, onClose }) => {
+  const [symbol, setSymbol] = useState('');
+  const [action, setAction] = useState('BUY');
+  const [entryPrice, setEntryPrice] = useState('');
+  const [stopLoss, setStopLoss] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!symbol.trim()) {
+      toast.error('Enter a symbol');
+      return;
+    }
+    if (!entryPrice || !stopLoss) {
+      toast.error('Enter entry and stop prices for full analysis');
+      return;
+    }
+    onSubmit({
+      symbol: symbol.toUpperCase(),
+      action,
+      entry_price: parseFloat(entryPrice),
+      stop_loss: parseFloat(stopLoss)
+    });
+    // Clear form after submit
+    setSymbol('');
+    setEntryPrice('');
+    setStopLoss('');
+    onClose?.();
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: 'auto' }}
+      exit={{ opacity: 0, height: 0 }}
+      className="bg-black/40 rounded-xl p-4 border border-white/10 mb-4"
+    >
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-sm font-medium text-white flex items-center gap-2">
+          <Target className="w-4 h-4 text-cyan-400" />
+          Check Our Trade
+        </h4>
+        <button onClick={onClose} className="p-1 hover:bg-white/10 rounded">
+          <X className="w-4 h-4 text-zinc-400" />
+        </button>
+      </div>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={symbol}
+            onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+            placeholder="Symbol"
+            className="flex-1 px-3 py-2 bg-zinc-800/50 border border-white/10 rounded-lg text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
+            data-testid="check-trade-symbol"
+          />
+          <select
+            value={action}
+            onChange={(e) => setAction(e.target.value)}
+            className="px-3 py-2 bg-zinc-800/50 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-cyan-500/50"
+          >
+            <option value="BUY">BUY</option>
+            <option value="SELL">SELL</option>
+          </select>
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="number"
+            step="0.01"
+            value={entryPrice}
+            onChange={(e) => setEntryPrice(e.target.value)}
+            placeholder="Entry $"
+            className="flex-1 px-3 py-2 bg-zinc-800/50 border border-white/10 rounded-lg text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
+          />
+          <input
+            type="number"
+            step="0.01"
+            value={stopLoss}
+            onChange={(e) => setStopLoss(e.target.value)}
+            placeholder="Stop $"
+            className="flex-1 px-3 py-2 bg-zinc-800/50 border border-white/10 rounded-lg text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full px-4 py-2 bg-gradient-to-r from-cyan-500 to-violet-500 rounded-lg text-white text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+        >
+          {loading ? 'Checking...' : 'Check This Trade'}
+        </button>
+      </form>
+    </motion.div>
+  );
+};
+
+// Quick Actions Bar Component
+const QuickActionsBar = ({ onAction, onCheckTrade, loading, showTradeForm, setShowTradeForm }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  const quickActions = [
+    { id: 'performance', icon: BarChart3, label: 'Our Performance', color: 'emerald', 
+      prompt: "Analyze our trading performance. What's our win rate, profit factor, and what are our strengths and weaknesses? Give us actionable recommendations." },
+    { id: 'news', icon: Newspaper, label: 'Market News', color: 'cyan',
+      prompt: "What's happening in the market today? Give us the key headlines and themes." },
+    { id: 'morning', icon: Sunrise, label: 'Morning Brief', color: 'amber',
+      endpoint: '/api/assistant/coach/morning-briefing' },
+    { id: 'rules', icon: BookOpen, label: 'Our Rules', color: 'violet',
+      endpoint: '/api/assistant/coach/rule-reminder' },
+    { id: 'summary', icon: TrendingUp, label: 'Daily Summary', color: 'purple',
+      endpoint: '/api/assistant/coach/daily-summary' },
+  ];
+
+  return (
+    <div className="border-b border-white/5">
+      {/* Toggle Button */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between px-4 py-2 text-xs text-zinc-400 hover:text-zinc-300 hover:bg-white/5 transition-colors"
+        data-testid="quick-actions-toggle"
+      >
+        <span className="flex items-center gap-2">
+          <Sparkles className="w-3.5 h-3.5" />
+          Quick Actions
+        </span>
+        <ChevronDown className={`w-4 h-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+      </button>
+      
+      {/* Expanded Actions */}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="px-4 pb-3 overflow-hidden"
+          >
+            <div className="flex items-center gap-2 flex-wrap">
+              {quickActions.map((action) => (
+                <QuickAction
+                  key={action.id}
+                  icon={action.icon}
+                  label={action.label}
+                  onClick={() => onAction(action)}
+                  loading={loading === action.id}
+                  color={action.color}
+                />
+              ))}
+              <div className="h-5 w-px bg-white/10 mx-1" />
+              <button
+                onClick={() => setShowTradeForm(!showTradeForm)}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition-all ${
+                  showTradeForm 
+                    ? 'bg-gradient-to-r from-cyan-500/20 to-emerald-500/20 border-cyan-500/50 text-cyan-400' 
+                    : 'bg-zinc-800/50 border-white/10 text-zinc-300 hover:border-cyan-500/30'
+                }`}
+                data-testid="check-our-trade-btn"
+              >
+                <Target className="w-3.5 h-3.5" />
+                Check Our Trade
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
 
 // ============================================================================
 // HOOKS
@@ -693,6 +887,8 @@ const SentCom = ({ compact = false, embedded = false }) => {
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const [localMessages, setLocalMessages] = useState([]);
+  const [quickActionLoading, setQuickActionLoading] = useState(null);
+  const [showTradeForm, setShowTradeForm] = useState(false);
 
   const handleChat = async (message) => {
     if (!message.trim() || chatLoading) return;
@@ -747,6 +943,138 @@ const SentCom = ({ compact = false, embedded = false }) => {
       setLocalMessages(prev => [errorMsg, ...prev]);
     } finally {
       setChatLoading(false);
+    }
+  };
+
+  // Handle quick action clicks
+  const handleQuickAction = async (action) => {
+    setQuickActionLoading(action.id);
+    
+    // Add user message showing which action was triggered
+    const userMsg = {
+      id: `user_${Date.now()}`,
+      type: 'chat',
+      content: action.prompt ? action.prompt : `Requesting ${action.label}...`,
+      timestamp: new Date().toISOString(),
+      action_type: 'user_message',
+      metadata: { role: 'user', quickAction: action.id }
+    };
+    setLocalMessages(prev => [userMsg, ...prev]);
+    
+    try {
+      let response;
+      
+      if (action.endpoint) {
+        // Call specific coaching endpoint
+        const res = await fetch(`${API_BASE}${action.endpoint}`);
+        const data = await res.json();
+        response = data.coaching || data.response || "We'll have that ready for you soon.";
+      } else if (action.prompt) {
+        // Send as chat message
+        const res = await fetch(`${API_BASE}/api/sentcom/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: action.prompt })
+        });
+        const data = await res.json();
+        response = data.response || "We're working on that analysis.";
+      }
+      
+      // Add assistant response
+      const assistantMsg = {
+        id: `assistant_${Date.now()}`,
+        type: 'chat',
+        content: response,
+        timestamp: new Date().toISOString(),
+        action_type: 'chat_response',
+        metadata: { role: 'assistant', source: action.id }
+      };
+      setLocalMessages(prev => [assistantMsg, ...prev]);
+      
+    } catch (err) {
+      console.error('Quick action error:', err);
+      const errorMsg = {
+        id: `error_${Date.now()}`,
+        type: 'system',
+        content: `We couldn't complete that action right now. We'll try again shortly.`,
+        timestamp: new Date().toISOString(),
+        action_type: 'error',
+        metadata: { role: 'assistant' }
+      };
+      setLocalMessages(prev => [errorMsg, ...prev]);
+    } finally {
+      setQuickActionLoading(null);
+    }
+  };
+
+  // Handle Check My Trade form submission
+  const handleCheckTrade = async (data) => {
+    setQuickActionLoading('checkTrade');
+    
+    const userMsg = {
+      id: `user_${Date.now()}`,
+      type: 'chat',
+      content: `Check Our Trade: ${data.action} ${data.symbol} @ $${data.entry_price} (stop: $${data.stop_loss})`,
+      timestamp: new Date().toISOString(),
+      action_type: 'user_message',
+      metadata: { role: 'user', tradeCheck: data }
+    };
+    setLocalMessages(prev => [userMsg, ...prev]);
+    
+    try {
+      // Call both endpoints in parallel
+      const [rulesRes, sizingRes] = await Promise.all([
+        fetch(`${API_BASE}/api/assistant/coach/check-rules`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        }).then(r => r.json()).catch(() => ({})),
+        fetch(`${API_BASE}/api/assistant/coach/position-size`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        }).then(r => r.json()).catch(() => ({}))
+      ]);
+      
+      // Combine the responses
+      let combinedResponse = '';
+      
+      if (rulesRes?.analysis) {
+        combinedResponse += '## Rule Check\n\n' + rulesRes.analysis;
+      }
+      
+      if (sizingRes?.analysis) {
+        combinedResponse += '\n\n---\n\n## Position Sizing\n\n' + sizingRes.analysis;
+      }
+      
+      if (!combinedResponse) {
+        combinedResponse = "We're analyzing this trade setup. Make sure our systems are fully connected for complete analysis.";
+      }
+      
+      const assistantMsg = {
+        id: `assistant_${Date.now()}`,
+        type: 'chat',
+        content: combinedResponse,
+        timestamp: new Date().toISOString(),
+        action_type: 'chat_response',
+        metadata: { role: 'assistant', source: 'trade_check' }
+      };
+      setLocalMessages(prev => [assistantMsg, ...prev]);
+      
+    } catch (err) {
+      console.error('Trade check error:', err);
+      const errorMsg = {
+        id: `error_${Date.now()}`,
+        type: 'system',
+        content: "We couldn't analyze that trade right now. Let's try again.",
+        timestamp: new Date().toISOString(),
+        action_type: 'error',
+        metadata: { role: 'assistant' }
+      };
+      setLocalMessages(prev => [errorMsg, ...prev]);
+    } finally {
+      setQuickActionLoading(null);
+      setShowTradeForm(false);
     }
   };
 
@@ -826,6 +1154,28 @@ const SentCom = ({ compact = false, embedded = false }) => {
             </div>
           </div>
         </div>
+
+        {/* Quick Actions Bar */}
+        <QuickActionsBar 
+          onAction={handleQuickAction}
+          onCheckTrade={handleCheckTrade}
+          loading={quickActionLoading}
+          showTradeForm={showTradeForm}
+          setShowTradeForm={setShowTradeForm}
+        />
+
+        {/* Check My Trade Form (shown when toggled) */}
+        <AnimatePresence>
+          {showTradeForm && (
+            <div className="px-4">
+              <CheckMyTradeForm 
+                onSubmit={handleCheckTrade}
+                loading={quickActionLoading === 'checkTrade'}
+                onClose={() => setShowTradeForm(false)}
+              />
+            </div>
+          )}
+        </AnimatePresence>
 
         {/* Main Content Grid */}
         <div className="grid grid-cols-12 gap-4 p-4">
