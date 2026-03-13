@@ -273,7 +273,7 @@ class TestRegimePerformanceAPI:
         import httpx
         
         # Get the API URL from env
-        api_url = "https://ollama-ib-hub.preview.emergentagent.com"
+        api_url = "https://ollama-trader-1.preview.emergentagent.com"
         
         endpoints = [
             "/api/regime-performance/summary",

@@ -1,1 +1,1 @@
-https://ollama-ib-hub.preview.emergentagent.com
+https://ollama-trader-1.preview.emergentagent.com
