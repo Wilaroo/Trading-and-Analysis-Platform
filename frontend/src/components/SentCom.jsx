@@ -4,6 +4,8 @@
  * Production component for the unified AI command center.
  * Wired to real /api/sentcom/* endpoints.
  * Uses "we" voice throughout for team partnership feeling.
+ * 
+ * Updated with glassy mockup styling and unified Trading Bot header controls.
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,7 +14,8 @@ import {
   CheckCircle, Loader, X, TrendingUp, Activity, ChevronUp, 
   ChevronDown, DollarSign, Gauge, Wifi, Eye, Crosshair,
   MessageSquare, RefreshCw, Bell, Circle, Flame, Radio,
-  BarChart3, Newspaper, Sunrise, BookOpen, Sparkles, ChevronRight
+  BarChart3, Newspaper, Sunrise, BookOpen, Sparkles, ChevronRight,
+  Play, Pause, Settings, Bot, Sliders, WifiOff, Star
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -36,9 +39,16 @@ const Sparkline = ({ data = [], color = 'cyan', height = 24 }) => {
   }).join(' ');
   
   const strokeColor = color === 'emerald' ? '#10b981' : color === 'rose' ? '#f43f5e' : '#06b6d4';
+  const gradientId = `sparkline-gradient-${color}-${Math.random().toString(36).substr(2, 9)}`;
   
   return (
-    <svg viewBox="0 0 100 100" className={`w-full h-${height}`} preserveAspectRatio="none">
+    <svg viewBox="0 0 100 100" className={`w-full h-${height} overflow-visible`} preserveAspectRatio="none">
+      <defs>
+        <linearGradient id={gradientId} x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor={strokeColor} stopOpacity="0.3" />
+          <stop offset="100%" stopColor={strokeColor} stopOpacity="0" />
+        </linearGradient>
+      </defs>
       <polyline
         points={points}
         fill="none"
@@ -392,6 +402,84 @@ const useSentComAlerts = (pollInterval = 5000) => {
   }, [fetchAlerts, pollInterval]);
 
   return { alerts, loading, refresh: fetchAlerts };
+};
+
+// Hook for Trading Bot status and controls
+const useTradingBotControl = (pollInterval = 5000) => {
+  const [botStatus, setBotStatus] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(null);
+
+  const fetchBotStatus = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/trading-bot/status`);
+      const data = await res.json();
+      if (data.success) {
+        setBotStatus(data);
+      }
+    } catch (err) {
+      console.error('Error fetching bot status:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const toggleBot = useCallback(async () => {
+    setActionLoading('toggle');
+    try {
+      const endpoint = botStatus?.running ? 'stop' : 'start';
+      await fetch(`${API_BASE}/api/trading-bot/${endpoint}`, { method: 'POST' });
+      await fetchBotStatus();
+    } catch (err) {
+      console.error('Failed to toggle bot:', err);
+    }
+    setActionLoading(null);
+  }, [botStatus?.running, fetchBotStatus]);
+
+  const changeMode = useCallback(async (mode) => {
+    setActionLoading('mode');
+    try {
+      await fetch(`${API_BASE}/api/trading-bot/mode/${mode}`, { method: 'POST' });
+      await fetchBotStatus();
+    } catch (err) {
+      console.error('Failed to change mode:', err);
+    }
+    setActionLoading(null);
+  }, [fetchBotStatus]);
+
+  useEffect(() => {
+    fetchBotStatus();
+    const interval = setInterval(fetchBotStatus, pollInterval);
+    return () => clearInterval(interval);
+  }, [fetchBotStatus, pollInterval]);
+
+  return { botStatus, loading, actionLoading, toggleBot, changeMode, refresh: fetchBotStatus };
+};
+
+// Hook for IB Connection status
+const useIBConnectionStatus = (pollInterval = 3000) => {
+  const [ibConnected, setIbConnected] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/ib/pushed-data`);
+      const data = await res.json();
+      setIbConnected(data.connected || false);
+    } catch (err) {
+      setIbConnected(false);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStatus();
+    const interval = setInterval(fetchStatus, pollInterval);
+    return () => clearInterval(interval);
+  }, [fetchStatus, pollInterval]);
+
+  return { ibConnected, loading };
 };
 
 // ============================================================================
@@ -841,6 +929,8 @@ const SentCom = ({ compact = false, embedded = false }) => {
   const { setups, loading: setupsLoading } = useSentComSetups();
   const { context, loading: contextLoading } = useSentComContext();
   const { alerts, loading: alertsLoading } = useSentComAlerts();
+  const { botStatus, actionLoading, toggleBot, changeMode } = useTradingBotControl();
+  const { ibConnected } = useIBConnectionStatus();
   
   const [selectedPosition, setSelectedPosition] = useState(null);
   const [chatInput, setChatInput] = useState('');
@@ -848,6 +938,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
   const [localMessages, setLocalMessages] = useState([]);
   const [quickActionLoading, setQuickActionLoading] = useState(null);
   const [showTradeForm, setShowTradeForm] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   const handleChat = async (message) => {
     if (!message.trim() || chatLoading) return;
@@ -1044,175 +1135,377 @@ const SentCom = ({ compact = false, embedded = false }) => {
 
   // =========================================================================
   // EMBEDDED MODE - For Command Center (full-featured but fits in dashboard)
+  // With glassy mockup styling and unified Trading Bot controls
   // =========================================================================
   if (embedded) {
+    const isRunning = botStatus?.running;
+    const mode = botStatus?.mode || 'confirmation';
+    const regime = context?.regime || status?.regime || 'UNKNOWN';
+    const connected = status?.connected || false;
+    
     return (
-      <div className="bg-zinc-900/50 backdrop-blur-xl rounded-2xl border border-white/10 overflow-hidden" data-testid="sentcom-embedded">
-        {/* Full Header with Status + Pipeline */}
-        <div className="flex items-center justify-between p-4 border-b border-white/5 bg-gradient-to-r from-cyan-500/5 to-violet-500/5">
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-white/[0.08] to-white/[0.02] border border-white/10 backdrop-blur-xl" data-testid="sentcom-embedded">
+        {/* Ambient Background Effects */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute -top-32 -right-32 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl" />
+          <div className="absolute -bottom-32 -left-32 w-64 h-64 bg-violet-500/10 rounded-full blur-3xl" />
+        </div>
+        
+        {/* Unified Header - Bot Controls + Status + Order Pipeline */}
+        <div className="relative flex items-center justify-between px-4 py-3 border-b border-white/10 bg-black/40 backdrop-blur-xl">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500/30 to-violet-500/30 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-              <Brain className="w-6 h-6 text-cyan-400" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-white tracking-tight">SENTCOM</h2>
-              <div className="flex items-center gap-3 mt-0.5">
-                <div className="flex items-center gap-1.5">
-                  {status?.connected ? (
-                    <PulsingDot color="emerald" />
-                  ) : (
-                    <Circle className="w-2 h-2 text-zinc-500" />
-                  )}
-                  <span className={`text-xs font-medium ${status?.connected ? 'text-emerald-400' : 'text-zinc-500'}`}>
-                    {status?.connected ? 'CONNECTED' : 'OFFLINE'}
-                  </span>
+            {/* Logo & Status */}
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="absolute inset-0 bg-gradient-to-br from-cyan-400 to-violet-500 blur-lg opacity-40" />
+                <div className="relative w-11 h-11 rounded-xl bg-gradient-to-br from-cyan-500/20 to-violet-500/20 flex items-center justify-center border border-white/20 shadow-lg shadow-cyan-500/20">
+                  <Brain className="w-5 h-5 text-cyan-400" />
                 </div>
-                {context?.regime && context.regime !== 'UNKNOWN' && (
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                    context.regime === 'RISK_ON' ? 'bg-emerald-500/20 text-emerald-400' :
-                    context.regime === 'RISK_OFF' ? 'bg-rose-500/20 text-rose-400' :
-                    'bg-zinc-500/20 text-zinc-400'
-                  }`}>
-                    {context.regime}
-                  </span>
-                )}
               </div>
+              <div>
+                <h2 className="text-lg font-bold text-white tracking-tight">SENTCOM</h2>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <div className="flex items-center gap-1.5">
+                    {connected ? (
+                      <PulsingDot color="emerald" />
+                    ) : (
+                      <Circle className="w-2 h-2 text-zinc-500" />
+                    )}
+                    <span className={`text-[10px] font-medium ${connected ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                      {connected ? 'CONNECTED' : 'OFFLINE'}
+                    </span>
+                  </div>
+                  <span className="text-zinc-600">•</span>
+                  {regime !== 'UNKNOWN' && (
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                      regime === 'RISK_ON' ? 'bg-emerald-500/20 text-emerald-400' :
+                      regime === 'RISK_OFF' ? 'bg-rose-500/20 text-rose-400' :
+                      'bg-zinc-500/20 text-zinc-400'
+                    }`}>
+                      {regime}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            {/* Bot Status Badge */}
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${
+              isRunning 
+                ? 'bg-emerald-500/10 border-emerald-500/30' 
+                : 'bg-zinc-500/10 border-zinc-500/30'
+            }`}>
+              <Bot className={`w-4 h-4 ${isRunning ? 'text-emerald-400' : 'text-zinc-500'}`} />
+              <span className={`text-xs font-bold ${isRunning ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                {isRunning ? 'ACTIVE' : 'STOPPED'}
+              </span>
+            </div>
+            
+            {/* Mode Indicator */}
+            <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${
+              mode === 'autonomous' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
+              mode === 'confirmation' ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' :
+              'bg-amber-500/10 border-amber-500/30 text-amber-400'
+            }`}>
+              {mode === 'autonomous' ? <Zap className="w-3.5 h-3.5" /> :
+               mode === 'confirmation' ? <Eye className="w-3.5 h-3.5" /> :
+               <Pause className="w-3.5 h-3.5" />}
+              <span className="text-[10px] font-bold uppercase">{mode}</span>
+            </div>
+            
+            {/* IB Connection */}
+            <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${
+              ibConnected 
+                ? 'bg-cyan-500/10 border-cyan-500/30' 
+                : 'bg-zinc-700/30 border-zinc-600/30'
+            }`}>
+              {ibConnected ? (
+                <Wifi className="w-3.5 h-3.5 text-cyan-400" />
+              ) : (
+                <WifiOff className="w-3.5 h-3.5 text-zinc-500" />
+              )}
+              <span className={`text-[10px] font-bold ${ibConnected ? 'text-cyan-400' : 'text-zinc-500'}`}>
+                {ibConnected ? 'IB LIVE' : 'OFFLINE'}
+              </span>
             </div>
           </div>
           
-          {/* Order Pipeline */}
-          <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-black/40 border border-white/5">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center">
-                <Clock className="w-4 h-4 text-amber-400" />
+          <div className="flex items-center gap-3">
+            {/* Order Pipeline */}
+            <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-black/40 border border-white/5">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-amber-500/20 flex items-center justify-center">
+                  <Clock className="w-3.5 h-3.5 text-amber-400" />
+                </div>
+                <div>
+                  <p className="text-base font-bold text-amber-400">{status?.order_pipeline?.pending || 0}</p>
+                  <p className="text-[8px] text-zinc-500 uppercase">Pending</p>
+                </div>
               </div>
-              <div>
-                <p className="text-lg font-bold text-amber-400">{status?.order_pipeline?.pending || 0}</p>
-                <p className="text-[9px] text-zinc-500 uppercase">Pending</p>
+              
+              <ArrowRight className="w-3 h-3 text-zinc-600" />
+              
+              <div className="flex items-center gap-2">
+                <div className={`w-7 h-7 rounded-lg bg-cyan-500/20 flex items-center justify-center ${(status?.order_pipeline?.executing || 0) > 0 ? 'animate-pulse' : ''}`}>
+                  <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                </div>
+                <div>
+                  <p className="text-base font-bold text-cyan-400">{status?.order_pipeline?.executing || 0}</p>
+                  <p className="text-[8px] text-zinc-500 uppercase">Executing</p>
+                </div>
+              </div>
+              
+              <ArrowRight className="w-3 h-3 text-zinc-600" />
+              
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                </div>
+                <div>
+                  <p className="text-base font-bold text-emerald-400">{status?.order_pipeline?.filled || 0}</p>
+                  <p className="text-[8px] text-zinc-500 uppercase">Filled</p>
+                </div>
               </div>
             </div>
-            <ArrowRight className="w-4 h-4 text-zinc-600" />
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center">
-                <Zap className="w-4 h-4 text-cyan-400" />
-              </div>
-              <div>
-                <p className="text-lg font-bold text-cyan-400">{status?.order_pipeline?.executing || 0}</p>
-                <p className="text-[9px] text-zinc-500 uppercase">Executing</p>
-              </div>
-            </div>
-            <ArrowRight className="w-4 h-4 text-zinc-600" />
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                <CheckCircle className="w-4 h-4 text-emerald-400" />
-              </div>
-              <div>
-                <p className="text-lg font-bold text-emerald-400">{status?.order_pipeline?.filled || 0}</p>
-                <p className="text-[9px] text-zinc-500 uppercase">Filled</p>
-              </div>
-            </div>
+            
+            {/* Bot Controls */}
+            <button
+              onClick={() => setShowSettings(!showSettings)}
+              className={`p-2.5 rounded-xl transition-all border ${
+                showSettings 
+                  ? 'bg-cyan-500/20 border-cyan-500/30 text-cyan-400' 
+                  : 'bg-white/5 border-white/5 text-zinc-400 hover:text-white hover:bg-white/10'
+              }`}
+              data-testid="sentcom-settings-btn"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+            
+            <button
+              onClick={toggleBot}
+              disabled={actionLoading === 'toggle'}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all shadow-lg ${
+                isRunning 
+                  ? 'bg-gradient-to-r from-rose-500/20 to-rose-600/10 border border-rose-500/30 text-rose-400 hover:from-rose-500/30 shadow-rose-500/10' 
+                  : 'bg-gradient-to-r from-emerald-500/20 to-emerald-600/10 border border-emerald-500/30 text-emerald-400 hover:from-emerald-500/30 shadow-emerald-500/10'
+              }`}
+              data-testid="sentcom-toggle-bot"
+            >
+              {actionLoading === 'toggle' ? (
+                <Loader className="w-4 h-4 animate-spin" />
+              ) : isRunning ? (
+                <Pause className="w-4 h-4" />
+              ) : (
+                <Play className="w-4 h-4" />
+              )}
+              {isRunning ? 'Stop' : 'Start'}
+            </button>
           </div>
         </div>
+        
+        {/* Settings Panel (Mode Selector) */}
+        <AnimatePresence>
+          {showSettings && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden border-b border-white/5"
+            >
+              <div className="relative p-4 bg-black/40">
+                <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3">Trading Mode</h4>
+                <div className="grid grid-cols-3 gap-3">
+                  {/* Autonomous Mode */}
+                  <button
+                    onClick={() => changeMode('autonomous')}
+                    className={`p-3 rounded-xl border text-center transition-all ${
+                      mode === 'autonomous' 
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
+                        : 'bg-black/30 border-white/5 text-zinc-400 hover:border-white/10 hover:bg-black/40'
+                    }`}
+                    data-testid="sentcom-mode-autonomous"
+                  >
+                    <Zap className={`w-5 h-5 mx-auto mb-2 ${mode === 'autonomous' ? 'text-emerald-400' : 'text-zinc-500'}`} />
+                    <div className="text-sm font-medium">Autonomous</div>
+                    <div className="text-[10px] text-zinc-500 mt-0.5">Auto-execute trades</div>
+                  </button>
+                  
+                  {/* Confirmation Mode */}
+                  <button
+                    onClick={() => changeMode('confirmation')}
+                    className={`p-3 rounded-xl border text-center transition-all ${
+                      mode === 'confirmation' 
+                        ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' 
+                        : 'bg-black/30 border-white/5 text-zinc-400 hover:border-white/10 hover:bg-black/40'
+                    }`}
+                    data-testid="sentcom-mode-confirmation"
+                  >
+                    <Eye className={`w-5 h-5 mx-auto mb-2 ${mode === 'confirmation' ? 'text-cyan-400' : 'text-zinc-500'}`} />
+                    <div className="text-sm font-medium">Confirmation</div>
+                    <div className="text-[10px] text-zinc-500 mt-0.5">Require approval</div>
+                  </button>
+                  
+                  {/* Paused Mode */}
+                  <button
+                    onClick={() => changeMode('paused')}
+                    className={`p-3 rounded-xl border text-center transition-all ${
+                      mode === 'paused' 
+                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' 
+                        : 'bg-black/30 border-white/5 text-zinc-400 hover:border-white/10 hover:bg-black/40'
+                    }`}
+                    data-testid="sentcom-mode-paused"
+                  >
+                    <Pause className={`w-5 h-5 mx-auto mb-2 ${mode === 'paused' ? 'text-amber-400' : 'text-zinc-500'}`} />
+                    <div className="text-sm font-medium">Paused</div>
+                    <div className="text-[10px] text-zinc-500 mt-0.5">No scanning</div>
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Main Content Grid */}
-        <div className="grid grid-cols-12 gap-4 p-4">
-          {/* Left Column - Positions */}
+        <div className="relative grid grid-cols-12 gap-4 p-4">
+          {/* Left Column - Positions + Setups */}
           <div className="col-span-4 space-y-4">
-            {/* Positions Mini Panel */}
-            <div className="bg-black/30 rounded-xl p-4 border border-white/5">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <DollarSign className="w-4 h-4 text-emerald-400" />
-                  <span className="text-sm font-medium text-zinc-300">Our Positions</span>
-                </div>
-                <span className={`text-sm font-bold ${totalPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {totalPnl >= 0 ? '+' : ''}{totalPnl.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
-                </span>
-              </div>
-              
-              {positionsLoading && positions.length === 0 ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader className="w-5 h-5 text-cyan-400 animate-spin" />
-                </div>
-              ) : positions.length === 0 ? (
-                <div className="text-center py-6">
-                  <Eye className="w-6 h-6 text-zinc-600 mx-auto mb-2" />
-                  <p className="text-xs text-zinc-500">No open positions</p>
-                </div>
-              ) : (
-                <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                  {positions.slice(0, 5).map((pos, i) => (
-                    <div 
-                      key={pos.symbol || i}
-                      onClick={() => setSelectedPosition(pos)}
-                      className="flex items-center justify-between p-2 rounded-lg bg-black/20 hover:bg-black/40 cursor-pointer transition-colors"
-                    >
-                      <span className="text-sm font-bold text-white">{pos.symbol}</span>
-                      <span className={`text-sm font-bold ${pos.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {pos.pnl >= 0 ? '+' : ''}{pos.pnl?.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) || '$0'}
-                      </span>
+            {/* Positions Panel - Glassy Style */}
+            <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] border border-white/10 p-4">
+              <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-transparent pointer-events-none" />
+              <div className="relative">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 flex items-center justify-center">
+                      <Target className="w-3.5 h-3.5 text-emerald-400" />
                     </div>
-                  ))}
-                  {positions.length > 5 && (
-                    <p className="text-[10px] text-zinc-500 text-center pt-1">+{positions.length - 5} more</p>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Setups Mini Panel */}
-            <div className="bg-black/30 rounded-xl p-4 border border-white/5">
-              <div className="flex items-center gap-2 mb-3">
-                <Crosshair className="w-4 h-4 text-violet-400" />
-                <span className="text-sm font-medium text-zinc-300">Setups We're Watching</span>
-              </div>
-              
-              {setupsLoading && setups.length === 0 ? (
-                <div className="flex items-center justify-center py-6">
-                  <Loader className="w-5 h-5 text-violet-400 animate-spin" />
-                </div>
-              ) : setups.length === 0 ? (
-                <div className="text-center py-4">
-                  <Crosshair className="w-5 h-5 text-zinc-600 mx-auto mb-1" />
-                  <p className="text-xs text-zinc-500">No setups</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {setups.slice(0, 3).map((setup, i) => (
-                    <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-black/20">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-white">{setup.symbol}</span>
-                        <span className="text-[10px] text-zinc-500">{setup.setup_type}</span>
-                      </div>
-                      {setup.trigger_price && (
-                        <span className="text-xs text-cyan-400">${setup.trigger_price?.toFixed(2)}</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Context Mini Panel */}
-            <div className="bg-black/30 rounded-xl p-4 border border-white/5">
-              <div className="flex items-center gap-2 mb-3">
-                <Wifi className="w-4 h-4 text-cyan-400" />
-                <span className="text-sm font-medium text-zinc-300">Market Context</span>
-              </div>
-              <div className="space-y-2 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-zinc-500">Regime</span>
-                  <span className={`font-bold ${
-                    context?.regime === 'RISK_ON' ? 'text-emerald-400' :
-                    context?.regime === 'RISK_OFF' ? 'text-rose-400' : 'text-zinc-400'
-                  }`}>{context?.regime || '--'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-zinc-500">Market</span>
-                  <span className={`font-bold ${context?.market_open ? 'text-emerald-400' : 'text-zinc-500'}`}>
-                    {context?.market_open ? 'OPEN' : 'CLOSED'}
+                    <span className="text-sm font-bold text-white">Our Positions</span>
+                  </div>
+                  <span className={`text-base font-bold ${totalPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {totalPnl >= 0 ? '+' : ''}{totalPnl.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                   </span>
                 </div>
+                
+                {positionsLoading && positions.length === 0 ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader className="w-5 h-5 text-cyan-400 animate-spin" />
+                  </div>
+                ) : positions.length === 0 ? (
+                  <div className="text-center py-6">
+                    <Eye className="w-6 h-6 text-zinc-600 mx-auto mb-2" />
+                    <p className="text-xs text-zinc-500">No open positions</p>
+                    <p className="text-[10px] text-zinc-600 mt-1">We're scanning for setups...</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-[220px] overflow-y-auto pr-1 custom-scrollbar">
+                    {positions.slice(0, 5).map((pos, i) => (
+                      <div 
+                        key={pos.symbol || i}
+                        onClick={() => setSelectedPosition(pos)}
+                        className="relative p-3 rounded-xl bg-black/40 border border-white/5 hover:border-white/10 cursor-pointer transition-all group"
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-white">{pos.symbol}</span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                              pos.status === 'running' ? 'bg-emerald-500/20 text-emerald-400' :
+                              pos.status === 'trailing' ? 'bg-cyan-500/20 text-cyan-400' :
+                              pos.status === 'watching' ? 'bg-amber-500/20 text-amber-400' :
+                              'bg-zinc-500/20 text-zinc-400'
+                            }`}>
+                              {pos.status || 'open'}
+                            </span>
+                          </div>
+                          <div className="text-right">
+                            <p className={`font-bold ${pos.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {pos.pnl >= 0 ? '+' : ''}{pos.pnl?.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) || '$0'}
+                            </p>
+                            {pos.r_multiple && (
+                              <p className="text-[10px] text-zinc-500">{pos.r_multiple}R</p>
+                            )}
+                          </div>
+                        </div>
+                        
+                        {/* Mini Sparkline */}
+                        <div className="h-6 mt-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                          <Sparkline 
+                            data={pos.sparkline_data || [50, 52, 48, 55, 53, 58, 56, 60]} 
+                            color={pos.pnl >= 0 ? 'emerald' : 'rose'} 
+                          />
+                        </div>
+                      </div>
+                    ))}
+                    {positions.length > 5 && (
+                      <p className="text-[10px] text-zinc-500 text-center pt-1">+{positions.length - 5} more positions</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Setups Panel - Glassy Style */}
+            <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] border border-white/10 p-4">
+              <div className="absolute inset-0 bg-gradient-to-br from-violet-500/5 via-transparent to-transparent pointer-events-none" />
+              <div className="relative">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500/20 to-violet-600/10 flex items-center justify-center">
+                      <Eye className="w-3.5 h-3.5 text-violet-400" />
+                    </div>
+                    <span className="text-sm font-bold text-white">Setups We're Watching</span>
+                  </div>
+                </div>
+                
+                {setupsLoading && setups.length === 0 ? (
+                  <div className="flex items-center justify-center py-6">
+                    <Loader className="w-5 h-5 text-violet-400 animate-spin" />
+                  </div>
+                ) : setups.length === 0 ? (
+                  <div className="text-center py-4">
+                    <Crosshair className="w-5 h-5 text-zinc-600 mx-auto mb-1" />
+                    <p className="text-xs text-zinc-500">No setups currently</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {setups.slice(0, 4).map((setup, i) => (
+                      <div 
+                        key={i}
+                        className="p-3 rounded-xl bg-black/30 hover:bg-black/50 cursor-pointer transition-all border border-transparent hover:border-white/5"
+                      >
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-white">{setup.symbol}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-400 rounded-full">
+                              {setup.setup_type}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Star className="w-3 h-3 text-amber-400" />
+                            <span className="text-xs font-bold text-white">{setup.score || setup.confidence || '--'}</span>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center justify-between text-[10px]">
+                          <span className="text-zinc-500">
+                            {setup.distance_to_entry || setup.trigger_price ? `Entry: $${setup.trigger_price?.toFixed(2)}` : 'Watching...'}
+                          </span>
+                          {setup.win_rate && (
+                            <span className={`flex items-center gap-1 ${setup.win_rate >= 60 ? 'text-emerald-400' : 'text-zinc-400'}`}>
+                              {setup.win_rate >= 60 && <Flame className="w-3 h-3" />}
+                              WR: {setup.win_rate}%
+                            </span>
+                          )}
+                        </div>
+                        
+                        {setup.near_entry && (
+                          <div className="mt-2 flex items-center gap-1 text-amber-400">
+                            <Zap className="w-3 h-3" />
+                            <span className="text-[10px] font-medium">Near Entry Zone</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1221,88 +1514,92 @@ const SentCom = ({ compact = false, embedded = false }) => {
           <div className="col-span-8 flex flex-col">
             {/* Stream Header */}
             <div className="flex items-center gap-2 mb-3">
-              <Flame className="w-4 h-4 text-violet-400" />
-              <span className="text-sm font-medium text-zinc-300">Live Stream</span>
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <Activity className="w-4 h-4 text-cyan-400" />
+              <span className="text-sm font-medium text-white">Live Team Stream</span>
               <span className="text-[10px] text-zinc-500">What we're thinking right now</span>
             </div>
             
-            {/* Stream Content */}
-            <div className="flex-1 bg-black/30 rounded-xl border border-white/5 p-4 overflow-y-auto max-h-[350px] mb-4">
-              {streamLoading && allMessages.length === 0 ? (
-                <div className="flex items-center justify-center h-full">
-                  <Loader className="w-6 h-6 text-cyan-400 animate-spin" />
-                </div>
-              ) : allMessages.length === 0 ? (
-                <div className="flex items-center justify-center h-full">
-                  <div className="text-center">
-                    <Radio className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
-                    <p className="text-sm text-zinc-500">Waiting for activity...</p>
+            {/* Stream Content - Glassy */}
+            <div className="flex-1 relative overflow-hidden rounded-xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] border border-white/10 p-4 mb-4">
+              <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 via-transparent to-violet-500/5 pointer-events-none" />
+              <div className="relative h-[320px] overflow-y-auto pr-2 custom-scrollbar">
+                {streamLoading && allMessages.length === 0 ? (
+                  <div className="flex items-center justify-center h-full">
+                    <Loader className="w-6 h-6 text-cyan-400 animate-spin" />
                   </div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {allMessages.map((msg, i) => (
-                    <motion.div
-                      key={msg.id || i}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: i * 0.03 }}
-                      className={`flex items-start gap-3 ${msg.metadata?.role === 'user' ? 'flex-row-reverse' : ''}`}
-                    >
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                        msg.metadata?.role === 'user' 
-                          ? 'bg-gradient-to-br from-cyan-500/30 to-blue-600/30' 
-                          : 'bg-gradient-to-br from-violet-500/30 to-purple-600/30'
-                      }`}>
-                        {msg.metadata?.role === 'user' ? (
-                          <MessageSquare className="w-4 h-4 text-cyan-400" />
-                        ) : msg.type === 'thought' || msg.action_type === 'scanning' ? (
-                          <Brain className="w-4 h-4 text-violet-400" />
-                        ) : msg.type === 'alert' ? (
-                          <AlertCircle className="w-4 h-4 text-amber-400" />
-                        ) : msg.type === 'filter' ? (
-                          <Target className="w-4 h-4 text-cyan-400" />
-                        ) : msg.action_type === 'chat_response' ? (
-                          <Brain className="w-4 h-4 text-violet-400" />
-                        ) : (
-                          <Radio className="w-4 h-4 text-zinc-400" />
-                        )}
-                      </div>
-                      <div className={`flex-1 min-w-0 ${msg.metadata?.role === 'user' ? 'text-right' : ''}`}>
-                        <div className={`flex items-center gap-2 mb-1 ${msg.metadata?.role === 'user' ? 'justify-end' : ''}`}>
-                          <span className={`text-[10px] font-medium uppercase ${
-                            msg.metadata?.role === 'user' ? 'text-cyan-400' : 'text-violet-400'
-                          }`}>
-                            {msg.metadata?.role === 'user' ? 'YOU' :
-                             msg.action_type === 'scanning' ? 'SCANNER' :
-                             msg.action_type === 'monitoring' ? 'MONITOR' :
-                             msg.action_type === 'chat_response' ? 'SENTCOM' :
-                             msg.type === 'filter' ? 'FILTER' :
-                             msg.type === 'alert' ? 'ALERT' : 'SENTCOM'}
-                          </span>
-                          {msg.symbol && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400">
-                              {msg.symbol}
-                            </span>
+                ) : allMessages.length === 0 ? (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="text-center">
+                      <Radio className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                      <p className="text-sm text-zinc-500">Waiting for activity...</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {allMessages.map((msg, i) => (
+                      <motion.div
+                        key={msg.id || i}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.03 }}
+                        className={`flex items-start gap-3 ${msg.metadata?.role === 'user' ? 'flex-row-reverse' : ''}`}
+                      >
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-lg ${
+                          msg.metadata?.role === 'user' 
+                            ? 'bg-gradient-to-br from-cyan-500/30 to-blue-600/30 shadow-cyan-500/20' 
+                            : 'bg-gradient-to-br from-violet-500/30 to-purple-600/30 shadow-violet-500/20'
+                        }`}>
+                          {msg.metadata?.role === 'user' ? (
+                            <MessageSquare className="w-4 h-4 text-cyan-400" />
+                          ) : msg.type === 'thought' || msg.action_type === 'scanning' ? (
+                            <Brain className="w-4 h-4 text-violet-400" />
+                          ) : msg.type === 'alert' ? (
+                            <AlertCircle className="w-4 h-4 text-amber-400" />
+                          ) : msg.type === 'filter' ? (
+                            <Target className="w-4 h-4 text-cyan-400" />
+                          ) : msg.action_type === 'chat_response' ? (
+                            <Brain className="w-4 h-4 text-violet-400" />
+                          ) : (
+                            <Radio className="w-4 h-4 text-zinc-400" />
                           )}
-                          <span className="text-[10px] text-zinc-600">
-                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
                         </div>
-                        <p className={`text-sm leading-relaxed ${
-                          msg.metadata?.role === 'user' ? 'text-cyan-300' : 'text-zinc-300'
-                        }`}>{msg.content}</p>
-                        {msg.confidence && (
-                          <div className={`flex items-center gap-1 mt-1 ${msg.metadata?.role === 'user' ? 'justify-end' : ''}`}>
-                            <Gauge className="w-3 h-3 text-violet-400" />
-                            <span className="text-[10px] text-violet-400">Confidence: {msg.confidence}%</span>
+                        <div className={`flex-1 min-w-0 ${msg.metadata?.role === 'user' ? 'text-right' : ''}`}>
+                          <div className={`flex items-center gap-2 mb-1 ${msg.metadata?.role === 'user' ? 'justify-end' : ''}`}>
+                            <span className={`text-[10px] font-bold uppercase tracking-wider ${
+                              msg.metadata?.role === 'user' ? 'text-cyan-400' : 'text-violet-400'
+                            }`}>
+                              {msg.metadata?.role === 'user' ? 'YOU' :
+                               msg.action_type === 'scanning' ? 'SCANNER' :
+                               msg.action_type === 'monitoring' ? 'MONITOR' :
+                               msg.action_type === 'chat_response' ? 'SENTCOM' :
+                               msg.type === 'filter' ? 'SMART FILTER' :
+                               msg.type === 'alert' ? 'ALERT' : 'SENTCOM'}
+                            </span>
+                            {msg.symbol && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400">
+                                {msg.symbol}
+                              </span>
+                            )}
+                            <span className="text-[10px] text-zinc-600">
+                              {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
                           </div>
-                        )}
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              )}
+                          <p className={`text-sm leading-relaxed ${
+                            msg.metadata?.role === 'user' ? 'text-cyan-200' : 'text-zinc-300'
+                          }`}>{msg.content}</p>
+                          {msg.confidence && (
+                            <div className={`flex items-center gap-1 mt-2 ${msg.metadata?.role === 'user' ? 'justify-end' : ''}`}>
+                              <Gauge className="w-3 h-3 text-violet-400" />
+                              <span className="text-[10px] text-violet-400">Confidence: {msg.confidence}%</span>
+                            </div>
+                          )}
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             
             {/* Quick Actions - Always visible above chat */}
@@ -1327,29 +1624,35 @@ const SentCom = ({ compact = false, embedded = false }) => {
               )}
             </AnimatePresence>
             
-            {/* Chat Input */}
-            <form onSubmit={(e) => { e.preventDefault(); handleChat(chatInput); }} className="flex gap-2">
-              <input
-                type="text"
-                name="message"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Ask SentCom anything..."
-                disabled={chatLoading}
-                className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50 disabled:opacity-50"
-              />
-              <button
-                type="submit"
-                disabled={!chatInput.trim() || chatLoading}
-                className="px-5 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-500 text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
-              >
-                {chatLoading ? <Loader className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-              </button>
-            </form>
+            {/* Chat Input - Enhanced */}
+            <div className="relative">
+              <form onSubmit={(e) => { e.preventDefault(); handleChat(chatInput); }} className="relative">
+                <input
+                  type="text"
+                  name="message"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Talk to the team... Ask questions, give commands, or discuss strategy"
+                  disabled={chatLoading}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl pl-4 pr-20 py-4 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition-all disabled:opacity-50"
+                  data-testid="sentcom-chat-input"
+                />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  <button
+                    type="submit"
+                    disabled={!chatInput.trim() || chatLoading}
+                    className="p-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-600 text-white shadow-lg shadow-cyan-500/30 hover:shadow-cyan-500/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    data-testid="sentcom-send-btn"
+                  >
+                    {chatLoading ? <Loader className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
 
-        {/* Position Detail Modal */}
+        {/* Position Detail Modal - Enhanced */}
         <AnimatePresence>
           {selectedPosition && (
             <motion.div
@@ -1363,31 +1666,91 @@ const SentCom = ({ compact = false, embedded = false }) => {
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.9, opacity: 0 }}
-                className="w-full max-w-lg"
+                className="w-full max-w-2xl"
                 onClick={e => e.stopPropagation()}
               >
                 <GlassCard glow className="p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xl font-bold text-white">Our {selectedPosition.symbol} Position</h3>
-                    <button onClick={() => setSelectedPosition(null)} className="p-2 rounded-lg hover:bg-white/10">
-                      <X className="w-5 h-5 text-zinc-400" />
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-4">
+                      <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-cyan-500/30 to-violet-500/30 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                        <span className="text-xl font-bold text-white">{selectedPosition.symbol}</span>
+                      </div>
+                      <div>
+                        <h2 className="text-2xl font-bold text-white">Our {selectedPosition.symbol} Position</h2>
+                        <p className="text-sm text-zinc-400">Detailed view • {selectedPosition.status || 'Open'}</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => setSelectedPosition(null)}
+                      className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
+                    >
+                      <X className="w-5 h-5" />
                     </button>
                   </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="p-3 rounded-lg bg-black/30 text-center">
-                      <p className="text-[10px] text-zinc-500 mb-1">P&L</p>
+                  
+                  {/* Position Stats */}
+                  <div className="grid grid-cols-4 gap-4 mb-6">
+                    <div className="p-3 rounded-xl bg-black/40 text-center">
+                      <p className="text-[10px] text-zinc-500 uppercase">Entry</p>
+                      <p className="text-lg font-bold text-white">${selectedPosition.entry_price?.toFixed(2)}</p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-black/40 text-center">
+                      <p className="text-[10px] text-zinc-500 uppercase">Current P&L</p>
                       <p className={`text-lg font-bold ${selectedPosition.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {selectedPosition.pnl >= 0 ? '+' : ''}{selectedPosition.pnl?.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                       </p>
                     </div>
-                    <div className="p-3 rounded-lg bg-black/30 text-center">
-                      <p className="text-[10px] text-zinc-500 mb-1">Entry</p>
-                      <p className="text-lg font-bold text-white">${selectedPosition.entry_price?.toFixed(2)}</p>
+                    <div className="p-3 rounded-xl bg-black/40 text-center">
+                      <p className="text-[10px] text-zinc-500 uppercase">R-Multiple</p>
+                      <p className="text-lg font-bold text-cyan-400">{selectedPosition.r_multiple || '--'}R</p>
                     </div>
-                    <div className="p-3 rounded-lg bg-black/30 text-center">
-                      <p className="text-[10px] text-zinc-500 mb-1">Current</p>
-                      <p className="text-lg font-bold text-white">${selectedPosition.current_price?.toFixed(2)}</p>
+                    <div className="p-3 rounded-xl bg-black/40 text-center">
+                      <p className="text-[10px] text-zinc-500 uppercase">Status</p>
+                      <p className={`text-lg font-bold capitalize ${
+                        selectedPosition.status === 'running' ? 'text-emerald-400' :
+                        selectedPosition.status === 'trailing' ? 'text-cyan-400' :
+                        selectedPosition.status === 'watching' ? 'text-amber-400' :
+                        'text-violet-400'
+                      }`}>
+                        {selectedPosition.status || 'Open'}
+                      </p>
                     </div>
+                  </div>
+                  
+                  {/* Price Levels */}
+                  <div className="grid grid-cols-3 gap-4 mb-6">
+                    <div className="p-3 rounded-xl bg-black/40 text-center">
+                      <p className="text-[10px] text-zinc-500 uppercase">Stop</p>
+                      <p className="text-lg font-bold text-rose-400">
+                        ${selectedPosition.stop_price?.toFixed(2) || '--'}
+                      </p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-black/40 text-center">
+                      <p className="text-[10px] text-zinc-500 uppercase">Current</p>
+                      <p className="text-lg font-bold text-white">
+                        ${selectedPosition.current_price?.toFixed(2)}
+                      </p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-black/40 text-center">
+                      <p className="text-[10px] text-zinc-500 uppercase">Target</p>
+                      <p className="text-lg font-bold text-emerald-400">
+                        ${selectedPosition.target_prices?.[0]?.toFixed(2) || '--'}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {/* Our Take Section */}
+                  <div className="p-4 rounded-xl bg-gradient-to-r from-violet-500/10 to-transparent border border-violet-500/20">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Brain className="w-5 h-5 text-violet-400" />
+                      <span className="font-bold text-white">Our Take</span>
+                    </div>
+                    <p className="text-sm text-zinc-300">
+                      "We're {selectedPosition.pnl >= 0 ? 'running nicely on' : 'underwater on'} {selectedPosition.symbol}. 
+                      {selectedPosition.status === 'trailing' ? " We've moved our stop to breakeven and are trailing for more." : 
+                       selectedPosition.status === 'watching' ? " We're watching for a bounce or considering cutting." :
+                       " Momentum is with us - letting it run."}
+                    </p>
                   </div>
                 </GlassCard>
               </motion.div>
