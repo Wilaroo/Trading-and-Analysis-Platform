@@ -314,6 +314,34 @@ const StopFixPanel = ({ thoughts = [], onRefresh }) => {
 // HOOKS
 // ============================================================================
 
+// Hook for Market Session status
+const useMarketSession = (pollInterval = 30000) => {
+  const [session, setSession] = useState({ name: 'LOADING', is_open: false });
+  const [loading, setLoading] = useState(true);
+
+  const fetchSession = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/market-context/session/status`);
+      const data = await res.json();
+      if (data.success && data.session) {
+        setSession(data.session);
+      }
+    } catch (err) {
+      console.error('Error fetching market session:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSession();
+    const interval = setInterval(fetchSession, pollInterval);
+    return () => clearInterval(interval);
+  }, [fetchSession, pollInterval]);
+
+  return { session, loading, refresh: fetchSession };
+};
+
 const useSentComStatus = (pollInterval = 5000) => {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1007,6 +1035,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
   const { alerts, loading: alertsLoading } = useSentComAlerts();
   const { botStatus, actionLoading, toggleBot, changeMode } = useTradingBotControl();
   const { ibConnected } = useIBConnectionStatus();
+  const { session: marketSession } = useMarketSession();
   
   const [selectedPosition, setSelectedPosition] = useState(null);
   const [chatInput, setChatInput] = useState('');
@@ -1252,14 +1281,27 @@ const SentCom = ({ compact = false, embedded = false }) => {
                     </span>
                   </div>
                   <span className="text-zinc-600">•</span>
+                  {/* Market Session Badge */}
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                    marketSession.is_open 
+                      ? marketSession.name === 'MARKET OPEN' 
+                        ? 'bg-emerald-500/20 text-emerald-400'
+                        : 'bg-amber-500/20 text-amber-400'
+                      : 'bg-zinc-500/20 text-zinc-400'
+                  }`}>
+                    {marketSession.name || 'LOADING'}
+                  </span>
                   {regime !== 'UNKNOWN' && (
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                      regime === 'RISK_ON' ? 'bg-emerald-500/20 text-emerald-400' :
-                      regime === 'RISK_OFF' ? 'bg-rose-500/20 text-rose-400' :
-                      'bg-zinc-500/20 text-zinc-400'
-                    }`}>
-                      {regime}
-                    </span>
+                    <>
+                      <span className="text-zinc-600">•</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                        regime === 'RISK_ON' ? 'bg-emerald-500/20 text-emerald-400' :
+                        regime === 'RISK_OFF' ? 'bg-rose-500/20 text-rose-400' :
+                        'bg-zinc-500/20 text-zinc-400'
+                      }`}>
+                        {regime}
+                      </span>
+                    </>
                   )}
                 </div>
               </div>

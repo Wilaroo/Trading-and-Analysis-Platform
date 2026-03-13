@@ -464,3 +464,72 @@ async def get_volume_threshold(symbol: str):
     except Exception as e:
         return {"error": str(e), "symbol": symbol}
 
+
+
+@router.get("/session/status")
+async def get_market_session():
+    """
+    Get current market session status based on US Eastern time.
+    Returns session name, whether market is open, and relevant times.
+    """
+    from datetime import datetime
+    import pytz
+    
+    try:
+        et = pytz.timezone('US/Eastern')
+        now = datetime.now(et)
+        
+        # Time boundaries
+        pre_market_start = now.replace(hour=4, minute=0, second=0, microsecond=0)
+        market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+        market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+        after_hours_end = now.replace(hour=20, minute=0, second=0, microsecond=0)
+        
+        is_weekend = now.weekday() >= 5
+        
+        # Determine session
+        if is_weekend:
+            session_name = "WEEKEND"
+            is_open = False
+            next_open = "Monday 9:30 AM ET"
+        elif now < pre_market_start:
+            session_name = "OVERNIGHT"
+            is_open = False
+            next_open = "4:00 AM ET"
+        elif pre_market_start <= now < market_open:
+            session_name = "PRE-MARKET"
+            is_open = True  # Pre-market trading available
+            next_open = "9:30 AM ET (Regular)"
+        elif market_open <= now < market_close:
+            session_name = "MARKET OPEN"
+            is_open = True
+            next_open = None
+        elif market_close <= now < after_hours_end:
+            session_name = "AFTER-HOURS"
+            is_open = True  # After-hours trading available
+            next_open = "9:30 AM ET (Next Day)"
+        else:
+            session_name = "CLOSED"
+            is_open = False
+            next_open = "4:00 AM ET (Pre-Market)"
+        
+        return {
+            "success": True,
+            "session": {
+                "name": session_name,
+                "is_open": is_open,
+                "is_regular_hours": session_name == "MARKET OPEN",
+                "current_time_et": now.strftime("%Y-%m-%d %H:%M:%S ET"),
+                "next_open": next_open,
+                "day_of_week": now.strftime("%A")
+            }
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "session": {
+                "name": "UNKNOWN",
+                "is_open": False
+            }
+        }

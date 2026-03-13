@@ -63,6 +63,16 @@ const TradingViewWidget = memo(({ symbol = 'SPY', theme = 'dark', height = '100%
       studies: ['MASimple@tv-basicstudies'],
       withdateranges: true,
       allow_symbol_change: true,
+      // Enable proper scrolling and zooming
+      disabled_features: [],
+      enabled_features: ['use_localstorage_for_settings', 'side_toolbar_in_fullscreen_mode'],
+      overrides: {
+        "mainSeriesProperties.showCountdown": true,
+        "paneProperties.background": theme === 'dark' ? "#0a0a0a" : "#ffffff",
+        "paneProperties.vertGridProperties.color": theme === 'dark' ? "#1f2937" : "#e0e0e0",
+        "paneProperties.horzGridProperties.color": theme === 'dark' ? "#1f2937" : "#e0e0e0",
+        "scalesProperties.textColor": theme === 'dark' ? "#9ca3af" : "#333333"
+      }
     });
 
     if (container.current) {

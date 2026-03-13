@@ -31,7 +31,6 @@ const ACCOUNT_REFRESH_INTERVAL = 5000; // 5 seconds for account data
 // Bot status and controls are now in the unified SentCom header below
 const DashboardHeader = ({ 
   botStatus, 
-  marketSession, 
   regime, 
   todayPnl, 
   openPnl,
@@ -39,6 +38,26 @@ const DashboardHeader = ({
   riskStatus,
   onBriefMe,
 }) => {
+  // Fetch market session from API
+  const [marketSession, setMarketSession] = useState({ name: 'LOADING', is_open: false });
+  
+  useEffect(() => {
+    const fetchSession = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/market-context/session/status`);
+        const data = await res.json();
+        if (data.success && data.session) {
+          setMarketSession(data.session);
+        }
+      } catch (err) {
+        console.error('Error fetching market session:', err);
+      }
+    };
+    
+    fetchSession();
+    const interval = setInterval(fetchSession, 30000); // Update every 30 seconds
+    return () => clearInterval(interval);
+  }, []);
   // Risk status calculations
   const dailyLossLimit = riskStatus?.daily_loss_limit || 10000;
   const dailyLossUsed = Math.abs(Math.min(todayPnl || 0, 0));
@@ -82,8 +101,20 @@ const DashboardHeader = ({
             
             <div className="w-px h-6 bg-white/10" />
             
-            <div className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/5">
-              <span className="text-xs text-zinc-400">{marketSession || 'CLOSED'}</span>
+            <div className={`px-2.5 py-1 rounded-lg border ${
+              marketSession.is_open 
+                ? marketSession.name === 'MARKET OPEN'
+                  ? 'bg-emerald-500/10 border-emerald-500/20'
+                  : 'bg-amber-500/10 border-amber-500/20'
+                : 'bg-white/5 border-white/5'
+            }`}>
+              <span className={`text-xs font-medium ${
+                marketSession.is_open 
+                  ? marketSession.name === 'MARKET OPEN'
+                    ? 'text-emerald-400'
+                    : 'text-amber-400'
+                  : 'text-zinc-400'
+              }`}>{marketSession.name || 'CLOSED'}</span>
             </div>
           </div>
         </div>
