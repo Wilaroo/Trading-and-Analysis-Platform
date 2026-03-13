@@ -145,14 +145,7 @@ const ActivePositionsCard = ({ positions = [], onPositionClick }) => {
   const { openTickerModal } = useTickerModal();
   
   const handlePositionClick = (symbol) => {
-    console.log('[ActivePositionsCard] handlePositionClick called with:', symbol);
-    console.log('[ActivePositionsCard] openTickerModal is:', typeof openTickerModal);
-    try {
-      openTickerModal(symbol);
-      console.log('[ActivePositionsCard] openTickerModal called successfully');
-    } catch (err) {
-      console.error('[ActivePositionsCard] Error calling openTickerModal:', err);
-    }
+    openTickerModal(symbol);
   };
   
   return (
