@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import AICommandPanel from '../AICommandPanel';
 import RightSidebar from '../RightSidebar';
 import LearningInsightsWidget from '../LearningInsightsWidget';
 import MarketRegimeWidget from '../MarketRegimeWidget';
@@ -143,7 +142,8 @@ const AICoachTab = ({
           onViewAllAlerts={() => console.log('View all alerts')}
           onNavigateToTab={onNavigateToTab}
         >
-          {/* Right column content: AI Assistant + Market Regime */}
+          {/* Right column content: Learning Insights + Market Regime */}
+          {/* Note: AI Chat is now integrated into SentCom on the left */}
           <div className="space-y-4">
             {/* Compact Learning Insights */}
             <LearningInsightsWidget 
@@ -157,29 +157,6 @@ const AICoachTab = ({
                 console.log(`Market regime changed: ${oldState} -> ${newState}`);
               }}
             />
-            
-            {/* AI Chat Panel (Compact) */}
-            <div className="bg-zinc-900/50 border border-white/10 rounded-xl overflow-hidden h-[400px]">
-              <AICommandPanel
-                onTickerSelect={handleTickerClick}
-                onViewChart={(ticker) => setChartSymbol(ticker)}
-                watchlist={watchlist}
-                alerts={[...enhancedAlerts, ...alerts]}
-                opportunities={opportunities}
-                earnings={earnings}
-                scanResults={opportunities}
-                isConnected={isConnected}
-                onRefresh={() => runScanner()}
-                account={account}
-                marketContext={marketContext}
-                positions={positions}
-                chartSymbol={chartSymbol}
-                setChartSymbol={setChartSymbol}
-                wsBotStatus={wsBotStatus}
-                wsBotTrades={wsBotTrades}
-                wsCoachingNotifications={wsCoachingNotifications}
-              />
-            </div>
           </div>
         </NewDashboard>
       </div>

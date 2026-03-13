@@ -34,11 +34,11 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 - Wired into server.py with service injection
 
 **Phase 3: UI Implementation** ✅ COMPLETE
-- Created `/app/frontend/src/components/SentCom.jsx` - Production component wired to real APIs
-- 3-column responsive layout (Positions/Setups | Live Stream/Chat | Context/Alerts)
-- Real-time polling hooks for all data
-- Added "SentCom" route in App.js
-- Updated sidebar with SentCom menu item (NEW badge)
+- Created `/app/frontend/src/components/SentCom.jsx` - Production component
+- **Compact Mode**: Embedded in Command Center, replacing BotBrainPanel + AI Assistant
+- Full Page Mode: Accessible via sidebar "SentCom" menu item
+- Wired to real `/api/sentcom/*` endpoints with polling hooks
+- Removed separate AICommandPanel from right sidebar (chat now in SentCom)
 
 **V2 Interactive Mockups (For Reference):**
 - `/app/frontend/src/pages/TeamBrainMockupsV2.jsx` - Now labeled "SentCom Mockups"

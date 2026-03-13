@@ -708,13 +708,72 @@ const SentCom = ({ compact = false }) => {
   };
 
   if (compact) {
-    // Compact version for embedding in dashboard
+    // Compact version for embedding in Command Center dashboard
+    // Replaces BotBrainPanel + AI Assistant with unified SentCom
     return (
-      <div className="h-full flex flex-col bg-zinc-950 rounded-2xl border border-white/10 overflow-hidden">
-        <StatusHeader status={status} context={context} />
-        <div className="flex-1 overflow-hidden">
+      <div className="bg-zinc-900/50 backdrop-blur-xl rounded-2xl border border-white/10 overflow-hidden" data-testid="sentcom-compact">
+        {/* Compact Header */}
+        <div className="flex items-center justify-between p-4 border-b border-white/5">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/30 to-violet-500/30 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+              <Brain className="w-5 h-5 text-cyan-400" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white tracking-tight">SENTCOM</h2>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  {status?.connected ? (
+                    <PulsingDot color="emerald" />
+                  ) : (
+                    <Circle className="w-2 h-2 text-zinc-500" />
+                  )}
+                  <span className={`text-[10px] font-medium ${status?.connected ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                    {status?.connected ? 'CONNECTED' : 'OFFLINE'}
+                  </span>
+                </div>
+                {context?.regime && context.regime !== 'UNKNOWN' && (
+                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                    context.regime === 'RISK_ON' ? 'bg-emerald-500/20 text-emerald-400' :
+                    context.regime === 'RISK_OFF' ? 'bg-rose-500/20 text-rose-400' :
+                    'bg-zinc-500/20 text-zinc-400'
+                  }`}>
+                    {context.regime}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          
+          {/* Compact Order Pipeline */}
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black/30">
+            <div className="flex items-center gap-1">
+              <Clock className="w-3 h-3 text-amber-400" />
+              <span className="text-sm font-bold text-amber-400">{status?.order_pipeline?.pending || 0}</span>
+            </div>
+            <ArrowRight className="w-3 h-3 text-zinc-600" />
+            <div className="flex items-center gap-1">
+              <Zap className="w-3 h-3 text-cyan-400" />
+              <span className="text-sm font-bold text-cyan-400">{status?.order_pipeline?.executing || 0}</span>
+            </div>
+            <ArrowRight className="w-3 h-3 text-zinc-600" />
+            <div className="flex items-center gap-1">
+              <CheckCircle className="w-3 h-3 text-emerald-400" />
+              <span className="text-sm font-bold text-emerald-400">{status?.order_pipeline?.filled || 0}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Thought Label */}
+        <div className="px-4 pt-3 pb-1">
+          <p className="text-[10px] text-zinc-500 uppercase tracking-wider">What we're thinking right now</p>
+        </div>
+        
+        {/* Live Stream - compact height */}
+        <div className="h-[280px] overflow-hidden">
           <StreamPanel messages={messages} loading={streamLoading} />
         </div>
+        
+        {/* Chat Input */}
         <ChatInput onSend={handleChat} disabled={!status?.connected} />
       </div>
     );
