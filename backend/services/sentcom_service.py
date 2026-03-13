@@ -413,6 +413,7 @@ class SentComService:
         """
         Process a chat message through SentCom.
         Routes to the appropriate agent and returns unified response.
+        Now includes conversation history for better context.
         """
         orchestrator = self._get_orchestrator()
         
@@ -425,8 +426,21 @@ class SentComService:
             }
         
         try:
-            # Process through orchestrator
-            result = await orchestrator.process(message, session_id)
+            # Format recent chat history for the orchestrator
+            recent_history = []
+            for chat_msg in self._chat_history[-10:]:
+                recent_history.append({
+                    "role": chat_msg.get("role", "user"),
+                    "content": chat_msg.get("content", ""),
+                    "timestamp": chat_msg.get("timestamp")
+                })
+            
+            # Process through orchestrator with conversation history
+            result = await orchestrator.process(
+                message=message, 
+                session_id=session_id,
+                chat_history=recent_history
+            )
             
             # Ensure response uses "we" voice
             response_text = self._ensure_we_voice(result.response)

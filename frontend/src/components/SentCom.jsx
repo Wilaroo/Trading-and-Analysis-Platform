@@ -310,6 +310,124 @@ const StopFixPanel = ({ thoughts = [], onRefresh }) => {
   );
 };
 
+// Risk Parameters Control Panel
+const RiskControlsPanel = ({ botStatus, onUpdateRisk, loading }) => {
+  const riskParams = botStatus?.risk_params || {};
+  const [localParams, setLocalParams] = useState({
+    max_risk_per_trade: riskParams.max_risk_per_trade || 1.0,
+    max_daily_loss: riskParams.max_daily_loss || 500,
+    max_open_positions: riskParams.max_open_positions || 5,
+    max_position_pct: riskParams.max_position_pct || 5.0,
+    min_risk_reward: riskParams.min_risk_reward || 2.0
+  });
+  const [hasChanges, setHasChanges] = useState(false);
+
+  // Update local params when bot status changes
+  useEffect(() => {
+    if (riskParams) {
+      setLocalParams({
+        max_risk_per_trade: riskParams.max_risk_per_trade || 1.0,
+        max_daily_loss: riskParams.max_daily_loss || 500,
+        max_open_positions: riskParams.max_open_positions || 5,
+        max_position_pct: riskParams.max_position_pct || 5.0,
+        min_risk_reward: riskParams.min_risk_reward || 2.0
+      });
+      setHasChanges(false);
+    }
+  }, [riskParams]);
+
+  const handleChange = (field, value) => {
+    setLocalParams(prev => ({ ...prev, [field]: parseFloat(value) || 0 }));
+    setHasChanges(true);
+  };
+
+  const handleSave = async () => {
+    const success = await onUpdateRisk(localParams);
+    if (success) setHasChanges(false);
+  };
+
+  return (
+    <div className="space-y-4">
+      <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Risk Parameters</h4>
+      
+      <div className="grid grid-cols-2 gap-3">
+        {/* Max Risk Per Trade */}
+        <div className="space-y-1">
+          <label className="text-[10px] text-zinc-500 uppercase">Risk/Trade (%)</label>
+          <input
+            type="number"
+            step="0.1"
+            min="0.1"
+            max="5"
+            value={localParams.max_risk_per_trade}
+            onChange={(e) => handleChange('max_risk_per_trade', e.target.value)}
+            className="w-full px-3 py-2 bg-zinc-800/50 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-cyan-500/50"
+            data-testid="risk-per-trade-input"
+          />
+        </div>
+
+        {/* Max Daily Loss */}
+        <div className="space-y-1">
+          <label className="text-[10px] text-zinc-500 uppercase">Max Daily Loss ($)</label>
+          <input
+            type="number"
+            step="50"
+            min="100"
+            value={localParams.max_daily_loss}
+            onChange={(e) => handleChange('max_daily_loss', e.target.value)}
+            className="w-full px-3 py-2 bg-zinc-800/50 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-cyan-500/50"
+            data-testid="max-daily-loss-input"
+          />
+        </div>
+
+        {/* Max Open Positions */}
+        <div className="space-y-1">
+          <label className="text-[10px] text-zinc-500 uppercase">Max Positions</label>
+          <input
+            type="number"
+            step="1"
+            min="1"
+            max="20"
+            value={localParams.max_open_positions}
+            onChange={(e) => handleChange('max_open_positions', e.target.value)}
+            className="w-full px-3 py-2 bg-zinc-800/50 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-cyan-500/50"
+            data-testid="max-positions-input"
+          />
+        </div>
+
+        {/* Min Risk:Reward */}
+        <div className="space-y-1">
+          <label className="text-[10px] text-zinc-500 uppercase">Min R:R Ratio</label>
+          <input
+            type="number"
+            step="0.5"
+            min="1"
+            max="10"
+            value={localParams.min_risk_reward}
+            onChange={(e) => handleChange('min_risk_reward', e.target.value)}
+            className="w-full px-3 py-2 bg-zinc-800/50 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-cyan-500/50"
+            data-testid="min-rr-input"
+          />
+        </div>
+      </div>
+
+      {/* Save Button */}
+      {hasChanges && (
+        <motion.button
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          onClick={handleSave}
+          disabled={loading}
+          className="w-full px-4 py-2 bg-gradient-to-r from-cyan-500 to-violet-500 rounded-lg text-white text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+          data-testid="save-risk-params-btn"
+        >
+          {loading ? 'Saving...' : 'Save Risk Parameters'}
+        </motion.button>
+      )}
+    </div>
+  );
+};
+
 // ============================================================================
 // HOOKS
 // ============================================================================
@@ -534,8 +652,10 @@ const useTradingBotControl = (pollInterval = 5000) => {
       const endpoint = botStatus?.running ? 'stop' : 'start';
       await fetch(`${API_BASE}/api/trading-bot/${endpoint}`, { method: 'POST' });
       await fetchBotStatus();
+      toast.success(botStatus?.running ? 'Bot stopped' : 'Bot started');
     } catch (err) {
       console.error('Failed to toggle bot:', err);
+      toast.error('Failed to toggle bot');
     }
     setActionLoading(null);
   }, [botStatus?.running, fetchBotStatus]);
@@ -545,10 +665,38 @@ const useTradingBotControl = (pollInterval = 5000) => {
     try {
       await fetch(`${API_BASE}/api/trading-bot/mode/${mode}`, { method: 'POST' });
       await fetchBotStatus();
+      toast.success(`Mode changed to ${mode}`);
     } catch (err) {
       console.error('Failed to change mode:', err);
+      toast.error('Failed to change mode');
     }
     setActionLoading(null);
+  }, [fetchBotStatus]);
+
+  const updateRiskParams = useCallback(async (params) => {
+    setActionLoading('risk');
+    try {
+      const res = await fetch(`${API_BASE}/api/trading-bot/risk-params`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params)
+      });
+      const data = await res.json();
+      if (data.success) {
+        await fetchBotStatus();
+        toast.success('Risk parameters updated');
+        return true;
+      } else {
+        toast.error(data.error || 'Failed to update risk params');
+        return false;
+      }
+    } catch (err) {
+      console.error('Failed to update risk params:', err);
+      toast.error('Failed to update risk parameters');
+      return false;
+    } finally {
+      setActionLoading(null);
+    }
   }, [fetchBotStatus]);
 
   useEffect(() => {
@@ -557,7 +705,7 @@ const useTradingBotControl = (pollInterval = 5000) => {
     return () => clearInterval(interval);
   }, [fetchBotStatus, pollInterval]);
 
-  return { botStatus, loading, actionLoading, toggleBot, changeMode, refresh: fetchBotStatus };
+  return { botStatus, loading, actionLoading, toggleBot, changeMode, updateRiskParams, refresh: fetchBotStatus };
 };
 
 // Hook for IB Connection status
@@ -1033,7 +1181,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
   const { setups, loading: setupsLoading } = useSentComSetups();
   const { context, loading: contextLoading } = useSentComContext();
   const { alerts, loading: alertsLoading } = useSentComAlerts();
-  const { botStatus, actionLoading, toggleBot, changeMode } = useTradingBotControl();
+  const { botStatus, actionLoading, toggleBot, changeMode, updateRiskParams } = useTradingBotControl();
   const { ibConnected } = useIBConnectionStatus();
   const { session: marketSession } = useMarketSession();
   
@@ -1044,6 +1192,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
   const [quickActionLoading, setQuickActionLoading] = useState(null);
   const [showTradeForm, setShowTradeForm] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState('mode'); // 'mode' or 'risk'
 
   const handleChat = async (message) => {
     if (!message.trim() || chatLoading) return;
@@ -1421,7 +1570,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
           </div>
         </div>
         
-        {/* Settings Panel (Mode Selector) */}
+        {/* Settings Panel (Mode Selector + Risk Controls) */}
         <AnimatePresence>
           {showSettings && (
             <motion.div
@@ -1431,53 +1580,88 @@ const SentCom = ({ compact = false, embedded = false }) => {
               className="overflow-hidden border-b border-white/5"
             >
               <div className="relative p-4 bg-black/40">
-                <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3">Trading Mode</h4>
-                <div className="grid grid-cols-3 gap-3">
-                  {/* Autonomous Mode */}
+                {/* Tab Navigation */}
+                <div className="flex gap-2 mb-4">
                   <button
-                    onClick={() => changeMode('autonomous')}
-                    className={`p-3 rounded-xl border text-center transition-all ${
-                      mode === 'autonomous' 
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
-                        : 'bg-black/30 border-white/5 text-zinc-400 hover:border-white/10 hover:bg-black/40'
+                    onClick={() => setSettingsTab('mode')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      settingsTab === 'mode' 
+                        ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' 
+                        : 'bg-zinc-800/50 text-zinc-400 border border-white/5 hover:border-white/10'
                     }`}
-                    data-testid="sentcom-mode-autonomous"
                   >
-                    <Zap className={`w-5 h-5 mx-auto mb-2 ${mode === 'autonomous' ? 'text-emerald-400' : 'text-zinc-500'}`} />
-                    <div className="text-sm font-medium">Autonomous</div>
-                    <div className="text-[10px] text-zinc-500 mt-0.5">Auto-execute trades</div>
+                    Trading Mode
                   </button>
-                  
-                  {/* Confirmation Mode */}
                   <button
-                    onClick={() => changeMode('confirmation')}
-                    className={`p-3 rounded-xl border text-center transition-all ${
-                      mode === 'confirmation' 
-                        ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' 
-                        : 'bg-black/30 border-white/5 text-zinc-400 hover:border-white/10 hover:bg-black/40'
+                    onClick={() => setSettingsTab('risk')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      settingsTab === 'risk' 
+                        ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' 
+                        : 'bg-zinc-800/50 text-zinc-400 border border-white/5 hover:border-white/10'
                     }`}
-                    data-testid="sentcom-mode-confirmation"
                   >
-                    <Eye className={`w-5 h-5 mx-auto mb-2 ${mode === 'confirmation' ? 'text-cyan-400' : 'text-zinc-500'}`} />
-                    <div className="text-sm font-medium">Confirmation</div>
-                    <div className="text-[10px] text-zinc-500 mt-0.5">Require approval</div>
-                  </button>
-                  
-                  {/* Paused Mode */}
-                  <button
-                    onClick={() => changeMode('paused')}
-                    className={`p-3 rounded-xl border text-center transition-all ${
-                      mode === 'paused' 
-                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' 
-                        : 'bg-black/30 border-white/5 text-zinc-400 hover:border-white/10 hover:bg-black/40'
-                    }`}
-                    data-testid="sentcom-mode-paused"
-                  >
-                    <Pause className={`w-5 h-5 mx-auto mb-2 ${mode === 'paused' ? 'text-amber-400' : 'text-zinc-500'}`} />
-                    <div className="text-sm font-medium">Paused</div>
-                    <div className="text-[10px] text-zinc-500 mt-0.5">No scanning</div>
+                    Risk Controls
                   </button>
                 </div>
+
+                {/* Tab Content */}
+                {settingsTab === 'mode' ? (
+                  <>
+                    <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3">Trading Mode</h4>
+                    <div className="grid grid-cols-3 gap-3">
+                      {/* Autonomous Mode */}
+                      <button
+                        onClick={() => changeMode('autonomous')}
+                        className={`p-3 rounded-xl border text-center transition-all ${
+                          mode === 'autonomous' 
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
+                            : 'bg-black/30 border-white/5 text-zinc-400 hover:border-white/10 hover:bg-black/40'
+                        }`}
+                        data-testid="sentcom-mode-autonomous"
+                      >
+                        <Zap className={`w-5 h-5 mx-auto mb-2 ${mode === 'autonomous' ? 'text-emerald-400' : 'text-zinc-500'}`} />
+                        <div className="text-sm font-medium">Autonomous</div>
+                        <div className="text-[10px] text-zinc-500 mt-0.5">Auto-execute trades</div>
+                      </button>
+                      
+                      {/* Confirmation Mode */}
+                      <button
+                        onClick={() => changeMode('confirmation')}
+                        className={`p-3 rounded-xl border text-center transition-all ${
+                          mode === 'confirmation' 
+                            ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' 
+                            : 'bg-black/30 border-white/5 text-zinc-400 hover:border-white/10 hover:bg-black/40'
+                        }`}
+                        data-testid="sentcom-mode-confirmation"
+                      >
+                        <Eye className={`w-5 h-5 mx-auto mb-2 ${mode === 'confirmation' ? 'text-cyan-400' : 'text-zinc-500'}`} />
+                        <div className="text-sm font-medium">Confirmation</div>
+                        <div className="text-[10px] text-zinc-500 mt-0.5">Require approval</div>
+                      </button>
+                      
+                      {/* Paused Mode */}
+                      <button
+                        onClick={() => changeMode('paused')}
+                        className={`p-3 rounded-xl border text-center transition-all ${
+                          mode === 'paused' 
+                            ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' 
+                            : 'bg-black/30 border-white/5 text-zinc-400 hover:border-white/10 hover:bg-black/40'
+                        }`}
+                        data-testid="sentcom-mode-paused"
+                      >
+                        <Pause className={`w-5 h-5 mx-auto mb-2 ${mode === 'paused' ? 'text-amber-400' : 'text-zinc-500'}`} />
+                        <div className="text-sm font-medium">Paused</div>
+                        <div className="text-[10px] text-zinc-500 mt-0.5">No scanning</div>
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <RiskControlsPanel 
+                    botStatus={botStatus} 
+                    onUpdateRisk={updateRiskParams}
+                    loading={actionLoading === 'risk'}
+                  />
+                )}
               </div>
             </motion.div>
           )}

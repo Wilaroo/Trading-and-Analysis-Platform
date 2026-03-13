@@ -135,26 +135,37 @@ class AgentOrchestrator:
         
         logger.info(f"Services injected: {list(services.keys())}")
     
-    async def process(self, message: str, session_id: str = "default") -> OrchestrationResult:
+    async def process(self, message: str, session_id: str = "default", 
+                      chat_history: List[Dict] = None) -> OrchestrationResult:
         """
         Process a user message through the multi-agent system.
         
         Flow:
         1. Router classifies intent
-        2. Route to appropriate agent
+        2. Route to appropriate agent with conversation context
         3. Agent processes with verified data
         4. Return response
+        
+        Args:
+            message: User's message
+            session_id: Session ID for context persistence
+            chat_history: Recent chat history for conversational context
         """
         start = time.time()
         
         # Get session context
         context = self._get_session_context(session_id)
         
+        # Update conversation history from chat_history if provided
+        if chat_history:
+            context["conversation_history"] = chat_history[-10:]  # Keep last 10 messages
+        
         # Step 1: Route the request
         routing_start = time.time()
         routing_result = await self.router.process({
             "message": message,
-            "context": context
+            "context": context,
+            "conversation_history": context.get("conversation_history", [])
         })
         routing_latency = (time.time() - routing_start) * 1000
         
@@ -211,7 +222,8 @@ class AgentOrchestrator:
             agent_response = await self.coach.process({
                 "message": message,
                 "query_type": self._map_intent_to_query_type(intent),
-                "symbol": symbols[0] if symbols else None
+                "symbol": symbols[0] if symbols else None,
+                "conversation_history": context.get("conversation_history", [])
             })
             
             # Clear any pending trade confirmation
@@ -224,7 +236,8 @@ class AgentOrchestrator:
                 "message": message,
                 "symbol": symbols[0] if symbols else None,
                 "symbols": symbols,
-                "analysis_type": "full"
+                "analysis_type": "full",
+                "conversation_history": context.get("conversation_history", [])
             })
             
             context["awaiting_confirmation"] = False
@@ -235,7 +248,8 @@ class AgentOrchestrator:
             agent_response = await self.coach.process({
                 "message": message,
                 "query_type": "market_context",
-                "symbol": symbols[0] if symbols else None
+                "symbol": symbols[0] if symbols else None,
+                "conversation_history": context.get("conversation_history", [])
             })
             
             context["awaiting_confirmation"] = False
@@ -264,7 +278,8 @@ class AgentOrchestrator:
             agent_response = await self.coach.process({
                 "message": message,
                 "query_type": "general",
-                "symbol": symbols[0] if symbols else None
+                "symbol": symbols[0] if symbols else None,
+                "conversation_history": context.get("conversation_history", [])
             })
             
             context["awaiting_confirmation"] = False
