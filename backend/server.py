@@ -476,6 +476,10 @@ print("  - Regime Performance Tracking: Strategy performance by market regime")
 print("  - Wired to Trading Bot: Closed trades logged with regime data")
 print("  - Endpoints: /api/regime-performance/summary, /api/regime-performance/best-for-regime/{regime}")
 
+# Wire Trade Journal to Trading Bot for auto-recording
+trading_bot.set_trade_journal(trade_journal_service)
+print("  - Trade Journal: Auto-recording enabled for bot trades")
+
 # ===================== CONTEXT AWARENESS SERVICE (Phase 2 AI) =====================
 # Initialize Context Awareness Service for smarter AI responses
 context_awareness_service = init_context_awareness_service(
