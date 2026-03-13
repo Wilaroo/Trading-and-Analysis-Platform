@@ -13,7 +13,6 @@ import {
 
 const navItems = [
   { id: 'command-center', icon: Target, label: 'Command Center', highlight: true },
-  { id: 'trading', icon: Activity, label: 'Trading Dashboard', highlight: false },
   { id: 'team-brain-mockups-v2', icon: Sparkles, label: 'SentCom Mockups', highlight: false },
   { id: 'trade-journal', icon: ClipboardList, label: 'Trade Journal' },
   { id: 'chart', icon: LineChart, label: 'Charts' },
