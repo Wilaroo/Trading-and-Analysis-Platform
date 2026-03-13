@@ -253,6 +253,129 @@ async def update_risk_params(params: RiskParamsUpdate):
     return {"success": True, "risk_params": _trading_bot.get_status()["risk_params"]}
 
 
+# ==================== EOD AUTO-CLOSE ====================
+
+class EODConfigUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    close_hour: Optional[int] = None  # 0-23 in ET
+    close_minute: Optional[int] = None  # 0-59
+
+
+@router.get("/eod-config")
+async def get_eod_config():
+    """Get EOD auto-close configuration"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    return {
+        "success": True,
+        "eod_config": {
+            "enabled": _trading_bot._eod_close_enabled,
+            "close_hour": _trading_bot._eod_close_hour,
+            "close_minute": _trading_bot._eod_close_minute,
+            "close_time_et": f"{_trading_bot._eod_close_hour}:{_trading_bot._eod_close_minute:02d} PM ET",
+            "executed_today": _trading_bot._eod_close_executed_today,
+            "last_check_date": _trading_bot._last_eod_check_date
+        }
+    }
+
+
+@router.post("/eod-config")
+async def update_eod_config(config: EODConfigUpdate):
+    """Update EOD auto-close configuration"""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    if config.enabled is not None:
+        _trading_bot._eod_close_enabled = config.enabled
+    
+    if config.close_hour is not None:
+        if not 0 <= config.close_hour <= 23:
+            raise HTTPException(status_code=400, detail="close_hour must be 0-23")
+        _trading_bot._eod_close_hour = config.close_hour
+    
+    if config.close_minute is not None:
+        if not 0 <= config.close_minute <= 59:
+            raise HTTPException(status_code=400, detail="close_minute must be 0-59")
+        _trading_bot._eod_close_minute = config.close_minute
+    
+    # Persist config to database
+    if _trading_bot._db:
+        _trading_bot._db.bot_config.update_one(
+            {"_id": "eod_config"},
+            {"$set": {
+                "enabled": _trading_bot._eod_close_enabled,
+                "close_hour": _trading_bot._eod_close_hour,
+                "close_minute": _trading_bot._eod_close_minute,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }},
+            upsert=True
+        )
+    
+    return {
+        "success": True,
+        "eod_config": {
+            "enabled": _trading_bot._eod_close_enabled,
+            "close_hour": _trading_bot._eod_close_hour,
+            "close_minute": _trading_bot._eod_close_minute,
+            "close_time_et": f"{_trading_bot._eod_close_hour}:{_trading_bot._eod_close_minute:02d} PM ET"
+        },
+        "message": "EOD configuration updated"
+    }
+
+
+@router.post("/eod-close-now")
+async def trigger_eod_close_now():
+    """
+    Manually trigger EOD close of all positions.
+    Use this to close all positions immediately regardless of time.
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    open_count = len(_trading_bot._open_trades)
+    if open_count == 0:
+        return {"success": True, "message": "No open positions to close", "closed_count": 0}
+    
+    closed_count = 0
+    total_pnl = 0.0
+    results = []
+    
+    for trade_id, trade in list(_trading_bot._open_trades.items()):
+        try:
+            result = await _trading_bot.close_trade(trade_id, reason="manual_eod_close")
+            if result.get("success"):
+                closed_count += 1
+                pnl = result.get("realized_pnl", 0)
+                total_pnl += pnl
+                results.append({
+                    "symbol": trade.symbol,
+                    "shares": trade.remaining_shares,
+                    "pnl": pnl,
+                    "status": "closed"
+                })
+            else:
+                results.append({
+                    "symbol": trade.symbol,
+                    "error": result.get("error"),
+                    "status": "failed"
+                })
+        except Exception as e:
+            results.append({
+                "symbol": trade.symbol,
+                "error": str(e),
+                "status": "error"
+            })
+    
+    return {
+        "success": True,
+        "message": f"Closed {closed_count} of {open_count} positions",
+        "closed_count": closed_count,
+        "total_pnl": total_pnl,
+        "results": results
+    }
+
+
 # ==================== TRADE MANAGEMENT ====================
 
 @router.get("/trades/pending")
