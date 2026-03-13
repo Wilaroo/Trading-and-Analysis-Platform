@@ -5,6 +5,24 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ---
 
+## BUG FIX (March 13, 2026)
+
+### Positions Not Showing in SentCom Panel ✅ FIXED
+
+**Problem:** "Our Positions" panel was showing empty even though there were 8 open trades in the trading bot.
+
+**Root Cause:** The `get_our_positions()` method in `sentcom_service.py` was trying to get trades from `trading_bot.get_status()["open_trades"]`, but that returns just a count (integer), not the actual list of trades.
+
+**Fix:** Changed to call `trading_bot.get_open_trades()` directly, which returns the full list of trade objects. Also improved P&L calculation to handle short positions correctly.
+
+**Result:** All 8 positions now display with:
+- Symbol, quantity, entry price, current price
+- P&L in dollars and percentage (red/green coloring)
+- Stop and target prices
+- Mini price chart for each position
+
+---
+
 ## LATEST UPDATES (March 13, 2026)
 
 ### P0 COMPLETE: Chat Conversational Context & Bot Control Mechanisms
