@@ -2,6 +2,13 @@
 BriefMeAgent - Generates personalized market briefings
 =====================================================
 
+ENHANCED VERSION (March 2026):
+- Real news/catalysts from IB Gateway and Finnhub
+- Sector rotation analysis with leading/lagging sectors
+- More actionable intelligence with specific trade ideas
+- Earnings calendar integration for watchlist stocks
+- Market regime-based strategy recommendations
+
 Aggregates data from multiple services to create a personalized
 market report tailored to the user's trading style and current conditions.
 
@@ -12,6 +19,9 @@ Features:
 - Key market levels (SPY, QQQ, VIX)
 - Personalized insights based on learning data
 - Top opportunities ranked by relevance
+- Real news headlines and catalysts
+- Sector rotation heatmap
+- Earnings warnings for watchlist stocks
 """
 
 import logging
@@ -19,12 +29,17 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone, timedelta
 import asyncio
 import aiohttp
+import os
+import requests
 
 logger = logging.getLogger(__name__)
 
+# Finnhub API key
+FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY", "")
+
 
 class BriefMeAgent:
-    """Agent that generates personalized market briefings."""
+    """Agent that generates personalized market briefings with real news and sector analysis."""
     
     def __init__(self, llm_provider=None):
         self.name = "BriefMeAgent"
@@ -39,6 +54,7 @@ class BriefMeAgent:
         self.regime_performance_service = None
         self.alpaca_service = None
         self.ib_pushed_data = None  # For real-time IB data
+        self.news_service = None  # For real news
     
     def inject_services(
         self,
@@ -49,7 +65,8 @@ class BriefMeAgent:
         scanner_service=None,
         regime_performance_service=None,
         alpaca_service=None,
-        ib_pushed_data=None
+        ib_pushed_data=None,
+        news_service=None
     ):
         """Inject required services."""
         self.market_intel_service = market_intel_service
@@ -60,6 +77,7 @@ class BriefMeAgent:
         self.regime_performance_service = regime_performance_service
         self.alpaca_service = alpaca_service
         self.ib_pushed_data = ib_pushed_data
+        self.news_service = news_service
     
     async def generate_brief(self, detail_level: str = "quick") -> Dict[str, Any]:
         """
@@ -117,7 +135,7 @@ class BriefMeAgent:
             }
     
     async def _gather_all_data(self) -> Dict[str, Any]:
-        """Gather data from all services in parallel."""
+        """Gather data from all services in parallel - ENHANCED with news, sectors, earnings."""
         data = {
             "market": {},
             "session": {},
@@ -129,47 +147,85 @@ class BriefMeAgent:
             "key_levels": {},
             "gappers": {"up": [], "down": []},
             "market_movers": {"gainers": [], "losers": []},
-            "index_status": {}
+            "index_status": {},
+            # NEW: Enhanced data sections
+            "news": {
+                "market_headlines": [],
+                "ticker_news": {},
+                "themes": [],
+                "sentiment": "neutral"
+            },
+            "sectors": {
+                "leaders": [],
+                "laggards": [],
+                "rotation_signal": None
+            },
+            "earnings": {
+                "upcoming": [],
+                "recent_reports": []
+            },
+            "catalysts": []
         }
         
-        # Gather everything in parallel
-        tasks = []
-        
-        # Market regime data
+        # Core data fetches (critical)
+        core_tasks = []
         if self.context_service:
-            tasks.append(self._fetch_regime_data(data))
-        
-        # Session data
-        if self.context_service:
-            tasks.append(self._fetch_session_data(data))
-        
-        # Bot status
+            core_tasks.append(self._fetch_regime_data(data))
+            core_tasks.append(self._fetch_session_data(data))
         if self.trading_bot:
-            tasks.append(self._fetch_bot_status(data))
+            core_tasks.append(self._fetch_bot_status(data))
+        
+        # Run core tasks first (with 10s timeout)
+        if core_tasks:
+            try:
+                await asyncio.wait_for(asyncio.gather(*core_tasks, return_exceptions=True), timeout=10.0)
+            except asyncio.TimeoutError:
+                logger.warning("Core data fetch timed out after 10s")
+        
+        # Enhanced data fetches (best effort, with short timeouts)
+        enhanced_tasks = []
         
         # Learning insights
         if self.learning_provider:
-            tasks.append(self._fetch_learning_data(data))
+            enhanced_tasks.append(self._safe_fetch(self._fetch_learning_data(data), 5.0, "learning"))
         
         # Regime performance
         if self.regime_performance_service:
-            tasks.append(self._fetch_regime_performance(data))
+            enhanced_tasks.append(self._safe_fetch(self._fetch_regime_performance(data), 5.0, "regime_perf"))
         
         # Scanner opportunities
         if self.scanner_service:
-            tasks.append(self._fetch_scanner_alerts(data))
+            enhanced_tasks.append(self._safe_fetch(self._fetch_scanner_alerts(data), 5.0, "scanner"))
         
         # Pre-market/gapper data from Alpaca
         if self.alpaca_service:
-            tasks.append(self._fetch_premarket_data(data))
+            enhanced_tasks.append(self._safe_fetch(self._fetch_premarket_data(data), 8.0, "premarket"))
         
-        # Real-time IB data (index quotes, VIX, etc.) - always try
-        tasks.append(self._fetch_ib_realtime_data(data))
+        # Real-time IB data - important for market context
+        enhanced_tasks.append(self._safe_fetch(self._fetch_ib_realtime_data(data), 8.0, "ib_data"))
         
-        # Run all tasks
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # NEW: Enhanced data sources (with individual timeouts)
+        enhanced_tasks.append(self._safe_fetch(self._fetch_news_and_catalysts(data), 10.0, "news"))
+        enhanced_tasks.append(self._safe_fetch(self._fetch_sector_rotation(data), 8.0, "sectors"))
+        enhanced_tasks.append(self._safe_fetch(self._fetch_earnings_calendar(data), 8.0, "earnings"))
+        
+        # Run all enhanced tasks in parallel with overall 15s timeout
+        if enhanced_tasks:
+            try:
+                await asyncio.wait_for(asyncio.gather(*enhanced_tasks, return_exceptions=True), timeout=15.0)
+            except asyncio.TimeoutError:
+                logger.warning("Enhanced data fetch timed out after 15s")
         
         return data
+    
+    async def _safe_fetch(self, coro, timeout: float, name: str):
+        """Wrapper to safely run a coroutine with timeout."""
+        try:
+            await asyncio.wait_for(coro, timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(f"Fetch {name} timed out after {timeout}s")
+        except Exception as e:
+            logger.warning(f"Fetch {name} failed: {e}")
     
     async def _fetch_regime_data(self, data: Dict):
         """Fetch market regime data."""
@@ -232,10 +288,27 @@ class BriefMeAgent:
         """Fetch scanner alerts."""
         try:
             alerts = await asyncio.to_thread(
-                self.scanner_service.get_all_alerts
+                self.scanner_service.get_live_alerts
             )
+            # Convert LiveAlert objects to dicts
+            alert_dicts = []
+            for a in alerts:
+                try:
+                    alert_dict = {
+                        "symbol": getattr(a, 'symbol', ''),
+                        "setup_type": getattr(a, 'setup_type', ''),
+                        "tqs_score": getattr(a, 'tqs_score', 0),
+                        "direction": getattr(a, 'direction', 'long'),
+                        "entry_price": getattr(a, 'entry_price', 0),
+                        "risk_reward_ratio": getattr(a, 'risk_reward', 0),
+                    }
+                    if alert_dict.get("tqs_score", 0) >= 60:
+                        alert_dicts.append(alert_dict)
+                except Exception:
+                    continue
+            
             top_alerts = sorted(
-                [a for a in alerts if a.get("tqs_score", 0) >= 60],
+                alert_dicts,
                 key=lambda x: x.get("tqs_score", 0),
                 reverse=True
             )[:5]
@@ -425,6 +498,382 @@ class BriefMeAgent:
         except Exception as e:
             logger.warning(f"Failed to get IB realtime data: {e}")
     
+    async def _fetch_news_and_catalysts(self, data: Dict):
+        """
+        Fetch real news headlines and identify catalysts.
+        Uses IB Gateway (primary) or Finnhub (fallback).
+        """
+        try:
+            # Try news service first (uses IB Gateway with Finnhub fallback)
+            if self.news_service:
+                try:
+                    market_summary = await self.news_service.get_market_summary()
+                    if market_summary.get("available"):
+                        data["news"]["market_headlines"] = market_summary.get("headlines", [])[:10]
+                        data["news"]["themes"] = market_summary.get("themes", [])[:5]
+                        data["news"]["sentiment"] = market_summary.get("overall_sentiment", "neutral")
+                        
+                        # Identify catalysts from headlines
+                        catalysts = self._extract_catalysts(market_summary.get("headlines", []))
+                        data["catalysts"] = catalysts
+                        
+                        logger.info(f"Got {len(data['news']['market_headlines'])} headlines, {len(catalysts)} catalysts from news service")
+                        return
+                except Exception as e:
+                    logger.warning(f"News service failed: {e}")
+            
+            # Fallback: Direct Finnhub API call
+            if FINNHUB_API_KEY:
+                try:
+                    resp = requests.get(
+                        "https://finnhub.io/api/v1/news",
+                        params={"category": "general", "token": FINNHUB_API_KEY},
+                        timeout=10
+                    )
+                    if resp.status_code == 200:
+                        news_items = resp.json()
+                        headlines = [item.get("headline", "") for item in news_items[:15]]
+                        data["news"]["market_headlines"] = headlines
+                        data["news"]["themes"] = self._extract_themes(headlines)
+                        data["news"]["sentiment"] = self._analyze_news_sentiment(headlines)
+                        data["catalysts"] = self._extract_catalysts(headlines)
+                        logger.info(f"Got {len(headlines)} headlines from Finnhub")
+                except Exception as e:
+                    logger.warning(f"Finnhub news fetch failed: {e}")
+            
+            # Also fetch ticker-specific news for watchlist
+            await self._fetch_ticker_specific_news(data)
+            
+        except Exception as e:
+            logger.warning(f"Failed to fetch news and catalysts: {e}")
+    
+    async def _fetch_ticker_specific_news(self, data: Dict):
+        """Fetch news for key watchlist symbols."""
+        try:
+            # Get symbols from open positions and gappers
+            symbols_to_check = set()
+            
+            # Add open position symbols
+            if data.get("bot", {}).get("open_positions"):
+                for pos in data["bot"]["open_positions"][:5]:
+                    symbols_to_check.add(pos.get("symbol", ""))
+            
+            # Add gapper symbols
+            for g in data.get("gappers", {}).get("up", [])[:3]:
+                symbols_to_check.add(g.get("symbol", ""))
+            for g in data.get("gappers", {}).get("down", [])[:3]:
+                symbols_to_check.add(g.get("symbol", ""))
+            
+            # Add key tech stocks if not enough symbols
+            default_symbols = ["NVDA", "TSLA", "AAPL", "AMD", "META"]
+            while len(symbols_to_check) < 5 and default_symbols:
+                symbols_to_check.add(default_symbols.pop(0))
+            
+            # Remove empty strings
+            symbols_to_check = {s for s in symbols_to_check if s}
+            
+            if not symbols_to_check:
+                return
+            
+            # Fetch news for each symbol
+            for symbol in list(symbols_to_check)[:5]:
+                try:
+                    if self.news_service:
+                        news = await self.news_service.get_ticker_news(symbol, max_items=3)
+                        if news and not news[0].get("is_placeholder"):
+                            data["news"]["ticker_news"][symbol] = [
+                                {
+                                    "headline": n.get("headline", ""),
+                                    "source": n.get("source", ""),
+                                    "sentiment": n.get("sentiment", "neutral")
+                                }
+                                for n in news[:3]
+                            ]
+                    elif FINNHUB_API_KEY:
+                        # Direct Finnhub fallback
+                        from_date = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+                        to_date = datetime.now().strftime("%Y-%m-%d")
+                        resp = requests.get(
+                            "https://finnhub.io/api/v1/company-news",
+                            params={"symbol": symbol, "from": from_date, "to": to_date, "token": FINNHUB_API_KEY},
+                            timeout=5
+                        )
+                        if resp.status_code == 200:
+                            news_items = resp.json()[:3]
+                            if news_items:
+                                data["news"]["ticker_news"][symbol] = [
+                                    {
+                                        "headline": n.get("headline", ""),
+                                        "source": n.get("source", ""),
+                                        "sentiment": self._analyze_headline_sentiment(n.get("headline", ""))
+                                    }
+                                    for n in news_items
+                                ]
+                except Exception as e:
+                    logger.debug(f"Failed to get news for {symbol}: {e}")
+                    
+        except Exception as e:
+            logger.warning(f"Failed to fetch ticker-specific news: {e}")
+    
+    async def _fetch_sector_rotation(self, data: Dict):
+        """
+        Fetch sector ETF performance and identify rotation patterns.
+        This helps determine if market is favoring growth/value, risk-on/risk-off.
+        """
+        try:
+            # Sector ETF mappings
+            sector_etfs = {
+                "XLK": "Technology",
+                "XLF": "Financials",
+                "XLE": "Energy",
+                "XLV": "Healthcare",
+                "XLI": "Industrials",
+                "XLC": "Comm Services",
+                "XLY": "Cons Discretionary",
+                "XLP": "Cons Staples",
+                "XLU": "Utilities",
+                "XLRE": "Real Estate",
+                "XLB": "Materials"
+            }
+            
+            if self.alpaca_service:
+                # get_quotes_batch is already async, so await it directly
+                quotes = await self.alpaca_service.get_quotes_batch(list(sector_etfs.keys()))
+                
+                if quotes:
+                    # Sort sectors by performance
+                    sector_performance = []
+                    for symbol, q in quotes.items():
+                        chg = q.get("change_percent", 0)
+                        sector_performance.append({
+                            "symbol": symbol,
+                            "name": sector_etfs.get(symbol, symbol),
+                            "change_pct": round(chg, 2),
+                            "price": q.get("price", 0)
+                        })
+                    
+                    sector_performance.sort(key=lambda x: x["change_pct"], reverse=True)
+                    
+                    # Top 3 leaders and bottom 3 laggards
+                    data["sectors"]["leaders"] = sector_performance[:3]
+                    data["sectors"]["laggards"] = sector_performance[-3:]
+                    
+                    # Determine rotation signal
+                    data["sectors"]["rotation_signal"] = self._analyze_sector_rotation(sector_performance)
+                    
+                    logger.info(f"Sector rotation: Leaders={[s['symbol'] for s in data['sectors']['leaders']]}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to fetch sector rotation: {e}")
+    
+    async def _fetch_earnings_calendar(self, data: Dict):
+        """
+        Fetch earnings calendar for watchlist stocks.
+        Warns about upcoming earnings to avoid surprise moves.
+        """
+        try:
+            if not FINNHUB_API_KEY:
+                return
+            
+            # Get symbols to check (positions + watchlist)
+            symbols_to_check = set()
+            
+            # Add open position symbols
+            if data.get("bot", {}).get("open_positions"):
+                for pos in data["bot"]["open_positions"]:
+                    symbols_to_check.add(pos.get("symbol", ""))
+            
+            # Add gapper symbols
+            for g in data.get("gappers", {}).get("up", [])[:5]:
+                symbols_to_check.add(g.get("symbol", ""))
+            
+            # Add key stocks
+            symbols_to_check.update(["NVDA", "TSLA", "AAPL", "AMD", "META", "MSFT", "GOOGL", "AMZN"])
+            
+            # Remove empty
+            symbols_to_check = {s for s in symbols_to_check if s}
+            
+            # Fetch earnings calendar from Finnhub
+            from_date = datetime.now().strftime("%Y-%m-%d")
+            to_date = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+            
+            resp = requests.get(
+                "https://finnhub.io/api/v1/calendar/earnings",
+                params={"from": from_date, "to": to_date, "token": FINNHUB_API_KEY},
+                timeout=10
+            )
+            
+            if resp.status_code == 200:
+                calendar_data = resp.json()
+                earnings_list = calendar_data.get("earningsCalendar", [])
+                
+                # Filter for our watchlist symbols
+                upcoming = []
+                for e in earnings_list:
+                    sym = e.get("symbol", "")
+                    if sym in symbols_to_check:
+                        timing = "Before Open" if e.get("hour") == "bmo" else "After Close" if e.get("hour") == "amc" else "TBD"
+                        upcoming.append({
+                            "symbol": sym,
+                            "date": e.get("date", ""),
+                            "timing": timing,
+                            "eps_estimate": e.get("epsEstimate"),
+                            "revenue_estimate": e.get("revenueEstimate")
+                        })
+                
+                data["earnings"]["upcoming"] = upcoming[:10]
+                
+                if upcoming:
+                    logger.info(f"Found {len(upcoming)} upcoming earnings for watchlist")
+            
+        except Exception as e:
+            logger.warning(f"Failed to fetch earnings calendar: {e}")
+    
+    def _extract_catalysts(self, headlines: List[str]) -> List[Dict]:
+        """Extract actionable catalysts from news headlines."""
+        catalysts = []
+        
+        # Catalyst patterns
+        catalyst_patterns = {
+            "earnings": ["beat", "miss", "earnings", "revenue", "eps", "profit", "guidance"],
+            "analyst": ["upgrade", "downgrade", "price target", "outperform", "underperform", "buy rating", "sell rating"],
+            "fed": ["fed", "fomc", "interest rate", "powell", "rate cut", "rate hike"],
+            "economic": ["jobs", "unemployment", "inflation", "cpi", "ppi", "gdp"],
+            "deal": ["merger", "acquisition", "buyout", "deal", "takeover"],
+            "product": ["launch", "unveil", "announce", "new product", "fda approval"]
+        }
+        
+        for headline in headlines[:15]:
+            headline_lower = headline.lower()
+            for cat_type, keywords in catalyst_patterns.items():
+                if any(kw in headline_lower for kw in keywords):
+                    # Extract ticker mention (simple heuristic)
+                    ticker = self._extract_ticker_from_headline(headline)
+                    catalysts.append({
+                        "type": cat_type,
+                        "headline": headline[:150],
+                        "ticker": ticker,
+                        "impact": self._estimate_catalyst_impact(cat_type, headline_lower)
+                    })
+                    break  # Only categorize once
+        
+        return catalysts[:8]  # Limit to 8 catalysts
+    
+    def _extract_ticker_from_headline(self, headline: str) -> Optional[str]:
+        """Try to extract a ticker symbol from a headline."""
+        import re
+        # Look for patterns like "NVDA", "Tesla (TSLA)", etc.
+        patterns = [
+            r'\(([A-Z]{1,5})\)',  # (NVDA)
+            r'^([A-Z]{2,5})\s',   # NVDA at start
+            r'\s([A-Z]{2,5})\s',  # NVDA in middle
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, headline)
+            if match:
+                ticker = match.group(1)
+                # Filter out common non-ticker words
+                if ticker not in ["THE", "FOR", "AND", "IPO", "CEO", "CFO", "GDP", "CPI", "FED", "SEC"]:
+                    return ticker
+        return None
+    
+    def _estimate_catalyst_impact(self, cat_type: str, headline: str) -> str:
+        """Estimate the potential market impact of a catalyst."""
+        high_impact_words = ["surge", "plunge", "soar", "crash", "record", "historic", "major", "massive"]
+        
+        if any(word in headline for word in high_impact_words):
+            return "high"
+        
+        high_impact_types = ["fed", "deal", "earnings"]
+        if cat_type in high_impact_types:
+            return "medium-high"
+        
+        return "medium"
+    
+    def _extract_themes(self, headlines: List[str]) -> List[str]:
+        """Extract market themes from headlines."""
+        themes = []
+        theme_keywords = {
+            "Federal Reserve / Rates": ["fed", "fomc", "interest rate", "powell"],
+            "Earnings Season": ["earnings", "beat", "miss", "revenue"],
+            "AI / Technology": ["ai", "artificial intelligence", "nvidia", "chip"],
+            "Inflation": ["inflation", "cpi", "ppi", "prices"],
+            "Employment": ["jobs", "unemployment", "payroll"],
+            "Energy / Oil": ["oil", "energy", "opec"],
+            "China / Trade": ["china", "tariff", "trade war"],
+            "Crypto / Bitcoin": ["crypto", "bitcoin", "btc"]
+        }
+        
+        combined = " ".join(headlines).lower()
+        for theme, keywords in theme_keywords.items():
+            if any(kw in combined for kw in keywords):
+                themes.append(theme)
+        
+        return themes[:5]
+    
+    def _analyze_news_sentiment(self, headlines: List[str]) -> str:
+        """Analyze overall sentiment from headlines."""
+        bullish = 0
+        bearish = 0
+        
+        bullish_words = ["surge", "rally", "jump", "gain", "rise", "soar", "record high", "bullish", "beat"]
+        bearish_words = ["drop", "fall", "plunge", "crash", "decline", "sink", "bearish", "miss", "selloff"]
+        
+        combined = " ".join(headlines).lower()
+        for word in bullish_words:
+            bullish += combined.count(word)
+        for word in bearish_words:
+            bearish += combined.count(word)
+        
+        if bullish > bearish * 1.5:
+            return "bullish"
+        elif bearish > bullish * 1.5:
+            return "bearish"
+        return "neutral"
+    
+    def _analyze_headline_sentiment(self, headline: str) -> str:
+        """Analyze sentiment of a single headline."""
+        headline_lower = headline.lower()
+        bullish_words = ["surge", "rally", "jump", "gain", "rise", "soar", "beat", "upgrade", "bullish"]
+        bearish_words = ["drop", "fall", "plunge", "crash", "decline", "miss", "downgrade", "bearish"]
+        
+        bullish = sum(1 for w in bullish_words if w in headline_lower)
+        bearish = sum(1 for w in bearish_words if w in headline_lower)
+        
+        if bullish > bearish:
+            return "bullish"
+        elif bearish > bullish:
+            return "bearish"
+        return "neutral"
+    
+    def _analyze_sector_rotation(self, sectors: List[Dict]) -> str:
+        """Analyze sector performance to determine market rotation signal."""
+        if not sectors:
+            return "unknown"
+        
+        # Categorize sectors
+        growth_sectors = ["XLK", "XLC", "XLY"]  # Tech, Comm Services, Consumer Discretionary
+        defensive_sectors = ["XLU", "XLP", "XLV"]  # Utilities, Staples, Healthcare
+        cyclical_sectors = ["XLF", "XLI", "XLB"]  # Financials, Industrials, Materials
+        
+        growth_avg = sum(s["change_pct"] for s in sectors if s["symbol"] in growth_sectors) / 3
+        defensive_avg = sum(s["change_pct"] for s in sectors if s["symbol"] in defensive_sectors) / 3
+        cyclical_avg = sum(s["change_pct"] for s in sectors if s["symbol"] in cyclical_sectors) / 3
+        
+        # Determine rotation signal
+        if growth_avg > defensive_avg + 0.5 and growth_avg > 0:
+            return "risk_on_growth"
+        elif defensive_avg > growth_avg + 0.5 and defensive_avg > 0:
+            return "risk_off_defensive"
+        elif cyclical_avg > growth_avg and cyclical_avg > defensive_avg:
+            return "cyclical_rotation"
+        elif all(s["change_pct"] < 0 for s in sectors[:3]):
+            return "broad_selling"
+        elif all(s["change_pct"] > 0 for s in sectors[-3:]):
+            return "broad_buying"
+        else:
+            return "mixed_rotation"
+    
     def _build_structured_brief(self, data: Dict) -> Dict[str, Any]:
         """Build a structured brief from gathered data."""
         market = data.get("market", {})
@@ -528,7 +977,23 @@ class BriefMeAgent:
                     "risk_reward": opp.get("risk_reward_ratio", 0)
                 }
                 for opp in opportunities[:5]
-            ]
+            ],
+            # NEW: Enhanced data sections
+            "news": {
+                "headlines": data.get("news", {}).get("market_headlines", [])[:8],
+                "ticker_news": data.get("news", {}).get("ticker_news", {}),
+                "themes": data.get("news", {}).get("themes", []),
+                "sentiment": data.get("news", {}).get("sentiment", "neutral")
+            },
+            "sectors": {
+                "leaders": data.get("sectors", {}).get("leaders", []),
+                "laggards": data.get("sectors", {}).get("laggards", []),
+                "rotation_signal": data.get("sectors", {}).get("rotation_signal")
+            },
+            "catalysts": data.get("catalysts", [])[:6],
+            "earnings": {
+                "upcoming": data.get("earnings", {}).get("upcoming", [])[:5]
+            }
         }
     
     def _get_regime_label(self, regime: str) -> str:
@@ -542,54 +1007,87 @@ class BriefMeAgent:
         return labels.get(regime, regime)
     
     async def _generate_quick_summary(self, brief: Dict) -> str:
-        """Generate a quick 2-3 sentence summary."""
+        """Generate a quick 2-3 sentence summary with news and sector context."""
         market = brief.get("market_summary", {})
         bot = brief.get("your_bot", {})
         insights = brief.get("personalized_insights", {})
         opportunities = brief.get("opportunities", [])
+        news = brief.get("news", {})
+        sectors = brief.get("sectors", {})
+        catalysts = brief.get("catalysts", [])
         
         # Build quick summary without LLM for speed
-        regime = market.get("regime", "HOLD")
         regime_label = market.get("regime_label", "Neutral")
         session = market.get("session", "")
         position_mult = market.get("position_multiplier", 1.0)
+        
+        # News sentiment context
+        themes = news.get("themes", [])
+        
+        # Sector context
+        leaders = sectors.get("leaders", [])
         
         # Bot status
         bot_state = "actively hunting" if bot.get("running") else "paused"
         today_pnl = bot.get("today_pnl", 0)
         pnl_text = f"+${today_pnl:.0f}" if today_pnl >= 0 else f"-${abs(today_pnl):.0f}"
         
+        # Build summary
+        summary_parts = []
+        
+        # Market context with news
+        summary_parts.append(f"Market is {regime_label} ({session}).")
+        
+        # Add news themes if available
+        if themes:
+            summary_parts.append(f"Key themes: {', '.join(themes[:2])}.")
+        
+        # Add sector rotation insight
+        if leaders:
+            top_sector = leaders[0].get("name", "")
+            top_chg = leaders[0].get("change_pct", 0)
+            if top_chg > 0:
+                summary_parts.append(f"{top_sector} leading (+{top_chg:.1f}%).")
+        
+        # Bot status
+        summary_parts.append(f"Bot is {bot_state} with {pnl_text} today.")
+        
         # Best opportunity
         top_opp = opportunities[0] if opportunities else None
-        opp_text = ""
         if top_opp:
-            opp_text = f" Top opportunity: {top_opp['symbol']} {top_opp['setup']} (TQS {top_opp['tqs']})."
+            summary_parts.append(f"Top setup: {top_opp['symbol']} {top_opp['setup']}.")
+        
+        # Top catalyst if available
+        if catalysts:
+            top_catalyst = catalysts[0]
+            if top_catalyst.get("ticker"):
+                summary_parts.append(f"Catalyst: {top_catalyst['ticker']} ({top_catalyst['type']}).")
         
         # Best setup for regime
         best_setup = insights.get("best_setup_for_regime")
         win_rate = insights.get("win_rate_in_regime")
-        setup_text = ""
         if best_setup and win_rate:
-            setup_text = f" Your best setup in {regime} is {best_setup.replace('_', ' ').title()} ({win_rate:.0f}% win rate)."
+            summary_parts.append(f"Your best: {best_setup.replace('_', ' ').title()} ({win_rate:.0f}% WR).")
         
         # Position sizing recommendation
-        sizing_text = ""
         if position_mult < 1.0:
-            sizing_text = f" Consider reducing position size to {position_mult*100:.0f}%."
+            summary_parts.append(f"Size: {position_mult*100:.0f}%.")
         
-        summary = f"Market is {regime_label} ({session}). Your bot is {bot_state} with {pnl_text} today."
-        summary += setup_text + opp_text + sizing_text
-        
-        return summary.strip()
+        return " ".join(summary_parts)
     
     async def _generate_detailed_summary(self, brief: Dict, rich_intel: Dict = None) -> Dict[str, str]:
-        """Generate a detailed multi-section summary."""
+        """Generate a detailed multi-section summary with news, sectors, and catalysts."""
         market = brief.get("market_summary", {})
         bot = brief.get("your_bot", {})
         insights = brief.get("personalized_insights", {})
         opportunities = brief.get("opportunities", [])
         index_status = brief.get("index_status", {})
         gappers = brief.get("gappers", {"up": [], "down": []})
+        # NEW: Enhanced data
+        news_data = brief.get("news", {})
+        sectors_data = brief.get("sectors", {})
+        catalysts = brief.get("catalysts", [])
+        earnings_data = brief.get("earnings", {})
         
         # Use rich_intel from MarketIntelService if available
         sections = {}
@@ -623,9 +1121,10 @@ class BriefMeAgent:
             except Exception as e:
                 logger.warning(f"LLM summary generation failed: {e}")
         
+        regime = market.get("regime", "HOLD")
+        
         # Build Market Overview with Index Status if not already set
         if "market_overview" not in sections:
-            regime = market.get("regime", "HOLD")
             regime_label = market.get("regime_label", "Neutral")
             score = market.get("regime_score", 50)
             session = market.get("session", "Unknown")
@@ -667,6 +1166,105 @@ class BriefMeAgent:
                 f"{index_text if index_text else ''}"
                 f"{session_advice}"
             )
+        
+        # NEW: News & Catalysts Section
+        if "news" not in sections:
+            headlines = news_data.get("headlines", [])
+            themes = news_data.get("themes", [])
+            sentiment = news_data.get("sentiment", "neutral")
+            ticker_news = news_data.get("ticker_news", {})
+            
+            news_text = ""
+            
+            # Add themes if available
+            if themes:
+                news_text += f"**Today's Themes:** {', '.join(themes)}\n\n"
+            
+            # Add sentiment
+            sentiment_emoji = "🟢" if sentiment == "bullish" else "🔴" if sentiment == "bearish" else "🟡"
+            news_text += f"**Market Sentiment:** {sentiment_emoji} {sentiment.title()}\n\n"
+            
+            # Add top headlines
+            if headlines:
+                news_text += "**Top Headlines:**\n"
+                for h in headlines[:5]:
+                    news_text += f"- {h[:100]}{'...' if len(h) > 100 else ''}\n"
+            
+            # Add ticker-specific news
+            if ticker_news:
+                news_text += "\n**Stock-Specific News:**\n"
+                for symbol, news_items in list(ticker_news.items())[:3]:
+                    if news_items:
+                        top_headline = news_items[0].get("headline", "")[:80]
+                        news_text += f"- **{symbol}:** {top_headline}\n"
+            
+            if news_text:
+                sections["news"] = f"**📰 News & Catalysts:**\n\n{news_text}"
+        
+        # NEW: Catalysts Section
+        if catalysts and "catalysts" not in sections:
+            catalyst_text = ""
+            for cat in catalysts[:5]:
+                impact = cat.get("impact", "medium")
+                impact_emoji = "🔥" if impact == "high" else "⚡" if "medium" in impact else "📌"
+                ticker = cat.get("ticker", "")
+                ticker_str = f"[{ticker}] " if ticker else ""
+                cat_type = cat.get("type", "").replace("_", " ").title()
+                headline = cat.get("headline", "")[:80]
+                catalyst_text += f"{impact_emoji} {ticker_str}**{cat_type}:** {headline}\n"
+            
+            if catalyst_text:
+                sections["catalysts"] = f"**🎯 Today's Catalysts:**\n\n{catalyst_text}"
+        
+        # NEW: Sector Rotation Section
+        if "sectors" not in sections:
+            leaders = sectors_data.get("leaders", [])
+            laggards = sectors_data.get("laggards", [])
+            rotation_signal = sectors_data.get("rotation_signal", "")
+            
+            sector_text = ""
+            
+            # Rotation signal interpretation
+            if rotation_signal:
+                signal_interpretations = {
+                    "risk_on_growth": "🚀 **Risk-On:** Growth/Tech sectors leading - favor momentum plays",
+                    "risk_off_defensive": "🛡️ **Risk-Off:** Defensive sectors leading - be cautious with growth",
+                    "cyclical_rotation": "🔄 **Cyclical Rotation:** Money moving to value/industrials",
+                    "broad_selling": "📉 **Broad Selling:** All sectors weak - reduce exposure",
+                    "broad_buying": "📈 **Broad Buying:** All sectors strong - trend day possible",
+                    "mixed_rotation": "🔀 **Mixed:** No clear rotation - focus on individual stocks"
+                }
+                sector_text += signal_interpretations.get(rotation_signal, f"Signal: {rotation_signal}") + "\n\n"
+            
+            if leaders:
+                sector_text += "**Leading Sectors:**\n"
+                for s in leaders:
+                    chg = s.get("change_pct", 0)
+                    emoji = "🟢" if chg > 0 else "🔴"
+                    sector_text += f"{emoji} {s.get('name', s.get('symbol'))}: {'+' if chg > 0 else ''}{chg:.2f}%\n"
+            
+            if laggards:
+                sector_text += "\n**Lagging Sectors:**\n"
+                for s in laggards:
+                    chg = s.get("change_pct", 0)
+                    emoji = "🟢" if chg > 0 else "🔴"
+                    sector_text += f"{emoji} {s.get('name', s.get('symbol'))}: {'+' if chg > 0 else ''}{chg:.2f}%\n"
+            
+            if sector_text:
+                sections["sectors"] = f"**📊 Sector Rotation:**\n\n{sector_text}"
+        
+        # NEW: Earnings Warning Section
+        if "earnings" not in sections:
+            upcoming = earnings_data.get("upcoming", [])
+            if upcoming:
+                earnings_text = "⚠️ **Watchlist stocks reporting soon:**\n\n"
+                for e in upcoming[:5]:
+                    timing = e.get("timing", "TBD")
+                    eps = e.get("eps_estimate")
+                    eps_str = f" (EPS Est: ${eps:.2f})" if eps else ""
+                    earnings_text += f"- **{e.get('symbol')}**: {e.get('date')} {timing}{eps_str}\n"
+                earnings_text += "\n💡 *Consider reducing position size before earnings!*"
+                sections["earnings"] = f"**📅 Earnings Watch:**\n\n{earnings_text}"
         
         # Gappers Section (only if not from rich_intel "in_play")
         if "in_play" not in sections and "gappers" not in sections:
@@ -750,17 +1348,20 @@ class BriefMeAgent:
         else:
             sections["opportunities"] = "**📊 Stocks to Watch:**\n\nNo high-quality setups active right now. Check the scanner for emerging opportunities."
         
-        # Recommendation
+        # Recommendation (enhanced with sector/catalyst context)
         recommendation = self._generate_recommendation(brief)
         sections["recommendation"] = f"**💡 Recommendation:**\n\n{recommendation}"
         
         return sections
     
     def _generate_recommendation(self, brief: Dict) -> str:
-        """Generate a trading recommendation based on the brief."""
+        """Generate a trading recommendation based on the brief with sector and catalyst context."""
         market = brief.get("market_summary", {})
         insights = brief.get("personalized_insights", {})
         opportunities = brief.get("opportunities", [])
+        sectors = brief.get("sectors", {})
+        catalysts = brief.get("catalysts", [])
+        earnings = brief.get("earnings", {})
         
         regime = market.get("regime", "HOLD")
         best_setup = insights.get("best_setup_for_regime")
@@ -778,18 +1379,46 @@ class BriefMeAgent:
         else:
             rec_parts.append("Wait for clearer signals before committing capital.")
         
+        # Sector rotation context
+        rotation_signal = sectors.get("rotation_signal", "")
+        if rotation_signal == "risk_on_growth":
+            rec_parts.append("Tech/Growth sectors leading - favor momentum longs.")
+        elif rotation_signal == "risk_off_defensive":
+            rec_parts.append("Defensive rotation underway - be cautious with growth names.")
+        elif rotation_signal == "broad_selling":
+            rec_parts.append("Broad weakness - consider staying cash or short setups only.")
+        
+        # Leading sector focus
+        leaders = sectors.get("leaders", [])
+        if leaders and leaders[0].get("change_pct", 0) > 1.0:
+            top_sector = leaders[0].get("name", "")
+            rec_parts.append(f"Focus on {top_sector} stocks for best momentum.")
+        
         # Setup advice
         if best_setup:
-            rec_parts.append(f"Focus on {best_setup.replace('_', ' ').title()} setups - they've worked well for you in similar conditions.")
+            rec_parts.append(f"Your best setup: {best_setup.replace('_', ' ').title()}.")
         
         # Opportunity highlight
         if opportunities:
             top = opportunities[0]
             rec_parts.append(f"Watch {top['symbol']} for a {top['setup']} entry.")
         
+        # Catalyst awareness
+        high_impact_catalysts = [c for c in catalysts if c.get("impact") == "high"]
+        if high_impact_catalysts:
+            tickers = [c.get("ticker") for c in high_impact_catalysts if c.get("ticker")]
+            if tickers:
+                rec_parts.append(f"Catalyst alert: {', '.join(tickers[:2])} - watch for volatility.")
+        
+        # Earnings warning
+        upcoming_earnings = earnings.get("upcoming", [])
+        if upcoming_earnings:
+            earnings_symbols = [e.get("symbol") for e in upcoming_earnings[:2]]
+            rec_parts.append(f"Earnings soon: {', '.join(earnings_symbols)} - reduce size or avoid.")
+        
         # Position sizing
         if position_mult < 1.0:
-            rec_parts.append(f"Keep position sizes at {position_mult*100:.0f}% of normal.")
+            rec_parts.append(f"Size: {position_mult*100:.0f}% of normal.")
         
         return " ".join(rec_parts)
     

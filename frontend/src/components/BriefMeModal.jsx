@@ -23,17 +23,24 @@ const BriefMeModal = ({ isOpen, onClose }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   
-  // Fetch briefing
+  // Fetch briefing with extended timeout for enhanced data fetching
   const fetchBrief = useCallback(async (level = detailLevel) => {
     setIsLoading(true);
     setError(null);
+    
+    // Create abort controller with 60 second timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
     
     try {
       const response = await fetch(`${API_URL}/api/agents/brief-me`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ detail_level: level })
+        body: JSON.stringify({ detail_level: level }),
+        signal: controller.signal
       });
+      
+      clearTimeout(timeoutId);
       
       if (!response.ok) {
         throw new Error('Failed to generate briefing');
@@ -47,8 +54,13 @@ const BriefMeModal = ({ isOpen, onClose }) => {
         setError(data.error || 'Unknown error');
       }
     } catch (err) {
-      console.error('Brief Me error:', err);
-      setError(err.message);
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        setError('Request timed out. The briefing is taking longer than expected.');
+      } else {
+        console.error('Brief Me error:', err);
+        setError(err.message);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -178,6 +190,9 @@ const QuickSummary = ({ data }) => {
   const marketData = data.data?.market_summary || {};
   const botData = data.data?.your_bot || {};
   const opportunities = data.data?.opportunities || [];
+  const newsData = data.data?.news || {};
+  const sectorsData = data.data?.sectors || {};
+  const catalysts = data.data?.catalysts || [];
   
   return (
     <div className="space-y-4">
@@ -198,6 +213,32 @@ const QuickSummary = ({ data }) => {
           <div className="text-xs opacity-70">Regime</div>
           <div className="font-bold">{marketData.regime || 'HOLD'}</div>
         </div>
+        
+        {/* News Sentiment Badge */}
+        {newsData.sentiment && (
+          <div className={`px-3 py-2 rounded-lg border ${
+            newsData.sentiment === 'bullish' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
+            newsData.sentiment === 'bearish' ? 'bg-red-500/10 border-red-500/30 text-red-400' :
+            'bg-zinc-500/10 border-zinc-500/30 text-zinc-400'
+          }`}>
+            <div className="text-xs opacity-70">News Tone</div>
+            <div className="font-bold capitalize">{newsData.sentiment}</div>
+          </div>
+        )}
+        
+        {/* Leading Sector Badge */}
+        {sectorsData.leaders?.[0] && (
+          <div className={`px-3 py-2 rounded-lg border ${
+            sectorsData.leaders[0].change_pct > 0 
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+              : 'bg-red-500/10 border-red-500/30 text-red-400'
+          }`}>
+            <div className="text-xs opacity-70">Top Sector</div>
+            <div className="font-bold">
+              {sectorsData.leaders[0].name} {sectorsData.leaders[0].change_pct > 0 ? '+' : ''}{sectorsData.leaders[0].change_pct?.toFixed(1)}%
+            </div>
+          </div>
+        )}
         
         {/* Bot State */}
         <div className={`px-3 py-2 rounded-lg border ${
@@ -228,7 +269,27 @@ const QuickSummary = ({ data }) => {
             <div className="font-bold">{opportunities[0].symbol} - {opportunities[0].setup}</div>
           </div>
         )}
+        
+        {/* Catalyst Alert */}
+        {catalysts[0]?.ticker && (
+          <div className="px-3 py-2 rounded-lg border bg-orange-500/10 border-orange-500/30 text-orange-400">
+            <div className="text-xs opacity-70">Catalyst</div>
+            <div className="font-bold">{catalysts[0].ticker} ({catalysts[0].type})</div>
+          </div>
+        )}
       </div>
+      
+      {/* Key Themes Row */}
+      {newsData.themes?.length > 0 && (
+        <div className="flex flex-wrap gap-2 pt-2">
+          <span className="text-xs text-zinc-500">Themes:</span>
+          {newsData.themes.slice(0, 3).map((theme, idx) => (
+            <span key={idx} className="text-xs px-2 py-1 rounded-full bg-zinc-800 text-zinc-400">
+              {theme}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -272,6 +333,93 @@ const DetailedSummary = ({ data }) => {
             dangerouslySetInnerHTML={{ 
               __html: sections.market_overview
                 .replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>')
+            }}
+          />
+        </Section>
+      )}
+      
+      {/* NEW: News & Catalysts */}
+      {sections?.news && (
+        <Section 
+          icon={<AlertTriangle className="w-4 h-4" />}
+          title="News & Catalysts"
+          color="cyan"
+        >
+          <div 
+            className="text-sm text-zinc-300 whitespace-pre-wrap"
+            dangerouslySetInnerHTML={{ 
+              __html: sections.news
+                .replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>')
+                .replace(/📰/g, '<span class="text-cyan-400">📰</span>')
+                .replace(/🟢/g, '<span class="text-emerald-400">🟢</span>')
+                .replace(/🔴/g, '<span class="text-red-400">🔴</span>')
+                .replace(/🟡/g, '<span class="text-amber-400">🟡</span>')
+            }}
+          />
+        </Section>
+      )}
+      
+      {/* NEW: Catalysts */}
+      {sections?.catalysts && (
+        <Section 
+          icon={<Zap className="w-4 h-4" />}
+          title="Today's Catalysts"
+          color="amber"
+        >
+          <div 
+            className="text-sm text-zinc-300 whitespace-pre-wrap"
+            dangerouslySetInnerHTML={{ 
+              __html: sections.catalysts
+                .replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>')
+                .replace(/🔥/g, '<span class="text-orange-400">🔥</span>')
+                .replace(/⚡/g, '<span class="text-amber-400">⚡</span>')
+                .replace(/📌/g, '<span class="text-zinc-400">📌</span>')
+                .replace(/🎯/g, '<span class="text-cyan-400">🎯</span>')
+            }}
+          />
+        </Section>
+      )}
+      
+      {/* NEW: Sector Rotation */}
+      {sections?.sectors && (
+        <Section 
+          icon={<TrendingUp className="w-4 h-4" />}
+          title="Sector Rotation"
+          color="emerald"
+        >
+          <div 
+            className="text-sm text-zinc-300 whitespace-pre-wrap"
+            dangerouslySetInnerHTML={{ 
+              __html: sections.sectors
+                .replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>')
+                .replace(/🚀/g, '<span class="text-emerald-400">🚀</span>')
+                .replace(/🛡️/g, '<span class="text-blue-400">🛡️</span>')
+                .replace(/🔄/g, '<span class="text-purple-400">🔄</span>')
+                .replace(/📉/g, '<span class="text-red-400">📉</span>')
+                .replace(/📈/g, '<span class="text-emerald-400">📈</span>')
+                .replace(/🔀/g, '<span class="text-zinc-400">🔀</span>')
+                .replace(/🟢/g, '<span class="text-emerald-400">🟢</span>')
+                .replace(/🔴/g, '<span class="text-red-400">🔴</span>')
+            }}
+          />
+        </Section>
+      )}
+      
+      {/* NEW: Earnings Watch */}
+      {sections?.earnings && (
+        <Section 
+          icon={<Clock className="w-4 h-4" />}
+          title="Earnings Watch"
+          color="amber"
+        >
+          <div 
+            className="text-sm text-zinc-300 whitespace-pre-wrap"
+            dangerouslySetInnerHTML={{ 
+              __html: sections.earnings
+                .replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>')
+                .replace(/⚠️/g, '<span class="text-amber-400">⚠️</span>')
+                .replace(/📅/g, '<span class="text-cyan-400">📅</span>')
+                .replace(/💡/g, '<span class="text-amber-400">💡</span>')
             }}
           />
         </Section>

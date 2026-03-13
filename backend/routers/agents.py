@@ -185,11 +185,12 @@ def get_brief_me_agent():
     if _brief_me_agent is None:
         from agents.brief_me_agent import BriefMeAgent
         from routers.ib import get_pushed_ib_data
+        from services.news_service import get_news_service
         
         llm = get_llm_provider()
         _brief_me_agent = BriefMeAgent(llm_provider=llm)
         
-        # Inject services
+        # Inject services (now including news_service)
         _brief_me_agent.inject_services(
             context_service=_services.get("context_service"),
             learning_provider=_services.get("learning_provider"),
@@ -198,10 +199,11 @@ def get_brief_me_agent():
             regime_performance_service=_services.get("regime_performance_service"),
             market_intel_service=_services.get("market_intel_service"),
             alpaca_service=_services.get("alpaca_service"),
-            ib_pushed_data=get_pushed_ib_data()
+            ib_pushed_data=get_pushed_ib_data(),
+            news_service=get_news_service()  # NEW: Inject news service for real news/catalysts
         )
         
-        logger.info("BriefMeAgent initialized with Alpaca and IB data services")
+        logger.info("BriefMeAgent initialized with Alpaca, IB data, and News services")
     
     return _brief_me_agent
 
