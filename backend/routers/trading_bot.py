@@ -1028,7 +1028,7 @@ async def get_bot_thoughts(limit: int = Query(10, ge=1, le=50)):
             rr = trade.get('risk_reward_ratio', 0)
             
             thoughts.append({
-                "text": f'"I\'m preparing to enter {symbol} on a {setup.replace("_", " ")} setup at ${entry:.2f}. Risk/Reward is {rr:.1f}:1. Awaiting confirmation."',
+                "text": f'"We\'re preparing to enter {symbol} on a {setup.replace("_", " ")} setup at ${entry:.2f}. Risk/Reward is {rr:.1f}:1. Awaiting confirmation."',
                 "timestamp": trade.get('created_at', now.isoformat()),
                 "confidence": 80,
                 "action_type": "entry",
@@ -1045,7 +1045,7 @@ async def get_bot_thoughts(limit: int = Query(10, ge=1, le=50)):
             direction = 'up' if pnl >= 0 else 'down'
             
             thoughts.append({
-                "text": f'"I\'m monitoring my {symbol} position. Currently {direction} {abs(pnl_pct):.1f}%. Stop at ${stop:.2f} is safe. {f"Target 1 at ${target:.2f}." if target else ""}"',
+                "text": f'"We\'re monitoring our {symbol} position. Currently {direction} {abs(pnl_pct):.1f}%. Our stop at ${stop:.2f} is safe. {f"Target 1 at ${target:.2f}." if target else ""}"',
                 "timestamp": trade.get('executed_at', now.isoformat()),
                 "confidence": 60,
                 "action_type": "monitoring",
@@ -1060,9 +1060,9 @@ async def get_bot_thoughts(limit: int = Query(10, ge=1, le=50)):
             reason = trade.get('close_reason', 'manual')
             
             if pnl > 0:
-                text = f'"I closed {symbol} for +${pnl:.2f}. {reason.replace("_", " ").title()} worked well."'
+                text = f'"We closed {symbol} for +${pnl:.2f}. {reason.replace("_", " ").title()} worked well for us."'
             else:
-                text = f'"I closed {symbol} for -${abs(pnl):.2f}. {reason.replace("_", " ").title()}. Learning from this."'
+                text = f'"We closed {symbol} for -${abs(pnl):.2f}. {reason.replace("_", " ").title()}. We\'re learning from this."'
             
             thoughts.append({
                 "text": text,
@@ -1078,16 +1078,16 @@ async def get_bot_thoughts(limit: int = Query(10, ge=1, le=50)):
             regime = getattr(_trading_bot, '_current_regime', 'UNKNOWN')
             
             if regime == 'RISK_ON':
-                regime_comment = "so I'm looking for aggressive breakout setups."
+                regime_comment = "so we're looking for aggressive breakout setups."
             elif regime == 'RISK_OFF':
-                regime_comment = "so I'm being cautious and reducing position sizes."
+                regime_comment = "so we're being cautious and reducing position sizes."
             elif regime == 'CONFIRMED_DOWN':
-                regime_comment = "so I'm favoring short setups and reducing long exposure."
+                regime_comment = "so we're favoring short setups and reducing long exposure."
             else:
-                regime_comment = "so I'm using standard position sizing."
+                regime_comment = "so we're using standard position sizing."
             
             thoughts.append({
-                "text": f'"I\'m actively scanning for opportunities in {mode} mode. Market regime is {regime}, {regime_comment}"',
+                "text": f'"We\'re actively scanning for opportunities in {mode} mode. Market regime is {regime}, {regime_comment}"',
                 "timestamp": now.isoformat(),
                 "confidence": 50,
                 "action_type": "scanning",

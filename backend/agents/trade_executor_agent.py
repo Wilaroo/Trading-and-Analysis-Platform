@@ -315,7 +315,7 @@ ONLY output JSON, nothing else."""
                                       position: Optional[Dict], start_time: float) -> AgentResponse:
         """Create a response asking for trade confirmation"""
         
-        # Build confirmation message
+        # Build confirmation message with "we" language
         if intent.action in ["close", "sell"]:
             avg_cost = position.get("avgCost", position.get("averageCost", 0)) if position else 0
             unrealized_pnl = position.get("unrealizedPNL", position.get("unrealized_pnl", 0)) if position else 0
@@ -325,17 +325,17 @@ ONLY output JSON, nothing else."""
 **Action:** {order.action} {order.quantity:,} shares of {order.symbol}
 **Current Price:** ${order.current_price:.2f}
 **Position Value:** ${order.position_value:,.2f}
-**Avg Cost:** ${avg_cost:.2f}
-**Unrealized P&L:** ${unrealized_pnl:,.2f}
+**Our Avg Cost:** ${avg_cost:.2f}
+**Our Unrealized P&L:** ${unrealized_pnl:,.2f}
 
-Reply **"yes"** to execute this trade."""
+Reply **"yes"** to execute this trade for us."""
         else:
             message = f"""**Trade Confirmation Required**
 
 **Action:** {order.action} {order.quantity:,} shares of {order.symbol}
 **Order Type:** {order.order_type}
 
-Reply **"yes"** to execute this trade."""
+Reply **"yes"** to execute this trade for us."""
         
         return self._create_response(
             success=True,

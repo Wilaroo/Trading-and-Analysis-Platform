@@ -101,7 +101,7 @@ from routers.market_regime import router as market_regime_router
 app.include_router(market_regime_router)
 
 # Test with curl:
-# curl https://ai-trader-bot-26.preview.emergentagent.com/api/market-regime/summary
+# curl https://team-brain-unified.preview.emergentagent.com/api/market-regime/summary
 ```
 
 ## Integration with Other Systems

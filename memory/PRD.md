@@ -7,7 +7,35 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## RECENT UPDATES (March 13, 2026)
 
-### P0 Features Complete - Smart Strategy Filtering & One-Click Stop Fix
+### P0 ACTIVE: Team Brain Unification Project
+
+**Status:** 🟡 IN PROGRESS - Phase 1 Complete, Phase 2 Starting
+
+**Project Goal:** Unify the AI Assistant and Bot Brain into a single "Team Brain" that uses "we" language throughout, creating a partnership feeling between the trader and the AI system.
+
+**Phase 1: Backend & Frontend Voice Unification** ✅ COMPLETE
+- Updated all backend agent prompts (coach_agent.py, analyst_agent.py, brief_me_agent.py) to use "we/our" voice
+- Updated frontend fallback messages in BotBrainPanel.jsx and NewDashboard.jsx
+- Changed "SETUPS I'M WATCHING" → "SETUPS WE'RE WATCHING"
+- EnhancedTickerModal already has "OUR TAKE" language and GlassCard V2 styling
+
+**V2 Interactive Mockups Created:**
+- `/app/frontend/src/pages/TeamBrainMockupsV2.jsx` - 3 tab mockup (Option C Enhanced, Our Performance, Our Take Modal)
+- Accessible via sidebar "Team Brain V2" menu item
+- Shows glass effects, gradient backgrounds, sparkline charts, unified voice
+
+**Next: Phase 2 - Backend Wiring**
+1. Create `TeamBrainOrchestrator` service - unified AI logic
+2. Create `team_brain_router.py` with new API endpoints:
+   - POST /api/team-brain/chat - Unified chat endpoint
+   - GET /api/team-brain/stream - Combined thoughts + chat stream
+3. Wire TeamBrain.jsx mockup to real APIs
+
+**Implementation Plan:** See `/app/memory/TEAM_BRAIN_IMPLEMENTATION_PLAN.md`
+
+---
+
+### Previous P0 Features Complete - Smart Strategy Filtering & One-Click Stop Fix
 
 **Status:** ✅ COMPLETE - Tested and Verified (iteration_83.json - 100% backend, 100% frontend)
 
@@ -333,11 +361,23 @@ Build smart strategy filtering directly into the bot's AI reasoning, NOT as a se
 
 ## 📋 FULL PRIORITY ROADMAP (March 2026)
 
-### 🔴 P0 - CRITICAL (Data Integrity & Core Functionality)
+### 🔴 P0 - CRITICAL (Active)
+
+1. **Team Brain Unification** 🟡 IN PROGRESS
+   - Phase 1: Voice Unification ✅ COMPLETE
+   - Phase 2: Backend Wiring ⏳ NEXT
+   - Phase 3: UI Implementation (pending user approval of mockups)
+   - Phase 4: Deprecation (AIAssistant.jsx, BotBrainPanel.jsx)
+
+---
+
+### ✅ P0 - COMPLETE (Data Integrity & Core Functionality)
 
 1. **Session Persistence & Data Continuity** ✅ COMPLETE
 2. **EOD Auto-Close for Intraday Trades** ✅ COMPLETE  
 3. **Ticker Modal Click Bug** ✅ COMPLETE (March 13)
+4. **Smart Strategy Filtering** ✅ COMPLETE (March 13)
+5. **One-Click Stop Fix** ✅ COMPLETE (March 13)
 
 ---
 
@@ -378,24 +418,30 @@ Build smart strategy filtering directly into the bot's AI reasoning, NOT as a se
 12. **Bot's Take for Non-Position Tickers** ✅ COMPLETE
     - HypotheticalBotTakeCard in ticker modal
 
-13. **Smart Strategy Filtering** 🔜 NEXT SESSION
-    - Build into bot's AI reasoning (not UI filters)
+13. **Smart Strategy Filtering** ✅ COMPLETE (moved to P0)
+    - Built into bot's AI reasoning (not UI filters)
     - Bot checks user's historical win rate on setup type
     - Surfaces reasoning in thoughts
 
-14. **One-Click Stop Fix** ❌ NOT STARTED
+14. **One-Click Stop Fix** ✅ COMPLETE (moved to P0)
     - Auto-adjust risky stops to recommended level
+    - Fix All Stops button in Bot Brain panel
 
 ---
 
 ### 🟢 P3 - LOW PRIORITY (Nice to Have)
 
 15. **Market Scanner Alpaca Rate Limiting Fix**
-    - `ai_assistant_service.py`, `slow_learning_service.py`
+    - Scanning 12,000+ symbols is impractically slow
+    - Consider pre-filtered lists or caching
 
-13. **Voice Commands**
+16. **Voice Commands**
+    - Voice-based interaction for Team Brain
 
-14. **Multi-Timeframe Analysis**
+17. **Multi-Timeframe Analysis**
+
+18. **Deprecate Old Trader Dashboard** (after Team Brain complete)
+    - TradingDashboardPage.jsx can be removed once Team Brain has all features
 
 ---
 

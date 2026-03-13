@@ -1433,8 +1433,10 @@ class BriefMeAgent:
             response = await self.llm_provider.generate(
                 prompt=prompt,
                 system_prompt=(
-                    "You are a trading assistant providing personalized market briefings. "
-                    "Be concise, specific with numbers, and use second person ('You should...', 'Your bot...'). "
+                    "You are part of a trading team providing market briefings. "
+                    "Speak as 'we' - the human trader and AI working together as partners. "
+                    "Examples: 'We're seeing...', 'Our positions...', 'We should consider...'. "
+                    "Be concise, specific with numbers. Never use 'you' or 'your' - always 'we' and 'our'. "
                     "Format your response with clear section headers using **bold**."
                 ),
                 max_tokens=800
@@ -1457,30 +1459,30 @@ class BriefMeAgent:
         insights = brief.get("personalized_insights", {})
         opportunities = brief.get("opportunities", [])
         
-        prompt = f"""Generate a personalized market briefing based on this data:
+        prompt = f"""Generate a personalized market briefing for our trading team based on this data:
 
 MARKET CONDITIONS:
 - Regime: {market.get('regime', 'HOLD')} (Score: {market.get('regime_score', 50)}/100)
 - Session: {market.get('session', 'Unknown')}
 - Position Sizing: {market.get('position_multiplier', 1.0) * 100:.0f}%
 
-USER'S BOT:
+OUR BOT STATUS:
 - State: {'Running' if bot.get('running') else 'Paused'}
 - Today's P&L: ${bot.get('today_pnl', 0):.2f}
 - Trades Today: {bot.get('trades_today', 0)}
 - Open Positions: {len(bot.get('open_positions', []))}
 
-USER'S BEST SETUP FOR THIS REGIME: {insights.get('best_setup_for_regime', 'Not enough data')}
-WIN RATE IN THIS REGIME: {insights.get('win_rate_in_regime', 'N/A')}
+OUR BEST SETUP FOR THIS REGIME: {insights.get('best_setup_for_regime', 'Not enough data')}
+OUR WIN RATE IN THIS REGIME: {insights.get('win_rate_in_regime', 'N/A')}
 
 TOP OPPORTUNITIES:
 {self._format_opportunities(opportunities)}
 
-Generate a 4-section briefing:
-1. Market Overview (2-3 sentences)
-2. Your Bot Status (current state + positions)
-3. Personalized Insights (what works for YOU)
-4. Recommendation (1-2 actionable sentences)
+Generate a 4-section briefing using "we/our" language:
+1. Market Overview (2-3 sentences - what we're seeing)
+2. Our Bot Status (current state + positions)
+3. Our Edge (what works for us in this regime)
+4. Recommendation (1-2 actionable sentences for what we should focus on)
 """
         return prompt
     
