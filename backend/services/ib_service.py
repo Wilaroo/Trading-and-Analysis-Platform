@@ -12,7 +12,7 @@ import logging
 import os
 import time
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from dataclasses import dataclass
 from enum import Enum
@@ -46,6 +46,8 @@ class IBCommand(Enum):
     GET_FUNDAMENTALS = "get_fundamentals"
     GET_NEWS = "get_news"
     GET_NEWS_ARTICLE = "get_news_article"
+    GET_NEWS_PROVIDERS = "get_news_providers"
+    GET_HISTORICAL_NEWS = "get_historical_news"
     SHUTDOWN = "shutdown"
 
 
@@ -222,7 +224,22 @@ class IBWorkerThread(threading.Thread):
                 return self._do_get_news(request.params.get("symbol"))
             
             elif request.command == IBCommand.GET_NEWS_ARTICLE:
-                return self._do_get_news_article(request.params.get("article_id"))
+                return self._do_get_news_article(
+                    request.params.get("provider_code"),
+                    request.params.get("article_id")
+                )
+            
+            elif request.command == IBCommand.GET_NEWS_PROVIDERS:
+                return self._do_get_news_providers()
+            
+            elif request.command == IBCommand.GET_HISTORICAL_NEWS:
+                return self._do_get_historical_news(
+                    request.params.get("symbol"),
+                    request.params.get("provider_codes"),
+                    request.params.get("total_results", 10),
+                    request.params.get("start_date"),
+                    request.params.get("end_date")
+                )
             
             else:
                 return IBResponse(success=False, error=f"Unknown command: {request.command}")
@@ -782,8 +799,115 @@ class IBWorkerThread(threading.Thread):
             logger.error(f"Error getting fundamentals: {e}")
             return IBResponse(success=False, error=str(e))
     
+    def _do_get_news_providers(self) -> IBResponse:
+        """Get list of available news providers the user is subscribed to"""
+        if not self.ib or not self.ib.isConnected():
+            return IBResponse(success=False, error="Not connected to IB")
+        
+        try:
+            providers = self.ib.reqNewsProviders()
+            self.ib.sleep(0.5)
+            
+            provider_list = []
+            for p in providers:
+                provider_list.append({
+                    "code": p.providerCode if hasattr(p, 'providerCode') else str(p),
+                    "name": p.providerName if hasattr(p, 'providerName') else p.providerCode if hasattr(p, 'providerCode') else str(p)
+                })
+            
+            logger.info(f"Found {len(provider_list)} news providers: {[p['code'] for p in provider_list]}")
+            return IBResponse(success=True, data=provider_list)
+            
+        except Exception as e:
+            logger.error(f"Error getting news providers: {e}")
+            return IBResponse(success=False, error=str(e))
+    
+    def _do_get_historical_news(self, symbol: str, provider_codes: List[str] = None, 
+                                 total_results: int = 10, start_date: str = None, 
+                                 end_date: str = None) -> IBResponse:
+        """
+        Get historical news for a symbol using reqHistoricalNews.
+        This is the proper IB news API that returns real headlines.
+        """
+        if not self.ib or not self.ib.isConnected():
+            return IBResponse(success=False, error="Not connected to IB")
+        
+        try:
+            from ib_insync import Stock
+            
+            # Get the contract and its conId
+            contract = Stock(symbol.upper(), "SMART", "USD")
+            qualified = self.ib.qualifyContracts(contract)
+            
+            if not qualified or not contract.conId:
+                return IBResponse(success=False, error=f"Could not qualify contract for {symbol}")
+            
+            con_id = contract.conId
+            logger.info(f"Getting historical news for {symbol} (conId: {con_id})")
+            
+            # If no providers specified, try to get user's subscribed providers
+            if not provider_codes:
+                providers = self.ib.reqNewsProviders()
+                self.ib.sleep(0.3)
+                if providers:
+                    # Use all available providers
+                    provider_codes = [p.providerCode for p in providers if hasattr(p, 'providerCode')]
+                    logger.info(f"Using providers: {provider_codes}")
+                else:
+                    # Default common providers
+                    provider_codes = ["BZ", "FLY", "DJ", "BRFG", "BRFUPDN"]
+            
+            # Set date range (default: last 7 days)
+            if not end_date:
+                end_date = datetime.now(timezone.utc).strftime("%Y%m%d %H:%M:%S")
+            if not start_date:
+                start_dt = datetime.now(timezone.utc) - timedelta(days=7)
+                start_date = start_dt.strftime("%Y%m%d %H:%M:%S")
+            
+            # Join provider codes with '+' as IB expects
+            providers_str = "+".join(provider_codes) if isinstance(provider_codes, list) else provider_codes
+            
+            # Request historical news
+            news_items = []
+            try:
+                historical_news = self.ib.reqHistoricalNews(
+                    conId=con_id,
+                    providerCodes=providers_str,
+                    startDateTime=start_date,
+                    endDateTime=end_date,
+                    totalResults=total_results,
+                    historicalNewsOptions=[]
+                )
+                self.ib.sleep(1)  # Wait for response
+                
+                if historical_news:
+                    for item in historical_news:
+                        news_items.append({
+                            "id": item.articleId if hasattr(item, 'articleId') else str(len(news_items)),
+                            "article_id": item.articleId if hasattr(item, 'articleId') else None,
+                            "provider_code": item.providerCode if hasattr(item, 'providerCode') else "IB",
+                            "symbol": symbol.upper(),
+                            "headline": item.headline if hasattr(item, 'headline') else str(item),
+                            "timestamp": item.time.isoformat() if hasattr(item, 'time') and hasattr(item.time, 'isoformat') else str(item.time) if hasattr(item, 'time') else datetime.now(timezone.utc).isoformat(),
+                            "source": item.providerCode if hasattr(item, 'providerCode') else "IB",
+                            "source_type": "ib_historical"
+                        })
+                    
+                    logger.info(f"Got {len(news_items)} historical news items for {symbol}")
+                    
+            except Exception as news_err:
+                logger.warning(f"reqHistoricalNews error for {symbol}: {news_err}")
+                # Fallback to real-time news ticks
+                return self._do_get_news(symbol)
+            
+            return IBResponse(success=True, data=news_items)
+            
+        except Exception as e:
+            logger.error(f"Error getting historical news: {e}")
+            return IBResponse(success=False, error=str(e))
+    
     def _do_get_news(self, symbol: str = None) -> IBResponse:
-        """Get news headlines - optionally filtered by symbol"""
+        """Get news headlines - optionally filtered by symbol (legacy method using tickNews)"""
         if not self.ib or not self.ib.isConnected():
             return IBResponse(success=False, error="Not connected to IB")
         
@@ -810,7 +934,8 @@ class IBWorkerThread(threading.Thread):
                             "headline": tick.headline if hasattr(tick, 'headline') else str(tick),
                             "source": tick.providerCode if hasattr(tick, 'providerCode') else "IB",
                             "timestamp": tick.timeStamp.isoformat() if hasattr(tick.timeStamp, 'isoformat') else str(tick.timeStamp),
-                            "article_id": tick.articleId if hasattr(tick, 'articleId') else None
+                            "article_id": tick.articleId if hasattr(tick, 'articleId') else None,
+                            "source_type": "ib_realtime"
                         })
                 
                 # Cancel market data
@@ -824,7 +949,8 @@ class IBWorkerThread(threading.Thread):
                         "headline": bulletin.message if hasattr(bulletin, 'message') else str(bulletin),
                         "source": "IB Bulletin",
                         "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "type": bulletin.msgType if hasattr(bulletin, 'msgType') else "news"
+                        "type": bulletin.msgType if hasattr(bulletin, 'msgType') else "news",
+                        "source_type": "ib_bulletin"
                     })
             
             return IBResponse(success=True, data=news_items)
@@ -833,19 +959,34 @@ class IBWorkerThread(threading.Thread):
             logger.error(f"Error getting news: {e}")
             return IBResponse(success=False, error=str(e))
     
-    def _do_get_news_article(self, article_id: str) -> IBResponse:
-        """Get full news article content"""
+    def _do_get_news_article(self, provider_code: str, article_id: str) -> IBResponse:
+        """Get full news article content using reqNewsArticle"""
         if not self.ib or not self.ib.isConnected():
             return IBResponse(success=False, error="Not connected to IB")
         
+        if not provider_code or not article_id:
+            return IBResponse(success=False, error="Both provider_code and article_id are required")
+        
         try:
-            # IB requires provider code and article ID
-            # This is a simplified implementation
-            return IBResponse(success=True, data={
-                "article_id": article_id,
-                "content": "Full article content requires IB news subscription",
-                "note": "Use the headline link to read the full article"
-            })
+            # Request the full article
+            article = self.ib.reqNewsArticle(provider_code, article_id, [])
+            self.ib.sleep(1)
+            
+            if article:
+                return IBResponse(success=True, data={
+                    "article_id": article_id,
+                    "provider_code": provider_code,
+                    "article_type": article.articleType if hasattr(article, 'articleType') else "text",
+                    "content": article.articleText if hasattr(article, 'articleText') else str(article),
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+            else:
+                return IBResponse(success=True, data={
+                    "article_id": article_id,
+                    "provider_code": provider_code,
+                    "content": "Article content not available",
+                    "note": "Check your IB news subscription or the article may have expired"
+                })
             
         except Exception as e:
             logger.error(f"Error getting news article: {e}")
@@ -1112,6 +1253,72 @@ class IBService:
         if not response.success:
             return []
         return response.data or []
+    
+    async def get_news_providers(self) -> List[Dict]:
+        """Get list of subscribed news providers (e.g., BZ=Benzinga, FLY=Fly, DJ=Dow Jones)"""
+        response = self._send_request(
+            IBCommand.GET_NEWS_PROVIDERS,
+            {},
+            timeout=15.0
+        )
+        if not response.success:
+            return []
+        return response.data or []
+    
+    async def get_historical_news(self, symbol: str, provider_codes: List[str] = None,
+                                   total_results: int = 10, start_date: str = None,
+                                   end_date: str = None) -> List[Dict]:
+        """
+        Get historical news for a symbol using IB's reqHistoricalNews API.
+        This is the proper way to get ticker-specific news from IB.
+        
+        Args:
+            symbol: Stock symbol (e.g., "AAPL")
+            provider_codes: List of provider codes (e.g., ["BZ", "FLY"]). If None, uses all subscribed.
+            total_results: Maximum number of results (default 10)
+            start_date: Start date in format "YYYYMMDD HH:MM:SS" (default: 7 days ago)
+            end_date: End date in format "YYYYMMDD HH:MM:SS" (default: now)
+        
+        Returns:
+            List of news items with headline, timestamp, provider, article_id
+        """
+        response = self._send_request(
+            IBCommand.GET_HISTORICAL_NEWS,
+            {
+                "symbol": symbol,
+                "provider_codes": provider_codes,
+                "total_results": total_results,
+                "start_date": start_date,
+                "end_date": end_date
+            },
+            timeout=30.0
+        )
+        if not response.success:
+            return []
+        return response.data or []
+    
+    async def get_news_article(self, provider_code: str, article_id: str) -> Dict:
+        """
+        Get full news article content using IB's reqNewsArticle API.
+        
+        Args:
+            provider_code: The news provider code (e.g., "BZ", "FLY")
+            article_id: The article ID from historical news
+        
+        Returns:
+            Dict with article content
+        """
+        response = self._send_request(
+            IBCommand.GET_NEWS_ARTICLE,
+            {
+                "provider_code": provider_code,
+                "article_id": article_id
+            },
+            timeout=15.0
+        )
+        if not response.success:
+            return {"error": response.error}
+        return response.data or {}
     
     def get_vix(self) -> Optional[Dict]:
         """

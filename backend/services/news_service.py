@@ -1,6 +1,15 @@
 """
-News Service - Fetches news from Finnhub and other sources
+News Service - Fetches news from IB Gateway (primary), Finnhub (fallback), and other sources
 Provides real-time market news and ticker-specific headlines
+
+Priority order for ticker news:
+1. IB Gateway Historical News (reqHistoricalNews) - Professional financial news, unlimited
+2. Finnhub Company News - Good backup, rate limited
+3. IB Real-time News Ticks - Fallback if historical fails
+
+Priority order for market news:
+1. Finnhub General News - Best for broad market news
+2. IB News Bulletins - Exchange bulletins
 """
 import logging
 import os
@@ -15,36 +24,104 @@ logger = logging.getLogger(__name__)
 
 
 class NewsService:
-    """Service for fetching news from Finnhub and other sources"""
+    """Service for fetching news - prioritizes IB Gateway, falls back to Finnhub"""
     
     def __init__(self, ib_service=None):
         self.ib_service = ib_service
         self._finnhub_key = os.environ.get("FINNHUB_API_KEY")
+        self._news_providers_cache = None
+        self._providers_cache_time = None
         
         if self._finnhub_key:
-            logger.info("Finnhub API key loaded for news")
+            logger.info("Finnhub API key loaded for news (fallback)")
         else:
-            logger.warning("No Finnhub API key found for news")
+            logger.warning("No Finnhub API key found for news fallback")
         
     def set_ib_service(self, ib_service):
         """Set the IB service for news fetching"""
         self.ib_service = ib_service
+        self._news_providers_cache = None  # Reset cache when service changes
+    
+    async def get_news_providers(self) -> List[Dict]:
+        """
+        Get list of subscribed IB news providers.
+        Cached for 5 minutes to avoid repeated API calls.
+        """
+        # Check cache
+        if self._news_providers_cache and self._providers_cache_time:
+            cache_age = (datetime.now(timezone.utc) - self._providers_cache_time).total_seconds()
+            if cache_age < 300:  # 5 minute cache
+                return self._news_providers_cache
+        
+        if not self.ib_service:
+            return []
+        
+        try:
+            providers = await self.ib_service.get_news_providers()
+            if providers:
+                self._news_providers_cache = providers
+                self._providers_cache_time = datetime.now(timezone.utc)
+                logger.info(f"IB News Providers: {[p.get('code') for p in providers]}")
+            return providers
+        except Exception as e:
+            logger.warning(f"Failed to get news providers: {e}")
+            return []
     
     async def get_ticker_news(self, symbol: str, max_items: int = 10) -> List[Dict]:
         """
-        Fetch news for a specific ticker symbol using Finnhub.
+        Fetch news for a specific ticker symbol.
+        
+        Priority:
+        1. IB Historical News (reqHistoricalNews) - Best quality, no rate limits
+        2. Finnhub Company News - Good fallback
+        3. IB Real-time Ticks - Last resort
         """
+        symbol = symbol.upper()
+        
+        # === PRIORITY 1: IB Historical News ===
+        if self.ib_service:
+            try:
+                news = await self.ib_service.get_historical_news(
+                    symbol=symbol,
+                    total_results=max_items
+                )
+                
+                if news and len(news) > 0:
+                    # Format and enrich with sentiment
+                    formatted_news = []
+                    for item in news[:max_items]:
+                        formatted_news.append({
+                            "id": item.get("id", item.get("article_id", "")),
+                            "article_id": item.get("article_id"),
+                            "provider_code": item.get("provider_code"),
+                            "symbol": symbol,
+                            "headline": item.get("headline", ""),
+                            "summary": "",  # IB doesn't provide summary in headlines
+                            "source": self._get_provider_name(item.get("provider_code", "IB")),
+                            "timestamp": item.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                            "url": None,  # Would need article fetch to get URL
+                            "sentiment": self._analyze_sentiment(item.get("headline", "")),
+                            "source_type": "ib_historical",
+                            "is_placeholder": False
+                        })
+                    
+                    if formatted_news:
+                        logger.info(f"Got {len(formatted_news)} IB historical news for {symbol}")
+                        return formatted_news
+                        
+            except Exception as e:
+                logger.warning(f"IB historical news failed for {symbol}: {e}")
+        
+        # === PRIORITY 2: Finnhub Company News ===
         if self._finnhub_key:
             try:
-                # Finnhub company news endpoint
-                url = f"https://finnhub.io/api/v1/company-news"
+                url = "https://finnhub.io/api/v1/company-news"
                 
-                # Get news from last 7 days
                 today = datetime.now(timezone.utc).date()
                 week_ago = today - timedelta(days=7)
                 
                 params = {
-                    "symbol": symbol.upper(),
+                    "symbol": symbol,
                     "from": week_ago.isoformat(),
                     "to": today.isoformat(),
                     "token": self._finnhub_key
@@ -60,7 +137,7 @@ class NewsService:
                         for item in news_items[:max_items]:
                             formatted_news.append({
                                 "id": str(item.get("id", "")),
-                                "symbol": symbol.upper(),
+                                "symbol": symbol,
                                 "headline": item.get("headline", ""),
                                 "summary": item.get("summary", ""),
                                 "source": item.get("source", "Finnhub"),
@@ -68,36 +145,42 @@ class NewsService:
                                 "url": item.get("url"),
                                 "image": item.get("image"),
                                 "sentiment": self._analyze_sentiment(item.get("headline", "")),
+                                "source_type": "finnhub",
                                 "is_placeholder": False
                             })
                         
                         if formatted_news:
+                            logger.info(f"Got {len(formatted_news)} Finnhub news for {symbol}")
                             return formatted_news
                 else:
                     logger.warning(f"Finnhub news request failed: {resp.status_code}")
             except Exception as e:
                 logger.warning(f"Failed to get Finnhub news for {symbol}: {e}")
         
-        # Fallback to IB if available
+        # === PRIORITY 3: IB Real-time News Ticks (fallback) ===
         if self.ib_service:
             try:
                 news = await self.ib_service.get_news_for_symbol(symbol)
                 if news:
+                    for item in news:
+                        item["sentiment"] = self._analyze_sentiment(item.get("headline", ""))
+                        item["is_placeholder"] = False
                     return news[:max_items]
             except Exception as e:
-                logger.warning(f"Failed to get IB news for {symbol}: {e}")
+                logger.warning(f"Failed to get IB realtime news for {symbol}: {e}")
         
-        # Return structured placeholder when nothing available
+        # === No news available ===
         return self._get_placeholder_news(symbol, max_items)
     
     async def get_market_news(self, max_items: int = 20) -> List[Dict]:
         """
-        Fetch general market news headlines using Finnhub.
+        Fetch general market news headlines.
+        Uses Finnhub as primary (better for broad market news).
         """
+        # === PRIORITY 1: Finnhub General News ===
         if self._finnhub_key:
             try:
-                # Finnhub general market news
-                url = f"https://finnhub.io/api/v1/news"
+                url = "https://finnhub.io/api/v1/news"
                 params = {
                     "category": "general",
                     "token": self._finnhub_key
@@ -114,7 +197,6 @@ class NewsService:
                         
                         for item in news_items:
                             headline = item.get("headline", "")
-                            # Deduplicate
                             if headline and headline not in seen_headlines:
                                 seen_headlines.add(headline)
                                 formatted_news.append({
@@ -127,6 +209,7 @@ class NewsService:
                                     "image": item.get("image"),
                                     "category": item.get("category", "general"),
                                     "sentiment": self._analyze_sentiment(headline),
+                                    "source_type": "finnhub",
                                     "is_placeholder": False
                                 })
                         
@@ -137,16 +220,39 @@ class NewsService:
             except Exception as e:
                 logger.warning(f"Failed to get Finnhub market news: {e}")
         
-        # Fallback to IB if available
+        # === PRIORITY 2: IB News Bulletins ===
         if self.ib_service:
             try:
                 news = await self.ib_service.get_general_news()
                 if news:
+                    for item in news:
+                        item["sentiment"] = self._analyze_sentiment(item.get("headline", ""))
+                        item["is_placeholder"] = False
                     return news[:max_items]
             except Exception as e:
                 logger.warning(f"Failed to get general news from IB: {e}")
         
         return self._get_placeholder_market_news(max_items)
+    
+    async def get_news_article(self, provider_code: str, article_id: str) -> Dict:
+        """
+        Get full news article content from IB.
+        
+        Args:
+            provider_code: The news provider (e.g., "BZ", "FLY", "DJ")
+            article_id: The article ID from historical news
+        
+        Returns:
+            Dict with article content
+        """
+        if not self.ib_service:
+            return {"error": "IB service not available"}
+        
+        try:
+            return await self.ib_service.get_news_article(provider_code, article_id)
+        except Exception as e:
+            logger.error(f"Failed to get news article: {e}")
+            return {"error": str(e)}
     
     async def get_market_summary(self) -> Dict:
         """
@@ -158,7 +264,7 @@ class NewsService:
         if not news or (len(news) == 1 and news[0].get("is_placeholder")):
             return {
                 "available": False,
-                "message": "Market news unavailable. Check Finnhub API connection.",
+                "message": "Market news unavailable. Check API connections.",
                 "headlines": [],
                 "themes": []
             }
@@ -242,6 +348,21 @@ class NewsService:
             "sources": sources[:5]
         }
     
+    def _get_provider_name(self, code: str) -> str:
+        """Convert provider code to human-readable name"""
+        provider_names = {
+            "BZ": "Benzinga",
+            "FLY": "Fly on the Wall",
+            "DJ": "Dow Jones",
+            "BRFG": "Briefing.com",
+            "BRFUPDN": "Briefing.com Upgrades/Downgrades",
+            "MT": "Midnight Trader",
+            "TWTR": "Twitter/X",
+            "RTN": "Reuters",
+            "DJNL": "DJ Newswires",
+        }
+        return provider_names.get(code, code)
+    
     def _analyze_sentiment(self, text: str) -> str:
         """Simple keyword-based sentiment analysis"""
         if not text:
@@ -274,11 +395,12 @@ class NewsService:
                 "id": f"{symbol}-news-placeholder",
                 "symbol": symbol,
                 "headline": f"No recent news available for {symbol}",
-                "summary": "Check API connection or try a different symbol.",
+                "summary": "Check IB Gateway connection or try a different symbol.",
                 "source": "System",
                 "timestamp": now.isoformat(),
                 "url": None,
                 "sentiment": "neutral",
+                "source_type": "placeholder",
                 "is_placeholder": True
             }
         ]
@@ -291,10 +413,11 @@ class NewsService:
             {
                 "id": "market-news-placeholder",
                 "headline": "Market news unavailable",
-                "summary": "Check Finnhub API connection for live market news.",
+                "summary": "Check Finnhub API or IB Gateway connection for live market news.",
                 "source": "System",
                 "timestamp": now.isoformat(),
                 "sentiment": "neutral",
+                "source_type": "placeholder",
                 "is_placeholder": True
             }
         ]
