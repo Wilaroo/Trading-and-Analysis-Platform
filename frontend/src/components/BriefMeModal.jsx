@@ -277,6 +277,25 @@ const DetailedSummary = ({ data }) => {
         </Section>
       )}
       
+      {/* Gappers */}
+      {sections?.gappers && (
+        <Section 
+          icon={<TrendingUp className="w-4 h-4" />}
+          title="Pre-Market Gappers"
+          color="emerald"
+        >
+          <div 
+            className="text-sm text-zinc-300 whitespace-pre-wrap"
+            dangerouslySetInnerHTML={{ 
+              __html: sections.gappers
+                .replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>')
+                .replace(/🟢/g, '<span class="text-emerald-400">🟢</span>')
+                .replace(/🔴/g, '<span class="text-red-400">🔴</span>')
+            }}
+          />
+        </Section>
+      )}
+      
       {/* Bot Status */}
       {sections?.bot_status && (
         <Section 
@@ -311,11 +330,11 @@ const DetailedSummary = ({ data }) => {
         </Section>
       )}
       
-      {/* Opportunities */}
+      {/* Opportunities / Stocks to Watch */}
       {sections?.opportunities && (
         <Section 
           icon={<Target className="w-4 h-4" />}
-          title="Top Opportunities"
+          title="Stocks to Watch"
           color="emerald"
         >
           <div 
@@ -323,6 +342,7 @@ const DetailedSummary = ({ data }) => {
             dangerouslySetInnerHTML={{ 
               __html: sections.opportunities
                 .replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>')
+                .replace(/📊/g, '<span class="text-cyan-400">📊</span>')
             }}
           />
         </Section>
@@ -341,6 +361,7 @@ const DetailedSummary = ({ data }) => {
             dangerouslySetInnerHTML={{ 
               __html: sections.recommendation
                 .replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>')
+                .replace(/💡/g, '<span class="text-amber-400">💡</span>')
             }}
           />
         </Section>

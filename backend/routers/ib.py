@@ -122,6 +122,12 @@ _pushed_ib_data = {
     "connected": False
 }
 
+
+def get_pushed_ib_data() -> dict:
+    """Get reference to pushed IB data for other services."""
+    return _pushed_ib_data
+
+
 # ===================== Order Queue for Remote Execution =====================
 # Orders queued by cloud trading bot, executed by local pusher
 # NOW BACKED BY MONGODB for persistence
