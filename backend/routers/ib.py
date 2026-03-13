@@ -111,6 +111,8 @@ class IBPushDataRequest(BaseModel):
     positions: list = Field(default=[], description="Position data")
     level2: dict = Field(default={}, description="Level 2 / DOM data by symbol")
     fundamentals: dict = Field(default={}, description="Fundamental data by symbol")
+    news: dict = Field(default={}, description="News data by symbol")
+    news_providers: list = Field(default=[], description="Available news providers")
 
 
 # In-memory storage for pushed IB data
@@ -121,6 +123,8 @@ _pushed_ib_data = {
     "positions": [],
     "level2": {},  # Level 2 / DOM data
     "fundamentals": {},  # Fundamental data (P/E, short interest, float, etc.)
+    "news": {},  # News data by symbol
+    "news_providers": [],  # Available news providers
     "connected": False
 }
 
@@ -424,10 +428,19 @@ async def receive_pushed_ib_data(request: IBPushDataRequest):
         if request.fundamentals:
             _pushed_ib_data["fundamentals"].update(request.fundamentals)
         
+        # Update News data
+        if request.news:
+            _pushed_ib_data["news"].update(request.news)
+        
+        # Update News providers
+        if request.news_providers:
+            _pushed_ib_data["news_providers"] = request.news_providers
+        
         quote_count = len(request.quotes) if request.quotes else 0
         pos_count = len(request.positions) if request.positions else 0
         l2_count = len(request.level2) if request.level2 else 0
         fund_count = len(request.fundamentals) if request.fundamentals else 0
+        news_count = sum(len(items) for items in request.news.values()) if request.news else 0
         
         return {
             "success": True,
@@ -436,7 +449,9 @@ async def receive_pushed_ib_data(request: IBPushDataRequest):
                 "positions": pos_count,
                 "account_fields": len(request.account) if request.account else 0,
                 "level2": l2_count,
-                "fundamentals": fund_count
+                "fundamentals": fund_count,
+                "news_items": news_count,
+                "news_providers": len(request.news_providers) if request.news_providers else 0
             },
             "timestamp": datetime.now(timezone.utc).isoformat()
         }

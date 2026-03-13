@@ -1423,6 +1423,16 @@ DECISION: {score_result['trade_or_skip']}
             except:
                 pass
             
+            # Try to get news service (now prioritizes IB news)
+            try:
+                from services.news_service import get_news_service
+                news_svc = get_news_service()
+                services["news"] = news_svc
+                # Also set on the engine for direct access
+                engine.news_service = news_svc
+            except:
+                pass
+            
             # Gather context based on intent (also stores data for validation)
             smart_context, context_data = await engine.gather_context_with_data(intent_result, services)
             
