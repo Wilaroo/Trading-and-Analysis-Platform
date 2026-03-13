@@ -14,11 +14,26 @@ Phase 2: Backend Wiring for Team Brain → SentCom
 """
 import logging
 import asyncio
+import os
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
+from pymongo import MongoClient, DESCENDING
 
 logger = logging.getLogger(__name__)
+
+# MongoDB connection for chat persistence
+_db = None
+
+def _get_db():
+    """Get MongoDB database connection for SentCom persistence"""
+    global _db
+    if _db is None:
+        mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+        db_name = os.environ.get("DB_NAME", "tradecommand")
+        client = MongoClient(mongo_url)
+        _db = client[db_name]
+    return _db
 
 
 @dataclass
@@ -82,14 +97,88 @@ class SentComService:
     The unified AI command center that speaks with "we" voice.
     Orchestrates all trading intelligence and provides a single
     stream of consciousness for the trading team (human + AI).
+    
+    Persistence: Chat history and settings are stored in MongoDB.
     """
+    
+    CHAT_COLLECTION = "sentcom_chat_history"
+    SETTINGS_COLLECTION = "sentcom_settings"
     
     def __init__(self):
         self._services: Dict[str, Any] = {}
         self._chat_history: List[Dict] = []
         self._max_history = 50
         self._message_counter = 0
-        logger.info("SentCom service initialized")
+        self._session_id = "default"
+        
+        # Load persisted chat history from MongoDB
+        self._load_chat_history()
+        logger.info(f"SentCom service initialized with {len(self._chat_history)} persisted messages")
+    
+    def _load_chat_history(self):
+        """Load chat history from MongoDB"""
+        try:
+            db = _get_db()
+            # Get the most recent messages for the session
+            cursor = db[self.CHAT_COLLECTION].find(
+                {"session_id": self._session_id}
+            ).sort("timestamp", DESCENDING).limit(self._max_history)
+            
+            messages = list(cursor)
+            # Reverse to get chronological order
+            messages.reverse()
+            
+            self._chat_history = []
+            for msg in messages:
+                self._chat_history.append({
+                    "role": msg.get("role"),
+                    "content": msg.get("content"),
+                    "timestamp": msg.get("timestamp")
+                })
+            
+            logger.info(f"Loaded {len(self._chat_history)} chat messages from MongoDB")
+        except Exception as e:
+            logger.error(f"Error loading chat history: {e}")
+            self._chat_history = []
+    
+    def _save_chat_message(self, role: str, content: str, timestamp: str):
+        """Save a chat message to MongoDB"""
+        try:
+            db = _get_db()
+            db[self.CHAT_COLLECTION].insert_one({
+                "session_id": self._session_id,
+                "role": role,
+                "content": content,
+                "timestamp": timestamp,
+                "created_at": datetime.now(timezone.utc)
+            })
+        except Exception as e:
+            logger.error(f"Error saving chat message: {e}")
+    
+    def _cleanup_old_messages(self):
+        """Remove old messages beyond max_history from MongoDB"""
+        try:
+            db = _get_db()
+            # Count messages
+            count = db[self.CHAT_COLLECTION].count_documents({"session_id": self._session_id})
+            
+            if count > self._max_history * 2:  # Clean up when we have 2x max
+                # Get IDs of messages to keep (most recent max_history)
+                keep_cursor = db[self.CHAT_COLLECTION].find(
+                    {"session_id": self._session_id},
+                    {"_id": 1}
+                ).sort("timestamp", DESCENDING).limit(self._max_history)
+                
+                keep_ids = [doc["_id"] for doc in keep_cursor]
+                
+                # Delete older messages
+                result = db[self.CHAT_COLLECTION].delete_many({
+                    "session_id": self._session_id,
+                    "_id": {"$nin": keep_ids}
+                })
+                logger.info(f"Cleaned up {result.deleted_count} old chat messages")
+        except Exception as e:
+            logger.error(f"Error cleaning up old messages: {e}")
     
     def inject_services(self, services: Dict[str, Any]):
         """Inject required services"""
@@ -462,12 +551,20 @@ class SentComService:
                 "symbol": result.metadata.get("symbol") if result.metadata else None
             }
             
+            # Add to in-memory history
             self._chat_history.append(user_msg)
             self._chat_history.append(assistant_msg)
             
-            # Trim history
+            # Persist to MongoDB
+            self._save_chat_message("user", message, user_msg["timestamp"])
+            self._save_chat_message("assistant", response_text, assistant_msg["timestamp"])
+            
+            # Trim in-memory history
             if len(self._chat_history) > self._max_history:
                 self._chat_history = self._chat_history[-self._max_history:]
+            
+            # Periodically clean up old DB messages
+            self._cleanup_old_messages()
             
             return {
                 "success": result.success,

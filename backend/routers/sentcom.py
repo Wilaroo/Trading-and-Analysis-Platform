@@ -141,6 +141,33 @@ async def chat(request: ChatRequest):
         )
 
 
+@router.get("/chat/history")
+async def get_chat_history(limit: int = Query(50, ge=1, le=100)):
+    """
+    Get persisted chat history.
+    
+    Returns recent chat messages for display in the SentCom panel.
+    Messages are loaded from MongoDB for persistence across sessions.
+    """
+    try:
+        service = _get_service()
+        # Return the in-memory chat history (already loaded from MongoDB)
+        history = service._chat_history[-limit:] if service._chat_history else []
+        return {
+            "success": True,
+            "messages": history,
+            "count": len(history)
+        }
+    except Exception as e:
+        logger.error(f"Error getting chat history: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "messages": [],
+            "count": 0
+        }
+
+
 @router.get("/context")
 async def get_context():
     """
