@@ -218,6 +218,124 @@ const BotTakeCard = ({ trade, symbol }) => {
   );
 };
 
+// Hypothetical Bot's Take Card - "If I were to trade this..." for non-position tickers
+const HypotheticalBotTakeCard = ({ analysis, symbol, onAskAI }) => {
+  const [hypothetical, setHypothetical] = useState(null);
+  
+  useEffect(() => {
+    if (!symbol || !analysis) return;
+    
+    // Generate hypothetical trade based on analysis
+    const scores = analysis?.scores || {};
+    const tradingSummary = analysis?.trading_summary || {};
+    const matchedStrategies = analysis?.matched_strategies || [];
+    const levels = analysis?.levels || {};
+    
+    const overallScore = scores.overall || 50;
+    const bias = tradingSummary.bias || 'NEUTRAL';
+    const strategy = matchedStrategies[0];
+    
+    // Determine if bot would trade this
+    const wouldTrade = overallScore >= 60 && bias !== 'NEUTRAL';
+    
+    // Calculate hypothetical entry, stop, target
+    const support = levels.support || levels.near_support || 0;
+    const resistance = levels.resistance || levels.near_resistance || 0;
+    const currentPrice = analysis?.current_price || 0;
+    const atr = currentPrice * 0.02; // Estimate 2% ATR
+    
+    let hypotheticalTrade = null;
+    
+    if (wouldTrade && currentPrice > 0) {
+      if (bias === 'BULLISH') {
+        hypotheticalTrade = {
+          direction: 'long',
+          entry: currentPrice,
+          stop: support > 0 ? support - (atr * 0.5) : currentPrice - (atr * 1.5),
+          target: resistance > 0 ? resistance : currentPrice * 1.03,
+          reasoning: `I'd look to enter long near $${currentPrice.toFixed(2)}. ${
+            strategy?.name ? `Using ${strategy.name} setup.` : ''
+          } Stop below support at $${(support > 0 ? support - (atr * 0.5) : currentPrice - (atr * 1.5)).toFixed(2)}. Target near resistance.`,
+          confidence: overallScore
+        };
+      } else if (bias === 'BEARISH') {
+        hypotheticalTrade = {
+          direction: 'short',
+          entry: currentPrice,
+          stop: resistance > 0 ? resistance + (atr * 0.5) : currentPrice + (atr * 1.5),
+          target: support > 0 ? support : currentPrice * 0.97,
+          reasoning: `I'd look to short near $${currentPrice.toFixed(2)}. ${
+            strategy?.name ? `Using ${strategy.name} setup.` : ''
+          } Stop above resistance at $${(resistance > 0 ? resistance + (atr * 0.5) : currentPrice + (atr * 1.5)).toFixed(2)}. Target near support.`,
+          confidence: overallScore
+        };
+      }
+    } else if (!wouldTrade) {
+      hypotheticalTrade = {
+        direction: 'pass',
+        reasoning: overallScore < 60 
+          ? `I'd pass on ${symbol} right now - quality score is only ${overallScore}/100. I prefer setups with 60+ quality.`
+          : `I'd wait for clearer direction on ${symbol}. Current bias is neutral - no edge.`,
+        confidence: 100 - overallScore
+      };
+    }
+    
+    setHypothetical(hypotheticalTrade);
+  }, [analysis, symbol]);
+  
+  if (!hypothetical) return null;
+  
+  const isPass = hypothetical.direction === 'pass';
+  const isLong = hypothetical.direction === 'long';
+  
+  return (
+    <div className={`border-l-[3px] ${
+      isPass ? 'border-zinc-500' : isLong ? 'border-emerald-400' : 'border-red-400'
+    } bg-gradient-to-r ${
+      isPass ? 'from-zinc-500/10' : isLong ? 'from-emerald-400/10' : 'from-red-400/10'
+    } to-transparent p-3 rounded-r-xl`}>
+      <div className="flex items-center gap-2 mb-2">
+        <div className={`w-2 h-2 rounded-full ${
+          isPass ? 'bg-zinc-500' : isLong ? 'bg-emerald-400' : 'bg-red-400'
+        }`} />
+        <span className={`text-xs font-bold ${
+          isPass ? 'text-zinc-400' : isLong ? 'text-emerald-400' : 'text-red-400'
+        }`}>IF I WERE TO TRADE THIS...</span>
+        <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+          isPass ? 'bg-zinc-500/20 text-zinc-400' : 
+          isLong ? 'bg-emerald-500/20 text-emerald-400' : 
+          'bg-red-500/20 text-red-400'
+        }`}>
+          {isPass ? 'PASS' : isLong ? 'LONG' : 'SHORT'}
+        </span>
+        <span className="text-[10px] text-zinc-500 ml-auto">{hypothetical.confidence}% conf</span>
+      </div>
+      
+      <p className="text-xs text-zinc-300 leading-relaxed mb-2">
+        "{hypothetical.reasoning}"
+      </p>
+      
+      {!isPass && (
+        <div className="flex gap-3 text-[10px]">
+          <span className="text-zinc-500">Entry: <span className="text-white font-mono">${hypothetical.entry?.toFixed(2)}</span></span>
+          <span className="text-zinc-500">Stop: <span className="text-red-400 font-mono">${hypothetical.stop?.toFixed(2)}</span></span>
+          <span className="text-zinc-500">Target: <span className="text-emerald-400 font-mono">${hypothetical.target?.toFixed(2)}</span></span>
+        </div>
+      )}
+      
+      {onAskAI && (
+        <button 
+          onClick={() => onAskAI(symbol, isPass ? 'quality' : 'analyze')}
+          className="w-full mt-2 flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-purple-500/20 text-purple-400 rounded text-xs hover:bg-purple-500/30 border border-purple-500/30 transition-colors"
+        >
+          <Brain className="w-3 h-3" />
+          {isPass ? 'Ask Why Not Trade This?' : 'Get Full Analysis'}
+        </button>
+      )}
+    </div>
+  );
+};
+
 // AI Recommendation Card
 const AIRecommendationCard = ({ analysis, onAskAI, symbol }) => {
   const tradingSummary = analysis?.trading_summary || {};
@@ -1240,9 +1358,18 @@ const EnhancedTickerModal = ({
                     </div>
                   </div>
                   
-                  {/* Bot's Take */}
+                  {/* Bot's Take - for positions */}
                   {hasBotPosition && (
                     <BotTakeCard trade={trade} symbol={ticker.symbol} />
+                  )}
+                  
+                  {/* Hypothetical Bot's Take - for non-positions */}
+                  {!hasBotPosition && analysis && (
+                    <HypotheticalBotTakeCard 
+                      analysis={analysis} 
+                      symbol={ticker.symbol}
+                      onAskAI={onAskAI}
+                    />
                   )}
                   
                   {/* AI Recommendation */}

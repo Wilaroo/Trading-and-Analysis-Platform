@@ -1066,7 +1066,8 @@ async def get_bot_thoughts(limit: int = Query(10, ge=1, le=50)):
             })
         
         # Sort by timestamp (most recent first) and limit
-        thoughts.sort(key=lambda t: t['timestamp'], reverse=True)
+        # Handle None timestamps by using epoch as fallback
+        thoughts.sort(key=lambda t: t['timestamp'] or '1970-01-01T00:00:00', reverse=True)
         
         return {
             "success": True,
