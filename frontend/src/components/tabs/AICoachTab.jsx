@@ -4,6 +4,7 @@ import LearningInsightsWidget from '../LearningInsightsWidget';
 import MarketRegimeWidget from '../MarketRegimeWidget';
 import NewDashboard from '../NewDashboard';
 import BriefMeModal from '../BriefMeModal';
+import SentCom from '../SentCom';
 import { useTickerModal } from '../../hooks/useTickerModal';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
@@ -184,29 +185,10 @@ const AICoachTab = ({
       
       {/* Main Content Grid */}
       <div className="grid lg:grid-cols-12 gap-4">
-        {/* LEFT - AI Trading Assistant (Bot + AI integrated) - Takes more space */}
+        {/* LEFT - SentCom (Unified AI Command Center) - Takes more space */}
         <div className="lg:col-span-9">
           <div className="h-[calc(100vh-180px)] min-h-[800px]">
-            <AICommandPanel
-              onTickerSelect={handleTickerClick}
-              onViewChart={(ticker) => setChartSymbol(ticker)}
-              watchlist={watchlist}
-              alerts={[...enhancedAlerts, ...alerts]}
-              opportunities={opportunities}
-              earnings={earnings}
-              scanResults={opportunities}
-              isConnected={isConnected}
-              onRefresh={() => runScanner()}
-              account={account}
-              marketContext={marketContext}
-              positions={positions}
-              chartSymbol={chartSymbol}
-              setChartSymbol={setChartSymbol}
-              // WebSocket-pushed data
-              wsBotStatus={wsBotStatus}
-              wsBotTrades={wsBotTrades}
-              wsCoachingNotifications={wsCoachingNotifications}
-            />
+            <SentCom embedded={true} />
           </div>
         </div>
 
