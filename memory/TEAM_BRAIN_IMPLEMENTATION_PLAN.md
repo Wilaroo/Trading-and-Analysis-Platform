@@ -1,8 +1,8 @@
-# Team Brain Unification - Implementation Plan
+# SentCom Unification - Implementation Plan
 
 ## Overview
 
-This document outlines the plan to unify the AI Assistant and Bot Brain into a single "Team Brain" that uses "we" language throughout, creating a partnership feeling between the trader and the AI system.
+This document outlines the plan to unify the AI Assistant and Bot Brain into a single "SentCom" (Sentinel Command) that uses "we" language throughout, creating a partnership feeling between the trader and the AI system.
 
 ---
 
@@ -19,17 +19,18 @@ This document outlines the plan to unify the AI Assistant and Bot Brain into a s
 | `analyst_agent.py` | Market analysis | Update to "we" language |
 | `brief_me_agent.py` | Market summaries | Update to "we" language |
 | `trading_bot_service.py` | Bot logic, thoughts generation | Update to "we" language |
-| `ai_assistant_service.py` | Chat interactions | **DEPRECATE** - Merge into orchestrator |
+| `sentcom_service.py` | **NEW** Unified SentCom service | Uses "we" language |
+| `ai_assistant_service.py` | Chat interactions | **DEPRECATE** - Merge into SentCom |
 | `smart_context_engine.py` | Context building | No change |
 
 ### Frontend Components (Need Consolidation)
 
 | Component | Current State | Action |
 |-----------|--------------|--------|
-| `BotBrainPanel.jsx` | Bot's first-person thoughts | **REPLACE** with TeamBrain.jsx |
-| `AIAssistant.jsx` | Separate chat interface | **DEPRECATE** - Merge into TeamBrain |
-| `TeamBrain.jsx` | New unified component (created by design agent) | **WIRE UP** to real APIs |
-| `NewDashboard.jsx` | Shows both panels separately | **UPDATE** layout to single TeamBrain |
+| `BotBrainPanel.jsx` | Bot's first-person thoughts | **REPLACE** with SentCom.jsx |
+| `AIAssistant.jsx` | Separate chat interface | **DEPRECATE** - Merge into SentCom |
+| `TeamBrainMockupsV2.jsx` | Mockups (now called SentCom) | **WIRE UP** to real APIs |
+| `NewDashboard.jsx` | Shows both panels separately | **UPDATE** layout to single SentCom |
 | `EnhancedTickerModal.jsx` | "Bot's Take" section | Rename to "Our Take", update language |
 | `BriefMeModal.jsx` | Market summary | Update language to "we" |
 | `LearningDashboard.jsx` | Strategy stats | Rename to "Our Performance" |

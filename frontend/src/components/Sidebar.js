@@ -16,8 +16,8 @@ import {
 const navItems = [
   { id: 'command-center', icon: Target, label: 'Command Center', highlight: true },
   { id: 'trading', icon: Activity, label: 'Trading Dashboard', highlight: true },
-  { id: 'team-brain-mockups-v2', icon: Sparkles, label: 'Team Brain V2', highlight: true, isNew: true },
-  { id: 'team-brain-mockups', icon: Brain, label: 'Team Brain V1', highlight: false },
+  { id: 'team-brain-mockups-v2', icon: Sparkles, label: 'SentCom V2', highlight: true, isNew: true },
+  { id: 'team-brain-mockups', icon: Brain, label: 'SentCom V1', highlight: false },
   { id: 'trade-journal', icon: ClipboardList, label: 'Trade Journal' },
   { id: 'chart', icon: LineChart, label: 'Charts' },
   { id: 'ib-trading', icon: Zap, label: 'IB Trading' },

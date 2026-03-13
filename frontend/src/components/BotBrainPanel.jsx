@@ -3,7 +3,7 @@
  * 
  * Features:
  * - Order Pipeline: Visual order flow (Pending → Executing → Filled)
- * - Real-time thought stream: "We detected...", "We're monitoring..." (Team Brain unified "we" voice)
+ * - Real-time thought stream: "We detected...", "We're monitoring..." (SentCom unified "we" voice)
  * - Proactive Intelligence: Setup triggers, profit-taking suggestions, market alerts
  * - In-Trade Guidance: Position-specific alerts and recommendations
  * - Smart Strategy Filtering: Shows when trades are filtered based on historical performance
@@ -790,7 +790,7 @@ const BotBrainPanel = ({
               <Brain className="w-5 h-5 text-cyan-400" />
             </div>
             <div>
-              <h2 className="font-bold text-lg text-white">TEAM BRAIN</h2>
+              <h2 className="font-bold text-lg text-white">SENTCOM</h2>
               <p className="text-xs text-zinc-500">What we're thinking right now</p>
             </div>
           </div>

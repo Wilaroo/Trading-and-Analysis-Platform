@@ -78,6 +78,8 @@ from routers.market_regime import router as market_regime_router, init_market_re
 from routers.regime_performance import router as regime_performance_router, init_regime_performance_router
 from routers.context_awareness import router as context_awareness_router, init_context_router
 from routers.smart_stops import router as smart_stops_router, init_smart_stop_router
+from routers.sentcom import router as sentcom_router
+from services.sentcom_service import get_sentcom_service, init_sentcom_service
 from services.market_intel_service import get_market_intel_service
 from services.hybrid_data_service import get_hybrid_data_service, init_hybrid_data_service
 from services.market_scanner_service import get_market_scanner_service, init_market_scanner_service
@@ -268,6 +270,25 @@ perf_service.set_services(trading_bot=trading_bot, ai_assistant=assistant_servic
 trading_bot._perf_service = perf_service
 init_learning_dashboard(perf_service)
 
+# Initialize SentCom - Unified AI Command Center
+from agents.orchestrator import get_orchestrator
+try:
+    from services.order_queue_service import get_order_queue_service
+    _order_queue = get_order_queue_service()
+except:
+    _order_queue = None
+
+sentcom_services = {
+    "trading_bot": trading_bot,
+    "orchestrator": get_orchestrator(),
+    "ib_service": ib_service,
+    "regime_engine": None,  # Will be set later when regime engine is ready
+    "order_queue": _order_queue,
+    "db": db
+}
+init_sentcom_service(sentcom_services)
+print("[SERVER] SentCom service initialized")
+
 # Include routers
 app.include_router(notifications_router)
 app.include_router(market_context_router)
@@ -319,6 +340,7 @@ app.include_router(regime_performance_router)  # Regime-based performance tracki
 app.include_router(context_awareness_router)  # Phase 2 AI context awareness
 app.include_router(smart_stops_router)  # Unified Smart Stop System
 init_smart_stop_router()  # Initialize smart stop service
+app.include_router(sentcom_router)  # SentCom - Unified AI Command Center
 
 # Collections
 strategies_col = db["strategies"]
