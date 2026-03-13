@@ -5,6 +5,39 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ---
 
+## LATEST UPDATES (March 13, 2026)
+
+### P0 COMPLETE: Chat Conversational Context & Bot Control Mechanisms
+
+**Status:** ✅ COMPLETE - Tested and Verified (iteration_86.json - 100% backend, 100% frontend)
+
+**P0 Task 1: Chat Conversational Context** ✅ COMPLETE
+- **Backend Changes:**
+  - `sentcom_service.py`: chat() method now builds recent_history from _chat_history and passes to orchestrator.process()
+  - `orchestrator.py`: process() method accepts chat_history parameter and stores it in session context
+  - `coach_agent.py`: _build_coaching_prompt_async() includes conversation_history section in prompts
+  - Conversation context formatted as "Trader: ..." / "SentCom: ..." pairs for the last 6 messages
+- **Result:** AI responses now maintain conversational continuity and can reference previous discussion points
+
+**P0 Task 2: Bot Control Mechanisms** ✅ COMPLETE
+- **Backend Endpoints (already existed, verified working):**
+  - `POST /api/trading-bot/start` - Start the bot
+  - `POST /api/trading-bot/stop` - Stop the bot
+  - `POST /api/trading-bot/mode/{mode}` - Change mode (autonomous/confirmation/paused)
+  - `POST /api/trading-bot/risk-params` - Update risk parameters
+- **Frontend Enhancements:**
+  - `useTradingBotControl` hook now includes `updateRiskParams()` function
+  - Added `RiskControlsPanel` component with inputs for:
+    - Risk Per Trade (%)
+    - Max Daily Loss ($)
+    - Max Positions
+    - Min R:R Ratio
+  - Settings panel now has two tabs: "Trading Mode" and "Risk Controls"
+  - Toast notifications added for mode changes and risk param updates
+- **Result:** Users can fully control the bot from the SentCom interface
+
+---
+
 ## RECENT UPDATES (March 13, 2026)
 
 ### P0 ACTIVE: SentCom Unification Project
