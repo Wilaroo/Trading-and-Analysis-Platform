@@ -120,16 +120,15 @@ class SentComService:
     async def get_status(self) -> SentComStatus:
         """Get current SentCom operational status"""
         trading_bot = self._get_trading_bot()
-        ib_service = self._get_ib_service()
         regime_engine = self._get_regime_engine()
         
-        # Determine connection status
+        # Determine connection status from pushed IB data
         connected = False
-        if ib_service:
-            try:
-                connected = ib_service.is_connected()
-            except:
-                connected = False
+        try:
+            from routers.ib import _pushed_ib_data
+            connected = _pushed_ib_data.get("connected", False)
+        except:
+            pass
         
         # Get bot state
         state = "offline"
@@ -142,24 +141,42 @@ class SentComService:
         if trading_bot:
             try:
                 bot_status = trading_bot.get_status()
-                state = bot_status.get("state", "offline")
-                
-                # Get position counts
-                open_trades = bot_status.get("open_trades", [])
-                positions_count = len(open_trades)
-                
-                watching_setups = bot_status.get("watching_setups", [])
-                watching_count = len(watching_setups)
-                
-                # Get order pipeline
-                order_queue = self._services.get("order_queue")
-                if order_queue:
-                    queue_status = order_queue.get_queue_status()
+                if isinstance(bot_status, dict):
+                    state = bot_status.get("state", "offline")
+                    if bot_status.get("running"):
+                        state = "active"
+                    
+                    # Get position counts from bot
+                    open_trades = bot_status.get("open_trades", [])
+                    if isinstance(open_trades, list):
+                        positions_count = len(open_trades)
+                    
+                    watching_setups = bot_status.get("watching_setups", [])
+                    if isinstance(watching_setups, list):
+                        watching_count = len(watching_setups)
+            except Exception as e:
+                logger.error(f"Error getting bot status: {e}")
+        
+        # Also count IB positions if more than bot positions
+        try:
+            from routers.ib import _pushed_ib_data
+            ib_positions = _pushed_ib_data.get("positions", [])
+            if len(ib_positions) > positions_count:
+                positions_count = len(ib_positions)
+        except:
+            pass
+        
+        # Get order pipeline
+        try:
+            order_queue = self._services.get("order_queue")
+            if order_queue:
+                queue_status = order_queue.get_queue_status()
+                if isinstance(queue_status, dict):
                     pending = queue_status.get("pending_count", 0)
                     executing = queue_status.get("executing_count", 0)
                     filled = queue_status.get("filled_today", 0)
-            except Exception as e:
-                logger.error(f"Error getting bot status: {e}")
+        except Exception as e:
+            logger.error(f"Error getting order queue status: {e}")
         
         # Get market regime
         regime = None
@@ -191,48 +208,113 @@ class SentComService:
         messages: List[SentComMessage] = []
         trading_bot = self._get_trading_bot()
         
-        # 1. Get bot thoughts
+        # 1. Get bot thoughts and position updates
         if trading_bot:
             try:
                 bot_status = trading_bot.get_status()
                 
-                # Recent execution thoughts
-                recent_thoughts = bot_status.get("recent_thoughts", [])
-                for thought in recent_thoughts[:5]:
-                    messages.append(SentComMessage(
-                        id=self._generate_message_id(),
-                        type="thought",
-                        content=self._ensure_we_voice(thought.get("text", "")),
-                        timestamp=thought.get("timestamp", datetime.now(timezone.utc).isoformat()),
-                        confidence=thought.get("confidence"),
-                        symbol=thought.get("symbol"),
-                        action_type=thought.get("action_type", "thinking"),
-                        metadata={"source": "trading_bot"}
-                    ))
+                if isinstance(bot_status, dict):
+                    # Generate thoughts from open trades
+                    open_trades = bot_status.get("open_trades", [])
+                    if isinstance(open_trades, list):
+                        for trade in open_trades[:3]:
+                            symbol = trade.get("symbol")
+                            pnl_pct = trade.get("pnl_percent", 0)
+                            status = trade.get("status", "open")
+                            stop = trade.get("stop_price")
+                            target = trade.get("target_prices", [None])[0] if trade.get("target_prices") else None
+                            
+                            thought_text = f"We're monitoring our {symbol} position. "
+                            if pnl_pct > 0:
+                                thought_text += f"Currently up {pnl_pct:.1f}%. "
+                            elif pnl_pct < 0:
+                                thought_text += f"Currently down {abs(pnl_pct):.1f}%. "
+                            
+                            if stop:
+                                thought_text += f"Our stop at ${stop:.2f} is in place. "
+                            if target:
+                                thought_text += f"Target at ${target:.2f}."
+                            
+                            messages.append(SentComMessage(
+                                id=self._generate_message_id(),
+                                type="thought",
+                                content=thought_text.strip(),
+                                timestamp=datetime.now(timezone.utc).isoformat(),
+                                confidence=60,
+                                symbol=symbol,
+                                action_type="monitoring",
+                                metadata={"source": "trading_bot", "pnl_percent": pnl_pct}
+                            ))
+                    
+                    # Add scanning status
+                    mode = bot_status.get("mode", "confirmation")
+                    running = bot_status.get("running", False)
+                    if running:
+                        scan_thought = f"We're actively scanning for opportunities in {mode} mode."
+                        messages.append(SentComMessage(
+                            id=self._generate_message_id(),
+                            type="thought",
+                            content=scan_thought,
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                            confidence=50,
+                            action_type="scanning",
+                            metadata={"source": "trading_bot", "mode": mode}
+                        ))
                 
-                # Filter thoughts (smart strategy filtering)
-                filter_thoughts = trading_bot.get_filter_thoughts(limit=5)
-                for ft in filter_thoughts:
-                    messages.append(SentComMessage(
-                        id=self._generate_message_id(),
-                        type="filter",
-                        content=self._ensure_we_voice(ft.get("text", ft.get("reasoning", ""))),
-                        timestamp=ft.get("timestamp", datetime.now(timezone.utc).isoformat()),
-                        confidence=ft.get("confidence"),
-                        symbol=ft.get("symbol"),
-                        action_type=ft.get("decision", "filter"),
-                        metadata={
-                            "source": "smart_filter",
-                            "decision": ft.get("decision"),
-                            "win_rate": ft.get("win_rate"),
-                            "setup_type": ft.get("setup_type")
-                        }
-                    ))
+                # Get filter thoughts (smart strategy filtering)
+                try:
+                    filter_thoughts = trading_bot.get_filter_thoughts(limit=5)
+                    for ft in filter_thoughts:
+                        messages.append(SentComMessage(
+                            id=self._generate_message_id(),
+                            type="filter",
+                            content=self._ensure_we_voice(ft.get("text", ft.get("reasoning", ""))),
+                            timestamp=ft.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                            confidence=ft.get("confidence"),
+                            symbol=ft.get("symbol"),
+                            action_type=ft.get("decision", "filter"),
+                            metadata={
+                                "source": "smart_filter",
+                                "decision": ft.get("decision"),
+                                "win_rate": ft.get("win_rate"),
+                                "setup_type": ft.get("setup_type")
+                            }
+                        ))
+                except Exception as e:
+                    logger.debug(f"No filter thoughts: {e}")
                 
             except Exception as e:
                 logger.error(f"Error getting bot thoughts: {e}")
         
-        # 2. Add chat history
+        # 2. Add IB position summaries
+        try:
+            from routers.ib import _pushed_ib_data
+            ib_positions = _pushed_ib_data.get("positions", [])
+            if ib_positions:
+                # Generate a summary thought about IB positions
+                pos_count = len(ib_positions)
+                total_unrealized = sum(p.get("unrealizedPNL", p.get("unrealizedPnL", 0)) for p in ib_positions)
+                
+                summary_text = f"We're monitoring {pos_count} active positions"
+                if total_unrealized > 0:
+                    summary_text += f", currently up ${total_unrealized:,.2f}"
+                elif total_unrealized < 0:
+                    summary_text += f", currently down ${abs(total_unrealized):,.2f}"
+                summary_text += " and scanning for setups."
+                
+                messages.append(SentComMessage(
+                    id=self._generate_message_id(),
+                    type="system",
+                    content=summary_text,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    confidence=50,
+                    action_type="status",
+                    metadata={"source": "ib_positions", "position_count": pos_count}
+                ))
+        except Exception as e:
+            logger.debug(f"No IB positions for stream: {e}")
+        
+        # 3. Add chat history
         for chat in self._chat_history[-10:]:
             messages.append(SentComMessage(
                 id=chat.get("id", self._generate_message_id()),
@@ -245,7 +327,7 @@ class SentComService:
                 metadata={"source": "sentcom_chat", "role": chat.get("role", "assistant")}
             ))
         
-        # 3. Generate system status message if no activity
+        # 4. Generate system status message if no activity
         if len(messages) == 0:
             status = await self.get_status()
             state_message = self._generate_state_message(status)
@@ -434,43 +516,86 @@ class SentComService:
         return context
     
     async def get_our_positions(self) -> List[Dict[str, Any]]:
-        """Get our current positions with P&L"""
+        """Get our current positions with P&L from both Trading Bot and IB"""
         trading_bot = self._get_trading_bot()
         
-        if not trading_bot:
-            return []
+        positions = []
+        seen_symbols = set()
         
+        # First, get bot-managed trades (these have more detailed tracking)
+        if trading_bot:
+            try:
+                bot_status = trading_bot.get_status()
+                if isinstance(bot_status, dict):
+                    open_trades = bot_status.get("open_trades", [])
+                    if isinstance(open_trades, list):
+                        for trade in open_trades:
+                            symbol = trade.get("symbol")
+                            if symbol:
+                                seen_symbols.add(symbol)
+                            
+                            entry = trade.get("fill_price") or trade.get("entry_price", 0)
+                            current = trade.get("current_price", entry)
+                            shares = trade.get("shares") or trade.get("quantity", 0)
+                            
+                            pnl = (current - entry) * shares if entry and current else 0
+                            pnl_pct = ((current - entry) / entry * 100) if entry else 0
+                            
+                            positions.append({
+                                "symbol": symbol,
+                                "shares": shares,
+                                "entry_price": entry,
+                                "current_price": current,
+                                "pnl": round(pnl, 2),
+                                "pnl_percent": round(pnl_pct, 2),
+                                "stop_price": trade.get("stop_price"),
+                                "target_prices": trade.get("target_prices", []),
+                                "status": trade.get("status", "open"),
+                                "entry_time": trade.get("entry_time"),
+                                "source": "bot"
+                            })
+            except Exception as e:
+                logger.error(f"Error getting bot positions: {e}")
+        
+        # Then, get IB positions from pushed data
         try:
-            bot_status = trading_bot.get_status()
-            open_trades = bot_status.get("open_trades", [])
+            # Import the global dict directly
+            from routers.ib import _pushed_ib_data
+            ib_positions = _pushed_ib_data.get("positions", [])
             
-            positions = []
-            for trade in open_trades:
-                entry = trade.get("fill_price") or trade.get("entry_price", 0)
-                current = trade.get("current_price", entry)
-                shares = trade.get("shares") or trade.get("quantity", 0)
-                
-                pnl = (current - entry) * shares if entry and current else 0
-                pnl_pct = ((current - entry) / entry * 100) if entry else 0
-                
-                positions.append({
-                    "symbol": trade.get("symbol"),
-                    "shares": shares,
-                    "entry_price": entry,
-                    "current_price": current,
-                    "pnl": round(pnl, 2),
-                    "pnl_percent": round(pnl_pct, 2),
-                    "stop_price": trade.get("stop_price"),
-                    "target_prices": trade.get("target_prices", []),
-                    "status": trade.get("status", "open"),
-                    "entry_time": trade.get("entry_time")
-                })
-            
-            return positions
-            
+            for pos in ib_positions:
+                symbol = pos.get("symbol")
+                if symbol and symbol not in seen_symbols:
+                    shares = pos.get("position", 0)
+                    avg_cost = pos.get("avgCost", 0)
+                    market_price = pos.get("marketPrice", avg_cost)
+                    unrealized_pnl = pos.get("unrealizedPnL", pos.get("unrealizedPNL", 0))
+                    
+                    # Calculate P&L percent
+                    total_cost = abs(shares * avg_cost) if shares and avg_cost else 0
+                    pnl_pct = (unrealized_pnl / total_cost * 100) if total_cost > 0 else 0
+                    
+                    # Determine if long or short
+                    position_type = "long" if shares > 0 else "short"
+                    
+                    positions.append({
+                        "symbol": symbol,
+                        "shares": abs(shares),
+                        "position_type": position_type,
+                        "entry_price": avg_cost,
+                        "current_price": market_price if market_price else avg_cost,
+                        "pnl": round(unrealized_pnl, 2),
+                        "pnl_percent": round(pnl_pct, 2),
+                        "stop_price": None,
+                        "target_prices": [],
+                        "status": "ib_position",
+                        "entry_time": None,
+                        "source": "ib"
+                    })
         except Exception as e:
-            logger.error(f"Error getting positions: {e}")
-            return []
+            logger.error(f"Error getting IB positions: {e}")
+        
+        return positions
     
     async def get_setups_watching(self) -> List[Dict[str, Any]]:
         """Get setups we're currently watching"""
