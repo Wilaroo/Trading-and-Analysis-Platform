@@ -7,6 +7,46 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## RECENT UPDATES (March 13, 2026)
 
+### Dashboard Integration Complete: TradingDashboard → Command Center
+
+**Status:** ✅ COMPLETE - Tested and Verified (iteration_79.json - 100%)
+
+**Features Integrated from TradingDashboardPage:**
+
+1. **Account Data in Header (Auto-Updating)**
+   - Account Value: Shows Net Liquidation value
+   - Buying Power: Shows available trading capital
+   - Auto-refresh every 5 seconds from `/api/ib/account/summary`
+   - Shows $0 when IB Gateway offline (expected)
+
+2. **Risk Status Bar**
+   - Daily Loss Limit: Progress bar showing % of limit used
+   - Position Exposure: Shows X/10 positions open
+   - IB Connection Status badge (LIVE/OFFLINE)
+   - Visual alerts when daily limit is hit
+
+3. **Order Pipeline in Bot's Brain**
+   - Visual flow: Pending → Executing → Filled
+   - Real-time updates from `/api/ib/orders/queue/status`
+   - Shows order counts at each stage
+   - Auto-refresh every 3 seconds
+
+4. **Compact Header Redesign**
+   - Session/Regime/Brief Me now compact badges
+   - More space for account data and P&L
+   - Cleaner, more data-dense layout
+
+**Files Modified:**
+- `/app/frontend/src/components/NewDashboard.jsx` - Complete header redesign
+- `/app/frontend/src/components/BotBrainPanel.jsx` - Added OrderPipeline component
+
+**Testing Results (iteration_79.json):**
+- ✅ All 11 features verified: 100% pass rate
+- ✅ Position card → Modal regression test: PASS
+- ✅ Modal features (Buy/Short, tabs, analysis): PASS
+
+---
+
 ### P0 COMPLETE: Ticker Modal Click Bug Fixed
 
 **Status:** ✅ COMPLETE - Tested and Verified (iteration_78.json - 100%)
