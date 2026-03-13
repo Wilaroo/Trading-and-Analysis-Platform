@@ -7,6 +7,59 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## RECENT UPDATES (March 13, 2026)
 
+### P0 Features Complete - Smart Strategy Filtering & One-Click Stop Fix
+
+**Status:** ✅ COMPLETE - Tested and Verified (iteration_83.json - 100% backend, 100% frontend)
+
+**Features Implemented:**
+
+#### Smart Strategy Filtering ✅
+The bot now adjusts trade decisions based on user's historical win rate for each setup type:
+
+1. **Core Logic in `trading_bot_service.py`:**
+   - `get_strategy_historical_stats()` - Fetches win rate, sample size, avg R from enhanced scanner
+   - `_evaluate_strategy_filter()` - Decision tree: SKIP, REDUCE_SIZE, REQUIRE_HIGHER_TQS, or PROCEED
+   - `_add_filter_thought()` - Logs reasoning to Bot's Thoughts stream
+
+2. **Filtering Thresholds (configurable via API):**
+   - Win rate < 35%: SKIP trade entirely
+   - Win rate 35-45%: REDUCE_SIZE to 50%
+   - Win rate 45-50%: REQUIRE_HIGHER_TQS (75+) to proceed
+   - Win rate > 55%: PROCEED with normal sizing
+
+3. **New API Endpoints:**
+   - `GET /api/trading-bot/smart-filter/config` - Get filter configuration
+   - `POST /api/trading-bot/smart-filter/config` - Update filter settings
+   - `GET /api/trading-bot/smart-filter/thoughts` - Get filtered trade reasoning
+   - `GET /api/trading-bot/smart-filter/strategy-stats/{setup_type}` - Get stats for setup
+   - `GET /api/trading-bot/smart-filter/all-strategy-stats` - Get all 35 strategy stats
+
+4. **Bot's Thoughts Integration:**
+   - Filter reasoning appears with new action types: `filter_skip`, `filter_reduce`, `filter_proceed`
+   - Styled badges: FILTERED OUT (amber), REDUCED SIZE (purple), GREENLIGHT (emerald)
+   - Shows win rate percentage for each filter decision
+
+#### One-Click Stop Fix ✅
+Quick fix for risky stop-loss placements:
+
+1. **New API Endpoints:**
+   - `POST /api/trading-bot/fix-stop/{trade_id}` - Fix single trade's stop
+   - `POST /api/trading-bot/fix-all-risky-stops` - Fix all risky stops at once
+
+2. **StopFixActions Component (BotBrainPanel.jsx):**
+   - Detects stop_warning thoughts with critical/warning severity
+   - Shows "Fix All Stops" button when risky stops detected
+   - Displays fix results with symbol, old_stop → new_stop, improvement %
+   - Loading state during fix operation
+
+**Files Modified:**
+- `/app/backend/services/trading_bot_service.py` - Smart filtering methods
+- `/app/backend/routers/trading_bot.py` - 8 new endpoints
+- `/app/backend/server.py` - Wired scanner ↔ trading bot for stats access
+- `/app/frontend/src/components/BotBrainPanel.jsx` - StopFixActions, filter styling
+
+---
+
 ### P1 & P2 Features Complete
 
 **Status:** ✅ COMPLETE - Tested and Verified (iteration_82.json - 94% backend, 100% frontend)
