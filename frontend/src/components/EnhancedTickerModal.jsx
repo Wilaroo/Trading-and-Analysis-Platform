@@ -277,6 +277,7 @@ const EnhancedTickerModal = ({
   const [historicalData, setHistoricalData] = useState(null);
   const [qualityData, setQualityData] = useState(null);
   const [earningsData, setEarningsData] = useState(null);
+  const [newsData, setNewsData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [showBotVision, setShowBotVision] = useState(true);
@@ -285,6 +286,8 @@ const EnhancedTickerModal = ({
   const [tickerInput, setTickerInput] = useState(ticker?.symbol || '');
   const [selectedStopMode, setSelectedStopMode] = useState('atr_dynamic');
   const [selectedStopData, setSelectedStopData] = useState(null);
+  const [selectedTimeframe, setSelectedTimeframe] = useState('5m');
+  const [loadingNews, setLoadingNews] = useState(false);
   
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
@@ -293,8 +296,61 @@ const EnhancedTickerModal = ({
   
   // Quick ticker chips
   const quickTickers = ['NVDA', 'AMD', 'TSLA', 'META', 'AAPL', 'SPY', 'QQQ'];
+  
+  // Timeframe configuration
+  const timeframes = [
+    { id: '1m', label: '1m', duration: '1 D', barSize: '1 min' },
+    { id: '5m', label: '5m', duration: '1 D', barSize: '5 mins' },
+    { id: '15m', label: '15m', duration: '2 D', barSize: '15 mins' },
+    { id: '1h', label: '1H', duration: '5 D', barSize: '1 hour' },
+    { id: 'D', label: 'D', duration: '6 M', barSize: '1 day' },
+  ];
 
   // Fetch all data
+  // Fetch historical data for timeframe
+  const fetchHistoricalData = useCallback(async (tf) => {
+    if (!ticker?.symbol) return;
+    
+    const tfConfig = timeframes.find(t => t.id === tf) || timeframes[1];
+    
+    try {
+      const response = await api.get(`/api/ib/historical/${ticker.symbol}?duration=${tfConfig.duration}&bar_size=${tfConfig.barSize}`);
+      if (response.data?.bars) {
+        setHistoricalData(response.data.bars);
+        setChartError(null);
+      }
+    } catch (err) {
+      const errorMsg = err.response?.data?.detail?.message || err.response?.data?.detail || 'Unable to load chart data';
+      if (err.response?.data?.ib_busy || errorMsg.includes('busy')) {
+        setChartError('IB Gateway is busy. Chart data may be delayed.');
+      } else {
+        setChartError(errorMsg);
+      }
+    }
+  }, [ticker?.symbol, timeframes]);
+  
+  // Fetch news data
+  const fetchNewsData = useCallback(async () => {
+    if (!ticker?.symbol) return;
+    
+    setLoadingNews(true);
+    try {
+      const response = await api.get(`/api/ib/news/${ticker.symbol}`);
+      if (response.data?.news) {
+        setNewsData(response.data.news);
+      }
+    } catch (err) {
+      console.debug('News fetch error:', err);
+    }
+    setLoadingNews(false);
+  }, [ticker?.symbol]);
+  
+  // Handle timeframe change
+  const handleTimeframeChange = (tf) => {
+    setSelectedTimeframe(tf);
+    fetchHistoricalData(tf);
+  };
+
   useEffect(() => {
     if (!ticker?.symbol) return;
     
@@ -313,10 +369,12 @@ const EnhancedTickerModal = ({
         }
       };
       
+      const tfConfig = timeframes.find(t => t.id === selectedTimeframe) || timeframes[1];
+      
       try {
-        const [analysisRes, histRes, qualityRes, earningsRes] = await Promise.all([
+        const [analysisRes, histRes, qualityRes, earningsRes, newsRes] = await Promise.all([
           fetchWithRetry(() => api.get(`/api/ib/analysis/${ticker.symbol}`)).catch(() => ({ data: null })),
-          fetchWithRetry(() => api.get(`/api/ib/historical/${ticker.symbol}?duration=1 D&bar_size=5 mins`)).catch((err) => {
+          fetchWithRetry(() => api.get(`/api/ib/historical/${ticker.symbol}?duration=${tfConfig.duration}&bar_size=${tfConfig.barSize}`)).catch((err) => {
             const errorMsg = err.response?.data?.detail?.message || err.response?.data?.detail || 'Unable to load chart data';
             if (err.response?.data?.ib_busy || errorMsg.includes('busy')) {
               setChartError('IB Gateway is busy. Using cached data.');
@@ -326,13 +384,15 @@ const EnhancedTickerModal = ({
             return { data: { bars: [] } };
           }),
           fetchWithRetry(() => api.get(`/api/quality/score/${ticker.symbol}`)).catch(() => ({ data: null })),
-          fetchWithRetry(() => api.get(`/api/earnings/${ticker.symbol}`)).catch(() => ({ data: null }))
+          fetchWithRetry(() => api.get(`/api/earnings/${ticker.symbol}`)).catch(() => ({ data: null })),
+          fetchWithRetry(() => api.get(`/api/ib/news/${ticker.symbol}`)).catch(() => ({ data: { news: [] } }))
         ]);
         
         setAnalysis(analysisRes.data);
         setHistoricalData(histRes.data?.bars || []);
         setQualityData(qualityRes.data);
         setEarningsData(earningsRes.data);
+        setNewsData(newsRes.data?.news || []);
       } catch (err) {
         setChartError('Failed to load data. Please try again.');
       }
@@ -512,6 +572,18 @@ const EnhancedTickerModal = ({
       console.error('Error setting chart data:', err);
     }
   }, [historicalData, analysis, showBotVision, botTrade, botPosition]);
+  
+  // Re-resize chart when tab changes
+  useEffect(() => {
+    if (chartRef.current && chartContainerRef.current && (activeTab === 'overview' || activeTab === 'chart')) {
+      const container = chartContainerRef.current;
+      const width = container.clientWidth || 600;
+      const height = container.clientHeight || (activeTab === 'chart' ? 500 : 350);
+      
+      chartRef.current.resize(width, height);
+      chartRef.current.timeScale().fitContent();
+    }
+  }, [activeTab]);
 
   // Handle ticker change
   const handleTickerChange = useCallback((newTicker) => {
@@ -677,21 +749,294 @@ const EnhancedTickerModal = ({
               <div className="flex-1 flex items-center justify-center">
                 <Loader2 className="w-10 h-10 animate-spin text-cyan-400" />
               </div>
+            ) : activeTab === 'research' ? (
+              /* RESEARCH TAB */
+              <div className="flex-1 p-4 overflow-y-auto">
+                <div className="max-w-4xl mx-auto space-y-4">
+                  {/* News Section */}
+                  <div className="bg-zinc-900/50 border border-white/10 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-medium text-white flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-cyan-400" />
+                        Recent News
+                      </h3>
+                      <button 
+                        onClick={fetchNewsData}
+                        className="text-xs text-zinc-400 hover:text-cyan-400 flex items-center gap-1"
+                      >
+                        {loadingNews ? <Loader2 className="w-3 h-3 animate-spin" /> : <Activity className="w-3 h-3" />}
+                        Refresh
+                      </button>
+                    </div>
+                    
+                    {newsData.length > 0 ? (
+                      <div className="space-y-3">
+                        {newsData.slice(0, 10).map((item, idx) => (
+                          <div key={idx} className="p-3 bg-black/30 rounded-lg hover:bg-black/50 transition-colors">
+                            <div className="flex items-start gap-3">
+                              <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${
+                                item.sentiment === 'bullish' ? 'bg-emerald-400' :
+                                item.sentiment === 'bearish' ? 'bg-red-400' : 'bg-zinc-500'
+                              }`} />
+                              <div className="flex-1 min-w-0">
+                                <h4 className="text-sm text-white font-medium line-clamp-2">{item.headline}</h4>
+                                {item.summary && (
+                                  <p className="text-xs text-zinc-400 mt-1 line-clamp-2">{item.summary}</p>
+                                )}
+                                <div className="flex items-center gap-3 mt-2 text-[10px] text-zinc-500">
+                                  <span className="flex items-center gap-1">
+                                    <Clock className="w-3 h-3" />
+                                    {item.timestamp ? new Date(item.timestamp).toLocaleString() : '--'}
+                                  </span>
+                                  <span>{item.source || 'News'}</span>
+                                  {item.url && (
+                                    <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline flex items-center gap-1">
+                                      <ExternalLink className="w-3 h-3" />
+                                      Read More
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-zinc-500">
+                        <Sparkles className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm">No recent news available</p>
+                        <p className="text-xs mt-1">Try refreshing or check back later</p>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Earnings Section */}
+                  {earningsData && (
+                    <div className="bg-zinc-900/50 border border-white/10 rounded-xl p-4">
+                      <h3 className="text-sm font-medium text-white flex items-center gap-2 mb-4">
+                        <Target className="w-4 h-4 text-purple-400" />
+                        Earnings Calendar
+                      </h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="p-3 bg-black/30 rounded-lg">
+                          <span className="text-xs text-zinc-500">Next Earnings</span>
+                          <p className="text-sm font-medium text-white mt-1">
+                            {earningsData.next_earnings_date || 'TBD'}
+                          </p>
+                        </div>
+                        <div className="p-3 bg-black/30 rounded-lg">
+                          <span className="text-xs text-zinc-500">Days Until</span>
+                          <p className="text-sm font-medium text-white mt-1">
+                            {earningsData.days_until_earnings !== undefined ? `${earningsData.days_until_earnings} days` : '--'}
+                          </p>
+                        </div>
+                        {earningsData.last_eps_surprise && (
+                          <>
+                            <div className="p-3 bg-black/30 rounded-lg">
+                              <span className="text-xs text-zinc-500">Last EPS Surprise</span>
+                              <p className={`text-sm font-medium mt-1 ${earningsData.last_eps_surprise >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {earningsData.last_eps_surprise >= 0 ? '+' : ''}{(earningsData.last_eps_surprise * 100).toFixed(1)}%
+                              </p>
+                            </div>
+                            <div className="p-3 bg-black/30 rounded-lg">
+                              <span className="text-xs text-zinc-500">Earnings Score</span>
+                              <p className="text-sm font-medium text-white mt-1">
+                                {earningsData.earnings_score || '--'}/100
+                              </p>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Quality Score Details */}
+                  {qualityData && (
+                    <div className="bg-zinc-900/50 border border-white/10 rounded-xl p-4">
+                      <h3 className="text-sm font-medium text-white flex items-center gap-2 mb-4">
+                        <Brain className="w-4 h-4 text-amber-400" />
+                        Quality Analysis
+                      </h3>
+                      <div className="grid grid-cols-3 gap-3">
+                        {[
+                          { label: 'Overall', value: qualityData.overall_score, color: 'cyan' },
+                          { label: 'Momentum', value: qualityData.momentum_score, color: 'emerald' },
+                          { label: 'Trend', value: qualityData.trend_score, color: 'purple' },
+                          { label: 'Volume', value: qualityData.volume_score, color: 'yellow' },
+                          { label: 'Volatility', value: qualityData.volatility_score, color: 'orange' },
+                          { label: 'Structure', value: qualityData.structure_score, color: 'pink' },
+                        ].map((item, idx) => (
+                          <div key={idx} className="p-3 bg-black/30 rounded-lg text-center">
+                            <span className="text-xs text-zinc-500 block mb-1">{item.label}</span>
+                            <span className={`text-lg font-bold ${
+                              item.value >= 70 ? 'text-emerald-400' :
+                              item.value >= 50 ? 'text-yellow-400' : 'text-red-400'
+                            }`}>
+                              {item.value?.toFixed(0) || '--'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      {qualityData.grade && (
+                        <div className="mt-4 p-3 bg-black/30 rounded-lg flex items-center justify-between">
+                          <span className="text-sm text-zinc-400">Quality Grade</span>
+                          <span className={`text-xl font-bold ${
+                            qualityData.grade === 'A' ? 'text-emerald-400' :
+                            qualityData.grade === 'B' ? 'text-cyan-400' :
+                            qualityData.grade === 'C' ? 'text-yellow-400' : 'text-red-400'
+                          }`}>
+                            {qualityData.grade}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* Ask AI for Research */}
+                  {onAskAI && (
+                    <button 
+                      onClick={() => onAskAI(ticker.symbol)}
+                      className="w-full p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl hover:bg-amber-500/20 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Bot className="w-5 h-5 text-amber-400" />
+                      <span className="text-amber-400 font-medium">Ask AI for Deep Research</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : activeTab === 'chart' ? (
+              /* CHART TAB - Full width chart */
+              <div className="flex-1 p-4 flex flex-col">
+                {/* Chart Controls */}
+                <div className="flex justify-between items-center mb-2 flex-shrink-0">
+                  <div className="flex gap-1">
+                    {timeframes.map((tf) => (
+                      <button 
+                        key={tf.id}
+                        onClick={() => handleTimeframeChange(tf.id)}
+                        className={`px-3 py-1.5 rounded text-sm transition-colors ${
+                          selectedTimeframe === tf.id ? 'bg-cyan-400/30 text-cyan-400' : 'bg-white/10 hover:bg-white/20'
+                        }`}
+                      >
+                        {tf.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={showBotVision}
+                        onChange={(e) => setShowBotVision(e.target.checked)}
+                        className="w-4 h-4 accent-cyan-400" 
+                      />
+                      <span className="text-sm text-cyan-400 flex items-center gap-1">
+                        {showBotVision ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                        Bot Vision
+                      </span>
+                    </label>
+                    <button className="text-sm text-zinc-400 hover:text-white flex items-center gap-1">
+                      <BarChart3 className="w-4 h-4" /> Indicators
+                    </button>
+                    <button className="text-sm text-zinc-400 hover:text-white flex items-center gap-1">
+                      <Pencil className="w-4 h-4" /> Draw
+                    </button>
+                  </div>
+                </div>
+                
+                {/* Full Width Chart */}
+                <div className="relative flex-1 bg-black/50 rounded-lg overflow-hidden min-h-[500px]">
+                  {chartError ? (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="text-center">
+                        <AlertTriangle className="w-8 h-8 text-yellow-500 mx-auto mb-2" />
+                        <p className="text-sm text-zinc-400">{chartError}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div ref={chartContainerRef} className="w-full h-full" style={{ minHeight: '500px' }} />
+                  )}
+                  
+                  {/* Position Badge Overlay */}
+                  {hasBotPosition && (
+                    <div className="absolute top-3 left-3 px-3 py-2 rounded-lg bg-emerald-400/15 border border-emerald-400/50 backdrop-blur-sm">
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                          <span className="text-xs font-bold text-emerald-400">POSITION OPEN</span>
+                        </div>
+                        <div className="h-4 w-px bg-emerald-400/30" />
+                        <span className="font-mono text-sm text-white">
+                          {trade?.shares || trade?.quantity || 0} shares
+                        </span>
+                        <span className={`font-mono text-sm ${positionPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {positionPnl >= 0 ? '+' : ''}${positionPnl?.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Key Levels Bar */}
+                {keyLevels.length > 0 && (
+                  <div className="flex gap-2 mt-3 flex-shrink-0">
+                    {keyLevels.map((level, i) => (
+                      <div 
+                        key={i}
+                        className="flex-1 p-3 rounded-lg text-center"
+                        style={{ 
+                          backgroundColor: `rgba(${
+                            level.color === 'purple' ? '168,85,247' :
+                            level.color === 'emerald' ? '16,185,129' :
+                            level.color === 'red' ? '239,68,68' :
+                            level.color === 'cyan' ? '34,211,238' :
+                            level.color === 'yellow' ? '250,204,21' :
+                            '161,161,170'
+                          }, 0.1)`,
+                          borderColor: `rgba(${
+                            level.color === 'purple' ? '168,85,247' :
+                            level.color === 'emerald' ? '16,185,129' :
+                            level.color === 'red' ? '239,68,68' :
+                            level.color === 'cyan' ? '34,211,238' :
+                            level.color === 'yellow' ? '250,204,21' :
+                            '161,161,170'
+                          }, 0.2)`,
+                          border: '1px solid'
+                        }}
+                      >
+                        <span className="text-xs text-zinc-400">{level.label}</span>
+                        <span className="font-mono text-base ml-2" style={{
+                          color: level.color === 'purple' ? '#A855F7' :
+                                 level.color === 'emerald' ? '#10B981' :
+                                 level.color === 'red' ? '#EF4444' :
+                                 level.color === 'cyan' ? '#22D3EE' :
+                                 level.color === 'yellow' ? '#FACC15' :
+                                 '#A1A1AA'
+                        }}>
+                          ${level.value?.toFixed(2)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             ) : (
+              /* OVERVIEW TAB - Chart + Sidebar */
               <>
                 {/* LEFT: CHART AREA (65%) */}
                 <div className="flex-1 p-4 flex flex-col border-r border-white/10 overflow-hidden">
                   {/* Chart Controls */}
                   <div className="flex justify-between items-center mb-2 flex-shrink-0">
                     <div className="flex gap-1">
-                      {['1m', '5m', '15m', '1h', 'D'].map((tf, i) => (
+                      {timeframes.map((tf) => (
                         <button 
-                          key={tf}
+                          key={tf.id}
+                          onClick={() => handleTimeframeChange(tf.id)}
                           className={`px-2.5 py-1 rounded text-xs transition-colors ${
-                            i === 1 ? 'bg-cyan-400/30 text-cyan-400' : 'bg-white/10 hover:bg-white/20'
+                            selectedTimeframe === tf.id ? 'bg-cyan-400/30 text-cyan-400' : 'bg-white/10 hover:bg-white/20'
                           }`}
                         >
-                          {tf}
+                          {tf.label}
                         </button>
                       ))}
                     </div>
