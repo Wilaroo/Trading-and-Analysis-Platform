@@ -706,3 +706,247 @@ async def get_volume_profile(
         "error": "Historical data not available. Volume profile requires price/volume data.",
         "symbol": symbol
     }
+
+
+@router.post("/calculate-trailing-stop")
+async def calculate_trailing_stop(
+    symbol: str = Query(..., description="Ticker symbol"),
+    entry_price: float = Query(..., description="Original entry price"),
+    current_price: float = Query(..., description="Current market price"),
+    current_stop: float = Query(..., description="Current stop price"),
+    highest_price: float = Query(None, description="Highest price since entry (for longs)"),
+    lowest_price: float = Query(None, description="Lowest price since entry (for shorts)"),
+    direction: str = Query("long", description="Position direction"),
+    trailing_mode: str = Query("atr", description="Trailing mode: atr, percent, chandelier, parabolic"),
+    atr: float = Query(None, description="ATR value (optional, will estimate if not provided)")
+):
+    """
+    Calculate optimal trailing stop based on position movement.
+    
+    Uses the smart stop service to determine if stop should be trailed
+    and where to place it.
+    
+    Returns:
+    - new_stop: Suggested new stop price
+    - should_trail: Whether stop should be moved
+    - reasoning: Explanation of the recommendation
+    - lock_in_profit: How much profit would be locked in
+    """
+    if _service is None:
+        raise HTTPException(status_code=503, detail="Smart stop service not available")
+    
+    try:
+        # Estimate ATR if not provided
+        if atr is None:
+            atr = entry_price * 0.02  # 2% estimate
+        
+        # Calculate P&L
+        if direction == 'long':
+            pnl_pct = (current_price - entry_price) / entry_price * 100
+            peak_price = highest_price or current_price
+        else:
+            pnl_pct = (entry_price - current_price) / entry_price * 100
+            peak_price = lowest_price or current_price
+        
+        # Calculate new trailing stop
+        new_stop = current_stop
+        should_trail = False
+        reasoning = "No adjustment needed"
+        
+        # Determine trailing based on mode
+        if trailing_mode == "atr":
+            # ATR-based trailing: trail by 2 ATR from peak
+            if direction == 'long':
+                trail_stop = peak_price - (atr * 2.0)
+                if trail_stop > current_stop:
+                    new_stop = trail_stop
+                    should_trail = True
+                    reasoning = f"ATR trail: Move stop to ${trail_stop:.2f} (2 ATR from ${peak_price:.2f} high)"
+            else:
+                trail_stop = peak_price + (atr * 2.0)
+                if trail_stop < current_stop:
+                    new_stop = trail_stop
+                    should_trail = True
+                    reasoning = f"ATR trail: Move stop to ${trail_stop:.2f} (2 ATR from ${peak_price:.2f} low)"
+        
+        elif trailing_mode == "percent":
+            # Percentage-based trailing: trail by 3%
+            trail_pct = 0.03
+            if direction == 'long':
+                trail_stop = peak_price * (1 - trail_pct)
+                if trail_stop > current_stop:
+                    new_stop = trail_stop
+                    should_trail = True
+                    reasoning = f"Percent trail: Move stop to ${trail_stop:.2f} (3% from ${peak_price:.2f} high)"
+            else:
+                trail_stop = peak_price * (1 + trail_pct)
+                if trail_stop < current_stop:
+                    new_stop = trail_stop
+                    should_trail = True
+                    reasoning = f"Percent trail: Move stop to ${trail_stop:.2f} (3% from ${peak_price:.2f} low)"
+        
+        elif trailing_mode == "chandelier":
+            # Chandelier: 3 ATR from peak
+            if direction == 'long':
+                trail_stop = peak_price - (atr * 3.0)
+                if trail_stop > current_stop:
+                    new_stop = trail_stop
+                    should_trail = True
+                    reasoning = f"Chandelier: Move stop to ${trail_stop:.2f} (3 ATR from ${peak_price:.2f} high)"
+            else:
+                trail_stop = peak_price + (atr * 3.0)
+                if trail_stop < current_stop:
+                    new_stop = trail_stop
+                    should_trail = True
+                    reasoning = f"Chandelier: Move stop to ${trail_stop:.2f} (3 ATR from ${peak_price:.2f} low)"
+        
+        elif trailing_mode == "parabolic":
+            # Parabolic: acceleration factor increases with profit
+            base_mult = 2.0
+            acceleration = min(pnl_pct / 10, 1.0)  # Accelerate up to 1x reduction
+            effective_mult = base_mult - acceleration
+            
+            if direction == 'long':
+                trail_stop = peak_price - (atr * effective_mult)
+                if trail_stop > current_stop:
+                    new_stop = trail_stop
+                    should_trail = True
+                    reasoning = f"Parabolic: Move stop to ${trail_stop:.2f} ({effective_mult:.1f} ATR - tightening with profit)"
+            else:
+                trail_stop = peak_price + (atr * effective_mult)
+                if trail_stop < current_stop:
+                    new_stop = trail_stop
+                    should_trail = True
+                    reasoning = f"Parabolic: Move stop to ${trail_stop:.2f} ({effective_mult:.1f} ATR - tightening with profit)"
+        
+        # Break-even check: if profitable but not trailing, consider B/E
+        if not should_trail and pnl_pct >= 1.5:  # 1.5R or more
+            be_stop = entry_price + (atr * 0.1) if direction == 'long' else entry_price - (atr * 0.1)
+            if (direction == 'long' and be_stop > current_stop) or (direction == 'short' and be_stop < current_stop):
+                new_stop = be_stop
+                should_trail = True
+                reasoning = f"Break-even: Move stop to ${be_stop:.2f} to lock in profit"
+        
+        # Calculate profit that would be locked in
+        if direction == 'long':
+            lock_in_profit = (new_stop - entry_price) / entry_price * 100
+        else:
+            lock_in_profit = (entry_price - new_stop) / entry_price * 100
+        
+        return {
+            "success": True,
+            "symbol": symbol,
+            "current_stop": current_stop,
+            "new_stop": round(new_stop, 2),
+            "should_trail": should_trail,
+            "reasoning": reasoning,
+            "pnl_pct": round(pnl_pct, 2),
+            "lock_in_profit_pct": round(max(lock_in_profit, 0), 2),
+            "trailing_mode": trailing_mode,
+            "peak_price": peak_price
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/auto-trail-positions")
+async def auto_trail_all_positions():
+    """
+    Analyze all open positions and suggest trailing stop adjustments.
+    
+    This is a batch endpoint that:
+    1. Gets all open positions from the trading bot
+    2. Calculates optimal trailing stop for each
+    3. Returns recommendations for stop adjustments
+    
+    Note: This does NOT automatically move stops - it only suggests.
+    """
+    if _service is None:
+        raise HTTPException(status_code=503, detail="Smart stop service not available")
+    
+    try:
+        # Import trading bot to get positions
+        from services.trading_bot_service import get_trading_bot_service
+        bot = get_trading_bot_service()
+        
+        # Get open positions/trades
+        open_trades = bot.get_open_trades() if bot else []
+        
+        if not open_trades:
+            return {
+                "success": True,
+                "message": "No open positions to analyze",
+                "recommendations": []
+            }
+        
+        recommendations = []
+        
+        for trade in open_trades:
+            try:
+                symbol = trade.get('symbol')
+                entry_price = trade.get('entry_price') or trade.get('fill_price')
+                current_price = trade.get('current_price') or entry_price
+                current_stop = trade.get('stop_price')
+                direction = trade.get('direction', 'long')
+                
+                if not all([symbol, entry_price, current_stop]):
+                    continue
+                
+                # Estimate ATR
+                atr = entry_price * 0.02
+                
+                # Calculate P&L
+                if direction == 'long':
+                    pnl_pct = (current_price - entry_price) / entry_price * 100
+                    peak_price = max(current_price, entry_price)
+                else:
+                    pnl_pct = (entry_price - current_price) / entry_price * 100
+                    peak_price = min(current_price, entry_price)
+                
+                # Only suggest trailing if profitable
+                if pnl_pct <= 0:
+                    continue
+                
+                # Calculate trailing stop
+                if direction == 'long':
+                    trail_stop = peak_price - (atr * 2.0)
+                    if trail_stop > current_stop:
+                        lock_in = (trail_stop - entry_price) / entry_price * 100
+                        recommendations.append({
+                            "symbol": symbol,
+                            "direction": direction,
+                            "current_stop": current_stop,
+                            "suggested_stop": round(trail_stop, 2),
+                            "pnl_pct": round(pnl_pct, 2),
+                            "lock_in_profit_pct": round(max(lock_in, 0), 2),
+                            "reasoning": f"{symbol} up {pnl_pct:.1f}% - trail stop to ${trail_stop:.2f} to lock gains",
+                            "priority": "high" if pnl_pct >= 3 else "medium"
+                        })
+                else:
+                    trail_stop = peak_price + (atr * 2.0)
+                    if trail_stop < current_stop:
+                        lock_in = (entry_price - trail_stop) / entry_price * 100
+                        recommendations.append({
+                            "symbol": symbol,
+                            "direction": direction,
+                            "current_stop": current_stop,
+                            "suggested_stop": round(trail_stop, 2),
+                            "pnl_pct": round(pnl_pct, 2),
+                            "lock_in_profit_pct": round(max(lock_in, 0), 2),
+                            "reasoning": f"{symbol} (short) up {pnl_pct:.1f}% - trail stop to ${trail_stop:.2f} to lock gains",
+                            "priority": "high" if pnl_pct >= 3 else "medium"
+                        })
+            
+            except Exception:
+                continue
+        
+        return {
+            "success": True,
+            "positions_analyzed": len(open_trades),
+            "recommendations": sorted(recommendations, key=lambda x: x.get('pnl_pct', 0), reverse=True),
+            "message": f"{len(recommendations)} positions could benefit from trailing stops"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -231,24 +231,24 @@ const ActivePositionsCard = ({ positions = [], onPositionClick }) => {
   };
   
   return (
-    <div className="bg-zinc-900/50 border border-white/10 rounded-xl p-4">
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex items-center gap-3">
+    <div className="bg-zinc-900/50 border border-white/10 rounded-xl p-3">
+      <div className="flex justify-between items-center mb-2">
+        <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <h2 className="font-bold text-lg">MY ACTIVE POSITIONS</h2>
-          <span className="px-2 py-0.5 rounded bg-zinc-700 text-xs font-mono">
+          <h2 className="font-bold text-sm">ACTIVE POSITIONS</h2>
+          <span className="px-1.5 py-0.5 rounded bg-zinc-700 text-[10px] font-mono">
             {positions.length} OPEN
           </span>
         </div>
       </div>
       
       {positions.length === 0 ? (
-        <div className="text-center py-8 text-zinc-500">
-          <Target className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          <p className="text-sm">No open positions</p>
+        <div className="text-center py-4 text-zinc-500">
+          <Target className="w-5 h-5 mx-auto mb-1 opacity-50" />
+          <p className="text-xs">No open positions</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-1.5">
           {positions.map((pos, i) => {
             const pnl = pos.unrealized_pnl || pos.pnl || 0;
             const pnlPct = pos.pnl_percent || (pos.current_price && pos.entry_price 
@@ -261,69 +261,43 @@ const ActivePositionsCard = ({ positions = [], onPositionClick }) => {
                 key={pos.id || pos.symbol}
                 onClick={() => handlePositionClick(pos.symbol)}
                 data-testid={`position-card-${pos.symbol}`}
-                className={`w-full text-left p-4 rounded-xl bg-zinc-800/50 border cursor-pointer transition-all hover:scale-[1.01] hover:bg-zinc-800/70 ${
-                  isPositive ? 'border-emerald-500/30 hover:border-emerald-500/50' : 'border-red-500/30 hover:border-red-500/50'
+                className={`w-full text-left p-2 rounded-lg bg-zinc-800/50 border cursor-pointer transition-all hover:scale-[1.005] hover:bg-zinc-800/70 ${
+                  isPositive ? 'border-emerald-500/20 hover:border-emerald-500/40' : 'border-red-500/20 hover:border-red-500/40'
                 }`}
-                style={{ boxShadow: isPositive ? '0 0 15px rgba(0, 255, 148, 0.1)' : '0 0 15px rgba(255, 46, 46, 0.1)' }}
               >
-                <div className="flex justify-between items-start mb-3">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${
-                      isPositive ? 'bg-emerald-500/20' : 'bg-red-500/20'
+                {/* Compact Single Row Layout */}
+                <div className="flex items-center justify-between gap-2">
+                  {/* Symbol + Direction */}
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`font-bold text-sm ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {pos.symbol}
+                    </span>
+                    <span className={`px-1 py-0.5 rounded text-[10px] ${
+                      pos.direction === 'long' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
                     }`}>
-                      <span className={`font-bold text-lg ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {pos.symbol}
-                      </span>
+                      {pos.direction?.toUpperCase() || 'L'}
+                    </span>
+                  </div>
+                  
+                  {/* Compact Stats */}
+                  <div className="flex items-center gap-3 text-[10px]">
+                    <div className="text-zinc-500">
+                      <span className="font-mono">{pos.shares || pos.quantity}</span> @ <span className="font-mono">${pos.entry_price?.toFixed(2)}</span>
                     </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg font-bold">{pos.symbol}</span>
-                        <span className={`px-2 py-0.5 rounded text-xs ${
-                          pos.direction === 'long' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
-                        }`}>
-                          {pos.direction?.toUpperCase() || 'LONG'}
-                        </span>
-                        <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400 text-xs">
-                          {pos.timeframe || 'INTRADAY'}
-                        </span>
-                      </div>
-                      <div className="text-xs text-zinc-400">Click to view chart with bot annotations</div>
+                    <div className="text-zinc-500">
+                      <span className="text-red-400 font-mono">${pos.stop_price?.toFixed(2) || '--'}</span>
+                      <span className="mx-1">→</span>
+                      <span className="text-emerald-400 font-mono">${pos.target_prices?.[0]?.toFixed(2) || pos.target_price?.toFixed(2) || '--'}</span>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className={`font-mono text-2xl ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {isPositive ? '+' : ''}${pnl.toFixed(2)}
+                  
+                  {/* P&L */}
+                  <div className="text-right flex-shrink-0">
+                    <div className={`font-mono text-sm font-bold ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {isPositive ? '+' : ''}${pnl.toFixed(0)}
                     </div>
-                    <div className={`text-sm ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {isPositive ? '+' : ''}{pnlPct.toFixed(2)}%
-                    </div>
-                  </div>
-                </div>
-              
-                {/* Quick Stats */}
-                <div className="grid grid-cols-5 gap-2 text-xs">
-                  <div className="p-2 rounded bg-black/30 text-center">
-                    <div className="text-zinc-500">Shares</div>
-                    <div className="font-mono font-bold">{pos.shares || pos.quantity || '--'}</div>
-                  </div>
-                  <div className="p-2 rounded bg-black/30 text-center">
-                    <div className="text-zinc-500">Entry</div>
-                    <div className="font-mono font-bold">${pos.entry_price?.toFixed(2) || '--'}</div>
-                  </div>
-                  <div className="p-2 rounded bg-black/30 text-center">
-                    <div className="text-zinc-500">Current</div>
-                    <div className={`font-mono font-bold ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
-                      ${pos.current_price?.toFixed(2) || '--'}
-                    </div>
-                  </div>
-                  <div className="p-2 rounded bg-black/30 text-center border border-red-500/30">
-                    <div className="text-red-400">Stop</div>
-                    <div className="font-mono font-bold text-red-400">${pos.stop_price?.toFixed(2) || '--'}</div>
-                  </div>
-                  <div className="p-2 rounded bg-black/30 text-center border border-emerald-500/30">
-                    <div className="text-emerald-400">Target</div>
-                    <div className="font-mono font-bold text-emerald-400">
-                      ${pos.target_prices?.[0]?.toFixed(2) || pos.target_price?.toFixed(2) || '--'}
+                    <div className={`text-[10px] ${isPositive ? 'text-emerald-400/70' : 'text-red-400/70'}`}>
+                      {isPositive ? '+' : ''}{pnlPct.toFixed(1)}%
                     </div>
                   </div>
                 </div>

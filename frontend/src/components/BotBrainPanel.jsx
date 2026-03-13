@@ -4,13 +4,14 @@
  * Features:
  * - Order Pipeline: Visual order flow (Pending → Executing → Filled)
  * - Real-time thought stream: "I detected...", "I'm monitoring..."
+ * - Proactive Intelligence: Setup triggers, profit-taking suggestions, market alerts
+ * - In-Trade Guidance: Position-specific alerts and recommendations
  * - Timestamped entries with confidence badges
  * - Clickable ticker mentions
- * - "View History" to see full reasoning log
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Brain, Cpu, ChevronRight, Clock, Zap, Target, Eye, AlertCircle, ArrowRight, CheckCircle, Loader } from 'lucide-react';
+import { Brain, Cpu, ChevronRight, Clock, Zap, Target, Eye, AlertCircle, ArrowRight, CheckCircle, Loader, TrendingUp, Bell, Sparkles } from 'lucide-react';
 import { useTickerModal } from '../hooks/useTickerModal';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
@@ -173,6 +174,165 @@ const InTradeGuidance = ({ openTrades = [], onTickerClick }) => {
           </div>
         </motion.div>
       ))}
+    </div>
+  );
+};
+
+// Proactive Intelligence Component - Shows upcoming triggers, profit suggestions, market alerts
+const ProactiveIntelligence = ({ watchingSetups = [], openTrades = [], botStatus, onTickerClick }) => {
+  const [proactiveAlerts, setProactiveAlerts] = useState([]);
+  
+  // Generate proactive alerts based on current data
+  useEffect(() => {
+    const alerts = [];
+    
+    // 1. Setup Trigger Alerts - Setups approaching trigger price
+    watchingSetups.forEach(setup => {
+      if (!setup.trigger_price || !setup.current_price) return;
+      
+      const distanceToTrigger = ((setup.trigger_price - setup.current_price) / setup.current_price * 100);
+      const isNearTrigger = Math.abs(distanceToTrigger) <= 2; // Within 2%
+      
+      if (isNearTrigger) {
+        alerts.push({
+          type: 'trigger',
+          icon: '🎯',
+          title: 'SETUP NEAR TRIGGER',
+          symbol: setup.symbol,
+          message: `${setup.symbol} is ${Math.abs(distanceToTrigger).toFixed(1)}% from trigger ($${setup.trigger_price?.toFixed(2)}). ${setup.setup_type || 'Entry'} setup ready.`,
+          priority: 1,
+          color: 'cyan'
+        });
+      }
+    });
+    
+    // 2. Profit-Taking Suggestions - Positions with good gains
+    openTrades.forEach(trade => {
+      const pnlPct = trade.pnl_percent || (trade.current_price && trade.entry_price 
+        ? ((trade.current_price - trade.entry_price) / trade.entry_price * 100) 
+        : 0);
+      
+      // Suggest profit-taking at 1R (roughly 3-5%)
+      if (pnlPct >= 3 && pnlPct < 5) {
+        alerts.push({
+          type: 'profit',
+          icon: '💰',
+          title: 'CONSIDER PARTIAL',
+          symbol: trade.symbol,
+          message: `${trade.symbol} is up ${pnlPct.toFixed(1)}%. Consider taking 25-50% off and moving stop to breakeven.`,
+          priority: 2,
+          color: 'emerald'
+        });
+      }
+      
+      // Strong runner - suggest trailing
+      if (pnlPct >= 5) {
+        alerts.push({
+          type: 'runner',
+          icon: '🚀',
+          title: 'STRONG RUNNER',
+          symbol: trade.symbol,
+          message: `${trade.symbol} running +${pnlPct.toFixed(1)}%! Trail stop to lock gains. Consider scaling out at extended moves.`,
+          priority: 2,
+          color: 'purple'
+        });
+      }
+    });
+    
+    // 3. Market Regime Alerts
+    if (botStatus?.regime === 'RISK_OFF' && openTrades.length > 0) {
+      alerts.push({
+        type: 'regime',
+        icon: '⚠️',
+        title: 'RISK-OFF MARKET',
+        symbol: null,
+        message: 'Market in RISK-OFF mode. Consider tightening stops and reducing exposure.',
+        priority: 3,
+        color: 'amber'
+      });
+    }
+    
+    // 4. Session-based alerts
+    const now = new Date();
+    const hour = now.getHours();
+    const minute = now.getMinutes();
+    
+    // Power hour alert (3-4 PM)
+    if (hour === 15 && minute < 15) {
+      alerts.push({
+        type: 'session',
+        icon: '⚡',
+        title: 'POWER HOUR',
+        symbol: null,
+        message: 'Power Hour starting! Expect increased volatility. Good for momentum plays.',
+        priority: 4,
+        color: 'purple'
+      });
+    }
+    
+    // EOD warning (15 min before close)
+    if (hour === 15 && minute >= 45) {
+      alerts.push({
+        type: 'session',
+        icon: '🔔',
+        title: 'MARKET CLOSING',
+        symbol: null,
+        message: 'Market closing soon. Review open positions and pending orders.',
+        priority: 1,
+        color: 'amber'
+      });
+    }
+    
+    // Sort by priority
+    alerts.sort((a, b) => a.priority - b.priority);
+    setProactiveAlerts(alerts.slice(0, 4));
+  }, [watchingSetups, openTrades, botStatus]);
+  
+  if (proactiveAlerts.length === 0) return null;
+  
+  const colorMap = {
+    cyan: 'border-cyan-500/50 bg-cyan-500/10 text-cyan-400',
+    emerald: 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400',
+    purple: 'border-purple-500/50 bg-purple-500/10 text-purple-400',
+    amber: 'border-amber-500/50 bg-amber-500/10 text-amber-400',
+    red: 'border-red-500/50 bg-red-500/10 text-red-400',
+  };
+  
+  return (
+    <div className="px-4 pb-3 border-t border-white/5">
+      <div className="flex items-center gap-2 py-2">
+        <Sparkles className="w-4 h-4 text-purple-400" />
+        <span className="text-xs text-zinc-400 font-medium uppercase">Proactive Intelligence</span>
+        <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 text-[10px] font-mono">
+          {proactiveAlerts.length} ALERTS
+        </span>
+      </div>
+      
+      <div className="space-y-1.5">
+        {proactiveAlerts.map((alert, i) => (
+          <motion.div
+            key={`${alert.type}-${alert.symbol || i}`}
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: i * 0.05 }}
+            className={`p-2 rounded-lg border cursor-pointer transition-all hover:scale-[1.01] ${colorMap[alert.color]}`}
+            onClick={() => alert.symbol && onTickerClick?.(alert.symbol)}
+          >
+            <div className="flex items-start gap-2">
+              <span className="text-sm">{alert.icon}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold">{alert.title}</span>
+                  {alert.symbol && (
+                    <span className="text-xs font-mono text-white">{alert.symbol}</span>
+                  )}
+                </div>
+                <p className="text-[10px] text-zinc-400 mt-0.5 leading-relaxed">{alert.message}</p>
+              </div>
+            </div>
+          </motion.div>
+        ))}
+      </div>
     </div>
   );
 };
@@ -508,7 +668,7 @@ const BotBrainPanel = ({
       </div>
       
       {/* Thoughts Stream */}
-      <div className="p-4 space-y-3 max-h-[220px] overflow-y-auto">
+      <div className="p-4 space-y-3 max-h-[300px] overflow-y-auto">
         <AnimatePresence mode="popLayout">
           {thoughts.map((thought, index) => (
             <ThoughtEntry
@@ -521,18 +681,30 @@ const BotBrainPanel = ({
         </AnimatePresence>
         
         {thoughts.length === 0 && (
-          <div className="text-center py-8 text-zinc-500">
-            <Brain className="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">Bot is idle. Start trading to see thoughts.</p>
+          <div className="text-center py-4 text-zinc-500">
+            <Brain className="w-6 h-6 mx-auto mb-1 opacity-50" />
+            <p className="text-xs">Bot is idle. Start trading to see thoughts.</p>
           </div>
         )}
-        
-        {/* In-Trade Guidance Alerts */}
-        <InTradeGuidance 
-          openTrades={openTrades} 
-          onTickerClick={openTickerModal}
-        />
       </div>
+      
+      {/* Proactive Intelligence Alerts */}
+      <ProactiveIntelligence 
+        watchingSetups={watchingSetups}
+        openTrades={openTrades}
+        botStatus={botStatus}
+        onTickerClick={openTickerModal}
+      />
+      
+      {/* In-Trade Guidance Alerts */}
+      {openTrades && openTrades.length > 0 && (
+        <div className="px-4 pb-4">
+          <InTradeGuidance 
+            openTrades={openTrades} 
+            onTickerClick={openTickerModal}
+          />
+        </div>
+      )}
     </div>
   );
 };
