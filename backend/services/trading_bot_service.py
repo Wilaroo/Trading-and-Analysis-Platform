@@ -2656,6 +2656,228 @@ class TradingBotService:
         """Get daily trading statistics"""
         return asdict(self._daily_stats)
     
+    async def reconcile_positions_with_ib(self) -> Dict:
+        """
+        Reconcile bot's internal trades with actual IB positions.
+        Returns a report of discrepancies and optionally syncs them.
+        
+        This is critical for:
+        1. Session persistence - ensuring state matches reality after restart
+        2. Detecting manual trades made outside the bot
+        3. Catching missed fills or order execution issues
+        """
+        report = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "bot_positions": [],
+            "ib_positions": [],
+            "discrepancies": [],
+            "synced": False,
+            "actions_taken": []
+        }
+        
+        try:
+            # Get IB positions from pushed data
+            from routers.ib import _pushed_ib_data, is_pusher_connected
+            
+            if not is_pusher_connected():
+                report["error"] = "IB pusher not connected - cannot reconcile"
+                return report
+            
+            ib_positions = _pushed_ib_data.get("positions", [])
+            
+            # Convert to comparable format
+            ib_pos_map = {}
+            for pos in ib_positions:
+                symbol = pos.get("symbol", pos.get("contract", {}).get("symbol", ""))
+                if symbol:
+                    qty = float(pos.get("position", pos.get("qty", 0)))
+                    ib_pos_map[symbol] = {
+                        "symbol": symbol,
+                        "qty": qty,
+                        "avg_cost": float(pos.get("avgCost", pos.get("avg_cost", 0))),
+                        "market_value": float(pos.get("marketValue", pos.get("market_value", 0))),
+                        "unrealized_pnl": float(pos.get("unrealizedPNL", pos.get("unrealized_pnl", 0)))
+                    }
+                    report["ib_positions"].append(ib_pos_map[symbol])
+            
+            # Get bot's open trades
+            bot_pos_map = {}
+            for trade in self._open_trades.values():
+                symbol = trade.symbol
+                # Account for direction
+                qty = trade.remaining_shares if trade.direction == TradeDirection.LONG else -trade.remaining_shares
+                bot_pos_map[symbol] = {
+                    "symbol": symbol,
+                    "qty": qty,
+                    "trade_id": trade.id,
+                    "fill_price": trade.fill_price,
+                    "direction": trade.direction.value
+                }
+                report["bot_positions"].append(bot_pos_map[symbol])
+            
+            # Find discrepancies
+            all_symbols = set(ib_pos_map.keys()) | set(bot_pos_map.keys())
+            
+            for symbol in all_symbols:
+                ib_pos = ib_pos_map.get(symbol)
+                bot_pos = bot_pos_map.get(symbol)
+                
+                if ib_pos and not bot_pos:
+                    # Position exists in IB but not tracked by bot
+                    report["discrepancies"].append({
+                        "type": "untracked_position",
+                        "symbol": symbol,
+                        "ib_qty": ib_pos["qty"],
+                        "bot_qty": 0,
+                        "message": f"{symbol}: Position in IB ({ib_pos['qty']} shares) not tracked by bot"
+                    })
+                
+                elif bot_pos and not ib_pos:
+                    # Bot thinks we have a position but IB doesn't show it
+                    report["discrepancies"].append({
+                        "type": "phantom_position",
+                        "symbol": symbol,
+                        "ib_qty": 0,
+                        "bot_qty": bot_pos["qty"],
+                        "trade_id": bot_pos["trade_id"],
+                        "message": f"{symbol}: Bot tracking position ({bot_pos['qty']} shares) but not in IB - may have been closed"
+                    })
+                
+                elif ib_pos and bot_pos:
+                    # Both have position - check if quantities match
+                    ib_qty = ib_pos["qty"]
+                    bot_qty = bot_pos["qty"]
+                    
+                    if abs(ib_qty - bot_qty) > 0.1:  # Allow small floating point differences
+                        report["discrepancies"].append({
+                            "type": "quantity_mismatch",
+                            "symbol": symbol,
+                            "ib_qty": ib_qty,
+                            "bot_qty": bot_qty,
+                            "trade_id": bot_pos["trade_id"],
+                            "message": f"{symbol}: IB shows {ib_qty} shares, bot tracking {bot_qty} shares"
+                        })
+            
+            report["synced"] = len(report["discrepancies"]) == 0
+            
+            if report["discrepancies"]:
+                logger.warning(f"Position reconciliation found {len(report['discrepancies'])} discrepancies")
+                for d in report["discrepancies"]:
+                    logger.warning(f"  - {d['message']}")
+            else:
+                logger.info("Position reconciliation: All positions match ✓")
+            
+            return report
+            
+        except Exception as e:
+            logger.error(f"Position reconciliation error: {e}")
+            report["error"] = str(e)
+            return report
+    
+    async def sync_position_from_ib(self, symbol: str, auto_create_trade: bool = False) -> Dict:
+        """
+        Sync a single position from IB to the bot's tracking.
+        Use this to import positions that were opened manually or outside the bot.
+        
+        Args:
+            symbol: Stock symbol to sync
+            auto_create_trade: If True, automatically create a bot trade entry for untracked positions
+        
+        Returns:
+            Dict with sync result
+        """
+        try:
+            from routers.ib import _pushed_ib_data, is_pusher_connected
+            
+            if not is_pusher_connected():
+                return {"success": False, "error": "IB pusher not connected"}
+            
+            ib_positions = _pushed_ib_data.get("positions", [])
+            ib_pos = None
+            
+            for pos in ib_positions:
+                pos_symbol = pos.get("symbol", pos.get("contract", {}).get("symbol", ""))
+                if pos_symbol.upper() == symbol.upper():
+                    ib_pos = pos
+                    break
+            
+            if not ib_pos:
+                return {"success": False, "error": f"No IB position found for {symbol}"}
+            
+            qty = float(ib_pos.get("position", ib_pos.get("qty", 0)))
+            avg_cost = float(ib_pos.get("avgCost", ib_pos.get("avg_cost", 0)))
+            
+            # Check if bot already tracks this
+            existing_trade = None
+            for trade in self._open_trades.values():
+                if trade.symbol.upper() == symbol.upper():
+                    existing_trade = trade
+                    break
+            
+            if existing_trade:
+                # Update existing trade
+                existing_trade.remaining_shares = abs(qty)
+                existing_trade.shares = abs(qty)
+                existing_trade.fill_price = avg_cost
+                logger.info(f"Updated existing trade for {symbol}: {qty} shares @ ${avg_cost:.2f}")
+                return {
+                    "success": True,
+                    "action": "updated",
+                    "trade_id": existing_trade.id,
+                    "symbol": symbol,
+                    "qty": qty,
+                    "avg_cost": avg_cost
+                }
+            
+            elif auto_create_trade:
+                # Create new trade entry for this position
+                direction = TradeDirection.LONG if qty > 0 else TradeDirection.SHORT
+                
+                # Create a synthetic trade
+                trade = BotTrade(
+                    symbol=symbol.upper(),
+                    direction=direction,
+                    shares=abs(qty),
+                    fill_price=avg_cost,
+                    entry_price=avg_cost,
+                    stop_price=avg_cost * 0.95 if direction == TradeDirection.LONG else avg_cost * 1.05,
+                    target_price=avg_cost * 1.10 if direction == TradeDirection.LONG else avg_cost * 0.90,
+                    setup_type="imported_from_ib",
+                    status=TradeStatus.FILLED,
+                    entry_time=datetime.now(timezone.utc)
+                )
+                trade.remaining_shares = abs(qty)
+                trade.original_shares = abs(qty)
+                
+                self._open_trades[trade.id] = trade
+                
+                # Save to MongoDB
+                self._db.bot_trades.update_one(
+                    {"id": trade.id},
+                    {"$set": trade.to_dict()},
+                    upsert=True
+                )
+                
+                logger.info(f"Created new trade for imported position: {symbol} {qty} shares @ ${avg_cost:.2f}")
+                return {
+                    "success": True,
+                    "action": "created",
+                    "trade_id": trade.id,
+                    "symbol": symbol,
+                    "qty": qty,
+                    "avg_cost": avg_cost
+                }
+            
+            else:
+                return {
+                    "success": False,
+                    "error": f"Position {symbol} not tracked by bot. Set auto_create_trade=True to import it."
+                }
+                
+        except Exception as e:
+            logger.error(f"Error syncing position {symbol}: {e}")
+            return {"success": False, "error": str(e)}
+    
     # ==================== REGIME PERFORMANCE LOGGING ====================
     
     async def _log_trade_to_regime_performance(self, trade: BotTrade):
