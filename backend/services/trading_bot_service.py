@@ -732,9 +732,37 @@ class TradingBotService:
                 logger.info(f"✅ Restored {restored_count} open trades from database")
             else:
                 logger.info("📭 No open trades to restore from database")
+            
+            # Schedule position reconciliation after a short delay (allow IB pusher to connect)
+            # This ensures our restored state matches actual IB positions
+            asyncio.create_task(self._delayed_reconciliation())
                 
         except Exception as e:
             logger.warning(f"Could not restore open trades: {e}")
+    
+    async def _delayed_reconciliation(self):
+        """Run position reconciliation after startup delay to allow IB connection"""
+        try:
+            # Wait for IB pusher to potentially connect
+            await asyncio.sleep(10)
+            
+            from routers.ib import is_pusher_connected
+            if is_pusher_connected():
+                logger.info("🔄 Running startup position reconciliation...")
+                report = await self.reconcile_positions_with_ib()
+                
+                if report.get("discrepancies"):
+                    disc_count = len(report["discrepancies"])
+                    logger.warning(f"⚠️ Found {disc_count} position discrepancies on startup!")
+                    for d in report["discrepancies"]:
+                        logger.warning(f"   - {d['message']}")
+                    logger.info("💡 Run /api/trading-bot/positions/sync-all to auto-fix discrepancies")
+                else:
+                    logger.info("✅ Position reconciliation: All positions in sync with IB")
+            else:
+                logger.info("⏳ IB pusher not connected - skipping startup reconciliation")
+        except Exception as e:
+            logger.debug(f"Startup reconciliation skipped: {e}")
     
     async def _save_state(self):
         """Save bot state to MongoDB"""
@@ -757,6 +785,50 @@ class TradingBotService:
             logger.info(f"💾 Bot state saved: running={self._running}, watchlist={len(self._watchlist)} symbols")
         except Exception as e:
             logger.warning(f"Could not save bot state: {e}")
+    
+    def _persist_trade(self, trade: 'BotTrade'):
+        """
+        Persist a single trade to MongoDB.
+        Called whenever a trade's state changes (created, filled, updated, closed).
+        This is CRITICAL for data consistency and session persistence.
+        """
+        if self._db is None:
+            logger.warning("Cannot persist trade - no database connection")
+            return
+        
+        try:
+            trade_dict = trade.to_dict()
+            
+            # Ensure status is stored as string value
+            if isinstance(trade_dict.get("status"), TradeStatus):
+                trade_dict["status"] = trade_dict["status"].value
+            if isinstance(trade_dict.get("direction"), TradeDirection):
+                trade_dict["direction"] = trade_dict["direction"].value
+            
+            # Add metadata
+            trade_dict["last_updated"] = datetime.now(timezone.utc).isoformat()
+            
+            # Upsert to MongoDB
+            self._db.bot_trades.update_one(
+                {"id": trade.id},
+                {"$set": trade_dict},
+                upsert=True
+            )
+            
+            logger.debug(f"💾 Trade persisted: {trade.symbol} ({trade.id}) status={trade.status.value if hasattr(trade.status, 'value') else trade.status}")
+            
+        except Exception as e:
+            logger.error(f"Failed to persist trade {trade.id}: {e}")
+    
+    def _persist_all_open_trades(self):
+        """Persist all open trades - call this periodically or on shutdown"""
+        if self._db is None:
+            return
+        
+        for trade in self._open_trades.values():
+            self._persist_trade(trade)
+        
+        logger.info(f"💾 Persisted {len(self._open_trades)} open trades")
     
     # ==================== INTELLIGENCE SERVICE PROPERTIES ====================
     
@@ -2833,32 +2905,50 @@ class TradingBotService:
                 # Create new trade entry for this position
                 direction = TradeDirection.LONG if qty > 0 else TradeDirection.SHORT
                 
-                # Create a synthetic trade
+                # Calculate price levels
+                target_1 = avg_cost * 1.05 if direction == TradeDirection.LONG else avg_cost * 0.95
+                target_2 = avg_cost * 1.10 if direction == TradeDirection.LONG else avg_cost * 0.90
+                target_3 = avg_cost * 1.15 if direction == TradeDirection.LONG else avg_cost * 0.85
+                stop = avg_cost * 0.95 if direction == TradeDirection.LONG else avg_cost * 1.05
+                
+                risk_per_share = abs(avg_cost - stop)
+                reward_per_share = abs(target_2 - avg_cost)
+                
+                # Generate unique ID
+                import uuid
+                trade_id = str(uuid.uuid4())[:8]
+                
+                # Create a synthetic trade with all required fields
                 trade = BotTrade(
+                    id=trade_id,
                     symbol=symbol.upper(),
                     direction=direction,
-                    shares=abs(qty),
-                    fill_price=avg_cost,
-                    entry_price=avg_cost,
-                    stop_price=avg_cost * 0.95 if direction == TradeDirection.LONG else avg_cost * 1.05,
-                    target_price=avg_cost * 1.10 if direction == TradeDirection.LONG else avg_cost * 0.90,
+                    status=TradeStatus.OPEN,  # Use OPEN for active positions
                     setup_type="imported_from_ib",
-                    status=TradeStatus.FILLED,
-                    entry_time=datetime.now(timezone.utc)
+                    timeframe="daily",
+                    quality_score=50,
+                    quality_grade="B",
+                    entry_price=avg_cost,
+                    current_price=avg_cost,
+                    stop_price=stop,
+                    target_prices=[target_1, target_2, target_3],
+                    shares=int(abs(qty)),
+                    risk_amount=risk_per_share * abs(qty),
+                    potential_reward=reward_per_share * abs(qty),
+                    risk_reward_ratio=reward_per_share / risk_per_share if risk_per_share > 0 else 2.0
                 )
-                trade.remaining_shares = abs(qty)
-                trade.original_shares = abs(qty)
+                trade.fill_price = avg_cost
+                trade.remaining_shares = int(abs(qty))
+                trade.original_shares = int(abs(qty))
+                trade.entry_time = datetime.now(timezone.utc)
+                trade.notes = "Imported from IB - position existed before bot tracking"
                 
                 self._open_trades[trade.id] = trade
                 
-                # Save to MongoDB
-                self._db.bot_trades.update_one(
-                    {"id": trade.id},
-                    {"$set": trade.to_dict()},
-                    upsert=True
-                )
+                # Save to MongoDB using the persist method (handles enum serialization)
+                self._persist_trade(trade)
                 
-                logger.info(f"Created new trade for imported position: {symbol} {qty} shares @ ${avg_cost:.2f}")
+                logger.info(f"Created new trade for imported position: {symbol} {int(abs(qty))} shares @ ${avg_cost:.2f}")
                 return {
                     "success": True,
                     "action": "created",
@@ -2875,8 +2965,198 @@ class TradingBotService:
                 }
                 
         except Exception as e:
+            import traceback
             logger.error(f"Error syncing position {symbol}: {e}")
+            logger.error(f"Exception type: {type(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return {"success": False, "error": str(e)}
+    
+    async def close_phantom_position(self, trade_id: str, reason: str = "not_in_ib") -> Dict:
+        """
+        Close a bot trade that no longer exists in IB.
+        This handles cases where positions were manually closed or stopped out.
+        """
+        try:
+            if trade_id not in self._open_trades:
+                return {"success": False, "error": f"Trade {trade_id} not found in open trades"}
+            
+            trade = self._open_trades[trade_id]
+            
+            # Move to closed trades
+            trade.status = TradeStatus.CLOSED
+            trade.exit_time = datetime.now(timezone.utc)
+            trade.exit_reason = reason
+            
+            # We don't know the actual exit price, use current price if available or fill price
+            if trade.current_price and trade.current_price > 0:
+                trade.exit_price = trade.current_price
+            else:
+                trade.exit_price = trade.fill_price  # Assume breakeven if no price
+            
+            # Calculate final P&L
+            if trade.direction == TradeDirection.LONG:
+                trade.realized_pnl = (trade.exit_price - trade.fill_price) * trade.remaining_shares
+            else:
+                trade.realized_pnl = (trade.fill_price - trade.exit_price) * trade.remaining_shares
+            
+            trade.unrealized_pnl = 0
+            trade.remaining_shares = 0
+            
+            # Move from open to closed
+            del self._open_trades[trade_id]
+            self._closed_trades.append(trade)
+            
+            # Update MongoDB
+            self._db.bot_trades.update_one(
+                {"id": trade_id},
+                {"$set": {
+                    "status": TradeStatus.CLOSED.value,
+                    "exit_time": trade.exit_time.isoformat(),
+                    "exit_price": trade.exit_price,
+                    "exit_reason": trade.exit_reason,
+                    "realized_pnl": trade.realized_pnl,
+                    "unrealized_pnl": 0,
+                    "remaining_shares": 0
+                }}
+            )
+            
+            logger.info(f"Closed phantom trade {trade.symbol} ({trade_id}): reason={reason}, P&L=${trade.realized_pnl:.2f}")
+            
+            return {
+                "success": True,
+                "trade_id": trade_id,
+                "symbol": trade.symbol,
+                "action": "closed",
+                "reason": reason,
+                "realized_pnl": trade.realized_pnl
+            }
+            
+        except Exception as e:
+            logger.error(f"Error closing phantom position {trade_id}: {e}")
+            return {"success": False, "error": str(e)}
+    
+    async def full_position_sync(self) -> Dict:
+        """
+        Comprehensive position sync that:
+        1. Imports untracked IB positions
+        2. Closes phantom positions (bot has, IB doesn't)
+        3. Fixes quantity mismatches
+        4. Fixes direction mismatches
+        
+        Returns detailed report of all actions taken.
+        """
+        report = {
+            "success": True,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "imported": [],
+            "closed_phantom": [],
+            "updated": [],
+            "errors": []
+        }
+        
+        try:
+            # First get reconciliation report
+            recon = await self.reconcile_positions_with_ib()
+            
+            if recon.get("error"):
+                report["success"] = False
+                report["error"] = recon["error"]
+                return report
+            
+            for disc in recon.get("discrepancies", []):
+                disc_type = disc["type"]
+                symbol = disc["symbol"]
+                
+                try:
+                    if disc_type == "untracked_position":
+                        # Import from IB
+                        result = await self.sync_position_from_ib(symbol, auto_create_trade=True)
+                        if result.get("success"):
+                            report["imported"].append({
+                                "symbol": symbol,
+                                "qty": disc["ib_qty"],
+                                "trade_id": result.get("trade_id")
+                            })
+                        else:
+                            report["errors"].append({"symbol": symbol, "error": result.get("error"), "type": "import"})
+                    
+                    elif disc_type == "phantom_position":
+                        # Close the phantom trade
+                        trade_id = disc.get("trade_id")
+                        if trade_id:
+                            result = await self.close_phantom_position(trade_id, reason="closed_outside_bot")
+                            if result.get("success"):
+                                report["closed_phantom"].append({
+                                    "symbol": symbol,
+                                    "trade_id": trade_id,
+                                    "realized_pnl": result.get("realized_pnl", 0)
+                                })
+                            else:
+                                report["errors"].append({"symbol": symbol, "error": result.get("error"), "type": "close_phantom"})
+                    
+                    elif disc_type == "quantity_mismatch":
+                        # Update the trade quantity to match IB
+                        trade_id = disc.get("trade_id")
+                        ib_qty = disc["ib_qty"]
+                        
+                        if trade_id and trade_id in self._open_trades:
+                            trade = self._open_trades[trade_id]
+                            old_qty = trade.remaining_shares
+                            
+                            # Check if direction changed (long to short or vice versa)
+                            ib_direction = TradeDirection.LONG if ib_qty > 0 else TradeDirection.SHORT
+                            
+                            if ib_direction != trade.direction:
+                                # Direction flipped - this is a significant change
+                                # Close the old trade and create new one
+                                await self.close_phantom_position(trade_id, reason="direction_changed")
+                                result = await self.sync_position_from_ib(symbol, auto_create_trade=True)
+                                report["updated"].append({
+                                    "symbol": symbol,
+                                    "action": "direction_changed",
+                                    "old_direction": trade.direction.value,
+                                    "new_direction": ib_direction.value,
+                                    "new_qty": abs(ib_qty)
+                                })
+                            else:
+                                # Same direction, just quantity changed
+                                trade.remaining_shares = abs(ib_qty)
+                                trade.shares = abs(ib_qty)
+                                
+                                # Update MongoDB
+                                self._db.bot_trades.update_one(
+                                    {"id": trade_id},
+                                    {"$set": {
+                                        "remaining_shares": abs(ib_qty),
+                                        "shares": abs(ib_qty)
+                                    }}
+                                )
+                                
+                                report["updated"].append({
+                                    "symbol": symbol,
+                                    "trade_id": trade_id,
+                                    "old_qty": old_qty,
+                                    "new_qty": abs(ib_qty),
+                                    "action": "quantity_updated"
+                                })
+                
+                except Exception as e:
+                    report["errors"].append({"symbol": symbol, "error": str(e), "type": disc_type})
+            
+            # Final reconciliation check
+            final_recon = await self.reconcile_positions_with_ib()
+            report["final_synced"] = final_recon.get("synced", False)
+            report["remaining_discrepancies"] = len(final_recon.get("discrepancies", []))
+            
+            logger.info(f"Full position sync complete: imported={len(report['imported'])}, closed={len(report['closed_phantom'])}, updated={len(report['updated'])}, errors={len(report['errors'])}")
+            
+            return report
+            
+        except Exception as e:
+            logger.error(f"Full position sync error: {e}")
+            report["success"] = False
+            report["error"] = str(e)
+            return report
     
     # ==================== REGIME PERFORMANCE LOGGING ====================
     
