@@ -1649,9 +1649,41 @@ class TradingBotService:
         return intelligence
     
     async def _get_news_intelligence(self, symbol: str) -> Optional[Dict]:
-        """Get recent news that could impact the trade"""
+        """Get recent news that could impact the trade - prioritizes IB news"""
         try:
-            # Search for recent news about this stock
+            # Try unified news service first (prioritizes IB historical news)
+            try:
+                from services.news_service import get_news_service
+                news_service = get_news_service()
+                news_items = await news_service.get_ticker_news(symbol, max_items=5)
+                
+                if news_items and not news_items[0].get("is_placeholder"):
+                    headlines = [n.get("headline", "") for n in news_items]
+                    sentiments = [n.get("sentiment", "neutral") for n in news_items]
+                    
+                    # Count sentiment
+                    bullish = sentiments.count("bullish")
+                    bearish = sentiments.count("bearish")
+                    
+                    if bullish > bearish:
+                        overall_sentiment = "bullish"
+                    elif bearish > bullish:
+                        overall_sentiment = "bearish"
+                    else:
+                        overall_sentiment = "neutral"
+                    
+                    return {
+                        "has_news": True,
+                        "summary": f"Found {len(news_items)} recent news items for {symbol}",
+                        "headlines": headlines[:5],
+                        "sentiment": overall_sentiment,
+                        "source": news_items[0].get("source_type", "unknown"),
+                        "key_topics": []
+                    }
+            except Exception as e:
+                logger.debug(f"News service failed, falling back to Tavily: {e}")
+            
+            # Fallback to Tavily for web search if news service fails
             result = await self.web_research.tavily.search_financial(
                 f"{symbol} stock news latest",
                 max_results=3
@@ -1662,7 +1694,8 @@ class TradingBotService:
                 "summary": result.answer[:500] if result.answer else None,
                 "headlines": [r.title for r in result.results[:3]],
                 "sentiment": self._analyze_news_sentiment(result),
-                "key_topics": self._extract_news_topics(result)
+                "key_topics": self._extract_news_topics(result),
+                "source": "tavily"
             }
             
             return news_data

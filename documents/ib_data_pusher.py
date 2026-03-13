@@ -58,10 +58,16 @@ class IBDataPusher:
         self.positions_data: List[dict] = []
         self.level2_buffer: Dict[str, dict] = {}  # Level 2 / DOM data
         self.fundamentals_buffer: Dict[str, dict] = {}  # Fundamental data
+        self.news_buffer: Dict[str, List[dict]] = {}  # News by symbol
+        self.news_providers: List[dict] = []  # Available news providers
         
         # Fundamental data refresh tracking (don't need to refresh every second)
         self.last_fundamentals_refresh = 0
         self.fundamentals_refresh_interval = 300  # Refresh every 5 minutes
+        
+        # News refresh tracking
+        self.last_news_refresh = 0
+        self.news_refresh_interval = 60  # Refresh news every 60 seconds
         
     def connect(self) -> bool:
         """Connect to local IB Gateway"""
@@ -562,6 +568,83 @@ class IBDataPusher:
         except Exception as e:
             logger.debug(f"Error parsing fundamental XML for {symbol}: {e}")
     
+    def fetch_news_providers(self):
+        """Fetch available news providers from IB"""
+        try:
+            providers = self.ib.reqNewsProviders()
+            self.ib.sleep(0.5)
+            
+            if providers:
+                self.news_providers = []
+                for p in providers:
+                    self.news_providers.append({
+                        "code": p.providerCode if hasattr(p, 'providerCode') else str(p),
+                        "name": p.providerName if hasattr(p, 'providerName') else str(p)
+                    })
+                logger.info(f"News providers: {[p['code'] for p in self.news_providers]}")
+            return self.news_providers
+        except Exception as e:
+            logger.warning(f"Could not fetch news providers: {e}")
+            return []
+    
+    def fetch_news_for_symbols(self, symbols: List[str], max_results: int = 5):
+        """
+        Fetch historical news for symbols using IB's reqHistoricalNews.
+        This provides real professional financial news from Benzinga, Dow Jones, etc.
+        """
+        if not self.news_providers:
+            self.fetch_news_providers()
+        
+        if not self.news_providers:
+            logger.debug("No news providers available")
+            return
+        
+        # Get provider codes
+        provider_codes = "+".join([p["code"] for p in self.news_providers])
+        
+        # Date range: last 3 days
+        from datetime import timedelta
+        end_date = datetime.now().strftime("%Y%m%d %H:%M:%S")
+        start_dt = datetime.now() - timedelta(days=3)
+        start_date = start_dt.strftime("%Y%m%d %H:%M:%S")
+        
+        for symbol in symbols[:10]:  # Limit to 10 symbols to avoid rate limiting
+            try:
+                if symbol == "VIX" or symbol not in self.subscribed_contracts:
+                    continue
+                
+                contract = self.subscribed_contracts[symbol]
+                if not contract.conId:
+                    self.ib.qualifyContracts(contract)
+                
+                if not contract.conId:
+                    continue
+                
+                # Request historical news
+                news_items = self.ib.reqHistoricalNews(
+                    conId=contract.conId,
+                    providerCodes=provider_codes,
+                    startDateTime=start_date,
+                    endDateTime=end_date,
+                    totalResults=max_results,
+                    historicalNewsOptions=[]
+                )
+                self.ib.sleep(0.3)
+                
+                if news_items:
+                    self.news_buffer[symbol] = []
+                    for item in news_items:
+                        self.news_buffer[symbol].append({
+                            "article_id": item.articleId if hasattr(item, 'articleId') else None,
+                            "provider_code": item.providerCode if hasattr(item, 'providerCode') else "IB",
+                            "headline": item.headline if hasattr(item, 'headline') else str(item),
+                            "timestamp": item.time.isoformat() if hasattr(item, 'time') and hasattr(item.time, 'isoformat') else str(item.time) if hasattr(item, 'time') else datetime.now().isoformat()
+                        })
+                    logger.debug(f"Got {len(news_items)} news items for {symbol}")
+                    
+            except Exception as e:
+                logger.debug(f"News fetch error for {symbol}: {e}")
+    
     def _clean_for_json(self, obj):
         """Clean data for JSON serialization - replace NaN/Inf with None"""
         import math
@@ -579,14 +662,15 @@ class IBDataPusher:
     def push_data_to_cloud(self):
         """Push buffered data to cloud backend (synchronous)"""
         has_data = (self.quotes_buffer or self.account_data or 
-                    self.positions_data or self.level2_buffer or self.fundamentals_buffer)
+                    self.positions_data or self.level2_buffer or self.fundamentals_buffer or self.news_buffer)
         
         # Always log what we have
         if not has_data:
             return
         
         # Log what we're pushing
-        logger.info(f"Pushing: {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions, {len(self.account_data)} account fields")
+        news_count = sum(len(items) for items in self.news_buffer.values())
+        logger.info(f"Pushing: {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions, {len(self.account_data)} account fields, {news_count} news items")
         
         # Clean all data to remove NaN/Inf values before JSON serialization
         # Use UTC timestamp for proper timezone handling
@@ -598,7 +682,9 @@ class IBDataPusher:
             "account": self.account_data.copy(),
             "positions": self.positions_data.copy(),
             "level2": self.level2_buffer.copy(),
-            "fundamentals": self.fundamentals_buffer.copy()
+            "fundamentals": self.fundamentals_buffer.copy(),
+            "news": self.news_buffer.copy(),
+            "news_providers": self.news_providers.copy() if self.news_providers else []
         })
         
         try:
@@ -716,6 +802,10 @@ class IBDataPusher:
         last_order_poll = 0
         current_time = time.time()
         
+        # Fetch news providers on startup
+        logger.info("Fetching news providers...")
+        self.fetch_news_providers()
+        
         # Force initial push immediately
         logger.info(f"")
         logger.info(f"========================================")
@@ -723,6 +813,7 @@ class IBDataPusher:
         logger.info(f"    Positions: {len(self.positions_data)}")
         logger.info(f"    Quotes: {len(self.quotes_buffer)}")
         logger.info(f"    Level 2 Subscriptions: {len(self.depth_subscriptions)}")
+        logger.info(f"    News Providers: {[p['code'] for p in self.news_providers]}")
         logger.info(f"    Order Execution: ENABLED")
         logger.info(f"========================================")
         logger.info(f"")
@@ -757,6 +848,11 @@ class IBDataPusher:
                     if enable_level2 and self.level2_enabled and (current_time - last_l2_update >= l2_update_interval):
                         self.update_level2_subscriptions()
                         last_l2_update = current_time
+                    
+                    # Periodically refresh news for subscribed symbols
+                    if current_time - self.last_news_refresh >= self.news_refresh_interval:
+                        self.fetch_news_for_symbols(symbols)
+                        self.last_news_refresh = current_time
                     
                     # Poll for pending orders from cloud trading bot
                     if current_time - last_order_poll >= order_poll_interval:

@@ -677,6 +677,36 @@ class SmartContextEngine:
                 except Exception as e:
                     logger.debug(f"Could not gather sector context: {e}")
             
+            # NEWS (IB Historical News prioritized via news_service)
+            if sources.get("news") and self.news_service:
+                try:
+                    if symbols:
+                        # Get ticker-specific news for the first symbol
+                        symbol = symbols[0]
+                        news_items = await self.news_service.get_ticker_news(symbol, max_items=5)
+                        if news_items and not news_items[0].get("is_placeholder"):
+                            context_parts.append(f"=== NEWS FOR {symbol} ===")
+                            for item in news_items[:5]:
+                                source = item.get("source", "")
+                                headline = item.get("headline", "")
+                                sentiment = item.get("sentiment", "neutral")
+                                context_parts.append(f"  [{source}] {headline} ({sentiment})")
+                            context_parts.append("")
+                    else:
+                        # Get general market news
+                        market_summary = await self.news_service.get_market_summary()
+                        if market_summary.get("available"):
+                            context_parts.append("=== MARKET NEWS ===")
+                            headlines = market_summary.get("headlines", [])[:5]
+                            for h in headlines:
+                                context_parts.append(f"  - {h}")
+                            themes = market_summary.get("themes", [])
+                            if themes:
+                                context_parts.append(f"  Key Themes: {', '.join(themes[:3])}")
+                            context_parts.append("")
+                except Exception as e:
+                    logger.debug(f"Could not gather news context: {e}")
+            
         except Exception as e:
             logger.error(f"Error gathering context: {e}")
             context_parts.append(f"[Some context unavailable: {str(e)[:50]}]")

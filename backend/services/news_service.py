@@ -45,7 +45,7 @@ class NewsService:
     async def get_news_providers(self) -> List[Dict]:
         """
         Get list of subscribed IB news providers.
-        Cached for 5 minutes to avoid repeated API calls.
+        Checks pushed data first, then IB service, cached for 5 minutes.
         """
         # Check cache
         if self._news_providers_cache and self._providers_cache_time:
@@ -53,6 +53,19 @@ class NewsService:
             if cache_age < 300:  # 5 minute cache
                 return self._news_providers_cache
         
+        # Check pushed data first (from IB Data Pusher)
+        try:
+            from routers.ib import _pushed_ib_data
+            pushed_providers = _pushed_ib_data.get("news_providers", [])
+            if pushed_providers:
+                self._news_providers_cache = pushed_providers
+                self._providers_cache_time = datetime.now(timezone.utc)
+                logger.info(f"Using pushed news providers: {[p.get('code') for p in pushed_providers]}")
+                return pushed_providers
+        except Exception as e:
+            logger.debug(f"Could not check pushed providers: {e}")
+        
+        # Fallback to direct IB service
         if not self.ib_service:
             return []
         
@@ -72,11 +85,53 @@ class NewsService:
         Fetch news for a specific ticker symbol.
         
         Priority:
-        1. IB Historical News (reqHistoricalNews) - Best quality, no rate limits
-        2. Finnhub Company News - Good fallback
-        3. IB Real-time Ticks - Last resort
+        1. IB Pushed News (from local data pusher) - Real-time from your IB subscription
+        2. IB Historical News (reqHistoricalNews) - Best quality, no rate limits
+        3. Finnhub Company News - Good fallback
+        4. IB Real-time Ticks - Last resort
         """
         symbol = symbol.upper()
+        
+        # === PRIORITY 0: Check pushed news from IB Data Pusher ===
+        try:
+            from routers.ib import _pushed_ib_data
+            pushed_news = _pushed_ib_data.get("news", {})
+            
+            if pushed_news.get(symbol):
+                # Check if pusher data is fresh (within 5 minutes)
+                last_update = _pushed_ib_data.get("last_update")
+                is_fresh = False
+                if last_update:
+                    try:
+                        last_dt = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
+                        age_seconds = (datetime.now(timezone.utc) - last_dt).total_seconds()
+                        is_fresh = age_seconds < 300  # 5 minutes
+                    except:
+                        pass
+                
+                if is_fresh:
+                    formatted_news = []
+                    for item in pushed_news[symbol][:max_items]:
+                        formatted_news.append({
+                            "id": item.get("article_id", ""),
+                            "article_id": item.get("article_id"),
+                            "provider_code": item.get("provider_code"),
+                            "symbol": symbol,
+                            "headline": item.get("headline", ""),
+                            "summary": "",
+                            "source": self._get_provider_name(item.get("provider_code", "IB")),
+                            "timestamp": item.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                            "url": None,
+                            "sentiment": self._analyze_sentiment(item.get("headline", "")),
+                            "source_type": "ib_pushed",
+                            "is_placeholder": False
+                        })
+                    
+                    if formatted_news:
+                        logger.info(f"Got {len(formatted_news)} pushed IB news for {symbol}")
+                        return formatted_news
+        except Exception as e:
+            logger.debug(f"Could not check pushed news: {e}")
         
         # === PRIORITY 1: IB Historical News ===
         if self.ib_service:

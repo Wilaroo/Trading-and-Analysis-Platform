@@ -73,10 +73,57 @@ class MarketIntelService:
     # ==================== CONTEXT GATHERING ====================
 
     async def _gather_news_context(self) -> str:
-        """Gather REAL news from Finnhub directly — no hallucination"""
+        """Gather REAL news - prioritizes IB Gateway news, falls back to Finnhub"""
         parts = []
 
-        # Fetch real market news from Finnhub
+        # Try the unified news service first (prioritizes IB historical news)
+        if self._news_service:
+            try:
+                market_summary = await self._news_service.get_market_summary()
+                if market_summary.get("available") and market_summary.get("headlines"):
+                    parts.append("=== REAL-TIME MARKET NEWS ===")
+                    
+                    headlines = market_summary.get("headlines", [])
+                    for i, headline in enumerate(headlines[:15], 1):
+                        parts.append(f"  {i}. {headline}")
+                    
+                    # Add themes if available
+                    themes = market_summary.get("themes", [])
+                    if themes:
+                        parts.append(f"\n  Key Themes: {', '.join(themes[:5])}")
+                    
+                    # Add sentiment
+                    sentiment = market_summary.get("overall_sentiment", "mixed")
+                    breakdown = market_summary.get("sentiment_breakdown", {})
+                    parts.append(f"  Market Sentiment: {sentiment.upper()} (Bullish: {breakdown.get('bullish', 0)}, Bearish: {breakdown.get('bearish', 0)}, Neutral: {breakdown.get('neutral', 0)})")
+                    
+                    # Add sources
+                    sources = market_summary.get("sources", [])
+                    if sources:
+                        parts.append(f"  Sources: {', '.join(sources[:5])}")
+                    
+                    # Categorize headlines for earnings and analyst actions
+                    earnings_kw = ["earnings", "beat", "miss", "revenue", "eps", "guidance", "quarterly", "profit"]
+                    analyst_kw = ["upgrade", "downgrade", "price target", "outperform", "underperform", "overweight", "buy rating", "sell rating"]
+                    
+                    earnings_news = [h for h in headlines if any(kw in h.lower() for kw in earnings_kw)]
+                    analyst_news = [h for h in headlines if any(kw in h.lower() for kw in analyst_kw)]
+                    
+                    if earnings_news:
+                        parts.append("\n=== EARNINGS NEWS ===")
+                        for h in earnings_news[:5]:
+                            parts.append(f"  - {h}")
+                    
+                    if analyst_news:
+                        parts.append("\n=== ANALYST UPGRADES/DOWNGRADES ===")
+                        for h in analyst_news[:5]:
+                            parts.append(f"  - {h}")
+                    
+                    return "\n".join(parts)
+            except Exception as e:
+                logger.warning(f"News service failed, falling back to direct Finnhub: {e}")
+
+        # Fallback: Fetch real market news from Finnhub directly
         if self._finnhub_key:
             try:
                 resp = requests.get(
