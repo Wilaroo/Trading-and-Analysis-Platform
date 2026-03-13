@@ -246,9 +246,95 @@ const mockSetups = [
 
 const DedicatedPageV2 = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedTicker, setSelectedTicker] = useState(null);
   
   return (
     <div className="bg-zinc-950 min-h-[750px] rounded-2xl border border-white/10 overflow-hidden relative">
+      {/* Ticker Detail Modal */}
+      <AnimatePresence>
+        {selectedTicker && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-8"
+            onClick={() => setSelectedTicker(null)}
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="w-full max-w-3xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <GlassCard glow className="p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-cyan-500/30 to-violet-500/30 flex items-center justify-center">
+                      <span className="text-xl font-bold text-white">{selectedTicker.symbol}</span>
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-bold text-white">Our {selectedTicker.symbol} Position</h2>
+                      <p className="text-sm text-zinc-400">Detailed view • Click sparkline to open</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setSelectedTicker(null)}
+                    className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                
+                {/* Mock Chart Area */}
+                <div className="h-48 rounded-xl bg-black/40 border border-white/10 mb-6 flex items-center justify-center">
+                  <div className="text-center">
+                    <LineChart className="w-12 h-12 text-cyan-400/50 mx-auto mb-2" />
+                    <p className="text-sm text-zinc-500">Full Interactive Chart</p>
+                    <p className="text-xs text-zinc-600">Price action, indicators, entries/exits</p>
+                  </div>
+                </div>
+                
+                {/* Position Stats */}
+                <div className="grid grid-cols-4 gap-4 mb-6">
+                  <div className="p-3 rounded-xl bg-black/40 text-center">
+                    <p className="text-[10px] text-zinc-500 uppercase">Entry</p>
+                    <p className="text-lg font-bold text-white">{selectedTicker.entry}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-black/40 text-center">
+                    <p className="text-[10px] text-zinc-500 uppercase">Current P&L</p>
+                    <p className={`text-lg font-bold ${selectedTicker.pnl.startsWith('+') ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {selectedTicker.pnl}
+                    </p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-black/40 text-center">
+                    <p className="text-[10px] text-zinc-500 uppercase">R-Multiple</p>
+                    <p className="text-lg font-bold text-cyan-400">{selectedTicker.rr}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-black/40 text-center">
+                    <p className="text-[10px] text-zinc-500 uppercase">Status</p>
+                    <p className="text-lg font-bold text-violet-400 capitalize">{selectedTicker.status}</p>
+                  </div>
+                </div>
+                
+                {/* Our Take Section */}
+                <div className="p-4 rounded-xl bg-gradient-to-r from-violet-500/10 to-transparent border border-violet-500/20">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Brain className="w-5 h-5 text-violet-400" />
+                    <span className="font-bold text-white">Our Take</span>
+                  </div>
+                  <p className="text-sm text-zinc-300">
+                    "We're {selectedTicker.pnl.startsWith('+') ? 'running nicely on' : 'underwater on'} {selectedTicker.symbol}. 
+                    {selectedTicker.status === 'trailing' ? " We've moved our stop to breakeven and are trailing for more." : 
+                     selectedTicker.status === 'watching' ? " We're watching for a bounce or considering cutting." :
+                     " Momentum is with us - letting it run."}
+                  </p>
+                </div>
+              </GlassCard>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* Ambient Background Effects */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-0 right-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl" />
@@ -308,6 +394,7 @@ const DedicatedPageV2 = () => {
                 <div 
                   key={pos.symbol} 
                   className="relative p-3 rounded-xl bg-black/40 border border-white/5 hover:border-white/10 cursor-pointer transition-all group"
+                  onClick={() => setSelectedTicker(pos)}
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
@@ -328,9 +415,15 @@ const DedicatedPageV2 = () => {
                     </div>
                   </div>
                   
-                  {/* Mini Chart */}
-                  <div className="h-8 mt-2 opacity-60 group-hover:opacity-100 transition-opacity">
+                  {/* Mini Chart - Clickable */}
+                  <div className="h-8 mt-2 opacity-60 group-hover:opacity-100 transition-opacity relative">
                     <Sparkline data={pos.data} color={pos.pnl.startsWith('+') ? 'emerald' : 'rose'} />
+                    {/* Hover hint */}
+                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 rounded">
+                      <span className="text-[9px] text-cyan-400 flex items-center gap-1">
+                        <ExternalLink className="w-3 h-3" /> Click for details
+                      </span>
+                    </div>
                   </div>
                 </div>
               ))}
