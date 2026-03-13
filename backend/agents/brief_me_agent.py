@@ -63,7 +63,7 @@ class BriefMeAgent:
     
     async def generate_brief(self, detail_level: str = "quick") -> Dict[str, Any]:
         """
-        Generate a market briefing.
+        Generate a market briefing using MarketIntelService for rich data.
         
         Args:
             detail_level: "quick" for 2-3 sentences, "detailed" for full report
@@ -72,8 +72,24 @@ class BriefMeAgent:
             Dictionary with briefing data and formatted text
         """
         try:
+            # Try to use MarketIntelService for rich pre-market data first
+            rich_intel = None
+            if self.market_intel_service:
+                try:
+                    # Get or generate pre-market report
+                    result = await self.market_intel_service.generate_report("premarket", force=False)
+                    if result and result.get("success"):
+                        rich_intel = result.get("content", {})
+                        logger.info("Using MarketIntelService for rich pre-market data")
+                except Exception as e:
+                    logger.warning(f"MarketIntelService failed, using fallback: {e}")
+            
             # Gather all data in parallel
             data = await self._gather_all_data()
+            
+            # Merge rich intel if available
+            if rich_intel:
+                data["rich_intel"] = rich_intel
             
             # Build structured brief
             brief = self._build_structured_brief(data)
@@ -82,7 +98,7 @@ class BriefMeAgent:
             if detail_level == "quick":
                 summary = await self._generate_quick_summary(brief)
             else:
-                summary = await self._generate_detailed_summary(brief)
+                summary = await self._generate_detailed_summary(brief, data.get("rich_intel"))
             
             return {
                 "success": True,
@@ -230,18 +246,20 @@ class BriefMeAgent:
     async def _fetch_premarket_data(self, data: Dict):
         """Fetch pre-market gappers and movers from Alpaca."""
         try:
-            # Key symbols to check
+            # Key symbols to check - expanded list
             index_etfs = ["SPY", "QQQ", "IWM", "DIA"]
-            watchlist = ["NVDA", "TSLA", "AAPL", "AMD", "META", "MSFT", "AMZN", "GOOGL"]
-            
-            # Get quotes for key symbols
-            all_symbols = index_etfs + watchlist
+            # Popular/volatile stocks likely to gap
+            watchlist = [
+                "NVDA", "TSLA", "AAPL", "AMD", "META", "MSFT", "AMZN", "GOOGL",
+                "SMCI", "ARM", "PLTR", "COIN", "MARA", "RIOT", "SOFI", "RBLX",
+                "SNOW", "CRWD", "NET", "SQ", "SHOP", "UBER", "LYFT", "ABNB"
+            ]
             
             gappers_up = []
             gappers_down = []
             index_status = {}
             
-            for symbol in all_symbols:
+            for symbol in index_etfs + watchlist:
                 try:
                     quote = await asyncio.to_thread(
                         self.alpaca_service.get_latest_quote, symbol
@@ -267,7 +285,7 @@ class BriefMeAgent:
                             
                             if symbol in index_etfs:
                                 index_status[symbol] = item
-                            elif abs(gap_pct) >= 2.0:  # 2%+ gap
+                            elif abs(gap_pct) >= 1.0:  # 1%+ gap (lowered from 2%)
                                 if gap_pct > 0:
                                     gappers_up.append(item)
                                 else:
@@ -334,7 +352,7 @@ class BriefMeAgent:
             
             data["key_levels"] = key_levels
             
-            # Also populate index_status from IB data
+            # Populate index_status from IB data
             for symbol in ["SPY", "QQQ", "IWM", "DIA"]:
                 if symbol in quotes:
                     q = quotes[symbol]
@@ -357,6 +375,52 @@ class BriefMeAgent:
                             "high": q.get("high", 0),
                             "low": q.get("low", 0)
                         }
+            
+            # Build gappers from IB data - use all available symbols
+            gappers_up = []
+            gappers_down = []
+            index_symbols = ["SPY", "QQQ", "IWM", "DIA", "VIX"]
+            
+            for symbol, q in quotes.items():
+                if symbol in index_symbols:
+                    continue
+                    
+                price = q.get("last", q.get("close", 0))
+                prev_close = q.get("prev_close", 0)
+                open_price = q.get("open", 0)
+                
+                # Try to calculate gap from prev_close or open
+                if prev_close and prev_close > 0 and price:
+                    gap_pct = ((price - prev_close) / prev_close) * 100
+                elif open_price and open_price > 0 and price:
+                    gap_pct = ((price - open_price) / open_price) * 100
+                else:
+                    continue
+                
+                if abs(gap_pct) >= 1.0:  # 1%+ move
+                    item = {
+                        "symbol": symbol,
+                        "price": price,
+                        "prev_close": prev_close or open_price,
+                        "gap_pct": round(gap_pct, 2),
+                        "high": q.get("high", 0),
+                        "low": q.get("low", 0)
+                    }
+                    
+                    if gap_pct > 0:
+                        gappers_up.append(item)
+                    else:
+                        gappers_down.append(item)
+            
+            # Sort and update gappers
+            gappers_up.sort(key=lambda x: x["gap_pct"], reverse=True)
+            gappers_down.sort(key=lambda x: x["gap_pct"])
+            
+            # Merge with existing gappers (IB data takes priority)
+            if gappers_up:
+                data["gappers"]["up"] = gappers_up[:5]
+            if gappers_down:
+                data["gappers"]["down"] = gappers_down[:5]
             
         except Exception as e:
             logger.warning(f"Failed to get IB realtime data: {e}")
@@ -518,7 +582,7 @@ class BriefMeAgent:
         
         return summary.strip()
     
-    async def _generate_detailed_summary(self, brief: Dict) -> Dict[str, str]:
+    async def _generate_detailed_summary(self, brief: Dict, rich_intel: Dict = None) -> Dict[str, str]:
         """Generate a detailed multi-section summary."""
         market = brief.get("market_summary", {})
         bot = brief.get("your_bot", {})
@@ -527,8 +591,31 @@ class BriefMeAgent:
         index_status = brief.get("index_status", {})
         gappers = brief.get("gappers", {"up": [], "down": []})
         
-        # Try LLM generation first
-        if self.llm_provider:
+        # Use rich_intel from MarketIntelService if available
+        sections = {}
+        
+        # If we have rich intel from MarketIntelService, use its content
+        if rich_intel:
+            logger.info(f"Using rich_intel with keys: {list(rich_intel.keys())}")
+            
+            # MarketIntelService provides formatted sections
+            if rich_intel.get("market_regime"):
+                sections["market_overview"] = f"**{rich_intel.get('market_regime', '')}**\n\n{rich_intel.get('regime_detail', '')}\n\n{rich_intel.get('vix_assessment', '')}\n\n📋 {rich_intel.get('strategy_recommendation', '')}"
+            
+            if rich_intel.get("news_summary"):
+                sections["news"] = f"**📰 Market News:**\n\n{rich_intel.get('news_summary', '')}"
+            
+            if rich_intel.get("watchlist_in_play"):
+                sections["in_play"] = f"**🔥 IN PLAY TODAY:**\n\n{rich_intel.get('watchlist_in_play', '')}"
+            
+            if rich_intel.get("sector_rotation"):
+                sections["sectors"] = f"**📊 Sector Rotation:**\n\n{rich_intel.get('sector_rotation', '')}"
+            
+            if rich_intel.get("earnings_watch"):
+                sections["earnings"] = f"**📅 Earnings Watch:**\n\n{rich_intel.get('earnings_watch', '')}"
+        
+        # Try LLM generation if no rich_intel
+        if not rich_intel and self.llm_provider:
             try:
                 llm_summary = await self._generate_llm_summary(brief)
                 if llm_summary:
@@ -536,74 +623,73 @@ class BriefMeAgent:
             except Exception as e:
                 logger.warning(f"LLM summary generation failed: {e}")
         
-        # Fallback to template-based generation
-        sections = {}
-        
-        # Market Overview with Index Status
-        regime = market.get("regime", "HOLD")
-        regime_label = market.get("regime_label", "Neutral")
-        score = market.get("regime_score", 50)
-        session = market.get("session", "Unknown")
-        session_advice = market.get("session_advice", "")
-        
-        # Build index status text
-        index_text = ""
-        spy = index_status.get("SPY", {})
-        qqq = index_status.get("QQQ", {})
-        vix = index_status.get("VIX", {})
-        
-        if spy:
-            spy_price = spy.get("price", 0)
-            spy_gap = spy.get("gap_pct", 0)
-            if spy_price:
-                index_text += f"**SPY:** ${spy_price:.2f}"
-                if spy_gap:
-                    index_text += f" ({'+' if spy_gap > 0 else ''}{spy_gap:.1f}%)"
-                index_text += "\n"
-        
-        if qqq:
-            qqq_price = qqq.get("price", 0)
-            qqq_gap = qqq.get("gap_pct", 0)
-            if qqq_price:
-                index_text += f"**QQQ:** ${qqq_price:.2f}"
-                if qqq_gap:
-                    index_text += f" ({'+' if qqq_gap > 0 else ''}{qqq_gap:.1f}%)"
-                index_text += "\n"
-        
-        if vix:
-            vix_price = vix.get("price", 0)
-            vix_level = vix.get("level", "")
-            if vix_price:
-                index_text += f"**VIX:** {vix_price:.1f} ({vix_level})\n"
-        
-        sections["market_overview"] = (
-            f"**Market Regime: {regime_label}** (Score: {score}/100)\n\n"
-            f"**Session:** {session}\n\n"
-            f"{index_text if index_text else ''}"
-            f"{session_advice}"
-        )
-        
-        # Gappers Section
-        gappers_up = gappers.get("up", [])
-        gappers_down = gappers.get("down", [])
-        
-        if gappers_up or gappers_down:
-            gapper_text = ""
+        # Build Market Overview with Index Status if not already set
+        if "market_overview" not in sections:
+            regime = market.get("regime", "HOLD")
+            regime_label = market.get("regime_label", "Neutral")
+            score = market.get("regime_score", 50)
+            session = market.get("session", "Unknown")
+            session_advice = market.get("session_advice", "")
             
-            if gappers_up:
-                gapper_text += "**🟢 Gapping UP:**\n"
-                for g in gappers_up[:5]:
-                    gapper_text += f"- **{g['symbol']}** +{g['gap_pct']:.1f}% (${g['price']:.2f})\n"
-                gapper_text += "\n"
+            # Build index status text
+            index_text = ""
+            spy = index_status.get("SPY", {})
+            qqq = index_status.get("QQQ", {})
+            vix = index_status.get("VIX", {})
             
-            if gappers_down:
-                gapper_text += "**🔴 Gapping DOWN:**\n"
-                for g in gappers_down[:5]:
-                    gapper_text += f"- **{g['symbol']}** {g['gap_pct']:.1f}% (${g['price']:.2f})\n"
+            if spy:
+                spy_price = spy.get("price", 0)
+                spy_gap = spy.get("gap_pct", 0)
+                if spy_price:
+                    index_text += f"**SPY:** ${spy_price:.2f}"
+                    if spy_gap:
+                        index_text += f" ({'+' if spy_gap > 0 else ''}{spy_gap:.1f}%)"
+                    index_text += "\n"
             
-            sections["gappers"] = gapper_text if gapper_text else "No significant gaps today."
-        else:
-            sections["gappers"] = "No significant gappers detected (need 2%+ move)."
+            if qqq:
+                qqq_price = qqq.get("price", 0)
+                qqq_gap = qqq.get("gap_pct", 0)
+                if qqq_price:
+                    index_text += f"**QQQ:** ${qqq_price:.2f}"
+                    if qqq_gap:
+                        index_text += f" ({'+' if qqq_gap > 0 else ''}{qqq_gap:.1f}%)"
+                    index_text += "\n"
+            
+            if vix:
+                vix_price = vix.get("price", 0)
+                vix_level = vix.get("level", "")
+                if vix_price:
+                    index_text += f"**VIX:** {vix_price:.1f} ({vix_level})\n"
+            
+            sections["market_overview"] = (
+                f"**Market Regime: {regime_label}** (Score: {score}/100)\n\n"
+                f"**Session:** {session}\n\n"
+                f"{index_text if index_text else ''}"
+                f"{session_advice}"
+            )
+        
+        # Gappers Section (only if not from rich_intel "in_play")
+        if "in_play" not in sections and "gappers" not in sections:
+            gappers_up = gappers.get("up", [])
+            gappers_down = gappers.get("down", [])
+            
+            if gappers_up or gappers_down:
+                gapper_text = ""
+                
+                if gappers_up:
+                    gapper_text += "**🟢 Gapping UP:**\n"
+                    for g in gappers_up[:5]:
+                        gapper_text += f"- **{g['symbol']}** +{g['gap_pct']:.1f}% (${g['price']:.2f})\n"
+                    gapper_text += "\n"
+                
+                if gappers_down:
+                    gapper_text += "**🔴 Gapping DOWN:**\n"
+                    for g in gappers_down[:5]:
+                        gapper_text += f"- **{g['symbol']}** {g['gap_pct']:.1f}% (${g['price']:.2f})\n"
+                
+                sections["gappers"] = gapper_text if gapper_text else "No significant gaps today."
+            else:
+                sections["gappers"] = "No significant gappers detected (need 2%+ move)."
         
         # Your Bot Status
         bot_state = "actively hunting for opportunities" if bot.get("running") else "currently paused"

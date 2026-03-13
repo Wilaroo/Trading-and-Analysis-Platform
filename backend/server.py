@@ -352,6 +352,7 @@ market_intel_service.set_services(
     smart_watchlist=smart_watchlist,
     alert_system=alert_system
 )
+register_service('market_intel_service', market_intel_service)
 init_market_intel_router(market_intel_service)
 
 # ===================== LEARNING ARCHITECTURE (Phase 1) =====================
