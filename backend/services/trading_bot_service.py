@@ -564,6 +564,9 @@ class TradingBotService:
         # Regime Performance Tracking
         self._regime_performance_service = None
         
+        # Trade Journal Service (auto-record trades)
+        self._trade_journal = None
+        
         # Callbacks for real-time updates
         self._trade_callbacks: List[callable] = []
         
@@ -617,6 +620,11 @@ class TradingBotService:
         """Set enhanced scanner for strategy stats access (Smart Strategy Filtering)"""
         self._enhanced_scanner = scanner
         logger.info("TradingBotService: Enhanced Scanner connected for Smart Strategy Filtering")
+    
+    def set_trade_journal(self, journal_service):
+        """Set trade journal service for auto-recording trades"""
+        self._trade_journal = journal_service
+        logger.info("TradingBotService: Trade Journal connected for auto-recording")
     
     # ==================== SMART STRATEGY FILTERING ====================
     
@@ -2529,6 +2537,9 @@ class TradingBotService:
                 await self._notify_trade_update(trade, "executed")
                 await self._save_trade(trade)
                 
+                # Auto-record to Trade Journal
+                await self._log_trade_to_journal(trade, "entry")
+                
                 sim_tag = " (SIMULATED)" if result.get('simulated') else ""
                 logger.info(f"✅ Trade executed{sim_tag}: {trade.symbol} {trade.shares} @ ${trade.fill_price:.2f}")
             
@@ -3048,6 +3059,9 @@ class TradingBotService:
             
             await self._notify_trade_update(trade, "closed")
             await self._save_trade(trade)
+            
+            # Auto-record exit to Trade Journal
+            await self._log_trade_to_journal(trade, "exit")
             
             # Record performance for learning loop
             if hasattr(self, '_perf_service') and self._perf_service:
@@ -3751,6 +3765,103 @@ class TradingBotService:
         except Exception as e:
             logger.error(f"Scanner auto-submit error: {e}")
             return {"success": False, "reason": str(e)}
+
+    async def _log_trade_to_journal(self, trade: BotTrade, action: str = "entry"):
+        """
+        Auto-record a trade to the Trade Journal.
+        
+        Args:
+            trade: The BotTrade object
+            action: "entry" for new trades, "exit" for closed trades
+        """
+        if not self._trade_journal:
+            logger.debug("Trade journal not configured - skipping auto-record")
+            return
+        
+        try:
+            # Get current market regime for context
+            regime = self._current_regime or "UNKNOWN"
+            
+            # Build journal entry based on action type
+            if action == "entry":
+                journal_entry = {
+                    "symbol": trade.symbol,
+                    "direction": trade.direction.value.upper(),
+                    "entry_price": trade.fill_price or trade.entry_price,
+                    "entry_date": (trade.executed_at or datetime.now(timezone.utc).isoformat())[:10],
+                    "shares": trade.shares,
+                    "stop_loss": trade.stop_price,
+                    "target": trade.target_prices[0] if trade.target_prices else None,
+                    "setup_type": trade.setup_type or "bot_trade",
+                    "strategy": trade.setup_type or "Auto-Trade",
+                    "market_regime": regime,
+                    "notes": f"[AUTO-RECORDED by Trading Bot]\nSetup: {trade.setup_type}\nReason: {trade.notes or 'Bot execution'}",
+                    "status": "open",
+                    "tags": ["auto-recorded", "trading-bot", regime.lower()],
+                    "bot_trade_id": trade.id,
+                }
+                
+                result = await self._trade_journal.log_trade(journal_entry)
+                if result.get("success"):
+                    logger.info(f"📓 Auto-recorded ENTRY to journal: {trade.symbol} {trade.direction.value}")
+                else:
+                    logger.warning(f"Failed to record entry: {result.get('error', 'Unknown error')}")
+                
+            elif action == "exit":
+                # For exits, we update the existing trade entry if possible
+                # First try to find the existing journal entry by bot_trade_id
+                try:
+                    existing = await self._trade_journal.db.trades.find_one({
+                        "bot_trade_id": trade.id
+                    })
+                    
+                    if existing:
+                        # Update the existing entry with exit data
+                        update_data = {
+                            "exit_price": trade.exit_price,
+                            "exit_date": (trade.closed_at or datetime.now(timezone.utc).isoformat())[:10],
+                            "pnl": trade.realized_pnl,
+                            "pnl_percent": trade.pnl_pct,
+                            "status": "closed",
+                            "exit_reason": trade.close_reason or "closed",
+                            "notes": existing.get("notes", "") + f"\n\n[EXIT] Reason: {trade.close_reason or 'closed'}, P&L: ${trade.realized_pnl:+,.2f}",
+                        }
+                        
+                        await self._trade_journal.db.trades.update_one(
+                            {"_id": existing["_id"]},
+                            {"$set": update_data}
+                        )
+                        logger.info(f"📓 Auto-recorded EXIT to journal: {trade.symbol} P&L: ${trade.realized_pnl:+,.2f}")
+                    else:
+                        # No existing entry found, create a complete closed trade entry
+                        journal_entry = {
+                            "symbol": trade.symbol,
+                            "direction": trade.direction.value.upper(),
+                            "entry_price": trade.fill_price,
+                            "entry_date": (trade.executed_at or datetime.now(timezone.utc).isoformat())[:10],
+                            "exit_price": trade.exit_price,
+                            "exit_date": (trade.closed_at or datetime.now(timezone.utc).isoformat())[:10],
+                            "shares": trade.shares,
+                            "pnl": trade.realized_pnl,
+                            "pnl_percent": trade.pnl_pct,
+                            "status": "closed",
+                            "setup_type": trade.setup_type or "bot_trade",
+                            "strategy": trade.setup_type or "Auto-Trade",
+                            "market_regime": regime,
+                            "notes": f"[AUTO-RECORDED by Trading Bot]\nExit Reason: {trade.close_reason or 'closed'}",
+                            "tags": ["auto-recorded", "trading-bot", regime.lower()],
+                            "bot_trade_id": trade.id,
+                        }
+                        
+                        await self._trade_journal.log_trade(journal_entry)
+                        logger.info(f"📓 Auto-recorded complete trade to journal: {trade.symbol} P&L: ${trade.realized_pnl:+,.2f}")
+                        
+                except Exception as e:
+                    logger.error(f"Error finding/updating journal entry: {e}")
+                
+        except Exception as e:
+            logger.error(f"Failed to auto-record trade to journal: {e}")
+
 
 
 # Singleton instance

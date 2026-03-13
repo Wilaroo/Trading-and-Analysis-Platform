@@ -300,8 +300,53 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
       {/* Expanded Panel */}
       {expanded && (
         <div className="px-3 pb-3 space-y-3 border-t border-white/5">
+          {/* Major Indices - SPY, QQQ, IWM */}
+          <div className="mt-3">
+            <span className="text-[10px] text-zinc-500 block mb-2">MAJOR INDICES</span>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { symbol: 'SPY', name: 'S&P 500', change: regime?.signal_blocks?.breadth?.signals?.spy_change || 0 },
+                { symbol: 'QQQ', name: 'Nasdaq', change: regime?.signal_blocks?.breadth?.signals?.qqq_change || 0 },
+                { symbol: 'IWM', name: 'Russell', change: regime?.signal_blocks?.breadth?.signals?.iwm_change || 0 },
+              ].map(idx => (
+                <div 
+                  key={idx.symbol}
+                  className={`p-2 rounded-lg border ${
+                    idx.change > 0 
+                      ? 'bg-emerald-500/5 border-emerald-500/20' 
+                      : idx.change < 0 
+                        ? 'bg-rose-500/5 border-rose-500/20' 
+                        : 'bg-zinc-800/50 border-white/5'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white">{idx.symbol}</span>
+                    <span className={`text-xs font-mono font-medium ${
+                      idx.change > 0 ? 'text-emerald-400' : idx.change < 0 ? 'text-rose-400' : 'text-zinc-400'
+                    }`}>
+                      {idx.change > 0 ? '+' : ''}{idx.change?.toFixed(2) || '0.00'}%
+                    </span>
+                  </div>
+                  <span className="text-[9px] text-zinc-500">{idx.name}</span>
+                </div>
+              ))}
+            </div>
+            
+            {/* Index Alignment Status */}
+            <div className="mt-2 flex items-center justify-between p-2 bg-black/30 rounded-lg">
+              <span className="text-[10px] text-zinc-500">Index Alignment</span>
+              <span className={`text-xs font-medium ${
+                regime?.signal_blocks?.breadth?.signals?.indices_aligned === 'BULLISH' ? 'text-emerald-400' :
+                regime?.signal_blocks?.breadth?.signals?.indices_aligned === 'BEARISH' ? 'text-rose-400' :
+                'text-amber-400'
+              }`}>
+                {regime?.signal_blocks?.breadth?.signals?.indices_aligned || 'MIXED'}
+              </span>
+            </div>
+          </div>
+          
           {/* Recommendation */}
-          <div className="flex items-start gap-2 p-2 bg-black/30 rounded-lg mt-3">
+          <div className="flex items-start gap-2 p-2 bg-black/30 rounded-lg">
             <Brain className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
             <p className="text-xs text-zinc-300 leading-relaxed">
               {regime?.recommendation || 'Loading...'}
