@@ -8,12 +8,15 @@ import {
   Target,
   ChevronRight,
   BookOpen,
-  Settings
+  Settings,
+  Brain,
+  Sparkles
 } from 'lucide-react';
 
 const navItems = [
   { id: 'command-center', icon: Target, label: 'Command Center', highlight: true },
   { id: 'trading', icon: Activity, label: 'Trading Dashboard', highlight: true },
+  { id: 'team-brain-mockups', icon: Brain, label: 'Team Brain Mockups', highlight: true, isNew: true },
   { id: 'trade-journal', icon: ClipboardList, label: 'Trade Journal' },
   { id: 'chart', icon: LineChart, label: 'Charts' },
   { id: 'ib-trading', icon: Zap, label: 'IB Trading' },
@@ -108,6 +111,11 @@ export const Sidebar = ({ activeTab, setActiveTab }) => {
                     className="whitespace-nowrap flex items-center gap-1.5 text-[11px] font-medium"
                   >
                     {item.label}
+                    {item.isNew && (
+                      <span className="px-1.5 py-0.5 text-[8px] font-bold bg-violet-500/30 text-violet-300 rounded-full animate-pulse">
+                        NEW
+                      </span>
+                    )}
                   </motion.span>
                 )}
               </AnimatePresence>
