@@ -7,6 +7,60 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## RECENT UPDATES (March 13, 2026)
 
+### Enhanced "Brief Me" Feature Complete
+
+**Status:** ✅ COMPLETE - Tested and Verified (iteration_81.json - 92%)
+
+**New Features Added:**
+
+1. **Real News Headlines & Catalysts**
+   - Fetches from IB Gateway (primary) or Finnhub (fallback)
+   - 8+ market news headlines displayed
+   - Catalyst extraction: earnings, analyst, fed, economic, deal, product types
+   - Each catalyst shows type, ticker, headline, and impact level
+
+2. **News Sentiment Analysis**
+   - Bullish/Bearish/Neutral market tone indicator
+   - Displayed as colored badge in quick summary
+   - Derived from headline keyword analysis
+
+3. **Market Themes Extraction**
+   - Auto-detects: Inflation Data, AI/Technology, Energy/Oil, Fed/Rates, etc.
+   - Displayed as theme badges in quick summary
+   - Helps identify market-moving narratives
+
+4. **Sector Rotation Analysis**
+   - Tracks 11 sector ETFs (XLK, XLF, XLE, XLV, XLI, XLC, XLY, XLP, XLU, XLRE, XLB)
+   - Shows top 3 leaders and bottom 3 laggards with % change
+   - Rotation signals: risk_on_growth, risk_off_defensive, cyclical_rotation, broad_selling, broad_buying, mixed_rotation
+   - Strategy recommendations based on rotation
+
+5. **Earnings Calendar Integration**
+   - Warns about upcoming earnings for watchlist stocks
+   - Shows date, timing (BMO/AMC), and EPS estimates
+   - Position sizing advice before earnings
+
+**Files Modified:**
+- `/app/backend/agents/brief_me_agent.py` - Complete rewrite with parallel data fetching, timeouts, and enhanced sections
+- `/app/backend/routers/agents.py` - Injected news_service into BriefMeAgent
+- `/app/frontend/src/components/BriefMeModal.jsx` - Added News Tone, Top Sector, Catalyst badges; themes row; detailed sections for news, catalysts, sectors, earnings
+
+**Testing Results (iteration_81.json):**
+- ✅ API returns news headlines (8+ items): PASS
+- ✅ News themes extracted: PASS
+- ✅ News sentiment analysis: PASS  
+- ✅ Sector rotation leaders/laggards: PASS
+- ✅ Sector rotation signal: PASS
+- ✅ Catalysts extracted: PASS
+- ✅ Quick response time ~15s: PASS
+- ✅ Frontend modal opens: PASS
+- ✅ Quick summary badges: PASS
+- ✅ Themes row: PASS
+- ✅ Toggle to detailed view: PASS
+- ⚠️ Detailed response time ~52s: NEEDS OPTIMIZATION (target was 40s)
+
+---
+
 ### Custom Chart & In-Trade Guidance Complete
 
 **Status:** ✅ COMPLETE - Tested and Verified (iteration_80.json - 100%)
