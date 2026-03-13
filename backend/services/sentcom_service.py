@@ -539,35 +539,44 @@ class SentComService:
         # First, get bot-managed trades (these have more detailed tracking)
         if trading_bot:
             try:
-                bot_status = trading_bot.get_status()
-                if isinstance(bot_status, dict):
-                    open_trades = bot_status.get("open_trades", [])
-                    if isinstance(open_trades, list):
-                        for trade in open_trades:
-                            symbol = trade.get("symbol")
-                            if symbol:
-                                seen_symbols.add(symbol)
-                            
-                            entry = trade.get("fill_price") or trade.get("entry_price", 0)
-                            current = trade.get("current_price", entry)
-                            shares = trade.get("shares") or trade.get("quantity", 0)
-                            
+                # Get open trades directly from trading bot service
+                open_trades = trading_bot.get_open_trades()
+                if isinstance(open_trades, list):
+                    for trade in open_trades:
+                        symbol = trade.get("symbol")
+                        if symbol:
+                            seen_symbols.add(symbol)
+                        
+                        entry = trade.get("fill_price") or trade.get("entry_price", 0)
+                        current = trade.get("current_price", entry)
+                        shares = trade.get("shares") or trade.get("quantity", 0)
+                        direction = trade.get("direction", "long")
+                        
+                        # Calculate P&L based on direction
+                        if direction == "short":
+                            pnl = (entry - current) * shares if entry and current else 0
+                            pnl_pct = ((entry - current) / entry * 100) if entry else 0
+                        else:
                             pnl = (current - entry) * shares if entry and current else 0
                             pnl_pct = ((current - entry) / entry * 100) if entry else 0
-                            
-                            positions.append({
-                                "symbol": symbol,
-                                "shares": shares,
-                                "entry_price": entry,
-                                "current_price": current,
-                                "pnl": round(pnl, 2),
-                                "pnl_percent": round(pnl_pct, 2),
-                                "stop_price": trade.get("stop_price"),
-                                "target_prices": trade.get("target_prices", []),
-                                "status": trade.get("status", "open"),
-                                "entry_time": trade.get("entry_time"),
-                                "source": "bot"
-                            })
+                        
+                        positions.append({
+                            "symbol": symbol,
+                            "shares": shares,
+                            "direction": direction,
+                            "entry_price": entry,
+                            "current_price": current,
+                            "pnl": round(pnl, 2),
+                            "pnl_percent": round(pnl_pct, 2),
+                            "stop_price": trade.get("stop_price"),
+                            "target_prices": trade.get("target_prices", []),
+                            "status": trade.get("status", "open"),
+                            "setup_type": trade.get("setup_type", "unknown"),
+                            "entry_time": trade.get("executed_at"),
+                            "trade_id": trade.get("id"),
+                            "source": "bot",
+                            "notes": trade.get("notes", "")
+                        })
             except Exception as e:
                 logger.error(f"Error getting bot positions: {e}")
         
