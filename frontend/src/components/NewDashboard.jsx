@@ -5,7 +5,7 @@
  * - Header: Bot status, compact info (Session/Regime/Brief Me), Account data, Risk Status, P&L
  * - Bot Performance Chart (always visible)
  * - Main Grid:
- *   - Left (8 cols): Bot's Brain (with Order Pipeline), Active Positions, Setups I'm Watching
+ *   - Left (8 cols): Team Brain (with Order Pipeline), Active Positions, Setups We're Watching
  *   - Right (4 cols): AI Assistant, Market Regime, Quick Stats
  * - Scanner Alerts strip at bottom
  */
@@ -310,7 +310,7 @@ const ActivePositionsCard = ({ positions = [], onPositionClick }) => {
   );
 };
 
-// Setups I'm Watching Card
+// Setups We're Watching Card
 const WatchingSetupsCard = ({ setups = [] }) => {
   const { openTickerModal } = useTickerModal();
   
@@ -319,7 +319,7 @@ const WatchingSetupsCard = ({ setups = [] }) => {
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-3">
           <Eye className="w-5 h-5 text-purple-400" />
-          <h2 className="font-bold text-lg">SETUPS I'M WATCHING</h2>
+          <h2 className="font-bold text-lg">SETUPS WE'RE WATCHING</h2>
           <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-400 text-xs font-mono">
             {setups.length} PENDING
           </span>
@@ -671,7 +671,7 @@ const NewDashboard = ({
           {/* Active Positions */}
           <ActivePositionsCard positions={effectiveOpenTrades} />
           
-          {/* Setups I'm Watching */}
+          {/* Setups We're Watching */}
           <WatchingSetupsCard setups={effectiveWatchingSetups} />
         </div>
         

@@ -3,7 +3,7 @@
  * 
  * Features:
  * - Order Pipeline: Visual order flow (Pending → Executing → Filled)
- * - Real-time thought stream: "I detected...", "I'm monitoring..."
+ * - Real-time thought stream: "We detected...", "We're monitoring..." (Team Brain unified "we" voice)
  * - Proactive Intelligence: Setup triggers, profit-taking suggestions, market alerts
  * - In-Trade Guidance: Position-specific alerts and recommendations
  * - Smart Strategy Filtering: Shows when trades are filtered based on historical performance
@@ -693,9 +693,9 @@ const BotBrainPanel = ({
     if (watchingSetups && watchingSetups.length > 0) {
       const topSetup = watchingSetups[0];
       newThoughts.push({
-        text: `"I detected a ${topSetup.setup_type || 'potential setup'} forming on ${topSetup.symbol}. ${
+        text: `"We detected a ${topSetup.setup_type || 'potential setup'} forming on ${topSetup.symbol}. ${
           topSetup.trigger_price ? `Entry trigger at $${topSetup.trigger_price.toFixed(2)}.` : ''
-        } ${topSetup.risk_reward ? `R:R is ${topSetup.risk_reward.toFixed(1)}:1.` : ''} I'm preparing to enter if conditions confirm."`,
+        } ${topSetup.risk_reward ? `R:R is ${topSetup.risk_reward.toFixed(1)}:1.` : ''} We're preparing to enter if conditions confirm."`,
         timestamp: topSetup.timestamp || new Date().toISOString(),
         confidence: topSetup.confidence || 75,
         action_type: 'watching',
@@ -712,11 +712,11 @@ const BotBrainPanel = ({
         const direction = pnlPct >= 0 ? 'up' : 'down';
         
         newThoughts.push({
-          text: `"I'm monitoring my ${trade.symbol} position. Currently ${direction} ${Math.abs(pnlPct).toFixed(1)}%. ${
+          text: `"We're monitoring our ${trade.symbol} position. Currently ${direction} ${Math.abs(pnlPct).toFixed(1)}%. ${
             trade.stop_price ? `Stop is safe at $${trade.stop_price.toFixed(2)}.` : ''
           } ${
             trade.target_prices?.[0] && pnlPct > 0 
-              ? `I'll consider taking profits near $${trade.target_prices[0].toFixed(2)}.` 
+              ? `We'll consider taking profits near $${trade.target_prices[0].toFixed(2)}.` 
               : ''
           }"`,
           timestamp: trade.last_update || trade.entry_time || new Date().toISOString(),
@@ -730,8 +730,8 @@ const BotBrainPanel = ({
     // Add general market awareness thought
     if (botStatus?.state === 'hunting' || botStatus?.state === 'active') {
       newThoughts.push({
-        text: `"I'm actively scanning for opportunities. ${
-          botStatus.regime ? `Market regime is ${botStatus.regime}, so I'm ${
+        text: `"We're actively scanning for opportunities. ${
+          botStatus.regime ? `Market regime is ${botStatus.regime}, so we're ${
             botStatus.regime === 'RISK_ON' ? 'looking for aggressive setups.' :
             botStatus.regime === 'RISK_OFF' ? 'being cautious with entries.' :
             'using standard position sizing.'
@@ -747,7 +747,7 @@ const BotBrainPanel = ({
     if (newThoughts.length === 0) {
       newThoughts.push(
         {
-          text: `"I'm monitoring market conditions and scanning for setups that match my criteria. Looking for high R:R opportunities with clear entry triggers."`,
+          text: `"We're monitoring market conditions and scanning for setups that match our criteria. Looking for high R:R opportunities with clear entry triggers."`,
           timestamp: new Date().toISOString(),
           confidence: 50,
           action_type: 'scanning',
@@ -786,12 +786,12 @@ const BotBrainPanel = ({
       <div className="p-4 border-b border-white/5">
         <div className="flex justify-between items-center mb-3">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-cyan-400/20 flex items-center justify-center">
-              <Cpu className="w-5 h-5 text-cyan-400" />
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-400/20 to-violet-500/20 flex items-center justify-center">
+              <Brain className="w-5 h-5 text-cyan-400" />
             </div>
             <div>
-              <h2 className="font-bold text-lg text-cyan-400">BOT'S BRAIN</h2>
-              <p className="text-xs text-zinc-500">What I'm thinking right now</p>
+              <h2 className="font-bold text-lg text-white">TEAM BRAIN</h2>
+              <p className="text-xs text-zinc-500">What we're thinking right now</p>
             </div>
           </div>
           

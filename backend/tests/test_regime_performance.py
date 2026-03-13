@@ -273,7 +273,7 @@ class TestRegimePerformanceAPI:
         import httpx
         
         # Get the API URL from env
-        api_url = "https://ai-trader-bot-26.preview.emergentagent.com"
+        api_url = "https://team-brain-unified.preview.emergentagent.com"
         
         endpoints = [
             "/api/regime-performance/summary",

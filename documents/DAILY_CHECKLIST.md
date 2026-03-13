@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://ai-trader-bot-26.preview.emergentagent.com
+https://team-brain-unified.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://ai-trader-bot-26.preview.emergentagent.com
+https://team-brain-unified.preview.emergentagent.com
 ```
