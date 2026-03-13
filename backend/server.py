@@ -254,6 +254,9 @@ trading_bot._ai_assistant = assistant_service
 background_scanner.set_trading_bot(trading_bot)
 background_scanner.set_db(db)
 
+# Wire Trading bot ↔ Scanner for Smart Strategy Filtering (access to strategy stats)
+trading_bot.set_enhanced_scanner(background_scanner)
+
 # Wire Scanner ↔ AI assistant for proactive coaching notifications
 background_scanner.set_ai_assistant(assistant_service)
 

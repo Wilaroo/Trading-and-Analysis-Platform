@@ -6,12 +6,14 @@
  * - Real-time thought stream: "I detected...", "I'm monitoring..."
  * - Proactive Intelligence: Setup triggers, profit-taking suggestions, market alerts
  * - In-Trade Guidance: Position-specific alerts and recommendations
+ * - Smart Strategy Filtering: Shows when trades are filtered based on historical performance
+ * - One-Click Stop Fix: Quick fix button for risky stop warnings
  * - Timestamped entries with confidence badges
  * - Clickable ticker mentions
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Brain, Cpu, ChevronRight, Clock, Zap, Target, Eye, AlertCircle, ArrowRight, CheckCircle, Loader, TrendingUp, Bell, Sparkles } from 'lucide-react';
+import { Brain, Cpu, ChevronRight, Clock, Zap, Target, Eye, AlertCircle, ArrowRight, CheckCircle, Loader, TrendingUp, Bell, Sparkles, Wrench, Shield } from 'lucide-react';
 import { useTickerModal } from '../hooks/useTickerModal';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
@@ -57,6 +59,122 @@ const OrderPipeline = ({ orderQueue }) => {
         <span className="text-xs font-mono text-emerald-400">{completed}</span>
         <span className="text-[10px] text-zinc-500">filled</span>
       </div>
+    </div>
+  );
+};
+
+// One-Click Stop Fix Component - Shows button when there are risky stops
+const StopFixActions = ({ thoughts = [], onRefresh }) => {
+  const [isFixing, setIsFixing] = useState(false);
+  const [fixResult, setFixResult] = useState(null);
+  
+  // Check if there are any stop warnings in thoughts
+  const stopWarnings = useMemo(() => {
+    return thoughts.filter(t => 
+      t.action_type === 'stop_warning' && 
+      (t.severity === 'critical' || t.severity === 'warning')
+    );
+  }, [thoughts]);
+  
+  const handleFixAllStops = async () => {
+    setIsFixing(true);
+    setFixResult(null);
+    
+    try {
+      const response = await fetch(`${API_URL}/api/trading-bot/fix-all-risky-stops`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        setFixResult({
+          success: true,
+          message: data.message || `Fixed ${data.fixes_applied} stops`,
+          fixes: data.fixes || []
+        });
+        
+        // Refresh thoughts after fix
+        if (onRefresh) {
+          setTimeout(onRefresh, 1000);
+        }
+      } else {
+        setFixResult({
+          success: false,
+          message: data.error || 'Failed to fix stops'
+        });
+      }
+    } catch (err) {
+      console.error('Error fixing stops:', err);
+      setFixResult({
+        success: false,
+        message: 'Network error - could not fix stops'
+      });
+    } finally {
+      setIsFixing(false);
+    }
+  };
+  
+  // Only show if there are stop warnings
+  if (stopWarnings.length === 0 && !fixResult) {
+    return null;
+  }
+  
+  return (
+    <div className="mt-3 p-3 rounded-lg bg-gradient-to-r from-amber-500/10 to-transparent border border-amber-500/20">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Shield className="w-4 h-4 text-amber-400" />
+          <span className="text-sm text-amber-300 font-medium">
+            {stopWarnings.length} Risky Stop{stopWarnings.length !== 1 ? 's' : ''} Detected
+          </span>
+        </div>
+        
+        <button
+          onClick={handleFixAllStops}
+          disabled={isFixing}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 text-xs font-medium transition-all disabled:opacity-50"
+        >
+          {isFixing ? (
+            <>
+              <Loader className="w-3 h-3 animate-spin" />
+              Fixing...
+            </>
+          ) : (
+            <>
+              <Wrench className="w-3 h-3" />
+              Fix All Stops
+            </>
+          )}
+        </button>
+      </div>
+      
+      {/* Show fix result */}
+      {fixResult && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          className={`mt-2 p-2 rounded text-xs ${
+            fixResult.success 
+              ? 'bg-emerald-500/10 text-emerald-400' 
+              : 'bg-red-500/10 text-red-400'
+          }`}
+        >
+          {fixResult.success && fixResult.fixes?.length > 0 ? (
+            <div className="space-y-1">
+              <p className="font-medium">{fixResult.message}</p>
+              {fixResult.fixes.map((fix, i) => (
+                <p key={i} className="text-zinc-400">
+                  {fix.symbol}: ${fix.old_stop?.toFixed(2)} → ${fix.new_stop?.toFixed(2)} ({fix.improvement})
+                </p>
+              ))}
+            </div>
+          ) : (
+            <p>{fixResult.message}</p>
+          )}
+        </motion.div>
+      )}
     </div>
   );
 };
@@ -346,6 +464,17 @@ const getConfidenceBadge = (confidence, actionType = '') => {
     return { text: 'HEADS UP', bg: 'bg-blue-500/20', color: 'text-blue-400' };
   }
   
+  // Special handling for strategy filter actions
+  if (actionType === 'filter_skip') {
+    return { text: 'FILTERED OUT', bg: 'bg-amber-500/30', color: 'text-amber-400' };
+  }
+  if (actionType === 'filter_reduce') {
+    return { text: 'REDUCED SIZE', bg: 'bg-purple-500/30', color: 'text-purple-400' };
+  }
+  if (actionType === 'filter_proceed') {
+    return { text: 'GREENLIGHT', bg: 'bg-emerald-500/30', color: 'text-emerald-400' };
+  }
+  
   if (confidence >= 80) return { text: 'HIGH CONFIDENCE', bg: 'bg-emerald-500/20', color: 'text-emerald-400' };
   if (confidence >= 60) return { text: 'MONITORING', bg: 'bg-purple-500/20', color: 'text-purple-400' };
   if (confidence >= 40) return { text: 'WATCHING', bg: 'bg-amber-500/20', color: 'text-amber-400' };
@@ -359,6 +488,12 @@ const ActionIcon = ({ type, severity }) => {
       return severity === 'critical' 
         ? <AlertCircle className="w-4 h-4 text-red-400 animate-pulse" />
         : <AlertCircle className="w-4 h-4 text-amber-400" />;
+    case 'filter_skip':
+      return <AlertCircle className="w-4 h-4 text-amber-400" />;
+    case 'filter_reduce':
+      return <TrendingUp className="w-4 h-4 text-purple-400" />;
+    case 'filter_proceed':
+      return <Sparkles className="w-4 h-4 text-emerald-400" />;
     case 'entry':
     case 'buy':
       return <Zap className="w-4 h-4 text-emerald-400" />;
@@ -428,12 +563,27 @@ const ThoughtEntry = ({ thought, index, onTickerClick }) => {
   
   // Special styling for stop warnings
   const isStopWarning = actionType === 'stop_warning';
-  const borderColor = isStopWarning 
-    ? (severity === 'critical' ? 'border-red-500' : severity === 'warning' ? 'border-amber-500' : 'border-blue-400')
-    : 'border-cyan-400';
-  const bgGradient = isStopWarning
-    ? (severity === 'critical' ? 'from-red-500/20' : severity === 'warning' ? 'from-amber-500/15' : 'from-blue-400/10')
-    : 'from-cyan-400/10';
+  // Special styling for filter actions
+  const isFilterAction = actionType.startsWith('filter_');
+  
+  let borderColor = 'border-cyan-400';
+  let bgGradient = 'from-cyan-400/10';
+  
+  if (isStopWarning) {
+    borderColor = severity === 'critical' ? 'border-red-500' : severity === 'warning' ? 'border-amber-500' : 'border-blue-400';
+    bgGradient = severity === 'critical' ? 'from-red-500/20' : severity === 'warning' ? 'from-amber-500/15' : 'from-blue-400/10';
+  } else if (isFilterAction) {
+    if (actionType === 'filter_skip') {
+      borderColor = 'border-amber-500';
+      bgGradient = 'from-amber-500/15';
+    } else if (actionType === 'filter_reduce') {
+      borderColor = 'border-purple-500';
+      bgGradient = 'from-purple-500/15';
+    } else if (actionType === 'filter_proceed') {
+      borderColor = 'border-emerald-500';
+      bgGradient = 'from-emerald-500/15';
+    }
+  }
   
   return (
     <motion.div
@@ -448,9 +598,11 @@ const ThoughtEntry = ({ thought, index, onTickerClick }) => {
         <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${
           isStopWarning 
             ? (severity === 'critical' ? 'bg-red-500/30' : 'bg-amber-500/30')
-            : (index === 0 ? 'bg-cyan-400/30' : 'bg-cyan-400/20')
+            : isFilterAction
+              ? (actionType === 'filter_skip' ? 'bg-amber-500/30' : actionType === 'filter_reduce' ? 'bg-purple-500/30' : 'bg-emerald-500/30')
+              : (index === 0 ? 'bg-cyan-400/30' : 'bg-cyan-400/20')
         }`}>
-          {isStopWarning ? (
+          {isStopWarning || isFilterAction ? (
             <ActionIcon type={actionType} severity={severity} />
           ) : (
             <span className="text-xs text-cyan-400">{index + 1}</span>
@@ -458,7 +610,7 @@ const ThoughtEntry = ({ thought, index, onTickerClick }) => {
         </div>
         
         <div className="flex-1 min-w-0">
-          <p className={`text-sm leading-relaxed ${isStopWarning ? 'text-zinc-100' : 'text-zinc-200'}`}>
+          <p className={`text-sm leading-relaxed ${isStopWarning || isFilterAction ? 'text-zinc-100' : 'text-zinc-200'}`}>
             <ThoughtText text={thought.text} onTickerClick={onTickerClick} />
           </p>
           
@@ -472,7 +624,14 @@ const ThoughtEntry = ({ thought, index, onTickerClick }) => {
             <span className={`px-2 py-0.5 rounded ${badge.bg} ${badge.color}`}>
               {badge.text}
             </span>
-            {thought.action_type && !isStopWarning && (
+            {/* Show win rate for filter actions */}
+            {isFilterAction && thought.win_rate !== undefined && thought.win_rate > 0 && (
+              <span className="flex items-center gap-1 text-zinc-400">
+                <TrendingUp className="w-3 h-3" />
+                {(thought.win_rate * 100).toFixed(0)}% WR
+              </span>
+            )}
+            {thought.action_type && !isStopWarning && !isFilterAction && (
               <span className="flex items-center gap-1 text-zinc-400">
                 <ActionIcon type={thought.action_type} />
                 {thought.action_type}
@@ -686,6 +845,12 @@ const BotBrainPanel = ({
             <p className="text-xs">Bot is idle. Start trading to see thoughts.</p>
           </div>
         )}
+        
+        {/* One-Click Stop Fix Action Bar */}
+        <StopFixActions 
+          thoughts={thoughts} 
+          onRefresh={fetchThoughts}
+        />
       </div>
       
       {/* Proactive Intelligence Alerts */}
