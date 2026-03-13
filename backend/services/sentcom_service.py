@@ -386,9 +386,18 @@ class SentComService:
             
         except Exception as e:
             logger.error(f"SentCom chat error: {e}")
+            # Provide a friendly error message
+            error_response = "We're having trouble with that query right now."
+            if "connection" in str(e).lower() or "offline" in str(e).lower():
+                error_response = "We're currently offline and can't access market data. Once we're connected, we'll be able to help with that."
+            elif "NoneType" in str(e) or "not found" in str(e).lower():
+                error_response = "We're still initializing our systems. Give us a moment and try again."
+            else:
+                error_response = f"We ran into an issue processing that. Let's try again in a moment."
+            
             return {
                 "success": False,
-                "response": f"We encountered an issue: {str(e)}. Let's try that again.",
+                "response": error_response,
                 "source": "sentcom_error"
             }
     

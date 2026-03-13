@@ -690,8 +690,27 @@ const SentCom = ({ compact = false, embedded = false }) => {
   const { alerts, loading: alertsLoading } = useSentComAlerts();
   
   const [selectedPosition, setSelectedPosition] = useState(null);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [localMessages, setLocalMessages] = useState([]);
 
   const handleChat = async (message) => {
+    if (!message.trim() || chatLoading) return;
+    
+    setChatLoading(true);
+    
+    // Add user message to local messages immediately
+    const userMsg = {
+      id: `user_${Date.now()}`,
+      type: 'chat',
+      content: message,
+      timestamp: new Date().toISOString(),
+      action_type: 'user_message',
+      metadata: { role: 'user' }
+    };
+    setLocalMessages(prev => [userMsg, ...prev]);
+    setChatInput('');
+    
     try {
       const res = await fetch(`${API_BASE}/api/sentcom/chat`, {
         method: 'POST',
@@ -699,13 +718,42 @@ const SentCom = ({ compact = false, embedded = false }) => {
         body: JSON.stringify({ message })
       });
       const data = await res.json();
-      // Refresh stream to show new message
-      setTimeout(refreshStream, 500);
+      
+      // Add assistant response to local messages
+      const assistantMsg = {
+        id: `assistant_${Date.now()}`,
+        type: 'chat',
+        content: data.response || "We're processing your request...",
+        timestamp: new Date().toISOString(),
+        action_type: 'chat_response',
+        metadata: { role: 'assistant', source: data.source }
+      };
+      setLocalMessages(prev => [assistantMsg, ...prev]);
+      
+      // Refresh stream to sync with backend
+      setTimeout(refreshStream, 1000);
       return data;
     } catch (err) {
       console.error('Chat error:', err);
+      // Add error message
+      const errorMsg = {
+        id: `error_${Date.now()}`,
+        type: 'system',
+        content: "We're having trouble processing that right now. We'll keep trying.",
+        timestamp: new Date().toISOString(),
+        action_type: 'error',
+        metadata: { role: 'assistant' }
+      };
+      setLocalMessages(prev => [errorMsg, ...prev]);
+    } finally {
+      setChatLoading(false);
     }
   };
+
+  // Combine API messages with local chat messages
+  const allMessages = [...localMessages, ...messages].sort((a, b) => 
+    new Date(b.timestamp) - new Date(a.timestamp)
+  ).slice(0, 30);
 
   // =========================================================================
   // EMBEDDED MODE - For Command Center (full-featured but fits in dashboard)
@@ -893,11 +941,11 @@ const SentCom = ({ compact = false, embedded = false }) => {
             
             {/* Stream Content */}
             <div className="flex-1 bg-black/30 rounded-xl border border-white/5 p-4 overflow-y-auto max-h-[350px] mb-4">
-              {streamLoading && messages.length === 0 ? (
+              {streamLoading && allMessages.length === 0 ? (
                 <div className="flex items-center justify-center h-full">
                   <Loader className="w-6 h-6 text-cyan-400 animate-spin" />
                 </div>
-              ) : messages.length === 0 ? (
+              ) : allMessages.length === 0 ? (
                 <div className="flex items-center justify-center h-full">
                   <div className="text-center">
                     <Radio className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
@@ -906,30 +954,42 @@ const SentCom = ({ compact = false, embedded = false }) => {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {messages.map((msg, i) => (
+                  {allMessages.map((msg, i) => (
                     <motion.div
                       key={msg.id || i}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: i * 0.03 }}
-                      className="flex items-start gap-3"
+                      className={`flex items-start gap-3 ${msg.metadata?.role === 'user' ? 'flex-row-reverse' : ''}`}
                     >
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500/30 to-purple-600/30 flex items-center justify-center flex-shrink-0">
-                        {msg.type === 'thought' || msg.action_type === 'scanning' ? (
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                        msg.metadata?.role === 'user' 
+                          ? 'bg-gradient-to-br from-cyan-500/30 to-blue-600/30' 
+                          : 'bg-gradient-to-br from-violet-500/30 to-purple-600/30'
+                      }`}>
+                        {msg.metadata?.role === 'user' ? (
+                          <MessageSquare className="w-4 h-4 text-cyan-400" />
+                        ) : msg.type === 'thought' || msg.action_type === 'scanning' ? (
                           <Brain className="w-4 h-4 text-violet-400" />
                         ) : msg.type === 'alert' ? (
                           <AlertCircle className="w-4 h-4 text-amber-400" />
                         ) : msg.type === 'filter' ? (
                           <Target className="w-4 h-4 text-cyan-400" />
+                        ) : msg.action_type === 'chat_response' ? (
+                          <Brain className="w-4 h-4 text-violet-400" />
                         ) : (
                           <Radio className="w-4 h-4 text-zinc-400" />
                         )}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-[10px] font-medium text-violet-400 uppercase">
-                            {msg.action_type === 'scanning' ? 'SCANNER' :
+                      <div className={`flex-1 min-w-0 ${msg.metadata?.role === 'user' ? 'text-right' : ''}`}>
+                        <div className={`flex items-center gap-2 mb-1 ${msg.metadata?.role === 'user' ? 'justify-end' : ''}`}>
+                          <span className={`text-[10px] font-medium uppercase ${
+                            msg.metadata?.role === 'user' ? 'text-cyan-400' : 'text-violet-400'
+                          }`}>
+                            {msg.metadata?.role === 'user' ? 'YOU' :
+                             msg.action_type === 'scanning' ? 'SCANNER' :
                              msg.action_type === 'monitoring' ? 'MONITOR' :
+                             msg.action_type === 'chat_response' ? 'SENTCOM' :
                              msg.type === 'filter' ? 'FILTER' :
                              msg.type === 'alert' ? 'ALERT' : 'SENTCOM'}
                           </span>
@@ -942,9 +1002,11 @@ const SentCom = ({ compact = false, embedded = false }) => {
                             {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
-                        <p className="text-sm text-zinc-300 leading-relaxed">{msg.content}</p>
+                        <p className={`text-sm leading-relaxed ${
+                          msg.metadata?.role === 'user' ? 'text-cyan-300' : 'text-zinc-300'
+                        }`}>{msg.content}</p>
                         {msg.confidence && (
-                          <div className="flex items-center gap-1 mt-1">
+                          <div className={`flex items-center gap-1 mt-1 ${msg.metadata?.role === 'user' ? 'justify-end' : ''}`}>
                             <Gauge className="w-3 h-3 text-violet-400" />
                             <span className="text-[10px] text-violet-400">Confidence: {msg.confidence}%</span>
                           </div>
@@ -957,20 +1019,22 @@ const SentCom = ({ compact = false, embedded = false }) => {
             </div>
             
             {/* Chat Input */}
-            <form onSubmit={(e) => { e.preventDefault(); const input = e.target.elements.message; if (input.value.trim()) { handleChat(input.value); input.value = ''; } }} className="flex gap-2">
+            <form onSubmit={(e) => { e.preventDefault(); handleChat(chatInput); }} className="flex gap-2">
               <input
                 type="text"
                 name="message"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
                 placeholder="Ask SentCom anything..."
-                disabled={!status?.connected}
+                disabled={chatLoading}
                 className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50 disabled:opacity-50"
               />
               <button
                 type="submit"
-                disabled={!status?.connected}
+                disabled={!chatInput.trim() || chatLoading}
                 className="px-5 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-500 text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
               >
-                <Send className="w-5 h-5" />
+                {chatLoading ? <Loader className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
               </button>
             </form>
           </div>
