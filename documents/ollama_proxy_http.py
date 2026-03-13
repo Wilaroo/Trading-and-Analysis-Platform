@@ -196,7 +196,7 @@ def detect_gpu():
 
 async def main():
     # Default cloud URL - update this if it changes
-    DEFAULT_CLOUD_URL = "https://team-brain-unified.preview.emergentagent.com"
+    DEFAULT_CLOUD_URL = "https://trading-sentinel-17.preview.emergentagent.com"
     
     parser = argparse.ArgumentParser(description="Ollama Local AI Proxy (HTTP)")
     parser.add_argument("--cloud-url", default=DEFAULT_CLOUD_URL, help="Cloud backend URL")

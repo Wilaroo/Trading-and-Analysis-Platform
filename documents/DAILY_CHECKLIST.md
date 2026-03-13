@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://team-brain-unified.preview.emergentagent.com
+https://trading-sentinel-17.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://team-brain-unified.preview.emergentagent.com
+https://trading-sentinel-17.preview.emergentagent.com
 ```
