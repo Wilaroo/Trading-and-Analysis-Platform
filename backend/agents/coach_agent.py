@@ -130,15 +130,18 @@ Keep responses concise but insightful. Use their actual numbers."""
         2. Build coaching context from learning layers
         3. Have LLM reason over verified data (or provide raw data if LLM unavailable)
         4. Return personalized guidance
+        
+        Supports conversation_history for multi-turn context.
         """
         start = time.time()
         message = input_data.get("message", "")
         query_type = input_data.get("query_type", "general")  # general, position, performance, trade_decision, market_context
         symbol = input_data.get("symbol")
+        conversation_history = input_data.get("conversation_history", [])
         
         # Handle market overview requests separately
         if query_type == "market_context":
-            return await self._handle_market_overview(message, start)
+            return await self._handle_market_overview(message, start, conversation_history)
         
         # Step 1: Fetch verified data from CODE
         context = await self._build_coaching_context(symbol)
@@ -180,7 +183,7 @@ Keep responses concise but insightful. Use their actual numbers."""
             )
         
         # Step 2: Build prompt with verified data (async to include trading context)
-        prompt = await self._build_coaching_prompt_async(message, context, query_type)
+        prompt = await self._build_coaching_prompt_async(message, context, query_type, conversation_history)
         
         # Step 3: Get LLM guidance (reasoning over verified data)
         response = await self._call_llm(
@@ -233,7 +236,8 @@ Please ensure your local IB Gateway and data pusher are running."""
             metadata={"query_type": query_type}
         )
     
-    async def _handle_market_overview(self, message: str, start: float) -> AgentResponse:
+    async def _handle_market_overview(self, message: str, start: float, 
+                                       conversation_history: List = None) -> AgentResponse:
         """Handle 'what's happening in the market' type questions"""
         import httpx
         import os
@@ -524,21 +528,39 @@ You have no open positions at this time."""
             logger.warning(f"Could not get trading context: {e}")
             return ""
     
-    async def _build_coaching_prompt_async(self, message: str, context: TradingContext, query_type: str) -> str:
+    async def _build_coaching_prompt_async(self, message: str, context: TradingContext, 
+                                           query_type: str, conversation_history: List = None) -> str:
         """Build prompt with verified data for LLM (async version with context awareness)"""
         
         # Get trading context (Phase 2)
         trading_context = await self._get_trading_context()
         
         # Build the rest of the prompt synchronously
-        return self._build_coaching_prompt_with_context(message, context, query_type, trading_context)
+        return self._build_coaching_prompt_with_context(
+            message, context, query_type, trading_context, conversation_history
+        )
     
     def _build_coaching_prompt(self, message: str, context: TradingContext, query_type: str) -> str:
         """Build prompt with verified data for LLM (sync fallback, no context awareness)"""
-        return self._build_coaching_prompt_with_context(message, context, query_type, "")
+        return self._build_coaching_prompt_with_context(message, context, query_type, "", [])
     
-    def _build_coaching_prompt_with_context(self, message: str, context: TradingContext, query_type: str, trading_context: str = "") -> str:
-        """Build prompt with verified data and optional trading context for LLM"""
+    def _build_coaching_prompt_with_context(self, message: str, context: TradingContext, 
+                                             query_type: str, trading_context: str = "",
+                                             conversation_history: List = None) -> str:
+        """Build prompt with verified data, optional trading context, and conversation history for LLM"""
+        
+        # Build conversation context from history
+        conversation_text = ""
+        if conversation_history:
+            conversation_text = "\n=== RECENT CONVERSATION CONTEXT ===\n"
+            for msg in conversation_history[-6:]:  # Last 6 messages for context
+                role = msg.get("role", "user")
+                content = msg.get("content", "")[:300]  # Truncate long messages
+                if role == "user":
+                    conversation_text += f"Trader: {content}\n"
+                else:
+                    conversation_text += f"SentCom: {content}\n"
+            conversation_text += "\n"
         
         # Build position summary
         positions_text = ""
@@ -658,7 +680,7 @@ TODAY'S SESSION:
 {mistakes_text}
 {learning_text}
 {context_section}
-=== USER QUESTION ===
+{conversation_text}=== USER QUESTION ===
 {message}
 
 === YOUR TASK ===
@@ -666,7 +688,8 @@ Provide personalized coaching based ONLY on the verified data above.
 Reference their specific numbers and patterns.
 Use insights from the learning system to personalize your advice.
 IMPORTANT: Factor in the current trading context (session, regime, positions) when giving advice.
-Be concise but insightful."""
+If there's conversation context, maintain conversational continuity and reference previous discussion points.
+Be conversational, direct, and insightful. Speak as "we" - we're a team."""
         
         return prompt
     
