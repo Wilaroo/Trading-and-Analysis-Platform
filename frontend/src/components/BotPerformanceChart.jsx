@@ -483,10 +483,19 @@ const BotPerformanceChart = ({
     <motion.div
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`bg-zinc-900/50 border border-white/10 rounded-xl p-4 ${className}`}
+      className={`relative overflow-hidden rounded-xl p-4 ${className} ${
+        isPositive 
+          ? 'bg-gradient-to-br from-emerald-500/5 via-zinc-900/50 to-zinc-900/50 border border-emerald-500/20' 
+          : 'bg-gradient-to-br from-rose-500/5 via-zinc-900/50 to-zinc-900/50 border border-rose-500/20'
+      }`}
     >
+      {/* Subtle glow effect based on P&L */}
+      <div className={`absolute top-0 left-0 w-32 h-32 rounded-full blur-3xl opacity-20 pointer-events-none ${
+        isPositive ? 'bg-emerald-500' : 'bg-rose-500'
+      }`} />
+      
       {/* Header */}
-      <div className="flex justify-between items-center mb-3">
+      <div className="relative flex justify-between items-center mb-3">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             {isPositive ? (
