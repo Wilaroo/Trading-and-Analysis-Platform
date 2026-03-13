@@ -144,6 +144,17 @@ const DashboardHeader = ({
 const ActivePositionsCard = ({ positions = [], onPositionClick }) => {
   const { openTickerModal } = useTickerModal();
   
+  const handlePositionClick = (symbol) => {
+    console.log('[ActivePositionsCard] handlePositionClick called with:', symbol);
+    console.log('[ActivePositionsCard] openTickerModal is:', typeof openTickerModal);
+    try {
+      openTickerModal(symbol);
+      console.log('[ActivePositionsCard] openTickerModal called successfully');
+    } catch (err) {
+      console.error('[ActivePositionsCard] Error calling openTickerModal:', err);
+    }
+  };
+  
   return (
     <div className="bg-zinc-900/50 border border-white/10 rounded-xl p-4">
       <div className="flex justify-between items-center mb-4">
@@ -171,13 +182,11 @@ const ActivePositionsCard = ({ positions = [], onPositionClick }) => {
             const isPositive = pnl >= 0;
             
             return (
-              <motion.div
+              <button
                 key={pos.id || pos.symbol}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.05 }}
-                onClick={() => openTickerModal(pos.symbol)}
-                className={`p-4 rounded-xl bg-zinc-800/50 border cursor-pointer transition-all hover:scale-[1.01] ${
+                onClick={() => handlePositionClick(pos.symbol)}
+                data-testid={`position-card-${pos.symbol}`}
+                className={`w-full text-left p-4 rounded-xl bg-zinc-800/50 border cursor-pointer transition-all hover:scale-[1.01] hover:bg-zinc-800/70 ${
                   isPositive ? 'border-emerald-500/30 hover:border-emerald-500/50' : 'border-red-500/30 hover:border-red-500/50'
                 }`}
                 style={{ boxShadow: isPositive ? '0 0 15px rgba(0, 255, 148, 0.1)' : '0 0 15px rgba(255, 46, 46, 0.1)' }}
@@ -215,7 +224,7 @@ const ActivePositionsCard = ({ positions = [], onPositionClick }) => {
                     </div>
                   </div>
                 </div>
-                
+              
                 {/* Quick Stats */}
                 <div className="grid grid-cols-5 gap-2 text-xs">
                   <div className="p-2 rounded bg-black/30 text-center">
@@ -243,7 +252,7 @@ const ActivePositionsCard = ({ positions = [], onPositionClick }) => {
                     </div>
                   </div>
                 </div>
-              </motion.div>
+              </button>
             );
           })}
         </div>

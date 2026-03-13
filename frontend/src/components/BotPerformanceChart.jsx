@@ -50,6 +50,9 @@ const BotPerformanceChart = ({
     avgR: 0,
     bestTrade: 0,
     worstTrade: 0,
+    realizedPnl: 0,
+    unrealizedPnl: 0,
+    openPositions: 0,
   });
   const [isLoading, setIsLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState(null);
@@ -82,6 +85,9 @@ const BotPerformanceChart = ({
             avgR: summary.avg_r || 0,
             bestTrade: summary.best_trade || 0,
             worstTrade: summary.worst_trade || 0,
+            realizedPnl: summary.realized_pnl || 0,
+            unrealizedPnl: summary.unrealized_pnl || 0,
+            openPositions: summary.open_positions || 0,
           });
           
           setLastRefresh(new Date());
@@ -296,30 +302,52 @@ const BotPerformanceChart = ({
       
       {/* Stats Row */}
       <div className="flex justify-between items-center mt-3">
-        <div className="flex gap-6">
+        <div className="flex gap-4 flex-wrap">
           <StatItem label="Trades" value={stats.totalTrades} />
           <StatItem 
             label="Win Rate" 
             value={`${stats.winRate.toFixed(0)}%`} 
             color={stats.winRate >= 50 ? 'emerald-400' : 'red-400'} 
           />
-          <StatItem 
-            label="Avg R" 
-            value={`${stats.avgR.toFixed(1)}R`} 
-            color="cyan-400" 
-          />
-          <StatItem 
-            label="Best" 
-            value={stats.bestTrade.toFixed(0)} 
-            prefix="+$" 
-            color="emerald-400" 
-          />
-          <StatItem 
-            label="Worst" 
-            value={Math.abs(stats.worstTrade).toFixed(0)} 
-            prefix="-$" 
-            color="red-400" 
-          />
+          {stats.openPositions > 0 && (
+            <StatItem 
+              label="Open" 
+              value={stats.openPositions}
+              color="cyan-400"
+            />
+          )}
+          {stats.unrealizedPnl !== 0 && (
+            <StatItem 
+              label="Unrealized" 
+              value={Math.abs(stats.unrealizedPnl).toFixed(0)} 
+              prefix={stats.unrealizedPnl >= 0 ? '+$' : '-$'}
+              color={stats.unrealizedPnl >= 0 ? 'emerald-400' : 'red-400'} 
+            />
+          )}
+          {stats.realizedPnl !== 0 && (
+            <StatItem 
+              label="Realized" 
+              value={Math.abs(stats.realizedPnl).toFixed(0)} 
+              prefix={stats.realizedPnl >= 0 ? '+$' : '-$'}
+              color={stats.realizedPnl >= 0 ? 'emerald-400' : 'red-400'} 
+            />
+          )}
+          {stats.bestTrade > 0 && (
+            <StatItem 
+              label="Best" 
+              value={stats.bestTrade.toFixed(0)} 
+              prefix="+$" 
+              color="emerald-400" 
+            />
+          )}
+          {stats.worstTrade < 0 && (
+            <StatItem 
+              label="Worst" 
+              value={Math.abs(stats.worstTrade).toFixed(0)} 
+              prefix="-$" 
+              color="red-400" 
+            />
+          )}
         </div>
         
         {onViewFullAnalytics && (

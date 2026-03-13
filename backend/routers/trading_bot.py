@@ -765,6 +765,7 @@ async def get_equity_curve(period: str = Query("today", enum=["today", "week", "
     """
     Get equity curve data for the bot performance chart.
     Returns cumulative P&L over time with trade markers.
+    Includes both realized P&L (closed trades) and unrealized P&L (open positions).
     
     Period options:
     - today: Intraday (last 24 hours)
@@ -780,11 +781,14 @@ async def get_equity_curve(period: str = Query("today", enum=["today", "week", "
             "trade_markers": [],
             "summary": {
                 "total_pnl": 0,
+                "realized_pnl": 0,
+                "unrealized_pnl": 0,
                 "trades_count": 0,
                 "win_rate": 0,
                 "avg_r": 0,
                 "best_trade": 0,
-                "worst_trade": 0
+                "worst_trade": 0,
+                "open_positions": 0
             }
         }
     
@@ -793,6 +797,13 @@ async def get_equity_curve(period: str = Query("today", enum=["today", "week", "
         
         # Get closed trades
         closed = _trading_bot.get_closed_trades(limit=1000)
+        
+        # Get open positions for unrealized P&L
+        open_trades = _trading_bot.get_all_trades_summary()
+        open_positions = open_trades.get('open', [])
+        
+        # Calculate total unrealized P&L from open positions
+        total_unrealized_pnl = sum(pos.get('unrealized_pnl', 0) for pos in open_positions)
         
         # Filter by period
         now = datetime.now(timezone.utc)
@@ -825,7 +836,7 @@ async def get_equity_curve(period: str = Query("today", enum=["today", "week", "
         # Sort by close time
         filtered_trades.sort(key=lambda t: t['_close_time'])
         
-        # Build equity curve
+        # Build equity curve from closed trades
         cumulative_pnl = 0
         equity_curve = []
         trade_markers = []
@@ -850,6 +861,36 @@ async def get_equity_curve(period: str = Query("today", enum=["today", "week", "
                 "is_win": pnl > 0
             })
         
+        # Add current point with unrealized P&L if we have open positions
+        if open_positions:
+            current_timestamp = int(now.timestamp() * 1000)
+            current_total = cumulative_pnl + total_unrealized_pnl
+            
+            equity_curve.append({
+                "time": current_timestamp,
+                "value": current_total,
+                "is_live": True,
+                "unrealized": total_unrealized_pnl
+            })
+            
+            # Add markers for open positions (different style)
+            for pos in open_positions:
+                entry_time_str = pos.get('entry_time')
+                if entry_time_str:
+                    try:
+                        entry_time = datetime.fromisoformat(entry_time_str.replace('Z', '+00:00'))
+                        if entry_time >= cutoff:
+                            trade_markers.append({
+                                "time": int(entry_time.timestamp() * 1000),
+                                "pnl": pos.get('unrealized_pnl', 0),
+                                "symbol": pos.get('symbol', ''),
+                                "setup_type": pos.get('setup_type', ''),
+                                "is_open": True,
+                                "is_win": pos.get('unrealized_pnl', 0) > 0
+                            })
+                    except (ValueError, TypeError):
+                        pass
+        
         # Calculate summary stats
         wins = [p for p in pnls if p > 0]
         
@@ -858,12 +899,15 @@ async def get_equity_curve(period: str = Query("today", enum=["today", "week", "
         avg_r = sum(r_multiples) / len(r_multiples) if r_multiples else 0
         
         summary = {
-            "total_pnl": cumulative_pnl,
+            "total_pnl": cumulative_pnl + total_unrealized_pnl,
+            "realized_pnl": cumulative_pnl,
+            "unrealized_pnl": total_unrealized_pnl,
             "trades_count": len(filtered_trades),
             "win_rate": (len(wins) / len(filtered_trades) * 100) if filtered_trades else 0,
             "avg_r": avg_r,
             "best_trade": max(pnls, default=0),
-            "worst_trade": min(pnls, default=0)
+            "worst_trade": min(pnls, default=0),
+            "open_positions": len(open_positions)
         }
         
         return {
