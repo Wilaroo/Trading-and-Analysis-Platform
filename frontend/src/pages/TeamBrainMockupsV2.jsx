@@ -1,7 +1,7 @@
 /**
  * SentCom Mockups V2 - Enhanced Visual Design
  * 
- * SentCom = Sentinel Command - Unified AI Command Center
+ * SentCom = Sentient Command - Unified AI Command Center
  * 
  * Improvements:
  * - More visually appealing Option C with glass effects and gradients
@@ -1016,7 +1016,7 @@ const TeamBrainMockupsV2 = () => {
               </div>
               <div>
                 <h1 className="text-xl font-bold">SentCom Mockups <span className="text-cyan-400">V2</span></h1>
-                <p className="text-xs text-zinc-500">Sentinel Command - Enhanced visual design based on your feedback</p>
+                <p className="text-xs text-zinc-500">Sentient Command - Enhanced visual design based on your feedback</p>
               </div>
             </div>
             <div className="flex gap-2">

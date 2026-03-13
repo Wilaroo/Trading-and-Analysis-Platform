@@ -23,6 +23,7 @@ import MockupPreviewPage from './pages/MockupPreviewPage';
 import TradingDashboardPage from './pages/TradingDashboardPage';
 import TeamBrainMockups from './pages/TeamBrainMockups';
 import TeamBrainMockupsV2 from './pages/TeamBrainMockupsV2';
+import SentCom from './components/SentCom';
 
 import './App.css';
 
@@ -333,6 +334,7 @@ function App() {
     switch (activeTab) {
       case 'command-center': return <CommandCenterPage {...ibProps} isActiveTab={true} />;
       case 'trading': return <TradingDashboardPage {...ibProps} />;
+      case 'sentcom': return <SentCom />;
       case 'team-brain-mockups-v2': return <TeamBrainMockupsV2 />;
       case 'team-brain-mockups': return <TeamBrainMockups />;
       case 'chart': return <ErrorBoundary><ChartsPage {...ibProps} /></ErrorBoundary>;
