@@ -10,10 +10,13 @@ Features:
 - Autonomous or confirmation-based trade execution
 - Trade explanation generation for every decision
 - P&L tracking and daily statistics
+- Session persistence (trades, stats, config survive restarts)
+- EOD auto-close (closes all positions at configurable time)
 """
 import os
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field, asdict
@@ -524,6 +527,13 @@ class TradingBotService:
         self._scan_interval = 30  # seconds - faster scanning for autonomous trading
         self._watchlist: List[str] = []
         
+        # EOD Auto-Close Configuration
+        self._eod_close_enabled = True
+        self._eod_close_hour = 15  # 3 PM ET
+        self._eod_close_minute = 57  # 3:57 PM ET
+        self._eod_close_executed_today = False
+        self._last_eod_check_date = None
+        
         # Services (injected)
         self._alert_system = None
         self._trading_intelligence = None
@@ -600,12 +610,12 @@ class TradingBotService:
             logger.warning(f"Could not fetch market regime: {e}")
     
     async def _restore_state(self):
-        """Restore bot state from MongoDB on startup"""
+        """Restore bot state from MongoDB on startup - COMPREHENSIVE SESSION PERSISTENCE"""
         try:
             if self._db is None:
                 return
             
-            # Use synchronous pymongo (db is MongoClient, not Motor)
+            # === 1. RESTORE BOT STATE ===
             state = self._db.bot_state.find_one({"_id": "bot_state"})
             if state:
                 was_running = state.get("running", False)
@@ -623,27 +633,107 @@ class TradingBotService:
                     logger.info(f"📋 Restored watchlist: {', '.join(saved_watchlist[:5])}{'...' if len(saved_watchlist) > 5 else ''}")
                 
                 # Restore enabled setups only if more than defaults were saved
-                if saved_setups and len(saved_setups) > 10:  # Only restore if significant customization
+                if saved_setups and len(saved_setups) > 10:
                     self._enabled_setups = saved_setups
                     logger.info(f"🎯 Restored {len(saved_setups)} strategies")
                 else:
-                    logger.info(f"🎯 Using default {len(self._enabled_setups)} strategies (no saved customization)")
-                
-                # CRITICAL: Restore open trades from database
-                await self._restore_open_trades()
-                
-                # Auto-restart if bot was running before
-                if was_running:
-                    logger.info("🔄 Bot was running before restart - auto-resuming...")
-                    await self.start()
-                
-                logger.info(f"✅ Bot state restored: mode={self._mode.value}, running={self._running}, watchlist={len(self._watchlist)} symbols, open_trades={len(self._open_trades)}")
-            else:
-                logger.info(f"🆕 No saved bot state - using defaults: {len(self._enabled_setups)} strategies enabled")
-                # Still try to restore any orphaned open trades
-                await self._restore_open_trades()
+                    logger.info(f"🎯 Using default {len(self._enabled_setups)} strategies")
+            
+            # === 2. RESTORE EOD CONFIG ===
+            eod_config = self._db.bot_config.find_one({"_id": "eod_config"})
+            if eod_config:
+                self._eod_close_enabled = eod_config.get("enabled", True)
+                self._eod_close_hour = eod_config.get("close_hour", 15)
+                self._eod_close_minute = eod_config.get("close_minute", 57)
+                logger.info(f"⏰ Restored EOD config: {self._eod_close_hour}:{self._eod_close_minute:02d} PM ET, enabled={self._eod_close_enabled}")
+            
+            # === 3. RESTORE DAILY STATS ===
+            today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            daily_stats = self._db.daily_stats.find_one({"date": today_str})
+            if daily_stats:
+                self._daily_stats = DailyStats(
+                    date=today_str,
+                    trades_executed=daily_stats.get("trades_executed", 0),
+                    trades_won=daily_stats.get("trades_won", 0),
+                    trades_lost=daily_stats.get("trades_lost", 0),
+                    gross_pnl=daily_stats.get("gross_pnl", 0.0),
+                    net_pnl=daily_stats.get("net_pnl", 0.0),
+                    largest_win=daily_stats.get("largest_win", 0.0),
+                    largest_loss=daily_stats.get("largest_loss", 0.0),
+                    win_rate=daily_stats.get("win_rate", 0.0),
+                    daily_limit_hit=daily_stats.get("daily_limit_hit", False)
+                )
+                logger.info(f"📊 Restored daily stats: P&L=${self._daily_stats.net_pnl:+,.2f}, Trades={self._daily_stats.trades_executed}")
+            
+            # === 4. RESTORE OPEN TRADES ===
+            await self._restore_open_trades()
+            
+            # === 5. RESTORE CLOSED TRADES (recent) ===
+            await self._restore_closed_trades()
+            
+            # === 6. AUTO-RESTART if bot was running ===
+            if state and state.get("running", False):
+                logger.info("🔄 Bot was running before restart - auto-resuming...")
+                await self.start()
+            
+            logger.info(f"✅ Session restored: mode={self._mode.value}, running={self._running}, open_trades={len(self._open_trades)}, closed_trades={len(self._closed_trades)}")
+            
         except Exception as e:
             logger.warning(f"Could not restore bot state: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+    
+    async def _restore_closed_trades(self):
+        """Restore recent closed trades for history display"""
+        try:
+            if self._db is None:
+                return
+            
+            # Restore last 100 closed trades
+            closed_trades = list(self._db.bot_trades.find({
+                "status": "closed"
+            }).sort("closed_at", -1).limit(100))
+            
+            for trade_doc in closed_trades:
+                try:
+                    # Create trade object from stored data
+                    direction = trade_doc.get("direction", "long")
+                    if isinstance(direction, str):
+                        direction = TradeDirection.LONG if direction.lower() == "long" else TradeDirection.SHORT
+                    
+                    trade = BotTrade(
+                        id=trade_doc.get("id", str(uuid.uuid4())[:8]),
+                        symbol=trade_doc.get("symbol", "UNKNOWN"),
+                        direction=direction,
+                        status=TradeStatus.CLOSED,
+                        setup_type=trade_doc.get("setup_type", "unknown"),
+                        timeframe=trade_doc.get("timeframe", "daily"),
+                        quality_score=trade_doc.get("quality_score", 50),
+                        quality_grade=trade_doc.get("quality_grade", "B"),
+                        entry_price=trade_doc.get("entry_price", 0),
+                        current_price=trade_doc.get("exit_price", trade_doc.get("entry_price", 0)),
+                        stop_price=trade_doc.get("stop_price", 0),
+                        target_prices=trade_doc.get("target_prices", []),
+                        shares=trade_doc.get("shares", 0),
+                        risk_amount=trade_doc.get("risk_amount", 0),
+                        potential_reward=trade_doc.get("potential_reward", 0),
+                        risk_reward_ratio=trade_doc.get("risk_reward_ratio", 0)
+                    )
+                    trade.fill_price = trade_doc.get("fill_price", trade_doc.get("entry_price", 0))
+                    trade.exit_price = trade_doc.get("exit_price", 0)
+                    trade.realized_pnl = trade_doc.get("realized_pnl", 0)
+                    trade.close_reason = trade_doc.get("close_reason", trade_doc.get("exit_reason", "unknown"))
+                    trade.closed_at = trade_doc.get("closed_at")
+                    
+                    self._closed_trades.append(trade)
+                except Exception as e:
+                    logger.debug(f"Could not restore closed trade: {e}")
+            
+            if self._closed_trades:
+                logger.info(f"📚 Restored {len(self._closed_trades)} closed trades from history")
+                
+        except Exception as e:
+            logger.warning(f"Could not restore closed trades: {e}")
     
     async def _restore_open_trades(self):
         """Restore open trades from database - CRITICAL for persistence across restarts"""
@@ -765,12 +855,12 @@ class TradingBotService:
             logger.debug(f"Startup reconciliation skipped: {e}")
     
     async def _save_state(self):
-        """Save bot state to MongoDB"""
+        """Save bot state to MongoDB - COMPREHENSIVE SESSION PERSISTENCE"""
         try:
             if self._db is None:
                 return
             
-            # Use synchronous pymongo (db is MongoClient, not Motor)
+            # === 1. SAVE BOT STATE ===
             self._db.bot_state.update_one(
                 {"_id": "bot_state"},
                 {"$set": {
@@ -778,11 +868,33 @@ class TradingBotService:
                     "mode": self._mode.value,
                     "watchlist": self._watchlist,
                     "enabled_setups": self._enabled_setups,
-                    "last_updated": datetime.now(timezone.utc)
+                    "last_updated": datetime.now(timezone.utc).isoformat()
                 }},
                 upsert=True
             )
-            logger.info(f"💾 Bot state saved: running={self._running}, watchlist={len(self._watchlist)} symbols")
+            
+            # === 2. SAVE DAILY STATS ===
+            self._db.daily_stats.update_one(
+                {"date": self._daily_stats.date},
+                {"$set": {
+                    "trades_executed": self._daily_stats.trades_executed,
+                    "trades_won": self._daily_stats.trades_won,
+                    "trades_lost": self._daily_stats.trades_lost,
+                    "gross_pnl": self._daily_stats.gross_pnl,
+                    "net_pnl": self._daily_stats.net_pnl,
+                    "largest_win": self._daily_stats.largest_win,
+                    "largest_loss": self._daily_stats.largest_loss,
+                    "win_rate": self._daily_stats.win_rate,
+                    "daily_limit_hit": self._daily_stats.daily_limit_hit,
+                    "last_updated": datetime.now(timezone.utc).isoformat()
+                }},
+                upsert=True
+            )
+            
+            # === 3. PERSIST ALL OPEN TRADES ===
+            self._persist_all_open_trades()
+            
+            logger.info(f"💾 Session saved: running={self._running}, P&L=${self._daily_stats.net_pnl:+,.2f}, open_trades={len(self._open_trades)}")
         except Exception as e:
             logger.warning(f"Could not save bot state: {e}")
     
@@ -2304,24 +2416,43 @@ class TradingBotService:
 
     async def _check_eod_close(self):
         """
-        Close trades marked close_at_eod near market close (3:50 PM ET).
-        Scalp and intraday trades must be closed before end of day.
+        Close ALL open positions near market close (default: 3:57 PM ET).
+        This is a critical risk management feature to avoid overnight exposure.
+        
+        Configurable via:
+        - self._eod_close_enabled: Enable/disable EOD close
+        - self._eod_close_hour: Hour in ET (24-hour format, default 15 = 3 PM)
+        - self._eod_close_minute: Minute (default 57)
         """
+        if not self._eod_close_enabled:
+            return
+        
         try:
             from zoneinfo import ZoneInfo
         except ImportError:
             from backports.zoneinfo import ZoneInfo
         
         now_et = datetime.now(ZoneInfo("America/New_York"))
+        today_str = now_et.strftime("%Y-%m-%d")
+        
+        # Reset the executed flag if it's a new day
+        if self._last_eod_check_date != today_str:
+            self._eod_close_executed_today = False
+            self._last_eod_check_date = today_str
+        
+        # Skip if already executed today
+        if self._eod_close_executed_today:
+            return
         
         # Only run on weekdays during market hours
         if now_et.weekday() >= 5:
             return
         
-        # Close at 3:50 PM ET (10 min before market close)
-        eod_hour = 15
-        eod_minute = 50
+        # Check if we're in the EOD close window (3:57-3:59 PM ET)
+        eod_hour = self._eod_close_hour
+        eod_minute = self._eod_close_minute
         
+        # Not yet time to close
         if now_et.hour < eod_hour or (now_et.hour == eod_hour and now_et.minute < eod_minute):
             return
         
@@ -2329,10 +2460,43 @@ class TradingBotService:
         if now_et.hour >= 16:
             return
         
+        # Time to close all positions!
+        open_count = len(self._open_trades)
+        if open_count == 0:
+            self._eod_close_executed_today = True
+            return
+        
+        logger.info(f"🔔 EOD AUTO-CLOSE: Closing all {open_count} open positions at {now_et.strftime('%H:%M:%S')} ET")
+        
+        closed_count = 0
+        total_pnl = 0.0
+        
         for trade_id, trade in list(self._open_trades.items()):
-            if trade.close_at_eod:
-                logger.info(f"EOD CLOSE: Closing {trade.symbol} ({trade.timeframe}) - close_at_eod=True")
-                await self.close_trade(trade_id, reason="eod_close")
+            try:
+                logger.info(f"  📤 EOD CLOSE: {trade.symbol} - {trade.direction.value} {trade.remaining_shares} shares")
+                result = await self.close_trade(trade_id, reason="eod_auto_close")
+                if result.get("success"):
+                    closed_count += 1
+                    total_pnl += result.get("realized_pnl", 0)
+                else:
+                    logger.error(f"  ❌ Failed to close {trade.symbol}: {result.get('error')}")
+            except Exception as e:
+                logger.error(f"  ❌ Error closing {trade.symbol}: {e}")
+        
+        self._eod_close_executed_today = True
+        
+        # Persist the EOD close event
+        if self._db:
+            self._db.bot_events.insert_one({
+                "event_type": "eod_auto_close",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "date": today_str,
+                "positions_closed": closed_count,
+                "total_pnl": total_pnl,
+                "close_time_et": now_et.strftime("%H:%M:%S")
+            })
+        
+        logger.info(f"✅ EOD AUTO-CLOSE COMPLETE: Closed {closed_count} positions, Total P&L: ${total_pnl:+,.2f}")
 
     async def _update_trailing_stop(self, trade: BotTrade):
         """
