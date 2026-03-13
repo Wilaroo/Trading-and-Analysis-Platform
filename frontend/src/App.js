@@ -14,7 +14,6 @@ import StartupModal from './components/StartupModal';
 import {
   ChartsPage,
   TradeJournalPage,
-  IBTradingPage,
 } from './pages';
 import CommandCenterPage from './pages/CommandCenterPage';
 import GlossaryPage from './pages/GlossaryPage';
@@ -23,7 +22,6 @@ import MockupPreviewPage from './pages/MockupPreviewPage';
 import TradingDashboardPage from './pages/TradingDashboardPage';
 import TeamBrainMockups from './pages/TeamBrainMockups';
 import TeamBrainMockupsV2 from './pages/TeamBrainMockupsV2';
-import SentCom from './components/SentCom';
 
 import './App.css';
 
@@ -334,12 +332,10 @@ function App() {
     switch (activeTab) {
       case 'command-center': return <CommandCenterPage {...ibProps} isActiveTab={true} />;
       case 'trading': return <TradingDashboardPage {...ibProps} />;
-      case 'sentcom': return <SentCom />;
       case 'team-brain-mockups-v2': return <TeamBrainMockupsV2 />;
       case 'team-brain-mockups': return <TeamBrainMockups />;
       case 'chart': return <ErrorBoundary><ChartsPage {...ibProps} /></ErrorBoundary>;
       case 'trade-journal': return <TradeJournalPage />;
-      case 'ib-trading': return <IBTradingPage {...ibProps} />;
       case 'glossary': return <GlossaryPage />;
       case 'settings': return <SettingsPage />;
       case 'mockups': return <MockupPreviewPage />;

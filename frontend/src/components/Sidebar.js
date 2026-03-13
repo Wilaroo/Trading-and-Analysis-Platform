@@ -4,24 +4,19 @@ import {
   Activity,
   ClipboardList,
   LineChart,
-  Zap,
   Target,
   ChevronRight,
   BookOpen,
   Settings,
-  Brain,
-  Sparkles,
-  Radio
+  Sparkles
 } from 'lucide-react';
 
 const navItems = [
   { id: 'command-center', icon: Target, label: 'Command Center', highlight: true },
-  { id: 'sentcom', icon: Radio, label: 'SentCom', highlight: true, isNew: true },
   { id: 'trading', icon: Activity, label: 'Trading Dashboard', highlight: false },
   { id: 'team-brain-mockups-v2', icon: Sparkles, label: 'SentCom Mockups', highlight: false },
   { id: 'trade-journal', icon: ClipboardList, label: 'Trade Journal' },
   { id: 'chart', icon: LineChart, label: 'Charts' },
-  { id: 'ib-trading', icon: Zap, label: 'IB Trading' },
   { id: 'glossary', icon: BookOpen, label: 'Glossary & Logic' },
   { id: 'settings', icon: Settings, label: 'Settings' },
 ];
