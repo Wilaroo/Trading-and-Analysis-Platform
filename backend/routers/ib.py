@@ -6,7 +6,7 @@ NO MOCK DATA - Only real verified data from IB Gateway or cached data with times
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from services.ib_service import IBService
 from services.feature_engine import get_feature_engine
 from services.data_cache import get_data_cache
@@ -38,6 +38,8 @@ def init_ib_service(service: IBService):
     _stock_service = get_stock_service()
     _alpaca_service = get_alpaca_service()
     _news_service = get_news_service()
+    # Set IB service on news service for IB news priority
+    _news_service.set_ib_service(service)
 
 
 def _convert_ib_to_alpaca_timeframe(bar_size: str) -> str:
@@ -263,7 +265,7 @@ def get_order_result(order_id: str, timeout: float = 30.0) -> Optional[dict]:
             order = service.get_order(order_id)
             if order and order.get("status") in ["filled", "rejected", "cancelled", "expired", "partial"]:
                 return order
-        except Exception as e:
+        except Exception:
             # Fallback to legacy
             if order_id in _order_queue_legacy["completed"]:
                 return _order_queue_legacy["completed"][order_id]
@@ -851,7 +853,7 @@ def is_pusher_connected() -> bool:
         
         # Allow up to 30 seconds staleness
         return age_seconds <= 30
-    except Exception as e:
+    except Exception:
         return False
 
 
@@ -1260,7 +1262,7 @@ async def cancel_queued_order(order_id: str):
             
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         # Fallback to legacy
         if order_id in _order_queue_legacy["pending"]:
             _order_queue_legacy["pending"].pop(order_id)
@@ -1633,18 +1635,140 @@ async def get_fundamentals(symbol: str):
 
 # ===================== News Endpoints =====================
 
-@router.get("/news/{symbol}")
-async def get_ticker_news(symbol: str):
-    """Get news headlines for a specific ticker symbol"""
+@router.get("/news/providers")
+async def get_news_providers():
+    """
+    Get list of subscribed IB news providers.
+    Returns provider codes like BZ (Benzinga), FLY (Fly), DJ (Dow Jones), etc.
+    Use these codes to understand what news sources are available.
+    """
     if not _ib_service:
         raise HTTPException(status_code=500, detail="IB service not initialized")
     
     try:
-        news = await _ib_service.get_news_for_symbol(symbol.upper())
+        providers = await _ib_service.get_news_providers()
+        
+        # Map codes to names for better readability
+        provider_names = {
+            "BZ": "Benzinga",
+            "FLY": "Fly on the Wall",
+            "DJ": "Dow Jones",
+            "BRFG": "Briefing.com",
+            "BRFUPDN": "Briefing.com Upgrades/Downgrades",
+            "MT": "Midnight Trader",
+            "RTN": "Reuters",
+            "DJNL": "DJ Newswires",
+        }
+        
+        enriched = []
+        for p in providers:
+            code = p.get("code", "")
+            enriched.append({
+                "code": code,
+                "name": provider_names.get(code, p.get("name", code)),
+                "raw_name": p.get("name", "")
+            })
+        
+        return {
+            "success": True,
+            "providers": enriched,
+            "count": len(enriched),
+            "note": "These are the news providers you're subscribed to via IB"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching news providers: {str(e)}")
+
+
+@router.get("/news/historical/{symbol}")
+async def get_historical_news(
+    symbol: str,
+    max_results: int = 10,
+    days_back: int = 7,
+    providers: str = None
+):
+    """
+    Get historical news for a ticker using IB's reqHistoricalNews API.
+    
+    This is the proper IB news API that returns professional financial news.
+    
+    Args:
+        symbol: Stock symbol (e.g., AAPL, NVDA)
+        max_results: Maximum number of news items (default 10, max 50)
+        days_back: How many days back to search (default 7)
+        providers: Comma-separated provider codes (e.g., "BZ,FLY"). If empty, uses all subscribed.
+    """
+    if not _ib_service:
+        raise HTTPException(status_code=500, detail="IB service not initialized")
+    
+    try:
+        # Parse provider codes if provided
+        provider_codes = None
+        if providers:
+            provider_codes = [p.strip() for p in providers.split(",")]
+        
+        # Calculate date range
+        end_date = datetime.now(timezone.utc).strftime("%Y%m%d %H:%M:%S")
+        start_dt = datetime.now(timezone.utc) - timedelta(days=days_back)
+        start_date = start_dt.strftime("%Y%m%d %H:%M:%S")
+        
+        news = await _ib_service.get_historical_news(
+            symbol=symbol.upper(),
+            provider_codes=provider_codes,
+            total_results=min(max_results, 50),
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        return {
+            "success": True,
+            "symbol": symbol.upper(),
+            "news": news,
+            "count": len(news),
+            "date_range": {
+                "start": start_date,
+                "end": end_date
+            },
+            "providers_used": provider_codes if provider_codes else "all_subscribed",
+            "source": "ib_historical_news"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching historical news: {str(e)}")
+
+
+@router.get("/news/article/{provider_code}/{article_id}")
+async def get_news_article(provider_code: str, article_id: str):
+    """
+    Get full news article content from IB.
+    
+    Args:
+        provider_code: The news provider (e.g., BZ, FLY, DJ)
+        article_id: The article ID from historical news endpoint
+    """
+    if not _ib_service:
+        raise HTTPException(status_code=500, detail="IB service not initialized")
+    
+    try:
+        article = await _ib_service.get_news_article(provider_code, article_id)
+        return {
+            "success": True,
+            "provider_code": provider_code,
+            "article_id": article_id,
+            "article": article
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching article: {str(e)}")
+
+
+@router.get("/news/{symbol}")
+async def get_ticker_news(symbol: str):
+    """Get news headlines for a specific ticker symbol (uses NewsService with IB priority)"""
+    try:
+        news = await _news_service.get_ticker_news(symbol.upper(), max_items=15)
         return {
             "symbol": symbol.upper(),
             "news": news,
-            "count": len(news)
+            "count": len(news),
+            "source": news[0].get("source_type", "unknown") if news else "none"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching news: {str(e)}")
@@ -1653,11 +1777,8 @@ async def get_ticker_news(symbol: str):
 @router.get("/news")
 async def get_market_news():
     """Get general market news headlines"""
-    if not _ib_service:
-        raise HTTPException(status_code=500, detail="IB service not initialized")
-    
     try:
-        news = await _ib_service.get_general_news()
+        news = await _news_service.get_market_news(max_items=20)
         return {
             "news": news,
             "count": len(news)
