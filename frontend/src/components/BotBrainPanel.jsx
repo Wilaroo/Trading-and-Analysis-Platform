@@ -2,6 +2,7 @@
  * BotBrainPanel - Shows the bot's internal thoughts in first person
  * 
  * Features:
+ * - Order Pipeline: Visual order flow (Pending → Executing → Filled)
  * - Real-time thought stream: "I detected...", "I'm monitoring..."
  * - Timestamped entries with confidence badges
  * - Clickable ticker mentions
@@ -9,10 +10,55 @@
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Brain, Cpu, ChevronRight, Clock, Zap, Target, Eye, AlertCircle } from 'lucide-react';
+import { Brain, Cpu, ChevronRight, Clock, Zap, Target, Eye, AlertCircle, ArrowRight, CheckCircle, Loader } from 'lucide-react';
 import { useTickerModal } from '../hooks/useTickerModal';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
+
+// Order Pipeline Mini Component
+const OrderPipeline = ({ orderQueue }) => {
+  const pending = orderQueue?.pending || 0;
+  const executing = orderQueue?.executing || 0;
+  const completed = orderQueue?.completed || 0;
+  
+  return (
+    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black/30 border border-white/5">
+      <span className="text-[10px] text-zinc-500 uppercase font-medium">Orders:</span>
+      
+      {/* Pending */}
+      <div className={`flex items-center gap-1 px-2 py-0.5 rounded ${
+        pending > 0 ? 'bg-yellow-500/20' : 'bg-zinc-800/50'
+      }`}>
+        <span className={`text-xs font-mono ${pending > 0 ? 'text-yellow-400' : 'text-zinc-500'}`}>
+          {pending}
+        </span>
+        <span className="text-[10px] text-zinc-500">pending</span>
+      </div>
+      
+      <ArrowRight className="w-3 h-3 text-zinc-600" />
+      
+      {/* Executing */}
+      <div className={`flex items-center gap-1 px-2 py-0.5 rounded ${
+        executing > 0 ? 'bg-cyan-500/20 animate-pulse' : 'bg-zinc-800/50'
+      }`}>
+        {executing > 0 && <Loader className="w-3 h-3 text-cyan-400 animate-spin" />}
+        <span className={`text-xs font-mono ${executing > 0 ? 'text-cyan-400' : 'text-zinc-500'}`}>
+          {executing}
+        </span>
+        <span className="text-[10px] text-zinc-500">executing</span>
+      </div>
+      
+      <ArrowRight className="w-3 h-3 text-zinc-600" />
+      
+      {/* Completed */}
+      <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/10">
+        <CheckCircle className="w-3 h-3 text-emerald-400" />
+        <span className="text-xs font-mono text-emerald-400">{completed}</span>
+        <span className="text-[10px] text-zinc-500">filled</span>
+      </div>
+    </div>
+  );
+};
 
 // Confidence badge colors
 const getConfidenceBadge = (confidence, actionType = '') => {
@@ -166,6 +212,7 @@ const BotBrainPanel = ({
   botStatus = null,
   openTrades = [],
   watchingSetups = [],
+  orderQueue = null,
   className = '',
   onViewHistory,
   maxThoughts = 3,
@@ -299,41 +346,48 @@ const BotBrainPanel = ({
 
   return (
     <div className={`bg-zinc-900/50 border border-white/10 rounded-xl overflow-hidden ${className}`}>
-      {/* Header */}
-      <div className="p-4 border-b border-white/5 flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-cyan-400/20 flex items-center justify-center">
-            <Cpu className="w-5 h-5 text-cyan-400" />
+      {/* Header with Order Pipeline */}
+      <div className="p-4 border-b border-white/5">
+        <div className="flex justify-between items-center mb-3">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-cyan-400/20 flex items-center justify-center">
+              <Cpu className="w-5 h-5 text-cyan-400" />
+            </div>
+            <div>
+              <h2 className="font-bold text-lg text-cyan-400">BOT'S BRAIN</h2>
+              <p className="text-xs text-zinc-500">What I'm thinking right now</p>
+            </div>
           </div>
-          <div>
-            <h2 className="font-bold text-lg text-cyan-400">BOT'S BRAIN</h2>
-            <p className="text-xs text-zinc-500">What I'm thinking right now</p>
+          
+          <div className="flex items-center gap-3">
+            {/* Processing indicator */}
+            {isProcessing && (
+              <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-400/10">
+                <div className="flex gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+                <span className="text-xs text-cyan-400">Processing</span>
+              </div>
+            )}
+            
+            {onViewHistory && (
+              <button 
+                onClick={onViewHistory}
+                className="flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
+              >
+                View History
+                <ChevronRight className="w-3 h-3" />
+              </button>
+            )}
           </div>
         </div>
         
-        <div className="flex items-center gap-3">
-          {/* Processing indicator */}
-          {isProcessing && (
-            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-400/10">
-              <div className="flex gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
-              <span className="text-xs text-cyan-400">Processing</span>
-            </div>
-          )}
-          
-          {onViewHistory && (
-            <button 
-              onClick={onViewHistory}
-              className="flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
-            >
-              View History
-              <ChevronRight className="w-3 h-3" />
-            </button>
-          )}
-        </div>
+        {/* Order Pipeline */}
+        {orderQueue && (
+          <OrderPipeline orderQueue={orderQueue} />
+        )}
       </div>
       
       {/* Thoughts Stream */}

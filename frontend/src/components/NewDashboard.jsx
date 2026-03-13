@@ -2,10 +2,10 @@
  * NewDashboard - Bot-centric dashboard layout matching the approved V2 design
  * 
  * Layout:
- * - Header: Bot status, Session, Regime, "Brief Me" button, P&L
+ * - Header: Bot status, compact info (Session/Regime/Brief Me), Account data, Risk Status, P&L
  * - Bot Performance Chart (always visible)
  * - Main Grid:
- *   - Left (8 cols): Bot's Brain, Active Positions, Setups I'm Watching
+ *   - Left (8 cols): Bot's Brain (with Order Pipeline), Active Positions, Setups I'm Watching
  *   - Right (4 cols): AI Assistant, Market Regime, Quick Stats
  * - Scanner Alerts strip at bottom
  */
@@ -14,7 +14,8 @@ import { motion } from 'framer-motion';
 import { 
   Wifi, WifiOff, Brain, Sparkles, Activity, Target, Eye, 
   Bell, ChevronRight, Clock, TrendingUp, TrendingDown,
-  Pause, Play, Zap, RefreshCw
+  Pause, Play, Zap, RefreshCw, Shield, DollarSign, Wallet,
+  ArrowRight, AlertTriangle
 } from 'lucide-react';
 
 // Import new components
@@ -24,14 +25,17 @@ import { useTickerModal } from '../hooks/useTickerModal';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 const DASHBOARD_REFRESH_INTERVAL = 15000; // 15 seconds for dashboard data
+const ACCOUNT_REFRESH_INTERVAL = 5000; // 5 seconds for account data
 
-// Header component with bot status, session, regime, Brief Me button
+// Header component with bot status, compact info, account data, risk status, P&L
 const DashboardHeader = ({ 
   botStatus, 
   marketSession, 
   regime, 
   todayPnl, 
   openPnl,
+  accountData,
+  riskStatus,
   onBriefMe,
   onToggleBot 
 }) => {
@@ -57,84 +61,162 @@ const DashboardHeader = ({
     'LOADING': 'bg-blue-500/20 text-blue-400 animate-pulse',
     'OFFLINE': 'bg-zinc-500/20 text-zinc-400'
   };
+
+  // Risk status calculations
+  const dailyLossLimit = riskStatus?.daily_loss_limit || 10000;
+  const dailyLossUsed = Math.abs(Math.min(todayPnl || 0, 0));
+  const dailyLossPct = (dailyLossUsed / dailyLossLimit) * 100;
+  const positionCount = riskStatus?.position_count || 0;
+  const maxPositions = riskStatus?.max_positions || 10;
+  const exposurePct = (positionCount / maxPositions) * 100;
   
   return (
-    <div className="bg-zinc-900/50 border border-white/10 rounded-xl p-3 mb-4 flex justify-between items-center">
-      <div className="flex items-center gap-6">
-        {/* Bot Status Hero */}
+    <div className="bg-zinc-900/50 border border-white/10 rounded-xl p-3 mb-4">
+      {/* Top Row: Bot Status + Compact Info + Account + P&L */}
+      <div className="flex justify-between items-center mb-2">
         <div className="flex items-center gap-4">
-          <div className="relative">
-            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-cyan-400 to-purple-500 p-0.5">
-              <div className="w-full h-full rounded-full bg-zinc-900 flex items-center justify-center">
-                <span className="font-bold text-lg text-cyan-400">TC</span>
+          {/* Bot Status Hero - Compact */}
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-400 to-purple-500 p-0.5">
+                <div className="w-full h-full rounded-full bg-zinc-900 flex items-center justify-center">
+                  <span className="font-bold text-sm text-cyan-400">TC</span>
+                </div>
+              </div>
+              <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-zinc-900 ${
+                isHunting ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-500'
+              }`} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-lg">TRADING BOT</span>
+                <span className={`px-2 py-0.5 rounded-full text-xs font-mono ${stateColors[displayState] || stateColors['OFFLINE']}`}>
+                  {displayState}
+                </span>
               </div>
             </div>
-            <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-zinc-900 ${
-              isHunting ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-500'
-            }`} />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-xl">TRADING BOT</span>
-              <span className={`px-2 py-0.5 rounded-full text-xs font-mono ${stateColors[displayState] || stateColors['OFFLINE']}`}>
-                {displayState}
-              </span>
+          
+          {/* Compact Info Row: Session | Regime | Brief Me */}
+          <div className="flex items-center gap-2 ml-4">
+            <div className="px-2 py-1 rounded bg-cyan-400/10 border border-cyan-400/20">
+              <span className="text-xs text-cyan-400 font-medium">{marketSession || 'CLOSED'}</span>
             </div>
-            <div className="text-xs text-zinc-500">
-              {lastAction 
-                ? `Last: ${lastAction.type} ${lastAction.symbol || ''} (${lastAction.time || 'recently'})`
-                : 'No recent actions'
-              }
+            <div className="px-2 py-1 rounded bg-purple-500/10 border border-purple-500/20">
+              <span className="text-xs text-purple-400 font-medium">{regime?.name || 'HOLD'}</span>
+            </div>
+            <button 
+              onClick={onBriefMe}
+              className="px-2 py-1 rounded bg-pink-500/10 border border-pink-500/20 hover:bg-pink-500/20 transition-colors flex items-center gap-1"
+            >
+              <Sparkles className="w-3 h-3 text-pink-400" />
+              <span className="text-xs text-pink-400 font-medium">BRIEF ME</span>
+            </button>
+          </div>
+        </div>
+        
+        {/* Right Side: Account + P&L */}
+        <div className="flex items-center gap-4">
+          {/* Account Value */}
+          <div className="text-right">
+            <div className="text-[10px] text-zinc-500 uppercase">Account</div>
+            <div className="font-mono text-lg text-white">
+              ${accountData?.net_liquidation?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || '--'}
             </div>
           </div>
-        </div>
-        
-        {/* Session Badge */}
-        <div className="px-4 py-2 rounded-lg bg-cyan-400/10 border border-cyan-400/30">
-          <div className="text-xs text-zinc-400">SESSION</div>
-          <div className="font-bold text-cyan-400">{marketSession || 'MARKET CLOSED'}</div>
-        </div>
-        
-        {/* Regime Badge */}
-        <div className="px-4 py-2 rounded-lg bg-purple-500/10 border border-purple-500/30 cursor-pointer hover:bg-purple-500/20 transition-colors">
-          <div className="text-xs text-zinc-400">REGIME</div>
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-purple-400">{regime?.name || 'HOLD'}</span>
-            <span className="font-mono text-xs text-zinc-500">{regime?.score?.toFixed(0) || '--'}</span>
+          
+          {/* Buying Power */}
+          <div className="text-right">
+            <div className="text-[10px] text-zinc-500 uppercase">Buying Power</div>
+            <div className="font-mono text-sm text-zinc-300">
+              ${accountData?.buying_power?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || '--'}
+            </div>
+          </div>
+          
+          <div className="h-8 w-px bg-zinc-700" />
+          
+          {/* Today's P&L */}
+          <div className="text-right">
+            <div className="text-[10px] text-zinc-500 uppercase">Today P&L</div>
+            <div className={`font-mono text-xl ${todayPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {todayPnl >= 0 ? '+' : ''}${todayPnl?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '0.00'}
+            </div>
+          </div>
+          
+          {/* Open P&L */}
+          <div className="text-right">
+            <div className="text-[10px] text-zinc-500 uppercase">Open P&L</div>
+            <div className={`font-mono text-sm ${openPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {openPnl >= 0 ? '+' : ''}${openPnl?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '0.00'}
+            </div>
+          </div>
+          
+          {/* Time */}
+          <div className="font-mono text-lg text-zinc-400">
+            {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </div>
         </div>
-        
-        {/* Brief Me Button */}
-        <button 
-          onClick={onBriefMe}
-          className="px-5 py-3 rounded-xl bg-gradient-to-r from-pink-500/20 to-purple-500/20 border border-pink-500/50 hover:border-pink-500 transition-all group"
-        >
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-pink-400 group-hover:scale-110 transition-transform" />
-            <span className="font-bold text-pink-400">BRIEF ME</span>
-          </div>
-          <div className="text-xs text-zinc-400">AI Market Report</div>
-        </button>
       </div>
       
-      {/* Right Side: P&L + Time */}
-      <div className="flex items-center gap-6">
-        <div className="text-right">
-          <div className="text-xs text-zinc-400">TODAY'S P&L</div>
-          <div className={`font-mono text-2xl ${todayPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-            {todayPnl >= 0 ? '+' : ''}${todayPnl?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '0.00'}
+      {/* Bottom Row: Risk Status Bar */}
+      <div className="flex items-center gap-4 pt-2 border-t border-white/5">
+        <div className="flex items-center gap-2">
+          <Shield className="w-4 h-4 text-yellow-400" />
+          <span className="text-xs text-zinc-400 font-medium">RISK STATUS</span>
+        </div>
+        
+        {/* Daily Loss Limit */}
+        <div className="flex items-center gap-2 flex-1 max-w-[200px]">
+          <span className="text-[10px] text-zinc-500 whitespace-nowrap">Daily Loss:</span>
+          <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
+            <div 
+              className={`h-full rounded-full transition-all ${
+                dailyLossPct > 75 ? 'bg-red-500' : dailyLossPct > 50 ? 'bg-yellow-500' : 'bg-emerald-500'
+              }`}
+              style={{ width: `${Math.min(dailyLossPct, 100)}%` }}
+            />
           </div>
+          <span className={`text-[10px] font-mono ${
+            dailyLossPct > 75 ? 'text-red-400' : dailyLossPct > 50 ? 'text-yellow-400' : 'text-emerald-400'
+          }`}>
+            {dailyLossPct.toFixed(0)}%
+          </span>
         </div>
-        <div className="text-right">
-          <div className="text-xs text-zinc-400">OPEN P&L</div>
-          <div className={`font-mono text-lg ${openPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-            {openPnl >= 0 ? '+' : ''}${openPnl?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '0.00'}
+        
+        {/* Position Exposure */}
+        <div className="flex items-center gap-2 flex-1 max-w-[200px]">
+          <span className="text-[10px] text-zinc-500 whitespace-nowrap">Positions:</span>
+          <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
+            <div 
+              className={`h-full rounded-full ${exposurePct > 80 ? 'bg-red-500' : 'bg-emerald-500'}`}
+              style={{ width: `${Math.min(exposurePct, 100)}%` }}
+            />
           </div>
+          <span className={`text-[10px] font-mono ${exposurePct > 80 ? 'text-red-400' : 'text-emerald-400'}`}>
+            {positionCount}/{maxPositions}
+          </span>
         </div>
-        <div className="h-10 w-px bg-zinc-700" />
-        <div className="font-mono text-xl text-zinc-400">
-          {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+        
+        {/* IB Connection Status */}
+        <div className={`flex items-center gap-1 px-2 py-0.5 rounded ${
+          accountData?.ib_connected ? 'bg-cyan-500/20' : 'bg-zinc-700/50'
+        }`}>
+          {accountData?.ib_connected ? (
+            <Wifi className="w-3 h-3 text-cyan-400" />
+          ) : (
+            <WifiOff className="w-3 h-3 text-zinc-500" />
+          )}
+          <span className={`text-[10px] font-medium ${accountData?.ib_connected ? 'text-cyan-400' : 'text-zinc-500'}`}>
+            {accountData?.ib_connected ? 'IB LIVE' : 'OFFLINE'}
+          </span>
         </div>
+        
+        {riskStatus?.daily_limit_hit && (
+          <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-red-500/20 animate-pulse">
+            <AlertTriangle className="w-3 h-3 text-red-400" />
+            <span className="text-[10px] text-red-400 font-medium">LIMIT HIT</span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -454,6 +536,8 @@ const NewDashboard = ({
 }) => {
   // Local state for API data
   const [dashboardData, setDashboardData] = useState(null);
+  const [accountData, setAccountData] = useState(null);
+  const [orderQueue, setOrderQueue] = useState({ pending: 0, executing: 0, completed: 0 });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   
@@ -476,14 +560,78 @@ const NewDashboard = ({
       setIsLoading(false);
     }
   }, []);
+
+  // Fetch account data from IB
+  const fetchAccountData = useCallback(async () => {
+    try {
+      const [accountRes, ibDataRes] = await Promise.all([
+        fetch(`${API_URL}/api/ib/account/summary`),
+        fetch(`${API_URL}/api/ib/pushed-data`)
+      ]);
+      
+      if (accountRes.ok) {
+        const data = await accountRes.json();
+        if (data.success) {
+          setAccountData(prev => ({
+            ...prev,
+            net_liquidation: data.net_liquidation,
+            buying_power: data.buying_power,
+            available_funds: data.available_funds,
+            daily_pnl: data.daily_pnl,
+            realized_pnl: data.realized_pnl,
+            unrealized_pnl: data.unrealized_pnl,
+          }));
+        }
+      }
+      
+      if (ibDataRes.ok) {
+        const ibData = await ibDataRes.json();
+        setAccountData(prev => ({
+          ...prev,
+          ib_connected: ibData.connected || false,
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to fetch account data:', err);
+    }
+  }, []);
+
+  // Fetch order queue status
+  const fetchOrderQueue = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/ib/orders/queue/status`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setOrderQueue({
+            pending: data.counts?.pending || data.pending?.length || 0,
+            executing: data.counts?.executing || data.executing?.length || 0,
+            completed: data.counts?.completed || data.completed?.length || 0,
+            recent_orders: data.completed?.slice(0, 5) || [],
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch order queue:', err);
+    }
+  }, []);
   
   // Initial fetch and auto-refresh
   useEffect(() => {
     fetchDashboardData();
+    fetchAccountData();
+    fetchOrderQueue();
     
-    const interval = setInterval(fetchDashboardData, DASHBOARD_REFRESH_INTERVAL);
-    return () => clearInterval(interval);
-  }, [fetchDashboardData]);
+    const dashboardInterval = setInterval(fetchDashboardData, DASHBOARD_REFRESH_INTERVAL);
+    const accountInterval = setInterval(fetchAccountData, ACCOUNT_REFRESH_INTERVAL);
+    const orderQueueInterval = setInterval(fetchOrderQueue, 3000); // 3 seconds for order queue
+    
+    return () => {
+      clearInterval(dashboardInterval);
+      clearInterval(accountInterval);
+      clearInterval(orderQueueInterval);
+    };
+  }, [fetchDashboardData, fetchAccountData, fetchOrderQueue]);
   
   // Merge prop data with API data (props take precedence if provided)
   const effectiveBotStatus = botStatus || dashboardData?.bot_status;
@@ -501,6 +649,14 @@ const NewDashboard = ({
     ? watchingSetups 
     : dashboardData?.watching_setups || [];
   const closedTrades = botTrades.filter(t => t.status === 'closed');
+
+  // Build risk status
+  const riskStatus = {
+    daily_loss_limit: dashboardData?.bot_status?.daily_loss_limit || 10000,
+    position_count: effectiveOpenTrades.length,
+    max_positions: 10,
+    daily_limit_hit: dashboardData?.bot_status?.daily_limit_hit || false,
+  };
   
   return (
     <div className="space-y-4">
@@ -511,6 +667,8 @@ const NewDashboard = ({
         regime={regime}
         todayPnl={effectiveTodayPnl}
         openPnl={effectiveOpenPnl}
+        accountData={accountData}
+        riskStatus={riskStatus}
         onBriefMe={onBriefMe}
       />
       
@@ -526,11 +684,12 @@ const NewDashboard = ({
       <div className="grid grid-cols-12 gap-4">
         {/* Left Column (8 cols) */}
         <div className="col-span-8 space-y-4">
-          {/* Bot's Brain Panel */}
+          {/* Bot's Brain Panel with Order Pipeline */}
           <BotBrainPanel
             botStatus={effectiveBotStatus}
             openTrades={effectiveOpenTrades}
             watchingSetups={effectiveWatchingSetups}
+            orderQueue={orderQueue}
             onViewHistory={onViewHistory}
             autoRefresh={true}
           />
