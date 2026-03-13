@@ -34,7 +34,12 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
     - Min R:R Ratio
   - Settings panel now has two tabs: "Trading Mode" and "Risk Controls"
   - Toast notifications added for mode changes and risk param updates
-- **Result:** Users can fully control the bot from the SentCom interface
+  - **NEW: Quick Risk Profile Presets** (March 13, 2026):
+    - 🛡️ **Conservative**: 0.5% risk/trade, $250 max daily loss, 3 positions, 3:1 R:R
+    - ⚖️ **Moderate**: 1% risk/trade, $500 max daily loss, 5 positions, 2:1 R:R
+    - 🔥 **Aggressive**: 2% risk/trade, $1000 max daily loss, 8 positions, 1.5:1 R:R
+  - Active preset auto-detected and highlighted when params match
+- **Result:** Users can fully control the bot from the SentCom interface with one-click risk profiles
 
 ---
 
