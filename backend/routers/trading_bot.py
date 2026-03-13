@@ -295,6 +295,84 @@ async def get_all_trades():
     return {"success": True, **summary}
 
 
+@router.get("/positions/reconcile")
+async def reconcile_positions():
+    """
+    Compare bot's tracked positions with actual IB positions.
+    Returns discrepancies that need attention.
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    try:
+        report = await _trading_bot.reconcile_positions_with_ib()
+        return {
+            "success": True,
+            **report
+        }
+    except Exception as e:
+        logger.error(f"Reconciliation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/positions/sync/{symbol}")
+async def sync_position(symbol: str, auto_create: bool = False):
+    """
+    Sync a specific position from IB to the bot's tracking.
+    
+    Args:
+        symbol: Stock symbol to sync
+        auto_create: If True, create a new trade entry for untracked positions
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    try:
+        result = await _trading_bot.sync_position_from_ib(symbol, auto_create_trade=auto_create)
+        return result
+    except Exception as e:
+        logger.error(f"Sync error for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/positions/sync-all")
+async def sync_all_positions():
+    """
+    Sync ALL IB positions to the bot.
+    Creates trade entries for any untracked positions.
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    try:
+        # First reconcile to find discrepancies
+        report = await _trading_bot.reconcile_positions_with_ib()
+        
+        synced = []
+        errors = []
+        
+        # Auto-import any untracked positions
+        for disc in report.get("discrepancies", []):
+            if disc["type"] == "untracked_position":
+                symbol = disc["symbol"]
+                result = await _trading_bot.sync_position_from_ib(symbol, auto_create_trade=True)
+                if result.get("success"):
+                    synced.append(result)
+                else:
+                    errors.append({"symbol": symbol, "error": result.get("error")})
+        
+        return {
+            "success": True,
+            "synced_count": len(synced),
+            "synced": synced,
+            "errors": errors,
+            "original_discrepancies": len(report.get("discrepancies", []))
+        }
+    except Exception as e:
+        logger.error(f"Sync all error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 @router.get("/trades")
 async def get_trades_list():
