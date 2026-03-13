@@ -681,7 +681,7 @@ const ChatInput = ({ onSend, disabled }) => {
 // MAIN COMPONENT
 // ============================================================================
 
-const SentCom = ({ compact = false }) => {
+const SentCom = ({ compact = false, embedded = false }) => {
   const { status, loading: statusLoading } = useSentComStatus();
   const { messages, loading: streamLoading, refresh: refreshStream } = useSentComStream();
   const { positions, totalPnl, loading: positionsLoading } = useSentComPositions();
@@ -707,9 +707,328 @@ const SentCom = ({ compact = false }) => {
     }
   };
 
+  // =========================================================================
+  // EMBEDDED MODE - For Command Center (full-featured but fits in dashboard)
+  // =========================================================================
+  if (embedded) {
+    return (
+      <div className="bg-zinc-900/50 backdrop-blur-xl rounded-2xl border border-white/10 overflow-hidden" data-testid="sentcom-embedded">
+        {/* Full Header with Status + Pipeline */}
+        <div className="flex items-center justify-between p-4 border-b border-white/5 bg-gradient-to-r from-cyan-500/5 to-violet-500/5">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500/30 to-violet-500/30 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+              <Brain className="w-6 h-6 text-cyan-400" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-white tracking-tight">SENTCOM</h2>
+              <div className="flex items-center gap-3 mt-0.5">
+                <div className="flex items-center gap-1.5">
+                  {status?.connected ? (
+                    <PulsingDot color="emerald" />
+                  ) : (
+                    <Circle className="w-2 h-2 text-zinc-500" />
+                  )}
+                  <span className={`text-xs font-medium ${status?.connected ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                    {status?.connected ? 'CONNECTED' : 'OFFLINE'}
+                  </span>
+                </div>
+                {context?.regime && context.regime !== 'UNKNOWN' && (
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    context.regime === 'RISK_ON' ? 'bg-emerald-500/20 text-emerald-400' :
+                    context.regime === 'RISK_OFF' ? 'bg-rose-500/20 text-rose-400' :
+                    'bg-zinc-500/20 text-zinc-400'
+                  }`}>
+                    {context.regime}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          
+          {/* Order Pipeline */}
+          <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-black/40 border border-white/5">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center">
+                <Clock className="w-4 h-4 text-amber-400" />
+              </div>
+              <div>
+                <p className="text-lg font-bold text-amber-400">{status?.order_pipeline?.pending || 0}</p>
+                <p className="text-[9px] text-zinc-500 uppercase">Pending</p>
+              </div>
+            </div>
+            <ArrowRight className="w-4 h-4 text-zinc-600" />
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center">
+                <Zap className="w-4 h-4 text-cyan-400" />
+              </div>
+              <div>
+                <p className="text-lg font-bold text-cyan-400">{status?.order_pipeline?.executing || 0}</p>
+                <p className="text-[9px] text-zinc-500 uppercase">Executing</p>
+              </div>
+            </div>
+            <ArrowRight className="w-4 h-4 text-zinc-600" />
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                <CheckCircle className="w-4 h-4 text-emerald-400" />
+              </div>
+              <div>
+                <p className="text-lg font-bold text-emerald-400">{status?.order_pipeline?.filled || 0}</p>
+                <p className="text-[9px] text-zinc-500 uppercase">Filled</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Main Content Grid */}
+        <div className="grid grid-cols-12 gap-4 p-4">
+          {/* Left Column - Positions */}
+          <div className="col-span-4 space-y-4">
+            {/* Positions Mini Panel */}
+            <div className="bg-black/30 rounded-xl p-4 border border-white/5">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <DollarSign className="w-4 h-4 text-emerald-400" />
+                  <span className="text-sm font-medium text-zinc-300">Our Positions</span>
+                </div>
+                <span className={`text-sm font-bold ${totalPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {totalPnl >= 0 ? '+' : ''}{totalPnl.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                </span>
+              </div>
+              
+              {positionsLoading && positions.length === 0 ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader className="w-5 h-5 text-cyan-400 animate-spin" />
+                </div>
+              ) : positions.length === 0 ? (
+                <div className="text-center py-6">
+                  <Eye className="w-6 h-6 text-zinc-600 mx-auto mb-2" />
+                  <p className="text-xs text-zinc-500">No open positions</p>
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                  {positions.slice(0, 5).map((pos, i) => (
+                    <div 
+                      key={pos.symbol || i}
+                      onClick={() => setSelectedPosition(pos)}
+                      className="flex items-center justify-between p-2 rounded-lg bg-black/20 hover:bg-black/40 cursor-pointer transition-colors"
+                    >
+                      <span className="text-sm font-bold text-white">{pos.symbol}</span>
+                      <span className={`text-sm font-bold ${pos.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {pos.pnl >= 0 ? '+' : ''}{pos.pnl?.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) || '$0'}
+                      </span>
+                    </div>
+                  ))}
+                  {positions.length > 5 && (
+                    <p className="text-[10px] text-zinc-500 text-center pt-1">+{positions.length - 5} more</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Setups Mini Panel */}
+            <div className="bg-black/30 rounded-xl p-4 border border-white/5">
+              <div className="flex items-center gap-2 mb-3">
+                <Crosshair className="w-4 h-4 text-violet-400" />
+                <span className="text-sm font-medium text-zinc-300">Setups We're Watching</span>
+              </div>
+              
+              {setupsLoading && setups.length === 0 ? (
+                <div className="flex items-center justify-center py-6">
+                  <Loader className="w-5 h-5 text-violet-400 animate-spin" />
+                </div>
+              ) : setups.length === 0 ? (
+                <div className="text-center py-4">
+                  <Crosshair className="w-5 h-5 text-zinc-600 mx-auto mb-1" />
+                  <p className="text-xs text-zinc-500">No setups</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {setups.slice(0, 3).map((setup, i) => (
+                    <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-black/20">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-white">{setup.symbol}</span>
+                        <span className="text-[10px] text-zinc-500">{setup.setup_type}</span>
+                      </div>
+                      {setup.trigger_price && (
+                        <span className="text-xs text-cyan-400">${setup.trigger_price?.toFixed(2)}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Context Mini Panel */}
+            <div className="bg-black/30 rounded-xl p-4 border border-white/5">
+              <div className="flex items-center gap-2 mb-3">
+                <Wifi className="w-4 h-4 text-cyan-400" />
+                <span className="text-sm font-medium text-zinc-300">Market Context</span>
+              </div>
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Regime</span>
+                  <span className={`font-bold ${
+                    context?.regime === 'RISK_ON' ? 'text-emerald-400' :
+                    context?.regime === 'RISK_OFF' ? 'text-rose-400' : 'text-zinc-400'
+                  }`}>{context?.regime || '--'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Market</span>
+                  <span className={`font-bold ${context?.market_open ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                    {context?.market_open ? 'OPEN' : 'CLOSED'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column - Stream + Chat */}
+          <div className="col-span-8 flex flex-col">
+            {/* Stream Header */}
+            <div className="flex items-center gap-2 mb-3">
+              <Flame className="w-4 h-4 text-violet-400" />
+              <span className="text-sm font-medium text-zinc-300">Live Stream</span>
+              <span className="text-[10px] text-zinc-500">What we're thinking right now</span>
+            </div>
+            
+            {/* Stream Content */}
+            <div className="flex-1 bg-black/30 rounded-xl border border-white/5 p-4 overflow-y-auto max-h-[350px] mb-4">
+              {streamLoading && messages.length === 0 ? (
+                <div className="flex items-center justify-center h-full">
+                  <Loader className="w-6 h-6 text-cyan-400 animate-spin" />
+                </div>
+              ) : messages.length === 0 ? (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-center">
+                    <Radio className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                    <p className="text-sm text-zinc-500">Waiting for activity...</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {messages.map((msg, i) => (
+                    <motion.div
+                      key={msg.id || i}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.03 }}
+                      className="flex items-start gap-3"
+                    >
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500/30 to-purple-600/30 flex items-center justify-center flex-shrink-0">
+                        {msg.type === 'thought' || msg.action_type === 'scanning' ? (
+                          <Brain className="w-4 h-4 text-violet-400" />
+                        ) : msg.type === 'alert' ? (
+                          <AlertCircle className="w-4 h-4 text-amber-400" />
+                        ) : msg.type === 'filter' ? (
+                          <Target className="w-4 h-4 text-cyan-400" />
+                        ) : (
+                          <Radio className="w-4 h-4 text-zinc-400" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[10px] font-medium text-violet-400 uppercase">
+                            {msg.action_type === 'scanning' ? 'SCANNER' :
+                             msg.action_type === 'monitoring' ? 'MONITOR' :
+                             msg.type === 'filter' ? 'FILTER' :
+                             msg.type === 'alert' ? 'ALERT' : 'SENTCOM'}
+                          </span>
+                          {msg.symbol && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400">
+                              {msg.symbol}
+                            </span>
+                          )}
+                          <span className="text-[10px] text-zinc-600">
+                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <p className="text-sm text-zinc-300 leading-relaxed">{msg.content}</p>
+                        {msg.confidence && (
+                          <div className="flex items-center gap-1 mt-1">
+                            <Gauge className="w-3 h-3 text-violet-400" />
+                            <span className="text-[10px] text-violet-400">Confidence: {msg.confidence}%</span>
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            {/* Chat Input */}
+            <form onSubmit={(e) => { e.preventDefault(); const input = e.target.elements.message; if (input.value.trim()) { handleChat(input.value); input.value = ''; } }} className="flex gap-2">
+              <input
+                type="text"
+                name="message"
+                placeholder="Ask SentCom anything..."
+                disabled={!status?.connected}
+                className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50 disabled:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={!status?.connected}
+                className="px-5 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-500 text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+              >
+                <Send className="w-5 h-5" />
+              </button>
+            </form>
+          </div>
+        </div>
+
+        {/* Position Detail Modal */}
+        <AnimatePresence>
+          {selectedPosition && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-8"
+              onClick={() => setSelectedPosition(null)}
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="w-full max-w-lg"
+                onClick={e => e.stopPropagation()}
+              >
+                <GlassCard glow className="p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xl font-bold text-white">Our {selectedPosition.symbol} Position</h3>
+                    <button onClick={() => setSelectedPosition(null)} className="p-2 rounded-lg hover:bg-white/10">
+                      <X className="w-5 h-5 text-zinc-400" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="p-3 rounded-lg bg-black/30 text-center">
+                      <p className="text-[10px] text-zinc-500 mb-1">P&L</p>
+                      <p className={`text-lg font-bold ${selectedPosition.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {selectedPosition.pnl >= 0 ? '+' : ''}{selectedPosition.pnl?.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                      </p>
+                    </div>
+                    <div className="p-3 rounded-lg bg-black/30 text-center">
+                      <p className="text-[10px] text-zinc-500 mb-1">Entry</p>
+                      <p className="text-lg font-bold text-white">${selectedPosition.entry_price?.toFixed(2)}</p>
+                    </div>
+                    <div className="p-3 rounded-lg bg-black/30 text-center">
+                      <p className="text-[10px] text-zinc-500 mb-1">Current</p>
+                      <p className="text-lg font-bold text-white">${selectedPosition.current_price?.toFixed(2)}</p>
+                    </div>
+                  </div>
+                </GlassCard>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // COMPACT MODE - Small box (kept for reference but not used currently)
+  // =========================================================================
   if (compact) {
-    // Compact version for embedding in Command Center dashboard
-    // Replaces BotBrainPanel + AI Assistant with unified SentCom
     return (
       <div className="bg-zinc-900/50 backdrop-blur-xl rounded-2xl border border-white/10 overflow-hidden" data-testid="sentcom-compact">
         {/* Compact Header */}
