@@ -7,6 +7,27 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## BUG FIX (March 13, 2026)
 
+### Chat Persistence Added ✅ FIXED
+
+**Problem:** Chat history was lost on page refresh or server restart because it was only stored in memory.
+
+**Solution:** Added MongoDB persistence for chat history:
+- **Backend (`sentcom_service.py`):**
+  - Added `_get_db()` function for MongoDB connection
+  - Added `_load_chat_history()` to load messages on service init
+  - Added `_save_chat_message()` to persist each message
+  - Added `_cleanup_old_messages()` to prevent unbounded growth
+  - Collection: `sentcom_chat_history`
+- **API (`sentcom.py`):**
+  - Added `GET /api/sentcom/chat/history` endpoint
+- **Frontend (`SentCom.jsx`):**
+  - Added `useChatHistory` hook to load persisted messages
+  - Messages initialize from MongoDB on component mount
+
+**Result:** Chat conversations now persist across page refreshes and server restarts.
+
+---
+
 ### Positions Not Showing in SentCom Panel ✅ FIXED
 
 **Problem:** "Our Positions" panel was showing empty even though there were 8 open trades in the trading bot.

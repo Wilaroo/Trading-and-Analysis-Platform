@@ -732,6 +732,46 @@ const useSentComAlerts = (pollInterval = 5000) => {
   return { alerts, loading, refresh: fetchAlerts };
 };
 
+// Hook for persisted chat history
+const useChatHistory = () => {
+  const [chatHistory, setChatHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+
+  const fetchChatHistory = useCallback(async () => {
+    if (loaded) return; // Only load once
+    
+    try {
+      const res = await fetch(`${API_BASE}/api/sentcom/chat/history?limit=50`);
+      const data = await res.json();
+      if (data.success && data.messages) {
+        // Convert to local message format and reverse for newest-first display
+        const formattedMessages = data.messages.map((msg, idx) => ({
+          id: `history_${idx}_${Date.now()}`,
+          type: 'chat',
+          content: msg.content,
+          timestamp: msg.timestamp,
+          action_type: msg.role === 'user' ? 'user_message' : 'chat_response',
+          metadata: { role: msg.role }
+        })).reverse();
+        
+        setChatHistory(formattedMessages);
+        setLoaded(true);
+      }
+    } catch (err) {
+      console.error('Error fetching chat history:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [loaded]);
+
+  useEffect(() => {
+    fetchChatHistory();
+  }, [fetchChatHistory]);
+
+  return { chatHistory, loading, refresh: fetchChatHistory };
+};
+
 // Hook for Trading Bot status and controls
 const useTradingBotControl = (pollInterval = 5000) => {
   const [botStatus, setBotStatus] = useState(null);
@@ -1290,6 +1330,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
   const { botStatus, actionLoading, toggleBot, changeMode, updateRiskParams } = useTradingBotControl();
   const { ibConnected } = useIBConnectionStatus();
   const { session: marketSession } = useMarketSession();
+  const { chatHistory, loading: historyLoading } = useChatHistory();
   
   const [selectedPosition, setSelectedPosition] = useState(null);
   const [chatInput, setChatInput] = useState('');
@@ -1299,6 +1340,13 @@ const SentCom = ({ compact = false, embedded = false }) => {
   const [showTradeForm, setShowTradeForm] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState('mode'); // 'mode' or 'risk'
+  
+  // Initialize local messages with chat history when it loads
+  useEffect(() => {
+    if (chatHistory.length > 0 && localMessages.length === 0) {
+      setLocalMessages(chatHistory);
+    }
+  }, [chatHistory, localMessages.length]);
 
   const handleChat = async (message) => {
     if (!message.trim() || chatLoading) return;
