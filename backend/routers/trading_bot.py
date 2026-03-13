@@ -338,38 +338,33 @@ async def sync_position(symbol: str, auto_create: bool = False):
 @router.post("/positions/sync-all")
 async def sync_all_positions():
     """
-    Sync ALL IB positions to the bot.
-    Creates trade entries for any untracked positions.
+    Full position sync - imports untracked positions, closes phantoms, fixes mismatches.
+    This is the comprehensive sync that should be run on startup or when positions drift.
     """
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
     
     try:
-        # First reconcile to find discrepancies
-        report = await _trading_bot.reconcile_positions_with_ib()
-        
-        synced = []
-        errors = []
-        
-        # Auto-import any untracked positions
-        for disc in report.get("discrepancies", []):
-            if disc["type"] == "untracked_position":
-                symbol = disc["symbol"]
-                result = await _trading_bot.sync_position_from_ib(symbol, auto_create_trade=True)
-                if result.get("success"):
-                    synced.append(result)
-                else:
-                    errors.append({"symbol": symbol, "error": result.get("error")})
-        
-        return {
-            "success": True,
-            "synced_count": len(synced),
-            "synced": synced,
-            "errors": errors,
-            "original_discrepancies": len(report.get("discrepancies", []))
-        }
+        report = await _trading_bot.full_position_sync()
+        return report
     except Exception as e:
-        logger.error(f"Sync all error: {e}")
+        logger.error(f"Full sync error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/positions/close-phantom/{trade_id}")
+async def close_phantom_trade(trade_id: str, reason: str = "manual_close"):
+    """
+    Close a specific phantom trade (one that bot tracks but IB doesn't have).
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    
+    try:
+        result = await _trading_bot.close_phantom_position(trade_id, reason=reason)
+        return result
+    except Exception as e:
+        logger.error(f"Close phantom error for {trade_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
