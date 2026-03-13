@@ -1,21 +1,23 @@
 /**
- * BotPerformanceChart - Always-visible equity curve showing bot's trading performance
+ * BotPerformanceChart - Custom proprietary equity curve chart
  * 
  * Features:
- * - Equity curve with trade markers (green=win, red=loss)
+ * - Custom SVG-based chart (no external dependencies)
+ * - Equity curve with gradient fill
+ * - Trade markers (green=win, red=loss)
  * - Time range toggle: Today | Week | Month | YTD | All
  * - Quick stats: Trades, Win Rate, Avg R, Best, Worst
- * - P&L display
- * - Auto-refresh every 30 seconds (configurable)
+ * - Hover tooltips showing trade details
+ * - Auto-refresh every 30 seconds
  */
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { TrendingUp, TrendingDown, Activity, ChevronRight, RefreshCw } from 'lucide-react';
-import * as LightweightCharts from 'lightweight-charts';
+import { TrendingUp, TrendingDown, ChevronRight, Activity } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
 
+// Custom Time Range Button
 const TimeRangeButton = ({ active, onClick, children }) => (
   <button
     onClick={onClick}
@@ -29,12 +31,355 @@ const TimeRangeButton = ({ active, onClick, children }) => (
   </button>
 );
 
+// Stat Item Display
 const StatItem = ({ label, value, color = 'white', prefix = '', suffix = '' }) => (
   <span className="text-zinc-400 text-xs">
     {label}: <span className={`text-${color} font-mono`}>{prefix}{value}{suffix}</span>
   </span>
 );
 
+// Custom SVG Chart Component
+const CustomEquityChart = ({ data, width = 800, height = 200 }) => {
+  const [hoveredPoint, setHoveredPoint] = useState(null);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  
+  // Calculate chart dimensions with padding
+  const padding = { top: 20, right: 20, bottom: 30, left: 60 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  
+  // Calculate min/max values for scaling
+  const chartMetrics = useMemo(() => {
+    if (!data || data.length === 0) {
+      return { minValue: 0, maxValue: 100, minTime: 0, maxTime: 1 };
+    }
+    
+    const values = data.map(d => d.value);
+    const times = data.map(d => d.time);
+    
+    const minValue = Math.min(...values);
+    const maxValue = Math.max(...values);
+    const valueRange = maxValue - minValue || 1;
+    
+    return {
+      minValue: minValue - valueRange * 0.1,
+      maxValue: maxValue + valueRange * 0.1,
+      minTime: Math.min(...times),
+      maxTime: Math.max(...times),
+    };
+  }, [data]);
+  
+  // Scale functions
+  const scaleX = useCallback((time) => {
+    const { minTime, maxTime } = chartMetrics;
+    const range = maxTime - minTime || 1;
+    return padding.left + ((time - minTime) / range) * chartWidth;
+  }, [chartMetrics, chartWidth, padding.left]);
+  
+  const scaleY = useCallback((value) => {
+    const { minValue, maxValue } = chartMetrics;
+    const range = maxValue - minValue || 1;
+    return padding.top + chartHeight - ((value - minValue) / range) * chartHeight;
+  }, [chartMetrics, chartHeight, padding.top]);
+  
+  // Generate path for the line
+  const linePath = useMemo(() => {
+    if (!data || data.length === 0) return '';
+    
+    return data.map((point, i) => {
+      const x = scaleX(point.time);
+      const y = scaleY(point.value);
+      return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+    }).join(' ');
+  }, [data, scaleX, scaleY]);
+  
+  // Generate path for the gradient fill area
+  const areaPath = useMemo(() => {
+    if (!data || data.length === 0) return '';
+    
+    const firstX = scaleX(data[0].time);
+    const lastX = scaleX(data[data.length - 1].time);
+    const bottomY = padding.top + chartHeight;
+    
+    return `${linePath} L ${lastX} ${bottomY} L ${firstX} ${bottomY} Z`;
+  }, [data, linePath, scaleX, padding.top, chartHeight]);
+  
+  // Generate Y-axis labels
+  const yAxisLabels = useMemo(() => {
+    const { minValue, maxValue } = chartMetrics;
+    const range = maxValue - minValue;
+    const labels = [];
+    const steps = 4;
+    
+    for (let i = 0; i <= steps; i++) {
+      const value = minValue + (range * i / steps);
+      labels.push({
+        value: value,
+        y: scaleY(value),
+        label: value >= 0 ? `$${Math.abs(value).toFixed(0)}` : `-$${Math.abs(value).toFixed(0)}`
+      });
+    }
+    
+    return labels;
+  }, [chartMetrics, scaleY]);
+  
+  // Generate X-axis labels (time)
+  const xAxisLabels = useMemo(() => {
+    if (!data || data.length === 0) return [];
+    
+    const labels = [];
+    const steps = Math.min(5, data.length);
+    const stepSize = Math.floor(data.length / steps);
+    
+    for (let i = 0; i < data.length; i += stepSize) {
+      const point = data[i];
+      const date = new Date(point.time * 1000);
+      labels.push({
+        x: scaleX(point.time),
+        label: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      });
+    }
+    
+    return labels;
+  }, [data, scaleX]);
+  
+  // Handle mouse move for tooltip
+  const handleMouseMove = (e) => {
+    if (!data || data.length === 0) return;
+    
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    
+    setMousePos({ x: mouseX, y: mouseY });
+    
+    // Find closest data point
+    let closest = null;
+    let closestDist = Infinity;
+    
+    data.forEach((point, index) => {
+      const x = scaleX(point.time);
+      const dist = Math.abs(x - mouseX);
+      if (dist < closestDist && dist < 30) {
+        closestDist = dist;
+        closest = { ...point, index, x, y: scaleY(point.value) };
+      }
+    });
+    
+    setHoveredPoint(closest);
+  };
+  
+  // Determine if overall trend is positive
+  const isPositive = data && data.length >= 2 
+    ? data[data.length - 1].value >= data[0].value 
+    : true;
+  
+  const gradientId = `equity-gradient-${Math.random().toString(36).substr(2, 9)}`;
+  const glowId = `equity-glow-${Math.random().toString(36).substr(2, 9)}`;
+  
+  return (
+    <svg 
+      width="100%" 
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      className="overflow-visible"
+      onMouseMove={handleMouseMove}
+      onMouseLeave={() => setHoveredPoint(null)}
+    >
+      {/* Definitions */}
+      <defs>
+        {/* Gradient fill */}
+        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={isPositive ? '#00FF94' : '#FF2E2E'} stopOpacity="0.3" />
+          <stop offset="100%" stopColor={isPositive ? '#00FF94' : '#FF2E2E'} stopOpacity="0" />
+        </linearGradient>
+        
+        {/* Glow effect */}
+        <filter id={glowId} x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="2" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+      
+      {/* Grid lines */}
+      {yAxisLabels.map((label, i) => (
+        <line
+          key={`grid-${i}`}
+          x1={padding.left}
+          y1={label.y}
+          x2={width - padding.right}
+          y2={label.y}
+          stroke="rgba(255,255,255,0.05)"
+          strokeDasharray="4,4"
+        />
+      ))}
+      
+      {/* Y-axis labels */}
+      {yAxisLabels.map((label, i) => (
+        <text
+          key={`y-label-${i}`}
+          x={padding.left - 10}
+          y={label.y + 4}
+          textAnchor="end"
+          fill="#6B7280"
+          fontSize="10"
+          fontFamily="monospace"
+        >
+          {label.label}
+        </text>
+      ))}
+      
+      {/* X-axis labels */}
+      {xAxisLabels.map((label, i) => (
+        <text
+          key={`x-label-${i}`}
+          x={label.x}
+          y={height - 8}
+          textAnchor="middle"
+          fill="#6B7280"
+          fontSize="10"
+          fontFamily="monospace"
+        >
+          {label.label}
+        </text>
+      ))}
+      
+      {/* Area fill */}
+      {data && data.length > 0 && (
+        <path
+          d={areaPath}
+          fill={`url(#${gradientId})`}
+        />
+      )}
+      
+      {/* Line */}
+      {data && data.length > 0 && (
+        <path
+          d={linePath}
+          fill="none"
+          stroke={isPositive ? '#00FF94' : '#FF2E2E'}
+          strokeWidth="2"
+          filter={`url(#${glowId})`}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      )}
+      
+      {/* Trade markers */}
+      {data && data.map((point, i) => {
+        if (!point.pnl) return null;
+        const x = scaleX(point.time);
+        const y = scaleY(point.value);
+        const isWin = point.pnl >= 0;
+        
+        return (
+          <g key={`marker-${i}`}>
+            <circle
+              cx={x}
+              cy={y}
+              r={hoveredPoint?.index === i ? 6 : 4}
+              fill={isWin ? '#00FF94' : '#FF2E2E'}
+              opacity={hoveredPoint?.index === i ? 1 : 0.7}
+              className="transition-all duration-150"
+            />
+            {/* Outer glow for markers */}
+            <circle
+              cx={x}
+              cy={y}
+              r={hoveredPoint?.index === i ? 10 : 8}
+              fill="none"
+              stroke={isWin ? '#00FF94' : '#FF2E2E'}
+              strokeWidth="1"
+              opacity={hoveredPoint?.index === i ? 0.5 : 0.2}
+            />
+          </g>
+        );
+      })}
+      
+      {/* Hover crosshair */}
+      {hoveredPoint && (
+        <>
+          <line
+            x1={hoveredPoint.x}
+            y1={padding.top}
+            x2={hoveredPoint.x}
+            y2={padding.top + chartHeight}
+            stroke="rgba(0,255,148,0.3)"
+            strokeDasharray="4,4"
+          />
+          <line
+            x1={padding.left}
+            y1={hoveredPoint.y}
+            x2={width - padding.right}
+            y2={hoveredPoint.y}
+            stroke="rgba(0,255,148,0.3)"
+            strokeDasharray="4,4"
+          />
+        </>
+      )}
+      
+      {/* Tooltip */}
+      {hoveredPoint && (
+        <g>
+          <rect
+            x={Math.min(hoveredPoint.x + 10, width - 130)}
+            y={Math.max(hoveredPoint.y - 50, 10)}
+            width="120"
+            height="45"
+            rx="6"
+            fill="rgba(24,24,27,0.95)"
+            stroke="rgba(255,255,255,0.1)"
+          />
+          <text
+            x={Math.min(hoveredPoint.x + 20, width - 120)}
+            y={Math.max(hoveredPoint.y - 30, 30)}
+            fill="#fff"
+            fontSize="12"
+            fontWeight="bold"
+          >
+            ${hoveredPoint.value?.toFixed(2)}
+          </text>
+          {hoveredPoint.pnl !== undefined && (
+            <text
+              x={Math.min(hoveredPoint.x + 20, width - 120)}
+              y={Math.max(hoveredPoint.y - 15, 45)}
+              fill={hoveredPoint.pnl >= 0 ? '#00FF94' : '#FF2E2E'}
+              fontSize="11"
+            >
+              {hoveredPoint.pnl >= 0 ? '+' : ''}${hoveredPoint.pnl?.toFixed(2)}
+            </text>
+          )}
+          <text
+            x={Math.min(hoveredPoint.x + 20, width - 120)}
+            y={Math.max(hoveredPoint.y, 60)}
+            fill="#6B7280"
+            fontSize="10"
+          >
+            {new Date(hoveredPoint.time * 1000).toLocaleTimeString()}
+          </text>
+        </g>
+      )}
+      
+      {/* No data message */}
+      {(!data || data.length === 0) && (
+        <text
+          x={width / 2}
+          y={height / 2}
+          textAnchor="middle"
+          fill="#6B7280"
+          fontSize="14"
+        >
+          No trading data available
+        </text>
+      )}
+    </svg>
+  );
+};
+
+// Main Component
 const BotPerformanceChart = ({ 
   trades = [],
   todayPnl = 0,
@@ -55,11 +400,6 @@ const BotPerformanceChart = ({
     openPositions: 0,
   });
   const [isLoading, setIsLoading] = useState(false);
-  const [lastRefresh, setLastRefresh] = useState(null);
-  
-  const chartContainerRef = useRef(null);
-  const chartRef = useRef(null);
-  const areaSeriesRef = useRef(null);
 
   // Fetch equity curve data from API
   const fetchEquityCurve = useCallback(async () => {
@@ -71,8 +411,9 @@ const BotPerformanceChart = ({
         if (data.success) {
           // Transform API data to chart format
           const equityData = data.equity_curve.map(point => ({
-            time: Math.floor(point.time / 1000), // Convert JS timestamp to seconds
-            value: point.value
+            time: Math.floor(point.time / 1000),
+            value: point.value,
+            pnl: point.pnl || 0,
           }));
           
           setChartData(equityData);
@@ -89,13 +430,10 @@ const BotPerformanceChart = ({
             unrealizedPnl: summary.unrealized_pnl || 0,
             openPositions: summary.open_positions || 0,
           });
-          
-          setLastRefresh(new Date());
         }
       }
     } catch (err) {
       console.error('Failed to fetch equity curve:', err);
-      // Generate demo data if API fails
       generateDemoData();
     } finally {
       setIsLoading(false);
@@ -112,149 +450,32 @@ const BotPerformanceChart = ({
     }
   }, [fetchEquityCurve, autoRefresh]);
 
-  // Also update when trades prop changes significantly
-  useEffect(() => {
-    if (trades && trades.length > 0) {
-      // If we received trades prop, could update from them too
-      // But prefer API data for consistency
-    }
-  }, [trades]);
-
   // Generate demo data for display when no real trades
   const generateDemoData = () => {
-    const now = new Date();
-    const demoTrades = [
-      { time: new Date(now.getTime() - 4 * 60 * 60 * 1000), value: 842, pnl: 842 },
-      { time: new Date(now.getTime() - 3 * 60 * 60 * 1000), value: 2098, pnl: 1256 },
-      { time: new Date(now.getTime() - 2 * 60 * 60 * 1000), value: 1675, pnl: -423 },
-      { time: new Date(now.getTime() - 1 * 60 * 60 * 1000), value: 2847, pnl: 1172 },
+    const now = Math.floor(Date.now() / 1000);
+    const hourInSec = 3600;
+    
+    const demoData = [
+      { time: now - 5 * hourInSec, value: 0, pnl: 0 },
+      { time: now - 4 * hourInSec, value: 842, pnl: 842 },
+      { time: now - 3 * hourInSec, value: 2098, pnl: 1256 },
+      { time: now - 2 * hourInSec, value: 1675, pnl: -423 },
+      { time: now - 1 * hourInSec, value: 2847, pnl: 1172 },
+      { time: now, value: 2500, pnl: -347 },
     ];
     
-    setChartData(demoTrades.map(t => ({
-      time: Math.floor(t.time.getTime() / 1000),
-      value: t.value,
-      pnl: t.pnl,
-    })));
-    
+    setChartData(demoData);
     setStats({
-      totalTrades: 4,
-      winRate: 75,
-      avgR: 1.8,
+      totalTrades: 5,
+      winRate: 60,
+      avgR: 1.5,
       bestTrade: 1256,
       worstTrade: -423,
+      realizedPnl: 2500,
+      unrealizedPnl: 0,
+      openPositions: 0,
     });
   };
-
-  // Create and update chart
-  useEffect(() => {
-    if (!chartContainerRef.current) return;
-    
-    // Cleanup existing chart
-    if (chartRef.current) {
-      chartRef.current.remove();
-      chartRef.current = null;
-    }
-    
-    const container = chartContainerRef.current;
-    const width = container.clientWidth || 600;
-    const height = 200;  // Increased from 100 for better visibility
-    
-    try {
-      const chart = LightweightCharts.createChart(container, {
-        width,
-        height,
-        layout: {
-          background: { type: 'solid', color: 'transparent' },
-          textColor: '#6B7280',
-          fontSize: 10,
-        },
-        grid: {
-          vertLines: { visible: false },
-          horzLines: { color: 'rgba(255,255,255,0.03)' },
-        },
-        timeScale: {
-          visible: true,
-          timeVisible: true,
-          secondsVisible: false,
-          borderVisible: false,
-        },
-        rightPriceScale: {
-          visible: true,
-          borderVisible: false,
-          scaleMargins: { top: 0.1, bottom: 0.1 },
-        },
-        crosshair: {
-          vertLine: { visible: false },
-          horzLine: { visible: false },
-        },
-        handleScroll: false,
-        handleScale: false,
-      });
-      
-      chartRef.current = chart;
-      
-      // Create area series for equity curve
-      const areaSeries = chart.addAreaSeries({
-        lineColor: '#00FF94',
-        topColor: 'rgba(0, 255, 148, 0.3)',
-        bottomColor: 'rgba(0, 255, 148, 0)',
-        lineWidth: 2,
-        priceFormat: {
-          type: 'price',
-          precision: 0,
-          minMove: 1,
-        },
-      });
-      areaSeriesRef.current = areaSeries;
-      
-      // Handle resize
-      const handleResize = () => {
-        if (chartRef.current && container) {
-          chartRef.current.applyOptions({ width: container.clientWidth });
-        }
-      };
-      window.addEventListener('resize', handleResize);
-      
-      return () => {
-        window.removeEventListener('resize', handleResize);
-        if (chartRef.current) {
-          chartRef.current.remove();
-          chartRef.current = null;
-        }
-      };
-    } catch (err) {
-      console.error('Chart init error:', err);
-    }
-  }, []);
-
-  // Update chart data
-  useEffect(() => {
-    if (!areaSeriesRef.current || chartData.length === 0) return;
-    
-    try {
-      // Set area series data
-      areaSeriesRef.current.setData(chartData.map(d => ({
-        time: d.time,
-        value: d.value,
-      })));
-      
-      // Add markers for trades
-      const markers = chartData.map(d => ({
-        time: d.time,
-        position: d.pnl >= 0 ? 'aboveBar' : 'belowBar',
-        color: d.pnl >= 0 ? '#00FF94' : '#FF2E2E',
-        shape: 'circle',
-        size: 0.5,
-      }));
-      areaSeriesRef.current.setMarkers(markers);
-      
-      if (chartRef.current) {
-        chartRef.current.timeScale().fitContent();
-      }
-    } catch (err) {
-      console.error('Chart update error:', err);
-    }
-  }, [chartData]);
 
   const isPositive = todayPnl >= 0;
   
@@ -278,6 +499,9 @@ const BotPerformanceChart = ({
           <span className={`font-mono text-lg ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
             {isPositive ? '+' : ''}${todayPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} today
           </span>
+          {isLoading && (
+            <Activity className="w-4 h-4 text-cyan-400 animate-spin" />
+          )}
         </div>
         
         {/* Time Range Toggle */}
@@ -294,11 +518,10 @@ const BotPerformanceChart = ({
         </div>
       </div>
       
-      {/* Chart */}
-      <div 
-        ref={chartContainerRef} 
-        className="w-full h-[200px] bg-gradient-to-b from-emerald-400/5 to-transparent rounded-lg"
-      />
+      {/* Custom Chart */}
+      <div className="w-full h-[200px] bg-gradient-to-b from-zinc-800/30 to-transparent rounded-lg overflow-hidden">
+        <CustomEquityChart data={chartData} width={800} height={200} />
+      </div>
       
       {/* Stats Row */}
       <div className="flex justify-between items-center mt-3">
