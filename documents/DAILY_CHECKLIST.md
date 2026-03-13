@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://brief-me-dash.preview.emergentagent.com
+https://eod-auto-close.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://brief-me-dash.preview.emergentagent.com
+https://eod-auto-close.preview.emergentagent.com
 ```
