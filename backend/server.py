@@ -389,6 +389,7 @@ trading_bot._learning_loop = learning_loop_service
 register_service('learning_loop_service', learning_loop_service)
 register_service('trade_context_service', trade_context_service)
 register_service('execution_tracker', execution_tracker)
+register_service('alpaca_service', alpaca_service)
 
 print("Three-Speed Learning Architecture Phase 1 initialized")
 print(f"  - Collections: trade_outcomes, learning_stats, calibration_log, trader_profile")

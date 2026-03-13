@@ -184,6 +184,7 @@ def get_brief_me_agent():
     
     if _brief_me_agent is None:
         from agents.brief_me_agent import BriefMeAgent
+        from routers.ib import get_pushed_ib_data
         
         llm = get_llm_provider()
         _brief_me_agent = BriefMeAgent(llm_provider=llm)
@@ -195,10 +196,12 @@ def get_brief_me_agent():
             trading_bot=_services.get("trading_bot"),
             scanner_service=_services.get("scanner"),
             regime_performance_service=_services.get("regime_performance_service"),
-            market_intel_service=_services.get("market_intel_service")
+            market_intel_service=_services.get("market_intel_service"),
+            alpaca_service=_services.get("alpaca_service"),
+            ib_pushed_data=get_pushed_ib_data()
         )
         
-        logger.info("BriefMeAgent initialized")
+        logger.info("BriefMeAgent initialized with Alpaca and IB data services")
     
     return _brief_me_agent
 

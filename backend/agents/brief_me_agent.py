@@ -8,14 +8,17 @@ market report tailored to the user's trading style and current conditions.
 Features:
 - Quick summary (2-3 sentences)
 - Detailed report with sections
+- Pre-market gappers & overnight movers
+- Key market levels (SPY, QQQ, VIX)
 - Personalized insights based on learning data
 - Top opportunities ranked by relevance
 """
 
 import logging
 from typing import Dict, List, Optional, Any
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import asyncio
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,8 @@ class BriefMeAgent:
         self.trading_bot = None
         self.scanner_service = None
         self.regime_performance_service = None
+        self.alpaca_service = None
+        self.ib_pushed_data = None  # For real-time IB data
     
     def inject_services(
         self,
@@ -42,7 +47,9 @@ class BriefMeAgent:
         learning_provider=None,
         trading_bot=None,
         scanner_service=None,
-        regime_performance_service=None
+        regime_performance_service=None,
+        alpaca_service=None,
+        ib_pushed_data=None
     ):
         """Inject required services."""
         self.market_intel_service = market_intel_service
@@ -51,6 +58,8 @@ class BriefMeAgent:
         self.trading_bot = trading_bot
         self.scanner_service = scanner_service
         self.regime_performance_service = regime_performance_service
+        self.alpaca_service = alpaca_service
+        self.ib_pushed_data = ib_pushed_data
     
     async def generate_brief(self, detail_level: str = "quick") -> Dict[str, Any]:
         """
@@ -99,83 +108,258 @@ class BriefMeAgent:
             "bot": {},
             "learning": {},
             "opportunities": [],
-            "regime_performance": {}
+            "regime_performance": {},
+            "premarket": {},
+            "key_levels": {},
+            "gappers": {"up": [], "down": []},
+            "market_movers": {"gainers": [], "losers": []},
+            "index_status": {}
         }
+        
+        # Gather everything in parallel
+        tasks = []
         
         # Market regime data
         if self.context_service:
-            try:
-                regime_data = await asyncio.to_thread(
-                    self.context_service.get_regime_context
-                )
-                data["market"] = regime_data or {}
-            except Exception as e:
-                logger.warning(f"Failed to get regime context: {e}")
+            tasks.append(self._fetch_regime_data(data))
         
         # Session data
         if self.context_service:
-            try:
-                session_data = await asyncio.to_thread(
-                    self.context_service.get_session_context
-                )
-                data["session"] = session_data or {}
-            except Exception as e:
-                logger.warning(f"Failed to get session context: {e}")
+            tasks.append(self._fetch_session_data(data))
         
         # Bot status
         if self.trading_bot:
-            try:
-                bot_status = self.trading_bot.get_status()
-                data["bot"] = {
-                    "state": bot_status.get("mode", "unknown"),
-                    "running": bot_status.get("running", False),
-                    "today_pnl": bot_status.get("daily_stats", {}).get("net_pnl", 0),
-                    "trades_today": bot_status.get("daily_stats", {}).get("total_trades", 0),
-                    "win_rate": bot_status.get("daily_stats", {}).get("win_rate", 0),
-                    "open_positions": self.trading_bot.get_open_trades()[:5]  # Top 5
-                }
-            except Exception as e:
-                logger.warning(f"Failed to get bot status: {e}")
+            tasks.append(self._fetch_bot_status(data))
         
         # Learning insights
         if self.learning_provider:
-            try:
-                learning_data = await asyncio.to_thread(
-                    self.learning_provider.build_full_learning_context
-                )
-                data["learning"] = learning_data or {}
-            except Exception as e:
-                logger.warning(f"Failed to get learning context: {e}")
+            tasks.append(self._fetch_learning_data(data))
         
-        # Regime-specific performance
+        # Regime performance
         if self.regime_performance_service:
-            try:
-                current_regime = data.get("market", {}).get("regime", "HOLD")
-                perf_data = await asyncio.to_thread(
-                    self.regime_performance_service.get_performance_by_regime,
-                    current_regime
-                )
-                data["regime_performance"] = perf_data or {}
-            except Exception as e:
-                logger.warning(f"Failed to get regime performance: {e}")
+            tasks.append(self._fetch_regime_performance(data))
         
         # Scanner opportunities
         if self.scanner_service:
-            try:
-                alerts = await asyncio.to_thread(
-                    self.scanner_service.get_all_alerts
-                )
-                # Filter to top quality alerts
-                top_alerts = sorted(
-                    [a for a in alerts if a.get("tqs_score", 0) >= 60],
-                    key=lambda x: x.get("tqs_score", 0),
-                    reverse=True
-                )[:5]
-                data["opportunities"] = top_alerts
-            except Exception as e:
-                logger.warning(f"Failed to get scanner alerts: {e}")
+            tasks.append(self._fetch_scanner_alerts(data))
+        
+        # Pre-market/gapper data from Alpaca
+        if self.alpaca_service:
+            tasks.append(self._fetch_premarket_data(data))
+        
+        # Real-time IB data (index quotes, VIX, etc.) - always try
+        tasks.append(self._fetch_ib_realtime_data(data))
+        
+        # Run all tasks
+        await asyncio.gather(*tasks, return_exceptions=True)
         
         return data
+    
+    async def _fetch_regime_data(self, data: Dict):
+        """Fetch market regime data."""
+        try:
+            regime_data = await asyncio.to_thread(
+                self.context_service.get_regime_context
+            )
+            data["market"] = regime_data or {}
+        except Exception as e:
+            logger.warning(f"Failed to get regime context: {e}")
+    
+    async def _fetch_session_data(self, data: Dict):
+        """Fetch session data."""
+        try:
+            session_data = await asyncio.to_thread(
+                self.context_service.get_session_context
+            )
+            data["session"] = session_data or {}
+        except Exception as e:
+            logger.warning(f"Failed to get session context: {e}")
+    
+    async def _fetch_bot_status(self, data: Dict):
+        """Fetch bot status."""
+        try:
+            bot_status = self.trading_bot.get_status()
+            data["bot"] = {
+                "state": bot_status.get("mode", "unknown"),
+                "running": bot_status.get("running", False),
+                "today_pnl": bot_status.get("daily_stats", {}).get("net_pnl", 0),
+                "trades_today": bot_status.get("daily_stats", {}).get("total_trades", 0),
+                "win_rate": bot_status.get("daily_stats", {}).get("win_rate", 0),
+                "open_positions": self.trading_bot.get_open_trades()[:5]
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get bot status: {e}")
+    
+    async def _fetch_learning_data(self, data: Dict):
+        """Fetch learning insights."""
+        try:
+            learning_data = await asyncio.to_thread(
+                self.learning_provider.build_full_learning_context
+            )
+            data["learning"] = learning_data or {}
+        except Exception as e:
+            logger.warning(f"Failed to get learning context: {e}")
+    
+    async def _fetch_regime_performance(self, data: Dict):
+        """Fetch regime-specific performance."""
+        try:
+            current_regime = data.get("market", {}).get("regime", "HOLD")
+            perf_data = await asyncio.to_thread(
+                self.regime_performance_service.get_performance_by_regime,
+                current_regime
+            )
+            data["regime_performance"] = perf_data or {}
+        except Exception as e:
+            logger.warning(f"Failed to get regime performance: {e}")
+    
+    async def _fetch_scanner_alerts(self, data: Dict):
+        """Fetch scanner alerts."""
+        try:
+            alerts = await asyncio.to_thread(
+                self.scanner_service.get_all_alerts
+            )
+            top_alerts = sorted(
+                [a for a in alerts if a.get("tqs_score", 0) >= 60],
+                key=lambda x: x.get("tqs_score", 0),
+                reverse=True
+            )[:5]
+            data["opportunities"] = top_alerts
+        except Exception as e:
+            logger.warning(f"Failed to get scanner alerts: {e}")
+    
+    async def _fetch_premarket_data(self, data: Dict):
+        """Fetch pre-market gappers and movers from Alpaca."""
+        try:
+            # Key symbols to check
+            index_etfs = ["SPY", "QQQ", "IWM", "DIA"]
+            watchlist = ["NVDA", "TSLA", "AAPL", "AMD", "META", "MSFT", "AMZN", "GOOGL"]
+            
+            # Get quotes for key symbols
+            all_symbols = index_etfs + watchlist
+            
+            gappers_up = []
+            gappers_down = []
+            index_status = {}
+            
+            for symbol in all_symbols:
+                try:
+                    quote = await asyncio.to_thread(
+                        self.alpaca_service.get_latest_quote, symbol
+                    )
+                    bars = await asyncio.to_thread(
+                        self.alpaca_service.get_historical_bars, symbol, 2
+                    )
+                    
+                    if quote and bars is not None and len(bars) >= 2:
+                        current_price = quote.get("price", 0)
+                        prev_close = bars.iloc[-2]["close"] if len(bars) >= 2 else current_price
+                        
+                        if prev_close > 0:
+                            gap_pct = ((current_price - prev_close) / prev_close) * 100
+                            
+                            item = {
+                                "symbol": symbol,
+                                "price": current_price,
+                                "prev_close": prev_close,
+                                "gap_pct": round(gap_pct, 2),
+                                "gap_dollars": round(current_price - prev_close, 2)
+                            }
+                            
+                            if symbol in index_etfs:
+                                index_status[symbol] = item
+                            elif abs(gap_pct) >= 2.0:  # 2%+ gap
+                                if gap_pct > 0:
+                                    gappers_up.append(item)
+                                else:
+                                    gappers_down.append(item)
+                except Exception as e:
+                    logger.debug(f"Failed to get data for {symbol}: {e}")
+            
+            # Sort gappers by gap percentage
+            gappers_up.sort(key=lambda x: x["gap_pct"], reverse=True)
+            gappers_down.sort(key=lambda x: x["gap_pct"])
+            
+            data["gappers"] = {"up": gappers_up[:5], "down": gappers_down[:5]}
+            data["index_status"] = index_status
+            
+        except Exception as e:
+            logger.warning(f"Failed to get premarket data: {e}")
+    
+    async def _fetch_ib_realtime_data(self, data: Dict):
+        """Fetch real-time data from IB pusher."""
+        try:
+            # Import at module level to avoid issues
+            import sys
+            if 'routers.ib' in sys.modules:
+                ib_module = sys.modules['routers.ib']
+                ib_data = ib_module._pushed_ib_data
+            else:
+                # Try direct import
+                from routers.ib import _pushed_ib_data as ib_data
+            
+            # Get pushed quotes from IB
+            quotes = ib_data.get("quotes", {})
+            
+            logger.info(f"IB pushed data quotes: {list(quotes.keys())}")
+            
+            # Extract key levels
+            spy_data = quotes.get("SPY", {})
+            qqq_data = quotes.get("QQQ", {})
+            vix_data = quotes.get("VIX", {})
+            
+            key_levels = {}
+            
+            if spy_data:
+                key_levels["SPY"] = {
+                    "price": spy_data.get("last", spy_data.get("close", 0)),
+                    "high": spy_data.get("high", 0),
+                    "low": spy_data.get("low", 0),
+                    "open": spy_data.get("open", 0),
+                    "volume": spy_data.get("volume", 0)
+                }
+            
+            if qqq_data:
+                key_levels["QQQ"] = {
+                    "price": qqq_data.get("last", qqq_data.get("close", 0)),
+                    "high": qqq_data.get("high", 0),
+                    "low": qqq_data.get("low", 0)
+                }
+            
+            if vix_data:
+                vix_price = vix_data.get("last", vix_data.get("close", 0))
+                key_levels["VIX"] = {
+                    "price": vix_price,
+                    "level": "LOW" if vix_price < 15 else "NORMAL" if vix_price < 20 else "ELEVATED" if vix_price < 30 else "HIGH"
+                }
+            
+            data["key_levels"] = key_levels
+            
+            # Also populate index_status from IB data
+            for symbol in ["SPY", "QQQ", "IWM", "DIA"]:
+                if symbol in quotes:
+                    q = quotes[symbol]
+                    # Calculate gap from previous close if available
+                    price = q.get("last", q.get("close", 0))
+                    prev_close = q.get("prev_close", q.get("close", 0))
+                    
+                    if price and prev_close and prev_close > 0:
+                        gap_pct = ((price - prev_close) / prev_close) * 100
+                        data["index_status"][symbol] = {
+                            "price": price,
+                            "prev_close": prev_close,
+                            "gap_pct": round(gap_pct, 2),
+                            "high": q.get("high", 0),
+                            "low": q.get("low", 0)
+                        }
+                    elif price:
+                        data["index_status"][symbol] = {
+                            "price": price,
+                            "high": q.get("high", 0),
+                            "low": q.get("low", 0)
+                        }
+            
+        except Exception as e:
+            logger.warning(f"Failed to get IB realtime data: {e}")
     
     def _build_structured_brief(self, data: Dict) -> Dict[str, Any]:
         """Build a structured brief from gathered data."""
@@ -185,6 +369,9 @@ class BriefMeAgent:
         learning = data.get("learning", {})
         regime_perf = data.get("regime_performance", {})
         opportunities = data.get("opportunities", [])
+        gappers = data.get("gappers", {"up": [], "down": []})
+        index_status = data.get("index_status", {})
+        key_levels = data.get("key_levels", {})
         
         # Get current regime
         regime = market.get("regime", "HOLD")
@@ -215,15 +402,35 @@ class BriefMeAgent:
             if regime_perf.get("win_rate"):
                 win_rate_in_regime = regime_perf.get("win_rate")
         
+        # Determine market session/time
+        now = datetime.now(timezone.utc)
+        hour_et = (now.hour - 5) % 24  # Rough EST conversion
+        if hour_et < 9 or (hour_et == 9 and now.minute < 30):
+            session_name = "Pre-Market"
+        elif hour_et < 16:
+            session_name = "Regular Hours"
+        else:
+            session_name = "After Hours"
+        
         return {
             "market_summary": {
                 "regime": regime,
                 "regime_score": regime_score,
                 "regime_label": self._get_regime_label(regime),
-                "session": session.get("name", "Unknown"),
+                "session": session.get("name", session_name),
                 "session_advice": session.get("trading_advice", ""),
                 "risk_level": session.get("risk_level", "medium"),
                 "position_multiplier": market.get("position_multiplier", 1.0)
+            },
+            "index_status": {
+                "SPY": index_status.get("SPY", key_levels.get("SPY", {})),
+                "QQQ": index_status.get("QQQ", key_levels.get("QQQ", {})),
+                "IWM": index_status.get("IWM", {}),
+                "VIX": key_levels.get("VIX", {})
+            },
+            "gappers": {
+                "up": gappers.get("up", [])[:5],
+                "down": gappers.get("down", [])[:5]
             },
             "your_bot": {
                 "state": bot.get("state", "offline"),
@@ -317,6 +524,8 @@ class BriefMeAgent:
         bot = brief.get("your_bot", {})
         insights = brief.get("personalized_insights", {})
         opportunities = brief.get("opportunities", [])
+        index_status = brief.get("index_status", {})
+        gappers = brief.get("gappers", {"up": [], "down": []})
         
         # Try LLM generation first
         if self.llm_provider:
@@ -330,18 +539,71 @@ class BriefMeAgent:
         # Fallback to template-based generation
         sections = {}
         
-        # Market Overview
+        # Market Overview with Index Status
         regime = market.get("regime", "HOLD")
         regime_label = market.get("regime_label", "Neutral")
         score = market.get("regime_score", 50)
         session = market.get("session", "Unknown")
         session_advice = market.get("session_advice", "")
         
+        # Build index status text
+        index_text = ""
+        spy = index_status.get("SPY", {})
+        qqq = index_status.get("QQQ", {})
+        vix = index_status.get("VIX", {})
+        
+        if spy:
+            spy_price = spy.get("price", 0)
+            spy_gap = spy.get("gap_pct", 0)
+            if spy_price:
+                index_text += f"**SPY:** ${spy_price:.2f}"
+                if spy_gap:
+                    index_text += f" ({'+' if spy_gap > 0 else ''}{spy_gap:.1f}%)"
+                index_text += "\n"
+        
+        if qqq:
+            qqq_price = qqq.get("price", 0)
+            qqq_gap = qqq.get("gap_pct", 0)
+            if qqq_price:
+                index_text += f"**QQQ:** ${qqq_price:.2f}"
+                if qqq_gap:
+                    index_text += f" ({'+' if qqq_gap > 0 else ''}{qqq_gap:.1f}%)"
+                index_text += "\n"
+        
+        if vix:
+            vix_price = vix.get("price", 0)
+            vix_level = vix.get("level", "")
+            if vix_price:
+                index_text += f"**VIX:** {vix_price:.1f} ({vix_level})\n"
+        
         sections["market_overview"] = (
             f"**Market Regime: {regime_label}** (Score: {score}/100)\n\n"
-            f"Current Session: {session}\n"
+            f"**Session:** {session}\n\n"
+            f"{index_text if index_text else ''}"
             f"{session_advice}"
         )
+        
+        # Gappers Section
+        gappers_up = gappers.get("up", [])
+        gappers_down = gappers.get("down", [])
+        
+        if gappers_up or gappers_down:
+            gapper_text = ""
+            
+            if gappers_up:
+                gapper_text += "**🟢 Gapping UP:**\n"
+                for g in gappers_up[:5]:
+                    gapper_text += f"- **{g['symbol']}** +{g['gap_pct']:.1f}% (${g['price']:.2f})\n"
+                gapper_text += "\n"
+            
+            if gappers_down:
+                gapper_text += "**🔴 Gapping DOWN:**\n"
+                for g in gappers_down[:5]:
+                    gapper_text += f"- **{g['symbol']}** {g['gap_pct']:.1f}% (${g['price']:.2f})\n"
+            
+            sections["gappers"] = gapper_text if gapper_text else "No significant gaps today."
+        else:
+            sections["gappers"] = "No significant gappers detected (need 2%+ move)."
         
         # Your Bot Status
         bot_state = "actively hunting for opportunities" if bot.get("running") else "currently paused"
@@ -351,11 +613,9 @@ class BriefMeAgent:
         
         positions_text = ""
         for pos in bot.get("open_positions", []):
-            pnl = pos.get("pnl", 0)
             pnl_pct = pos.get("pnl_pct", 0)
             direction = pos.get("direction", "long").upper()
-            _ = "green" if pnl >= 0 else "red"
-            positions_text += f"- **{pos['symbol']}** ({direction}): {'+' if pnl >= 0 else ''}{pnl_pct:.1f}%\n"
+            positions_text += f"- **{pos['symbol']}** ({direction}): {'+' if pnl_pct >= 0 else ''}{pnl_pct:.1f}%\n"
         
         sections["bot_status"] = (
             f"Your bot is {bot_state}.\n\n"
@@ -389,7 +649,7 @@ class BriefMeAgent:
             f"**Based on Your Trading History:**\n\n{insights_text if insights_text else 'Keep trading your edge!'}"
         )
         
-        # Top Opportunities
+        # Top Opportunities / Stocks to Watch
         if opportunities:
             opps_text = ""
             for opp in opportunities[:5]:
@@ -400,13 +660,13 @@ class BriefMeAgent:
                 rr = opp.get("risk_reward", 0)
                 opps_text += f"- **{symbol}** - {setup} ({direction}) | TQS: {tqs} | R:R: {rr:.1f}\n"
             
-            sections["opportunities"] = f"**Top Scanner Alerts:**\n\n{opps_text}"
+            sections["opportunities"] = f"**📊 Stocks to Watch:**\n\n{opps_text}"
         else:
-            sections["opportunities"] = "**Top Scanner Alerts:**\n\nNo high-quality setups active right now."
+            sections["opportunities"] = "**📊 Stocks to Watch:**\n\nNo high-quality setups active right now. Check the scanner for emerging opportunities."
         
         # Recommendation
         recommendation = self._generate_recommendation(brief)
-        sections["recommendation"] = f"**Recommendation:**\n\n{recommendation}"
+        sections["recommendation"] = f"**💡 Recommendation:**\n\n{recommendation}"
         
         return sections
     
