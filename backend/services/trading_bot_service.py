@@ -838,6 +838,7 @@ class TradingBotService:
                 saved_mode = state.get("mode", "confirmation")
                 saved_watchlist = state.get("watchlist", [])
                 saved_setups = state.get("enabled_setups", [])
+                saved_risk_params = state.get("risk_params", {})
                 
                 # Restore mode - but prefer AUTONOMOUS if that's the default
                 if saved_mode in ["autonomous", "confirmation", "paused"]:
@@ -854,6 +855,24 @@ class TradingBotService:
                     logger.info(f"🎯 Restored {len(saved_setups)} strategies")
                 else:
                     logger.info(f"🎯 Using default {len(self._enabled_setups)} strategies")
+                
+                # Restore risk parameters
+                if saved_risk_params:
+                    if "max_risk_per_trade" in saved_risk_params:
+                        self.risk_params.max_risk_per_trade = saved_risk_params["max_risk_per_trade"]
+                    if "max_daily_loss" in saved_risk_params:
+                        self.risk_params.max_daily_loss = saved_risk_params["max_daily_loss"]
+                    if "max_daily_loss_pct" in saved_risk_params:
+                        self.risk_params.max_daily_loss_pct = saved_risk_params["max_daily_loss_pct"]
+                    if "max_open_positions" in saved_risk_params:
+                        self.risk_params.max_open_positions = saved_risk_params["max_open_positions"]
+                    if "max_position_pct" in saved_risk_params:
+                        self.risk_params.max_position_pct = saved_risk_params["max_position_pct"]
+                    if "min_risk_reward" in saved_risk_params:
+                        self.risk_params.min_risk_reward = saved_risk_params["min_risk_reward"]
+                    if "starting_capital" in saved_risk_params:
+                        self.risk_params.starting_capital = saved_risk_params["starting_capital"]
+                    logger.info(f"💰 Restored risk params: max_risk=${self.risk_params.max_risk_per_trade:,.0f}, max_positions={self.risk_params.max_open_positions}, min_rr={self.risk_params.min_risk_reward}")
             
             # === 2. RESTORE EOD CONFIG ===
             eod_config = self._db.bot_config.find_one({"_id": "eod_config"})
@@ -1076,7 +1095,7 @@ class TradingBotService:
             if self._db is None:
                 return
             
-            # === 1. SAVE BOT STATE ===
+            # === 1. SAVE BOT STATE (including risk params) ===
             self._db.bot_state.update_one(
                 {"_id": "bot_state"},
                 {"$set": {
@@ -1084,6 +1103,15 @@ class TradingBotService:
                     "mode": self._mode.value,
                     "watchlist": self._watchlist,
                     "enabled_setups": self._enabled_setups,
+                    "risk_params": {
+                        "max_risk_per_trade": self.risk_params.max_risk_per_trade,
+                        "max_daily_loss": self.risk_params.max_daily_loss,
+                        "max_daily_loss_pct": self.risk_params.max_daily_loss_pct,
+                        "max_open_positions": self.risk_params.max_open_positions,
+                        "max_position_pct": self.risk_params.max_position_pct,
+                        "min_risk_reward": self.risk_params.min_risk_reward,
+                        "starting_capital": self.risk_params.starting_capital
+                    },
                     "last_updated": datetime.now(timezone.utc).isoformat()
                 }},
                 upsert=True
@@ -1240,11 +1268,21 @@ class TradingBotService:
         return self._mode
     
     def update_risk_params(self, **kwargs):
-        """Update risk parameters"""
+        """Update risk parameters and persist to MongoDB"""
         for key, value in kwargs.items():
             if hasattr(self.risk_params, key):
                 setattr(self.risk_params, key, value)
                 logger.info(f"Risk param updated: {key} = {value}")
+        
+        # Persist state after updating risk params
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._save_state())
+            else:
+                loop.run_until_complete(self._save_state())
+        except Exception:
+            pass  # State will be saved on next start/stop
     
     def set_watchlist(self, symbols: List[str]):
         """Set symbols to scan"""
