@@ -60,6 +60,29 @@ const Sparkline = ({ data = [], color = 'cyan', height = 24 }) => {
   );
 };
 
+// Generate sparkline data based on P&L direction and percentage
+const generateSparklineData = (pnl, pnlPercent = 0) => {
+  const isPositive = pnl >= 0;
+  const magnitude = Math.min(Math.abs(pnlPercent || 0), 10); // Cap at 10% for visual scaling
+  const baseValue = 50;
+  const points = 8;
+  const data = [];
+  
+  for (let i = 0; i < points; i++) {
+    // Create a trend line with some variation
+    const progress = i / (points - 1);
+    const trend = isPositive 
+      ? baseValue + (magnitude * progress * 3) // Upward trend
+      : baseValue - (magnitude * progress * 3); // Downward trend
+    
+    // Add some natural variation (smaller as we approach current price)
+    const variation = (Math.random() - 0.5) * (2 - progress) * 2;
+    data.push(Math.max(0, trend + variation));
+  }
+  
+  return data;
+};
+
 const GlassCard = ({ children, className = '', gradient = false, glow = false }) => (
   <div className={`
     relative overflow-hidden rounded-2xl
@@ -1021,7 +1044,7 @@ const PositionsPanel = ({ positions, totalPnl, loading, onSelectPosition }) => {
               <div className="flex items-center gap-4">
                 <div className="w-16 h-6">
                   <Sparkline 
-                    data={pos.sparkline_data || [50, 52, 48, 55, 53, 58, 56, 60]} 
+                    data={pos.sparkline_data || generateSparklineData(pos.pnl, pos.pnl_percent)} 
                     color={pos.pnl >= 0 ? 'emerald' : 'rose'} 
                   />
                 </div>
@@ -1930,7 +1953,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
                         {/* Mini Sparkline */}
                         <div className="h-5 mt-1 opacity-60 group-hover:opacity-100 transition-opacity">
                           <Sparkline 
-                            data={pos.sparkline_data || [50, 52, 48, 55, 53, 58, 56, 60]} 
+                            data={pos.sparkline_data || generateSparklineData(pos.pnl, pos.pnl_percent)} 
                             color={pos.pnl >= 0 ? 'emerald' : 'rose'} 
                           />
                         </div>
