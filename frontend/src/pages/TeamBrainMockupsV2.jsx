@@ -32,33 +32,60 @@ import {
 
 // Mini sparkline component
 const Sparkline = ({ data, color = 'cyan', height = 24 }) => {
+  if (!data || data.length < 2) return null;
+  
   const max = Math.max(...data);
   const min = Math.min(...data);
   const range = max - min || 1;
   
+  // Add padding to prevent clipping at edges
+  const padding = 5;
   const points = data.map((val, i) => {
-    const x = (i / (data.length - 1)) * 100;
-    const y = 100 - ((val - min) / range) * 100;
+    const x = padding + (i / (data.length - 1)) * (100 - padding * 2);
+    const y = padding + (100 - padding * 2) - ((val - min) / range) * (100 - padding * 2);
     return `${x},${y}`;
   }).join(' ');
   
+  const strokeColor = color === 'emerald' ? '#10b981' : color === 'rose' ? '#f43f5e' : '#06b6d4';
+  
   return (
-    <svg viewBox="0 0 100 100" className={`w-full h-${height} overflow-visible`} preserveAspectRatio="none">
-      <defs>
-        <linearGradient id={`gradient-${color}`} x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor={`var(--${color})`} stopOpacity="0.3" />
-          <stop offset="100%" stopColor={`var(--${color})`} stopOpacity="0" />
-        </linearGradient>
-      </defs>
+    <svg 
+      viewBox="0 0 100 100" 
+      className="w-full h-full" 
+      preserveAspectRatio="none"
+      style={{ display: 'block' }}
+    >
       <polyline
         points={points}
         fill="none"
-        stroke={color === 'emerald' ? '#10b981' : color === 'rose' ? '#f43f5e' : '#06b6d4'}
-        strokeWidth="2"
+        stroke={strokeColor}
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
         vectorEffect="non-scaling-stroke"
       />
     </svg>
   );
+};
+
+// Generate sparkline data based on P&L direction
+const generateSparklineData = (pnl, pnlPercent = 0) => {
+  const isPositive = pnl >= 0;
+  const magnitude = Math.min(Math.abs(pnlPercent || 0), 10);
+  const baseValue = 50;
+  const points = 8;
+  const data = [];
+  
+  for (let i = 0; i < points; i++) {
+    const progress = i / (points - 1);
+    const trend = isPositive 
+      ? baseValue + (magnitude * progress * 3)
+      : baseValue - (magnitude * progress * 3);
+    const variation = (Math.random() - 0.5) * (2 - progress) * 2;
+    data.push(Math.max(0, trend + variation));
+  }
+  
+  return data;
 };
 
 const GlassCard = ({ children, className = '', gradient = false, glow = false }) => (
@@ -418,7 +445,7 @@ const DedicatedPageV2 = () => {
                   </div>
                   
                   {/* Mini Chart - Clickable */}
-                  <div className="h-8 mt-2 opacity-60 group-hover:opacity-100 transition-opacity relative">
+                  <div className="h-8 mt-2 overflow-hidden rounded opacity-60 group-hover:opacity-100 transition-opacity relative">
                     <Sparkline data={pos.data} color={pos.pnl.startsWith('+') ? 'emerald' : 'rose'} />
                     {/* Hover hint */}
                     <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 rounded">
@@ -867,7 +894,7 @@ const EnhancedAnalytics = () => {
             <div className="flex items-center justify-between mt-2">
               <span className="text-[10px] text-zinc-500">{card.change} vs last period</span>
             </div>
-            <div className="h-8 mt-2">
+            <div className="h-8 mt-2 overflow-hidden rounded">
               <Sparkline data={card.data} color={card.color} />
             </div>
           </GlassCard>
@@ -958,7 +985,7 @@ const EnhancedAnalytics = () => {
                     </div>
                   </div>
                   
-                  <div className="col-span-4 h-12">
+                  <div className="col-span-4 h-12 overflow-hidden rounded">
                     <Sparkline 
                       data={stat.data} 
                       color={isEdge ? 'emerald' : isAvoid ? 'rose' : 'cyan'} 
