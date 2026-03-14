@@ -5,6 +5,110 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ---
 
+## INSTITUTIONAL-GRADE AI MODULES (March 14, 2026)
+
+### Phase 1: Shadow Mode + AI Agents ✅ COMPLETE
+
+**Implemented:**
+1. **AI Module Configuration System** (`module_config.py`)
+   - Centralized toggles for all AI modules
+   - Per-module and global shadow mode settings
+   - MongoDB persistence for configuration
+   
+2. **Shadow Tracker** (`shadow_tracker.py`)
+   - Logs ALL AI decisions without execution
+   - Tracks outcomes for learning
+   - Performance metrics per module
+   - MongoDB persistence for decisions
+   
+3. **Bull/Bear Debate Agents** (`debate_agents.py`)
+   - BullAgent: Argues FOR trades (setup quality, R:R, trend alignment)
+   - BearAgent: Argues AGAINST (regime risk, volatility, correlation)
+   - Arbiter: Makes final recommendation (proceed/pass/reduce_size)
+   
+4. **AI Risk Manager** (`risk_manager_agent.py`)
+   - Multi-factor risk assessment (6 factors)
+   - Position sizing, correlation, volatility, news, regime, historical
+   - Returns risk score (0-10), level (low/moderate/high/extreme)
+   - Size adjustment recommendations
+
+### Phase 5: Institutional Flow Tracking ✅ COMPLETE
+
+**Implemented:**
+1. **Institutional Flow Service** (`institutional_flow.py`)
+   - SEC EDGAR integration framework (FREE)
+   - CIK lookup for ticker symbols
+   - Ownership context for trades
+   - Rebalance risk calendar (quarter-end, Russell, S&P)
+   
+2. **13F Ownership Analysis** (placeholder pending full EDGAR parsing)
+   - Passive vs hedge fund breakdown
+   - Crowding risk assessment
+   - QoQ change tracking
+
+### Phase 6: Volume Anomaly Enhancement ✅ COMPLETE
+
+**Implemented:**
+1. **Volume Anomaly Service** (`volume_anomaly.py`)
+   - Z-score based spike detection (3σ threshold)
+   - Accumulation/Distribution detection
+   - Price absorption analysis
+   - RVOL calculations
+   
+2. **Volume Profile Analysis**
+   - Recent anomaly tracking
+   - Institutional signal detection
+   - Trade context recommendations
+
+### Frontend AI Modules Panel ✅ COMPLETE
+
+**Added to SentCom.jsx:**
+- New "AI Modules" tab in settings panel
+- Shadow Mode master toggle
+- Individual module toggles with status indicators:
+  - Bull/Bear Debate
+  - AI Risk Manager
+  - Institutional Flow
+  - Time Series AI
+- Active modules counter
+- Shadow tracking stats display
+
+### API Endpoints Added:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| /api/ai-modules/config | GET | Full module configuration |
+| /api/ai-modules/status | GET | Quick status summary |
+| /api/ai-modules/toggle/{module} | POST | Toggle module on/off |
+| /api/ai-modules/shadow-mode | POST | Set global shadow mode |
+| /api/ai-modules/debate/run | POST | Run Bull/Bear debate |
+| /api/ai-modules/risk/assess | POST | Perform risk assessment |
+| /api/ai-modules/institutional/context/{symbol} | GET | Get ownership context |
+| /api/ai-modules/institutional/rebalance-risk/{symbol} | GET | Check rebalance risks |
+| /api/ai-modules/volume/analyze | POST | Analyze volume profile |
+| /api/ai-modules/volume/detect | POST | Detect volume anomaly |
+| /api/ai-modules/shadow/stats | GET | Shadow tracker stats |
+| /api/ai-modules/shadow/decisions | GET | Get logged decisions |
+| /api/ai-modules/shadow/performance | GET | Module performance metrics |
+
+### Files Created/Modified:
+
+**New Files:**
+- `/app/backend/services/ai_modules/__init__.py`
+- `/app/backend/services/ai_modules/module_config.py`
+- `/app/backend/services/ai_modules/shadow_tracker.py`
+- `/app/backend/services/ai_modules/debate_agents.py`
+- `/app/backend/services/ai_modules/risk_manager_agent.py`
+- `/app/backend/services/ai_modules/institutional_flow.py`
+- `/app/backend/services/ai_modules/volume_anomaly.py`
+- `/app/backend/routers/ai_modules.py`
+
+**Modified Files:**
+- `/app/backend/server.py` - Added AI modules initialization
+- `/app/frontend/src/components/SentCom.jsx` - Added AI Modules panel and hook
+
+---
+
 ## DATA FLOW & LEARNING SYSTEMS INTEGRATION (March 14, 2026)
 
 ### Chart/Ticker Modals Connected ✅
