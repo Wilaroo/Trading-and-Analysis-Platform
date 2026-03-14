@@ -308,3 +308,31 @@ async def health_check():
             "healthy": False,
             "error": str(e)
         }
+
+
+@router.get("/learning/insights")
+async def get_learning_insights(symbol: str = Query(None)):
+    """
+    Get learning insights for the trader or a specific symbol.
+    
+    Provides:
+    - Trader profile (strengths, weaknesses)
+    - Recent patterns and behaviors
+    - Strategy performance data
+    - Symbol-specific insights (if symbol provided)
+    - AI recommendations based on learning
+    """
+    try:
+        service = _get_service()
+        insights = await service.get_learning_insights(symbol)
+        return {
+            "success": True,
+            "insights": insights
+        }
+    except Exception as e:
+        logger.error(f"Error getting learning insights: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "insights": {"available": False}
+        }
