@@ -79,7 +79,16 @@ from routers.regime_performance import router as regime_performance_router, init
 from routers.context_awareness import router as context_awareness_router, init_context_router
 from routers.smart_stops import router as smart_stops_router, init_smart_stop_router
 from routers.sentcom import router as sentcom_router
+from routers.ai_modules import router as ai_modules_router, inject_services as inject_ai_module_services
 from services.sentcom_service import get_sentcom_service, init_sentcom_service
+from services.ai_modules import (
+    get_ai_module_config, init_ai_module_config,
+    get_shadow_tracker, init_shadow_tracker,
+    get_debate_agents, init_debate_agents,
+    get_ai_risk_manager, init_ai_risk_manager,
+    init_institutional_flow_service,
+    init_volume_anomaly_service
+)
 from services.market_intel_service import get_market_intel_service
 from services.hybrid_data_service import get_hybrid_data_service, init_hybrid_data_service
 from services.market_scanner_service import get_market_scanner_service, init_market_scanner_service
@@ -341,6 +350,7 @@ app.include_router(context_awareness_router)  # Phase 2 AI context awareness
 app.include_router(smart_stops_router)  # Unified Smart Stop System
 init_smart_stop_router()  # Initialize smart stop service
 app.include_router(sentcom_router)  # SentCom - Unified AI Command Center
+app.include_router(ai_modules_router)  # AI Modules - Shadow Mode, Debate, Risk Manager
 
 # Collections
 strategies_col = db["strategies"]
@@ -701,6 +711,79 @@ try:
 except Exception as e:
     print(f"Learning Context Provider initialization deferred: {e}")
     learning_context_provider = None
+
+# ===================== AI MODULES (Institutional-Grade) =====================
+# Initialize AI trading modules: Shadow Mode, Bull/Bear Debate, AI Risk Manager
+try:
+    # Initialize AI Module Configuration (toggles, settings)
+    ai_module_config = init_ai_module_config(db=db)
+    
+    # Initialize Shadow Tracker (logs all AI decisions for learning)
+    shadow_tracker = init_shadow_tracker(db=db, alpaca_service=alpaca_service)
+    
+    # Initialize Debate Agents (Bull/Bear deliberation)
+    # Get config dict from module settings
+    debate_config = ai_module_config.get_module_settings("debate_agents")
+    debate_config_dict = debate_config.custom_settings if debate_config else None
+    debate_agents = init_debate_agents(
+        llm_service=None,  # Uses rule-based for now, can add LLM later
+        learning_provider=learning_context_provider,
+        config=debate_config_dict
+    )
+    
+    # Initialize AI Risk Manager
+    risk_config = ai_module_config.get_module_settings("ai_risk_manager")
+    risk_config_dict = risk_config.custom_settings if risk_config else None
+    ai_risk_manager = init_ai_risk_manager(config=risk_config_dict)
+    ai_risk_manager.set_services(
+        portfolio_service=None,  # Can wire later
+        learning_provider=learning_context_provider,
+        news_service=news_service
+    )
+    
+    # Initialize Institutional Flow Service (Phase 5 - FREE SEC EDGAR)
+    institutional_flow = init_institutional_flow_service(db=db)
+    
+    # Initialize Volume Anomaly Service (Phase 6 - Uses existing data)
+    volume_anomaly = init_volume_anomaly_service(db=db)
+    
+    # Inject services into AI modules router
+    inject_ai_module_services(
+        ai_module_config, 
+        shadow_tracker, 
+        debate_agents, 
+        ai_risk_manager,
+        institutional_flow,
+        volume_anomaly
+    )
+    
+    # Register AI module services
+    register_service('ai_module_config', ai_module_config)
+    register_service('shadow_tracker', shadow_tracker)
+    register_service('debate_agents', debate_agents)
+    register_service('ai_risk_manager', ai_risk_manager)
+    register_service('institutional_flow', institutional_flow)
+    register_service('volume_anomaly', volume_anomaly)
+    
+    print("AI Modules (Institutional-Grade) initialized")
+    print("  - Module Config: Toggle individual AI modules on/off")
+    print("  - Shadow Tracker: Logs all AI decisions without execution")
+    print("  - Debate Agents: Bull/Bear deliberation before trades")
+    print("  - AI Risk Manager: Multi-factor risk assessment")
+    print("  - Institutional Flow: 13F tracking, ownership context (FREE)")
+    print("  - Volume Anomaly: Z-score detection, accumulation/distribution")
+    print("  - Endpoints: /api/ai-modules/config, /api/ai-modules/institutional/*, /api/ai-modules/volume/*")
+    
+except Exception as e:
+    print(f"AI Modules initialization deferred: {e}")
+    import traceback
+    traceback.print_exc()
+    ai_module_config = None
+    shadow_tracker = None
+    debate_agents = None
+    ai_risk_manager = None
+    institutional_flow = None
+    volume_anomaly = None
 
 # ===================== TRADING SCHEDULER =====================
 # Automated daily/weekly analysis tasks
