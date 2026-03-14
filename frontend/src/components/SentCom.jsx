@@ -32,28 +32,30 @@ const Sparkline = ({ data = [], color = 'cyan', height = 24 }) => {
   const min = Math.min(...data);
   const range = max - min || 1;
   
+  // Add padding to prevent clipping at edges
+  const padding = 5;
   const points = data.map((val, i) => {
-    const x = (i / (data.length - 1)) * 100;
-    const y = 100 - ((val - min) / range) * 100;
+    const x = padding + (i / (data.length - 1)) * (100 - padding * 2);
+    const y = padding + (100 - padding * 2) - ((val - min) / range) * (100 - padding * 2);
     return `${x},${y}`;
   }).join(' ');
   
   const strokeColor = color === 'emerald' ? '#10b981' : color === 'rose' ? '#f43f5e' : '#06b6d4';
-  const gradientId = `sparkline-gradient-${color}-${Math.random().toString(36).substr(2, 9)}`;
   
   return (
-    <svg viewBox="0 0 100 100" className={`w-full h-${height} overflow-visible`} preserveAspectRatio="none">
-      <defs>
-        <linearGradient id={gradientId} x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor={strokeColor} stopOpacity="0.3" />
-          <stop offset="100%" stopColor={strokeColor} stopOpacity="0" />
-        </linearGradient>
-      </defs>
+    <svg 
+      viewBox="0 0 100 100" 
+      className="w-full h-full" 
+      preserveAspectRatio="none"
+      style={{ display: 'block' }}
+    >
       <polyline
         points={points}
         fill="none"
         stroke={strokeColor}
-        strokeWidth="2"
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
         vectorEffect="non-scaling-stroke"
       />
     </svg>
@@ -1042,7 +1044,7 @@ const PositionsPanel = ({ positions, totalPnl, loading, onSelectPosition }) => {
               </div>
               
               <div className="flex items-center gap-4">
-                <div className="w-16 h-6">
+                <div className="w-16 h-6 overflow-hidden rounded">
                   <Sparkline 
                     data={pos.sparkline_data || generateSparklineData(pos.pnl, pos.pnl_percent)} 
                     color={pos.pnl >= 0 ? 'emerald' : 'rose'} 
@@ -1950,8 +1952,8 @@ const SentCom = ({ compact = false, embedded = false }) => {
                           </div>
                         )}
                         
-                        {/* Mini Sparkline */}
-                        <div className="h-5 mt-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                        {/* Mini Sparkline - contained within card */}
+                        <div className="h-6 mt-2 overflow-hidden rounded">
                           <Sparkline 
                             data={pos.sparkline_data || generateSparklineData(pos.pnl, pos.pnl_percent)} 
                             color={pos.pnl >= 0 ? 'emerald' : 'rose'} 
