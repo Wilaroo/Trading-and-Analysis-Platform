@@ -185,6 +185,15 @@ class SentComService:
         self._services = services
         logger.info(f"SentCom services injected: {list(services.keys())}")
     
+    def inject_learning_services(self, learning_loop=None, learning_context_provider=None):
+        """Late injection of learning services (called after learning services are initialized)"""
+        if learning_loop:
+            self._services["learning_loop"] = learning_loop
+            logger.info("SentCom: Learning loop service injected")
+        if learning_context_provider:
+            self._services["learning_context_provider"] = learning_context_provider
+            logger.info("SentCom: Learning context provider injected")
+    
     def _generate_message_id(self) -> str:
         """Generate unique message ID"""
         self._message_counter += 1
@@ -205,6 +214,14 @@ class SentComService:
     def _get_regime_engine(self):
         """Get market regime engine"""
         return self._services.get("regime_engine")
+    
+    def _get_learning_loop(self):
+        """Get learning loop service"""
+        return self._services.get("learning_loop")
+    
+    def _get_learning_context(self):
+        """Get learning context provider"""
+        return self._services.get("learning_context_provider")
     
     async def get_status(self) -> SentComStatus:
         """Get current SentCom operational status"""
@@ -773,6 +790,71 @@ class SentComService:
                 })
         
         return alerts[:limit]
+    
+    async def get_learning_insights(self, symbol: str = None) -> Dict[str, Any]:
+        """Get learning insights from the learning systems"""
+        learning_loop = self._get_learning_loop()
+        learning_context = self._get_learning_context()
+        
+        insights = {
+            "available": False,
+            "symbol_insights": None,
+            "trader_profile": None,
+            "recent_patterns": [],
+            "strategy_performance": {},
+            "recommendations": []
+        }
+        
+        if not learning_loop and not learning_context:
+            return insights
+        
+        insights["available"] = True
+        
+        try:
+            # Get trader profile from learning context provider
+            if learning_context:
+                try:
+                    context = learning_context.get_full_context()
+                    insights["trader_profile"] = context.get("trader_profile")
+                    insights["recent_patterns"] = context.get("recent_patterns", [])
+                    insights["strategy_performance"] = context.get("strategy_stats", {})
+                except Exception as e:
+                    logger.error(f"Error getting learning context: {e}")
+            
+            # Get symbol-specific insights if symbol provided
+            if symbol and learning_loop:
+                try:
+                    # Get trade history for this symbol
+                    symbol_stats = learning_loop.get_symbol_stats(symbol) if hasattr(learning_loop, 'get_symbol_stats') else {}
+                    insights["symbol_insights"] = {
+                        "symbol": symbol,
+                        "total_trades": symbol_stats.get("total_trades", 0),
+                        "win_rate": symbol_stats.get("win_rate", 0),
+                        "avg_pnl": symbol_stats.get("avg_pnl", 0),
+                        "best_setups": symbol_stats.get("best_setups", []),
+                        "notes": symbol_stats.get("notes", [])
+                    }
+                except Exception as e:
+                    logger.error(f"Error getting symbol insights: {e}")
+            
+            # Generate recommendations based on learning data
+            if insights["trader_profile"]:
+                profile = insights["trader_profile"]
+                if profile.get("common_mistakes"):
+                    insights["recommendations"].append({
+                        "type": "avoid",
+                        "message": f"Watch for: {profile['common_mistakes'][0] if profile['common_mistakes'] else 'overtrading'}"
+                    })
+                if profile.get("best_timeframes"):
+                    insights["recommendations"].append({
+                        "type": "timing", 
+                        "message": f"Best times: {', '.join(profile['best_timeframes'][:2])}"
+                    })
+        
+        except Exception as e:
+            logger.error(f"Error getting learning insights: {e}")
+        
+        return insights
 
 
 # Singleton instance

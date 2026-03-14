@@ -488,15 +488,17 @@ const EnhancedTickerModal = ({
   onTrade, 
   onAskAI,
   botPosition = null,  // Pass bot's position if exists
-  botTrade = null      // Pass bot's trade data if exists
+  botTrade = null,     // Pass bot's trade data if exists
+  initialTab = 'overview'
 }) => {
   const [analysis, setAnalysis] = useState(null);
   const [historicalData, setHistoricalData] = useState(null);
   const [qualityData, setQualityData] = useState(null);
   const [earningsData, setEarningsData] = useState(null);
   const [newsData, setNewsData] = useState([]);
+  const [learningInsights, setLearningInsights] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [showBotVision, setShowBotVision] = useState(true);
   const [chartError, setChartError] = useState(null);
   const [companyInfoExpanded, setCompanyInfoExpanded] = useState(false);
@@ -522,6 +524,24 @@ const EnhancedTickerModal = ({
     { id: '1h', label: '1H', duration: '5 D', barSize: '1 hour' },
     { id: 'D', label: 'D', duration: '6 M', barSize: '1 day' },
   ];
+
+  // Fetch learning insights for this symbol
+  const fetchLearningInsights = useCallback(async () => {
+    if (!ticker?.symbol) return;
+    try {
+      const response = await api.get(`/api/sentcom/learning/insights?symbol=${ticker.symbol}`);
+      if (response.data?.success) {
+        setLearningInsights(response.data.insights);
+      }
+    } catch (err) {
+      console.debug('Learning insights fetch error:', err);
+    }
+  }, [ticker?.symbol]);
+
+  // Fetch learning insights when modal opens
+  useEffect(() => {
+    fetchLearningInsights();
+  }, [fetchLearningInsights]);
 
   // Fetch all data
   // Fetch historical data for timeframe
@@ -1420,6 +1440,60 @@ const EnhancedTickerModal = ({
                       setSelectedStopData(data);
                     }}
                   />
+                  
+                  {/* Learning Insights Card */}
+                  {learningInsights?.available && (learningInsights?.symbol_insights || learningInsights?.recommendations?.length > 0) && (
+                    <div className="bg-gradient-to-br from-violet-500/10 to-purple-600/5 border border-violet-500/20 rounded-xl p-3">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Brain className="w-4 h-4 text-violet-400" />
+                        <span className="text-xs font-medium text-violet-400">LEARNING INSIGHTS</span>
+                      </div>
+                      
+                      {/* Symbol-specific insights */}
+                      {learningInsights.symbol_insights && learningInsights.symbol_insights.total_trades > 0 && (
+                        <div className="grid grid-cols-3 gap-2 mb-3">
+                          <div className="text-center p-2 rounded-lg bg-black/40">
+                            <div className="text-[10px] text-zinc-500 mb-0.5">TRADES</div>
+                            <div className="font-mono font-bold text-white">{learningInsights.symbol_insights.total_trades}</div>
+                          </div>
+                          <div className="text-center p-2 rounded-lg bg-black/40">
+                            <div className="text-[10px] text-zinc-500 mb-0.5">WIN RATE</div>
+                            <div className={`font-mono font-bold ${learningInsights.symbol_insights.win_rate >= 50 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {learningInsights.symbol_insights.win_rate?.toFixed(0)}%
+                            </div>
+                          </div>
+                          <div className="text-center p-2 rounded-lg bg-black/40">
+                            <div className="text-[10px] text-zinc-500 mb-0.5">AVG P&L</div>
+                            <div className={`font-mono font-bold ${learningInsights.symbol_insights.avg_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              ${learningInsights.symbol_insights.avg_pnl?.toFixed(0)}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Recommendations */}
+                      {learningInsights.recommendations?.length > 0 && (
+                        <div className="space-y-1.5">
+                          {learningInsights.recommendations.slice(0, 2).map((rec, i) => (
+                            <div key={i} className="flex items-start gap-2 text-xs">
+                              <div className={`w-4 h-4 rounded flex items-center justify-center flex-shrink-0 ${
+                                rec.type === 'avoid' ? 'bg-amber-500/20 text-amber-400' : 'bg-cyan-500/20 text-cyan-400'
+                              }`}>
+                                {rec.type === 'avoid' ? <AlertTriangle className="w-2.5 h-2.5" /> : <Sparkles className="w-2.5 h-2.5" />}
+                              </div>
+                              <span className="text-zinc-300">{rec.message}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      
+                      {/* No insights yet message */}
+                      {(!learningInsights.symbol_insights?.total_trades || learningInsights.symbol_insights.total_trades === 0) && 
+                       (!learningInsights.recommendations || learningInsights.recommendations.length === 0) && (
+                        <p className="text-xs text-zinc-500 italic">No historical data for {ticker?.symbol} yet. Trade it to build insights!</p>
+                      )}
+                    </div>
+                  )}
                   
                   {/* Analysis Scores */}
                   <div className="bg-zinc-900/50 border border-white/10 rounded-xl p-3">

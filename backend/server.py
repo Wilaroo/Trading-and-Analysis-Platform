@@ -686,6 +686,18 @@ try:
     # Wire to AI assistant
     if assistant_service is not None:
         assistant_service.set_learning_context_provider(learning_context_provider)
+    
+    # Wire learning services to SentCom (late injection)
+    try:
+        sentcom_svc = get_sentcom_service()
+        sentcom_svc.inject_learning_services(
+            learning_loop=learning_loop_service,
+            learning_context_provider=learning_context_provider
+        )
+        print("[SERVER] SentCom wired to Learning services")
+    except Exception as e:
+        print(f"[SERVER] SentCom learning wire deferred: {e}")
+        
 except Exception as e:
     print(f"Learning Context Provider initialization deferred: {e}")
     learning_context_provider = None

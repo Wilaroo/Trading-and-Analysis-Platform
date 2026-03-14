@@ -5,6 +5,47 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ---
 
+## DATA FLOW & LEARNING SYSTEMS INTEGRATION (March 14, 2026)
+
+### Chart/Ticker Modals Connected ✅
+
+**Changes Made:**
+1. **SentCom.jsx**: Position cards now open `EnhancedTickerModal` with full chart view
+2. **EnhancedTickerModal.jsx**: 
+   - Added `initialTab` prop for starting on specific tab
+   - Added `learningInsights` state with fetch from `/api/sentcom/learning/insights`
+   - Added Learning Insights card in sidebar showing symbol stats and recommendations
+3. **useTickerModal.jsx**: Fixed API endpoint from `/api/bot/trades/open` to `/api/trading-bot/trades/open`
+
+### SentCom Service Learning Integration ✅
+
+**Backend Changes (`sentcom_service.py`):**
+- Added `inject_learning_services()` for late injection of learning services
+- Added `_get_learning_loop()` and `_get_learning_context()` helpers
+- Added `get_learning_insights(symbol)` method to fetch:
+  - Trader profile (strengths, weaknesses)
+  - Symbol-specific stats (trade count, win rate, avg P&L)
+  - Recent patterns and behaviors
+  - AI-generated recommendations
+
+**Server Wiring (`server.py`):**
+- SentCom now receives learning_loop_service and learning_context_provider
+- Late injection happens after learning services are initialized
+
+**New API Endpoint:**
+- `GET /api/sentcom/learning/insights?symbol=XXXX` - Returns learning data
+
+### Verified Data Flow:
+| Component | Source | Status |
+|-----------|--------|--------|
+| Positions | trading_bot.get_open_trades() | ✅ Working (8 positions) |
+| Chat History | MongoDB sentcom_chat_history | ✅ Working (persisted) |
+| Bot Status | trading_bot.get_status() | ✅ Working |
+| Learning Insights | learning_loop + learning_context_provider | ✅ Working |
+| Risk Params | bot_state collection | ✅ Persisted |
+
+---
+
 ## BUG FIX (March 13, 2026)
 
 ### Risk Parameters Persistence Added ✅ FIXED
