@@ -7,6 +7,26 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## BUG FIX (March 13, 2026)
 
+### Risk Parameters Persistence Added ✅ FIXED
+
+**Problem:** Risk parameters (max positions, min R:R, etc.) were lost on server restart.
+
+**Solution:** Updated `trading_bot_service.py`:
+- `_save_state()`: Now saves risk_params to MongoDB along with other bot state
+- `_restore_state()`: Now loads risk_params from MongoDB on startup
+- `update_risk_params()`: Now triggers `_save_state()` after updates
+
+**Persisted Risk Params:**
+- `max_risk_per_trade`
+- `max_daily_loss`
+- `max_daily_loss_pct`
+- `max_open_positions`
+- `max_position_pct`
+- `min_risk_reward`
+- `starting_capital`
+
+---
+
 ### Chat Persistence Added ✅ FIXED
 
 **Problem:** Chat history was lost on page refresh or server restart because it was only stored in memory.
