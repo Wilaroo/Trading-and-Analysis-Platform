@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://sentcom-chat-enhance.preview.emergentagent.com
+https://sentcom-multi-agent.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://sentcom-chat-enhance.preview.emergentagent.com
+https://sentcom-multi-agent.preview.emergentagent.com
 ```
