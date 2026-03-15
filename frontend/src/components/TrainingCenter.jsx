@@ -212,22 +212,26 @@ const useLearningConnections = () => {
 const useIBCollection = () => {
   const [status, setStatus] = useState(null);
   const [stats, setStats] = useState(null);
+  const [defaultSymbolCount, setDefaultSymbolCount] = useState(51);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
     try {
-      const [statusRes, statsRes] = await Promise.all([
+      const [statusRes, statsRes, symbolsRes] = await Promise.all([
         fetch(`${API_BASE}/api/ib-collector/status`),
-        fetch(`${API_BASE}/api/ib-collector/stats`)
+        fetch(`${API_BASE}/api/ib-collector/stats`),
+        fetch(`${API_BASE}/api/ib-collector/default-symbols`)
       ]);
       
-      const [statusData, statsData] = await Promise.all([
+      const [statusData, statsData, symbolsData] = await Promise.all([
         statusRes.json(),
-        statsRes.json()
+        statsRes.json(),
+        symbolsRes.json()
       ]);
       
       if (statusData.success) setStatus(statusData.job);
       if (statsData.success) setStats(statsData.stats);
+      if (symbolsData.success) setDefaultSymbolCount(symbolsData.count);
     } catch (err) {
       console.error('Error fetching IB collection data:', err);
     } finally {
@@ -242,7 +246,7 @@ const useIBCollection = () => {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  return { status, stats, loading, refresh: fetchData };
+  return { status, stats, defaultSymbolCount, loading, refresh: fetchData };
 };
 
 // Hook for Data Storage Stats
@@ -1138,7 +1142,7 @@ const LearningConnectionsPanel = ({ connections, metrics, weights, loading, onRe
 };
 
 // IB Data Collection Panel
-const IBDataCollectionPanel = ({ status, stats, loading, onRefresh }) => {
+const IBDataCollectionPanel = ({ status, stats, defaultSymbolCount = 51, loading, onRefresh }) => {
   const [collecting, setCollecting] = useState(false);
   const [collectionType, setCollectionType] = useState(null);
 
@@ -1224,7 +1228,7 @@ const IBDataCollectionPanel = ({ status, stats, loading, onRefresh }) => {
                 data-testid="full-collect-btn"
               >
                 {collecting && collectionType === 'full' ? <Loader className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-                Full (50+ symbols)
+                Full ({defaultSymbolCount} symbols)
               </button>
             </>
           )}
@@ -1356,7 +1360,7 @@ const TrainingCenter = () => {
   const { status: tsStatus, loading: tsLoading, refresh: refreshTs } = useTimeseriesStatus();
   const { accuracy, predictions, loading: predLoading, refresh: refreshPred } = usePredictionAccuracy();
   const { connections, metrics, weights, loading: connLoading, refresh: refreshConn } = useLearningConnections();
-  const { status: ibStatus, stats: ibStats, loading: ibLoading, refresh: refreshIB } = useIBCollection();
+  const { status: ibStatus, stats: ibStats, defaultSymbolCount, loading: ibLoading, refresh: refreshIB } = useIBCollection();
   const { summary: storageSummary, loading: storageLoading, refresh: refreshStorage } = useDataStorage();
 
   return (
@@ -1412,6 +1416,7 @@ const TrainingCenter = () => {
         <IBDataCollectionPanel
           status={ibStatus}
           stats={ibStats}
+          defaultSymbolCount={defaultSymbolCount}
           loading={ibLoading}
           onRefresh={refreshIB}
         />
