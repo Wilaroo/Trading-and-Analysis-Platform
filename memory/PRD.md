@@ -7,7 +7,42 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 15, 2026)
 
-### Auto-Apply Learning Connector Outputs ✅ NEW (March 15, 2026)
+### Strategy Promotion Service - Autonomous Loop ✅ NEW (March 15, 2026)
+**COMPLETE LIFECYCLE: SIMULATION → PAPER → LIVE** - Strategies auto-progress through phases.
+
+**What Changed:**
+- Created `StrategyPromotionService` to manage strategy lifecycle
+- Strategies start in SIMULATION, graduate to PAPER, then LIVE
+- Auto-promotion based on performance (win rate, avg R, profit factor)
+- Paper trading support - tracks would-be trades without execution
+- Human approval gate before going LIVE
+
+**Strategy Phases:**
+| Phase | Description |
+|-------|-------------|
+| SIMULATION | Testing on historical data |
+| PAPER | Real-time tracking without execution |
+| LIVE | Real money execution |
+| DEMOTED | Was live, now demoted |
+
+**Promotion Requirements:**
+- SIMULATION → PAPER: 50+ trades, >48% win rate, >0.3 avg R
+- PAPER → LIVE: 20+ trades, >52% win rate, >0.4 avg R, 5+ days in phase
+
+**New API Endpoints:**
+- `GET /api/strategy-promotion/phases` - View all strategy phases
+- `GET /api/strategy-promotion/candidates` - Get strategies ready for promotion
+- `POST /api/strategy-promotion/promote` - Promote a strategy
+- `GET /api/strategy-promotion/should-execute/{strategy}` - Check if trade should execute
+- `POST /api/strategy-promotion/paper-trade` - Record a paper trade
+
+**Files Created:**
+- `/app/backend/services/strategy_promotion_service.py`
+- `/app/backend/routers/strategy_promotion_router.py`
+
+---
+
+### Auto-Apply Learning Connector Outputs ✅ (March 15, 2026)
 **SCANNER THRESHOLDS NOW AUTO-CALIBRATE** - Learning loop closes automatically.
 
 **What Changed:**
