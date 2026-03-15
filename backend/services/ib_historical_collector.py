@@ -133,6 +133,90 @@ class IBHistoricalCollector:
         self._market_scanner = market_scanner
         logger.info("IB Collector: Using market scanner for symbol universe")
         
+    def get_symbols_with_recent_data(
+        self, 
+        bar_size: str = "1 day", 
+        days_threshold: int = 7
+    ) -> set:
+        """
+        Get symbols that already have recent historical data.
+        
+        Args:
+            bar_size: The bar size to check
+            days_threshold: Consider data "recent" if collected within this many days
+            
+        Returns:
+            Set of symbols that already have recent data
+        """
+        if self._data_col is None:
+            return set()
+            
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days_threshold)
+        
+        try:
+            # Find distinct symbols that have data collected after the cutoff
+            pipeline = [
+                {
+                    "$match": {
+                        "bar_size": bar_size,
+                        "collected_at": {"$gte": cutoff.isoformat()}
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": "$symbol"
+                    }
+                }
+            ]
+            
+            result = list(self._data_col.aggregate(pipeline))
+            symbols_with_data = {doc["_id"] for doc in result}
+            
+            logger.info(f"Found {len(symbols_with_data)} symbols with recent {bar_size} data (last {days_threshold} days)")
+            return symbols_with_data
+            
+        except Exception as e:
+            logger.warning(f"Error checking for symbols with recent data: {e}")
+            return set()
+            
+    def filter_symbols_needing_collection(
+        self,
+        symbols: List[str],
+        bar_size: str = "1 day",
+        days_threshold: int = 7,
+        force_refresh: bool = False
+    ) -> List[str]:
+        """
+        Filter symbols to only those that need collection.
+        
+        Args:
+            symbols: List of symbols to potentially collect
+            bar_size: Bar size to collect
+            days_threshold: Skip symbols with data newer than this many days
+            force_refresh: If True, collect all symbols regardless of existing data
+            
+        Returns:
+            List of symbols that actually need collection
+        """
+        if force_refresh:
+            logger.info(f"Force refresh enabled - collecting all {len(symbols)} symbols")
+            return symbols
+            
+        symbols_with_data = self.get_symbols_with_recent_data(bar_size, days_threshold)
+        
+        if not symbols_with_data:
+            logger.info("No existing data found - collecting all symbols")
+            return symbols
+            
+        # Filter out symbols that already have recent data
+        symbols_to_collect = [s for s in symbols if s.upper() not in symbols_with_data]
+        
+        skipped = len(symbols) - len(symbols_to_collect)
+        if skipped > 0:
+            logger.info(f"Skipping {skipped} symbols with recent data. Collecting {len(symbols_to_collect)} symbols.")
+            
+        return symbols_to_collect
+        
     async def get_all_us_symbols(self, min_price: float = 1.0, max_price: float = 1000.0, filter_ib_compatible: bool = True) -> List[str]:
         """
         Fetch all tradeable US stocks using the market scanner service.
@@ -343,7 +427,7 @@ class IBHistoricalCollector:
         try:
             adv_cache_col.create_index("avg_volume")
             adv_cache_col.create_index("symbol", unique=True)
-        except:
+        except Exception:
             pass
         
         return {
@@ -897,12 +981,21 @@ class IBHistoricalCollector:
         duration: str = "1 M",
         include_intraday: bool = True,
         include_swing: bool = True,
-        include_investment: bool = True
+        include_investment: bool = True,
+        skip_recent: bool = True,
+        recent_days_threshold: int = 7,
+        force_refresh: bool = False
     ) -> Dict[str, Any]:
         """
         Execute the smart tiered collection plan.
         
         Runs all tiers sequentially: intraday -> swing -> investment
+        Automatically skips symbols that already have recent data.
+        
+        Args:
+            skip_recent: If True, skip symbols with data collected within recent_days_threshold
+            recent_days_threshold: Days threshold for considering data "recent"
+            force_refresh: If True, collect all symbols regardless of existing data
         """
         if self._running_job and self._running_job.status == CollectionStatus.RUNNING:
             return {
@@ -911,9 +1004,9 @@ class IBHistoricalCollector:
                 "current_job": self._running_job.to_dict()
             }
         
-        # ADV thresholds
-        ADV_INTRADAY = 500_000
-        ADV_SWING = 100_000
+        # ADV thresholds (for reference/future tiers)
+        _ADV_INTRADAY = 500_000  # noqa: F841
+        _ADV_SWING = 100_000  # noqa: F841
         ADV_INVESTMENT = 50_000
         
         results = []
@@ -927,7 +1020,10 @@ class IBHistoricalCollector:
                     symbols=symbols,
                     bar_size="1 day",
                     duration=duration,
-                    use_defaults=False
+                    use_defaults=False,
+                    skip_recent=skip_recent,
+                    recent_days_threshold=recent_days_threshold,
+                    force_refresh=force_refresh
                 )
                 results.append({"tier": "investment", "bar_size": "1 day", "result": result})
                 
@@ -938,7 +1034,9 @@ class IBHistoricalCollector:
             "success": True,
             "message": "Smart collection started with investment tier (1 day bars)",
             "tiers_queued": ["investment", "swing", "intraday"] if include_intraday else ["investment", "swing"],
-            "note": "Each tier runs as a separate job. Monitor progress via /api/ib-collector/status",
+            "note": "Each tier runs as a separate job. Skipping symbols with recent data." if skip_recent else "Each tier runs as a separate job.",
+            "skip_recent": skip_recent,
+            "recent_days_threshold": recent_days_threshold,
             "results": results
         }
     
@@ -947,7 +1045,10 @@ class IBHistoricalCollector:
         symbols: List[str] = None,
         bar_size: str = "5 mins",
         duration: str = "1 M",
-        use_defaults: bool = True
+        use_defaults: bool = True,
+        skip_recent: bool = True,
+        recent_days_threshold: int = 7,
+        force_refresh: bool = False
     ) -> Dict[str, Any]:
         """
         Start a historical data collection job.
@@ -957,6 +1058,9 @@ class IBHistoricalCollector:
             bar_size: Bar size (1 min, 5 mins, 15 mins, 1 hour, 1 day)
             duration: Duration per request (1 D, 2 D, 1 W, 1 M, etc.)
             use_defaults: If True and no symbols provided, use default list
+            skip_recent: If True, skip symbols that already have recent data
+            recent_days_threshold: Consider data "recent" if collected within this many days
+            force_refresh: If True, collect all symbols regardless of existing data
             
         Returns:
             Job info dict
@@ -979,6 +1083,25 @@ class IBHistoricalCollector:
                 symbols = self.get_default_symbols()
             else:
                 return {"success": False, "error": "No symbols provided"}
+        
+        original_count = len(symbols)
+        
+        # Filter out symbols with recent data (unless force_refresh)
+        if skip_recent and not force_refresh:
+            symbols = self.filter_symbols_needing_collection(
+                symbols=symbols,
+                bar_size=bar_size,
+                days_threshold=recent_days_threshold,
+                force_refresh=force_refresh
+            )
+            
+        if not symbols:
+            return {
+                "success": True,
+                "message": f"All {original_count} symbols already have recent data (within {recent_days_threshold} days). Nothing to collect.",
+                "skipped": original_count,
+                "collected": 0
+            }
                 
         # Create job
         job = CollectionJob(
