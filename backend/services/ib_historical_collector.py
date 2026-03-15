@@ -223,7 +223,7 @@ class IBHistoricalCollector:
             "VXX", "UVXY"
         ]
     
-    async def get_liquid_symbols(self, min_adv: int = 500_000) -> List[str]:
+    async def get_liquid_symbols(self, min_adv: int = 100_000) -> List[str]:
         """
         Get liquid US stocks filtered by Average Daily Volume (ADV).
         
@@ -231,7 +231,7 @@ class IBHistoricalCollector:
         This significantly reduces collection time by focusing on tradeable stocks.
         
         Args:
-            min_adv: Minimum average daily volume (default 500K for intraday-quality)
+            min_adv: Minimum average daily volume (default 100K for broad coverage)
             
         Returns:
             List of liquid symbols meeting ADV criteria (~2,000-4,000 stocks)
@@ -457,7 +457,7 @@ class IBHistoricalCollector:
         self,
         bar_size: str = "1 day",
         duration: str = "1 M",
-        min_adv: int = 500_000
+        min_adv: int = 100_000
     ) -> Dict[str, Any]:
         """
         Start collection for LIQUID US stocks only (filtered by ADV).
@@ -468,7 +468,7 @@ class IBHistoricalCollector:
         Args:
             bar_size: Bar size (default "1 day")
             duration: Duration per request (default "1 M" = 1 month)
-            min_adv: Minimum average daily volume (default 500K)
+            min_adv: Minimum average daily volume (default 100K)
             
         Returns:
             Job info dict

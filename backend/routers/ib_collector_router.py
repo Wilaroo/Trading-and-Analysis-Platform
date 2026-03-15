@@ -142,17 +142,17 @@ async def full_market_collection(
 async def liquid_collection(
     bar_size: str = "1 day",
     days: int = 30,
-    min_adv: int = 500_000
+    min_adv: int = 100_000
 ):
     """
-    Start collection for LIQUID US stocks only (~1,500 stocks).
+    Start collection for LIQUID US stocks only (~800 stocks).
     
     ✅ RECOMMENDED: Much faster than full market (2-3 hours vs 10+ hours).
     Focuses on stocks with high trading volume that are actually tradeable.
     
     - **bar_size**: Bar size (default "1 day")
     - **days**: Number of days of data to collect
-    - **min_adv**: Minimum average daily volume (default 500,000)
+    - **min_adv**: Minimum average daily volume (default 100,000)
     
     Time estimates:
     - ~1,500 symbols × 3 seconds = ~1.25 hours for 1 day bars
@@ -290,11 +290,11 @@ async def get_full_market_symbols(min_price: float = 1.0, max_price: float = 100
 
 
 @router.get("/liquid-symbols")
-async def get_liquid_symbols(min_adv: int = 500_000):
+async def get_liquid_symbols(min_adv: int = 100_000):
     """
     Get the count of liquid US stocks (filtered by ADV).
     
-    - **min_adv**: Minimum average daily volume (default 500,000)
+    - **min_adv**: Minimum average daily volume (default 100,000)
     """
     try:
         collector = get_ib_collector()
