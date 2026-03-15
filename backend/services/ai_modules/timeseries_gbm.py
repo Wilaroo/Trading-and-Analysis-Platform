@@ -85,20 +85,27 @@ class TimeSeriesGBM:
     MODEL_COLLECTION = "timeseries_models"
     PREDICTIONS_COLLECTION = "timeseries_predictions"
     
-    # Default model parameters
+    # Default model parameters - optimized for imbalanced classification
     DEFAULT_PARAMS = {
         "objective": "binary",
         "metric": "auc",
         "boosting_type": "gbdt",
-        "num_leaves": 31,
-        "learning_rate": 0.05,
-        "feature_fraction": 0.8,
-        "bagging_fraction": 0.8,
+        "num_leaves": 63,  # Increased for more complexity
+        "learning_rate": 0.03,  # Lower for better generalization
+        "feature_fraction": 0.7,
+        "bagging_fraction": 0.7,
         "bagging_freq": 5,
+        "min_data_in_leaf": 50,  # Prevent overfitting
+        "max_depth": 8,  # Limit tree depth
+        "is_unbalance": True,  # Handle class imbalance automatically
         "verbose": -1,
         "n_jobs": -1,
         "seed": 42
     }
+    
+    # Prediction threshold for "up" classification
+    # Higher threshold = more precise but lower recall
+    UP_THRESHOLD = 0.52
     
     def __init__(
         self,
@@ -234,8 +241,9 @@ class TimeSeriesGBM:
                     # Calculate return (positive = price went up)
                     target_return = (future_price - current_price) / current_price
                     
-                    # Binary classification: up (>0.5%) vs not-up
-                    target = 1 if target_return > 0.005 else 0
+                    # Binary classification: up (>0%) vs not-up
+                    # Using 0% threshold for more balanced classes
+                    target = 1 if target_return > 0 else 0
                     
                     all_features.append(feature_vector)
                     all_targets.append(target)
@@ -250,6 +258,11 @@ class TimeSeriesGBM:
         X = np.array(all_features)
         y = np.array(all_targets)
         
+        # Log class distribution
+        n_up = np.sum(y == 1)
+        n_down = np.sum(y == 0)
+        logger.info(f"Class distribution: UP={n_up} ({n_up/len(y)*100:.1f}%), DOWN={n_down} ({n_down/len(y)*100:.1f}%)")
+        
         # Split train/validation
         split_idx = int(len(X) * (1 - validation_split))
         X_train, X_val = X[:split_idx], X[split_idx:]
@@ -259,21 +272,23 @@ class TimeSeriesGBM:
         train_data = lgb.Dataset(X_train, label=y_train, feature_name=self._feature_names)
         val_data = lgb.Dataset(X_val, label=y_val, feature_name=self._feature_names, reference=train_data)
         
-        # Train model
+        # Train model with more rounds
         callbacks = [lgb.early_stopping(early_stopping_rounds)]
         
         self._model = lgb.train(
             self.params,
             train_data,
-            num_boost_round=num_boost_round,
+            num_boost_round=num_boost_round * 2,  # More rounds for better learning
             valid_sets=[train_data, val_data],
             valid_names=["train", "val"],
             callbacks=callbacks
         )
         
-        # Evaluate
+        # Evaluate with dynamic threshold
         y_pred_proba = self._model.predict(X_val)
-        y_pred = (y_pred_proba > 0.5).astype(int)
+        
+        # Use class-specific threshold for better recall
+        y_pred = (y_pred_proba > self.UP_THRESHOLD).astype(int)
         
         # Calculate metrics
         accuracy = np.mean(y_pred == y_val)
@@ -363,10 +378,11 @@ class TimeSeriesGBM:
         prob_up = self._model.predict(feature_vector)[0]
         prob_down = 1 - prob_up
         
-        # Determine direction
-        if prob_up > 0.55:
+        # Determine direction using class-specific thresholds
+        # Use lower threshold for "up" to improve recall
+        if prob_up > self.UP_THRESHOLD:
             direction = "up"
-            confidence = (prob_up - 0.5) * 2  # Scale to 0-1
+            confidence = min((prob_up - self.UP_THRESHOLD) / (1 - self.UP_THRESHOLD), 1.0)
         elif prob_down > 0.55:
             direction = "down"
             confidence = (prob_down - 0.5) * 2
