@@ -1,0 +1,102 @@
+{
+  "summary": "Phase 2 AI Trade Consultation Integration - All 20 tests passed. Full consultation endpoint wired into trading bot decision flow with debate, risk, institutional, and volume analysis.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "features_verified": {
+    "consultation_status_api": {
+      "status": "PASS",
+      "endpoint": "GET /api/ai-modules/consultation/status",
+      "details": "Returns consultation service status with enabled=true, modules_available (debate, risk_manager, institutional_flow, volume_anomaly), modules_enabled, shadow_mode"
+    },
+    "consultation_run_api": {
+      "status": "PASS",
+      "endpoint": "POST /api/ai-modules/consultation/run",
+      "details": "Runs full consultation with all 4 modules. Returns proceed (bool), size_adjustment (0-1.0), reasoning (combined signals), debate_result, risk_assessment, institutional_context, volume_context, shadow_logged, shadow_decision_id"
+    },
+    "full_consultation_all_4_modules": {
+      "status": "PASS",
+      "details": [
+        "Debate module: Returns winner (bull/bear/tie), final_recommendation (proceed/pass/reduce_size), confidence",
+        "Risk Manager: Returns risk_level (low/moderate/high/extreme), total_risk_score, recommendation",
+        "Institutional Flow: Returns recommendation (favorable/neutral/caution), risk_score",
+        "Volume Analysis: Returns signals, profile with rvol, zscore, volume_trend"
+      ]
+    },
+    "shadow_decision_logging": {
+      "status": "PASS",
+      "details": "Consultation logs decision to Shadow Tracker. shadow_logged=true, shadow_decision_id returned. Decision count increased from 21 to 22+ during testing"
+    },
+    "size_adjustment_recommendations": {
+      "status": "PASS",
+      "details": "size_adjustment returned in range 0-1.0 (tested: 1.0 for favorable trades). Used by trading bot to reduce position size when AI recommends"
+    },
+    "proceed_pass_recommendations": {
+      "status": "PASS",
+      "details": "proceed boolean returned correctly. When modules block, proceed=false and trading bot skips trade"
+    },
+    "trading_bot_integration": {
+      "status": "PASS",
+      "details": [
+        "set_ai_consultation method exists in TradingBotService (line 632)",
+        "_ai_consultation attribute wired in server.py (line 805)",
+        "AI consultation called in _evaluate_opportunity (line 1960)",
+        "Trading bot can BLOCK trades if AI rejects (lines 1976-1985)",
+        "Trading bot can REDUCE SIZE based on AI recommendation (lines 1988-1994)",
+        "Shadow decision ID tracked for outcome learning"
+      ]
+    },
+    "phase1_endpoints_backward_compatible": {
+      "status": "PASS",
+      "details": [
+        "GET /api/ai-modules/config - OK",
+        "GET /api/ai-modules/status - OK",
+        "POST /api/ai-modules/toggle/{module} - OK",
+        "POST /api/ai-modules/shadow-mode - OK",
+        "POST /api/ai-modules/debate/run - OK",
+        "POST /api/ai-modules/risk/assess - OK",
+        "GET /api/ai-modules/institutional/context/{symbol} - OK",
+        "POST /api/ai-modules/volume/analyze - OK",
+        "GET /api/ai-modules/shadow/stats - OK"
+      ]
+    }
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ai_consultation_phase2.py",
+    "/app/test_reports/pytest/pytest_ai_consultation_phase2.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "AI Consultation properly wired into trading bot via set_ai_consultation method in server.py line 805",
+    "Trading bot _evaluate_opportunity method calls consult_on_trade before execution",
+    "Shadow Mode active - AI analyzes and logs but doesn't block trades (learning mode)",
+    "All 4 modules (debate, risk_manager, institutional_flow, volume_anomaly) integrated into consultation",
+    "Size adjustment and proceed/pass recommendations flow correctly from AI to trading bot",
+    "Consultation endpoint handles minimal trade objects gracefully with defaults"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ai_consultation_phase2.py"
+  ],
+  "success_rate": {
+    "backend": "100% (20/20 tests passed)",
+    "frontend": "N/A (backend-only testing requested)"
+  },
+  "test_credentials": "N/A",
+  "seed_data_creation": "None",
+  "mocked_apis": {
+    "has_mocked_apis": true,
+    "mocked_apis_list": [
+      "Institutional ownership returns placeholder data pending full SEC EDGAR parsing (as documented by main agent)"
+    ],
+    "note": "All other APIs return real computed results - debate, risk assessment, volume analysis all functional"
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phase 2 AI Consultation fully tested. New endpoints: GET /api/ai-modules/consultation/status, POST /api/ai-modules/consultation/run. Trading bot integration verified - AI consultation wired in _evaluate_opportunity method. All 4 modules (debate, risk, institutional, volume) run during consultation. Shadow Mode logs all decisions to Shadow Tracker. Previous Phase 1 endpoints all backward compatible."
+}

@@ -87,7 +87,8 @@ from services.ai_modules import (
     get_debate_agents, init_debate_agents,
     get_ai_risk_manager, init_ai_risk_manager,
     init_institutional_flow_service,
-    init_volume_anomaly_service
+    init_volume_anomaly_service,
+    init_ai_consultation
 )
 from services.market_intel_service import get_market_intel_service
 from services.hybrid_data_service import get_hybrid_data_service, init_hybrid_data_service
@@ -747,14 +748,25 @@ try:
     # Initialize Volume Anomaly Service (Phase 6 - Uses existing data)
     volume_anomaly = init_volume_anomaly_service(db=db)
     
-    # Inject services into AI modules router
+    # Initialize AI Trade Consultation (wires modules into trading bot)
+    ai_consultation = init_ai_consultation(
+        module_config=ai_module_config,
+        shadow_tracker=shadow_tracker,
+        debate_agents=debate_agents,
+        risk_manager=ai_risk_manager,
+        institutional_flow=institutional_flow,
+        volume_anomaly=volume_anomaly
+    )
+    
+    # Inject services into AI modules router (AFTER ai_consultation is created)
     inject_ai_module_services(
         ai_module_config, 
         shadow_tracker, 
         debate_agents, 
         ai_risk_manager,
         institutional_flow,
-        volume_anomaly
+        volume_anomaly,
+        ai_consultation
     )
     
     # Register AI module services
@@ -764,6 +776,7 @@ try:
     register_service('ai_risk_manager', ai_risk_manager)
     register_service('institutional_flow', institutional_flow)
     register_service('volume_anomaly', volume_anomaly)
+    register_service('ai_consultation', ai_consultation)
     
     print("AI Modules (Institutional-Grade) initialized")
     print("  - Module Config: Toggle individual AI modules on/off")
@@ -772,6 +785,7 @@ try:
     print("  - AI Risk Manager: Multi-factor risk assessment")
     print("  - Institutional Flow: 13F tracking, ownership context (FREE)")
     print("  - Volume Anomaly: Z-score detection, accumulation/distribution")
+    print("  - Trade Consultation: Pre-trade AI analysis integration")
     print("  - Endpoints: /api/ai-modules/config, /api/ai-modules/institutional/*, /api/ai-modules/volume/*")
     
 except Exception as e:
@@ -784,6 +798,15 @@ except Exception as e:
     ai_risk_manager = None
     institutional_flow = None
     volume_anomaly = None
+    ai_consultation = None
+
+# Wire AI Consultation into Trading Bot (Phase 2 Integration)
+if ai_consultation is not None:
+    trading_bot.set_ai_consultation(ai_consultation)
+    print("AI Trade Consultation wired into Trading Bot")
+    print("  - Pre-trade analysis: Debate + Risk + Institutional + Volume")
+    print("  - Shadow Mode: AI analyzes but doesn't block trades (learning mode)")
+    print("  - Live Mode: AI can block/reduce trades based on analysis")
 
 # ===================== TRADING SCHEDULER =====================
 # Automated daily/weekly analysis tasks

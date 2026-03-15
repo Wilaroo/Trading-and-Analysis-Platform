@@ -27,6 +27,7 @@ _debate_agents = None
 _ai_risk_manager = None
 _institutional_flow = None
 _volume_anomaly = None
+_ai_consultation = None
 
 
 def inject_services(
@@ -35,17 +36,19 @@ def inject_services(
     debate_agents, 
     ai_risk_manager,
     institutional_flow=None,
-    volume_anomaly=None
+    volume_anomaly=None,
+    ai_consultation=None
 ):
     """Inject service dependencies"""
     global _module_config, _shadow_tracker, _debate_agents, _ai_risk_manager
-    global _institutional_flow, _volume_anomaly
+    global _institutional_flow, _volume_anomaly, _ai_consultation
     _module_config = module_config
     _shadow_tracker = shadow_tracker
     _debate_agents = debate_agents
     _ai_risk_manager = ai_risk_manager
     _institutional_flow = institutional_flow
     _volume_anomaly = volume_anomaly
+    _ai_consultation = ai_consultation
 
 
 # =====================
@@ -558,4 +561,62 @@ async def detect_anomaly(request: VolumeDetectionRequest):
         }
     except Exception as e:
         logger.error(f"Detect anomaly error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =====================
+# Trade Consultation Endpoints
+# =====================
+
+@router.get("/consultation/status")
+async def get_consultation_status():
+    """Get AI Trade Consultation status"""
+    if not _ai_consultation:
+        return {
+            "success": True,
+            "status": {
+                "enabled": False,
+                "reason": "AI Consultation service not initialized"
+            }
+        }
+    
+    return {
+        "success": True,
+        "status": _ai_consultation.get_status()
+    }
+
+
+class ConsultationRequest(BaseModel):
+    trade: Dict[str, Any] = Field(..., description="Trade object")
+    market_context: Dict[str, Any] = Field(default_factory=dict, description="Market context")
+    portfolio: Optional[Dict[str, Any]] = Field(None, description="Portfolio state")
+    bars: Optional[List[Dict[str, Any]]] = Field(None, description="OHLCV bars for volume analysis")
+
+
+@router.post("/consultation/run")
+async def run_consultation(request: ConsultationRequest):
+    """
+    Run AI consultation on a trade (manual testing endpoint).
+    
+    This runs the same analysis that happens automatically when the trading bot
+    evaluates a trade opportunity.
+    """
+    if not _ai_consultation:
+        raise HTTPException(status_code=503, detail="AI Consultation not initialized")
+    
+    try:
+        result = await _ai_consultation.consult_on_trade(
+            trade=request.trade,
+            market_context=request.market_context,
+            portfolio=request.portfolio,
+            bars=request.bars
+        )
+        
+        return {
+            "success": True,
+            "consultation": result
+        }
+        
+    except Exception as e:
+        logger.error(f"Consultation error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

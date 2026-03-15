@@ -567,6 +567,9 @@ class TradingBotService:
         # Trade Journal Service (auto-record trades)
         self._trade_journal = None
         
+        # AI Trade Consultation (Phase 2 Integration)
+        self._ai_consultation = None
+        
         # Callbacks for real-time updates
         self._trade_callbacks: List[callable] = []
         
@@ -625,6 +628,26 @@ class TradingBotService:
         """Set trade journal service for auto-recording trades"""
         self._trade_journal = journal_service
         logger.info("TradingBotService: Trade Journal connected for auto-recording")
+    
+    def set_ai_consultation(self, ai_consultation):
+        """
+        Set AI Trade Consultation service for pre-trade analysis.
+        
+        When enabled, every trade runs through:
+        - Bull/Bear Debate
+        - AI Risk Manager
+        - Institutional Flow analysis
+        - Volume anomaly detection
+        
+        In Shadow Mode: AI analyzes and logs but doesn't block trades
+        In Live Mode: AI can block or reduce trade sizes
+        """
+        self._ai_consultation = ai_consultation
+        logger.info("TradingBotService: AI Trade Consultation connected")
+        if ai_consultation:
+            status = ai_consultation.get_status()
+            logger.info(f"  - Shadow Mode: {status.get('shadow_mode', True)}")
+            logger.info(f"  - Modules enabled: {status.get('modules_enabled', {})}")
     
     # ==================== SMART STRATEGY FILTERING ====================
     
@@ -824,6 +847,38 @@ class TradingBotService:
             
         except Exception as e:
             logger.warning(f"Could not fetch market regime: {e}")
+    
+    def _get_current_session(self) -> str:
+        """Get current trading session (for AI consultation context)"""
+        from datetime import time as dt_time
+        now_utc = datetime.now(timezone.utc)
+        # Convert to ET (rough approximation)
+        et_hour = (now_utc.hour - 5) % 24
+        
+        if et_hour < 9 or (et_hour == 9 and now_utc.minute < 30):
+            return "pre_market"
+        elif et_hour >= 16:
+            return "post_market"
+        elif et_hour == 9 and now_utc.minute < 45:
+            return "open"
+        elif et_hour == 15 and now_utc.minute >= 30:
+            return "power_hour"
+        elif et_hour < 12:
+            return "morning"
+        elif et_hour < 15:
+            return "afternoon"
+        else:
+            return "closing"
+    
+    async def _get_account_value(self) -> float:
+        """Get current account value from Alpaca"""
+        try:
+            if self._alpaca_service:
+                account = await self._alpaca_service.get_account()
+                return float(account.get("portfolio_value", 100000)) if account else 100000
+        except Exception as e:
+            logger.warning(f"Could not get account value: {e}")
+        return 100000  # Default fallback
     
     async def _restore_state(self):
         """Restore bot state from MongoDB on startup - COMPREHENSIVE SESSION PERSISTENCE"""
@@ -1877,7 +1932,86 @@ class TradingBotService:
             logger.info(f"Trade opportunity created: {symbol} {direction.value} {shares} shares @ ${entry_price:.2f}")
             print(f"   🎯 Trade object created: {trade.id} {symbol} {direction.value}")
             
-            # AI evaluation - enrich trade with AI analysis
+            # ==================== AI TRADE CONSULTATION (Phase 2) ====================
+            # Run pre-trade analysis through AI modules (Debate, Risk, Institutional, Volume)
+            ai_consultation_result = None
+            if hasattr(self, '_ai_consultation') and self._ai_consultation:
+                try:
+                    # Build market context for AI modules
+                    market_context = {
+                        "regime": current_regime,
+                        "vix": intelligence.get("market_data", {}).get("vix", 0),
+                        "trend": intelligence.get("market_data", {}).get("trend", "neutral"),
+                        "technicals": intelligence.get("technicals", {}),
+                        "session": self._get_current_session()
+                    }
+                    
+                    # Build portfolio context
+                    portfolio_context = {
+                        "account_value": await self._get_account_value(),
+                        "open_positions": len(self._open_trades),
+                        "positions": [t.to_dict() for t in self._open_trades.values()]
+                    }
+                    
+                    # Get bars for volume analysis
+                    bars = intelligence.get("bars", [])
+                    
+                    # Run AI consultation
+                    ai_consultation_result = await self._ai_consultation.consult_on_trade(
+                        trade=trade.to_dict(),
+                        market_context=market_context,
+                        portfolio=portfolio_context,
+                        bars=bars
+                    )
+                    
+                    # Log consultation result
+                    if ai_consultation_result:
+                        consult_rec = ai_consultation_result.get("reasoning", "No AI analysis")
+                        shadow_mode = ai_consultation_result.get("shadow_logged", False)
+                        decision_id = ai_consultation_result.get("shadow_decision_id", "")
+                        
+                        print(f"   🧠 [AI Consultation] {consult_rec[:100]}")
+                        
+                        # Apply AI consultation recommendations
+                        if not ai_consultation_result.get("proceed", True):
+                            # AI modules blocked this trade
+                            print(f"   ❌ [AI BLOCKED] {ai_consultation_result.get('reasoning', '')}")
+                            logger.info(f"AI Consultation BLOCKED trade {symbol}: {consult_rec}")
+                            
+                            # Track shadow decision
+                            if shadow_mode and decision_id:
+                                trade.explanation.ai_shadow_decision_id = decision_id
+                            
+                            return None
+                        
+                        # Apply size adjustment if recommended
+                        size_adj = ai_consultation_result.get("size_adjustment", 1.0)
+                        if size_adj < 1.0:
+                            original_shares = trade.shares
+                            trade.shares = max(1, int(trade.shares * size_adj))
+                            trade.risk_amount = trade.risk_amount * size_adj
+                            trade.potential_reward = trade.potential_reward * size_adj
+                            print(f"   📉 [AI SIZE ADJ] {original_shares} -> {trade.shares} shares ({size_adj*100:.0f}%)")
+                        
+                        # Store shadow decision ID for outcome tracking
+                        if shadow_mode and decision_id:
+                            if not hasattr(trade, 'ai_shadow_decision_id'):
+                                trade.ai_shadow_decision_id = decision_id
+                        
+                        # Store consultation results in explanation
+                        if trade.explanation:
+                            trade.explanation.ai_consultation = {
+                                "proceed": ai_consultation_result.get("proceed", True),
+                                "size_adjustment": size_adj,
+                                "reasoning": consult_rec[:300],
+                                "shadow_decision_id": decision_id
+                            }
+                            
+                except Exception as e:
+                    logger.warning(f"AI Consultation failed (proceeding anyway): {e}")
+                    print(f"   ⚠️ AI Consultation error: {str(e)[:100]}")
+            
+            # AI evaluation - enrich trade with AI analysis (legacy)
             if hasattr(self, '_ai_assistant') and self._ai_assistant:
                 try:
                     ai_result = await self._ai_assistant.evaluate_bot_opportunity(trade.to_dict())
