@@ -392,6 +392,18 @@ class TimeSeriesAIService:
             "historical_service_connected": self._historical_service is not None,
             "db_connected": self._db is not None
         }
+        
+    async def verify_pending_predictions(self) -> Dict[str, Any]:
+        """
+        Verify pending predictions against actual outcomes.
+        Delegates to the underlying model.
+        """
+        try:
+            result = self._model.verify_pending_predictions()
+            return result
+        except Exception as e:
+            logger.error(f"Error verifying predictions: {e}")
+            return {"success": False, "error": str(e)}
 
 
 # Singleton

@@ -14,7 +14,8 @@ import {
   Play, Pause, RefreshCw, Loader, ChevronRight, Calendar,
   Clock, CheckCircle, XCircle, AlertCircle, Settings,
   Database, Cpu, LineChart, ArrowUpRight, ArrowDownRight,
-  Sparkles, BookOpen, History, FlaskConical, Layers
+  Sparkles, BookOpen, History, FlaskConical, Layers,
+  Link2, Unlink, GitBranch, ArrowRight
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -166,6 +167,44 @@ const usePredictionAccuracy = () => {
   }, [fetchData]);
 
   return { accuracy, predictions, loading, refresh: fetchData };
+};
+
+// Hook for Learning Connections
+const useLearningConnections = () => {
+  const [connections, setConnections] = useState([]);
+  const [metrics, setMetrics] = useState(null);
+  const [weights, setWeights] = useState({});
+  const [loading, setLoading] = useState(true);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [connRes, metricsRes, weightsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/learning-connectors/connections`),
+        fetch(`${API_BASE}/api/learning-connectors/metrics`),
+        fetch(`${API_BASE}/api/learning-connectors/weights`)
+      ]);
+      
+      const [connData, metricsData, weightsData] = await Promise.all([
+        connRes.json(),
+        metricsRes.json(),
+        weightsRes.json()
+      ]);
+      
+      if (connData.success) setConnections(connData.connections || []);
+      if (metricsData.success) setMetrics(metricsData.metrics);
+      if (weightsData.success) setWeights(weightsData.weights || {});
+    } catch (err) {
+      console.error('Error fetching learning connections:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  return { connections, metrics, weights, loading, refresh: fetchData };
 };
 
 // ============================================================================
@@ -831,6 +870,201 @@ const LearningInsightsPanel = () => {
   );
 };
 
+// Learning Connections Panel - Shows data flow status
+const LearningConnectionsPanel = ({ connections, metrics, weights, loading, onRefresh, onSync }) => {
+  const [syncing, setSyncing] = useState(false);
+  const [syncType, setSyncType] = useState(null);
+
+  const handleSync = async (type) => {
+    setSyncing(true);
+    setSyncType(type);
+    try {
+      const endpoint = type === 'all' 
+        ? `${API_BASE}/api/learning-connectors/sync/all`
+        : `${API_BASE}/api/learning-connectors/sync/${type}`;
+      
+      const res = await fetch(endpoint, { method: 'POST' });
+      const data = await res.json();
+      
+      if (data.success) {
+        toast.success(`Sync completed: ${type}`);
+        onRefresh();
+      } else {
+        toast.error(data.error || 'Sync failed');
+      }
+    } catch (err) {
+      toast.error('Sync error');
+    } finally {
+      setSyncing(false);
+      setSyncType(null);
+    }
+  };
+
+  const getHealthColor = (health) => {
+    switch (health) {
+      case 'healthy': return 'emerald';
+      case 'pending': return 'amber';
+      case 'degraded': return 'orange';
+      case 'disconnected': return 'rose';
+      default: return 'zinc';
+    }
+  };
+
+  const getHealthIcon = (health) => {
+    switch (health) {
+      case 'healthy': return CheckCircle;
+      case 'pending': return Clock;
+      case 'degraded': return AlertCircle;
+      case 'disconnected': return Unlink;
+      default: return Clock;
+    }
+  };
+
+  // Calculate summary
+  const summary = connections.reduce((acc, conn) => {
+    acc[conn.health] = (acc[conn.health] || 0) + 1;
+    return acc;
+  }, {});
+
+  return (
+    <GlassCard className="p-5" gradient glow>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500/20 to-indigo-500/20 flex items-center justify-center">
+            <GitBranch className="w-5 h-5 text-blue-400" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-white">Learning Connections</h3>
+            <p className="text-[10px] text-zinc-500">Data flow between systems</p>
+          </div>
+        </div>
+        <button
+          onClick={() => handleSync('all')}
+          disabled={syncing}
+          className="px-3 py-1.5 rounded-lg bg-blue-500/20 border border-blue-500/30 text-blue-400 text-xs font-medium hover:bg-blue-500/30 transition-all disabled:opacity-50 flex items-center gap-1.5"
+          data-testid="sync-all-btn"
+        >
+          {syncing && syncType === 'all' ? <Loader className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+          Sync All
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader className="w-6 h-6 text-blue-400 animate-spin" />
+        </div>
+      ) : (
+        <>
+          {/* Summary Stats */}
+          <div className="grid grid-cols-4 gap-3 mb-4">
+            <StatCard 
+              label="Total Data" 
+              value={metrics?.total_data_points?.toLocaleString() || '0'} 
+              icon={Database} 
+              color="blue" 
+            />
+            <StatCard 
+              label="Used for Training" 
+              value={metrics?.data_points_used_for_training?.toLocaleString() || '0'} 
+              icon={Brain} 
+              color="violet" 
+            />
+            <StatCard 
+              label="Calibrations" 
+              value={metrics?.calibrations_applied || 0} 
+              icon={Settings} 
+              color="amber" 
+            />
+            <StatCard 
+              label="Model Versions" 
+              value={metrics?.model_versions_created || 0} 
+              icon={Layers} 
+              color="cyan" 
+            />
+          </div>
+
+          {/* Connection Health Summary */}
+          <div className="flex gap-2 mb-4">
+            {['healthy', 'pending', 'disconnected'].map(status => (
+              <div key={status} className={`flex items-center gap-1.5 px-2 py-1 rounded-lg bg-${getHealthColor(status)}-500/10 border border-${getHealthColor(status)}-500/20`}>
+                {React.createElement(getHealthIcon(status), { className: `w-3 h-3 text-${getHealthColor(status)}-400` })}
+                <span className={`text-[10px] font-medium text-${getHealthColor(status)}-400`}>
+                  {summary[status] || 0} {status}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Connections List */}
+          <div className="space-y-2 max-h-[250px] overflow-y-auto">
+            {connections.map((conn, i) => {
+              const HealthIcon = getHealthIcon(conn.health);
+              const color = getHealthColor(conn.health);
+              
+              return (
+                <div 
+                  key={i} 
+                  className="p-3 rounded-xl bg-black/30 border border-white/5 flex items-center justify-between"
+                  data-testid={`connection-${conn.name}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <HealthIcon className={`w-4 h-4 text-${color}-400`} />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-white">{conn.source}</span>
+                        <ArrowRight className="w-3 h-3 text-zinc-500" />
+                        <span className="text-xs font-medium text-white">{conn.destination}</span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded bg-${color}-500/20 text-${color}-400`}>
+                          {conn.health.toUpperCase()}
+                        </span>
+                        <span className="text-[9px] text-zinc-500">
+                          {conn.sync_frequency} • {conn.records_synced} synced
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  {conn.is_connected && (
+                    <button
+                      onClick={() => handleSync(conn.name.replace(/_/g, '-'))}
+                      disabled={syncing}
+                      className="px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-zinc-400 hover:text-white text-[10px] hover:bg-white/10 transition-all disabled:opacity-50"
+                    >
+                      {syncing && syncType === conn.name.replace(/_/g, '-') ? (
+                        <Loader className="w-3 h-3 animate-spin" />
+                      ) : (
+                        'Sync'
+                      )}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Module Weights */}
+          {Object.keys(weights).length > 0 && (
+            <div className="mt-4 p-3 rounded-xl bg-black/30 border border-white/5">
+              <h4 className="text-[10px] text-zinc-500 uppercase mb-2">AI Module Weights (Auto-Calibrated)</h4>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(weights).map(([module, weight]) => (
+                  <div key={module} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-violet-500/10 border border-violet-500/20">
+                    <span className="text-[10px] text-zinc-400">{module.replace(/_/g, ' ')}</span>
+                    <span className={`text-[10px] font-bold ${weight > 1 ? 'text-emerald-400' : weight < 1 ? 'text-amber-400' : 'text-zinc-400'}`}>
+                      {weight.toFixed(2)}x
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </GlassCard>
+  );
+};
+
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
@@ -839,6 +1073,7 @@ const TrainingCenter = () => {
   const { jobs, loading: jobsLoading, refresh: refreshJobs } = useSimulationJobs();
   const { status: tsStatus, loading: tsLoading, refresh: refreshTs } = useTimeseriesStatus();
   const { accuracy, predictions, loading: predLoading, refresh: refreshPred } = usePredictionAccuracy();
+  const { connections, metrics, weights, loading: connLoading, refresh: refreshConn } = useLearningConnections();
 
   return (
     <div className="space-y-6" data-testid="training-center">
@@ -858,6 +1093,7 @@ const TrainingCenter = () => {
             refreshJobs();
             refreshTs();
             refreshPred();
+            refreshConn();
             toast.success('Refreshed all data');
           }}
           className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-zinc-400 hover:text-white hover:bg-white/10 transition-all flex items-center gap-2"
@@ -867,6 +1103,15 @@ const TrainingCenter = () => {
           Refresh All
         </button>
       </div>
+
+      {/* Learning Connections - Full Width at Top */}
+      <LearningConnectionsPanel 
+        connections={connections}
+        metrics={metrics}
+        weights={weights}
+        loading={connLoading}
+        onRefresh={refreshConn}
+      />
 
       {/* Main Grid */}
       <div className="grid grid-cols-2 gap-6">

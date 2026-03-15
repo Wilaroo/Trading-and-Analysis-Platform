@@ -5,6 +5,40 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ---
 
+## LEARNING CONNECTORS ✅ COMPLETE (March 15, 2026)
+
+### Backend Learning Infrastructure
+
+**Purpose:** Bridge data gaps between SentCom's learning systems for continuous self-improvement.
+
+**Connections Built:**
+1. **Simulation → Time-Series Model**: Auto-retrain model from simulation data
+2. **Shadow Tracker → Module Weights**: Calibrate AI module weights based on accuracy
+3. **Alert Outcomes → Scanner Thresholds**: Tune scanner thresholds based on signal performance
+4. **Predictions → Verification**: Verify forecast accuracy against actual outcomes
+5. **Trade Journal → Learning Loop**: Feed trade outcomes back to learning systems
+6. **Debate → Tuning**: Track debate accuracy for prompt improvement
+
+**API Endpoints:**
+- `GET /api/learning-connectors/connections` - Get all connection statuses
+- `GET /api/learning-connectors/metrics` - Get overall learning metrics
+- `GET /api/learning-connectors/weights` - Get AI module weights
+- `POST /api/learning-connectors/sync/all` - Run full sync across all connections
+- `POST /api/learning-connectors/sync/{connection-type}` - Sync specific connection
+
+**Key Files:**
+- `/app/backend/services/learning_connectors_service.py` - Core service
+- `/app/backend/routers/learning_connectors_router.py` - API endpoints
+
+**UI Integration:**
+- New "Learning Connections" panel at top of Training Center
+- Shows connection health (healthy/pending/disconnected)
+- Displays AI module weights (auto-calibrated)
+- Sync buttons for each connection
+- Summary metrics: Total Data, Used for Training, Calibrations, Model Versions
+
+---
+
 ## TRAINING CENTER ✅ COMPLETE (March 15, 2026)
 
 ### Unified AI Training & Learning Hub

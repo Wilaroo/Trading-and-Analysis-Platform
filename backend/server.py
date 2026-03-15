@@ -81,6 +81,7 @@ from routers.smart_stops import router as smart_stops_router, init_smart_stop_ro
 from routers.sentcom import router as sentcom_router
 from routers.ai_modules import router as ai_modules_router, inject_services as inject_ai_module_services
 from routers.simulation_router import router as simulation_router, init_simulation_router
+from routers.learning_connectors_router import router as learning_connectors_router, init_learning_connectors_router
 from services.sentcom_service import get_sentcom_service, init_sentcom_service
 from services.ai_modules import (
     get_ai_module_config, init_ai_module_config,
@@ -355,6 +356,7 @@ init_smart_stop_router()  # Initialize smart stop service
 app.include_router(sentcom_router)  # SentCom - Unified AI Command Center
 app.include_router(ai_modules_router)  # AI Modules - Shadow Mode, Debate, Risk Manager
 app.include_router(simulation_router)  # Historical Simulation Engine
+app.include_router(learning_connectors_router)  # Learning Connectors - Data flow orchestration
 
 # Collections
 strategies_col = db["strategies"]
@@ -852,6 +854,44 @@ except Exception as e:
     import traceback
     traceback.print_exc()
     simulation_engine = None
+
+# ===================== LEARNING CONNECTORS =====================
+# Orchestrates data flow between learning systems
+
+try:
+    from services.learning_connectors_service import init_learning_connectors
+    from services.ai_modules.shadow_tracker import get_shadow_tracker
+    from services.learning_loop_service import get_learning_loop_service
+    
+    learning_connectors = init_learning_connectors(
+        db=db,
+        timeseries_ai=get_service_optional('timeseries_ai'),
+        shadow_tracker=get_shadow_tracker(),
+        learning_loop=get_learning_loop_service(),
+        scanner=get_service_optional('enhanced_scanner'),
+        simulation_engine=simulation_engine
+    )
+    
+    init_learning_connectors_router(
+        db=db,
+        timeseries_ai=get_service_optional('timeseries_ai'),
+        shadow_tracker=get_shadow_tracker(),
+        learning_loop=get_learning_loop_service(),
+        scanner=get_service_optional('enhanced_scanner'),
+        simulation_engine=simulation_engine
+    )
+    
+    register_service('learning_connectors', learning_connectors)
+    
+    print("Learning Connectors initialized")
+    print("  - Simulation → Time-Series Model retraining")
+    print("  - Shadow Tracker → Module weight calibration")
+    print("  - Alert Outcomes → Scanner threshold tuning")
+    print("  - Endpoints: /api/learning-connectors/*")
+except Exception as e:
+    print(f"Learning Connectors initialization deferred: {e}")
+    import traceback
+    traceback.print_exc()
 
 # ===================== TRADING SCHEDULER =====================
 # Automated daily/weekly analysis tasks
