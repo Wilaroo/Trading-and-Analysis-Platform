@@ -935,7 +935,7 @@ const LearningConnectionsPanel = ({ connections, metrics, weights, loading, onRe
           </div>
           <div>
             <h3 className="text-sm font-bold text-white">Learning Connections</h3>
-            <p className="text-[10px] text-zinc-500">Data flow between systems</p>
+            <p className="text-[10px] text-zinc-500">Data flow between systems • <span className="text-emerald-400">Auto-sync: 5pm ET daily</span></p>
           </div>
         </div>
         <button
