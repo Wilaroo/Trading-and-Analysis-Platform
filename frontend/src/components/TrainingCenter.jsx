@@ -16,7 +16,7 @@ import {
   Database, Cpu, LineChart, ArrowUpRight, ArrowDownRight,
   Sparkles, BookOpen, History, FlaskConical, Layers,
   Link2, Unlink, GitBranch, ArrowRight, HardDrive, 
-  Download, StopCircle, BarChart2
+  Download, StopCircle, BarChart2, Info
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -1168,6 +1168,24 @@ const LearningConnectionsPanel = ({ connections, metrics, weights, loading, onRe
 const IBDataCollectionPanel = ({ status, stats, queueProgress, defaultSymbolCount = 51, fullMarketCount = 0, loading, onRefresh }) => {
   const [collecting, setCollecting] = useState(false);
   const [collectionType, setCollectionType] = useState(null);
+  const [smartPlan, setSmartPlan] = useState(null);
+  const [showSmartPlan, setShowSmartPlan] = useState(false);
+
+  // Fetch smart collection plan on mount
+  useEffect(() => {
+    const fetchSmartPlan = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/ib-collector/smart-collection-plan`);
+        const data = await res.json();
+        if (data.success) {
+          setSmartPlan(data);
+        }
+      } catch (err) {
+        console.error('Error fetching smart plan:', err);
+      }
+    };
+    fetchSmartPlan();
+  }, []);
 
   const handleStartCollection = async (type) => {
     setCollecting(true);
@@ -1184,6 +1202,9 @@ const IBDataCollectionPanel = ({ status, stats, queueProgress, defaultSymbolCoun
         case 'market':
           endpoint = `${API_BASE}/api/ib-collector/full-market-collection?days=30&bar_size=1%20day`;
           break;
+        case 'smart':
+          endpoint = `${API_BASE}/api/ib-collector/smart-collection-run?days=30`;
+          break;
         default:
           endpoint = `${API_BASE}/api/ib-collector/quick-collect`;
       }
@@ -1192,7 +1213,7 @@ const IBDataCollectionPanel = ({ status, stats, queueProgress, defaultSymbolCoun
       const data = await res.json();
       
       if (data.success) {
-        toast.success(`Started ${type} collection: ${data.job_id}`);
+        toast.success(`Started ${type} collection: ${data.job_id || 'smart-tiered'}`);
         onRefresh();
       } else {
         toast.error(data.error || 'Failed to start collection');
@@ -1297,10 +1318,61 @@ const IBDataCollectionPanel = ({ status, stats, queueProgress, defaultSymbolCoun
                 {collecting && collectionType === 'market' ? <Loader className="w-3 h-3 animate-spin" /> : <Database className="w-3 h-3" />}
                 Full Market ({fullMarketCount.toLocaleString() || '8000+'})
               </button>
+              <button
+                onClick={() => handleStartCollection('smart')}
+                disabled={collecting}
+                className="px-2.5 py-1.5 rounded-lg bg-purple-500/20 border border-purple-500/30 text-purple-400 text-[10px] font-medium hover:bg-purple-500/30 transition-all disabled:opacity-50 flex items-center gap-1"
+                data-testid="smart-collect-btn"
+                title="Smart collection: Only stocks matching your ADV filters (~2-4K symbols, ~3hrs)"
+              >
+                {collecting && collectionType === 'smart' ? <Loader className="w-3 h-3 animate-spin" /> : <Brain className="w-3 h-3" />}
+                Smart
+              </button>
+              <button
+                onClick={() => setShowSmartPlan(!showSmartPlan)}
+                className="px-1.5 py-1.5 rounded-lg bg-zinc-700/50 border border-zinc-600/30 text-zinc-400 text-[10px] hover:bg-zinc-600/50 transition-all"
+                data-testid="smart-info-btn"
+                title="View Smart Collection plan details"
+              >
+                <Info className="w-3 h-3" />
+              </button>
             </div>
           )}
         </div>
       </div>
+
+      {/* Smart Collection Plan Info */}
+      {showSmartPlan && smartPlan && (
+        <div className="mb-4 p-4 rounded-xl bg-purple-500/10 border border-purple-500/30">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-sm font-bold text-purple-400">Smart Collection Plan</h4>
+            <span className="text-xs text-zinc-400">~{smartPlan.total_estimated_hours} hrs total</span>
+          </div>
+          <p className="text-[10px] text-zinc-400 mb-3">
+            Only collects data for stocks matching your bot's ADV filters. Much faster than Full Market.
+          </p>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="p-2 rounded-lg bg-black/30">
+              <div className="text-[10px] text-cyan-400 font-medium mb-1">Intraday (1min, 5min)</div>
+              <div className="text-lg font-bold text-white">{smartPlan.plan?.intraday?.symbol_count?.toLocaleString() || 0}</div>
+              <div className="text-[9px] text-zinc-500">ADV ≥ 500K</div>
+              <div className="text-[9px] text-zinc-500">~{smartPlan.plan?.intraday?.estimated_hours?.toFixed(1)}h</div>
+            </div>
+            <div className="p-2 rounded-lg bg-black/30">
+              <div className="text-[10px] text-amber-400 font-medium mb-1">Swing (15min, 1hr)</div>
+              <div className="text-lg font-bold text-white">{smartPlan.plan?.swing?.symbol_count?.toLocaleString() || 0}</div>
+              <div className="text-[9px] text-zinc-500">ADV ≥ 100K</div>
+              <div className="text-[9px] text-zinc-500">~{smartPlan.plan?.swing?.estimated_hours?.toFixed(1)}h</div>
+            </div>
+            <div className="p-2 rounded-lg bg-black/30">
+              <div className="text-[10px] text-emerald-400 font-medium mb-1">Investment (1day)</div>
+              <div className="text-lg font-bold text-white">{smartPlan.plan?.investment?.symbol_count?.toLocaleString() || 0}</div>
+              <div className="text-[9px] text-zinc-500">ADV ≥ 50K</div>
+              <div className="text-[9px] text-zinc-500">~{smartPlan.plan?.investment?.estimated_hours?.toFixed(1)}h</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-8">
