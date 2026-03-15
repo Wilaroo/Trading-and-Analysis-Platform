@@ -727,25 +727,33 @@ const useAIInsights = (pollInterval = 15000) => {
   const [shadowDecisions, setShadowDecisions] = useState([]);
   const [shadowPerformance, setShadowPerformance] = useState(null);
   const [timeseriesStatus, setTimeseriesStatus] = useState(null);
+  const [predictionAccuracy, setPredictionAccuracy] = useState(null);
+  const [recentPredictions, setRecentPredictions] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const fetchInsights = useCallback(async () => {
     try {
-      const [decisionsRes, performanceRes, timeseriesRes] = await Promise.all([
+      const [decisionsRes, performanceRes, timeseriesRes, accuracyRes, predictionsRes] = await Promise.all([
         fetch(`${API_BASE}/api/ai-modules/shadow/decisions?limit=10`),
         fetch(`${API_BASE}/api/ai-modules/shadow/performance?days=7`),
-        fetch(`${API_BASE}/api/ai-modules/timeseries/status`)
+        fetch(`${API_BASE}/api/ai-modules/timeseries/status`),
+        fetch(`${API_BASE}/api/ai-modules/timeseries/prediction-accuracy?days=30`),
+        fetch(`${API_BASE}/api/ai-modules/timeseries/predictions?limit=10`)
       ]);
 
-      const [decisionsData, performanceData, timeseriesData] = await Promise.all([
+      const [decisionsData, performanceData, timeseriesData, accuracyData, predictionsData] = await Promise.all([
         decisionsRes.json(),
         performanceRes.json(),
-        timeseriesRes.json()
+        timeseriesRes.json(),
+        accuracyRes.json(),
+        predictionsRes.json()
       ]);
 
       if (decisionsData.success) setShadowDecisions(decisionsData.decisions || []);
       if (performanceData.success) setShadowPerformance(performanceData.performance || null);
       if (timeseriesData.success) setTimeseriesStatus(timeseriesData.status || null);
+      if (accuracyData.success) setPredictionAccuracy(accuracyData.accuracy || null);
+      if (predictionsData.success) setRecentPredictions(predictionsData.predictions || []);
     } catch (err) {
       console.error('Error fetching AI insights:', err);
     } finally {
@@ -759,17 +767,18 @@ const useAIInsights = (pollInterval = 15000) => {
     return () => clearInterval(interval);
   }, [fetchInsights, pollInterval]);
 
-  return { shadowDecisions, shadowPerformance, timeseriesStatus, loading, refresh: fetchInsights };
+  return { shadowDecisions, shadowPerformance, timeseriesStatus, predictionAccuracy, recentPredictions, loading, refresh: fetchInsights };
 };
 
 // AI Insights Dashboard Panel
 const AIInsightsDashboard = ({ onClose }) => {
   console.log('AIInsightsDashboard component mounted');
-  const { shadowDecisions, shadowPerformance, timeseriesStatus, loading, refresh } = useAIInsights();
+  const { shadowDecisions, shadowPerformance, timeseriesStatus, predictionAccuracy, recentPredictions, loading, refresh } = useAIInsights();
   const [activeTab, setActiveTab] = useState('decisions');
   const [forecastSymbol, setForecastSymbol] = useState('');
   const [forecastResult, setForecastResult] = useState(null);
   const [forecastLoading, setForecastLoading] = useState(false);
+  const [verifying, setVerifying] = useState(false);
 
   const runForecast = async () => {
     if (!forecastSymbol.trim()) return;
@@ -832,6 +841,7 @@ const AIInsightsDashboard = ({ onClose }) => {
           {[
             { id: 'decisions', label: 'Shadow Decisions', icon: '👻' },
             { id: 'forecast', label: 'Time-Series Forecast', icon: '📈' },
+            { id: 'predictions', label: 'Prediction Tracking', icon: '🎯' },
             { id: 'performance', label: 'Module Performance', icon: '📊' }
           ].map(tab => (
             <button
@@ -1064,6 +1074,151 @@ const AIInsightsDashboard = ({ onClose }) => {
                     <p className="text-[10px] text-zinc-500 text-center mt-2">
                       Model: {forecastResult.model_version} | {forecastResult.usable ? '✅ Usable' : '⚠️ Low confidence'}
                     </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : activeTab === 'predictions' ? (
+            /* Predictions Tracking Tab */
+            <div className="space-y-4">
+              {/* Prediction Accuracy Summary */}
+              <div className="p-4 rounded-xl bg-gradient-to-br from-cyan-500/10 to-violet-500/5 border border-cyan-500/20">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <span>🎯</span> Prediction Accuracy (30 Days)
+                  </h3>
+                  <button
+                    onClick={async () => {
+                      setVerifying(true);
+                      try {
+                        const res = await fetch(`${API_BASE}/api/ai-modules/timeseries/verify-predictions`, {
+                          method: 'POST'
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                          toast.success(`Verified ${data.result.verified} predictions`);
+                          refresh();
+                        }
+                      } catch (e) {
+                        toast.error('Verification failed');
+                      } finally {
+                        setVerifying(false);
+                      }
+                    }}
+                    disabled={verifying}
+                    className="px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-400 text-xs font-medium hover:bg-cyan-500/30 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                    data-testid="verify-predictions-btn"
+                  >
+                    {verifying ? <Loader className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                    Verify Outcomes
+                  </button>
+                </div>
+                
+                {predictionAccuracy ? (
+                  <div className="grid grid-cols-4 gap-4 text-center">
+                    <div>
+                      <p className="text-2xl font-bold text-white">{predictionAccuracy.total_predictions}</p>
+                      <p className="text-[9px] text-zinc-500">Total Predictions</p>
+                    </div>
+                    <div>
+                      <p className="text-2xl font-bold text-emerald-400">{predictionAccuracy.correct_predictions || 0}</p>
+                      <p className="text-[9px] text-zinc-500">Correct</p>
+                    </div>
+                    <div>
+                      <p className="text-2xl font-bold text-cyan-400">
+                        {(predictionAccuracy.accuracy * 100).toFixed(1)}%
+                      </p>
+                      <p className="text-[9px] text-zinc-500">Accuracy</p>
+                    </div>
+                    <div>
+                      <p className={`text-2xl font-bold ${(predictionAccuracy.avg_return_when_correct || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {((predictionAccuracy.avg_return_when_correct || 0) * 100).toFixed(2)}%
+                      </p>
+                      <p className="text-[9px] text-zinc-500">Avg Return (Correct)</p>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-zinc-400 text-center py-4">No accuracy data available yet</p>
+                )}
+                
+                {/* Accuracy by Direction */}
+                {predictionAccuracy?.by_direction && Object.keys(predictionAccuracy.by_direction).length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-white/5">
+                    <p className="text-[10px] text-zinc-500 uppercase mb-2">Accuracy by Direction</p>
+                    <div className="flex gap-3">
+                      {Object.entries(predictionAccuracy.by_direction).map(([dir, stats]) => (
+                        <div key={dir} className="flex-1 p-2 rounded-lg bg-black/30 text-center">
+                          <span className={`text-xs font-bold ${
+                            dir === 'up' ? 'text-emerald-400' : dir === 'down' ? 'text-rose-400' : 'text-zinc-400'
+                          }`}>
+                            {dir.toUpperCase()}
+                          </span>
+                          <p className="text-lg font-bold text-white mt-1">{(stats.accuracy * 100).toFixed(0)}%</p>
+                          <p className="text-[8px] text-zinc-500">{stats.correct}/{stats.total}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {/* Recent Predictions List */}
+              <div>
+                <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                  <span>📋</span> Recent Predictions
+                </h3>
+                
+                {recentPredictions.length === 0 ? (
+                  <div className="text-center py-8">
+                    <div className="text-4xl mb-2">🎯</div>
+                    <p className="text-zinc-400">No predictions yet</p>
+                    <p className="text-xs text-zinc-500 mt-1">Run forecasts to track prediction accuracy</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {recentPredictions.map((pred, i) => (
+                      <div 
+                        key={i}
+                        className="p-3 rounded-xl bg-black/40 border border-white/5 flex items-center justify-between"
+                        data-testid={`prediction-${i}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm font-bold text-white">{pred.symbol}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            pred.prediction?.direction === 'up' ? 'bg-emerald-500/20 text-emerald-400'
+                            : pred.prediction?.direction === 'down' ? 'bg-rose-500/20 text-rose-400'
+                            : 'bg-zinc-500/20 text-zinc-400'
+                          }`}>
+                            {pred.prediction?.direction?.toUpperCase() || 'FLAT'}
+                          </span>
+                          <span className="text-xs text-zinc-500">
+                            {(pred.prediction?.probability_up * 100).toFixed(1)}% UP
+                          </span>
+                        </div>
+                        
+                        <div className="flex items-center gap-3">
+                          {pred.price_at_prediction && (
+                            <span className="text-xs text-zinc-400">${pred.price_at_prediction.toFixed(2)}</span>
+                          )}
+                          
+                          {pred.outcome_verified ? (
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${
+                              pred.prediction_correct ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                            }`}>
+                              {pred.prediction_correct ? '✓ CORRECT' : '✗ WRONG'}
+                            </span>
+                          ) : (
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400">
+                              PENDING
+                            </span>
+                          )}
+                          
+                          <span className="text-[10px] text-zinc-500">
+                            {new Date(pred.timestamp).toLocaleDateString()}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

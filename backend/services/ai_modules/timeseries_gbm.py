@@ -16,7 +16,7 @@ import pickle
 import base64
 import numpy as np
 from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, asdict, field
 import lightgbm as lgb
 
@@ -402,16 +402,21 @@ class TimeSeriesGBM:
         )
         
         # Log prediction
-        self._log_prediction(prediction, feature_set)
+        self._log_prediction(prediction, feature_set, bars)
         
         return prediction
         
-    def _log_prediction(self, prediction: Prediction, features: FeatureSet):
-        """Log prediction to database"""
+    def _log_prediction(self, prediction: Prediction, features: FeatureSet, bars: List[Dict] = None):
+        """Log prediction to database with price context for later verification"""
         if self._db is None:
             return
             
         try:
+            # Get current price from bars if available
+            current_price = None
+            if bars and len(bars) > 0:
+                current_price = bars[0].get("close")
+            
             self._db[self.PREDICTIONS_COLLECTION].insert_one({
                 "symbol": prediction.symbol,
                 "prediction": prediction.to_dict(),
@@ -421,10 +426,163 @@ class TimeSeriesGBM:
                     "rvol_1": features.features.get("rvol_1", 1),
                     "trend_strength": features.features.get("trend_strength", 0)
                 },
-                "timestamp": prediction.timestamp
+                "price_at_prediction": current_price,
+                "forecast_horizon": self.forecast_horizon,
+                "timestamp": prediction.timestamp,
+                # Outcome fields - to be filled by verification job
+                "outcome_verified": False,
+                "actual_direction": None,
+                "price_at_verification": None,
+                "actual_return": None,
+                "prediction_correct": None,
+                "verified_at": None
             })
         except Exception as e:
             logger.warning(f"Could not log prediction: {e}")
+
+    def verify_pending_predictions(self) -> Dict[str, Any]:
+        """
+        Verify pending predictions against actual price movements.
+        Called periodically to update prediction outcomes.
+        """
+        if self._db is None:
+            return {"success": False, "error": "Database not connected"}
+        
+        try:
+            # Find unverified predictions older than forecast_horizon periods
+            # For daily data, 5 days old; for 5-min data, 25 minutes old
+            cutoff_time = datetime.now(timezone.utc) - timedelta(days=self.forecast_horizon + 1)
+            
+            pending = list(self._db[self.PREDICTIONS_COLLECTION].find({
+                "outcome_verified": False,
+                "timestamp": {"$lt": cutoff_time.isoformat()}
+            }).limit(100))
+            
+            verified_count = 0
+            correct_count = 0
+            
+            for pred in pending:
+                symbol = pred["symbol"]
+                pred_time = pred["timestamp"]
+                pred_direction = pred["prediction"]["direction"]
+                pred_price = pred.get("price_at_prediction")
+                
+                if pred_price is None:
+                    continue
+                
+                # Get price after forecast horizon from historical_bars
+                # Find the first bar after (pred_time + forecast_horizon)
+                target_time = datetime.fromisoformat(pred_time.replace("Z", "+00:00")) + timedelta(days=self.forecast_horizon)
+                
+                future_bar = self._db["historical_bars"].find_one(
+                    {
+                        "symbol": symbol,
+                        "timestamp": {"$gte": target_time.isoformat()}
+                    },
+                    sort=[("timestamp", 1)]
+                )
+                
+                if future_bar and "close" in future_bar:
+                    future_price = future_bar["close"]
+                    actual_return = (future_price - pred_price) / pred_price
+                    
+                    # Determine actual direction
+                    if actual_return > 0:
+                        actual_direction = "up"
+                    elif actual_return < 0:
+                        actual_direction = "down"
+                    else:
+                        actual_direction = "flat"
+                    
+                    # Check if prediction was correct
+                    prediction_correct = (pred_direction == actual_direction) or \
+                                        (pred_direction == "flat" and abs(actual_return) < 0.01)
+                    
+                    if prediction_correct:
+                        correct_count += 1
+                    
+                    # Update the prediction record
+                    self._db[self.PREDICTIONS_COLLECTION].update_one(
+                        {"_id": pred["_id"]},
+                        {"$set": {
+                            "outcome_verified": True,
+                            "actual_direction": actual_direction,
+                            "price_at_verification": future_price,
+                            "actual_return": actual_return,
+                            "prediction_correct": prediction_correct,
+                            "verified_at": datetime.now(timezone.utc).isoformat()
+                        }}
+                    )
+                    verified_count += 1
+            
+            return {
+                "success": True,
+                "verified": verified_count,
+                "correct": correct_count,
+                "accuracy": correct_count / verified_count if verified_count > 0 else 0
+            }
+            
+        except Exception as e:
+            logger.error(f"Error verifying predictions: {e}")
+            return {"success": False, "error": str(e)}
+
+    def get_prediction_accuracy(self, days: int = 30) -> Dict[str, Any]:
+        """Get prediction accuracy statistics over a time period"""
+        if self._db is None:
+            return {"success": False, "error": "Database not connected"}
+        
+        try:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            
+            # Get verified predictions
+            verified = list(self._db[self.PREDICTIONS_COLLECTION].find({
+                "outcome_verified": True,
+                "timestamp": {"$gte": cutoff.isoformat()}
+            }))
+            
+            if not verified:
+                return {
+                    "success": True,
+                    "total_predictions": 0,
+                    "verified_predictions": 0,
+                    "accuracy": 0,
+                    "by_direction": {}
+                }
+            
+            total = len(verified)
+            correct = sum(1 for p in verified if p.get("prediction_correct"))
+            
+            # Break down by predicted direction
+            by_direction = {}
+            for direction in ["up", "down", "flat"]:
+                dir_preds = [p for p in verified if p["prediction"]["direction"] == direction]
+                dir_correct = sum(1 for p in dir_preds if p.get("prediction_correct"))
+                if dir_preds:
+                    by_direction[direction] = {
+                        "total": len(dir_preds),
+                        "correct": dir_correct,
+                        "accuracy": dir_correct / len(dir_preds)
+                    }
+            
+            # Calculate average return when prediction was correct vs incorrect
+            correct_returns = [p.get("actual_return", 0) for p in verified if p.get("prediction_correct")]
+            incorrect_returns = [p.get("actual_return", 0) for p in verified if not p.get("prediction_correct")]
+            
+            return {
+                "success": True,
+                "total_predictions": total,
+                "verified_predictions": total,
+                "correct_predictions": correct,
+                "accuracy": correct / total if total > 0 else 0,
+                "by_direction": by_direction,
+                "avg_return_when_correct": sum(correct_returns) / len(correct_returns) if correct_returns else 0,
+                "avg_return_when_incorrect": sum(incorrect_returns) / len(incorrect_returns) if incorrect_returns else 0,
+                "period_days": days
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting prediction accuracy: {e}")
+            return {"success": False, "error": str(e)}
             
     def get_metrics(self) -> ModelMetrics:
         """Get current model metrics"""
