@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://ai-trader-sync.preview.emergentagent.com
+https://sentcom-learn.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://ai-trader-sync.preview.emergentagent.com
+https://sentcom-learn.preview.emergentagent.com
 ```
