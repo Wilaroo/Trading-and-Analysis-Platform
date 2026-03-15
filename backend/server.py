@@ -84,6 +84,7 @@ from routers.simulation_router import router as simulation_router, init_simulati
 from routers.learning_connectors_router import router as learning_connectors_router, init_learning_connectors_router
 from routers.ib_collector_router import router as ib_collector_router
 from routers.data_storage_router import router as data_storage_router
+from routers.strategy_promotion_router import router as strategy_promotion_router, init_strategy_promotion_router
 from services.sentcom_service import get_sentcom_service, init_sentcom_service
 from services.ai_modules import (
     get_ai_module_config, init_ai_module_config,
@@ -96,6 +97,7 @@ from services.ai_modules import (
     init_timeseries_ai
 )
 from services.ai_modules.agent_data_service import get_agent_data_service, init_agent_data_service
+from services.strategy_promotion_service import get_strategy_promotion_service, init_strategy_promotion_service
 from services.market_intel_service import get_market_intel_service
 from services.hybrid_data_service import get_hybrid_data_service, init_hybrid_data_service
 from services.market_scanner_service import get_market_scanner_service, init_market_scanner_service
@@ -371,6 +373,7 @@ app.include_router(simulation_router)  # Historical Simulation Engine
 app.include_router(learning_connectors_router)  # Learning Connectors - Data flow orchestration
 app.include_router(ib_collector_router)  # IB Historical Data Collector
 app.include_router(data_storage_router)  # Data Storage Management
+app.include_router(strategy_promotion_router)  # Strategy Promotion - Autonomous Loop
 
 # Collections
 strategies_col = db["strategies"]
@@ -911,6 +914,23 @@ try:
     print("  - Endpoints: /api/learning-connectors/*")
 except Exception as e:
     print(f"Learning Connectors initialization deferred: {e}")
+    import traceback
+    traceback.print_exc()
+
+# ===================== STRATEGY PROMOTION SERVICE =====================
+# Autonomous learning loop: SIMULATION → PAPER → LIVE
+
+try:
+    init_strategy_promotion_router(db=db)
+    strategy_promotion_service = get_strategy_promotion_service()
+    register_service('strategy_promotion', strategy_promotion_service)
+    
+    print("Strategy Promotion Service initialized")
+    print("  - Manages strategy lifecycle: SIMULATION → PAPER → LIVE")
+    print("  - Auto-promotes strategies that prove profitable")
+    print("  - Endpoints: /api/strategy-promotion/*")
+except Exception as e:
+    print(f"Strategy Promotion Service initialization deferred: {e}")
     import traceback
     traceback.print_exc()
 
