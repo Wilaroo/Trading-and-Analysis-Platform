@@ -28,6 +28,7 @@ from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 import uuid
+from pymongo import ASCENDING, DESCENDING
 
 logger = logging.getLogger(__name__)
 
@@ -96,9 +97,14 @@ class IBHistoricalCollector:
         self._jobs_col = None
         self._ib_service = None
         self._alpaca_service = None
+        self._market_scanner = None  # Use existing market scanner for symbol universe
         self._running_job: Optional[CollectionJob] = None
         self._cancel_requested = False
         self._all_us_symbols: List[str] = []
+        
+        # Batch processing config
+        self.BATCH_SIZE = 100  # Symbols per batch checkpoint
+        self.BATCH_DELAY = 0.5  # Seconds between batch saves
         
     def set_db(self, db):
         """Set database connection"""
@@ -110,8 +116,9 @@ class IBHistoricalCollector:
             # Create indexes
             self._data_col.create_index([("symbol", 1), ("bar_size", 1), ("date", 1)], unique=True)
             self._data_col.create_index([("symbol", 1), ("bar_size", 1)])
-            self._data_col.create_index([("collected_at", -1)])
-            self._jobs_col.create_index([("start_time", -1)])
+            self._data_col.create_index([("collected_at", DESCENDING)])
+            self._jobs_col.create_index([("start_time", DESCENDING)])
+            self._jobs_col.create_index([("id", 1)], unique=True)
             
     def set_ib_service(self, ib_service):
         """Set IB service for data collection"""
@@ -121,9 +128,19 @@ class IBHistoricalCollector:
         """Set Alpaca service for fetching US stock universe"""
         self._alpaca_service = alpaca_service
         
+    def set_market_scanner(self, market_scanner):
+        """Set market scanner service for symbol universe (preferred)"""
+        self._market_scanner = market_scanner
+        logger.info("IB Collector: Using market scanner for symbol universe")
+        
     async def get_all_us_symbols(self, min_price: float = 5.0, max_price: float = 500.0) -> List[str]:
         """
-        Fetch all tradeable US stocks from Alpaca.
+        Fetch all tradeable US stocks using the market scanner service.
+        
+        Priority:
+        1. Market Scanner (already has caching and Alpaca integration)
+        2. Direct Alpaca API
+        3. Fallback to default symbols
         
         Args:
             min_price: Minimum stock price filter
@@ -135,29 +152,22 @@ class IBHistoricalCollector:
         # Check cache first
         if self._all_us_symbols and len(self._all_us_symbols) > 100:
             return self._all_us_symbols
-            
-        # Try to load from database cache
-        if self._db is not None:
-            try:
-                cache = self._db["symbol_cache"].find_one({"type": "us_stocks"})
-                if cache and cache.get("symbols"):
-                    # Check if cache is less than 24 hours old
-                    cached_at = cache.get("cached_at", "")
-                    if cached_at:
-                        from datetime import datetime, timezone, timedelta
-                        cache_time = datetime.fromisoformat(cached_at.replace("Z", "+00:00"))
-                        if datetime.now(timezone.utc) - cache_time < timedelta(hours=24):
-                            self._all_us_symbols = cache["symbols"]
-                            logger.info(f"Loaded {len(self._all_us_symbols)} symbols from cache")
-                            return self._all_us_symbols
-            except Exception as e:
-                logger.warning(f"Error loading symbol cache: {e}")
         
-        # Fetch from Alpaca
         symbols = []
-        try:
-            if self._alpaca_service:
-                # Use Alpaca service to get all assets
+        
+        # Method 1: Use Market Scanner (preferred - already has caching)
+        if self._market_scanner:
+            try:
+                universe = await self._market_scanner.get_symbol_universe()
+                if universe and len(universe) > 100:
+                    symbols = [s.get("symbol") for s in universe if s.get("symbol")]
+                    logger.info(f"Got {len(symbols)} symbols from market scanner")
+            except Exception as e:
+                logger.warning(f"Market scanner failed: {e}")
+        
+        # Method 2: Try direct Alpaca
+        if not symbols and self._alpaca_service:
+            try:
                 assets = await self._alpaca_service.get_all_assets()
                 if assets:
                     for asset in assets:
@@ -165,40 +175,26 @@ class IBHistoricalCollector:
                             asset.get("status") == "active" and
                             asset.get("exchange") in ["NYSE", "NASDAQ", "ARCA", "AMEX"]):
                             symbols.append(asset.get("symbol"))
-                    logger.info(f"Fetched {len(symbols)} symbols from Alpaca")
-        except Exception as e:
-            logger.error(f"Error fetching from Alpaca: {e}")
-            
-        # If Alpaca failed, try IB
-        if not symbols and self._ib_service:
-            try:
-                # IB doesn't have a direct "get all stocks" API
-                # Fall back to default symbols
-                logger.warning("Alpaca unavailable, using default symbols")
-                symbols = self.get_default_symbols()
+                    logger.info(f"Got {len(symbols)} symbols from Alpaca")
             except Exception as e:
-                logger.error(f"Error fetching from IB: {e}")
-                
-        # Final fallback
+                logger.warning(f"Alpaca service failed: {e}")
+        
+        # Method 3: Try to load from database cache
+        if not symbols and self._db is not None:
+            try:
+                cache = self._db["us_symbols"].find({}, {"symbol": 1, "_id": 0})
+                cached_symbols = [doc.get("symbol") for doc in cache if doc.get("symbol")]
+                if len(cached_symbols) > 100:
+                    symbols = cached_symbols
+                    logger.info(f"Got {len(symbols)} symbols from database cache")
+            except Exception as e:
+                logger.warning(f"Database cache failed: {e}")
+        
+        # Method 4: Fallback to default
         if not symbols:
             symbols = self.get_default_symbols()
-            
-        # Cache the results
-        if symbols and len(symbols) > 100 and self._db is not None:
-            try:
-                self._db["symbol_cache"].update_one(
-                    {"type": "us_stocks"},
-                    {"$set": {
-                        "type": "us_stocks",
-                        "symbols": symbols,
-                        "count": len(symbols),
-                        "cached_at": datetime.now(timezone.utc).isoformat()
-                    }},
-                    upsert=True
-                )
-            except Exception as e:
-                logger.warning(f"Error caching symbols: {e}")
-                
+            logger.info(f"Using {len(symbols)} default symbols")
+        
         self._all_us_symbols = symbols
         return symbols
         

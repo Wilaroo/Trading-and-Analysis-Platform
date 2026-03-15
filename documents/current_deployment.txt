@@ -1,1 +1,1 @@
-https://sentcom-backtest.preview.emergentagent.com
+https://ai-trader-sync.preview.emergentagent.com
