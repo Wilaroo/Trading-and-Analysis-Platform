@@ -15,7 +15,8 @@ import {
   Clock, CheckCircle, XCircle, AlertCircle, Settings,
   Database, Cpu, LineChart, ArrowUpRight, ArrowDownRight,
   Sparkles, BookOpen, History, FlaskConical, Layers,
-  Link2, Unlink, GitBranch, ArrowRight
+  Link2, Unlink, GitBranch, ArrowRight, HardDrive, 
+  Download, StopCircle, BarChart2
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -205,6 +206,77 @@ const useLearningConnections = () => {
   }, [fetchData]);
 
   return { connections, metrics, weights, loading, refresh: fetchData };
+};
+
+// Hook for IB Data Collection
+const useIBCollection = () => {
+  const [status, setStatus] = useState(null);
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [statusRes, statsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/ib-collector/status`),
+        fetch(`${API_BASE}/api/ib-collector/stats`)
+      ]);
+      
+      const [statusData, statsData] = await Promise.all([
+        statusRes.json(),
+        statsRes.json()
+      ]);
+      
+      if (statusData.success) setStatus(statusData.job);
+      if (statsData.success) setStats(statsData.stats);
+    } catch (err) {
+      console.error('Error fetching IB collection data:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+    // Poll every 5 seconds if a job is running
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  return { status, stats, loading, refresh: fetchData };
+};
+
+// Hook for Data Storage Stats
+const useDataStorage = () => {
+  const [stats, setStats] = useState(null);
+  const [summary, setSummary] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [statsRes, summaryRes] = await Promise.all([
+        fetch(`${API_BASE}/api/data-storage/stats`),
+        fetch(`${API_BASE}/api/data-storage/learning-summary`)
+      ]);
+      
+      const [statsData, summaryData] = await Promise.all([
+        statsRes.json(),
+        summaryRes.json()
+      ]);
+      
+      if (statsData.success) setStats(statsData);
+      if (summaryData.success) setSummary(summaryData);
+    } catch (err) {
+      console.error('Error fetching data storage stats:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  return { stats, summary, loading, refresh: fetchData };
 };
 
 // ============================================================================
@@ -1065,6 +1137,216 @@ const LearningConnectionsPanel = ({ connections, metrics, weights, loading, onRe
   );
 };
 
+// IB Data Collection Panel
+const IBDataCollectionPanel = ({ status, stats, loading, onRefresh }) => {
+  const [collecting, setCollecting] = useState(false);
+  const [collectionType, setCollectionType] = useState(null);
+
+  const handleStartCollection = async (type) => {
+    setCollecting(true);
+    setCollectionType(type);
+    try {
+      const endpoint = type === 'quick' 
+        ? `${API_BASE}/api/ib-collector/quick-collect`
+        : `${API_BASE}/api/ib-collector/full-collection?days=30`;
+      
+      const res = await fetch(endpoint, { method: 'POST' });
+      const data = await res.json();
+      
+      if (data.success) {
+        toast.success(`Started ${type} collection: ${data.job_id}`);
+        onRefresh();
+      } else {
+        toast.error(data.error || 'Failed to start collection');
+      }
+    } catch (err) {
+      toast.error('Error starting collection');
+    } finally {
+      setCollecting(false);
+      setCollectionType(null);
+    }
+  };
+
+  const handleCancel = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/ib-collector/cancel`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        toast.success('Collection cancelled');
+        onRefresh();
+      }
+    } catch (err) {
+      toast.error('Error cancelling collection');
+    }
+  };
+
+  const isRunning = status?.status === 'running';
+  const totalBars = stats?.total_bars || 0;
+  const uniqueSymbols = stats?.unique_symbols || 0;
+
+  return (
+    <GlassCard className="p-5" gradient>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500/20 to-red-500/20 flex items-center justify-center">
+            <HardDrive className="w-5 h-5 text-orange-400" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-white">IB Data Collection</h3>
+            <p className="text-[10px] text-zinc-500">Historical OHLCV from IB Gateway</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {isRunning ? (
+            <button
+              onClick={handleCancel}
+              className="px-3 py-1.5 rounded-lg bg-rose-500/20 border border-rose-500/30 text-rose-400 text-xs font-medium hover:bg-rose-500/30 transition-all flex items-center gap-1.5"
+              data-testid="cancel-collection-btn"
+            >
+              <StopCircle className="w-3 h-3" />
+              Cancel
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => handleStartCollection('quick')}
+                disabled={collecting}
+                className="px-3 py-1.5 rounded-lg bg-orange-500/20 border border-orange-500/30 text-orange-400 text-xs font-medium hover:bg-orange-500/30 transition-all disabled:opacity-50 flex items-center gap-1.5"
+                data-testid="quick-collect-btn"
+              >
+                {collecting && collectionType === 'quick' ? <Loader className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                Quick (8 symbols)
+              </button>
+              <button
+                onClick={() => handleStartCollection('full')}
+                disabled={collecting}
+                className="px-3 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-xs font-medium hover:bg-emerald-500/30 transition-all disabled:opacity-50 flex items-center gap-1.5"
+                data-testid="full-collect-btn"
+              >
+                {collecting && collectionType === 'full' ? <Loader className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                Full (50+ symbols)
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader className="w-6 h-6 text-orange-400 animate-spin" />
+        </div>
+      ) : (
+        <>
+          {/* Running Job Status */}
+          {isRunning && status && (
+            <div className="mb-4 p-4 rounded-xl bg-gradient-to-r from-orange-500/10 to-amber-500/10 border border-orange-500/30">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Loader className="w-4 h-4 text-orange-400 animate-spin" />
+                  <span className="text-sm font-medium text-white">Collection Running</span>
+                </div>
+                <span className="text-xs text-orange-400">{status.progress_pct?.toFixed(1)}%</span>
+              </div>
+              
+              {/* Progress Bar */}
+              <div className="w-full h-2 bg-black/30 rounded-full overflow-hidden mb-2">
+                <div 
+                  className="h-full bg-gradient-to-r from-orange-500 to-amber-500 transition-all duration-500"
+                  style={{ width: `${status.progress_pct || 0}%` }}
+                />
+              </div>
+              
+              <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                <span>Current: <span className="text-white">{status.current_symbol || 'Starting...'}</span></span>
+                <span>{status.symbols_completed || 0} / {status.symbols?.length || 0} symbols</span>
+              </div>
+              
+              <div className="mt-2 flex items-center gap-4 text-[10px]">
+                <span className="text-emerald-400">{status.total_bars_collected?.toLocaleString() || 0} bars collected</span>
+                {status.symbols_failed > 0 && (
+                  <span className="text-rose-400">{status.symbols_failed} failed</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Stats */}
+          <div className="grid grid-cols-4 gap-3 mb-4">
+            <StatCard 
+              label="Total Bars" 
+              value={totalBars.toLocaleString()} 
+              icon={BarChart2} 
+              color="orange" 
+            />
+            <StatCard 
+              label="Symbols" 
+              value={uniqueSymbols} 
+              icon={Database} 
+              color="cyan" 
+            />
+            <StatCard 
+              label="Bar Sizes" 
+              value={Object.keys(stats?.by_bar_size || {}).length || 0} 
+              icon={Layers} 
+              color="violet" 
+            />
+            <StatCard 
+              label="Status" 
+              value={isRunning ? 'Running' : totalBars > 0 ? 'Ready' : 'Empty'} 
+              icon={isRunning ? Loader : CheckCircle} 
+              color={isRunning ? 'amber' : totalBars > 0 ? 'emerald' : 'zinc'} 
+            />
+          </div>
+
+          {/* Bar Size Breakdown */}
+          {stats?.by_bar_size && Object.keys(stats.by_bar_size).length > 0 && (
+            <div className="p-3 rounded-xl bg-black/30 border border-white/5 mb-4">
+              <h4 className="text-[10px] text-zinc-500 uppercase mb-2">Data by Bar Size</h4>
+              <div className="grid grid-cols-3 gap-2">
+                {Object.entries(stats.by_bar_size).map(([size, data]) => (
+                  <div key={size} className="p-2 rounded-lg bg-black/30 text-center">
+                    <p className="text-xs font-bold text-white">{size}</p>
+                    <p className="text-[10px] text-orange-400">{data.bars?.toLocaleString() || 0} bars</p>
+                    <p className="text-[9px] text-zinc-500">{data.symbols || 0} symbols</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Symbols List */}
+          {stats?.symbols_list?.length > 0 && (
+            <div className="p-3 rounded-xl bg-black/30 border border-white/5">
+              <h4 className="text-[10px] text-zinc-500 uppercase mb-2">Collected Symbols ({uniqueSymbols})</h4>
+              <div className="flex flex-wrap gap-1">
+                {stats.symbols_list.slice(0, 20).map((symbol) => (
+                  <span key={symbol} className="px-2 py-0.5 rounded-full bg-orange-500/10 border border-orange-500/20 text-orange-400 text-[10px]">
+                    {symbol}
+                  </span>
+                ))}
+                {stats.symbols_list.length > 20 && (
+                  <span className="px-2 py-0.5 rounded-full bg-zinc-500/10 text-zinc-400 text-[10px]">
+                    +{stats.symbols_list.length - 20} more
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Empty State */}
+          {totalBars === 0 && !isRunning && (
+            <div className="text-center py-6">
+              <HardDrive className="w-10 h-10 text-zinc-600 mx-auto mb-2" />
+              <p className="text-zinc-500 text-sm">No historical data collected yet</p>
+              <p className="text-zinc-600 text-xs mt-1">Start your local system and click "Full Collection" to begin</p>
+            </div>
+          )}
+        </>
+      )}
+    </GlassCard>
+  );
+};
+
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
@@ -1074,6 +1356,8 @@ const TrainingCenter = () => {
   const { status: tsStatus, loading: tsLoading, refresh: refreshTs } = useTimeseriesStatus();
   const { accuracy, predictions, loading: predLoading, refresh: refreshPred } = usePredictionAccuracy();
   const { connections, metrics, weights, loading: connLoading, refresh: refreshConn } = useLearningConnections();
+  const { status: ibStatus, stats: ibStats, loading: ibLoading, refresh: refreshIB } = useIBCollection();
+  const { summary: storageSummary, loading: storageLoading, refresh: refreshStorage } = useDataStorage();
 
   return (
     <div className="space-y-6" data-testid="training-center">
@@ -1088,30 +1372,50 @@ const TrainingCenter = () => {
             <p className="text-sm text-zinc-400">Make the entire system smarter through simulation and learning</p>
           </div>
         </div>
-        <button
-          onClick={() => {
-            refreshJobs();
-            refreshTs();
-            refreshPred();
-            refreshConn();
-            toast.success('Refreshed all data');
-          }}
-          className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-zinc-400 hover:text-white hover:bg-white/10 transition-all flex items-center gap-2"
-          data-testid="refresh-all-btn"
-        >
-          <RefreshCw className="w-4 h-4" />
-          Refresh All
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Total Learning Samples Badge */}
+          {storageSummary && (
+            <div className="px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+              <span className="text-xs text-emerald-400 font-medium">
+                {storageSummary.total_learning_samples?.toLocaleString() || 0} total samples
+              </span>
+            </div>
+          )}
+          <button
+            onClick={() => {
+              refreshJobs();
+              refreshTs();
+              refreshPred();
+              refreshConn();
+              refreshIB();
+              refreshStorage();
+              toast.success('Refreshed all data');
+            }}
+            className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-zinc-400 hover:text-white hover:bg-white/10 transition-all flex items-center gap-2"
+            data-testid="refresh-all-btn"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh All
+          </button>
+        </div>
       </div>
 
-      {/* Learning Connections - Full Width at Top */}
-      <LearningConnectionsPanel 
-        connections={connections}
-        metrics={metrics}
-        weights={weights}
-        loading={connLoading}
-        onRefresh={refreshConn}
-      />
+      {/* Top Row - Learning Connections & IB Data Collection */}
+      <div className="grid grid-cols-2 gap-6">
+        <LearningConnectionsPanel 
+          connections={connections}
+          metrics={metrics}
+          weights={weights}
+          loading={connLoading}
+          onRefresh={refreshConn}
+        />
+        <IBDataCollectionPanel
+          status={ibStatus}
+          stats={ibStats}
+          loading={ibLoading}
+          onRefresh={refreshIB}
+        />
+      </div>
 
       {/* Main Grid */}
       <div className="grid grid-cols-2 gap-6">
