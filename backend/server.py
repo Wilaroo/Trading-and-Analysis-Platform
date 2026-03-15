@@ -83,6 +83,7 @@ from routers.ai_modules import router as ai_modules_router, inject_services as i
 from routers.simulation_router import router as simulation_router, init_simulation_router
 from routers.learning_connectors_router import router as learning_connectors_router, init_learning_connectors_router
 from routers.ib_collector_router import router as ib_collector_router
+from routers.data_storage_router import router as data_storage_router
 from services.sentcom_service import get_sentcom_service, init_sentcom_service
 from services.ai_modules import (
     get_ai_module_config, init_ai_module_config,
@@ -360,6 +361,7 @@ app.include_router(ai_modules_router)  # AI Modules - Shadow Mode, Debate, Risk 
 app.include_router(simulation_router)  # Historical Simulation Engine
 app.include_router(learning_connectors_router)  # Learning Connectors - Data flow orchestration
 app.include_router(ib_collector_router)  # IB Historical Data Collector
+app.include_router(data_storage_router)  # Data Storage Management
 
 # Collections
 strategies_col = db["strategies"]
@@ -912,6 +914,22 @@ try:
     print("  - Endpoints: /api/ib-collector/*")
 except Exception as e:
     print(f"IB Historical Collector initialization deferred: {e}")
+
+# ===================== DATA STORAGE MANAGER =====================
+# Ensures proper data persistence and indexing for all learning data
+
+try:
+    from services.data_storage_manager import init_storage_manager
+    
+    storage_manager = init_storage_manager(db=db)
+    register_service('storage_manager', storage_manager)
+    
+    print("Data Storage Manager initialized")
+    print("  - Manages 14 collections for learning data")
+    print("  - Ensures proper indexes for fast retrieval")
+    print("  - Endpoints: /api/data-storage/*")
+except Exception as e:
+    print(f"Data Storage Manager initialization deferred: {e}")
 
 # ===================== TRADING SCHEDULER =====================
 # Automated daily/weekly analysis tasks
