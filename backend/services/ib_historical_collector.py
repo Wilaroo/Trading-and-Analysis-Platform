@@ -274,6 +274,7 @@ class IBHistoricalCollector:
                 from alpaca.data.historical import StockHistoricalDataClient
                 from alpaca.data.requests import StockBarsRequest
                 from alpaca.data.timeframe import TimeFrame
+                from alpaca.data.enums import DataFeed
                 import os
                 
                 api_key = os.environ.get("ALPACA_API_KEY", "")
@@ -285,14 +286,15 @@ class IBHistoricalCollector:
                 client = StockHistoricalDataClient(api_key, secret_key)
                 
                 from datetime import datetime, timedelta, timezone
-                end = datetime.now(timezone.utc)
-                start = end - timedelta(days=30)  # 30 days for 20 trading days
+                end = datetime.now(timezone.utc) - timedelta(days=1)  # Yesterday to avoid SIP issues
+                start = end - timedelta(days=35)  # 35 days to get ~20 trading days
                 
                 request = StockBarsRequest(
                     symbol_or_symbols=batch,
                     timeframe=TimeFrame.Day,
                     start=start,
-                    end=end
+                    end=end,
+                    feed=DataFeed.IEX  # Use IEX feed (free tier compatible)
                 )
                 
                 bars = client.get_stock_bars(request)
@@ -300,7 +302,8 @@ class IBHistoricalCollector:
                 # Calculate ADV for each symbol
                 for symbol in batch:
                     try:
-                        symbol_bars = bars.get(symbol, [])
+                        # BarSet uses [] access, not .get()
+                        symbol_bars = bars[symbol] if symbol in bars.data else []
                         if symbol_bars and len(symbol_bars) > 0:
                             volumes = [b.volume for b in symbol_bars[-20:]]
                             avg_volume = sum(volumes) / len(volumes) if volumes else 0
@@ -356,14 +359,16 @@ class IBHistoricalCollector:
             adv_col = self._db["symbol_adv_cache"]
             total = adv_col.count_documents({})
             
-            # Count by ADV threshold
-            adv_100k = adv_col.count_documents({"avg_volume": {"$gte": 100_000}})
-            adv_500k = adv_col.count_documents({"avg_volume": {"$gte": 500_000}})
+            # Count by ADV threshold (matching scanner service thresholds)
+            adv_50k = adv_col.count_documents({"avg_volume": {"$gte": 50_000}})    # Investment
+            adv_100k = adv_col.count_documents({"avg_volume": {"$gte": 100_000}})  # Swing
+            adv_500k = adv_col.count_documents({"avg_volume": {"$gte": 500_000}})  # Intraday
             adv_1m = adv_col.count_documents({"avg_volume": {"$gte": 1_000_000}})
             
             return {
                 "cached": total > 0,
                 "total_symbols": total,
+                "adv_50k_plus": adv_50k,
                 "adv_100k_plus": adv_100k,
                 "adv_500k_plus": adv_500k,
                 "adv_1m_plus": adv_1m
@@ -375,7 +380,7 @@ class IBHistoricalCollector:
         """
         Get liquid US stocks filtered by Average Daily Volume (ADV).
         
-        Uses market scanner to dynamically fetch and filter the full universe.
+        Uses ADV cache (built from Alpaca data) as primary source.
         
         Args:
             min_adv: Minimum average daily volume (default 100K for broad coverage)
@@ -385,7 +390,23 @@ class IBHistoricalCollector:
         """
         liquid_symbols = []
         
-        # Method 1: Use market scanner to get filtered universe (PREFERRED)
+        # Method 1: Check ADV cache (PREFERRED - built from actual volume data)
+        if self._db is not None:
+            try:
+                # Look for symbols with ADV data
+                cursor = self._db["symbol_adv_cache"].find(
+                    {"avg_volume": {"$gte": min_adv}},
+                    {"symbol": 1, "_id": 0}
+                ).limit(15000)
+                liquid_symbols = [doc["symbol"] for doc in cursor if doc.get("symbol")]
+                
+                if liquid_symbols:
+                    logger.info(f"Got {len(liquid_symbols)} liquid symbols from ADV cache (min_adv={min_adv:,})")
+                    return liquid_symbols
+            except Exception as e:
+                logger.debug(f"ADV cache not available: {e}")
+        
+        # Method 2: Fall back to market scanner if cache empty
         if self._market_scanner is not None:
             try:
                 # Get the full symbol universe from market scanner
@@ -412,22 +433,6 @@ class IBHistoricalCollector:
                         
             except Exception as e:
                 logger.warning(f"Market scanner fetch failed: {e}")
-        
-        # Method 2: Check database for pre-computed ADV data
-        if self._db is not None:
-            try:
-                # Look for symbols with ADV data
-                cursor = self._db["symbol_adv_cache"].find(
-                    {"avg_volume": {"$gte": min_adv}},
-                    {"symbol": 1, "_id": 0}
-                ).limit(10000)
-                liquid_symbols = [doc["symbol"] for doc in cursor if doc.get("symbol")]
-                
-                if liquid_symbols:
-                    logger.info(f"Got {len(liquid_symbols)} liquid symbols from ADV cache (min_adv={min_adv:,})")
-                    return liquid_symbols
-            except Exception as e:
-                logger.debug(f"ADV cache not available: {e}")
         
         # Method 3: Fall back to curated list (known liquid stocks)
         liquid_symbols = self._get_known_liquid_symbols()
