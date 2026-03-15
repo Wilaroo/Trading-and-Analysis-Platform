@@ -237,9 +237,10 @@ const useIBCollection = () => {
         setStatus(statusData.job);
         
         // If there's an active job, fetch queue progress for real-time updates
-        if (statusData.job?.id && statusData.job?.status === 'running') {
+        // Use overall queue stats (no job_id filter) to capture all pending work
+        if (statusData.job?.status === 'running') {
           try {
-            const queueRes = await fetch(`${API_BASE}/api/ib-collector/queue-progress?job_id=${statusData.job.id}`);
+            const queueRes = await fetch(`${API_BASE}/api/ib-collector/queue-progress`);
             const queueData = await queueRes.json();
             if (queueData.success) {
               setQueueProgress(queueData);
@@ -1227,13 +1228,19 @@ const IBDataCollectionPanel = ({ status, stats, queueProgress, defaultSymbolCoun
   const uniqueSymbols = stats?.unique_symbols || 0;
   
   // Use queue progress for more accurate real-time stats
-  const progressData = queueProgress || {
-    total: status?.symbols?.length || 0,
-    completed: status?.symbols_completed || 0,
-    failed: status?.symbols_failed || 0,
-    pending: 0,
-    processing: 0,
-    progress_pct: status?.progress_pct || 0
+  // Calculate progress_pct from overall queue stats
+  const rawQueueProgress = queueProgress || {};
+  const queueTotal = (rawQueueProgress.pending || 0) + (rawQueueProgress.claimed || 0) + 
+                     (rawQueueProgress.completed || 0) + (rawQueueProgress.failed || 0);
+  const queueDone = (rawQueueProgress.completed || 0) + (rawQueueProgress.failed || 0);
+  
+  const progressData = {
+    total: queueTotal || status?.symbols?.length || 0,
+    completed: rawQueueProgress.completed || status?.symbols_completed || 0,
+    failed: rawQueueProgress.failed || status?.symbols_failed || 0,
+    pending: rawQueueProgress.pending || 0,
+    processing: rawQueueProgress.claimed || 0,
+    progress_pct: queueTotal > 0 ? (queueDone / queueTotal * 100) : (status?.progress_pct || 0)
   };
 
   return (
