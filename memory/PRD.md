@@ -5,6 +5,49 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ---
 
+## TRAINING CENTER ✅ COMPLETE (March 15, 2026)
+
+### Unified AI Training & Learning Hub
+
+**Purpose:** Make the entire SentCom system smarter through simulation, learning, and data gathering. Consolidates all learning-related features in one place.
+
+**Components:**
+1. **Historical Simulations Panel**
+   - View all simulation jobs with status badges (Running/Completed/Failed)
+   - Summary stats: Total Jobs, Completed, Total Trades, Avg Win Rate
+   - Quick Test button - runs 30-day backtest on top symbols
+   - New Simulation config - custom date range, symbols, capital
+   - Expandable job rows showing detailed metrics
+
+2. **Time-Series AI Model Panel**
+   - Model status (TRAINED badge), version, accuracy
+   - Features count, training samples
+   - Model performance: Precision, Recall, F1 Score
+   - Top Predictive Features display
+   - Retrain button to update model
+
+3. **Prediction Tracking Panel**
+   - Total predictions, correct count, accuracy %
+   - Breakdown by direction (UP/DOWN/FLAT)
+   - Recent predictions list with status
+   - Verify Outcomes button
+
+4. **Learning Insights Panel**
+   - Trader profile: strengths/weaknesses
+   - AI recommendations
+
+**Navigation:**
+- Added to sidebar as second item after Command Center
+- NEW badge indicator
+- data-testid: `nav-training-center`
+
+**Key Files:**
+- `/app/frontend/src/components/TrainingCenter.jsx`
+- `/app/frontend/src/components/Sidebar.js` (updated)
+- `/app/frontend/src/App.js` (updated)
+
+---
+
 ## HISTORICAL SIMULATION ENGINE ✅ COMPLETE (March 15, 2026)
 
 ### Full SentCom Backtesting System
