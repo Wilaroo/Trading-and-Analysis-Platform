@@ -25,6 +25,32 @@ A new panel in the NIA dashboard showing the user's personal trading statistics 
 
 ---
 
+### Strategy Promotion Wizard ✅ NEW (March 15, 2026)
+**ONE-CLICK STRATEGY PROMOTIONS** - Review and approve strategies with ease.
+
+**What It Is:**
+An interactive wizard panel in NIA that shows all promotion candidates and allows one-click approval.
+
+**Features:**
+- **Ready for Promotion Section**: Shows strategies that meet all requirements with green "Promote" button
+- **Not Yet Ready Section**: Shows strategies still building track record with missing requirements listed
+- **Performance Metrics**: Displays trades, win rate, avg R, days in phase for each candidate
+- **LIVE Confirmation Modal**: Extra safety gate with warning before enabling real money trading
+- **Visual Phase Badges**: Color-coded SIMULATION → PAPER → LIVE indicators
+
+**User Flow:**
+1. Open NIA dashboard
+2. See Promotion Wizard panel with candidates
+3. Review performance metrics
+4. Click "Promote to PAPER" (instant) or "Promote to LIVE" (shows confirmation modal)
+5. Confirm LIVE promotion with full awareness of real money risk
+6. Strategy immediately starts trading in new phase
+
+**Files Modified:**
+- `/app/frontend/src/components/NIA.jsx` - Added PromotionWizardPanel component (~280 lines)
+
+---
+
 ### Strategy Promotion Wired to Trading Bot ✅ NEW (March 15, 2026)
 **THE AUTONOMOUS LOOP IS NOW COMPLETE** - Strategies must be LIVE to execute real trades.
 
