@@ -723,3 +723,76 @@ async def get_model_metrics():
         "success": True,
         "metrics": status.get("model", {}).get("metrics")
     }
+
+
+@router.post("/timeseries/verify-predictions")
+async def verify_predictions():
+    """Verify pending predictions against actual outcomes"""
+    if not _timeseries_ai:
+        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
+    
+    try:
+        # Get the model instance and call verify
+        from services.ai_modules.timeseries_gbm import get_timeseries_model
+        model = get_timeseries_model()
+        result = model.verify_pending_predictions()
+        
+        return {
+            "success": result.get("success", False),
+            "result": result
+        }
+    except Exception as e:
+        logger.error(f"Verification error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/timeseries/prediction-accuracy")
+async def get_prediction_accuracy(days: int = 30):
+    """Get prediction accuracy statistics over a time period"""
+    if not _timeseries_ai:
+        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
+    
+    try:
+        from services.ai_modules.timeseries_gbm import get_timeseries_model
+        model = get_timeseries_model()
+        result = model.get_prediction_accuracy(days=days)
+        
+        return {
+            "success": result.get("success", False),
+            "accuracy": result
+        }
+    except Exception as e:
+        logger.error(f"Accuracy query error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/timeseries/predictions")
+async def get_recent_predictions(limit: int = 20, verified_only: bool = False):
+    """Get recent predictions with optional filtering"""
+    if not _timeseries_ai:
+        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
+    
+    try:
+        from services.ai_modules.timeseries_gbm import get_timeseries_model
+        model = get_timeseries_model()
+        
+        if model._db is None:
+            raise HTTPException(status_code=503, detail="Database not connected")
+        
+        query = {}
+        if verified_only:
+            query["outcome_verified"] = True
+        
+        predictions = list(model._db["timeseries_predictions"].find(
+            query,
+            {"_id": 0}
+        ).sort("timestamp", -1).limit(limit))
+        
+        return {
+            "success": True,
+            "predictions": predictions,
+            "count": len(predictions)
+        }
+    except Exception as e:
+        logger.error(f"Predictions query error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
