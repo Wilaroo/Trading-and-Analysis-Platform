@@ -1121,8 +1121,8 @@ class IBHistoricalCollector:
                 
                 logger.info(f"Created historical data request {request_id} for {symbol}")
                 
-                # Wait for IB Data Pusher to fulfill the request (max 90 seconds)
-                result = queue_service.get_request_result(request_id, timeout=90.0)
+                # Wait for IB Data Pusher to fulfill the request (max 180 seconds - IB can be slow)
+                result = queue_service.get_request_result(request_id, timeout=180.0)
                 
                 if result is None:
                     raise Exception("Timeout waiting for IB Data Pusher response - is your local app running?")
