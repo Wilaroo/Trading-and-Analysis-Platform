@@ -9,12 +9,14 @@ import {
   BookOpen,
   Settings,
   Sparkles,
-  FlaskConical
+  FlaskConical,
+  Brain
 } from 'lucide-react';
 
 const navItems = [
   { id: 'command-center', icon: Target, label: 'Command Center', highlight: true },
-  { id: 'training-center', icon: FlaskConical, label: 'Training Center', highlight: true, isNew: true },
+  { id: 'training-center', icon: FlaskConical, label: 'Training Center', highlight: true },
+  { id: 'nia', icon: Brain, label: 'NIA', highlight: true, isNew: true },
   { id: 'team-brain-mockups-v2', icon: Sparkles, label: 'SentCom Mockups', highlight: false },
   { id: 'trade-journal', icon: ClipboardList, label: 'Trade Journal' },
   { id: 'chart', icon: LineChart, label: 'Charts' },
