@@ -5,9 +5,56 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ---
 
-## INSTITUTIONAL-GRADE AI MODULES (March 14-15, 2026)
+## HISTORICAL SIMULATION ENGINE ✅ COMPLETE (March 15, 2026)
 
-### P1: Prediction Tracking System ✅ COMPLETE (March 15, 2026)
+### Full SentCom Backtesting System
+
+**Capabilities:**
+1. **Historical Data**: Fetches and caches bars from Alpaca/IB
+2. **First-Gate Filters**: ADV, price range, RVOL filtering
+3. **Signal Detection**: Gap-and-Go, VWAP Bounce, Oversold Bounce, Breakout
+4. **Full AI Pipeline**: Time-Series forecast, Trade Consultation (Debate + Risk)
+5. **Position Management**: Entry, stop-loss, target exits, time-based exits
+6. **Performance Tracking**: Win rate, P&L, profit factor, max drawdown, Sharpe ratio
+7. **Learning Storage**: All decisions saved to MongoDB for model improvement
+
+**API Endpoints:**
+- `POST /api/simulation/start` - Start full simulation
+- `POST /api/simulation/quick-test` - Quick 30-day test with 10 symbols
+- `GET /api/simulation/status/{job_id}` - Check job progress
+- `GET /api/simulation/jobs` - List all simulation jobs
+- `GET /api/simulation/trades/{job_id}` - Get all trades from a job
+- `GET /api/simulation/decisions/{job_id}` - Get AI decisions (for learning)
+- `GET /api/simulation/summary/{job_id}` - Detailed performance summary
+- `POST /api/simulation/cancel/{job_id}` - Cancel running job
+
+**Configuration Options:**
+```json
+{
+    "start_date": "2025-01-01",
+    "end_date": "2025-12-31",
+    "min_adv": 100000,
+    "min_price": 5.0,
+    "max_price": 500.0,
+    "min_rvol": 0.8,
+    "universe": "all | sp500 | nasdaq100 | custom",
+    "custom_symbols": ["AAPL", "NVDA", ...],
+    "starting_capital": 100000,
+    "max_position_pct": 10.0,
+    "max_open_positions": 5,
+    "use_ai_agents": true,
+    "data_source": "alpaca | ib | mongodb"
+}
+```
+
+**Data Stored for Learning:**
+- `simulation_jobs` - Job configs and results
+- `simulated_trades` - All trades with full context
+- `simulation_decisions` - AI decisions for each signal
+
+---
+
+## P1: Prediction Tracking System ✅ COMPLETE (March 15, 2026)
 
 **Implemented:**
 1. **Enhanced Prediction Logging** (`timeseries_gbm.py`)
