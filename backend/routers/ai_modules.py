@@ -693,13 +693,14 @@ class TrainRequest(BaseModel):
 
 
 @router.post("/timeseries/train")
-async def train_timeseries_model(request: TrainRequest):
+async def train_timeseries_model(request: Optional[TrainRequest] = None):
     """Train/update the time-series model"""
     if not _timeseries_ai:
         raise HTTPException(status_code=503, detail="Time-series AI not initialized")
     
     try:
-        result = await _timeseries_ai.train_model(symbols=request.symbols)
+        symbols = request.symbols if request else None
+        result = await _timeseries_ai.train_model(symbols=symbols)
         
         return {
             "success": result.get("success", False),
