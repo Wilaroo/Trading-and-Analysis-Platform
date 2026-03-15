@@ -244,6 +244,7 @@ init_alerts_router(alert_system)
 from services.enhanced_scanner import get_enhanced_scanner
 background_scanner = get_enhanced_scanner()
 init_live_scanner_router(background_scanner)
+register_service('enhanced_scanner', background_scanner)  # Register for learning connectors
 
 # Initialize trading bot
 trading_bot = get_trading_bot_service()
@@ -4494,6 +4495,32 @@ async def submit_http_proxy_response(data: dict):
                 future.set_result(result)
     
     return {"success": True}
+
+
+@app.post("/api/ollama-proxy/chat")
+async def ollama_proxy_chat(data: dict):
+    """
+    Direct chat endpoint for services to call Ollama via HTTP proxy.
+    This is the main entry point for LLM services to use local Ollama.
+    """
+    model = data.get("model", os.environ.get("OLLAMA_MODEL", "gpt-oss:120b-cloud"))
+    messages = data.get("messages", [])
+    options = data.get("options", {})
+    
+    if not messages:
+        return {"success": False, "error": "No messages provided"}
+    
+    # Check if proxy is connected
+    if not is_http_ollama_proxy_connected():
+        return {"success": False, "error": "No Ollama proxy connected"}
+    
+    # Call through the proxy
+    result = await call_ollama_via_http_proxy(model, messages, options)
+    
+    if result.get("success", True) and "error" not in result:
+        return {"success": True, "response": result}
+    else:
+        return {"success": False, "error": result.get("error", "Unknown error"), "details": result}
 
 
 async def call_ollama_via_http_proxy(model: str, messages: list, options: dict = None, timeout: float = 120.0) -> dict:
