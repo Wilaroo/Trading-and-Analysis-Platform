@@ -212,6 +212,7 @@ const useLearningConnections = () => {
 const useIBCollection = () => {
   const [status, setStatus] = useState(null);
   const [stats, setStats] = useState(null);
+  const [queueProgress, setQueueProgress] = useState(null);
   const [defaultSymbolCount, setDefaultSymbolCount] = useState(51);
   const [fullMarketCount, setFullMarketCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -232,7 +233,24 @@ const useIBCollection = () => {
         marketRes.json()
       ]);
       
-      if (statusData.success) setStatus(statusData.job);
+      if (statusData.success) {
+        setStatus(statusData.job);
+        
+        // If there's an active job, fetch queue progress for real-time updates
+        if (statusData.job?.id && statusData.job?.status === 'running') {
+          try {
+            const queueRes = await fetch(`${API_BASE}/api/ib-collector/queue-progress?job_id=${statusData.job.id}`);
+            const queueData = await queueRes.json();
+            if (queueData.success) {
+              setQueueProgress(queueData);
+            }
+          } catch (err) {
+            console.error('Error fetching queue progress:', err);
+          }
+        } else {
+          setQueueProgress(null);
+        }
+      }
       if (statsData.success) setStats(statsData.stats);
       if (symbolsData.success) setDefaultSymbolCount(symbolsData.count);
       if (marketData.success) setFullMarketCount(marketData.count);
@@ -245,12 +263,12 @@ const useIBCollection = () => {
 
   useEffect(() => {
     fetchData();
-    // Poll every 5 seconds if a job is running
-    const interval = setInterval(fetchData, 5000);
+    // Poll every 3 seconds for more responsive progress updates
+    const interval = setInterval(fetchData, 3000);
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  return { status, stats, defaultSymbolCount, fullMarketCount, loading, refresh: fetchData };
+  return { status, stats, queueProgress, defaultSymbolCount, fullMarketCount, loading, refresh: fetchData };
 };
 
 // Hook for Data Storage Stats
@@ -1146,7 +1164,7 @@ const LearningConnectionsPanel = ({ connections, metrics, weights, loading, onRe
 };
 
 // IB Data Collection Panel
-const IBDataCollectionPanel = ({ status, stats, defaultSymbolCount = 51, fullMarketCount = 0, loading, onRefresh }) => {
+const IBDataCollectionPanel = ({ status, stats, queueProgress, defaultSymbolCount = 51, fullMarketCount = 0, loading, onRefresh }) => {
   const [collecting, setCollecting] = useState(false);
   const [collectionType, setCollectionType] = useState(null);
 
@@ -1188,10 +1206,15 @@ const IBDataCollectionPanel = ({ status, stats, defaultSymbolCount = 51, fullMar
 
   const handleCancel = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/ib-collector/cancel`, { method: 'POST' });
+      // Use the new queue-cancel endpoint if we have a job_id
+      const endpoint = status?.id 
+        ? `${API_BASE}/api/ib-collector/queue-cancel?job_id=${status.id}`
+        : `${API_BASE}/api/ib-collector/cancel`;
+      
+      const res = await fetch(endpoint, { method: 'POST' });
       const data = await res.json();
       if (data.success) {
-        toast.success('Collection cancelled');
+        toast.success(`Collection cancelled (${data.cancelled || 0} pending requests cleared)`);
         onRefresh();
       }
     } catch (err) {
@@ -1202,6 +1225,16 @@ const IBDataCollectionPanel = ({ status, stats, defaultSymbolCount = 51, fullMar
   const isRunning = status?.status === 'running';
   const totalBars = stats?.total_bars || 0;
   const uniqueSymbols = stats?.unique_symbols || 0;
+  
+  // Use queue progress for more accurate real-time stats
+  const progressData = queueProgress || {
+    total: status?.symbols?.length || 0,
+    completed: status?.symbols_completed || 0,
+    failed: status?.symbols_failed || 0,
+    pending: 0,
+    processing: 0,
+    progress_pct: status?.progress_pct || 0
+  };
 
   return (
     <GlassCard className="p-5" gradient>
@@ -1276,28 +1309,65 @@ const IBDataCollectionPanel = ({ status, stats, defaultSymbolCount = 51, fullMar
                   <Loader className="w-4 h-4 text-orange-400 animate-spin" />
                   <span className="text-sm font-medium text-white">Collection Running</span>
                 </div>
-                <span className="text-xs text-orange-400">{status.progress_pct?.toFixed(1)}%</span>
+                <span className="text-xs text-orange-400">{progressData.progress_pct?.toFixed(1)}%</span>
               </div>
               
               {/* Progress Bar */}
               <div className="w-full h-2 bg-black/30 rounded-full overflow-hidden mb-2">
                 <div 
                   className="h-full bg-gradient-to-r from-orange-500 to-amber-500 transition-all duration-500"
-                  style={{ width: `${status.progress_pct || 0}%` }}
+                  style={{ width: `${progressData.progress_pct || 0}%` }}
                 />
               </div>
               
-              <div className="flex items-center justify-between text-[10px] text-zinc-400">
-                <span>Current: <span className="text-white">{status.current_symbol || 'Starting...'}</span></span>
-                <span>{status.symbols_completed || 0} / {status.symbols?.length || 0} symbols</span>
+              {/* Queue Status - Real-time from IB Data Pusher */}
+              <div className="grid grid-cols-4 gap-2 mb-3">
+                <div className="p-2 rounded-lg bg-black/30 text-center">
+                  <div className="text-lg font-bold text-amber-400">{progressData.pending || 0}</div>
+                  <div className="text-[9px] text-zinc-500 uppercase">Pending</div>
+                </div>
+                <div className="p-2 rounded-lg bg-black/30 text-center">
+                  <div className="text-lg font-bold text-cyan-400">{progressData.processing || 0}</div>
+                  <div className="text-[9px] text-zinc-500 uppercase">Processing</div>
+                </div>
+                <div className="p-2 rounded-lg bg-black/30 text-center">
+                  <div className="text-lg font-bold text-emerald-400">{progressData.completed || 0}</div>
+                  <div className="text-[9px] text-zinc-500 uppercase">Completed</div>
+                </div>
+                <div className="p-2 rounded-lg bg-black/30 text-center">
+                  <div className="text-lg font-bold text-rose-400">{progressData.failed || 0}</div>
+                  <div className="text-[9px] text-zinc-500 uppercase">Failed</div>
+                </div>
               </div>
               
-              <div className="mt-2 flex items-center gap-4 text-[10px]">
+              <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                <span>Total: <span className="text-white">{progressData.total || status.symbols?.length || 0} symbols</span></span>
                 <span className="text-emerald-400">{status.total_bars_collected?.toLocaleString() || 0} bars collected</span>
-                {status.symbols_failed > 0 && (
-                  <span className="text-rose-400">{status.symbols_failed} failed</span>
-                )}
               </div>
+              
+              {/* Recent Errors */}
+              {queueProgress?.recent_errors?.length > 0 && (
+                <div className="mt-3 p-2 rounded-lg bg-rose-500/10 border border-rose-500/20">
+                  <div className="text-[10px] text-rose-400 font-medium mb-1">Recent Errors:</div>
+                  <div className="space-y-0.5">
+                    {queueProgress.recent_errors.slice(0, 3).map((err, i) => (
+                      <div key={i} className="text-[9px] text-zinc-400 truncate">
+                        {err.symbol}: {err.error?.substring(0, 50) || 'Unknown error'}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Pusher Status Hint */}
+              {progressData.pending > 0 && progressData.processing === 0 && (
+                <div className="mt-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                  <div className="text-[10px] text-amber-400 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" />
+                    Waiting for IB Data Pusher - make sure it's running on your local machine
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1387,7 +1457,7 @@ const TrainingCenter = () => {
   const { status: tsStatus, loading: tsLoading, refresh: refreshTs } = useTimeseriesStatus();
   const { accuracy, predictions, loading: predLoading, refresh: refreshPred } = usePredictionAccuracy();
   const { connections, metrics, weights, loading: connLoading, refresh: refreshConn } = useLearningConnections();
-  const { status: ibStatus, stats: ibStats, defaultSymbolCount, fullMarketCount, loading: ibLoading, refresh: refreshIB } = useIBCollection();
+  const { status: ibStatus, stats: ibStats, queueProgress: ibQueueProgress, defaultSymbolCount, fullMarketCount, loading: ibLoading, refresh: refreshIB } = useIBCollection();
   const { summary: storageSummary, loading: storageLoading, refresh: refreshStorage } = useDataStorage();
 
   return (
@@ -1443,6 +1513,7 @@ const TrainingCenter = () => {
         <IBDataCollectionPanel
           status={ibStatus}
           stats={ibStats}
+          queueProgress={ibQueueProgress}
           defaultSymbolCount={defaultSymbolCount}
           fullMarketCount={fullMarketCount}
           loading={ibLoading}

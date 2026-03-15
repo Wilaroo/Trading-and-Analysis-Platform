@@ -162,6 +162,163 @@ class HistoricalDataQueueService:
         })
         if result.deleted_count > 0:
             logger.info(f"Cleaned up {result.deleted_count} old historical data requests")
+    
+    # =========================================================================
+    # ASYNC BATCH COLLECTION METHODS
+    # =========================================================================
+    
+    def create_batch_requests(self, symbols: List[str], duration: str = "1 M",
+                              bar_size: str = "1 day", job_id: str = None) -> Dict:
+        """
+        Create requests for multiple symbols in batch (fast, no blocking).
+        
+        Args:
+            symbols: List of symbols to fetch
+            duration: Duration string
+            bar_size: Bar size string
+            job_id: Optional job ID to group these requests
+            
+        Returns:
+            Dict with batch stats
+        """
+        if not symbols:
+            return {"created": 0, "request_ids": []}
+        
+        request_ids = []
+        requests_to_insert = []
+        
+        for symbol in symbols:
+            request_id = f"hist_{uuid.uuid4().hex[:12]}"
+            request_ids.append(request_id)
+            
+            requests_to_insert.append({
+                "request_id": request_id,
+                "symbol": symbol.upper(),
+                "duration": duration,
+                "bar_size": bar_size,
+                "job_id": job_id,  # Group by job for tracking
+                "status": "pending",
+                "data": None,
+                "error": None,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "claimed_at": None,
+                "completed_at": None
+            })
+        
+        # Batch insert for efficiency
+        if requests_to_insert:
+            self.collection.insert_many(requests_to_insert)
+            logger.info(f"Created {len(requests_to_insert)} batch requests for job {job_id}")
+        
+        return {
+            "created": len(request_ids),
+            "request_ids": request_ids,
+            "job_id": job_id
+        }
+    
+    def get_job_progress(self, job_id: str) -> Dict:
+        """
+        Get progress for a batch job.
+        
+        Returns:
+            Dict with pending, processing, completed, failed counts
+        """
+        pipeline = [
+            {"$match": {"job_id": job_id}},
+            {"$group": {
+                "_id": "$status",
+                "count": {"$sum": 1}
+            }}
+        ]
+        
+        results = list(self.collection.aggregate(pipeline))
+        
+        counts = {
+            "pending": 0,
+            "claimed": 0,
+            "completed": 0,
+            "failed": 0
+        }
+        
+        for r in results:
+            status = r["_id"]
+            if status in counts:
+                counts[status] = r["count"]
+        
+        total = sum(counts.values())
+        done = counts["completed"] + counts["failed"]
+        
+        return {
+            "job_id": job_id,
+            "total": total,
+            "pending": counts["pending"],
+            "processing": counts["claimed"],
+            "completed": counts["completed"],
+            "failed": counts["failed"],
+            "progress_pct": (done / total * 100) if total > 0 else 0,
+            "is_complete": done == total and total > 0
+        }
+    
+    def get_job_errors(self, job_id: str, limit: int = 20) -> List[Dict]:
+        """Get failed requests for a job"""
+        cursor = self.collection.find(
+            {"job_id": job_id, "status": "failed"},
+            {"_id": 0, "request_id": 1, "symbol": 1, "error": 1, "completed_at": 1}
+        ).sort("completed_at", -1).limit(limit)
+        
+        return list(cursor)
+    
+    def get_job_completed_data(self, job_id: str) -> List[Dict]:
+        """Get all completed data for a job (for storage)"""
+        cursor = self.collection.find(
+            {"job_id": job_id, "status": "completed", "data": {"$ne": None}},
+            {"_id": 0, "symbol": 1, "bar_size": 1, "data": 1}
+        )
+        return list(cursor)
+    
+    def cancel_job(self, job_id: str) -> Dict:
+        """
+        Cancel pending requests for a job.
+        Already claimed/completed requests are not affected.
+        """
+        result = self.collection.delete_many({
+            "job_id": job_id,
+            "status": "pending"
+        })
+        
+        logger.info(f"Cancelled {result.deleted_count} pending requests for job {job_id}")
+        
+        return {
+            "cancelled": result.deleted_count,
+            "job_id": job_id
+        }
+    
+    def get_overall_queue_stats(self) -> Dict:
+        """Get overall queue statistics"""
+        pipeline = [
+            {"$group": {
+                "_id": "$status",
+                "count": {"$sum": 1}
+            }}
+        ]
+        
+        results = list(self.collection.aggregate(pipeline))
+        
+        stats = {
+            "pending": 0,
+            "claimed": 0,
+            "completed": 0,
+            "failed": 0,
+            "total": 0
+        }
+        
+        for r in results:
+            status = r["_id"]
+            if status in stats:
+                stats[status] = r["count"]
+            stats["total"] += r["count"]
+        
+        return stats
 
 
 def init_historical_data_queue_service(db: Database):

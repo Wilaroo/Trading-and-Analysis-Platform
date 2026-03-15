@@ -7,6 +7,34 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 15, 2026)
 
+### Async Batch Collection System ✅ NEW (March 15, 2026)
+Completely re-architected the historical data collection to be fully asynchronous:
+
+**Key Changes:**
+- **Batch Request Creation**: All symbol requests are created instantly in MongoDB queue (no blocking)
+- **Background Monitoring**: Cloud monitors queue progress and stores completed data automatically
+- **Real-time Progress UI**: New queue progress endpoint shows Pending/Processing/Completed/Failed counts
+- **Smart Cancel**: Cancel button clears pending requests without affecting already-completed work
+- **Pusher Status Indicator**: UI shows warning if pusher isn't processing requests
+
+**New API Endpoints:**
+- `GET /api/ib-collector/queue-progress` - Real-time queue statistics
+- `GET /api/ib-collector/queue-progress?job_id=X` - Progress for specific job
+- `POST /api/ib-collector/queue-cancel?job_id=X` - Cancel pending requests
+
+**Benefits:**
+- Backend stays fully responsive during collection (no blocking)
+- WebSocket connections remain stable
+- More accurate real-time progress updates
+- Graceful handling of pusher disconnections
+- Error isolation (one symbol failure doesn't stop the job)
+
+**Files Modified:**
+- `/app/backend/services/historical_data_queue_service.py` - Added batch create, progress tracking, cancel
+- `/app/backend/services/ib_historical_collector.py` - Rewrote `_run_collection` for async batch mode
+- `/app/backend/routers/ib_collector_router.py` - Added queue-progress and queue-cancel endpoints
+- `/app/frontend/src/components/TrainingCenter.jsx` - Added real-time queue progress UI
+
 ### Historical Data Collection Pipeline Fixed ✅ (March 15, 2026)
 - **Fixed critical bug**: `/api/ib/historical-data/result` endpoint was missing `Request` import from FastAPI
 - The endpoint now correctly accepts JSON body from the local `ib_data_pusher.py` script
