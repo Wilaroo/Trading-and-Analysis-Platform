@@ -216,7 +216,7 @@ class MarketScannerService:
         # Symbol universe cache
         self._symbol_universe: List[Dict] = []
         self._universe_last_updated: Optional[datetime] = None
-        self._universe_cache_ttl = 86400  # 24 hours
+        self._universe_cache_ttl = 604800  # 7 days (168 hours) - symbols don't change often
         
         # Scheduled scan
         self._nightly_scan_enabled = False
@@ -252,7 +252,7 @@ class MarketScannerService:
     async def get_symbol_universe(self, refresh: bool = False) -> List[Dict]:
         """
         Get the full US stock universe with metadata.
-        Cached for 24 hours.
+        Cached for 7 days (symbols don't change frequently).
         """
         now = datetime.now(timezone.utc)
         
