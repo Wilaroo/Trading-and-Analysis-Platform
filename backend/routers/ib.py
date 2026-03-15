@@ -1238,6 +1238,116 @@ async def get_order_queue_status():
             "storage": "mongodb"
         }
     except Exception as e:
+        logger.error(f"Error getting order queue status: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# ==================== HISTORICAL DATA QUEUE ====================
+# These endpoints enable the IB Data Pusher to fulfill historical data requests
+
+_historical_data_service = None
+
+def _get_historical_data_service():
+    """Get the historical data queue service, initializing if needed"""
+    global _historical_data_service
+    if _historical_data_service is None:
+        try:
+            from services.historical_data_queue_service import get_historical_data_queue_service
+            _historical_data_service = get_historical_data_queue_service()
+        except Exception as e:
+            logger.warning(f"Historical data queue service not available: {e}")
+    return _historical_data_service
+
+
+@router.get("/historical-data/pending")
+async def get_pending_historical_data_requests():
+    """
+    Get pending historical data requests for the IB Data Pusher to fulfill.
+    Called by the local IB Data Pusher to check for work.
+    """
+    service = _get_historical_data_service()
+    if not service:
+        return {"success": True, "requests": []}
+    
+    try:
+        requests = service.get_pending_requests(limit=10)
+        return {"success": True, "requests": requests}
+    except Exception as e:
+        logger.error(f"Error getting pending historical data requests: {e}")
+        return {"success": False, "requests": [], "error": str(e)}
+
+
+@router.post("/historical-data/claim/{request_id}")
+async def claim_historical_data_request(request_id: str):
+    """
+    Claim a historical data request (prevents duplicate processing).
+    Called by IB Data Pusher before fetching data.
+    """
+    service = _get_historical_data_service()
+    if not service:
+        raise HTTPException(status_code=503, detail="Historical data service not available")
+    
+    try:
+        success = service.claim_request(request_id)
+        if success:
+            return {"success": True, "message": f"Request {request_id} claimed"}
+        else:
+            raise HTTPException(status_code=409, detail=f"Request {request_id} already claimed or completed")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error claiming historical data request: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/historical-data/result")
+async def report_historical_data_result(
+    request_id: str,
+    symbol: str,
+    success: bool,
+    data: List[dict] = None,
+    error: str = None,
+    fetched_at: str = None
+):
+    """
+    Report the result of a historical data fetch.
+    Called by IB Data Pusher after fetching data from IB Gateway.
+    """
+    service = _get_historical_data_service()
+    if not service:
+        raise HTTPException(status_code=503, detail="Historical data service not available")
+    
+    try:
+        service.complete_request(
+            request_id=request_id,
+            success=success,
+            data=data,
+            error=error
+        )
+        return {"success": True, "message": f"Result recorded for {request_id}"}
+    except Exception as e:
+        logger.error(f"Error reporting historical data result: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/historical-data/status/{request_id}")
+async def get_historical_data_request_status(request_id: str):
+    """Get the status of a historical data request"""
+    service = _get_historical_data_service()
+    if not service:
+        raise HTTPException(status_code=503, detail="Historical data service not available")
+    
+    try:
+        request = service.get_request(request_id)
+        if request:
+            return {"success": True, "request": request}
+        else:
+            raise HTTPException(status_code=404, detail=f"Request {request_id} not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting historical data request status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
         logger.warning(f"MongoDB status failed, using legacy: {e}")
         return {
             "success": True,

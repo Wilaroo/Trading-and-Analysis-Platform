@@ -857,6 +857,7 @@ class IBDataPusher:
                     # Poll for pending orders from cloud trading bot
                     if current_time - last_order_poll >= order_poll_interval:
                         self.poll_and_execute_orders()
+                        self.poll_and_execute_historical_data_requests()
                         last_order_poll = current_time
                         
                 except Exception as e:
@@ -1034,6 +1035,135 @@ class IBDataPusher:
                 
         except Exception as e:
             logger.error(f"[OrderQueue] Error reporting result: {e}")
+
+    # ==================== HISTORICAL DATA ====================
+    
+    def poll_and_execute_historical_data_requests(self):
+        """
+        Poll cloud for pending historical data requests and fulfill them via IB Gateway.
+        This enables the cloud to request historical bars through the local IB connection.
+        """
+        try:
+            # Poll for pending historical data requests
+            response = requests.get(
+                f"{self.cloud_url}/api/ib/historical-data/pending",
+                timeout=5
+            )
+            
+            if response.status_code != 200:
+                return
+            
+            result = response.json()
+            requests_list = result.get("requests", [])
+            
+            if not requests_list:
+                return
+            
+            logger.info(f"[HistoricalData] Found {len(requests_list)} pending requests")
+            
+            for req in requests_list:
+                self._fetch_and_return_historical_data(req)
+                
+        except requests.Timeout:
+            pass  # Silent timeout, will retry next cycle
+        except requests.exceptions.ConnectionError:
+            pass  # Server might not have this endpoint yet
+        except Exception as e:
+            if "404" not in str(e) and "Not Found" not in str(e):
+                logger.error(f"[HistoricalData] Poll error: {e}")
+    
+    def _fetch_and_return_historical_data(self, req: dict):
+        """Fetch historical data from IB and return to cloud"""
+        request_id = req.get("request_id")
+        symbol = req.get("symbol")
+        duration = req.get("duration", "1 M")
+        bar_size = req.get("bar_size", "1 day")
+        
+        logger.info(f"[HistoricalData] Fetching: {symbol} ({duration}, {bar_size})")
+        
+        try:
+            # Claim the request first (prevents duplicate fetching)
+            claim_response = requests.post(
+                f"{self.cloud_url}/api/ib/historical-data/claim/{request_id}",
+                timeout=5
+            )
+            
+            if claim_response.status_code != 200:
+                logger.warning(f"[HistoricalData] Could not claim request {request_id}")
+                return
+            
+            # Create IB contract
+            contract = Stock(symbol, "SMART", "USD")
+            self.ib.qualifyContracts(contract)
+            
+            # Request historical data from IB Gateway
+            bars = self.ib.reqHistoricalData(
+                contract,
+                endDateTime="",
+                durationStr=duration,
+                barSizeSetting=bar_size,
+                whatToShow="TRADES",
+                useRTH=True
+            )
+            
+            # Format the bars for the cloud
+            bar_data = []
+            for bar in bars:
+                bar_data.append({
+                    "date": bar.date.isoformat() if hasattr(bar.date, 'isoformat') else str(bar.date),
+                    "open": bar.open,
+                    "high": bar.high,
+                    "low": bar.low,
+                    "close": bar.close,
+                    "volume": bar.volume
+                })
+            
+            logger.info(f"[HistoricalData] Got {len(bar_data)} bars for {symbol}")
+            
+            # Send result back to cloud
+            self._report_historical_data_result(
+                request_id=request_id,
+                symbol=symbol,
+                success=True,
+                data=bar_data
+            )
+            
+        except Exception as e:
+            logger.error(f"[HistoricalData] Error fetching {symbol}: {e}")
+            self._report_historical_data_result(
+                request_id=request_id,
+                symbol=symbol,
+                success=False,
+                error=str(e)
+            )
+    
+    def _report_historical_data_result(self, request_id: str, symbol: str, success: bool, 
+                                        data: List[dict] = None, error: str = None):
+        """Report historical data result back to cloud"""
+        try:
+            payload = {
+                "request_id": request_id,
+                "symbol": symbol,
+                "success": success,
+                "data": data or [],
+                "error": error,
+                "fetched_at": datetime.now().isoformat()
+            }
+            
+            response = requests.post(
+                f"{self.cloud_url}/api/ib/historical-data/result",
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                logger.info(f"[HistoricalData] Result reported: {symbol} -> {'success' if success else 'failed'}")
+            else:
+                logger.warning(f"[HistoricalData] Failed to report result: {response.text}")
+                
+        except Exception as e:
+            logger.error(f"[HistoricalData] Error reporting result: {e}")
 
 
 def main():

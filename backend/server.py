@@ -294,6 +294,14 @@ try:
 except:
     _order_queue = None
 
+# Initialize Historical Data Queue Service (for IB Data Pusher)
+try:
+    from services.historical_data_queue_service import init_historical_data_queue_service
+    init_historical_data_queue_service(db)
+    print("[SERVER] Historical Data Queue Service initialized")
+except Exception as e:
+    print(f"[SERVER] Warning: Historical Data Queue Service not initialized: {e}")
+
 sentcom_services = {
     "trading_bot": trading_bot,
     "orchestrator": get_orchestrator(),
