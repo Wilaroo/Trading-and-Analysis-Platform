@@ -7,6 +7,32 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 15, 2026)
 
+### Weekend Auto Batch System ✅ NEW (March 15, 2026)
+Fully automated weekend batch processing system:
+
+**Components Created:**
+- `WeekendAuto.bat` - Master script that runs StartTrading.bat then triggers batch jobs
+- `weekend_batch.py` - Python automation for collection, training, simulations
+- `TradeCommand_WeekendAuto_Task.xml` - Windows Task Scheduler template
+- `WEEKEND_AUTO_SETUP.md` - Setup guide
+
+**What It Does (Every Weekend at 2 AM):**
+1. Computer wakes from sleep (via Task Scheduler)
+2. Auto-login (configured via netplwiz)
+3. IB Gateway auto-restarts at 1:45 AM
+4. WeekendAuto.bat runs StartTrading.bat
+5. Smart Collection triggers (~5,900 ADV-filtered stocks)
+6. Time-Series AI model retrains with new data
+7. Simulations run on FULL Smart Collection universe (not just 10 stocks)
+8. Learning connections sync
+
+**Files Location:** `/app/documents/`
+
+### Smart Collection UI Button ✅ NEW (March 15, 2026)
+- Added purple "Smart" button to Training Center
+- Shows Smart Collection plan with tier breakdown (Intraday/Swing/Investment)
+- Info button reveals ADV thresholds and estimated times
+
 ### Async Batch Collection System ✅ NEW (March 15, 2026)
 Completely re-architected the historical data collection to be fully asynchronous:
 
