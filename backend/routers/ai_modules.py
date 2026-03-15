@@ -620,3 +620,106 @@ async def run_consultation(request: ConsultationRequest):
     except Exception as e:
         logger.error(f"Consultation error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =====================
+# Time-Series AI Endpoints
+# =====================
+
+# Service reference
+_timeseries_ai = None
+
+
+def inject_timeseries_service(timeseries_ai):
+    """Inject timeseries AI service"""
+    global _timeseries_ai
+    _timeseries_ai = timeseries_ai
+
+
+class TimeSeriesForecastRequest(BaseModel):
+    symbol: str = Field(..., description="Ticker symbol")
+    bars: List[Dict[str, Any]] = Field(..., description="OHLCV bars (most recent first)")
+
+
+@router.post("/timeseries/forecast")
+async def get_timeseries_forecast(request: TimeSeriesForecastRequest):
+    """Get directional forecast for a symbol"""
+    if not _timeseries_ai:
+        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
+    
+    if not _module_config or not _module_config.is_timeseries_enabled():
+        return {
+            "success": False,
+            "error": "Time-Series AI module is disabled",
+            "enabled": False
+        }
+    
+    try:
+        forecast = await _timeseries_ai.get_forecast(
+            symbol=request.symbol,
+            bars=request.bars
+        )
+        
+        return {
+            "success": True,
+            "forecast": forecast
+        }
+        
+    except Exception as e:
+        logger.error(f"Forecast error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/timeseries/status")
+async def get_timeseries_status():
+    """Get time-series AI model status"""
+    if not _timeseries_ai:
+        return {
+            "success": True,
+            "status": {
+                "service": "timeseries_ai",
+                "initialized": False
+            }
+        }
+    
+    return {
+        "success": True,
+        "status": _timeseries_ai.get_status()
+    }
+
+
+class TrainRequest(BaseModel):
+    symbols: Optional[List[str]] = Field(None, description="Symbols to train on")
+
+
+@router.post("/timeseries/train")
+async def train_timeseries_model(request: TrainRequest):
+    """Train/update the time-series model"""
+    if not _timeseries_ai:
+        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
+    
+    try:
+        result = await _timeseries_ai.train_model(symbols=request.symbols)
+        
+        return {
+            "success": result.get("success", False),
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"Training error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/timeseries/metrics")
+async def get_model_metrics():
+    """Get model performance metrics"""
+    if not _timeseries_ai:
+        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
+    
+    status = _timeseries_ai.get_status()
+    
+    return {
+        "success": True,
+        "metrics": status.get("model", {}).get("metrics")
+    }

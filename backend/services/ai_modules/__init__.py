@@ -29,6 +29,23 @@ from .trade_consultation import (
     get_ai_consultation,
     init_ai_consultation
 )
+from .timeseries_features import (
+    TimeSeriesFeatureEngineer,
+    FeatureSet,
+    get_feature_engineer
+)
+from .timeseries_gbm import (
+    TimeSeriesGBM,
+    Prediction,
+    ModelMetrics,
+    get_timeseries_model,
+    init_timeseries_model
+)
+from .timeseries_service import (
+    TimeSeriesAIService,
+    get_timeseries_ai,
+    init_timeseries_ai
+)
 
 __all__ = [
     'ShadowTracker',
@@ -51,5 +68,16 @@ __all__ = [
     'init_volume_anomaly_service',
     'AITradeConsultation',
     'get_ai_consultation',
-    'init_ai_consultation'
+    'init_ai_consultation',
+    'TimeSeriesFeatureEngineer',
+    'FeatureSet',
+    'get_feature_engineer',
+    'TimeSeriesGBM',
+    'Prediction',
+    'ModelMetrics',
+    'get_timeseries_model',
+    'init_timeseries_model',
+    'TimeSeriesAIService',
+    'get_timeseries_ai',
+    'init_timeseries_ai'
 ]

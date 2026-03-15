@@ -1,0 +1,329 @@
+"""
+Time-Series AI Service - Directional Forecasting Integration
+
+Integrates LightGBM directional forecasting into the AI modules system.
+Provides predictions for the AI Trade Consultation.
+
+Key Features:
+- Direction prediction (up/down/flat)
+- Probability-based confidence
+- Auto-training from historical data
+- Performance tracking
+"""
+
+import logging
+from typing import Dict, Any, Optional, List
+from datetime import datetime, timezone, timedelta
+import asyncio
+
+from .timeseries_gbm import (
+    TimeSeriesGBM,
+    Prediction,
+    ModelMetrics,
+    get_timeseries_model,
+    init_timeseries_model
+)
+from .timeseries_features import get_feature_engineer
+
+logger = logging.getLogger(__name__)
+
+
+class TimeSeriesAIService:
+    """
+    High-level service for time-series AI predictions.
+    
+    Used by AI Trade Consultation to get directional forecasts.
+    """
+    
+    # Minimum confidence to include in consultation
+    MIN_CONFIDENCE_THRESHOLD = 0.3
+    
+    # Training configuration
+    AUTO_TRAIN_INTERVAL_HOURS = 24
+    MIN_BARS_FOR_TRAINING = 100
+    
+    def __init__(self):
+        self._model = get_timeseries_model()
+        self._db = None
+        self._historical_service = None
+        self._last_train_time = None
+        
+    def set_db(self, db):
+        """Set database connection"""
+        self._db = db
+        self._model.set_db(db)
+        
+    def set_historical_service(self, historical_service):
+        """Set historical data service for training"""
+        self._historical_service = historical_service
+        
+    async def get_forecast(
+        self,
+        symbol: str,
+        bars: List[Dict]
+    ) -> Dict[str, Any]:
+        """
+        Get directional forecast for a symbol.
+        
+        Args:
+            symbol: Ticker symbol
+            bars: Recent OHLCV bars (most recent first)
+            
+        Returns:
+            {
+                "direction": "up" | "down" | "flat",
+                "probability_up": 0.0-1.0,
+                "probability_down": 0.0-1.0,
+                "confidence": 0.0-1.0,
+                "signal": str,
+                "model_version": str,
+                "usable": bool  # True if confidence > threshold
+            }
+        """
+        if not bars or len(bars) < 20:
+            return self._empty_forecast(symbol, "Insufficient data")
+            
+        try:
+            prediction = self._model.predict(bars, symbol)
+            
+            if prediction is None:
+                return self._empty_forecast(symbol, "Prediction failed")
+                
+            # Build signal message
+            signal = self._build_signal(prediction)
+            
+            # Determine if usable for consultation
+            usable = prediction.confidence >= self.MIN_CONFIDENCE_THRESHOLD
+            
+            return {
+                "direction": prediction.direction,
+                "probability_up": prediction.probability_up,
+                "probability_down": prediction.probability_down,
+                "confidence": prediction.confidence,
+                "signal": signal,
+                "model_version": prediction.model_version,
+                "usable": usable,
+                "symbol": symbol,
+                "timestamp": prediction.timestamp
+            }
+            
+        except Exception as e:
+            logger.error(f"Forecast error for {symbol}: {e}")
+            return self._empty_forecast(symbol, f"Error: {str(e)[:50]}")
+            
+    def _build_signal(self, prediction: Prediction) -> str:
+        """Build human-readable signal from prediction"""
+        direction = prediction.direction
+        confidence = prediction.confidence
+        prob_up = prediction.probability_up
+        
+        if direction == "up":
+            if confidence > 0.6:
+                return f"Strong bullish signal ({prob_up*100:.0f}% up probability)"
+            else:
+                return f"Weak bullish signal ({prob_up*100:.0f}% up probability)"
+        elif direction == "down":
+            prob_down = prediction.probability_down
+            if confidence > 0.6:
+                return f"Strong bearish signal ({prob_down*100:.0f}% down probability)"
+            else:
+                return f"Weak bearish signal ({prob_down*100:.0f}% down probability)"
+        else:
+            return f"Neutral/unclear direction ({prob_up*100:.0f}% up)"
+            
+    def _empty_forecast(self, symbol: str, reason: str) -> Dict[str, Any]:
+        """Return empty forecast"""
+        return {
+            "direction": "flat",
+            "probability_up": 0.5,
+            "probability_down": 0.5,
+            "confidence": 0.0,
+            "signal": reason,
+            "model_version": "N/A",
+            "usable": False,
+            "symbol": symbol,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    async def train_model(
+        self,
+        symbols: List[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Train/update the model with historical data.
+        
+        Args:
+            symbols: List of symbols to train on (default: fetch from history)
+            
+        Returns:
+            Training result with metrics
+        """
+        if self._historical_service is None:
+            return {"success": False, "error": "Historical service not connected"}
+            
+        logger.info("Starting model training...")
+        
+        try:
+            # Get historical bars for training
+            bars_by_symbol = {}
+            
+            if symbols is None:
+                # Get symbols with most data
+                symbols = await self._get_training_symbols()
+                
+            for symbol in symbols[:20]:  # Limit to 20 symbols
+                bars = await self._get_historical_bars(symbol)
+                if bars and len(bars) >= self.MIN_BARS_FOR_TRAINING:
+                    bars_by_symbol[symbol] = bars
+                    
+            if not bars_by_symbol:
+                return {"success": False, "error": "No historical data available"}
+                
+            logger.info(f"Training on {len(bars_by_symbol)} symbols")
+            
+            # Train model
+            metrics = self._model.train(bars_by_symbol)
+            
+            self._last_train_time = datetime.now(timezone.utc)
+            
+            return {
+                "success": True,
+                "metrics": metrics.to_dict(),
+                "symbols_used": list(bars_by_symbol.keys()),
+                "samples": metrics.training_samples + metrics.validation_samples
+            }
+            
+        except Exception as e:
+            logger.error(f"Training error: {e}")
+            return {"success": False, "error": str(e)}
+            
+    async def _get_training_symbols(self) -> List[str]:
+        """Get symbols with sufficient historical data"""
+        # Default list of liquid stocks
+        default_symbols = [
+            "SPY", "QQQ", "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META",
+            "TSLA", "AMD", "NFLX", "DIS", "BA", "JPM", "GS", "BAC",
+            "XOM", "CVX", "PFE", "JNJ"
+        ]
+        return default_symbols
+        
+    async def _get_historical_bars(self, symbol: str) -> Optional[List[Dict]]:
+        """Get historical bars for a symbol"""
+        if self._historical_service is None:
+            return None
+            
+        try:
+            # Fetch last 200 bars (approx 1 week of 5-min bars)
+            bars = await self._historical_service.get_bars(
+                symbol,
+                timeframe="5Min",
+                limit=200
+            )
+            return bars if bars else None
+        except Exception as e:
+            logger.warning(f"Could not get bars for {symbol}: {e}")
+            return None
+            
+    async def auto_train_if_needed(self):
+        """Check and auto-train if interval has passed"""
+        if self._last_train_time is None:
+            # Never trained - train now
+            return await self.train_model()
+            
+        hours_since_train = (
+            datetime.now(timezone.utc) - self._last_train_time
+        ).total_seconds() / 3600
+        
+        if hours_since_train >= self.AUTO_TRAIN_INTERVAL_HOURS:
+            return await self.train_model()
+            
+        return {"success": True, "message": "Training not needed yet"}
+        
+    def get_consultation_context(
+        self,
+        forecast: Dict[str, Any],
+        direction: str = "long"
+    ) -> Dict[str, Any]:
+        """
+        Get context for AI Trade Consultation.
+        
+        Returns signals and risk adjustment based on forecast.
+        """
+        if not forecast.get("usable", False):
+            return {
+                "signal": "Time-series AI: No confident prediction",
+                "risk_adjustment": 0.0,
+                "align_with_trade": "neutral"
+            }
+            
+        pred_direction = forecast.get("direction", "flat")
+        confidence = forecast.get("confidence", 0)
+        
+        # Check if forecast aligns with trade direction
+        if direction == "long":
+            if pred_direction == "up":
+                align = "favorable"
+                adjustment = -0.2 * confidence  # Reduce risk (favorable)
+                signal = f"Time-series AI supports long ({confidence*100:.0f}% confidence)"
+            elif pred_direction == "down":
+                align = "contrary"
+                adjustment = 0.5 * confidence  # Increase risk (contrary)
+                signal = f"Time-series AI contradicts long ({confidence*100:.0f}% down probability)"
+            else:
+                align = "neutral"
+                adjustment = 0.0
+                signal = "Time-series AI: Neutral/unclear direction"
+        else:  # short
+            if pred_direction == "down":
+                align = "favorable"
+                adjustment = -0.2 * confidence
+                signal = f"Time-series AI supports short ({confidence*100:.0f}% confidence)"
+            elif pred_direction == "up":
+                align = "contrary"
+                adjustment = 0.5 * confidence
+                signal = f"Time-series AI contradicts short ({confidence*100:.0f}% up probability)"
+            else:
+                align = "neutral"
+                adjustment = 0.0
+                signal = "Time-series AI: Neutral/unclear direction"
+                
+        return {
+            "signal": signal,
+            "risk_adjustment": round(adjustment, 2),
+            "align_with_trade": align,
+            "forecast": forecast
+        }
+        
+    def get_status(self) -> Dict[str, Any]:
+        """Get service status"""
+        model_status = self._model.get_status()
+        
+        return {
+            "service": "timeseries_ai",
+            "model": model_status,
+            "last_train": self._last_train_time.isoformat() if self._last_train_time else None,
+            "historical_service_connected": self._historical_service is not None,
+            "db_connected": self._db is not None
+        }
+
+
+# Singleton
+_timeseries_ai: Optional[TimeSeriesAIService] = None
+
+
+def get_timeseries_ai() -> TimeSeriesAIService:
+    """Get singleton instance"""
+    global _timeseries_ai
+    if _timeseries_ai is None:
+        _timeseries_ai = TimeSeriesAIService()
+    return _timeseries_ai
+
+
+def init_timeseries_ai(db=None, historical_service=None) -> TimeSeriesAIService:
+    """Initialize service with dependencies"""
+    service = get_timeseries_ai()
+    if db is not None:
+        service.set_db(db)
+    if historical_service is not None:
+        service.set_historical_service(historical_service)
+    return service

@@ -41,6 +41,7 @@ class AITradeConsultation:
         self._risk_manager = None
         self._institutional_flow = None
         self._volume_anomaly = None
+        self._timeseries_ai = None
         self._enabled = False
         
     def inject_services(
@@ -50,7 +51,8 @@ class AITradeConsultation:
         debate_agents=None,
         risk_manager=None,
         institutional_flow=None,
-        volume_anomaly=None
+        volume_anomaly=None,
+        timeseries_ai=None
     ):
         """Inject AI module services"""
         self._module_config = module_config
@@ -59,6 +61,7 @@ class AITradeConsultation:
         self._risk_manager = risk_manager
         self._institutional_flow = institutional_flow
         self._volume_anomaly = volume_anomaly
+        self._timeseries_ai = timeseries_ai
         self._enabled = module_config is not None
         
         if self._enabled:
@@ -104,6 +107,7 @@ class AITradeConsultation:
             "risk_assessment": None,
             "institutional_context": None,
             "volume_context": None,
+            "timeseries_forecast": None,
             "shadow_logged": False,
             "shadow_decision_id": None
         }
@@ -254,6 +258,45 @@ class AITradeConsultation:
             except Exception as e:
                 logger.warning(f"Volume analysis failed for {symbol}: {e}")
                 
+        # ==================== 5. TIME-SERIES AI ====================
+        if self._module_config.is_timeseries_enabled() and self._timeseries_ai and bars:
+            try:
+                forecast = await self._timeseries_ai.get_forecast(
+                    symbol=symbol,
+                    bars=bars
+                )
+                
+                # Get consultation context from forecast
+                ts_context = self._timeseries_ai.get_consultation_context(
+                    forecast=forecast,
+                    direction=direction
+                )
+                
+                result["timeseries_forecast"] = {
+                    "forecast": forecast,
+                    "context": ts_context
+                }
+                modules_used.append("timeseries_ai")
+                
+                # Apply timeseries signals
+                if ts_context.get("signal"):
+                    all_signals.append(f"TimeSeries: {ts_context['signal']}")
+                    
+                # Apply risk adjustment based on alignment
+                if ts_context.get("align_with_trade") == "contrary":
+                    # Forecast contradicts trade direction
+                    if not self._module_config.is_shadow_mode("timeseries_ai"):
+                        result["size_adjustment"] = min(
+                            result["size_adjustment"], 
+                            0.7  # Reduce size when AI contradicts
+                        )
+                elif ts_context.get("align_with_trade") == "favorable":
+                    # Could increase size, but stay conservative
+                    pass
+                    
+            except Exception as e:
+                logger.warning(f"Time-series AI failed for {symbol}: {e}")
+                
         # ==================== BUILD COMBINED REASONING ====================
         if all_signals:
             result["reasoning"] = " | ".join(all_signals)
@@ -280,7 +323,7 @@ class AITradeConsultation:
                     debate_result=result["debate_result"],
                     risk_assessment=result["risk_assessment"],
                     institutional_context=result["institutional_context"],
-                    timeseries_forecast=None,  # Future: add timeseries
+                    timeseries_forecast=result.get("timeseries_forecast"),
                     combined_recommendation=combined_rec,
                     confidence_score=self._calculate_combined_confidence(result),
                     reasoning=result["reasoning"],
@@ -315,6 +358,11 @@ class AITradeConsultation:
             inst_risk = result["institutional_context"].get("risk_score", 3)
             confidences.append(1 - (inst_risk / 10))
             
+        if result.get("timeseries_forecast"):
+            ts_forecast = result["timeseries_forecast"].get("forecast", {})
+            ts_confidence = ts_forecast.get("confidence", 0)
+            confidences.append(ts_confidence)
+            
         if confidences:
             return sum(confidences) / len(confidences)
         return 0.5
@@ -329,6 +377,7 @@ class AITradeConsultation:
             "risk_assessment": None,
             "institutional_context": None,
             "volume_context": None,
+            "timeseries_forecast": None,
             "shadow_logged": False,
             "shadow_decision_id": None
         }
@@ -341,12 +390,14 @@ class AITradeConsultation:
                 "debate": self._debate_agents is not None,
                 "risk_manager": self._risk_manager is not None,
                 "institutional_flow": self._institutional_flow is not None,
-                "volume_anomaly": self._volume_anomaly is not None
+                "volume_anomaly": self._volume_anomaly is not None,
+                "timeseries_ai": self._timeseries_ai is not None
             },
             "modules_enabled": {
                 "debate": self._module_config.is_debate_enabled() if self._module_config else False,
                 "risk_manager": self._module_config.is_risk_manager_enabled() if self._module_config else False,
                 "institutional_flow": self._module_config.is_institutional_flow_enabled() if self._module_config else False,
+                "timeseries_ai": self._module_config.is_timeseries_enabled() if self._module_config else False,
             },
             "shadow_mode": self._module_config.is_shadow_mode() if self._module_config else True
         }

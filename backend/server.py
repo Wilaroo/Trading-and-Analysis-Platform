@@ -88,7 +88,8 @@ from services.ai_modules import (
     get_ai_risk_manager, init_ai_risk_manager,
     init_institutional_flow_service,
     init_volume_anomaly_service,
-    init_ai_consultation
+    init_ai_consultation,
+    init_timeseries_ai
 )
 from services.market_intel_service import get_market_intel_service
 from services.hybrid_data_service import get_hybrid_data_service, init_hybrid_data_service
@@ -748,6 +749,9 @@ try:
     # Initialize Volume Anomaly Service (Phase 6 - Uses existing data)
     volume_anomaly = init_volume_anomaly_service(db=db)
     
+    # Initialize Time-Series AI (Phase 3 - LightGBM directional forecasting)
+    timeseries_ai = init_timeseries_ai(db=db, historical_service=alpaca_service)
+    
     # Initialize AI Trade Consultation (wires modules into trading bot)
     ai_consultation = init_ai_consultation(
         module_config=ai_module_config,
@@ -755,10 +759,12 @@ try:
         debate_agents=debate_agents,
         risk_manager=ai_risk_manager,
         institutional_flow=institutional_flow,
-        volume_anomaly=volume_anomaly
+        volume_anomaly=volume_anomaly,
+        timeseries_ai=timeseries_ai
     )
     
     # Inject services into AI modules router (AFTER ai_consultation is created)
+    from routers.ai_modules import inject_timeseries_service
     inject_ai_module_services(
         ai_module_config, 
         shadow_tracker, 
@@ -768,6 +774,7 @@ try:
         volume_anomaly,
         ai_consultation
     )
+    inject_timeseries_service(timeseries_ai)
     
     # Register AI module services
     register_service('ai_module_config', ai_module_config)
@@ -777,6 +784,7 @@ try:
     register_service('institutional_flow', institutional_flow)
     register_service('volume_anomaly', volume_anomaly)
     register_service('ai_consultation', ai_consultation)
+    register_service('timeseries_ai', timeseries_ai)
     
     print("AI Modules (Institutional-Grade) initialized")
     print("  - Module Config: Toggle individual AI modules on/off")
@@ -785,8 +793,9 @@ try:
     print("  - AI Risk Manager: Multi-factor risk assessment")
     print("  - Institutional Flow: 13F tracking, ownership context (FREE)")
     print("  - Volume Anomaly: Z-score detection, accumulation/distribution")
+    print("  - Time-Series AI: LightGBM directional forecasting (Phase 3)")
     print("  - Trade Consultation: Pre-trade AI analysis integration")
-    print("  - Endpoints: /api/ai-modules/config, /api/ai-modules/institutional/*, /api/ai-modules/volume/*")
+    print("  - Endpoints: /api/ai-modules/config, /api/ai-modules/timeseries/*")
     
 except Exception as e:
     print(f"AI Modules initialization deferred: {e}")
@@ -799,6 +808,7 @@ except Exception as e:
     institutional_flow = None
     volume_anomaly = None
     ai_consultation = None
+    timeseries_ai = None
 
 # Wire AI Consultation into Trading Bot (Phase 2 Integration)
 if ai_consultation is not None:
