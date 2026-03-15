@@ -105,9 +105,9 @@ async def full_market_collection(
     max_price: float = 1000.0
 ):
     """
-    Start collection for ALL tradeable US stocks (8000+).
+    Start collection for ALL tradeable US stocks (12,000+).
     
-    ⚠️ This is a LONG-RUNNING job that can take several hours.
+    ⚠️ This is a LONG-RUNNING job that can take 10+ hours.
     Best to run overnight.
     
     - **bar_size**: Bar size (recommend "1 day" for full market - faster)
@@ -135,6 +135,47 @@ async def full_market_collection(
         return result
     except Exception as e:
         logger.error(f"Error starting full market collection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/liquid-collection")
+async def liquid_collection(
+    bar_size: str = "1 day",
+    days: int = 30,
+    min_adv: int = 500_000
+):
+    """
+    Start collection for LIQUID US stocks only (~1,500 stocks).
+    
+    ✅ RECOMMENDED: Much faster than full market (2-3 hours vs 10+ hours).
+    Focuses on stocks with high trading volume that are actually tradeable.
+    
+    - **bar_size**: Bar size (default "1 day")
+    - **days**: Number of days of data to collect
+    - **min_adv**: Minimum average daily volume (default 500,000)
+    
+    Time estimates:
+    - ~1,500 symbols × 3 seconds = ~1.25 hours for 1 day bars
+    """
+    try:
+        collector = get_ib_collector()
+        
+        # Calculate duration based on days
+        if days <= 7:
+            duration = f"{days} D"
+        elif days <= 30:
+            duration = f"{days // 7 + 1} W"
+        else:
+            duration = f"{days // 30 + 1} M"
+            
+        result = await collector.start_liquid_collection(
+            bar_size=bar_size,
+            duration=duration,
+            min_adv=min_adv
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error starting liquid collection: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -244,4 +285,34 @@ async def get_full_market_symbols(min_price: float = 1.0, max_price: float = 100
         }
     except Exception as e:
         logger.error(f"Error getting full market symbols: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.get("/liquid-symbols")
+async def get_liquid_symbols(min_adv: int = 500_000):
+    """
+    Get the count of liquid US stocks (filtered by ADV).
+    
+    - **min_adv**: Minimum average daily volume (default 500,000)
+    """
+    try:
+        collector = get_ib_collector()
+        symbols = await collector.get_liquid_symbols(min_adv=min_adv)
+        
+        # Estimate collection time
+        time_per_symbol = 3  # seconds
+        total_seconds = len(symbols) * time_per_symbol
+        hours = total_seconds / 3600
+        
+        return {
+            "success": True,
+            "count": len(symbols),
+            "sample": symbols[:20] if symbols else [],
+            "min_adv": min_adv,
+            "estimated_time": f"{hours:.1f} hours for 1-day bars",
+            "note": f"Liquid stocks: {len(symbols)} symbols with ADV >= {min_adv:,}"
+        }
+    except Exception as e:
+        logger.error(f"Error getting liquid symbols: {e}")
         raise HTTPException(status_code=500, detail=str(e))
