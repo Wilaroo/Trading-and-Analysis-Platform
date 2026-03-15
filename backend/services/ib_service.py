@@ -548,7 +548,10 @@ class IBWorkerThread(threading.Thread):
     
     def _do_get_historical_data(self, params: Dict) -> IBResponse:
         """Get historical data"""
+        logger.info(f"_do_get_historical_data called with params: {params}")
+        
         if not self.ib or not self.ib.isConnected():
+            logger.error("_do_get_historical_data: Not connected to IB")
             return IBResponse(success=False, error="Not connected to IB")
         
         try:
@@ -558,11 +561,15 @@ class IBWorkerThread(threading.Thread):
             duration = params.get("duration", "1 D")
             bar_size = params.get("bar_size", "5 mins")
             
+            logger.info(f"Requesting historical data for {symbol}, duration={duration}, bar_size={bar_size}")
+            
             # Process event loop before heavy operation
             self.ib.sleep(0.1)
             
             contract = Stock(symbol.upper(), "SMART", "USD")
             self.ib.qualifyContracts(contract)
+            
+            logger.info(f"Contract qualified for {symbol}, making reqHistoricalData call...")
             
             bars = self.ib.reqHistoricalData(
                 contract,
@@ -572,6 +579,8 @@ class IBWorkerThread(threading.Thread):
                 whatToShow="TRADES",
                 useRTH=True
             )
+            
+            logger.info(f"reqHistoricalData returned {len(bars) if bars else 0} bars for {symbol}")
             
             # Process event loop after data retrieval
             self.ib.sleep(0.1)
@@ -589,6 +598,7 @@ class IBWorkerThread(threading.Thread):
             ])
             
         except Exception as e:
+            logger.error(f"_do_get_historical_data error for {params.get('symbol')}: {e}")
             return IBResponse(success=False, error=str(e))
     
     def _do_run_scanner(self, params: Dict) -> IBResponse:
