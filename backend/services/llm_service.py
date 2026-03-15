@@ -162,18 +162,35 @@ class AnthropicProvider(LLMProvider):
 
 
 class OllamaProvider(LLMProvider):
-    """Local Ollama provider — free, runs via ngrok tunnel"""
+    """Local Ollama provider — uses HTTP proxy when connected, falls back to direct URL"""
     
     def __init__(self):
         self.url = os.environ.get("OLLAMA_URL", "")
-        self.model = os.environ.get("OLLAMA_MODEL", "llama3:8b")
+        self.model = os.environ.get("OLLAMA_MODEL", "gpt-oss:120b-cloud")
+        self._proxy_manager = None
+    
+    def set_proxy_manager(self, proxy_manager):
+        """Set the Ollama proxy manager for direct local connections"""
+        self._proxy_manager = proxy_manager
     
     @property
     def name(self) -> str:
         return "Ollama"
     
     def is_available(self) -> bool:
+        # Check proxy first, then direct URL
+        if self._proxy_manager and self._proxy_manager.ollama_available:
+            return True
         return bool(self.url)
+    
+    def _is_proxy_connected(self) -> bool:
+        """Check if HTTP proxy is connected"""
+        try:
+            # Import here to avoid circular imports
+            from server import is_http_ollama_proxy_connected
+            return is_http_ollama_proxy_connected()
+        except ImportError:
+            return False
     
     def generate(self, prompt: str, system_prompt: str = None, max_tokens: int = 2000, temperature: float = 0.7) -> str:
         import requests as req
@@ -182,6 +199,28 @@ class OllamaProvider(LLMProvider):
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
         
+        # Try HTTP proxy first (most stable connection to local Ollama)
+        if self._is_proxy_connected():
+            try:
+                # Use HTTP proxy endpoint
+                resp = req.post(
+                    "http://localhost:8001/api/ollama-proxy/chat",
+                    json={"model": self.model, "messages": messages},
+                    timeout=120
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("success"):
+                    return data.get("response", {}).get("message", {}).get("content", "")
+                else:
+                    logger.warning(f"Proxy returned error: {data.get('error')}, falling back to direct URL")
+            except Exception as e:
+                logger.warning(f"Proxy request failed: {e}, falling back to direct URL")
+        
+        # Fall back to direct URL (ngrok tunnel)
+        if not self.url:
+            raise Exception("No Ollama connection available (proxy disconnected, no direct URL)")
+            
         try:
             resp = req.post(
                 f"{self.url.rstrip('/')}/api/chat",
@@ -207,6 +246,65 @@ class OllamaProvider(LLMProvider):
             raise ValueError("No JSON found in response")
         except Exception as e:
             logger.error(f"Ollama JSON parsing error: {e}")
+            raise
+
+
+class OllamaProxyProvider(LLMProvider):
+    """
+    Dedicated Ollama provider that ONLY uses the HTTP proxy.
+    Use this when you want to ensure local Ollama is used and fail if unavailable.
+    """
+    
+    def __init__(self):
+        self.model = os.environ.get("OLLAMA_MODEL", "gpt-oss:120b-cloud")
+    
+    @property
+    def name(self) -> str:
+        return "OllamaProxy"
+    
+    def is_available(self) -> bool:
+        try:
+            from server import is_http_ollama_proxy_connected
+            return is_http_ollama_proxy_connected()
+        except ImportError:
+            return False
+    
+    def generate(self, prompt: str, system_prompt: str = None, max_tokens: int = 2000, temperature: float = 0.7) -> str:
+        import requests as req
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        
+        try:
+            resp = req.post(
+                "http://localhost:8001/api/ollama-proxy/chat",
+                json={"model": self.model, "messages": messages},
+                timeout=120
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("success"):
+                return data.get("response", {}).get("message", {}).get("content", "")
+            else:
+                raise Exception(f"Proxy error: {data.get('error')}")
+        except Exception as e:
+            logger.error(f"OllamaProxy generation error: {e}")
+            raise
+    
+    def generate_json(self, prompt: str, system_prompt: str = None, max_tokens: int = 2000) -> Dict[str, Any]:
+        json_prompt = f"{prompt}\n\nRespond with valid JSON only, no other text."
+        response = self.generate(json_prompt, system_prompt, max_tokens, temperature=0.3)
+        try:
+            if response.strip().startswith("{"):
+                return json.loads(response)
+            import re
+            json_match = re.search(r'\{[\s\S]*\}', response)
+            if json_match:
+                return json.loads(json_match.group())
+            raise ValueError("No JSON found in response")
+        except Exception as e:
+            logger.error(f"OllamaProxy JSON parsing error: {e}")
             raise
 
 
@@ -290,24 +388,27 @@ class LLMService:
     """
     Main LLM service with automatic provider selection.
     
-    Priority order (configurable via LLM_PROVIDER env var):
-    1. OpenAI (if OPENAI_API_KEY is set)
-    2. Anthropic (if ANTHROPIC_API_KEY is set)
-    3. Emergent (if EMERGENT_LLM_KEY is set)
+    Priority order (prioritizes local Ollama to save Emergent credits):
+    1. OllamaProxy (if HTTP proxy connected - most stable local connection)
+    2. Ollama (if direct URL available)
+    3. OpenAI (if OPENAI_API_KEY is set)
+    4. Anthropic (if ANTHROPIC_API_KEY is set)
+    5. Emergent (if EMERGENT_LLM_KEY is set - fallback only)
     """
     
     def __init__(self):
         self.providers: Dict[str, LLMProvider] = {
-            "ollama": OllamaProvider(),
+            "ollama_proxy": OllamaProxyProvider(),  # Local Ollama via HTTP proxy (highest priority)
+            "ollama": OllamaProvider(),              # Local Ollama via direct URL
             "openai": OpenAIProvider(),
             "anthropic": AnthropicProvider(),
-            "emergent": EmergentProvider()
+            "emergent": EmergentProvider()           # Fallback only - saves credits
         }
         self._active_provider: Optional[LLMProvider] = None
         self._select_provider()
     
     def _select_provider(self):
-        """Select the best available provider"""
+        """Select the best available provider (prioritizes local Ollama)"""
         forced_provider = os.environ.get("LLM_PROVIDER", "").lower()
         
         # If a specific provider is forced, try it first
@@ -320,8 +421,8 @@ class LLMService:
             else:
                 logger.warning(f"Forced provider {forced_provider} not available, falling back")
         
-        # Try providers in priority order
-        priority = ["ollama", "openai", "anthropic", "emergent"]
+        # Try providers in priority order (local Ollama first to save credits)
+        priority = ["ollama_proxy", "ollama", "openai", "anthropic", "emergent"]
         for name in priority:
             provider = self.providers[name]
             if provider.is_available():
@@ -331,6 +432,10 @@ class LLMService:
         
         logger.warning("No LLM provider available!")
         self._active_provider = None
+    
+    def refresh_provider(self):
+        """Re-check provider availability (call when proxy connects/disconnects)"""
+        self._select_provider()
     
     @property
     def is_available(self) -> bool:

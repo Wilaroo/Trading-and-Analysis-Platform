@@ -5,6 +5,38 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ---
 
+## OLLAMA INTEGRATION UPDATE ✅ (March 15, 2026)
+
+### LLM Provider Priority (Saves Emergent Credits)
+The LLM service now prioritizes local Ollama over cloud providers:
+
+**Priority Order:**
+1. **OllamaProxy** - Local Ollama via HTTP proxy (highest - most stable)
+2. **Ollama** - Local Ollama via direct URL
+3. **OpenAI** - If API key configured
+4. **Anthropic** - If API key configured
+5. **Emergent** - Fallback only (saves credits)
+
+**Key Changes:**
+- New `OllamaProxyProvider` class for dedicated proxy connections
+- `OllamaProvider` now tries proxy first, then falls back to direct URL
+- New `/api/ollama-proxy/chat` endpoint for direct LLM calls
+- Auto-refresh provider when proxy connects/disconnects
+
+**Files Modified:**
+- `/app/backend/services/llm_service.py` - Added OllamaProxyProvider, updated priorities
+- `/app/backend/server.py` - Added /api/ollama-proxy/chat endpoint, registered enhanced_scanner
+
+---
+
+## SCANNER CONNECTION FIXED ✅ (March 15, 2026)
+
+The enhanced_scanner service is now properly registered for learning connectors:
+- Added `register_service('enhanced_scanner', background_scanner)` in server.py
+- All 6 learning connections now available (0 disconnected)
+
+---
+
 ## LEARNING CONNECTORS ✅ COMPLETE (March 15, 2026)
 
 ### Backend Learning Infrastructure
