@@ -22,6 +22,7 @@ import MockupPreviewPage from './pages/MockupPreviewPage';
 import TeamBrainMockups from './pages/TeamBrainMockups';
 import TeamBrainMockupsV2 from './pages/TeamBrainMockupsV2';
 import TrainingCenter from './components/TrainingCenter';
+import NIA from './components/NIA';
 
 import './App.css';
 
@@ -332,6 +333,7 @@ function App() {
     switch (activeTab) {
       case 'command-center': return <CommandCenterPage {...ibProps} isActiveTab={true} />;
       case 'training-center': return <TrainingCenter />;
+      case 'nia': return <NIA />;
       case 'team-brain-mockups-v2': return <TeamBrainMockupsV2 />;
       case 'team-brain-mockups': return <TeamBrainMockups />;
       case 'chart': return <ErrorBoundary><ChartsPage {...ibProps} /></ErrorBoundary>;

@@ -7,7 +7,28 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 15, 2026)
 
-### Strategy Promotion Service - Autonomous Loop ✅ NEW (March 15, 2026)
+### NIA (Neural Intelligence Agency) ✅ NEW (March 15, 2026)
+**NEW TOP-LEVEL SECTION** - Unified AI intelligence dashboard
+
+**What It Is:**
+NIA is the intelligence arm of SentCom - a dedicated section for monitoring AI performance, strategy lifecycle, and learning health.
+
+**Sections:**
+1. **Intel Overview** - Key metrics at a glance (AI accuracy, live strategies, learning health)
+2. **AI Module Performance** - Time-Series AI, Bull/Bear agents, Risk Manager stats
+3. **Strategy Lifecycle** - Visual SIMULATION → PAPER → LIVE pipeline with promotion candidates
+4. **Learning Connectors** - Data flow health and "Run Calibrations" button
+
+**Files Created:**
+- `/app/frontend/src/components/NIA.jsx` - Main component (~600 lines)
+
+**Files Modified:**
+- `/app/frontend/src/components/Sidebar.js` - Added NIA nav item with "NEW" badge
+- `/app/frontend/src/App.js` - Added NIA import and routing
+
+---
+
+### Strategy Promotion Service - Autonomous Loop ✅ (March 15, 2026)
 **COMPLETE LIFECYCLE: SIMULATION → PAPER → LIVE** - Strategies auto-progress through phases.
 
 **What Changed:**
