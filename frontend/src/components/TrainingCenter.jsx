@@ -1,0 +1,902 @@
+/**
+ * TrainingCenter.jsx - Unified AI Training & Learning Hub
+ * 
+ * A comprehensive section for making the entire SentCom system smarter:
+ * 1. Historical Simulations - Run backtests, view results
+ * 2. Time-Series Model - Training status, accuracy, retraining
+ * 3. Prediction Tracking - Track forecast accuracy over time
+ * 4. Learning Analytics - System learning insights & improvements
+ */
+import React, { useState, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Brain, Zap, Target, TrendingUp, Activity, BarChart3,
+  Play, Pause, RefreshCw, Loader, ChevronRight, Calendar,
+  Clock, CheckCircle, XCircle, AlertCircle, Settings,
+  Database, Cpu, LineChart, ArrowUpRight, ArrowDownRight,
+  Sparkles, BookOpen, History, FlaskConical, Layers
+} from 'lucide-react';
+import { toast } from 'sonner';
+
+const API_BASE = process.env.REACT_APP_BACKEND_URL;
+
+// ============================================================================
+// SHARED COMPONENTS
+// ============================================================================
+
+const GlassCard = ({ children, className = '', gradient = false, glow = false }) => (
+  <div className={`
+    relative overflow-hidden rounded-2xl
+    bg-gradient-to-br from-white/[0.08] to-white/[0.02]
+    border border-white/10
+    backdrop-blur-xl
+    ${glow ? 'shadow-lg shadow-cyan-500/10' : ''}
+    ${className}
+  `}>
+    {gradient && (
+      <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 via-transparent to-violet-500/5 pointer-events-none" />
+    )}
+    <div className="relative">{children}</div>
+  </div>
+);
+
+const StatCard = ({ label, value, subValue, icon: Icon, color = 'cyan', trend = null }) => (
+  <div className="p-4 rounded-xl bg-black/30 border border-white/5">
+    <div className="flex items-center justify-between mb-2">
+      <span className="text-[10px] text-zinc-500 uppercase tracking-wider">{label}</span>
+      {Icon && <Icon className={`w-4 h-4 text-${color}-400`} />}
+    </div>
+    <div className="flex items-end gap-2">
+      <span className={`text-2xl font-bold text-${color}-400`}>{value}</span>
+      {trend !== null && (
+        <span className={`text-xs ${trend >= 0 ? 'text-emerald-400' : 'text-rose-400'} flex items-center`}>
+          {trend >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+          {Math.abs(trend).toFixed(1)}%
+        </span>
+      )}
+    </div>
+    {subValue && <p className="text-xs text-zinc-500 mt-1">{subValue}</p>}
+  </div>
+);
+
+const StatusBadge = ({ status }) => {
+  const statusConfig = {
+    completed: { color: 'emerald', icon: CheckCircle, label: 'Completed' },
+    running: { color: 'cyan', icon: Loader, label: 'Running', animate: true },
+    pending: { color: 'amber', icon: Clock, label: 'Pending' },
+    failed: { color: 'rose', icon: XCircle, label: 'Failed' },
+    cancelled: { color: 'zinc', icon: XCircle, label: 'Cancelled' }
+  };
+  
+  const config = statusConfig[status] || statusConfig.pending;
+  const Icon = config.icon;
+  
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-${config.color}-500/20 text-${config.color}-400 border border-${config.color}-500/30`}>
+      <Icon className={`w-3 h-3 ${config.animate ? 'animate-spin' : ''}`} />
+      {config.label}
+    </span>
+  );
+};
+
+// ============================================================================
+// HOOKS
+// ============================================================================
+
+const useSimulationJobs = () => {
+  const [jobs, setJobs] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchJobs = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/simulation/jobs?limit=10`);
+      const data = await res.json();
+      if (data.success) {
+        setJobs(data.jobs || []);
+      }
+    } catch (err) {
+      console.error('Error fetching simulation jobs:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchJobs();
+    const interval = setInterval(fetchJobs, 10000); // Poll every 10s for running jobs
+    return () => clearInterval(interval);
+  }, [fetchJobs]);
+
+  return { jobs, loading, refresh: fetchJobs };
+};
+
+const useTimeseriesStatus = () => {
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/ai-modules/timeseries/status`);
+      const data = await res.json();
+      if (data.success) {
+        setStatus(data.status);
+      }
+    } catch (err) {
+      console.error('Error fetching timeseries status:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStatus();
+  }, [fetchStatus]);
+
+  return { status, loading, refresh: fetchStatus };
+};
+
+const usePredictionAccuracy = () => {
+  const [accuracy, setAccuracy] = useState(null);
+  const [predictions, setPredictions] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [accuracyRes, predictionsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/ai-modules/timeseries/prediction-accuracy?days=30`),
+        fetch(`${API_BASE}/api/ai-modules/timeseries/predictions?limit=20`)
+      ]);
+      
+      const [accuracyData, predictionsData] = await Promise.all([
+        accuracyRes.json(),
+        predictionsRes.json()
+      ]);
+      
+      if (accuracyData.success) setAccuracy(accuracyData.accuracy);
+      if (predictionsData.success) setPredictions(predictionsData.predictions || []);
+    } catch (err) {
+      console.error('Error fetching prediction data:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  return { accuracy, predictions, loading, refresh: fetchData };
+};
+
+// ============================================================================
+// SUB-COMPONENTS
+// ============================================================================
+
+// Historical Simulation Panel
+const SimulationPanel = ({ jobs, loading, onRefresh, onStartSimulation }) => {
+  const [showConfig, setShowConfig] = useState(false);
+  const [config, setConfig] = useState({
+    start_date: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    end_date: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    universe: 'custom',
+    custom_symbols: 'AAPL,NVDA,MSFT,TSLA,GOOGL,AMD,META,AMZN',
+    starting_capital: 100000,
+    use_ai_agents: true
+  });
+  const [starting, setStarting] = useState(false);
+
+  const handleStart = async () => {
+    setStarting(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/simulation/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...config,
+          custom_symbols: config.custom_symbols.split(',').map(s => s.trim().toUpperCase())
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(`Simulation started: ${data.job_id}`);
+        setShowConfig(false);
+        onRefresh();
+      } else {
+        toast.error('Failed to start simulation: ' + (data.detail || 'Unknown error'));
+      }
+    } catch (err) {
+      toast.error('Error starting simulation');
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const handleQuickTest = async () => {
+    setStarting(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/simulation/quick-test`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(`Quick test started: ${data.job_id}`);
+        onRefresh();
+      } else {
+        toast.error('Failed to start quick test');
+      }
+    } catch (err) {
+      toast.error('Error starting quick test');
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  // Calculate summary stats from jobs
+  const completedJobs = jobs.filter(j => j.status === 'completed');
+  const totalTrades = completedJobs.reduce((sum, j) => sum + (j.total_trades || 0), 0);
+  const avgWinRate = completedJobs.length > 0 
+    ? completedJobs.reduce((sum, j) => sum + (j.win_rate || 0), 0) / completedJobs.length 
+    : 0;
+
+  return (
+    <GlassCard className="p-5" gradient>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500/20 to-purple-500/20 flex items-center justify-center">
+            <History className="w-5 h-5 text-violet-400" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-white">Historical Simulations</h3>
+            <p className="text-[10px] text-zinc-500">Backtest trading strategies on historical data</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleQuickTest}
+            disabled={starting}
+            className="px-3 py-1.5 rounded-lg bg-violet-500/20 border border-violet-500/30 text-violet-400 text-xs font-medium hover:bg-violet-500/30 transition-all disabled:opacity-50 flex items-center gap-1.5"
+            data-testid="quick-test-btn"
+          >
+            {starting ? <Loader className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+            Quick Test
+          </button>
+          <button
+            onClick={() => setShowConfig(!showConfig)}
+            className="px-3 py-1.5 rounded-lg bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-xs font-medium hover:bg-cyan-500/30 transition-all flex items-center gap-1.5"
+            data-testid="new-simulation-btn"
+          >
+            <Play className="w-3 h-3" />
+            New Simulation
+          </button>
+        </div>
+      </div>
+
+      {/* Summary Stats */}
+      <div className="grid grid-cols-4 gap-3 mb-4">
+        <StatCard label="Total Jobs" value={jobs.length} icon={Database} color="violet" />
+        <StatCard label="Completed" value={completedJobs.length} icon={CheckCircle} color="emerald" />
+        <StatCard label="Total Trades" value={totalTrades} icon={Activity} color="cyan" />
+        <StatCard label="Avg Win Rate" value={`${avgWinRate.toFixed(1)}%`} icon={Target} color="amber" />
+      </div>
+
+      {/* Config Panel */}
+      <AnimatePresence>
+        {showConfig && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mb-4 p-4 rounded-xl bg-black/40 border border-white/10"
+          >
+            <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+              <Settings className="w-4 h-4 text-cyan-400" />
+              Simulation Configuration
+            </h4>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] text-zinc-500 uppercase">Start Date</label>
+                <input
+                  type="date"
+                  value={config.start_date}
+                  onChange={(e) => setConfig({ ...config, start_date: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg bg-zinc-800/50 border border-white/10 text-white text-sm"
+                  data-testid="sim-start-date"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-zinc-500 uppercase">End Date</label>
+                <input
+                  type="date"
+                  value={config.end_date}
+                  onChange={(e) => setConfig({ ...config, end_date: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg bg-zinc-800/50 border border-white/10 text-white text-sm"
+                  data-testid="sim-end-date"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="text-[10px] text-zinc-500 uppercase">Symbols (comma-separated)</label>
+                <input
+                  type="text"
+                  value={config.custom_symbols}
+                  onChange={(e) => setConfig({ ...config, custom_symbols: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg bg-zinc-800/50 border border-white/10 text-white text-sm"
+                  placeholder="AAPL, NVDA, MSFT..."
+                  data-testid="sim-symbols"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-zinc-500 uppercase">Starting Capital</label>
+                <input
+                  type="number"
+                  value={config.starting_capital}
+                  onChange={(e) => setConfig({ ...config, starting_capital: parseFloat(e.target.value) })}
+                  className="w-full px-3 py-2 rounded-lg bg-zinc-800/50 border border-white/10 text-white text-sm"
+                  data-testid="sim-capital"
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="text-xs text-zinc-400">Use AI Agents</label>
+                <button
+                  onClick={() => setConfig({ ...config, use_ai_agents: !config.use_ai_agents })}
+                  className={`w-10 h-5 rounded-full transition-all ${config.use_ai_agents ? 'bg-cyan-500' : 'bg-zinc-700'}`}
+                  data-testid="sim-ai-toggle"
+                >
+                  <div className={`w-4 h-4 rounded-full bg-white transition-all ${config.use_ai_agents ? 'ml-5' : 'ml-0.5'}`} />
+                </button>
+              </div>
+            </div>
+            <button
+              onClick={handleStart}
+              disabled={starting}
+              className="mt-4 w-full px-4 py-2 rounded-lg bg-gradient-to-r from-cyan-500 to-violet-500 text-white text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
+              data-testid="start-simulation-btn"
+            >
+              {starting ? <Loader className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+              Start Simulation
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Jobs List */}
+      <div className="space-y-2 max-h-[300px] overflow-y-auto">
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader className="w-6 h-6 text-violet-400 animate-spin" />
+          </div>
+        ) : jobs.length === 0 ? (
+          <div className="text-center py-8">
+            <History className="w-10 h-10 text-zinc-600 mx-auto mb-2" />
+            <p className="text-zinc-500 text-sm">No simulations yet</p>
+            <p className="text-zinc-600 text-xs mt-1">Start a quick test to see results</p>
+          </div>
+        ) : (
+          jobs.map((job) => (
+            <SimulationJobRow key={job.id} job={job} />
+          ))
+        )}
+      </div>
+    </GlassCard>
+  );
+};
+
+const SimulationJobRow = ({ job }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="rounded-xl bg-black/30 border border-white/5 overflow-hidden" data-testid={`job-${job.id}`}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full p-3 flex items-center justify-between hover:bg-white/5 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <StatusBadge status={job.status} />
+          <div className="text-left">
+            <p className="text-sm font-medium text-white">{job.id}</p>
+            <p className="text-[10px] text-zinc-500">
+              {job.config?.start_date} → {job.config?.end_date}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <p className={`text-sm font-bold ${job.total_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {job.total_pnl >= 0 ? '+' : ''}${job.total_pnl?.toFixed(2) || '0.00'}
+            </p>
+            <p className="text-[10px] text-zinc-500">{job.total_trades || 0} trades</p>
+          </div>
+          <ChevronRight className={`w-4 h-4 text-zinc-500 transition-transform ${expanded ? 'rotate-90' : ''}`} />
+        </div>
+      </button>
+      
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="border-t border-white/5"
+          >
+            <div className="p-4 grid grid-cols-4 gap-3">
+              <div className="text-center">
+                <p className="text-lg font-bold text-emerald-400">{job.winning_trades || 0}</p>
+                <p className="text-[9px] text-zinc-500">Wins</p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-bold text-rose-400">{job.losing_trades || 0}</p>
+                <p className="text-[9px] text-zinc-500">Losses</p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-bold text-cyan-400">{job.win_rate?.toFixed(1) || 0}%</p>
+                <p className="text-[9px] text-zinc-500">Win Rate</p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-bold text-amber-400">{job.profit_factor?.toFixed(2) || 0}</p>
+                <p className="text-[9px] text-zinc-500">Profit Factor</p>
+              </div>
+            </div>
+            {job.config?.custom_symbols && (
+              <div className="px-4 pb-4">
+                <p className="text-[10px] text-zinc-500 mb-1">Symbols:</p>
+                <div className="flex flex-wrap gap-1">
+                  {(job.config.custom_symbols || []).map((s, i) => (
+                    <span key={i} className="px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 text-[10px]">
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+// Time-Series Model Panel
+const TimeSeriesPanel = ({ status, loading, onRefresh }) => {
+  const [training, setTraining] = useState(false);
+
+  const handleTrain = async () => {
+    setTraining(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/ai-modules/timeseries/train`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success('Model training started');
+        setTimeout(onRefresh, 2000);
+      } else {
+        toast.error('Training failed: ' + (data.error || 'Unknown error'));
+      }
+    } catch (err) {
+      toast.error('Error starting training');
+    } finally {
+      setTraining(false);
+    }
+  };
+
+  const model = status?.model || {};
+  const metrics = model.metrics || {};
+
+  return (
+    <GlassCard className="p-5" gradient>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center">
+            <Cpu className="w-5 h-5 text-amber-400" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-white">Time-Series AI Model</h3>
+            <p className="text-[10px] text-zinc-500">LightGBM price direction forecasting</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+            model.trained 
+              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+              : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+          }`}>
+            {model.trained ? 'TRAINED' : 'UNTRAINED'}
+          </span>
+          <button
+            onClick={handleTrain}
+            disabled={training}
+            className="px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-400 text-xs font-medium hover:bg-amber-500/30 transition-all disabled:opacity-50 flex items-center gap-1.5"
+            data-testid="train-model-btn"
+          >
+            {training ? <Loader className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+            Retrain
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader className="w-6 h-6 text-amber-400 animate-spin" />
+        </div>
+      ) : (
+        <>
+          {/* Model Stats */}
+          <div className="grid grid-cols-4 gap-3 mb-4">
+            <StatCard 
+              label="Version" 
+              value={model.version || 'N/A'} 
+              icon={Layers} 
+              color="amber" 
+            />
+            <StatCard 
+              label="Accuracy" 
+              value={`${((metrics.accuracy || 0) * 100).toFixed(1)}%`} 
+              icon={Target} 
+              color="cyan" 
+            />
+            <StatCard 
+              label="Features" 
+              value={model.feature_count || 0} 
+              icon={Database} 
+              color="violet" 
+            />
+            <StatCard 
+              label="Training Samples" 
+              value={metrics.training_samples?.toLocaleString() || '0'} 
+              icon={BarChart3} 
+              color="emerald" 
+            />
+          </div>
+
+          {/* Precision/Recall Stats */}
+          {metrics.precision_up !== undefined && (
+            <div className="p-3 rounded-xl bg-black/30 border border-white/5 mb-4">
+              <h4 className="text-[10px] text-zinc-500 uppercase mb-2">Model Performance (UP Predictions)</h4>
+              <div className="grid grid-cols-3 gap-4 text-center">
+                <div>
+                  <p className="text-lg font-bold text-emerald-400">{((metrics.precision_up || 0) * 100).toFixed(1)}%</p>
+                  <p className="text-[9px] text-zinc-500">Precision</p>
+                </div>
+                <div>
+                  <p className="text-lg font-bold text-cyan-400">{((metrics.recall_up || 0) * 100).toFixed(1)}%</p>
+                  <p className="text-[9px] text-zinc-500">Recall</p>
+                </div>
+                <div>
+                  <p className="text-lg font-bold text-amber-400">{((metrics.f1_up || 0) * 100).toFixed(1)}%</p>
+                  <p className="text-[9px] text-zinc-500">F1 Score</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Top Features */}
+          {metrics.top_features && (
+            <div className="p-3 rounded-xl bg-black/30 border border-white/5">
+              <h4 className="text-[10px] text-zinc-500 uppercase mb-2">Top Predictive Features</h4>
+              <div className="flex flex-wrap gap-1.5">
+                {metrics.top_features.slice(0, 8).map((f, i) => (
+                  <span key={i} className="px-2 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px]">
+                    {f}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </GlassCard>
+  );
+};
+
+// Prediction Tracking Panel
+const PredictionTrackingPanel = ({ accuracy, predictions, loading, onRefresh }) => {
+  const [verifying, setVerifying] = useState(false);
+
+  const handleVerify = async () => {
+    setVerifying(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/ai-modules/timeseries/verify-predictions`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(`Verified ${data.result?.verified || 0} predictions`);
+        onRefresh();
+      }
+    } catch (err) {
+      toast.error('Verification failed');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  return (
+    <GlassCard className="p-5" gradient>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 flex items-center justify-center">
+            <Target className="w-5 h-5 text-cyan-400" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-white">Prediction Tracking</h3>
+            <p className="text-[10px] text-zinc-500">Track forecast accuracy over time</p>
+          </div>
+        </div>
+        <button
+          onClick={handleVerify}
+          disabled={verifying}
+          className="px-3 py-1.5 rounded-lg bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-xs font-medium hover:bg-cyan-500/30 transition-all disabled:opacity-50 flex items-center gap-1.5"
+          data-testid="verify-btn"
+        >
+          {verifying ? <Loader className="w-3 h-3 animate-spin" /> : <CheckCircle className="w-3 h-3" />}
+          Verify Outcomes
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader className="w-6 h-6 text-cyan-400 animate-spin" />
+        </div>
+      ) : (
+        <>
+          {/* Accuracy Summary */}
+          {accuracy && (
+            <div className="grid grid-cols-4 gap-3 mb-4">
+              <StatCard 
+                label="Total Predictions" 
+                value={accuracy.total_predictions || 0} 
+                icon={Activity} 
+                color="cyan" 
+              />
+              <StatCard 
+                label="Correct" 
+                value={accuracy.correct_predictions || 0} 
+                icon={CheckCircle} 
+                color="emerald" 
+              />
+              <StatCard 
+                label="Accuracy" 
+                value={`${((accuracy.accuracy || 0) * 100).toFixed(1)}%`} 
+                icon={Target} 
+                color="amber" 
+              />
+              <StatCard 
+                label="Avg Return (Correct)" 
+                value={`${((accuracy.avg_return_when_correct || 0) * 100).toFixed(2)}%`} 
+                icon={TrendingUp} 
+                color="violet" 
+              />
+            </div>
+          )}
+
+          {/* Accuracy by Direction */}
+          {accuracy?.by_direction && Object.keys(accuracy.by_direction).length > 0 && (
+            <div className="p-3 rounded-xl bg-black/30 border border-white/5 mb-4">
+              <h4 className="text-[10px] text-zinc-500 uppercase mb-2">Accuracy by Direction</h4>
+              <div className="flex gap-3">
+                {Object.entries(accuracy.by_direction).map(([dir, stats]) => (
+                  <div key={dir} className="flex-1 p-2 rounded-lg bg-black/30 text-center">
+                    <span className={`text-xs font-bold ${
+                      dir === 'up' ? 'text-emerald-400' : dir === 'down' ? 'text-rose-400' : 'text-zinc-400'
+                    }`}>
+                      {dir.toUpperCase()}
+                    </span>
+                    <p className="text-lg font-bold text-white mt-1">{((stats.accuracy || 0) * 100).toFixed(0)}%</p>
+                    <p className="text-[8px] text-zinc-500">{stats.correct}/{stats.total}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Recent Predictions */}
+          <div>
+            <h4 className="text-[10px] text-zinc-500 uppercase mb-2">Recent Predictions</h4>
+            <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
+              {predictions.length === 0 ? (
+                <p className="text-center text-zinc-500 text-xs py-4">No predictions yet</p>
+              ) : (
+                predictions.slice(0, 10).map((pred, i) => (
+                  <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-black/30" data-testid={`prediction-${i}`}>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-white">{pred.symbol}</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                        pred.prediction?.direction === 'up' ? 'bg-emerald-500/20 text-emerald-400'
+                        : pred.prediction?.direction === 'down' ? 'bg-rose-500/20 text-rose-400'
+                        : 'bg-zinc-500/20 text-zinc-400'
+                      }`}>
+                        {pred.prediction?.direction?.toUpperCase() || 'FLAT'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {pred.outcome_verified ? (
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                          pred.prediction_correct ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                        }`}>
+                          {pred.prediction_correct ? 'CORRECT' : 'WRONG'}
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-400">
+                          PENDING
+                        </span>
+                      )}
+                      <span className="text-[10px] text-zinc-500">
+                        {new Date(pred.timestamp).toLocaleDateString()}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </GlassCard>
+  );
+};
+
+// Learning Insights Panel
+const LearningInsightsPanel = () => {
+  const [insights, setInsights] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchInsights = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/sentcom/learning/insights`);
+        const data = await res.json();
+        if (data.success) {
+          setInsights(data);
+        }
+      } catch (err) {
+        console.error('Error fetching learning insights:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchInsights();
+  }, []);
+
+  return (
+    <GlassCard className="p-5" gradient>
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20 flex items-center justify-center">
+          <Sparkles className="w-5 h-5 text-emerald-400" />
+        </div>
+        <div>
+          <h3 className="text-sm font-bold text-white">Learning Insights</h3>
+          <p className="text-[10px] text-zinc-500">System learning progress & patterns</p>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader className="w-6 h-6 text-emerald-400 animate-spin" />
+        </div>
+      ) : insights ? (
+        <div className="space-y-4">
+          {/* Trader Profile */}
+          {insights.trader_profile && (
+            <div className="p-3 rounded-xl bg-black/30 border border-white/5">
+              <h4 className="text-[10px] text-zinc-500 uppercase mb-2">Trader Profile</h4>
+              {insights.trader_profile.strengths?.length > 0 && (
+                <div className="mb-2">
+                  <p className="text-[10px] text-emerald-400 mb-1">Strengths:</p>
+                  <div className="flex flex-wrap gap-1">
+                    {insights.trader_profile.strengths.map((s, i) => (
+                      <span key={i} className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px]">
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {insights.trader_profile.weaknesses?.length > 0 && (
+                <div>
+                  <p className="text-[10px] text-rose-400 mb-1">Areas to Improve:</p>
+                  <div className="flex flex-wrap gap-1">
+                    {insights.trader_profile.weaknesses.map((w, i) => (
+                      <span key={i} className="px-2 py-0.5 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px]">
+                        {w}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Recommendations */}
+          {insights.recommendations?.length > 0 && (
+            <div className="p-3 rounded-xl bg-black/30 border border-white/5">
+              <h4 className="text-[10px] text-zinc-500 uppercase mb-2">AI Recommendations</h4>
+              <ul className="space-y-1.5">
+                {insights.recommendations.slice(0, 3).map((rec, i) => (
+                  <li key={i} className="flex items-start gap-2 text-xs text-zinc-400">
+                    <ChevronRight className="w-3 h-3 text-cyan-400 mt-0.5 flex-shrink-0" />
+                    {rec}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="text-center py-8">
+          <Sparkles className="w-10 h-10 text-zinc-600 mx-auto mb-2" />
+          <p className="text-zinc-500 text-sm">No learning insights yet</p>
+          <p className="text-zinc-600 text-xs mt-1">Trade more to generate insights</p>
+        </div>
+      )}
+    </GlassCard>
+  );
+};
+
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
+
+const TrainingCenter = () => {
+  const { jobs, loading: jobsLoading, refresh: refreshJobs } = useSimulationJobs();
+  const { status: tsStatus, loading: tsLoading, refresh: refreshTs } = useTimeseriesStatus();
+  const { accuracy, predictions, loading: predLoading, refresh: refreshPred } = usePredictionAccuracy();
+
+  return (
+    <div className="space-y-6" data-testid="training-center">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500/20 to-cyan-500/20 flex items-center justify-center">
+            <FlaskConical className="w-6 h-6 text-violet-400" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-white">Training Center</h1>
+            <p className="text-sm text-zinc-400">Make the entire system smarter through simulation and learning</p>
+          </div>
+        </div>
+        <button
+          onClick={() => {
+            refreshJobs();
+            refreshTs();
+            refreshPred();
+            toast.success('Refreshed all data');
+          }}
+          className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-zinc-400 hover:text-white hover:bg-white/10 transition-all flex items-center gap-2"
+          data-testid="refresh-all-btn"
+        >
+          <RefreshCw className="w-4 h-4" />
+          Refresh All
+        </button>
+      </div>
+
+      {/* Main Grid */}
+      <div className="grid grid-cols-2 gap-6">
+        {/* Left Column */}
+        <div className="space-y-6">
+          <SimulationPanel 
+            jobs={jobs} 
+            loading={jobsLoading} 
+            onRefresh={refreshJobs} 
+          />
+          <LearningInsightsPanel />
+        </div>
+        
+        {/* Right Column */}
+        <div className="space-y-6">
+          <TimeSeriesPanel 
+            status={tsStatus} 
+            loading={tsLoading} 
+            onRefresh={refreshTs} 
+          />
+          <PredictionTrackingPanel 
+            accuracy={accuracy} 
+            predictions={predictions} 
+            loading={predLoading} 
+            onRefresh={refreshPred} 
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default TrainingCenter;
