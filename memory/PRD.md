@@ -36,6 +36,13 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 - Displays AI module weights (auto-calibrated)
 - Sync buttons for each connection
 - Summary metrics: Total Data, Used for Training, Calibrations, Model Versions
+- **Auto-sync indicator**: "5pm ET daily" shown in panel header
+
+**Scheduled Auto-Sync:**
+- Runs daily at 5:00 PM ET (after market close)
+- Syncs all learning connections automatically
+- Results logged to `scheduled_task_logs` collection
+- Can be manually triggered via `/api/scheduler/run/learning_sync`
 
 ---
 

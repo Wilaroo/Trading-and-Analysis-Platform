@@ -25,6 +25,7 @@ class ScheduledTaskType(str, Enum):
     WEEKLY_REPORT = "weekly_report"
     SHADOW_UPDATE = "shadow_update"
     EDGE_DECAY_CHECK = "edge_decay_check"
+    LEARNING_SYNC = "learning_sync"
 
 
 @dataclass
@@ -170,6 +171,20 @@ class TradingScheduler:
                 replace_existing=True
             )
             
+            # 5. Learning Sync - Daily at 5:00 PM ET (after market close)
+            self._scheduler.add_job(
+                self._run_learning_sync,
+                CronTrigger(
+                    day_of_week='mon-fri',
+                    hour=17,
+                    minute=0,
+                    timezone='US/Eastern'
+                ),
+                id='learning_sync',
+                name='Learning Connections Sync',
+                replace_existing=True
+            )
+            
             self._scheduler.start()
             self._is_running = True
             logger.info("Trading scheduler started")
@@ -177,6 +192,7 @@ class TradingScheduler:
             logger.info("  - Weekly Report: Friday 4:30 PM ET")
             logger.info("  - Shadow Updates: Every 5 min")
             logger.info("  - Edge Decay Check: 4:15 PM ET (Mon-Fri)")
+            logger.info("  - Learning Sync: 5:00 PM ET (Mon-Fri)")
             
         except ImportError:
             logger.warning("APScheduler not installed. Scheduler disabled.")
@@ -365,6 +381,70 @@ class TradingScheduler:
             result.duration_seconds = (end_time - start_time).total_seconds()
             self._log_task_result(result)
             
+    async def _run_learning_sync(self):
+        """
+        Run daily learning connections sync.
+        
+        This synchronizes data between all learning systems:
+        - Simulation results → Model retraining
+        - Shadow decisions → Module weight calibration
+        - Alert outcomes → Scanner threshold tuning
+        - Predictions → Outcome verification
+        """
+        start_time = datetime.now(timezone.utc)
+        result = ScheduledTaskResult(
+            task_type=ScheduledTaskType.LEARNING_SYNC.value,
+            success=False,
+            started_at=start_time.isoformat(),
+            completed_at="",
+            duration_seconds=0,
+            result_summary=""
+        )
+        
+        try:
+            logger.info("Running scheduled learning sync...")
+            
+            # Import here to avoid circular imports
+            from services.learning_connectors_service import get_learning_connectors
+            
+            learning_connectors = get_learning_connectors()
+            sync_result = await learning_connectors.run_full_sync()
+            
+            if sync_result.get("success"):
+                # Count successful syncs
+                sync_results = sync_result.get("sync_results", {})
+                successful = sum(1 for r in sync_results.values() if r.get("success"))
+                total = len(sync_results)
+                
+                result.success = True
+                result.result_summary = (
+                    f"Learning sync completed: {successful}/{total} connections synced. "
+                    f"Timestamp: {sync_result.get('timestamp', 'N/A')}"
+                )
+                
+                # Log individual results
+                for conn_name, conn_result in sync_results.items():
+                    if conn_result.get("success"):
+                        logger.info(f"  ✓ {conn_name}: Success")
+                    else:
+                        logger.warning(f"  ✗ {conn_name}: {conn_result.get('error', 'Unknown error')}")
+            else:
+                result.result_summary = f"Sync failed: {sync_result.get('error', 'Unknown error')}"
+                
+        except Exception as e:
+            result.error = str(e)
+            result.result_summary = f"Learning sync failed: {e}"
+            logger.error(f"Learning sync failed: {e}")
+            import traceback
+            traceback.print_exc()
+            
+        finally:
+            end_time = datetime.now(timezone.utc)
+            result.completed_at = end_time.isoformat()
+            result.duration_seconds = (end_time - start_time).total_seconds()
+            self._log_task_result(result)
+            logger.info(f"Learning sync completed in {result.duration_seconds:.1f}s: {result.result_summary}")
+            
     def _log_task_result(self, result: ScheduledTaskResult):
         """Log task result to database"""
         if self._task_log_col is not None:
@@ -383,6 +463,8 @@ class TradingScheduler:
             await self._run_edge_decay_check()
         elif task_type == ScheduledTaskType.SHADOW_UPDATE.value:
             await self._run_shadow_update()
+        elif task_type == ScheduledTaskType.LEARNING_SYNC.value:
+            await self._run_learning_sync()
         else:
             return {"success": False, "error": f"Unknown task type: {task_type}"}
             
