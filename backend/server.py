@@ -80,6 +80,7 @@ from routers.context_awareness import router as context_awareness_router, init_c
 from routers.smart_stops import router as smart_stops_router, init_smart_stop_router
 from routers.sentcom import router as sentcom_router
 from routers.ai_modules import router as ai_modules_router, inject_services as inject_ai_module_services
+from routers.simulation_router import router as simulation_router, init_simulation_router
 from services.sentcom_service import get_sentcom_service, init_sentcom_service
 from services.ai_modules import (
     get_ai_module_config, init_ai_module_config,
@@ -353,6 +354,7 @@ app.include_router(smart_stops_router)  # Unified Smart Stop System
 init_smart_stop_router()  # Initialize smart stop service
 app.include_router(sentcom_router)  # SentCom - Unified AI Command Center
 app.include_router(ai_modules_router)  # AI Modules - Shadow Mode, Debate, Risk Manager
+app.include_router(simulation_router)  # Historical Simulation Engine
 
 # Collections
 strategies_col = db["strategies"]
@@ -817,6 +819,39 @@ if ai_consultation is not None:
     print("  - Pre-trade analysis: Debate + Risk + Institutional + Volume")
     print("  - Shadow Mode: AI analyzes but doesn't block trades (learning mode)")
     print("  - Live Mode: AI can block/reduce trades based on analysis")
+
+# ===================== HISTORICAL SIMULATION ENGINE =====================
+# Full SentCom backtesting on historical data
+try:
+    from services.historical_simulation_engine import init_simulation_engine, get_simulation_engine
+    from services.ai_modules.timeseries_gbm import get_timeseries_model
+    
+    simulation_engine = init_simulation_engine(
+        db=db,
+        alpaca_service=alpaca_service,
+        timeseries_model=get_timeseries_model() if timeseries_ai else None,
+        trade_consultation=ai_consultation,
+        scoring_engine=scoring_engine
+    )
+    
+    # Initialize the simulation engine
+    asyncio.create_task(simulation_engine.initialize())
+    
+    # Initialize router
+    init_simulation_router(simulation_engine)
+    
+    register_service('simulation_engine', simulation_engine)
+    
+    print("Historical Simulation Engine initialized")
+    print("  - Full SentCom bot backtesting on 1+ year of data")
+    print("  - Uses all AI agents (Debate, Risk, Time-Series, Institutional)")
+    print("  - Tracks all decisions for learning")
+    print("  - Endpoints: /api/simulation/*")
+except Exception as e:
+    print(f"Historical Simulation Engine initialization deferred: {e}")
+    import traceback
+    traceback.print_exc()
+    simulation_engine = None
 
 # ===================== TRADING SCHEDULER =====================
 # Automated daily/weekly analysis tasks
