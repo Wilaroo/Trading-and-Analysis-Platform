@@ -7,6 +7,42 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 15, 2026)
 
+### Time-Series AI Integration into Bull/Bear Debate ✅ NEW (March 15, 2026)
+**CLOSES THE LEARNING LOOP** - The trained Time-Series AI model now participates in trade decisions.
+
+**What Changed:**
+- Added `TimeSeriesAdvisor` class to `debate_agents.py`
+- AI predictions now influence the Bull/Bear debate as a weighted "advisor"
+- When AI supports the trade direction → Bull gets a score boost
+- When AI contradicts the trade direction → Bear gets a score boost
+- Configurable weight (default 15%) - can increase as model accuracy improves
+
+**New Fields in DebateResult:**
+- `ai_advisor_score`: How much AI supports the trade (0-1)
+- `ai_advisor_signal`: Human-readable signal (e.g., "AI predicts UP (72%) - supports long")
+- `ai_advisor_confidence`: Model's confidence level
+- `ai_advisor_direction`: "up", "down", or "flat"
+- `ai_forecast_used`: Whether AI forecast was available and usable
+
+**New API Endpoints:**
+- `POST /api/ai-modules/debate/ai-advisor-weight` - Set AI advisor weight (0-1)
+- `GET /api/ai-modules/debate/ai-advisor-status` - Get current AI advisor config
+- Updated `POST /api/ai-modules/debate/run` - Now accepts optional `ai_forecast` parameter
+
+**How It Works:**
+1. Trade consultation fetches Time-Series AI forecast FIRST
+2. Forecast is passed to Bull/Bear debate
+3. AI Advisor evaluates if forecast supports or contradicts trade
+4. Arbiter factors AI contribution into final scores
+5. All decisions logged to Shadow Tracker for learning
+
+**Files Modified:**
+- `/app/backend/services/ai_modules/debate_agents.py` - Added TimeSeriesAdvisor, updated Arbiter
+- `/app/backend/services/ai_modules/trade_consultation.py` - Reordered to fetch forecast first
+- `/app/backend/routers/ai_modules.py` - Added new endpoints
+
+---
+
 ### Weekend Auto Batch System ✅ NEW (March 15, 2026)
 Fully automated weekend batch processing system:
 

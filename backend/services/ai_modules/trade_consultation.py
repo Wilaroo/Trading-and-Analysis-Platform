@@ -145,23 +145,44 @@ class AITradeConsultation:
         modules_used = []
         all_signals = []
         
-        # ==================== 1. BULL/BEAR DEBATE ====================
+        # ==================== 0. GET TIME-SERIES FORECAST FIRST ====================
+        # Fetch forecast early so it can be passed to the debate
+        ai_forecast = None
+        if self._module_config.is_timeseries_enabled() and self._timeseries_ai and bars:
+            try:
+                ai_forecast = await self._timeseries_ai.get_forecast(
+                    symbol=symbol,
+                    bars=bars
+                )
+                logger.info(f"Time-Series forecast for {symbol}: {ai_forecast.get('direction')} "
+                           f"(confidence: {ai_forecast.get('confidence', 0):.0%})")
+            except Exception as e:
+                logger.warning(f"Time-series forecast fetch failed for {symbol}: {e}")
+        
+        # ==================== 1. BULL/BEAR DEBATE (now with AI forecast) ====================
         if self._module_config.is_debate_enabled() and self._debate_agents:
             try:
+                # Pass AI forecast to debate for integrated decision making
                 debate = await self._debate_agents.run_debate(
                     symbol=symbol,
                     setup=setup,
                     market_context=market_context,
                     technical_data=market_context.get("technicals", {}),
-                    portfolio=portfolio
+                    portfolio=portfolio,
+                    ai_forecast=ai_forecast  # NEW: Pass forecast to debate
                 )
                 
                 result["debate_result"] = debate.to_dict()
                 modules_used.append("debate_agents")
                 
+                # Note if AI was used in debate
+                if debate.ai_forecast_used:
+                    modules_used.append("timeseries_ai_in_debate")
+                
                 # Apply debate recommendation
                 if debate.final_recommendation == "pass":
-                    all_signals.append(f"Debate: PASS ({debate.winner} case prevailed)")
+                    ai_note = f" (AI: {debate.ai_advisor_signal})" if debate.ai_advisor_signal else ""
+                    all_signals.append(f"Debate: PASS ({debate.winner} case prevailed){ai_note}")
                     # Only block if NOT in shadow mode
                     if not self._module_config.is_shadow_mode("debate_agents"):
                         result["proceed"] = False
@@ -171,7 +192,10 @@ class AITradeConsultation:
                     if not self._module_config.is_shadow_mode("debate_agents"):
                         result["size_adjustment"] = min(result["size_adjustment"], 0.7)
                 else:
-                    all_signals.append(f"Debate: PROCEED ({debate.winner}, confidence {debate.combined_confidence:.0%})")
+                    ai_note = ""
+                    if debate.ai_forecast_used and debate.ai_advisor_signal:
+                        ai_note = f" | AI: {debate.ai_advisor_signal}"
+                    all_signals.append(f"Debate: PROCEED ({debate.winner}, confidence {debate.combined_confidence:.0%}){ai_note}")
                     
             except Exception as e:
                 logger.warning(f"Debate failed for {symbol}: {e}")
@@ -258,27 +282,28 @@ class AITradeConsultation:
             except Exception as e:
                 logger.warning(f"Volume analysis failed for {symbol}: {e}")
                 
-        # ==================== 5. TIME-SERIES AI ====================
-        if self._module_config.is_timeseries_enabled() and self._timeseries_ai and bars:
-            try:
-                forecast = await self._timeseries_ai.get_forecast(
-                    symbol=symbol,
-                    bars=bars
-                )
-                
-                # Get consultation context from forecast
-                ts_context = self._timeseries_ai.get_consultation_context(
-                    forecast=forecast,
-                    direction=direction
-                )
-                
-                result["timeseries_forecast"] = {
-                    "forecast": forecast,
-                    "context": ts_context
-                }
+        # ==================== 5. TIME-SERIES AI (store result) ====================
+        # Note: Forecast was already fetched in section 0 for the debate
+        # Here we just store it in the result and apply any additional signals
+        if ai_forecast and ai_forecast.get("usable", False):
+            # Get consultation context from forecast
+            ts_context = self._timeseries_ai.get_consultation_context(
+                forecast=ai_forecast,
+                direction=direction
+            )
+            
+            result["timeseries_forecast"] = {
+                "forecast": ai_forecast,
+                "context": ts_context
+            }
+            
+            # Only add to modules_used if not already added via debate
+            if "timeseries_ai" not in modules_used and "timeseries_ai_in_debate" not in modules_used:
                 modules_used.append("timeseries_ai")
-                
-                # Apply timeseries signals
+            
+            # Apply timeseries signals (only if debate is NOT enabled)
+            # This avoids double-counting the AI's contribution
+            if not self._module_config.is_debate_enabled():
                 if ts_context.get("signal"):
                     all_signals.append(f"TimeSeries: {ts_context['signal']}")
                     
@@ -290,12 +315,6 @@ class AITradeConsultation:
                             result["size_adjustment"], 
                             0.7  # Reduce size when AI contradicts
                         )
-                elif ts_context.get("align_with_trade") == "favorable":
-                    # Could increase size, but stay conservative
-                    pass
-                    
-            except Exception as e:
-                logger.warning(f"Time-series AI failed for {symbol}: {e}")
                 
         # ==================== BUILD COMBINED REASONING ====================
         if all_signals:

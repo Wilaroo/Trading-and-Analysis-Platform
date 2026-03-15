@@ -76,6 +76,11 @@ class DebateRequest(BaseModel):
     market_context: Dict[str, Any] = Field(default_factory=dict, description="Market context")
     technical_data: Dict[str, Any] = Field(default_factory=dict, description="Technical indicators")
     portfolio: Optional[Dict[str, Any]] = Field(None, description="Current portfolio state")
+    ai_forecast: Optional[Dict[str, Any]] = Field(None, description="Time-Series AI forecast (optional)")
+
+
+class AIAdvisorConfigRequest(BaseModel):
+    weight: float = Field(..., ge=0.0, le=1.0, description="AI advisor weight (0-1)")
 
 
 class RiskAssessmentRequest(BaseModel):
@@ -199,7 +204,12 @@ async def update_module_settings(module_name: str, request: ModuleSettingsReques
 
 @router.post("/debate/run")
 async def run_debate(request: DebateRequest):
-    """Run a bull/bear debate on a trade opportunity"""
+    """
+    Run a bull/bear debate on a trade opportunity.
+    
+    Enhanced: Now accepts optional ai_forecast parameter to include
+    Time-Series AI predictions in the debate.
+    """
     if not _debate_agents:
         raise HTTPException(status_code=503, detail="Debate agents not initialized")
     
@@ -216,7 +226,8 @@ async def run_debate(request: DebateRequest):
             setup=request.setup,
             market_context=request.market_context,
             technical_data=request.technical_data,
-            portfolio=request.portfolio
+            portfolio=request.portfolio,
+            ai_forecast=request.ai_forecast  # Pass AI forecast to debate
         )
         
         # Log to shadow tracker if enabled
@@ -243,6 +254,59 @@ async def run_debate(request: DebateRequest):
     except Exception as e:
         logger.error(f"Debate error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/debate/ai-advisor-weight")
+async def set_ai_advisor_weight(request: AIAdvisorConfigRequest):
+    """
+    Set the AI advisor weight in the debate process.
+    
+    The AI advisor weight determines how much the Time-Series AI predictions
+    influence the final debate outcome. 
+    
+    - 0.0 = AI has no influence
+    - 0.15 = Default (15% influence)
+    - 0.30 = High influence
+    - 1.0 = Maximum (AI dominates)
+    
+    Start conservative and increase as model accuracy improves.
+    """
+    if not _debate_agents:
+        raise HTTPException(status_code=503, detail="Debate agents not initialized")
+    
+    try:
+        _debate_agents.set_ai_advisor_weight(request.weight)
+        return {
+            "success": True,
+            "message": f"AI advisor weight set to {request.weight:.0%}",
+            "new_weight": request.weight
+        }
+    except Exception as e:
+        logger.error(f"Error setting AI advisor weight: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/debate/ai-advisor-status")
+async def get_ai_advisor_status():
+    """
+    Get the current AI advisor configuration and status.
+    """
+    if not _debate_agents:
+        raise HTTPException(status_code=503, detail="Debate agents not initialized")
+    
+    return {
+        "success": True,
+        "ai_advisor": {
+            "enabled": True,
+            "current_weight": _debate_agents._ai_advisor._weight,
+            "description": "Time-Series AI predictions now influence Bull/Bear debate",
+            "how_it_works": {
+                "supports_trade": "Adds to Bull's score when AI agrees with trade direction",
+                "contradicts_trade": "Adds to Bear's score when AI disagrees with trade direction",
+                "neutral": "No contribution when AI has low confidence"
+            }
+        }
+    }
 
 
 # =====================

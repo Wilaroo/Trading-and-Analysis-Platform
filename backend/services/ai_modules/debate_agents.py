@@ -6,7 +6,11 @@ argue opposing viewpoints before trade decisions.
 
 Bull Agent: Argues for the trade opportunity
 Bear Agent: Argues against / identifies risks
+Time-Series Advisor: Provides AI model's directional forecast
 Arbiter: Synthesizes debate and makes recommendation
+
+Enhanced (March 2026): Time-Series AI now participates in the debate
+as a weighted advisor, closing the learning loop.
 """
 
 import logging
@@ -33,6 +37,13 @@ class DebateResult:
     bear_score: float = 0.0  # 0-1
     bear_arguments: List[str] = field(default_factory=list)
     bear_confidence: float = 0.0
+    
+    # Time-Series AI Advisor (NEW)
+    ai_advisor_score: float = 0.0  # 0-1 (how much AI supports the trade direction)
+    ai_advisor_signal: str = ""  # Human-readable signal
+    ai_advisor_confidence: float = 0.0
+    ai_advisor_direction: str = ""  # "up", "down", "flat"
+    ai_forecast_used: bool = False  # Was AI forecast available?
     
     # Arbiter's verdict
     winner: str = ""  # "bull", "bear", "tie"
@@ -273,9 +284,130 @@ class BearAgent:
         }
 
 
+class TimeSeriesAdvisor:
+    """
+    Time-Series AI Advisor - Provides machine learning model's directional forecast.
+    
+    This closes the learning loop by incorporating the trained model's predictions
+    directly into the debate process. The model learns from historical outcomes
+    and provides probabilistic directional forecasts.
+    
+    Contribution:
+    - Supports Bull when predicting UP for long trades (or DOWN for shorts)
+    - Supports Bear when predicting contrary to trade direction
+    - Neutral when confidence is low or direction is flat
+    """
+    
+    # Weight of AI advisor in final decision (0-1)
+    # Start conservative, increase as model accuracy improves
+    DEFAULT_WEIGHT = 0.15  # 15% influence on final score
+    
+    def __init__(self, weight: float = None):
+        self._weight = weight if weight is not None else self.DEFAULT_WEIGHT
+        
+    def evaluate_forecast(
+        self,
+        forecast: Dict[str, Any],
+        trade_direction: str = "long"
+    ) -> Dict[str, Any]:
+        """
+        Evaluate how the AI forecast supports or contradicts the trade.
+        
+        Args:
+            forecast: Time-Series AI forecast with direction, probability, confidence
+            trade_direction: "long" or "short"
+            
+        Returns:
+            {
+                "score": 0-1 (how much this supports the trade),
+                "signal": human-readable signal,
+                "confidence": model confidence,
+                "supports_trade": "supports" | "contradicts" | "neutral",
+                "ai_direction": "up" | "down" | "flat"
+            }
+        """
+        if not forecast or not forecast.get("usable", False):
+            return {
+                "score": 0.5,  # Neutral
+                "signal": "AI forecast unavailable or low confidence",
+                "confidence": 0.0,
+                "supports_trade": "neutral",
+                "ai_direction": "flat",
+                "contribution_to_bull": 0.0,
+                "contribution_to_bear": 0.0
+            }
+            
+        ai_direction = forecast.get("direction", "flat")
+        confidence = forecast.get("confidence", 0)
+        prob_up = forecast.get("probability_up", 0.5)
+        prob_down = forecast.get("probability_down", 0.5)
+        
+        # Determine alignment with trade
+        if trade_direction == "long":
+            if ai_direction == "up":
+                # AI supports the long trade
+                supports = "supports"
+                score = 0.5 + (prob_up - 0.5) * confidence  # 0.5-1.0 range
+                signal = f"AI predicts UP ({prob_up*100:.0f}%) - supports long"
+                bull_contribution = confidence * self._weight
+                bear_contribution = 0.0
+            elif ai_direction == "down":
+                # AI contradicts the long trade
+                supports = "contradicts"
+                score = 0.5 - (prob_down - 0.5) * confidence  # 0.0-0.5 range
+                signal = f"AI predicts DOWN ({prob_down*100:.0f}%) - contradicts long"
+                bull_contribution = 0.0
+                bear_contribution = confidence * self._weight
+            else:
+                # AI is neutral
+                supports = "neutral"
+                score = 0.5
+                signal = "AI prediction unclear/neutral"
+                bull_contribution = 0.0
+                bear_contribution = 0.0
+        else:  # short
+            if ai_direction == "down":
+                # AI supports the short trade
+                supports = "supports"
+                score = 0.5 + (prob_down - 0.5) * confidence
+                signal = f"AI predicts DOWN ({prob_down*100:.0f}%) - supports short"
+                bull_contribution = confidence * self._weight
+                bear_contribution = 0.0
+            elif ai_direction == "up":
+                # AI contradicts the short trade
+                supports = "contradicts"
+                score = 0.5 - (prob_up - 0.5) * confidence
+                signal = f"AI predicts UP ({prob_up*100:.0f}%) - contradicts short"
+                bull_contribution = 0.0
+                bear_contribution = confidence * self._weight
+            else:
+                supports = "neutral"
+                score = 0.5
+                signal = "AI prediction unclear/neutral"
+                bull_contribution = 0.0
+                bear_contribution = 0.0
+                
+        return {
+            "score": round(max(0, min(1, score)), 2),
+            "signal": signal,
+            "confidence": round(confidence, 2),
+            "supports_trade": supports,
+            "ai_direction": ai_direction,
+            "contribution_to_bull": round(bull_contribution, 3),
+            "contribution_to_bear": round(bear_contribution, 3),
+            "weight_used": self._weight
+        }
+        
+    def set_weight(self, weight: float):
+        """Update the AI advisor weight (0-1)"""
+        self._weight = max(0, min(1, weight))
+
+
 class ArbiterAgent:
     """
     The Arbiter - Synthesizes bull/bear debate and makes final recommendation.
+    
+    Enhanced: Now factors in Time-Series AI advisor contribution.
     
     Uses configurable thresholds to determine:
     - Whether to proceed with trade
@@ -283,28 +415,58 @@ class ArbiterAgent:
     - Whether to pass entirely
     """
     
+    DEFAULT_CONFIG = {
+        "min_bull_score": 0.4,
+        "min_bear_score": 0.4,
+        "require_consensus": False,
+        "bull_margin_to_proceed": 0.15,
+        "bear_margin_to_pass": 0.2,
+        "ai_advisor_weight": 0.15
+    }
+    
     def __init__(self, config: Dict = None):
-        self._config = config or {
-            "min_bull_score": 0.4,
-            "min_bear_score": 0.4,
-            "require_consensus": False,
-            "bull_margin_to_proceed": 0.15,  # Bull must lead by this much
-            "bear_margin_to_pass": 0.2  # Bear must lead by this much to pass
-        }
+        # Merge provided config with defaults
+        self._config = {**self.DEFAULT_CONFIG}
+        if config:
+            self._config.update(config)
         
     def arbitrate(
         self,
         bull_case: Dict,
         bear_case: Dict,
-        setup: Dict
+        setup: Dict,
+        ai_advisor_result: Dict = None
     ) -> Dict[str, Any]:
         """
         Make final recommendation based on debate.
+        
+        Args:
+            bull_case: Bull agent's arguments and score
+            bear_case: Bear agent's arguments and score
+            setup: Trade setup details
+            ai_advisor_result: Optional Time-Series AI advisor evaluation
         """
         bull_score = bull_case.get("score", 0)
         bear_score = bear_case.get("score", 0)
         bull_args = bull_case.get("arguments", [])
         bear_args = bear_case.get("arguments", [])
+        
+        # Apply AI advisor contributions if available
+        ai_signal = ""
+        if ai_advisor_result and ai_advisor_result.get("confidence", 0) > 0:
+            bull_contribution = ai_advisor_result.get("contribution_to_bull", 0)
+            bear_contribution = ai_advisor_result.get("contribution_to_bear", 0)
+            
+            # Add AI contributions to scores
+            bull_score += bull_contribution
+            bear_score += bear_contribution
+            
+            ai_signal = ai_advisor_result.get("signal", "")
+            supports = ai_advisor_result.get("supports_trade", "neutral")
+            
+            logger.info(
+                f"AI Advisor: {supports} trade | Bull +{bull_contribution:.3f}, Bear +{bear_contribution:.3f}"
+            )
         
         # Determine winner
         score_diff = bull_score - bear_score
@@ -314,13 +476,17 @@ class ArbiterAgent:
             recommendation = "proceed"
             reasoning = f"Bull case prevails ({bull_score:.2f} vs {bear_score:.2f}). "
             reasoning += f"Key strengths: {bull_args[0] if bull_args else 'N/A'}. "
-            if bear_args:
+            if ai_signal and "supports" in ai_signal.lower():
+                reasoning += f"AI confirms: {ai_signal}. "
+            elif bear_args:
                 reasoning += f"Monitor: {bear_args[0]}"
         elif score_diff < -self._config["bear_margin_to_pass"]:
             winner = "bear"
             recommendation = "pass"
             reasoning = f"Bear case prevails ({bear_score:.2f} vs {bull_score:.2f}). "
             reasoning += f"Key concerns: {bear_args[0] if bear_args else 'N/A'}. "
+            if ai_signal and "contradicts" in ai_signal.lower():
+                reasoning += f"AI agrees: {ai_signal}. "
             reasoning += "Risk outweighs opportunity."
         else:
             winner = "tie"
@@ -328,14 +494,19 @@ class ArbiterAgent:
             if bull_score >= self._config["min_bull_score"]:
                 recommendation = "reduce_size"
                 reasoning = f"Close debate ({bull_score:.2f} vs {bear_score:.2f}). "
+                if ai_signal:
+                    reasoning += f"AI says: {ai_signal}. "
                 reasoning += "Consider reduced position size to manage uncertainty."
             else:
                 recommendation = "pass"
                 reasoning = f"Neither case is compelling ({bull_score:.2f} vs {bear_score:.2f}). "
                 reasoning += "Wait for clearer opportunity."
                 
-        # Calculate combined confidence
-        combined_confidence = (bull_case.get("confidence", 0.5) + bear_case.get("confidence", 0.5)) / 2
+        # Calculate combined confidence (include AI if available)
+        confidences = [bull_case.get("confidence", 0.5), bear_case.get("confidence", 0.5)]
+        if ai_advisor_result and ai_advisor_result.get("confidence", 0) > 0:
+            confidences.append(ai_advisor_result.get("confidence", 0.5))
+        combined_confidence = sum(confidences) / len(confidences)
         
         return {
             "winner": winner,
@@ -351,14 +522,19 @@ class DebateAgents:
     """
     Orchestrates the Bull/Bear Debate process.
     
+    Enhanced: Now includes Time-Series AI Advisor for ML-based input.
+    
     Usage:
         debate = DebateAgents()
-        result = await debate.run_debate(symbol, setup, market_context, technical_data)
+        result = await debate.run_debate(symbol, setup, market_context, technical_data, ai_forecast=forecast)
     """
     
     def __init__(self, llm_service=None, learning_provider=None, config: Dict = None):
         self._bull = BullAgent(llm_service)
         self._bear = BearAgent(llm_service, learning_provider)
+        self._ai_advisor = TimeSeriesAdvisor(
+            weight=config.get("ai_advisor_weight", 0.15) if config else 0.15
+        )
         self._arbiter = ArbiterAgent(config)
         self._config = config or {}
         
@@ -369,7 +545,8 @@ class DebateAgents:
         market_context: Dict,
         technical_data: Dict,
         portfolio: Dict = None,
-        rounds: int = 1
+        rounds: int = 1,
+        ai_forecast: Dict = None
     ) -> DebateResult:
         """
         Run a full bull/bear debate on a trade opportunity.
@@ -381,32 +558,51 @@ class DebateAgents:
             technical_data: Technical indicators for the symbol
             portfolio: Current portfolio state (optional)
             rounds: Number of debate rounds (future: multi-round debates)
+            ai_forecast: Time-Series AI forecast (optional, enhances debate)
             
         Returns:
-            DebateResult with full debate outcome
+            DebateResult with full debate outcome including AI advisor input
         """
         import time
         start_time = time.time()
+        
+        direction = setup.get("direction", "long")
         
         # Run bull and bear cases in parallel
         bull_case = await self._bull.make_case(symbol, setup, market_context, technical_data)
         bear_case = await self._bear.make_case(symbol, setup, market_context, technical_data, portfolio)
         
-        # Arbiter makes final call
-        verdict = self._arbiter.arbitrate(bull_case, bear_case, setup)
+        # Get AI Advisor's evaluation if forecast available
+        ai_advisor_result = None
+        if ai_forecast:
+            ai_advisor_result = self._ai_advisor.evaluate_forecast(ai_forecast, direction)
+            logger.info(
+                f"AI Advisor for {symbol}: {ai_advisor_result.get('supports_trade')} "
+                f"(confidence: {ai_advisor_result.get('confidence', 0):.0%})"
+            )
+        
+        # Arbiter makes final call (now with AI advisor input)
+        verdict = self._arbiter.arbitrate(bull_case, bear_case, setup, ai_advisor_result)
         
         elapsed_ms = int((time.time() - start_time) * 1000)
         
         result = DebateResult(
             symbol=symbol.upper(),
             setup_type=setup.get("setup_type", "unknown"),
-            direction=setup.get("direction", "long"),
-            bull_score=bull_case.get("score", 0),
+            direction=direction,
+            bull_score=verdict.get("bull_score", bull_case.get("score", 0)),
             bull_arguments=bull_case.get("arguments", []),
             bull_confidence=bull_case.get("confidence", 0),
-            bear_score=bear_case.get("score", 0),
+            bear_score=verdict.get("bear_score", bear_case.get("score", 0)),
             bear_arguments=bear_case.get("arguments", []),
             bear_confidence=bear_case.get("confidence", 0),
+            # AI Advisor fields
+            ai_advisor_score=ai_advisor_result.get("score", 0) if ai_advisor_result else 0,
+            ai_advisor_signal=ai_advisor_result.get("signal", "") if ai_advisor_result else "",
+            ai_advisor_confidence=ai_advisor_result.get("confidence", 0) if ai_advisor_result else 0,
+            ai_advisor_direction=ai_advisor_result.get("ai_direction", "") if ai_advisor_result else "",
+            ai_forecast_used=ai_forecast is not None and ai_forecast.get("usable", False),
+            # Arbiter fields
             winner=verdict.get("winner", "tie"),
             final_recommendation=verdict.get("recommendation", "pass"),
             reasoning=verdict.get("reasoning", ""),
@@ -416,14 +612,23 @@ class DebateAgents:
             timestamp=datetime.now(timezone.utc).isoformat()
         )
         
-        logger.info(f"Debate {symbol}: {result.winner} wins, recommendation={result.final_recommendation}")
+        logger.info(
+            f"Debate {symbol}: {result.winner} wins, recommendation={result.final_recommendation}"
+            + (f", AI: {ai_advisor_result.get('supports_trade')}" if ai_advisor_result else "")
+        )
         
         return result
+        
+    def set_ai_advisor_weight(self, weight: float):
+        """Update AI advisor weight (0-1)"""
+        self._ai_advisor.set_weight(weight)
         
     def update_config(self, config: Dict):
         """Update arbiter configuration"""
         self._arbiter._config.update(config)
         self._config.update(config)
+        if "ai_advisor_weight" in config:
+            self._ai_advisor.set_weight(config["ai_advisor_weight"])
 
 
 # Singleton instance
