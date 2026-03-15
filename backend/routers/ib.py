@@ -3,7 +3,7 @@ Interactive Brokers API Router
 Endpoints for IB connection, account info, trading, and market data
 NO MOCK DATA - Only real verified data from IB Gateway or cached data with timestamps
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
@@ -333,7 +333,7 @@ async def get_pusher_setup_info():
     cloud_url = os.environ.get("REACT_APP_BACKEND_URL", "")
     if not cloud_url:
         # Try to infer from request or env
-        cloud_url = os.environ.get("APP_URL", "https://ai-trader-sync.preview.emergentagent.com")
+        cloud_url = os.environ.get("APP_URL", "https://sentcom-learn.preview.emergentagent.com")
     
     pusher_connected = False
     last_update = _pushed_ib_data.get("last_update")
@@ -1301,23 +1301,28 @@ async def claim_historical_data_request(request_id: str):
 
 
 @router.post("/historical-data/result")
-async def report_historical_data_result(
-    request_id: str,
-    symbol: str,
-    success: bool,
-    data: List[dict] = None,
-    error: str = None,
-    fetched_at: str = None
-):
+async def report_historical_data_result(request: Request):
     """
     Report the result of a historical data fetch.
     Called by IB Data Pusher after fetching data from IB Gateway.
+    Accepts JSON body with: request_id, symbol, success, data, error, fetched_at
     """
     service = _get_historical_data_service()
     if not service:
         raise HTTPException(status_code=503, detail="Historical data service not available")
     
     try:
+        # Parse JSON body
+        body = await request.json()
+        request_id = body.get("request_id")
+        symbol = body.get("symbol")
+        success = body.get("success", False)
+        data = body.get("data")
+        error = body.get("error")
+        
+        if not request_id:
+            raise HTTPException(status_code=400, detail="request_id is required")
+        
         service.complete_request(
             request_id=request_id,
             success=success,
@@ -1325,6 +1330,8 @@ async def report_historical_data_result(
             error=error
         )
         return {"success": True, "message": f"Result recorded for {request_id}"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error reporting historical data result: {e}")
         raise HTTPException(status_code=500, detail=str(e))

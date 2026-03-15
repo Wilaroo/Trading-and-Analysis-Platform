@@ -7,6 +7,12 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 15, 2026)
 
+### Historical Data Collection Pipeline Fixed ✅ (March 15, 2026)
+- **Fixed critical bug**: `/api/ib/historical-data/result` endpoint was missing `Request` import from FastAPI
+- The endpoint now correctly accepts JSON body from the local `ib_data_pusher.py` script
+- This completes the command-queue architecture for historical data collection
+- **Flow**: Cloud creates job → Local pusher polls → Fetches from IB Gateway → Reports result back to cloud
+
 ### Market Scanner Integration ✅ COMPLETE
 - **Wired market_scanner_service to ib_historical_collector** in server.py
 - Full Market button now shows **12,577 US stocks** (previously showed 50+)
