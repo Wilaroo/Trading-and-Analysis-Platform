@@ -184,7 +184,7 @@ class TimeSeriesGBM:
         Train the model on historical data.
         
         Args:
-            bars_by_symbol: Dict of symbol -> list of OHLCV bars
+            bars_by_symbol: Dict of symbol -> list of OHLCV bars (oldest first)
             validation_split: Fraction of data for validation
             num_boost_round: Number of boosting rounds
             early_stopping_rounds: Early stopping patience
@@ -199,29 +199,43 @@ class TimeSeriesGBM:
         all_targets = []
         
         for symbol, bars in bars_by_symbol.items():
-            if len(bars) < 50:
+            if len(bars) < 50 + self.forecast_horizon:
                 continue
-                
-            # Slide through bars to create training samples
-            for i in range(len(bars) - self.forecast_horizon - 50):
+            
+            # Bars are in chronological order (oldest first)
+            # We need 50 bars for features + forecast_horizon bars for target
+            # Slide through leaving room for future target
+            for i in range(len(bars) - 50 - self.forecast_horizon):
+                # Window of 50 bars starting at position i
                 window_bars = bars[i:i+50]
                 
+                # Reverse window to recent-first for feature extraction
+                window_bars_recent_first = window_bars[::-1]
+                
                 feature_set = self._feature_engineer.extract_features(
-                    window_bars,
+                    window_bars_recent_first,
                     symbol=symbol,
-                    include_target=True,
-                    forecast_horizon=self.forecast_horizon
+                    include_target=False  # We calculate target ourselves
                 )
                 
-                if feature_set and feature_set.target is not None:
+                if feature_set is not None:
                     # Convert features to vector in consistent order
                     feature_vector = [
                         feature_set.features.get(f, 0.0) 
                         for f in self._feature_names
                     ]
                     
-                    # Binary classification: up vs not-up
-                    target = 1 if feature_set.target > 0.5 else 0
+                    # Calculate forward-looking target
+                    # Current price is the last bar in window (most recent in window)
+                    current_price = bars[i + 49]["close"]
+                    # Future price is forecast_horizon bars after the window
+                    future_price = bars[i + 49 + self.forecast_horizon]["close"]
+                    
+                    # Calculate return (positive = price went up)
+                    target_return = (future_price - current_price) / current_price
+                    
+                    # Binary classification: up (>0.5%) vs not-up
+                    target = 1 if target_return > 0.005 else 0
                     
                     all_features.append(feature_vector)
                     all_targets.append(target)

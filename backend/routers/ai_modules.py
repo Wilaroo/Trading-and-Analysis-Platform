@@ -638,7 +638,7 @@ def inject_timeseries_service(timeseries_ai):
 
 class TimeSeriesForecastRequest(BaseModel):
     symbol: str = Field(..., description="Ticker symbol")
-    bars: List[Dict[str, Any]] = Field(..., description="OHLCV bars (most recent first)")
+    bars: Optional[List[Dict[str, Any]]] = Field(None, description="OHLCV bars (most recent first). If not provided, will fetch from MongoDB.")
 
 
 @router.post("/timeseries/forecast")
