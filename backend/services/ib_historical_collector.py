@@ -1014,6 +1014,35 @@ class IBHistoricalCollector:
         try:
             total_symbols = len(job.symbols)
             
+            # Warm up the HMDS connection with a known liquid symbol first
+            logger.info("Warming up IB HMDS connection with SPY test...")
+            try:
+                warmup_result = await self._ib_service.get_historical_data(
+                    symbol="SPY",
+                    duration="1 D",
+                    bar_size="1 day"
+                )
+                if warmup_result.get("success") and warmup_result.get("data"):
+                    logger.info(f"HMDS warm-up successful: got {len(warmup_result['data'])} bars for SPY")
+                else:
+                    logger.warning(f"HMDS warm-up returned no data: {warmup_result.get('error', 'Unknown')}")
+                    # Wait a bit and try again
+                    await asyncio.sleep(5)
+                    warmup_result = await self._ib_service.get_historical_data(
+                        symbol="SPY",
+                        duration="1 D", 
+                        bar_size="1 day"
+                    )
+                    if warmup_result.get("success") and warmup_result.get("data"):
+                        logger.info(f"HMDS warm-up retry successful: got {len(warmup_result['data'])} bars")
+                    else:
+                        logger.error("HMDS warm-up failed after retry - collection may fail")
+            except Exception as e:
+                logger.error(f"HMDS warm-up failed: {e}")
+                # Continue anyway - maybe individual symbols will work
+            
+            await asyncio.sleep(2)  # Give HMDS time to fully connect
+            
             for i, symbol in enumerate(job.symbols):
                 if self._cancel_requested:
                     job.status = CollectionStatus.CANCELLED
@@ -1075,15 +1104,29 @@ class IBHistoricalCollector:
         while retries < self.MAX_RETRIES:
             try:
                 # Call IB service for historical data
+                # Returns a dict with 'success' and 'data' keys, or raises exception
                 result = await self._ib_service.get_historical_data(
                     symbol=symbol,
                     duration=duration,
                     bar_size=bar_size
                 )
                 
-                if result.get("success") and result.get("data"):
-                    bars = result["data"]
-                    
+                # Handle both return formats:
+                # 1. Dict with success/data keys: {"success": True, "data": [...]}
+                # 2. Direct list of bars: [...]
+                if isinstance(result, dict):
+                    if result.get("success") and result.get("data"):
+                        bars = result["data"]
+                    elif result.get("error"):
+                        raise Exception(result.get("error"))
+                    else:
+                        bars = result.get("data", [])
+                elif isinstance(result, list):
+                    bars = result
+                else:
+                    bars = []
+                
+                if bars:
                     # Store in database
                     if self._data_col is not None:
                         for bar in bars:
@@ -1092,15 +1135,15 @@ class IBHistoricalCollector:
                                     {
                                         "symbol": symbol,
                                         "bar_size": bar_size,
-                                        "date": bar["date"]
+                                        "date": bar.get("date") or bar.get("time")
                                     },
                                     {
                                         "$set": {
-                                            "open": bar["open"],
-                                            "high": bar["high"],
-                                            "low": bar["low"],
-                                            "close": bar["close"],
-                                            "volume": bar["volume"],
+                                            "open": bar.get("open"),
+                                            "high": bar.get("high"),
+                                            "low": bar.get("low"),
+                                            "close": bar.get("close"),
+                                            "volume": bar.get("volume"),
                                             "collected_at": datetime.now(timezone.utc).isoformat()
                                         }
                                     },
@@ -1110,17 +1153,13 @@ class IBHistoricalCollector:
                             except Exception as e:
                                 # Duplicate key errors are fine
                                 if "duplicate" not in str(e).lower():
-                                    logger.warning(f"Error storing bar: {e}")
+                                    logger.warning(f"Error storing bar for {symbol}: {e}")
                                     
                     return bars_collected
                 else:
-                    error = result.get("error", "Unknown error")
-                    if "pacing" in error.lower() or "limit" in error.lower():
-                        # Rate limit hit, wait longer
-                        await asyncio.sleep(10)
-                        retries += 1
-                    else:
-                        raise Exception(error)
+                    # No data returned - might be weekend/holiday or no data available
+                    logger.warning(f"No bars returned for {symbol}")
+                    return 0
                         
             except Exception:
                 retries += 1

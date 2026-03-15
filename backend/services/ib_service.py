@@ -1162,15 +1162,20 @@ class IBService:
         symbol: str,
         duration: str = "1 D",
         bar_size: str = "5 mins"
-    ) -> List[Dict]:
-        """Get historical data"""
+    ) -> Dict[str, Any]:
+        """Get historical data
+        
+        Returns:
+            Dict with 'success', 'data', and optionally 'error' keys
+        """
         response = self._send_request(
             IBCommand.GET_HISTORICAL_DATA,
-            {"symbol": symbol, "duration": duration, "bar_size": bar_size}
+            {"symbol": symbol, "duration": duration, "bar_size": bar_size},
+            timeout=60.0  # Longer timeout for historical data
         )
         if not response.success:
-            raise ConnectionError(response.error)
-        return response.data
+            return {"success": False, "error": response.error, "data": []}
+        return {"success": True, "data": response.data or [], "error": None}
     
     async def run_scanner(
         self,
