@@ -228,17 +228,70 @@ class WeekendBatchRunner:
             logger.error(f"Error triggering training: {e}")
             return {"success": False, "error": str(e)}
     
-    def run_simulations(self, symbols: list = None) -> dict:
-        """Run batch simulations on collected data."""
+    def get_simulation_universe(self) -> list:
+        """
+        Get the list of symbols to run simulations on.
+        Uses the Smart Collection universe (ADV-filtered stocks).
+        """
+        try:
+            # Get the smart collection plan which has the symbol universe
+            resp = requests.get(f"{self.api_base}/ib-collector/smart-collection-plan", timeout=30)
+            if resp.ok:
+                plan = resp.json()
+                symbols = set()
+                
+                # Collect symbols from all tiers
+                for tier_name, tier_data in plan.get("plan", {}).items():
+                    tier_symbols = tier_data.get("symbols", [])
+                    symbols.update(tier_symbols)
+                
+                logger.info(f"Got {len(symbols)} symbols from Smart Collection universe")
+                return list(symbols)
+        except Exception as e:
+            logger.warning(f"Could not get Smart Collection universe: {e}")
+        
+        # Fallback: Get the curated/default symbols
+        try:
+            resp = requests.get(f"{self.api_base}/ib-collector/default-symbols", timeout=30)
+            if resp.ok:
+                data = resp.json()
+                symbols = data.get("symbols", [])
+                logger.info(f"Fallback: Using {len(symbols)} curated symbols")
+                return symbols
+        except Exception as e:
+            logger.warning(f"Could not get curated symbols: {e}")
+        
+        # Last resort fallback
+        logger.warning("Using hardcoded top symbols as last resort")
+        return ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "TSLA", "AMD", "META", "GOOGL", "AMZN",
+                "NFLX", "JPM", "BAC", "WFC", "GS", "V", "MA", "DIS", "PYPL", "INTC"]
+    
+    def run_simulations(self, symbols: list = None, max_symbols: int = None) -> dict:
+        """
+        Run batch simulations on collected data.
+        
+        Args:
+            symbols: List of symbols to simulate. If None, uses Smart Collection universe.
+            max_symbols: Maximum number of symbols to simulate (None = all)
+        """
         logger.info("=" * 50)
         logger.info("RUNNING BATCH SIMULATIONS")
         logger.info("=" * 50)
         
         if symbols is None:
-            symbols = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "TSLA", "AMD", "META", "GOOGL", "AMZN"]
+            symbols = self.get_simulation_universe()
         
-        results = []
-        for symbol in symbols:
+        # Optionally limit the number of symbols
+        if max_symbols and len(symbols) > max_symbols:
+            logger.info(f"Limiting simulations to {max_symbols} symbols (from {len(symbols)})")
+            # Prioritize liquid names - they're usually first in the list
+            symbols = symbols[:max_symbols]
+        
+        logger.info(f"Running simulations for {len(symbols)} symbols...")
+        
+        results = {"success": 0, "failed": 0, "errors": []}
+        
+        for i, symbol in enumerate(symbols):
             try:
                 resp = requests.post(
                     f"{self.api_base}/simulation/run",
@@ -251,20 +304,27 @@ class WeekendBatchRunner:
                 )
                 
                 if resp.ok:
-                    result = resp.json()
-                    logger.info(f"  {symbol}: Simulation started")
-                    results.append({"symbol": symbol, "success": True})
+                    results["success"] += 1
+                    # Log progress every 50 symbols
+                    if (i + 1) % 50 == 0:
+                        logger.info(f"  Progress: {i + 1}/{len(symbols)} simulations triggered")
                 else:
-                    logger.warning(f"  {symbol}: Failed - {resp.status_code}")
-                    results.append({"symbol": symbol, "success": False})
+                    results["failed"] += 1
+                    if len(results["errors"]) < 10:  # Keep first 10 errors
+                        results["errors"].append(f"{symbol}: HTTP {resp.status_code}")
                     
             except Exception as e:
-                logger.warning(f"  {symbol}: Error - {e}")
-                results.append({"symbol": symbol, "success": False, "error": str(e)})
+                results["failed"] += 1
+                if len(results["errors"]) < 10:
+                    results["errors"].append(f"{symbol}: {str(e)[:50]}")
             
-            time.sleep(1)  # Don't overwhelm the API
+            time.sleep(0.5)  # Rate limit - 2 per second
         
-        return {"simulations_triggered": len(results), "results": results}
+        logger.info(f"Simulations complete: {results['success']} succeeded, {results['failed']} failed")
+        if results["errors"]:
+            logger.warning(f"Sample errors: {results['errors'][:5]}")
+        
+        return results
     
     def sync_learning_connections(self) -> dict:
         """Trigger learning connection sync."""
