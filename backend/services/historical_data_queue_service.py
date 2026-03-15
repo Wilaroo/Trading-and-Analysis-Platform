@@ -38,7 +38,8 @@ class HistoricalDataQueueService:
             logger.warning(f"Error creating indexes: {e}")
     
     def create_request(self, symbol: str, duration: str = "1 M", 
-                       bar_size: str = "1 day", callback_id: str = None) -> str:
+                       bar_size: str = "1 day", callback_id: str = None,
+                       skip_if_pending: bool = True) -> str:
         """
         Create a new historical data request.
         
@@ -47,10 +48,23 @@ class HistoricalDataQueueService:
             duration: Duration string (e.g., "1 M", "1 D", "1 Y")
             bar_size: Bar size string (e.g., "1 day", "1 hour", "5 mins")
             callback_id: Optional ID to associate with this request
+            skip_if_pending: If True, don't create if there's already a pending/claimed request
             
         Returns:
-            request_id for tracking
+            request_id for tracking (or existing request_id if skipping duplicate)
         """
+        # Check for existing pending/claimed request for same symbol+bar_size
+        if skip_if_pending:
+            existing = self.collection.find_one({
+                "symbol": symbol.upper(),
+                "bar_size": bar_size,
+                "status": {"$in": ["pending", "claimed"]}
+            }, {"request_id": 1})
+            
+            if existing:
+                logger.debug(f"Skipping duplicate request for {symbol} {bar_size} - already in queue")
+                return existing["request_id"]
+        
         request_id = f"hist_{uuid.uuid4().hex[:12]}"
         
         request = {

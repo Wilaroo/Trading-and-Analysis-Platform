@@ -15,12 +15,56 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ib-collector", tags=["ib-collector"])
 
 
+@router.get("/data-status")
+async def get_data_status(
+    bar_size: str = "1 day",
+    days_threshold: int = 7
+):
+    """
+    Check what historical data already exists.
+    
+    Returns count of symbols with recent data vs total expected symbols.
+    Use this to understand what will be skipped during collection.
+    
+    - **bar_size**: Bar size to check (default "1 day")
+    - **days_threshold**: Consider data "recent" if collected within this many days
+    """
+    try:
+        collector = get_ib_collector()
+        
+        # Get symbols with recent data
+        symbols_with_data = collector.get_symbols_with_recent_data(bar_size, days_threshold)
+        
+        # Get total expected symbols (default list)
+        default_symbols = collector.get_default_symbols()
+        
+        # Calculate overlap
+        overlap = len(set(s.upper() for s in default_symbols) & symbols_with_data)
+        
+        return {
+            "success": True,
+            "bar_size": bar_size,
+            "days_threshold": days_threshold,
+            "symbols_with_recent_data": len(symbols_with_data),
+            "default_symbols_count": len(default_symbols),
+            "would_be_skipped": overlap,
+            "would_collect": len(default_symbols) - overlap,
+            "message": f"{overlap} of {len(default_symbols)} default symbols already have recent {bar_size} data"
+        }
+    except Exception as e:
+        logger.error(f"Error getting data status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/start")
 async def start_collection(
     symbols: Optional[List[str]] = None,
     bar_size: str = "5 mins",
     duration: str = "1 M",
-    use_defaults: bool = True
+    use_defaults: bool = True,
+    skip_recent: bool = True,
+    recent_days_threshold: int = 7,
+    force_refresh: bool = False
 ):
     """
     Start a historical data collection job.
@@ -29,6 +73,9 @@ async def start_collection(
     - **bar_size**: Bar size (1 min, 5 mins, 15 mins, 1 hour, 1 day)
     - **duration**: Duration per request (1 D, 2 D, 1 W, 1 M, etc.)
     - **use_defaults**: If true, use default symbol list when none provided
+    - **skip_recent**: Skip symbols that already have data within recent_days_threshold
+    - **recent_days_threshold**: Days to consider data "recent" (default 7)
+    - **force_refresh**: Ignore existing data and re-collect everything
     """
     try:
         collector = get_ib_collector()
@@ -36,7 +83,10 @@ async def start_collection(
             symbols=symbols,
             bar_size=bar_size,
             duration=duration,
-            use_defaults=use_defaults
+            use_defaults=use_defaults,
+            skip_recent=skip_recent,
+            recent_days_threshold=recent_days_threshold,
+            force_refresh=force_refresh
         )
         return result
     except Exception as e:
@@ -541,7 +591,10 @@ async def run_smart_collection(
     days: int = 30,
     include_intraday: bool = True,
     include_swing: bool = True,
-    include_investment: bool = True
+    include_investment: bool = True,
+    skip_recent: bool = True,
+    recent_days_threshold: int = 7,
+    force_refresh: bool = False
 ):
     """
     Execute the smart tiered collection.
@@ -550,6 +603,10 @@ async def run_smart_collection(
     - **Intraday** (1min, 5min): High-ADV stocks (>= 500K) - fast in/out
     - **Swing** (15min, 1hour): Medium-ADV stocks (>= 100K) - multi-day holds
     - **Investment** (1day): All tradeable stocks (>= 50K) - position trades
+    
+    **Duplicate Prevention:**
+    - `skip_recent=True` (default): Skips symbols collected within `recent_days_threshold` days
+    - `force_refresh=True`: Ignores existing data and re-collects everything
     
     ⚠️ LONG-RUNNING: Check /api/ib-collector/status for progress
     """
@@ -568,7 +625,10 @@ async def run_smart_collection(
             duration=duration,
             include_intraday=include_intraday,
             include_swing=include_swing,
-            include_investment=include_investment
+            include_investment=include_investment,
+            skip_recent=skip_recent,
+            recent_days_threshold=recent_days_threshold,
+            force_refresh=force_refresh
         )
         return result
     except Exception as e:
