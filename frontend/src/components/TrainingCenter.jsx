@@ -213,25 +213,29 @@ const useIBCollection = () => {
   const [status, setStatus] = useState(null);
   const [stats, setStats] = useState(null);
   const [defaultSymbolCount, setDefaultSymbolCount] = useState(51);
+  const [fullMarketCount, setFullMarketCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
     try {
-      const [statusRes, statsRes, symbolsRes] = await Promise.all([
+      const [statusRes, statsRes, symbolsRes, marketRes] = await Promise.all([
         fetch(`${API_BASE}/api/ib-collector/status`),
         fetch(`${API_BASE}/api/ib-collector/stats`),
-        fetch(`${API_BASE}/api/ib-collector/default-symbols`)
+        fetch(`${API_BASE}/api/ib-collector/default-symbols`),
+        fetch(`${API_BASE}/api/ib-collector/full-market-symbols`)
       ]);
       
-      const [statusData, statsData, symbolsData] = await Promise.all([
+      const [statusData, statsData, symbolsData, marketData] = await Promise.all([
         statusRes.json(),
         statsRes.json(),
-        symbolsRes.json()
+        symbolsRes.json(),
+        marketRes.json()
       ]);
       
       if (statusData.success) setStatus(statusData.job);
       if (statsData.success) setStats(statsData.stats);
       if (symbolsData.success) setDefaultSymbolCount(symbolsData.count);
+      if (marketData.success) setFullMarketCount(marketData.count);
     } catch (err) {
       console.error('Error fetching IB collection data:', err);
     } finally {
@@ -246,7 +250,7 @@ const useIBCollection = () => {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  return { status, stats, defaultSymbolCount, loading, refresh: fetchData };
+  return { status, stats, defaultSymbolCount, fullMarketCount, loading, refresh: fetchData };
 };
 
 // Hook for Data Storage Stats
@@ -1142,7 +1146,7 @@ const LearningConnectionsPanel = ({ connections, metrics, weights, loading, onRe
 };
 
 // IB Data Collection Panel
-const IBDataCollectionPanel = ({ status, stats, defaultSymbolCount = 51, loading, onRefresh }) => {
+const IBDataCollectionPanel = ({ status, stats, defaultSymbolCount = 51, fullMarketCount = 0, loading, onRefresh }) => {
   const [collecting, setCollecting] = useState(false);
   const [collectionType, setCollectionType] = useState(null);
 
@@ -1150,9 +1154,20 @@ const IBDataCollectionPanel = ({ status, stats, defaultSymbolCount = 51, loading
     setCollecting(true);
     setCollectionType(type);
     try {
-      const endpoint = type === 'quick' 
-        ? `${API_BASE}/api/ib-collector/quick-collect`
-        : `${API_BASE}/api/ib-collector/full-collection?days=30`;
+      let endpoint;
+      switch (type) {
+        case 'quick':
+          endpoint = `${API_BASE}/api/ib-collector/quick-collect`;
+          break;
+        case 'full':
+          endpoint = `${API_BASE}/api/ib-collector/full-collection?days=30`;
+          break;
+        case 'market':
+          endpoint = `${API_BASE}/api/ib-collector/full-market-collection?days=30&bar_size=1%20day`;
+          break;
+        default:
+          endpoint = `${API_BASE}/api/ib-collector/quick-collect`;
+      }
       
       const res = await fetch(endpoint, { method: 'POST' });
       const data = await res.json();
@@ -1211,26 +1226,38 @@ const IBDataCollectionPanel = ({ status, stats, defaultSymbolCount = 51, loading
               Cancel
             </button>
           ) : (
-            <>
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => handleStartCollection('quick')}
                 disabled={collecting}
-                className="px-3 py-1.5 rounded-lg bg-orange-500/20 border border-orange-500/30 text-orange-400 text-xs font-medium hover:bg-orange-500/30 transition-all disabled:opacity-50 flex items-center gap-1.5"
+                className="px-2.5 py-1.5 rounded-lg bg-zinc-500/20 border border-zinc-500/30 text-zinc-400 text-[10px] font-medium hover:bg-zinc-500/30 transition-all disabled:opacity-50 flex items-center gap-1"
                 data-testid="quick-collect-btn"
+                title="Quick test with 8 high-volume symbols"
               >
                 {collecting && collectionType === 'quick' ? <Loader className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-                Quick (8 symbols)
+                Quick (8)
               </button>
               <button
                 onClick={() => handleStartCollection('full')}
                 disabled={collecting}
-                className="px-3 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-xs font-medium hover:bg-emerald-500/30 transition-all disabled:opacity-50 flex items-center gap-1.5"
+                className="px-2.5 py-1.5 rounded-lg bg-orange-500/20 border border-orange-500/30 text-orange-400 text-[10px] font-medium hover:bg-orange-500/30 transition-all disabled:opacity-50 flex items-center gap-1"
                 data-testid="full-collect-btn"
+                title={`Collect ${defaultSymbolCount} curated symbols`}
               >
                 {collecting && collectionType === 'full' ? <Loader className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-                Full ({defaultSymbolCount} symbols)
+                Curated ({defaultSymbolCount})
               </button>
-            </>
+              <button
+                onClick={() => handleStartCollection('market')}
+                disabled={collecting}
+                className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-[10px] font-medium hover:bg-emerald-500/30 transition-all disabled:opacity-50 flex items-center gap-1"
+                data-testid="market-collect-btn"
+                title={`Collect ALL ${fullMarketCount.toLocaleString()} US stocks - runs overnight`}
+              >
+                {collecting && collectionType === 'market' ? <Loader className="w-3 h-3 animate-spin" /> : <Database className="w-3 h-3" />}
+                Full Market ({fullMarketCount.toLocaleString() || '8000+'})
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -1360,7 +1387,7 @@ const TrainingCenter = () => {
   const { status: tsStatus, loading: tsLoading, refresh: refreshTs } = useTimeseriesStatus();
   const { accuracy, predictions, loading: predLoading, refresh: refreshPred } = usePredictionAccuracy();
   const { connections, metrics, weights, loading: connLoading, refresh: refreshConn } = useLearningConnections();
-  const { status: ibStatus, stats: ibStats, defaultSymbolCount, loading: ibLoading, refresh: refreshIB } = useIBCollection();
+  const { status: ibStatus, stats: ibStats, defaultSymbolCount, fullMarketCount, loading: ibLoading, refresh: refreshIB } = useIBCollection();
   const { summary: storageSummary, loading: storageLoading, refresh: refreshStorage } = useDataStorage();
 
   return (
@@ -1417,6 +1444,7 @@ const TrainingCenter = () => {
           status={ibStatus}
           stats={ibStats}
           defaultSymbolCount={defaultSymbolCount}
+          fullMarketCount={fullMarketCount}
           loading={ibLoading}
           onRefresh={refreshIB}
         />
