@@ -570,6 +570,9 @@ class TradingBotService:
         # AI Trade Consultation (Phase 2 Integration)
         self._ai_consultation = None
         
+        # Strategy Promotion Service (SIM → PAPER → LIVE lifecycle)
+        self._strategy_promotion_service = None
+        
         # Callbacks for real-time updates
         self._trade_callbacks: List[callable] = []
         
@@ -648,6 +651,24 @@ class TradingBotService:
             status = ai_consultation.get_status()
             logger.info(f"  - Shadow Mode: {status.get('shadow_mode', True)}")
             logger.info(f"  - Modules enabled: {status.get('modules_enabled', {})}")
+    
+    def set_strategy_promotion_service(self, promotion_service):
+        """
+        Set Strategy Promotion Service for SIM → PAPER → LIVE lifecycle management.
+        
+        When connected, the trading bot will:
+        - Check each strategy's phase before executing trades
+        - LIVE strategies: Execute real trades
+        - PAPER strategies: Record paper trades (no real execution)
+        - SIMULATION strategies: Skip real-time trading entirely
+        """
+        self._strategy_promotion_service = promotion_service
+        logger.info("TradingBotService: Strategy Promotion Service connected")
+        if promotion_service:
+            phases = promotion_service.get_all_phases()
+            live_count = sum(1 for p in phases.values() if p == "live")
+            paper_count = sum(1 for p in phases.values() if p == "paper")
+            logger.info(f"  - Tracking {len(phases)} strategies: {live_count} LIVE, {paper_count} PAPER")
     
     # ==================== SMART STRATEGY FILTERING ====================
     
@@ -2634,12 +2655,69 @@ class TradingBotService:
         """
         Execute a trade via the trade executor.
         
+        Strategy Phase Check (SIM → PAPER → LIVE):
+        - LIVE: Execute real trade via broker
+        - PAPER: Record paper trade, do not execute
+        - SIMULATION: Skip entirely (not ready for real-time)
+        
         In AUTONOMOUS mode with IB data:
         - Uses live IB prices for decision-making
         - Currently executes in SIMULATED mode (orders tracked but not sent to broker)
         - Full IB order execution requires local IB Gateway order routing (future enhancement)
         """
         print(f"   📤 [_execute_trade] Starting execution for {trade.symbol}")
+        
+        # === STRATEGY PHASE CHECK ===
+        # This is the gate that controls which strategies execute real trades
+        if self._strategy_promotion_service:
+            should_execute, phase_reason, should_paper = self._strategy_promotion_service.should_execute_trade(trade.setup_type)
+            
+            if not should_execute:
+                if should_paper:
+                    # PAPER PHASE: Record the trade without executing
+                    logger.info(f"📝 [PAPER TRADE] {trade.symbol} {trade.direction.value.upper()} - {phase_reason}")
+                    trade.notes = (trade.notes or "") + f" [PAPER: {phase_reason}]"
+                    
+                    # Record paper trade for tracking
+                    try:
+                        paper_trade_id = await self._strategy_promotion_service.record_paper_trade(
+                            strategy_name=trade.setup_type,
+                            symbol=trade.symbol,
+                            direction=trade.direction.value,
+                            entry_price=trade.entry_price,
+                            stop_price=trade.stop_price,
+                            target_price=trade.target_prices[0] if trade.target_prices else trade.entry_price * 1.02,
+                            notes=f"Would have traded: {trade.shares} shares | R:R={trade.risk_reward_ratio:.1f}"
+                        )
+                        logger.info(f"📝 Paper trade recorded: {paper_trade_id}")
+                        
+                        # Add to filter thoughts for visibility
+                        self._add_filter_thought({
+                            "text": f"📝 PAPER: {trade.symbol} {trade.setup_type} ({trade.direction.value}) - Strategy not yet LIVE",
+                            "symbol": trade.symbol,
+                            "setup_type": trade.setup_type,
+                            "action": "PAPER_TRACKED",
+                            "phase": "paper"
+                        })
+                    except Exception as e:
+                        logger.warning(f"Failed to record paper trade: {e}")
+                    
+                    # Mark trade as not executed (for UI feedback)
+                    trade.status = TradeStatus.CANCELLED
+                    trade.close_reason = "paper_phase"
+                    await self._save_trade(trade)
+                    return
+                else:
+                    # SIMULATION PHASE: Skip entirely
+                    logger.info(f"⏭️ [SKIPPED] {trade.symbol} {trade.direction.value.upper()} - {phase_reason}")
+                    trade.notes = (trade.notes or "") + f" [SKIPPED: {phase_reason}]"
+                    trade.status = TradeStatus.CANCELLED
+                    trade.close_reason = "simulation_phase"
+                    await self._save_trade(trade)
+                    return
+            else:
+                # LIVE PHASE: Proceed with execution
+                logger.info(f"🚀 [LIVE STRATEGY] {trade.symbol} {trade.setup_type} - Executing real trade")
         
         if not self._trade_executor:
             print("   ❌ Trade executor not configured")

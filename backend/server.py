@@ -925,9 +925,14 @@ try:
     strategy_promotion_service = get_strategy_promotion_service()
     register_service('strategy_promotion', strategy_promotion_service)
     
+    # Connect Strategy Promotion Service to Trading Bot
+    # This enables the SIM → PAPER → LIVE trade gating
+    trading_bot.set_strategy_promotion_service(strategy_promotion_service)
+    
     print("Strategy Promotion Service initialized")
     print("  - Manages strategy lifecycle: SIMULATION → PAPER → LIVE")
     print("  - Auto-promotes strategies that prove profitable")
+    print("  - Connected to Trading Bot for trade execution gating")
     print("  - Endpoints: /api/strategy-promotion/*")
 except Exception as e:
     print(f"Strategy Promotion Service initialization deferred: {e}")
