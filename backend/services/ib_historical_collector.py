@@ -133,7 +133,7 @@ class IBHistoricalCollector:
         self._market_scanner = market_scanner
         logger.info("IB Collector: Using market scanner for symbol universe")
         
-    async def get_all_us_symbols(self, min_price: float = 1.0, max_price: float = 1000.0) -> List[str]:
+    async def get_all_us_symbols(self, min_price: float = 1.0, max_price: float = 1000.0, filter_ib_compatible: bool = True) -> List[str]:
         """
         Fetch all tradeable US stocks using the market scanner service.
         
@@ -194,6 +194,10 @@ class IBHistoricalCollector:
         if not symbols:
             symbols = self.get_default_symbols()
             logger.info(f"Using {len(symbols)} default symbols")
+        
+        # Apply IB compatibility filter
+        if filter_ib_compatible and symbols:
+            symbols = self.filter_ib_compatible_symbols(symbols)
         
         self._all_us_symbols = symbols
         return symbols
@@ -376,7 +380,121 @@ class IBHistoricalCollector:
         except Exception as e:
             return {"cached": False, "error": str(e)}
     
-    async def get_liquid_symbols(self, min_adv: int = 100_000) -> List[str]:
+    # Exchanges supported by IB Gateway (exclude OTC/Pink Sheets)
+    SUPPORTED_EXCHANGES = {"NASDAQ", "NYSE", "AMEX", "ARCA", "BATS"}
+    
+    # Known problematic symbol patterns to exclude
+    EXCLUDED_PATTERNS = [
+        # OTC ADRs typically end in Y or F
+        lambda s: len(s) >= 5 and s[-1] in ('Y', 'F') and not s.endswith('SPY') and not s.endswith('QQQ'),
+        # Warrants
+        lambda s: '.WS' in s or s.endswith('W') and len(s) >= 5,
+        # Rights
+        lambda s: '.RT' in s or s.endswith('R') and len(s) >= 5,
+        # Units
+        lambda s: '.U' in s or s.endswith('U') and len(s) >= 5,
+        # Preferred shares with complex symbols
+        lambda s: '.PR' in s,
+        # When-issued
+        lambda s: '.WI' in s,
+    ]
+    
+    def filter_ib_compatible_symbols(self, symbols: List[str]) -> List[str]:
+        """
+        Filter symbols to only include those compatible with IB Gateway.
+        
+        Excludes:
+        - OTC/Pink Sheet stocks
+        - Foreign ADRs (typically end in Y or F)
+        - Warrants, Rights, Units
+        - Delisted stocks
+        
+        Args:
+            symbols: List of symbols to filter
+            
+        Returns:
+            Filtered list of IB-compatible symbols
+        """
+        if not symbols:
+            return []
+            
+        filtered = []
+        excluded_count = 0
+        excluded_reasons = {
+            "otc_exchange": 0,
+            "adr_pattern": 0,
+            "warrant": 0,
+            "rights": 0,
+            "units": 0,
+            "preferred": 0,
+            "other": 0
+        }
+        
+        # Get exchange info from database if available
+        exchange_map = {}
+        if self._db is not None:
+            try:
+                cursor = self._db["us_symbols"].find(
+                    {"symbol": {"$in": symbols}},
+                    {"symbol": 1, "exchange": 1, "_id": 0}
+                )
+                exchange_map = {doc["symbol"]: doc.get("exchange", "") for doc in cursor}
+            except Exception as e:
+                logger.debug(f"Could not fetch exchange data: {e}")
+        
+        for symbol in symbols:
+            exclude = False
+            reason = None
+            
+            # Check exchange (exclude OTC)
+            exchange = exchange_map.get(symbol, "")
+            if exchange and exchange.upper() == "OTC":
+                exclude = True
+                reason = "otc_exchange"
+            
+            # Check for ADR patterns (end in Y or F, length >= 5)
+            elif len(symbol) >= 5 and symbol[-1] in ('Y', 'F'):
+                # Exclude unless it's a known ETF
+                known_etfs = {'SPY', 'QQQ', 'IWF', 'VTV', 'ARKF', 'IUSG', 'SCHF', 'SLYV'}
+                if symbol not in known_etfs and not symbol.startswith('X'):  # XL* sector ETFs
+                    exclude = True
+                    reason = "adr_pattern"
+            
+            # Check for warrants
+            elif '.WS' in symbol or (symbol.endswith('W') and len(symbol) >= 5):
+                exclude = True
+                reason = "warrant"
+            
+            # Check for rights
+            elif '.RT' in symbol:
+                exclude = True
+                reason = "rights"
+            
+            # Check for units
+            elif '.U' in symbol:
+                exclude = True
+                reason = "units"
+            
+            # Check for preferred shares with complex symbols
+            elif '.PR' in symbol:
+                exclude = True
+                reason = "preferred"
+            
+            if exclude:
+                excluded_count += 1
+                if reason:
+                    excluded_reasons[reason] = excluded_reasons.get(reason, 0) + 1
+            else:
+                filtered.append(symbol)
+        
+        logger.info(f"Symbol filtering: {len(symbols)} -> {len(filtered)} ({excluded_count} excluded)")
+        if excluded_count > 0:
+            reasons_str = ", ".join([f"{k}:{v}" for k, v in excluded_reasons.items() if v > 0])
+            logger.info(f"  Exclusion breakdown: {reasons_str}")
+        
+        return filtered
+
+    async def get_liquid_symbols(self, min_adv: int = 100_000, filter_ib_compatible: bool = True) -> List[str]:
         """
         Get liquid US stocks filtered by Average Daily Volume (ADV).
         
@@ -402,6 +520,9 @@ class IBHistoricalCollector:
                 
                 if liquid_symbols:
                     logger.info(f"Got {len(liquid_symbols)} liquid symbols from ADV cache (min_adv={min_adv:,})")
+                    # Apply IB compatibility filter
+                    if filter_ib_compatible:
+                        liquid_symbols = self.filter_ib_compatible_symbols(liquid_symbols)
                     return liquid_symbols
             except Exception as e:
                 logger.debug(f"ADV cache not available: {e}")
@@ -437,6 +558,10 @@ class IBHistoricalCollector:
         # Method 3: Fall back to curated list (known liquid stocks)
         liquid_symbols = self._get_known_liquid_symbols()
         logger.info(f"Using {len(liquid_symbols)} known liquid symbols as fallback")
+        
+        # Apply IB compatibility filter if requested
+        if filter_ib_compatible and liquid_symbols:
+            liquid_symbols = self.filter_ib_compatible_symbols(liquid_symbols)
         
         return liquid_symbols
     
