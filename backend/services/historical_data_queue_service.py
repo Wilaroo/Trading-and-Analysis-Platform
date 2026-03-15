@@ -268,13 +268,27 @@ class HistoricalDataQueueService:
         
         return list(cursor)
     
-    def get_job_completed_data(self, job_id: str) -> List[Dict]:
-        """Get all completed data for a job (for storage)"""
+    def get_job_completed_data(self, job_id: str = None) -> List[Dict]:
+        """
+        Get all completed data for a job (for storage).
+        If job_id is None, returns all completed data across all jobs.
+        """
+        query = {"status": "completed", "data": {"$ne": None}}
+        if job_id:
+            query["job_id"] = job_id
+            
         cursor = self.collection.find(
-            {"job_id": job_id, "status": "completed", "data": {"$ne": None}},
-            {"_id": 0, "symbol": 1, "bar_size": 1, "data": 1}
-        )
+            query,
+            {"_id": 0, "symbol": 1, "bar_size": 1, "data": 1, "request_id": 1}
+        ).limit(100)  # Process in batches
         return list(cursor)
+    
+    def mark_data_stored(self, request_id: str):
+        """Mark a request's data as stored (clear data to save space)"""
+        self.collection.update_one(
+            {"request_id": request_id},
+            {"$set": {"data": None, "data_stored": True}}
+        )
     
     def cancel_job(self, job_id: str) -> Dict:
         """

@@ -1264,6 +1264,162 @@ class IBHistoricalCollector:
             "message": "Cancellation requested",
             "job_id": self._running_job.id
         }
+    
+    async def resume_monitoring(self) -> Dict[str, Any]:
+        """
+        Resume monitoring the queue and storing completed data.
+        
+        Use this after your machine wakes up from sleep - it restarts
+        the background task that processes completed requests.
+        """
+        if self._running_job and self._running_job.status == CollectionStatus.RUNNING:
+            return {
+                "success": False,
+                "error": "A job is already running",
+                "job_id": self._running_job.id
+            }
+        
+        try:
+            from services.historical_data_queue_service import get_historical_data_queue_service
+            queue_service = get_historical_data_queue_service()
+            
+            # Get current queue state
+            stats = queue_service.get_overall_queue_stats()
+            
+            if stats["pending"] == 0 and stats["claimed"] == 0:
+                return {
+                    "success": True,
+                    "message": "No pending work - collection complete",
+                    "stats": stats
+                }
+            
+            # Create a resume job
+            job = CollectionJob(
+                id=f"resume_{uuid.uuid4().hex[:8]}",
+                symbols=[],  # We don't need the full list, we monitor the queue
+                bar_size="1 day",
+                duration="1 M",
+                start_time=datetime.now(timezone.utc).isoformat()
+            )
+            job.status = CollectionStatus.RUNNING
+            
+            self._running_job = job
+            self._cancel_requested = False
+            
+            # Save job
+            if self._jobs_col is not None:
+                self._jobs_col.insert_one(job.to_dict())
+            
+            # Start monitoring in background
+            asyncio.create_task(self._resume_monitor_loop(job, queue_service))
+            
+            return {
+                "success": True,
+                "message": f"Resumed monitoring - {stats['pending']} pending, {stats['claimed']} processing",
+                "job_id": job.id,
+                "stats": stats
+            }
+            
+        except Exception as e:
+            logger.error(f"Error resuming monitoring: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def _resume_monitor_loop(self, job: CollectionJob, queue_service):
+        """Monitor loop for resumed collection - just stores completed data"""
+        try:
+            logger.info(f"Starting resume monitor loop for job {job.id}")
+            
+            while True:
+                if self._cancel_requested:
+                    job.status = CollectionStatus.CANCELLED
+                    break
+                
+                # Get progress
+                stats = queue_service.get_overall_queue_stats()
+                
+                # Store any completed data
+                await self._store_all_completed_data(queue_service)
+                
+                # Update job stats
+                job.symbols_completed = stats["completed"]
+                job.symbols_failed = stats["failed"]
+                total = stats["pending"] + stats["claimed"] + stats["completed"] + stats["failed"]
+                done = stats["completed"] + stats["failed"]
+                job.progress_pct = (done / total * 100) if total > 0 else 100
+                
+                self._update_job(job)
+                
+                # Check if done
+                if stats["pending"] == 0 and stats["claimed"] == 0:
+                    job.status = CollectionStatus.COMPLETED
+                    logger.info(f"Resume job {job.id} complete: {stats['completed']} completed, {stats['failed']} failed")
+                    break
+                
+                await asyncio.sleep(5)
+                
+        except Exception as e:
+            job.status = CollectionStatus.FAILED
+            job.errors.append(str(e))
+            logger.error(f"Resume monitor error: {e}")
+            
+        finally:
+            job.end_time = datetime.now(timezone.utc).isoformat()
+            self._update_job(job)
+            self._running_job = None
+    
+    async def _store_all_completed_data(self, queue_service):
+        """Store all completed data from queue to main database"""
+        if self._data_col is None:
+            return
+        
+        # Get completed requests with data
+        completed = queue_service.get_job_completed_data(None)  # Get all completed
+        
+        stored_count = 0
+        for item in completed:
+            symbol = item.get("symbol")
+            bar_size = item.get("bar_size", "1 day")
+            bars = item.get("data", [])
+            request_id = item.get("request_id")
+            
+            if not bars:
+                continue
+            
+            for bar in bars:
+                try:
+                    self._data_col.update_one(
+                        {
+                            "symbol": symbol,
+                            "bar_size": bar_size,
+                            "date": bar.get("date") or bar.get("time")
+                        },
+                        {
+                            "$set": {
+                                "open": bar.get("open"),
+                                "high": bar.get("high"),
+                                "low": bar.get("low"),
+                                "close": bar.get("close"),
+                                "volume": bar.get("volume"),
+                                "collected_at": datetime.now(timezone.utc).isoformat()
+                            }
+                        },
+                        upsert=True
+                    )
+                    stored_count += 1
+                except Exception as e:
+                    if "duplicate" not in str(e).lower():
+                        logger.warning(f"Error storing bar for {symbol}: {e}")
+            
+            # Mark this data as stored to avoid re-processing
+            if request_id:
+                queue_service.mark_data_stored(request_id)
+        
+        if stored_count > 0:
+            logger.info(f"Stored {stored_count} bars from completed requests")
+        
         
     def get_job_status(self, job_id: str = None) -> Dict[str, Any]:
         """Get status of a collection job"""

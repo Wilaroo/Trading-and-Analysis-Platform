@@ -191,6 +191,39 @@ async def cancel_collection():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/resume")
+async def resume_collection():
+    """
+    Resume monitoring and storing data for pending requests.
+    
+    Use this after your machine wakes up from sleep - it restarts
+    the background task that stores completed data from the queue
+    to the main database.
+    """
+    try:
+        collector = get_ib_collector()
+        
+        # Get queue stats to see if there's work to do
+        from services.historical_data_queue_service import get_historical_data_queue_service
+        queue_service = get_historical_data_queue_service()
+        stats = queue_service.get_overall_queue_stats()
+        
+        if stats["pending"] == 0 and stats["claimed"] == 0:
+            return {
+                "success": True,
+                "message": "No pending work to resume",
+                "stats": stats
+            }
+        
+        # Create a minimal job to resume monitoring
+        result = await collector.resume_monitoring()
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error resuming collection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/status")
 async def get_status(job_id: Optional[str] = None):
     """
