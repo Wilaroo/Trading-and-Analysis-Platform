@@ -7,6 +7,59 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## INSTITUTIONAL-GRADE AI MODULES (March 14, 2026)
 
+### Phase 3: Time-Series AI Integration ✅ COMPLETE (March 15, 2026)
+
+**Implemented:**
+1. **Feature Engineering Pipeline** (`timeseries_features.py`)
+   - 46 predictive features in 7 categories:
+     - Price Action (12): returns, gaps, ranges, wicks
+     - Volume (6): RVOL, trends, price-volume correlation
+     - Momentum (8): RSI, MACD, Stochastic, Williams %R, CCI
+     - Volatility (6): ATR, Bollinger Bands, historical vol
+     - Trend (6): EMA distances, trend strength, higher highs/lower lows
+     - Pattern (4): doji, hammer, engulfing, inside bar
+     - Time (4): hour cyclical encoding, day of week, power hour
+     
+2. **LightGBM Directional Model** (`timeseries_gbm.py`)
+   - Binary classification: up vs not-up
+   - Model persistence to MongoDB
+   - Feature importance tracking
+   - Training with early stopping
+   
+3. **Time-Series AI Service** (`timeseries_service.py`)
+   - High-level forecast API
+   - Auto-training capability
+   - Consultation context generation
+   - Alignment detection (favorable/contrary/neutral)
+   
+4. **API Endpoints**
+   - `GET /api/ai-modules/timeseries/status` - Model status
+   - `POST /api/ai-modules/timeseries/forecast` - Get prediction
+   - `POST /api/ai-modules/timeseries/train` - Train model
+   - `GET /api/ai-modules/timeseries/metrics` - Performance metrics
+
+5. **Trade Consultation Integration**
+   - `timeseries_forecast` field added to consultation result
+   - Alignment context (forecast vs trade direction)
+   - Risk adjustment when forecast contradicts trade
+
+**Model Output:**
+```json
+{
+  "direction": "up" | "down" | "flat",
+  "probability_up": 0.0-1.0,
+  "probability_down": 0.0-1.0,
+  "confidence": 0.0-1.0,
+  "signal": "Strong bullish signal (72% up probability)",
+  "usable": true | false
+}
+```
+
+**Training Note:** Model is currently untrained (returns neutral predictions). 
+To train, call `POST /api/ai-modules/timeseries/train` with historical data.
+
+---
+
 ### Phase 2: Trade Consultation Integration ✅ COMPLETE (March 15, 2026)
 
 **Implemented:**
