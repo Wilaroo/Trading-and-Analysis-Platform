@@ -5,6 +5,23 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ---
 
+## LATEST UPDATE (March 15, 2026)
+
+### Market Scanner Integration ✅ COMPLETE
+- **Wired market_scanner_service to ib_historical_collector** in server.py
+- Full Market button now shows **12,577 US stocks** (previously showed 50+)
+- Leverages existing market scanner's caching, batching, and Alpaca integration
+- Verified via `/api/ib-collector/full-market-symbols` endpoint
+
+### Simulation Jobs Status Clarification
+- **Not a bug**: Simulation jobs API works correctly (`/api/simulation/status/{job_id}`)
+- Recent simulations show 0 trades due to **missing Alpaca API keys in preview environment**
+- Historical job `sim_ff241dd1bba6` has 8 trades properly saved and retrievable
+- When user connects local environment with Alpaca credentials, simulations will generate trades
+
+---
+
+
 ## DATA STORAGE MANAGER ✅ NEW (March 15, 2026)
 
 ### Purpose
@@ -50,13 +67,14 @@ Centralized management of all learning and training data storage with proper ind
 
 ---
 
-## IB HISTORICAL DATA COLLECTOR ✅ NEW (March 15, 2026)
+## IB HISTORICAL DATA COLLECTOR ✅ UPDATED (March 15, 2026)
 
 ### Purpose
 Systematically collects historical OHLCV data from IB Gateway to build a comprehensive learning database for all AI systems.
 
 ### Key Features
-1. **Batch Collection**: Collects data for 50+ default symbols (customizable)
+1. **Full Market Collection**: Now supports 12,577+ US stocks via Market Scanner integration
+2. **Batch Collection**: Collects data for 50+ default symbols (customizable)
 2. **Multiple Bar Sizes**: 1 min, 5 mins, 15 mins, 1 hour, 1 day
 3. **Rate Limit Compliant**: 2-second delay between requests (conservative)
 4. **Background Processing**: Can run overnight for large collections

@@ -905,13 +905,20 @@ try:
     from services.ib_historical_collector import init_ib_collector
     
     # Get Alpaca service for fetching US stock universe
-    alpaca_service = get_service_optional('alpaca_historical_service')
+    alpaca_historical_service = get_service_optional('alpaca_historical_service')
     
     ib_collector = init_ib_collector(
         db=db, 
         ib_service=ib_service,
-        alpaca_service=alpaca_service
+        alpaca_service=alpaca_historical_service or alpaca_service  # Use main alpaca_service as fallback
     )
+    
+    # Wire market scanner for robust full-market symbol fetching
+    market_scanner = get_service_optional('market_scanner_service')
+    if market_scanner:
+        ib_collector.set_market_scanner(market_scanner)
+        print("  - Market scanner wired for full-market symbol universe")
+    
     register_service('ib_collector', ib_collector)
     
     print("IB Historical Data Collector initialized")
