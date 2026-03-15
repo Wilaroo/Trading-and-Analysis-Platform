@@ -7,7 +7,40 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 15, 2026)
 
-### Time-Series AI Integration into Bull/Bear Debate ✅ NEW (March 15, 2026)
+### AgentDataService - Breaking Agent Silos ✅ NEW (March 15, 2026)
+**GIVES AGENTS HISTORICAL CONTEXT** - Bull/Bear agents now access historical data for smarter decisions.
+
+**What Changed:**
+- Created `AgentDataService` - shared historical data layer for all AI agents
+- Bull/Bear agents now receive historical context during debates
+- Agents can see: user's trade history, setup type performance, symbol-specific stats
+
+**New Capabilities:**
+- **Symbol Context**: Win rate, avg R, trade count, last traded date for each symbol
+- **Setup Context**: Historical performance of setup types (bull_flag, orb_breakout, etc.)
+- **User Stats**: Overall trading statistics and best performing setups
+- **Actionable Insights**: Auto-generated insights like "You're 67% on NVDA (15 trades)"
+
+**New API Endpoints:**
+- `GET /api/ai-modules/agent-context/{symbol}` - Get historical context for a symbol
+- `GET /api/ai-modules/agent-context/status` - Check AgentDataService status
+
+**How Agents Use It:**
+- BullAgent: Adds arguments like "Strong track record on {symbol}: 67% win rate"
+- BearAgent: Adds warnings like "Poor history on {symbol}: only 40% win rate"
+- Both agents now factor historical regime/time-of-day performance
+
+**Files Created:**
+- `/app/backend/services/ai_modules/agent_data_service.py` - Core service
+
+**Files Modified:**
+- `/app/backend/services/ai_modules/debate_agents.py` - Bull/Bear accept historical_context
+- `/app/backend/routers/ai_modules.py` - Added endpoints, inject service
+- `/app/backend/server.py` - Initialize and wire AgentDataService
+
+---
+
+### Time-Series AI Integration into Bull/Bear Debate ✅ (March 15, 2026)
 **CLOSES THE LEARNING LOOP** - The trained Time-Series AI model now participates in trade decisions.
 
 **What Changed:**
