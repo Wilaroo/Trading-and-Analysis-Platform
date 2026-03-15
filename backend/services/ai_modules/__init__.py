@@ -24,6 +24,11 @@ from .volume_anomaly import (
     get_volume_anomaly_service,
     init_volume_anomaly_service
 )
+from .trade_consultation import (
+    AITradeConsultation,
+    get_ai_consultation,
+    init_ai_consultation
+)
 
 __all__ = [
     'ShadowTracker',
@@ -43,5 +48,8 @@ __all__ = [
     'init_institutional_flow_service',
     'VolumeAnomalyService',
     'get_volume_anomaly_service',
-    'init_volume_anomaly_service'
+    'init_volume_anomaly_service',
+    'AITradeConsultation',
+    'get_ai_consultation',
+    'init_ai_consultation'
 ]
