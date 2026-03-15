@@ -318,6 +318,55 @@ async def get_liquid_symbols(min_adv: int = 100_000):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/filter-preview")
+async def preview_ib_filter():
+    """
+    Preview what symbols would be filtered out as IB-incompatible.
+    
+    Shows counts of:
+    - OTC/Pink Sheet stocks
+    - ADRs (foreign stocks)
+    - Warrants, Rights, Units
+    - Preferred shares
+    """
+    try:
+        collector = get_ib_collector()
+        
+        # Get all symbols from universe
+        all_symbols = []
+        if collector._db is not None:
+            cursor = collector._db["us_symbols"].find({}, {"symbol": 1, "exchange": 1, "_id": 0})
+            all_data = list(cursor)
+            all_symbols = [doc["symbol"] for doc in all_data if doc.get("symbol")]
+            
+            # Count by exchange
+            exchange_counts = {}
+            for doc in all_data:
+                ex = doc.get("exchange", "UNKNOWN")
+                exchange_counts[ex] = exchange_counts.get(ex, 0) + 1
+        
+        # Apply filter and count exclusions
+        filtered = collector.filter_ib_compatible_symbols(all_symbols)
+        excluded_count = len(all_symbols) - len(filtered)
+        
+        # Sample of excluded symbols
+        excluded = [s for s in all_symbols if s not in set(filtered)][:50]
+        
+        return {
+            "success": True,
+            "total_symbols": len(all_symbols),
+            "ib_compatible": len(filtered),
+            "excluded": excluded_count,
+            "exchange_breakdown": exchange_counts,
+            "excluded_sample": excluded,
+            "note": f"Filtering removes {excluded_count} OTC/ADR/warrant symbols"
+        }
+    except Exception as e:
+        logger.error(f"Error previewing filter: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
 
 @router.post("/build-adv-cache")
 async def build_adv_cache(batch_size: int = 100):
