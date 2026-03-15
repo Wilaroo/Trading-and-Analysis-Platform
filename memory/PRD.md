@@ -7,6 +7,61 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## INSTITUTIONAL-GRADE AI MODULES (March 14, 2026)
 
+### Phase 2: Trade Consultation Integration ✅ COMPLETE (March 15, 2026)
+
+**Implemented:**
+1. **AI Trade Consultation Service** (`trade_consultation.py`)
+   - Central service that orchestrates all AI modules during trade evaluation
+   - Builds market context (regime, VIX, session, technicals)
+   - Builds portfolio context (account value, positions)
+   - Returns combined recommendation: proceed/pass/reduce_size
+   
+2. **Trading Bot Integration**
+   - `set_ai_consultation()` method added to TradingBotService
+   - AI Consultation runs during `_evaluate_opportunity()`
+   - Can BLOCK trades when AI rejects (not in Shadow Mode)
+   - Can REDUCE position size based on AI recommendation
+   - Shadow decision ID tracked for outcome learning
+   
+3. **Consultation API Endpoints**
+   - `GET /api/ai-modules/consultation/status` - Service status
+   - `POST /api/ai-modules/consultation/run` - Manual test endpoint
+
+**How It Works:**
+```
+Trade Setup Found
+       │
+       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  EXISTING: Quality Score, Regime, Strategy Filter                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+       │
+       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  NEW: AI Trade Consultation                                                 │
+│  ├─ Bull/Bear Debate → Should we take this trade?                          │
+│  ├─ AI Risk Manager → What's the risk profile?                             │
+│  ├─ Institutional Flow → Any ownership concerns?                           │
+│  └─ Volume Analysis → Any unusual activity?                                │
+│                                                                             │
+│  Returns: proceed (bool), size_adjustment (0-1.0), reasoning               │
+└─────────────────────────────────────────────────────────────────────────────┘
+       │
+       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Shadow Tracker: Log decision for learning                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+       │
+       ▼
+   EXECUTE or SKIP (based on AI recommendation + Shadow Mode)
+```
+
+**Shadow Mode Behavior:**
+- **Shadow Mode ON (default)**: AI analyzes and logs but doesn't block trades
+- **Shadow Mode OFF**: AI can block or reduce trade sizes
+
+---
+
 ### Phase 1: Shadow Mode + AI Agents ✅ COMPLETE
 
 **Implemented:**
