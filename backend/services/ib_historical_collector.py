@@ -223,6 +223,185 @@ class IBHistoricalCollector:
             "VXX", "UVXY"
         ]
     
+    async def get_liquid_symbols(self, min_adv: int = 500_000) -> List[str]:
+        """
+        Get liquid US stocks filtered by Average Daily Volume (ADV).
+        
+        Uses pre-cached ADV data from market scanner or database.
+        This significantly reduces collection time by focusing on tradeable stocks.
+        
+        Args:
+            min_adv: Minimum average daily volume (default 500K for intraday-quality)
+            
+        Returns:
+            List of liquid symbols meeting ADV criteria (~2,000-4,000 stocks)
+        """
+        liquid_symbols = []
+        
+        # Method 1: Check database for pre-computed ADV data
+        if self._db is not None:
+            try:
+                # Look for symbols with ADV data
+                cursor = self._db["symbol_adv_cache"].find(
+                    {"avg_volume": {"$gte": min_adv}},
+                    {"symbol": 1, "_id": 0}
+                ).limit(10000)
+                liquid_symbols = [doc["symbol"] for doc in cursor if doc.get("symbol")]
+                
+                if liquid_symbols:
+                    logger.info(f"Got {len(liquid_symbols)} liquid symbols from ADV cache (min_adv={min_adv:,})")
+                    return liquid_symbols
+            except Exception as e:
+                logger.debug(f"ADV cache not available: {e}")
+        
+        # Method 2: Use well-known liquid stock list (S&P 500 + Russell 1000 equivalent)
+        # These are stocks that typically have >500K ADV
+        liquid_symbols = self._get_known_liquid_symbols()
+        logger.info(f"Using {len(liquid_symbols)} known liquid symbols (ADV > {min_adv:,})")
+        
+        return liquid_symbols
+    
+    def _get_known_liquid_symbols(self) -> List[str]:
+        """
+        Curated list of ~1,500+ known liquid US stocks.
+        These stocks typically have ADV > 500,000 and are suitable for active trading.
+        """
+        # Major ETFs (50)
+        etfs = [
+            "SPY", "QQQ", "IWM", "DIA", "VTI", "VOO", "IVV", "VEA", "VWO", "EFA",
+            "IEMG", "VNQ", "BND", "AGG", "LQD", "TLT", "GLD", "SLV", "USO", "UNG",
+            "XLF", "XLE", "XLK", "XLV", "XLI", "XLC", "XLY", "XLP", "XLU", "XLRE", "XLB",
+            "ARKK", "ARKG", "ARKW", "ARKF", "ARKQ", "SOXL", "SOXS", "TQQQ", "SQQQ",
+            "UVXY", "VXX", "SVXY", "SPXU", "SPXS", "TNA", "TZA", "FAS", "FAZ",
+            "HYG", "JNK", "EMB", "VIG", "SCHD", "VYM", "DVY", "JEPI", "JEPQ",
+            "XBI", "IBB", "XOP", "OIH", "KRE", "XHB", "ITB", "KWEB", "FXI", "EWZ"
+        ]
+        
+        # Full S&P 500 components (500)
+        sp500 = [
+            # Top 100 by market cap
+            "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "NVDA", "META", "TSLA", "BRK.B", "UNH",
+            "JNJ", "JPM", "V", "PG", "XOM", "HD", "CVX", "MA", "ABBV", "MRK",
+            "LLY", "AVGO", "PEP", "KO", "COST", "TMO", "MCD", "WMT", "CSCO", "ACN",
+            "ABT", "DHR", "NEE", "DIS", "VZ", "ADBE", "WFC", "PM", "TXN", "CRM",
+            "NKE", "BMY", "RTX", "ORCL", "COP", "QCOM", "UPS", "HON", "T", "LOW",
+            "MS", "INTC", "UNP", "CAT", "IBM", "BA", "INTU", "SPGI", "GS", "DE",
+            "AMD", "BLK", "GILD", "AXP", "AMAT", "MDLZ", "CVS", "SBUX", "PLD", "ADI",
+            "LMT", "ISRG", "MMC", "AMT", "SYK", "CI", "MO", "NOW", "ZTS", "CB",
+            "TJX", "LRCX", "BKNG", "ADP", "SO", "REGN", "VRTX", "BSX", "PGR", "FISV",
+            "CME", "SCHW", "BDX", "CL", "EOG", "MU", "ITW", "SNPS", "CDNS", "NOC",
+            # 101-200
+            "DUK", "SHW", "ICE", "CSX", "PNC", "ETN", "MCK", "FDX", "AON", "KLAC",
+            "EQIX", "APD", "EMR", "TGT", "NSC", "AZO", "ORLY", "FCX", "PSA", "AEP",
+            "PXD", "HUM", "MCHP", "GD", "ADSK", "MPC", "MSI", "WM", "TRV", "EW",
+            "JCI", "SLB", "F", "GM", "OXY", "KMB", "MNST", "D", "HLT", "ROP",
+            "CMG", "NXPI", "MAR", "AIG", "STZ", "FTNT", "IQV", "PAYX", "TEL", "A",
+            "GIS", "EXC", "BIIB", "HES", "KHC", "YUM", "PCAR", "SYY", "CTSH", "AFL",
+            "DOW", "VLO", "ROST", "PSX", "HAL", "WELL", "KMI", "ON", "IDXX", "MSCI",
+            "WMB", "DVN", "EL", "CTAS", "CARR", "DXCM", "DD", "ODFL", "DHI", "GWW",
+            "HSY", "WBD", "FAST", "EXR", "KEYS", "CPRT", "VRSK", "VMC", "ANSS", "CSGP",
+            "IT", "CDW", "FANG", "AME", "MTD", "XYL", "TSCO", "BRO", "DOV", "HPQ",
+            # 201-300
+            "RMD", "WAT", "GPN", "LH", "FTV", "CHD", "BR", "IRM", "STE", "PTC",
+            "HOLX", "TRGP", "WAB", "PKI", "ALGN", "MOH", "WST", "CINF", "MKC", "AVB",
+            "NTRS", "MTB", "HBAN", "RF", "FE", "DTE", "VTR", "ARE", "LDOS", "CFG",
+            "DGX", "TDY", "BIO", "NDAQ", "TER", "LKQ", "EXPD", "COO", "ATO", "FMC",
+            "NI", "KEY", "JBHT", "POOL", "DPZ", "ETSY", "FICO", "SBNY", "URI", "TECH",
+            "PKG", "AES", "J", "IP", "CCL", "BBY", "CPB", "AKAM", "TYL", "GL",
+            "AAL", "UAL", "DAL", "LUV", "ALK", "JBLU", "SAVE", "HA", "SKYW",
+            "K", "SJM", "HRL", "CAG", "LW", "BG", "ADM", "TSN", "HRL", "PPC",
+            "CLX", "CL", "CHD", "SPB", "EL", "COTY", "TPR", "CPRI", "PVH", "RL",
+            "NVR", "LEN", "DHI", "PHM", "TOL", "MTH", "MDC", "KBH", "TMHC", "MHO",
+            # 301-400
+            "HPE", "NTAP", "WDC", "STX", "PSTG", "DELL", "NCR", "ZBRA", "JNPR", "ANET",
+            "FFIV", "SWKS", "MRVL", "WOLF", "CRUS", "SLAB", "LSCC", "RMBS", "MPWR",
+            "LNT", "EVRG", "CMS", "WEC", "ES", "AEE", "CNP", "PNW", "OGE", "NRG",
+            "HWM", "TXT", "GE", "LHX", "HII", "LDOS", "SAIC", "BWA", "LEA", "ALV",
+            "BEN", "TROW", "IVZ", "JHG", "SEIC", "FHI", "EV", "AMG", "APAM", "CG",
+            "TFC", "ZION", "SIVB", "SBNY", "CMA", "FCNCA", "FRC", "PACW", "WAL", "EWBC",
+            "MLM", "VMC", "MAS", "FND", "BLDR", "OC", "EXP", "USG", "GMS", "TREX",
+            "EMN", "CE", "ALB", "FMC", "IFF", "PPG", "RPM", "SHW", "AXTA", "CABOT",
+            "SEE", "IP", "PKG", "GPK", "SLGN", "BLL", "CCK", "ATR", "SON", "WRK",
+            "FLEX", "JBL", "SANM", "PLXS", "TTMI", "BDC", "APH", "TEL", "GRMN"
+        ]
+        
+        # NASDAQ 100 + high-growth tech (100)
+        nasdaq_growth = [
+            "NFLX", "PYPL", "CMCSA", "PDD", "ABNB", "MELI", "WDAY", "TEAM", "ZS", "DDOG",
+            "MDB", "NET", "CRWD", "PANW", "OKTA", "ZM", "DOCU", "SPLK", "SNOW", "PLTR",
+            "U", "RBLX", "COIN", "HOOD", "SOFI", "UPST", "AFRM", "BILL", "HUBS", "TWLO",
+            "RIVN", "LCID", "NIO", "XPEV", "LI", "GRAB", "SE", "SHOP", "SQ", "LSPD",
+            "MARA", "RIOT", "BITF", "HUT", "CLSK", "CIFR", "IREN", "BTBT", "GREE", "CAN",
+            "ROKU", "TTD", "MGNI", "APPS", "PUBM", "DV", "IAS", "ZETA", "BRZE", "SEMR",
+            "CFLT", "MNDY", "PATH", "AI", "GTLB", "ESTC", "NEWR", "SUMO", "FROG", "PD",
+            "APP", "BMBL", "MTCH", "PINS", "SNAP", "TWTR", "RDDT", "HOOD", "CPNG", "DUOL",
+            "DOCN", "LIDR", "IONQ", "RGTI", "QBTS", "QUBT", "ARQQ", "FORM", "LASR",
+            "LAZR", "VLDR", "INVZ", "AEYE", "OUST", "MVIS", "CINT"
+        ]
+        
+        # High-volume speculative/meme stocks (80)
+        high_volume = [
+            "AMC", "GME", "BBBY", "SNDL", "TLRY", "CGC", "ACB", "CRON", "OGI", "HEXO",
+            "SPCE", "PLUG", "FCEL", "BLDP", "BE", "CHPT", "QS", "GOEV", "FSR", "WKHS",
+            "RIDE", "NKLA", "HYLN", "ARVL", "REE", "FFIE", "MULN", "PTRA", "LEV", "EVGO",
+            "ATER", "BBIG", "PROG", "CLOV", "WISH", "SKLZ", "SDC", "ROOT", "LMND", "OPEN",
+            "RDFN", "CVNA", "CARG", "VRM", "STNE", "PAGS", "NU", "PSFE", "AFRM", "UPST",
+            "SOFI", "LC", "UWMC", "RKT", "GHLD", "TREE", "LDI", "COOP", "ESSC", "TMTG",
+            "DWAC", "CFVI", "NKLA", "GOEV", "REE", "VLDR", "LAZR", "OUST", "INVZ", "AEYE",
+            "BB", "NOK", "EXPR", "KOSS", "NAKD", "CENN", "PRTY", "BGFV", "DKNG", "PENN"
+        ]
+        
+        # Biotech & Healthcare (80)
+        biotech = [
+            "MRNA", "BNTX", "NVAX", "SGEN", "ALNY", "INCY", "BMRN", "EXEL", "SRPT", "RARE",
+            "IONS", "UTHR", "NBIX", "SGEN", "FOLD", "HALO", "ARWR", "PTCT", "XLRN", "BLUE",
+            "EDIT", "CRSP", "NTLA", "BEAM", "VERV", "PRME", "RXRX", "DNA", "DNAY", "TWST",
+            "CERS", "IOVA", "AGEN", "FATE", "KITE", "JUNO", "CELG", "GILD", "AMGN", "BIIB",
+            "ILMN", "EXAS", "GH", "NVTA", "PACB", "BNGO", "TWST", "CDNA", "MYGN", "NEO",
+            "HZNP", "JAZZ", "LGND", "SUPN", "PRGO", "PAHC", "CTLT", "WST", "TFX", "HOLX",
+            "DXCM", "PODD", "TNDM", "IRTC", "OFIX", "NUVA", "GMED", "LIVN", "PEN", "INSP",
+            "VEEV", "CNC", "MOH", "HUM", "UNH", "ANTM", "CI", "CVS", "WBA", "RAD"
+        ]
+        
+        # Financials & REITs (80)
+        financials = [
+            "C", "BAC", "WFC", "USB", "PNC", "TFC", "CFG", "KEY", "RF", "FITB",
+            "ZION", "CMA", "HBAN", "MTB", "NTRS", "STT", "BK", "ALLY", "COF", "DFS",
+            "AXP", "SYF", "PYPL", "V", "MA", "GPN", "FIS", "FISV", "FLT", "WU",
+            "MET", "PRU", "ALL", "HIG", "LNC", "CINF", "GL", "AIZ", "KMPR", "PFG",
+            "O", "VICI", "DLR", "CCI", "SBAC", "SPG", "AVB", "EQR", "MAA", "UDR",
+            "PSA", "EXR", "CUBE", "LSI", "COLD", "REXR", "PLD", "DRE", "FR", "STAG",
+            "WPC", "ADC", "NNN", "STOR", "EPRT", "SRC", "FCPT", "GTY", "PINE", "GOOD",
+            "AMH", "INVH", "RDFN", "Z", "ZG", "RDFN", "OPEN", "OPAD", "COMP", "RMAX"
+        ]
+        
+        # Energy & Materials (60)
+        energy_materials = [
+            "XOM", "CVX", "COP", "EOG", "PXD", "DVN", "FANG", "OXY", "HES", "MRO",
+            "APA", "MTDR", "PR", "CTRA", "OVV", "SM", "RRC", "AR", "SWN", "EQT",
+            "SLB", "HAL", "BKR", "NOV", "FTI", "HP", "OII", "RIG", "DO", "VAL",
+            "VLO", "MPC", "PSX", "DINO", "PBF", "HFC", "DK", "CVI", "PAR", "PARR",
+            "LIN", "APD", "ECL", "SHW", "PPG", "NEM", "FCX", "NUE", "STLD", "CLF",
+            "AA", "ATI", "CMC", "RS", "SCHN", "ZEUS", "X", "ARNC", "CENX", "KALU"
+        ]
+        
+        # Industrials & Defense (60)
+        industrials = [
+            "GE", "HON", "MMM", "CAT", "DE", "EMR", "ETN", "ROK", "AME", "ROP",
+            "IR", "PH", "ITW", "DOV", "GNRC", "CMI", "PCAR", "AGCO", "OSK", "TEX",
+            "BA", "LMT", "RTX", "NOC", "GD", "LHX", "HII", "TDG", "TXT", "HWM",
+            "UPS", "FDX", "XPO", "JBHT", "KNX", "WERN", "LSTR", "ODFL", "SAIA", "OLD",
+            "CSX", "UNP", "NSC", "KSU", "CP", "CNI", "WAB", "TRN", "GBX", "RAIL",
+            "AAL", "UAL", "DAL", "LUV", "ALK", "JBLU", "SAVE", "HA", "SKYW", "MESA"
+        ]
+        
+        # Combine all lists and remove duplicates
+        all_symbols = (etfs + sp500 + nasdaq_growth + high_volume + 
+                       biotech + financials + energy_materials + industrials)
+        unique_symbols = list(dict.fromkeys(all_symbols))  # Preserve order, remove dupes
+        
+        return unique_symbols
+    
     async def start_full_market_collection(
         self,
         bar_size: str = "1 day",
@@ -267,6 +446,53 @@ class IBHistoricalCollector:
         logger.info(f"Starting full market collection for {len(symbols)} symbols")
         
         # Start collection with all symbols
+        return await self.start_collection(
+            symbols=symbols,
+            bar_size=bar_size,
+            duration=duration,
+            use_defaults=False
+        )
+    
+    async def start_liquid_collection(
+        self,
+        bar_size: str = "1 day",
+        duration: str = "1 M",
+        min_adv: int = 500_000
+    ) -> Dict[str, Any]:
+        """
+        Start collection for LIQUID US stocks only (filtered by ADV).
+        
+        This is faster than full market (~2-3 hours vs 10+ hours) and focuses
+        on stocks that are actually tradeable with good liquidity.
+        
+        Args:
+            bar_size: Bar size (default "1 day")
+            duration: Duration per request (default "1 M" = 1 month)
+            min_adv: Minimum average daily volume (default 500K)
+            
+        Returns:
+            Job info dict
+        """
+        if self._running_job and self._running_job.status == CollectionStatus.RUNNING:
+            return {
+                "success": False,
+                "error": "Another collection job is already running",
+                "current_job": self._running_job.to_dict()
+            }
+            
+        # Get liquid symbols
+        logger.info(f"Fetching liquid US stocks (ADV >= {min_adv:,})...")
+        symbols = await self.get_liquid_symbols(min_adv=min_adv)
+        
+        if not symbols:
+            return {
+                "success": False,
+                "error": "Could not fetch liquid stock list."
+            }
+            
+        logger.info(f"Starting liquid collection for {len(symbols)} symbols (ADV >= {min_adv:,})")
+        
+        # Start collection
         return await self.start_collection(
             symbols=symbols,
             bar_size=bar_size,
