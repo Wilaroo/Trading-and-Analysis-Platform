@@ -60,14 +60,14 @@ class TimeSeriesAIService:
     async def get_forecast(
         self,
         symbol: str,
-        bars: List[Dict]
+        bars: List[Dict] = None
     ) -> Dict[str, Any]:
         """
         Get directional forecast for a symbol.
         
         Args:
             symbol: Ticker symbol
-            bars: Recent OHLCV bars (most recent first)
+            bars: Recent OHLCV bars (most recent first). If not provided, fetched from MongoDB.
             
         Returns:
             {
@@ -80,6 +80,10 @@ class TimeSeriesAIService:
                 "usable": bool  # True if confidence > threshold
             }
         """
+        # If no bars provided, fetch from MongoDB
+        if not bars:
+            bars = await self._get_bars_from_db_for_prediction(symbol)
+            
         if not bars or len(bars) < 20:
             return self._empty_forecast(symbol, "Insufficient data")
             
@@ -150,7 +154,7 @@ class TimeSeriesAIService:
         symbols: List[str] = None
     ) -> Dict[str, Any]:
         """
-        Train/update the model with historical data.
+        Train/update the model with historical data from MongoDB.
         
         Args:
             symbols: List of symbols to train on (default: fetch from history)
@@ -158,28 +162,32 @@ class TimeSeriesAIService:
         Returns:
             Training result with metrics
         """
-        if self._historical_service is None:
-            return {"success": False, "error": "Historical service not connected"}
+        if self._db is None:
+            return {"success": False, "error": "Database not connected"}
             
-        logger.info("Starting model training...")
+        logger.info("Starting model training from MongoDB historical_bars...")
         
         try:
-            # Get historical bars for training
+            # Get historical bars directly from MongoDB
             bars_by_symbol = {}
             
             if symbols is None:
-                # Get symbols with most data
-                symbols = await self._get_training_symbols()
+                # Get symbols with most data from MongoDB
+                symbols = await self._get_training_symbols_from_db()
                 
-            for symbol in symbols[:20]:  # Limit to 20 symbols
-                bars = await self._get_historical_bars(symbol)
+            logger.info(f"Training symbols: {symbols}")
+            
+            for symbol in symbols[:30]:  # Train on up to 30 symbols
+                bars = await self._get_historical_bars_from_db(symbol)
                 if bars and len(bars) >= self.MIN_BARS_FOR_TRAINING:
                     bars_by_symbol[symbol] = bars
+                    logger.info(f"  {symbol}: {len(bars)} bars")
                     
             if not bars_by_symbol:
-                return {"success": False, "error": "No historical data available"}
+                return {"success": False, "error": "No historical data available in MongoDB"}
                 
-            logger.info(f"Training on {len(bars_by_symbol)} symbols")
+            total_bars = sum(len(b) for b in bars_by_symbol.values())
+            logger.info(f"Training on {len(bars_by_symbol)} symbols, {total_bars} total bars")
             
             # Train model
             metrics = self._model.train(bars_by_symbol)
@@ -190,15 +198,67 @@ class TimeSeriesAIService:
                 "success": True,
                 "metrics": metrics.to_dict(),
                 "symbols_used": list(bars_by_symbol.keys()),
+                "total_bars": total_bars,
                 "samples": metrics.training_samples + metrics.validation_samples
             }
             
         except Exception as e:
-            logger.error(f"Training error: {e}")
+            logger.error(f"Training error: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
+            
+    async def _get_training_symbols_from_db(self) -> List[str]:
+        """Get symbols with most historical data from MongoDB"""
+        if self._db is None:
+            return []
+            
+        try:
+            # Aggregate to find symbols with most bars
+            pipeline = [
+                {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
+                {"$match": {"count": {"$gte": 100}}},  # At least 100 bars
+                {"$sort": {"count": -1}},
+                {"$limit": 30}
+            ]
+            result = list(self._db["historical_bars"].aggregate(pipeline))
+            symbols = [r["_id"] for r in result]
+            logger.info(f"Found {len(symbols)} symbols with sufficient data")
+            return symbols
+        except Exception as e:
+            logger.error(f"Error getting training symbols: {e}")
+            # Fallback to default list
+            return [
+                "NVDA", "TSLA", "ORCL", "AVGO", "MSFT", "GOOGL", "AAPL", 
+                "META", "AMZN", "JPM", "ADBE", "V"
+            ]
+            
+    async def _get_historical_bars_from_db(self, symbol: str) -> Optional[List[Dict]]:
+        """Get historical bars for a symbol directly from MongoDB"""
+        if self._db is None:
+            return None
+            
+        try:
+            # Fetch bars sorted by timestamp (oldest first for proper training)
+            # Training expects chronological order (oldest first)
+            cursor = self._db["historical_bars"].find(
+                {"symbol": symbol},
+                {"_id": 0, "symbol": 1, "timestamp": 1, "open": 1, "high": 1, 
+                 "low": 1, "close": 1, "volume": 1}
+            ).sort("timestamp", 1)  # Ascending order (oldest first)
+            
+            bars = list(cursor)
+            # Keep oldest-first for training
+            return bars if bars else None
+            
+        except Exception as e:
+            logger.warning(f"Could not get bars for {symbol} from DB: {e}")
+            return None
             
     async def _get_training_symbols(self) -> List[str]:
         """Get symbols with sufficient historical data"""
+        # Use DB method if available
+        if self._db is not None:
+            return await self._get_training_symbols_from_db()
+            
         # Default list of liquid stocks
         default_symbols = [
             "SPY", "QQQ", "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META",
@@ -222,6 +282,33 @@ class TimeSeriesAIService:
             return bars if bars else None
         except Exception as e:
             logger.warning(f"Could not get bars for {symbol}: {e}")
+            return None
+
+    async def _get_bars_from_db_for_prediction(self, symbol: str) -> Optional[List[Dict]]:
+        """Get historical bars from MongoDB for running a prediction"""
+        if self._db is None:
+            logger.warning("DB not connected, cannot fetch bars for prediction")
+            return None
+            
+        try:
+            # Fetch most recent 50 bars (sorted by timestamp descending for most recent first)
+            cursor = self._db["historical_bars"].find(
+                {"symbol": symbol.upper()},
+                {"_id": 0, "symbol": 1, "timestamp": 1, "open": 1, "high": 1, 
+                 "low": 1, "close": 1, "volume": 1}
+            ).sort("timestamp", -1).limit(50)  # Most recent first
+            
+            bars = list(cursor)
+            
+            if bars and len(bars) >= 20:
+                logger.info(f"Fetched {len(bars)} bars from MongoDB for {symbol}")
+                return bars
+            else:
+                logger.warning(f"Insufficient bars in MongoDB for {symbol}: {len(bars) if bars else 0}")
+                return None
+                
+        except Exception as e:
+            logger.warning(f"Could not get bars for {symbol} from DB for prediction: {e}")
             return None
             
     async def auto_train_if_needed(self):

@@ -380,14 +380,19 @@ class TimeSeriesFeatureEngineer:
         
         # ATR (14-period)
         if len(closes) >= 15:
+            # True Range = max(H-L, |H-Prev_C|, |L-Prev_C|)
+            prev_closes = closes[1:15]  # Previous closes (14 values)
+            curr_highs = highs[:14]      # Current highs (14 values)
+            curr_lows = lows[:14]        # Current lows (14 values)
+            
             tr = np.maximum(
-                highs[:14] - lows[:14],
+                curr_highs - curr_lows,
                 np.maximum(
-                    np.abs(highs[:14] - np.roll(closes[:14], 1)[1:15]),
-                    np.abs(lows[:14] - np.roll(closes[:14], 1)[1:15])
+                    np.abs(curr_highs - prev_closes),
+                    np.abs(curr_lows - prev_closes)
                 )
             )
-            atr = np.mean(tr[:14])
+            atr = np.mean(tr)
             features["atr_pct"] = atr / closes[0] if closes[0] > 0 else 0
         else:
             features["atr_pct"] = 0.02  # Default 2%
