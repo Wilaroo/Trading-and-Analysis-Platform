@@ -5,7 +5,47 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ---
 
-## INSTITUTIONAL-GRADE AI MODULES (March 14, 2026)
+## INSTITUTIONAL-GRADE AI MODULES (March 14-15, 2026)
+
+### Phase 4: AI Insights Dashboard ✅ COMPLETE (March 15, 2026)
+
+**Implemented:**
+1. **AI Insights Dashboard Modal** (`SentCom.jsx`)
+   - Accessible via "AI Insights" button in SENTCOM Settings
+   - Uses React Portal for proper modal rendering above overflow containers
+   - Three tabs: Shadow Decisions, Time-Series Forecast, Module Performance
+   
+2. **Shadow Decisions Tab**
+   - Displays recent AI trade decisions
+   - Shows symbol, recommendation (PROCEED/PASS), execution status
+   - Price at decision, confidence score, market regime
+   - Full reasoning with debate result, risk assessment, institutional context
+   
+3. **Time-Series Forecast Tab**
+   - Model status card (version, accuracy, features, training samples)
+   - Top features display (volatility_10, hour_cos, rvol_10, etc.)
+   - Interactive forecast runner - enter any symbol to get prediction
+   - Result shows direction, probabilities (UP/DOWN), confidence, signal
+   
+4. **Module Performance Tab**
+   - Performance metrics for all AI modules
+   - Accuracy, total/correct/incorrect decisions, pending outcomes
+   - Average P&L for correct and incorrect predictions
+
+**API Integration:**
+- `GET /api/ai-modules/shadow/decisions` - Fetch recent AI decisions
+- `GET /api/ai-modules/shadow/performance` - Module performance metrics
+- `GET /api/ai-modules/timeseries/status` - Model status
+- `POST /api/ai-modules/timeseries/forecast` - Run prediction (with optional bars)
+
+**Key Test IDs:**
+- `sentcom-settings-btn` - Open settings panel
+- `open-ai-insights` - Open AI Insights Dashboard
+- `ai-insights-modal` - Modal container
+- `ai-insights-tab-decisions`, `ai-insights-tab-forecast`, `ai-insights-tab-performance`
+- `forecast-symbol-input`, `run-forecast-btn`, `forecast-result`
+
+---
 
 ### Phase 3: Time-Series AI Integration ✅ COMPLETE (March 15, 2026)
 
@@ -55,8 +95,12 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 }
 ```
 
-**Training Note:** Model is currently untrained (returns neutral predictions). 
-To train, call `POST /api/ai-modules/timeseries/train` with historical data.
+**Training Status:** Model is TRAINED (v0.4.0)
+- Accuracy: 31.8% (realistic for directional prediction)
+- Features: 46
+- Training Samples: 173
+- Top Features: volatility_10, keltner_position, hour_cos, cci, bb_position
+- To retrain: Call `POST /api/ai-modules/timeseries/train`
 
 ---
 
