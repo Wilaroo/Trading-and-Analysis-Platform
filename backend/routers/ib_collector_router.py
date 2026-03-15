@@ -355,3 +355,73 @@ async def get_adv_cache_stats():
     except Exception as e:
         logger.error(f"Error getting ADV cache stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/smart-collection-plan")
+async def get_smart_collection_plan(
+    include_intraday: bool = True,
+    include_swing: bool = True,
+    include_investment: bool = True
+):
+    """
+    Get a smart collection plan that matches ADV requirements to trading styles.
+    
+    This shows what will be collected for each tier:
+    - **Intraday** (1min, 5min): ADV >= 500K stocks only
+    - **Swing** (15min, 1hour): ADV >= 100K stocks
+    - **Investment** (1day): ADV >= 50K stocks (broadest)
+    
+    This approach saves significant time by not collecting high-frequency
+    data for illiquid stocks that wouldn't be traded intraday anyway.
+    """
+    try:
+        collector = get_ib_collector()
+        plan = await collector.start_smart_collection(
+            include_intraday=include_intraday,
+            include_swing=include_swing,
+            include_investment=include_investment
+        )
+        return plan
+    except Exception as e:
+        logger.error(f"Error getting smart collection plan: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/smart-collection-run")
+async def run_smart_collection(
+    days: int = 30,
+    include_intraday: bool = True,
+    include_swing: bool = True,
+    include_investment: bool = True
+):
+    """
+    Execute the smart tiered collection.
+    
+    Collects data matching your bot's ADV requirements:
+    - **Intraday** (1min, 5min): High-ADV stocks (>= 500K) - fast in/out
+    - **Swing** (15min, 1hour): Medium-ADV stocks (>= 100K) - multi-day holds
+    - **Investment** (1day): All tradeable stocks (>= 50K) - position trades
+    
+    ⚠️ LONG-RUNNING: Check /api/ib-collector/status for progress
+    """
+    try:
+        collector = get_ib_collector()
+        
+        # Calculate duration
+        if days <= 7:
+            duration = f"{days} D"
+        elif days <= 30:
+            duration = f"{days // 7 + 1} W"
+        else:
+            duration = f"{days // 30 + 1} M"
+        
+        result = await collector.run_smart_collection(
+            duration=duration,
+            include_intraday=include_intraday,
+            include_swing=include_swing,
+            include_investment=include_investment
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error running smart collection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
