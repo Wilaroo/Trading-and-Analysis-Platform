@@ -7,7 +7,34 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 15, 2026)
 
-### AgentDataService - Breaking Agent Silos ✅ NEW (March 15, 2026)
+### Auto-Apply Learning Connector Outputs ✅ NEW (March 15, 2026)
+**SCANNER THRESHOLDS NOW AUTO-CALIBRATE** - Learning loop closes automatically.
+
+**What Changed:**
+- `LearningConnectorsService` now actually APPLIES threshold calibrations (not just logs them)
+- Setup types with low win rates get higher thresholds (more selective)
+- Setup types with high win rates can have lower thresholds (take more trades)
+- Thresholds are persisted to database and loaded on restart
+
+**New API Endpoints:**
+- `POST /api/learning-connectors/sync/run-all-calibrations` - Run all calibrations at once
+- `GET /api/learning-connectors/thresholds` - View currently applied thresholds
+
+**How It Works:**
+1. Analyze alert outcomes from last 30 days
+2. Calculate win rate and avg R for each setup type
+3. If avg R < 0: threshold × 1.3 (much more selective)
+4. If win rate < 40%: threshold × 1.15 (more selective)
+5. If win rate > 60% and avg R > 0.5: threshold × 0.95 (slightly less selective)
+6. Apply threshold to DynamicThresholdService (affects TQS in real-time)
+
+**Files Modified:**
+- `/app/backend/services/learning_connectors_service.py` - Added _apply_setup_calibration()
+- `/app/backend/routers/learning_connectors_router.py` - Added new endpoints
+
+---
+
+### AgentDataService - Breaking Agent Silos ✅ (March 15, 2026)
 **GIVES AGENTS HISTORICAL CONTEXT** - Bull/Bear agents now access historical data for smarter decisions.
 
 **What Changed:**

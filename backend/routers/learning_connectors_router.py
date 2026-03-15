@@ -18,7 +18,8 @@ def init_learning_connectors_router(
     shadow_tracker=None,
     learning_loop=None,
     scanner=None,
-    simulation_engine=None
+    simulation_engine=None,
+    dynamic_thresholds=None
 ):
     """Initialize the learning connectors service with dependencies"""
     init_learning_connectors(
@@ -27,7 +28,8 @@ def init_learning_connectors_router(
         shadow_tracker=shadow_tracker,
         learning_loop=learning_loop,
         scanner=scanner,
-        simulation_engine=simulation_engine
+        simulation_engine=simulation_engine,
+        dynamic_thresholds=dynamic_thresholds
     )
 
 
@@ -177,3 +179,81 @@ async def sync_verify_predictions():
     except Exception as e:
         logger.error(f"Error verifying predictions: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sync/run-all-calibrations")
+async def run_all_calibrations():
+    """
+    Run all calibration syncs at once:
+    - Shadow tracker → Module weights
+    - Alert outcomes → Scanner thresholds
+    - Predictions → Verification
+    
+    This is meant to be called after market close or on weekends.
+    """
+    try:
+        service = get_learning_connectors()
+        results = {}
+        
+        # 1. Shadow to weights
+        try:
+            results["shadow_to_weights"] = await service.sync_shadow_to_weights()
+        except Exception as e:
+            results["shadow_to_weights"] = {"success": False, "error": str(e)}
+            
+        # 2. Outcomes to scanner (auto-applies thresholds)
+        try:
+            results["outcomes_to_scanner"] = await service.sync_outcomes_to_scanner()
+        except Exception as e:
+            results["outcomes_to_scanner"] = {"success": False, "error": str(e)}
+            
+        # 3. Predictions verification
+        try:
+            results["predictions_verification"] = await service.sync_predictions_verification()
+        except Exception as e:
+            results["predictions_verification"] = {"success": False, "error": str(e)}
+            
+        # Summary
+        all_success = all(r.get("success", False) for r in results.values())
+        applied_calibrations = results.get("outcomes_to_scanner", {}).get("applied_count", 0)
+        
+        return {
+            "success": all_success,
+            "results": results,
+            "applied_calibrations": applied_calibrations,
+            "message": f"Calibrations complete. {applied_calibrations} threshold(s) applied."
+        }
+    except Exception as e:
+        logger.error(f"Error running all calibrations: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/thresholds")
+async def get_applied_thresholds():
+    """Get all currently applied setup thresholds"""
+    try:
+        service = get_learning_connectors()
+        
+        # Get all threshold_* docs from the collection
+        thresholds = {}
+        if service._connectors_col is not None:
+            docs = list(service._connectors_col.find({"name": {"$regex": "^threshold_"}}))
+            for doc in docs:
+                setup_type = doc["name"].replace("threshold_", "")
+                thresholds[setup_type] = {
+                    "value": doc.get("value", 1.0),
+                    "win_rate_30d": doc.get("win_rate_30d", 0),
+                    "total_alerts": doc.get("total_alerts", 0),
+                    "avg_r_multiple": doc.get("avg_r_multiple", 0),
+                    "updated_at": doc.get("updated_at", "")
+                }
+                
+        return {
+            "success": True,
+            "thresholds": thresholds,
+            "description": "Values > 1.0 mean 'be more selective', < 1.0 mean 'can be less selective'"
+        }
+    except Exception as e:
+        logger.error(f"Error getting thresholds: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+

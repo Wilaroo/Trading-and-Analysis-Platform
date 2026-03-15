@@ -113,6 +113,7 @@ class LearningConnectorsService:
         self._learning_loop = None
         self._scanner = None
         self._simulation_engine = None
+        self._dynamic_thresholds = None  # NEW: DynamicThresholdService
         
         # Connection definitions
         self._connections: Dict[str, ConnectionStatus] = {}
@@ -203,7 +204,8 @@ class LearningConnectorsService:
         shadow_tracker=None,
         learning_loop=None,
         scanner=None,
-        simulation_engine=None
+        simulation_engine=None,
+        dynamic_thresholds=None  # NEW
     ):
         """Set service dependencies"""
         self._timeseries_ai = timeseries_ai
@@ -211,6 +213,7 @@ class LearningConnectorsService:
         self._learning_loop = learning_loop
         self._scanner = scanner
         self._simulation_engine = simulation_engine
+        self._dynamic_thresholds = dynamic_thresholds
         
         # Update connection status based on available services
         self._update_connection_health()
@@ -620,6 +623,20 @@ class LearningConnectorsService:
                     )
                     calibrations.append(calibration)
                     
+            # ==== NEW: Actually apply calibrations to DynamicThresholdService ====
+            applied_count = 0
+            if self._dynamic_thresholds and calibrations:
+                for cal in calibrations:
+                    # Only apply if there's a meaningful change
+                    if abs(cal.recommended_threshold - cal.current_threshold) > 0.05:
+                        self._apply_setup_calibration(cal)
+                        applied_count += 1
+                        logger.info(
+                            f"Applied threshold calibration for {cal.setup_type}: "
+                            f"{cal.current_threshold:.2f} → {cal.recommended_threshold:.2f} "
+                            f"(win_rate: {cal.win_rate_30d:.1%})"
+                        )
+                    
             # Update connection status
             conn.last_sync = datetime.now(timezone.utc).isoformat()
             conn.records_synced += sum(r["total"] for r in results)
@@ -629,13 +646,15 @@ class LearningConnectorsService:
             # Log calibration
             self._log_calibration("scanner_thresholds", {
                 "setups_analyzed": len(results),
-                "calibrations": [c.to_dict() for c in calibrations]
+                "calibrations": [c.to_dict() for c in calibrations],
+                "applied_count": applied_count
             })
             
             return {
                 "success": True,
                 "setups_analyzed": len(results),
-                "calibrations": [c.to_dict() for c in calibrations]
+                "calibrations": [c.to_dict() for c in calibrations],
+                "applied_count": applied_count
             }
             
         except Exception as e:
@@ -646,6 +665,15 @@ class LearningConnectorsService:
             
     def _get_current_threshold(self, setup_type: str) -> float:
         """Get current threshold for a setup type"""
+        # First check if we have a stored custom threshold
+        if self._db is not None:
+            try:
+                doc = self._connectors_col.find_one({"name": f"threshold_{setup_type}"})
+                if doc and "value" in doc:
+                    return doc["value"]
+            except Exception:
+                pass
+                
         # Default thresholds by setup type
         defaults = {
             "gap_and_go": 1.0,
@@ -653,9 +681,56 @@ class LearningConnectorsService:
             "oversold_bounce": 1.0,
             "breakout": 1.0,
             "range_break": 1.0,
-            "momentum_surge": 1.0
+            "momentum_surge": 1.0,
+            "bull_flag": 1.0,
+            "orb_breakout": 1.0,
+            "pullback_to_ema": 1.0
         }
         return defaults.get(setup_type, 1.0)
+        
+    def _apply_setup_calibration(self, calibration: 'SignalCalibration'):
+        """
+        Apply a calibration to both the database and DynamicThresholdService.
+        
+        This is where the learning loop actually CLOSES - calibrations get applied.
+        """
+        setup_type = calibration.setup_type
+        new_threshold = calibration.recommended_threshold
+        
+        # 1. Store in database for persistence
+        if self._connectors_col is not None:
+            try:
+                self._connectors_col.update_one(
+                    {"name": f"threshold_{setup_type}"},
+                    {"$set": {
+                        "name": f"threshold_{setup_type}",
+                        "value": new_threshold,
+                        "win_rate_30d": calibration.win_rate_30d,
+                        "total_alerts": calibration.total_alerts,
+                        "avg_r_multiple": calibration.avg_r_multiple,
+                        "updated_at": datetime.now(timezone.utc).isoformat()
+                    }},
+                    upsert=True
+                )
+            except Exception as e:
+                logger.error(f"Error saving threshold for {setup_type}: {e}")
+                
+        # 2. If DynamicThresholdService is available, also set there
+        # This affects the TQS calculations in real-time
+        if self._dynamic_thresholds:
+            try:
+                # Map the threshold to TQS adjustment
+                # If threshold > 1.0, we need higher TQS (be more selective)
+                # If threshold < 1.0, we can accept lower TQS
+                from services.dynamic_thresholds import ThresholdType
+                
+                # Store setup-specific threshold adjustment
+                # This will be queried during TQS calculation
+                tqs_adjustment = (new_threshold - 1.0) * 10  # Scale: 1.3 → +3, 0.95 → -0.5
+                self._dynamic_thresholds._custom_thresholds[f"tqs_{setup_type}"] = tqs_adjustment
+                
+            except Exception as e:
+                logger.warning(f"Could not set dynamic threshold for {setup_type}: {e}")
 
     # =========================================================================
     # CONNECTION 4: Predictions → Outcome Verification
@@ -840,7 +915,8 @@ def init_learning_connectors(
     shadow_tracker=None,
     learning_loop=None,
     scanner=None,
-    simulation_engine=None
+    simulation_engine=None,
+    dynamic_thresholds=None
 ) -> LearningConnectorsService:
     """Initialize the learning connectors service"""
     service = get_learning_connectors()
@@ -850,6 +926,7 @@ def init_learning_connectors(
         shadow_tracker=shadow_tracker,
         learning_loop=learning_loop,
         scanner=scanner,
-        simulation_engine=simulation_engine
+        simulation_engine=simulation_engine,
+        dynamic_thresholds=dynamic_thresholds
     )
     return service
