@@ -1007,70 +1007,36 @@ class IBHistoricalCollector:
         }
         
     async def _run_collection(self, job: CollectionJob):
-        """Run the collection job"""
+        """
+        Run the collection job using async batch approach.
+        
+        Instead of blocking for each symbol, we:
+        1. Create all requests in batch (fast)
+        2. Start a background task to monitor and store results
+        3. The local IB Data Pusher processes them at its own pace
+        """
         job.status = CollectionStatus.RUNNING
         self._update_job(job)
         
         try:
+            from services.historical_data_queue_service import get_historical_data_queue_service
+            queue_service = get_historical_data_queue_service()
+            
             total_symbols = len(job.symbols)
+            logger.info(f"Starting async collection for {total_symbols} symbols (job: {job.id})")
             
-            # Warm up the HMDS connection with a known liquid symbol first
-            logger.info("Warming up IB HMDS connection with SPY test...")
-            try:
-                warmup_result = await self._ib_service.get_historical_data(
-                    symbol="SPY",
-                    duration="1 D",
-                    bar_size="1 day"
-                )
-                if warmup_result.get("success") and warmup_result.get("data"):
-                    logger.info(f"HMDS warm-up successful: got {len(warmup_result['data'])} bars for SPY")
-                else:
-                    logger.warning(f"HMDS warm-up returned no data: {warmup_result.get('error', 'Unknown')}")
-                    # Wait a bit and try again
-                    await asyncio.sleep(5)
-                    warmup_result = await self._ib_service.get_historical_data(
-                        symbol="SPY",
-                        duration="1 D", 
-                        bar_size="1 day"
-                    )
-                    if warmup_result.get("success") and warmup_result.get("data"):
-                        logger.info(f"HMDS warm-up retry successful: got {len(warmup_result['data'])} bars")
-                    else:
-                        logger.error("HMDS warm-up failed after retry - collection may fail")
-            except Exception as e:
-                logger.error(f"HMDS warm-up failed: {e}")
-                # Continue anyway - maybe individual symbols will work
+            # Create all requests in batch (fast, no blocking!)
+            batch_result = queue_service.create_batch_requests(
+                symbols=job.symbols,
+                duration=job.duration,
+                bar_size=job.bar_size,
+                job_id=job.id
+            )
             
-            await asyncio.sleep(2)  # Give HMDS time to fully connect
+            logger.info(f"Created {batch_result['created']} requests in queue for job {job.id}")
             
-            for i, symbol in enumerate(job.symbols):
-                if self._cancel_requested:
-                    job.status = CollectionStatus.CANCELLED
-                    break
-                    
-                job.current_symbol = symbol
-                job.progress_pct = (i / total_symbols) * 100
-                self._update_job(job)
-                
-                try:
-                    bars_collected = await self._collect_symbol_data(
-                        symbol, job.bar_size, job.duration
-                    )
-                    job.total_bars_collected += bars_collected
-                    job.symbols_completed += 1
-                    logger.info(f"Collected {bars_collected} bars for {symbol} ({i+1}/{total_symbols})")
-                    
-                except Exception as e:
-                    job.symbols_failed += 1
-                    job.errors.append(f"{symbol}: {str(e)}")
-                    logger.error(f"Failed to collect {symbol}: {e}")
-                    
-                # Rate limit - wait between requests
-                await asyncio.sleep(self.REQUEST_DELAY_SECONDS)
-                
-            # Job completed
-            if job.status != CollectionStatus.CANCELLED:
-                job.status = CollectionStatus.COMPLETED
+            # Now monitor progress and store completed data
+            await self._monitor_and_store_results(job, queue_service)
                 
         except Exception as e:
             job.status = CollectionStatus.FAILED
@@ -1083,6 +1049,111 @@ class IBHistoricalCollector:
             job.current_symbol = ""
             self._update_job(job)
             self._running_job = None
+    
+    async def _monitor_and_store_results(self, job: CollectionJob, queue_service):
+        """
+        Monitor queue progress and store completed data to the database.
+        This runs in the background while the local pusher processes requests.
+        """
+        from datetime import datetime, timezone
+        
+        last_completed = 0
+        stall_count = 0
+        max_stall_checks = 60  # After 60 checks with no progress (5 mins), consider it stalled
+        
+        while True:
+            # Check if cancellation was requested
+            if self._cancel_requested:
+                queue_service.cancel_job(job.id)
+                job.status = CollectionStatus.CANCELLED
+                logger.info(f"Job {job.id} cancelled")
+                break
+            
+            # Get current progress from queue
+            progress = queue_service.get_job_progress(job.id)
+            
+            # Update job stats
+            job.symbols_completed = progress["completed"]
+            job.symbols_failed = progress["failed"]
+            job.progress_pct = progress["progress_pct"]
+            
+            # Store any newly completed data
+            await self._store_completed_data(job, queue_service)
+            
+            # Check if done
+            if progress["is_complete"]:
+                # Get final error list
+                errors = queue_service.get_job_errors(job.id, limit=50)
+                job.errors = [f"{e['symbol']}: {e.get('error', 'Unknown')}" for e in errors]
+                
+                if job.symbols_failed == 0:
+                    job.status = CollectionStatus.COMPLETED
+                    logger.info(f"Job {job.id} completed successfully: {job.symbols_completed} symbols")
+                else:
+                    job.status = CollectionStatus.COMPLETED  # Still "completed" but with errors
+                    logger.info(f"Job {job.id} completed with {job.symbols_failed} failures")
+                break
+            
+            # Check for stalls (no progress)
+            if progress["completed"] == last_completed and progress["pending"] > 0:
+                stall_count += 1
+                if stall_count >= max_stall_checks:
+                    logger.warning(f"Job {job.id} stalled - no progress for 5 minutes")
+                    # Don't fail - just note it. Pusher might be temporarily offline
+                    job.errors.append("Collection stalled - is your local IB Data Pusher running?")
+            else:
+                stall_count = 0
+                last_completed = progress["completed"]
+            
+            # Update job in DB
+            self._update_job(job)
+            
+            # Wait before next check
+            await asyncio.sleep(5)
+    
+    async def _store_completed_data(self, job: CollectionJob, queue_service):
+        """Store completed bar data from the queue to the main database"""
+        if self._data_col is None:
+            return
+        
+        # Get completed requests that have data
+        completed = queue_service.get_job_completed_data(job.id)
+        
+        for item in completed:
+            symbol = item.get("symbol")
+            bar_size = item.get("bar_size", job.bar_size)
+            bars = item.get("data", [])
+            
+            if not bars:
+                continue
+            
+            for bar in bars:
+                try:
+                    self._data_col.update_one(
+                        {
+                            "symbol": symbol,
+                            "bar_size": bar_size,
+                            "date": bar.get("date") or bar.get("time")
+                        },
+                        {
+                            "$set": {
+                                "open": bar.get("open"),
+                                "high": bar.get("high"),
+                                "low": bar.get("low"),
+                                "close": bar.get("close"),
+                                "volume": bar.get("volume"),
+                                "collected_at": datetime.now(timezone.utc).isoformat()
+                            }
+                        },
+                        upsert=True
+                    )
+                    job.total_bars_collected += 1
+                except Exception as e:
+                    if "duplicate" not in str(e).lower():
+                        logger.warning(f"Error storing bar for {symbol}: {e}")
+            
+            # Mark this data as processed by clearing it from queue
+            # (The queue will auto-cleanup old completed requests)
             
     async def _collect_symbol_data(
         self, 

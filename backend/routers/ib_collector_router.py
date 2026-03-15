@@ -218,6 +218,73 @@ async def get_stats():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/queue-progress")
+async def get_queue_progress(job_id: Optional[str] = None):
+    """
+    Get real-time progress from the data request queue.
+    
+    This is the primary endpoint for tracking async collection progress.
+    It shows pending, processing, completed, and failed counts directly
+    from the queue that your local IB Data Pusher is processing.
+    
+    - **job_id**: Optional job ID. If not provided, returns overall queue stats.
+    """
+    try:
+        from services.historical_data_queue_service import get_historical_data_queue_service
+        queue_service = get_historical_data_queue_service()
+        
+        if job_id:
+            progress = queue_service.get_job_progress(job_id)
+            errors = queue_service.get_job_errors(job_id, limit=10)
+            return {
+                "success": True,
+                **progress,
+                "recent_errors": errors
+            }
+        else:
+            # Return overall queue stats
+            stats = queue_service.get_overall_queue_stats()
+            return {
+                "success": True,
+                **stats
+            }
+    except Exception as e:
+        logger.error(f"Error getting queue progress: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@router.post("/queue-cancel")
+async def cancel_queue_job(job_id: str):
+    """
+    Cancel pending requests for a specific job.
+    
+    This cancels only pending requests - already claimed/completed
+    requests are not affected.
+    
+    - **job_id**: The job ID to cancel
+    """
+    try:
+        from services.historical_data_queue_service import get_historical_data_queue_service
+        queue_service = get_historical_data_queue_service()
+        
+        result = queue_service.cancel_job(job_id)
+        
+        # Also signal the collector to stop monitoring
+        collector = get_ib_collector()
+        collector.cancel_collection()
+        
+        return {
+            "success": True,
+            **result
+        }
+    except Exception as e:
+        logger.error(f"Error cancelling queue job: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/history")
 async def get_job_history(limit: int = 10):
     """Get history of collection jobs."""
