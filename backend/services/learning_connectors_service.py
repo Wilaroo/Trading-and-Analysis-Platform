@@ -170,6 +170,12 @@ class LearningConnectorsService:
                 source="Debate Outcomes",
                 destination="Debate Weights",
                 sync_frequency="weekly"
+            ),
+            ConnectionStatus(
+                name="ib_historical_to_training",
+                source="IB Gateway Historical",
+                destination="Model Training Data",
+                sync_frequency="on_demand"
             )
         ]
         
@@ -254,6 +260,11 @@ class LearningConnectorsService:
         # Debate → Tuning
         self._connections["debate_to_tuning"].is_connected = (
             self._shadow_tracker is not None
+        )
+        
+        # IB Historical → Training (always available if DB connected)
+        self._connections["ib_historical_to_training"].is_connected = (
+            self._db is not None
         )
         
         # Update health status

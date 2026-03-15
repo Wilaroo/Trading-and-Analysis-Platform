@@ -82,6 +82,7 @@ from routers.sentcom import router as sentcom_router
 from routers.ai_modules import router as ai_modules_router, inject_services as inject_ai_module_services
 from routers.simulation_router import router as simulation_router, init_simulation_router
 from routers.learning_connectors_router import router as learning_connectors_router, init_learning_connectors_router
+from routers.ib_collector_router import router as ib_collector_router
 from services.sentcom_service import get_sentcom_service, init_sentcom_service
 from services.ai_modules import (
     get_ai_module_config, init_ai_module_config,
@@ -358,6 +359,7 @@ app.include_router(sentcom_router)  # SentCom - Unified AI Command Center
 app.include_router(ai_modules_router)  # AI Modules - Shadow Mode, Debate, Risk Manager
 app.include_router(simulation_router)  # Historical Simulation Engine
 app.include_router(learning_connectors_router)  # Learning Connectors - Data flow orchestration
+app.include_router(ib_collector_router)  # IB Historical Data Collector
 
 # Collections
 strategies_col = db["strategies"]
@@ -893,6 +895,23 @@ except Exception as e:
     print(f"Learning Connectors initialization deferred: {e}")
     import traceback
     traceback.print_exc()
+
+# ===================== IB HISTORICAL DATA COLLECTOR =====================
+# Systematically collects historical data from IB Gateway for learning
+
+try:
+    from services.ib_historical_collector import init_ib_collector
+    
+    ib_collector = init_ib_collector(db=db, ib_service=ib_service)
+    register_service('ib_collector', ib_collector)
+    
+    print("IB Historical Data Collector initialized")
+    print("  - Collects OHLCV data from IB Gateway")
+    print("  - Supports multiple bar sizes (1min, 5min, 1hour, 1day)")
+    print("  - Stores in MongoDB for model training")
+    print("  - Endpoints: /api/ib-collector/*")
+except Exception as e:
+    print(f"IB Historical Collector initialization deferred: {e}")
 
 # ===================== TRADING SCHEDULER =====================
 # Automated daily/weekly analysis tasks

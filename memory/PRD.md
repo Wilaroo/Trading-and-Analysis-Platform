@@ -5,6 +5,53 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ---
 
+## IB HISTORICAL DATA COLLECTOR ✅ NEW (March 15, 2026)
+
+### Purpose
+Systematically collects historical OHLCV data from IB Gateway to build a comprehensive learning database for all AI systems.
+
+### Key Features
+1. **Batch Collection**: Collects data for 50+ default symbols (customizable)
+2. **Multiple Bar Sizes**: 1 min, 5 mins, 15 mins, 1 hour, 1 day
+3. **Rate Limit Compliant**: 2-second delay between requests (conservative)
+4. **Background Processing**: Can run overnight for large collections
+5. **Progress Tracking**: Live status updates, pause/resume capability
+6. **MongoDB Storage**: Indexed by symbol, bar_size, date for fast retrieval
+
+### IB Gateway Data Limits
+- 30 sec bars: ~6 months history
+- 1 min bars: ~1 year history
+- 5 min bars: ~2 years history
+- 1 day bars: ~20 years history
+
+### API Endpoints
+- `POST /api/ib-collector/start` - Start custom collection
+- `POST /api/ib-collector/quick-collect` - Quick 8-symbol test
+- `POST /api/ib-collector/full-collection` - Full 50+ symbol collection
+- `POST /api/ib-collector/cancel` - Cancel running job
+- `GET /api/ib-collector/status` - Get job status
+- `GET /api/ib-collector/stats` - Get collection statistics
+- `GET /api/ib-collector/data/{symbol}` - Get collected data
+
+### Default Symbols (50+)
+ETFs: SPY, QQQ, IWM, DIA
+Tech: AAPL, MSFT, GOOGL, AMZN, META, NVDA, TSLA, AMD
+Financials: JPM, BAC, GS, MS, WFC, C
+Healthcare: JNJ, UNH, PFE, ABBV, MRK
+Consumer: WMT, COST, HD, MCD, NKE, SBUX
+And more...
+
+### Key Files
+- `/app/backend/services/ib_historical_collector.py` - Core service
+- `/app/backend/routers/ib_collector_router.py` - API endpoints
+
+### Learning Connection
+Added new learning connection: **IB Gateway Historical → Model Training Data**
+- Sync frequency: on_demand
+- Status: Pending (awaiting first collection)
+
+---
+
 ## OLLAMA INTEGRATION UPDATE ✅ (March 15, 2026)
 
 ### LLM Provider Priority (Saves Emergent Credits)
