@@ -316,3 +316,42 @@ async def get_liquid_symbols(min_adv: int = 100_000):
     except Exception as e:
         logger.error(f"Error getting liquid symbols: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.post("/build-adv-cache")
+async def build_adv_cache(batch_size: int = 100):
+    """
+    Build/refresh the ADV (Average Daily Volume) cache for all US stocks.
+    
+    This enables accurate filtering by liquidity. The cache stores the 20-day
+    average volume for each symbol.
+    
+    ⚠️ This is a LONG-RUNNING operation (30-60 minutes for full market).
+    Run once to initialize, then periodically to refresh.
+    
+    - **batch_size**: Number of symbols to process per Alpaca API call
+    """
+    try:
+        collector = get_ib_collector()
+        result = await collector.build_adv_cache(batch_size=batch_size)
+        return result
+    except Exception as e:
+        logger.error(f"Error building ADV cache: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/adv-cache-stats")
+async def get_adv_cache_stats():
+    """
+    Get statistics about the ADV cache.
+    
+    Shows how many symbols are cached and breakdown by ADV threshold.
+    """
+    try:
+        collector = get_ib_collector()
+        stats = await collector.get_adv_cache_stats()
+        return {"success": True, **stats}
+    except Exception as e:
+        logger.error(f"Error getting ADV cache stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

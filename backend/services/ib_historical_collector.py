@@ -223,22 +223,197 @@ class IBHistoricalCollector:
             "VXX", "UVXY"
         ]
     
+    async def build_adv_cache(self, batch_size: int = 100) -> Dict[str, Any]:
+        """
+        Build/refresh the ADV (Average Daily Volume) cache for all symbols.
+        This enables accurate filtering by liquidity.
+        
+        Fetches 20-day volume data from Alpaca for all symbols in the universe.
+        
+        Args:
+            batch_size: Number of symbols to process per batch
+            
+        Returns:
+            Summary of cache build operation
+        """
+        if self._alpaca_service is None:
+            return {"success": False, "error": "Alpaca service not available"}
+            
+        if self._db is None:
+            return {"success": False, "error": "Database not available"}
+        
+        # Get all symbols from market scanner
+        all_symbols = []
+        if self._market_scanner:
+            try:
+                universe = await self._market_scanner.get_symbol_universe()
+                all_symbols = [s.get("symbol") for s in universe if s.get("symbol")]
+            except Exception as e:
+                logger.warning(f"Could not get universe from scanner: {e}")
+        
+        if not all_symbols:
+            # Fall back to direct Alpaca fetch
+            all_symbols = await self.get_all_us_symbols()
+        
+        if not all_symbols:
+            return {"success": False, "error": "Could not fetch symbol list"}
+        
+        logger.info(f"Building ADV cache for {len(all_symbols)} symbols...")
+        
+        # Process in batches
+        adv_cache_col = self._db["symbol_adv_cache"]
+        processed = 0
+        cached = 0
+        errors = 0
+        
+        for i in range(0, len(all_symbols), batch_size):
+            batch = all_symbols[i:i + batch_size]
+            
+            try:
+                # Fetch bars for batch
+                from alpaca.data.historical import StockHistoricalDataClient
+                from alpaca.data.requests import StockBarsRequest
+                from alpaca.data.timeframe import TimeFrame
+                import os
+                
+                api_key = os.environ.get("ALPACA_API_KEY", "")
+                secret_key = os.environ.get("ALPACA_SECRET_KEY", "")
+                
+                if not api_key or not secret_key:
+                    return {"success": False, "error": "Alpaca keys not configured"}
+                
+                client = StockHistoricalDataClient(api_key, secret_key)
+                
+                from datetime import datetime, timedelta, timezone
+                end = datetime.now(timezone.utc)
+                start = end - timedelta(days=30)  # 30 days for 20 trading days
+                
+                request = StockBarsRequest(
+                    symbol_or_symbols=batch,
+                    timeframe=TimeFrame.Day,
+                    start=start,
+                    end=end
+                )
+                
+                bars = client.get_stock_bars(request)
+                
+                # Calculate ADV for each symbol
+                for symbol in batch:
+                    try:
+                        symbol_bars = bars.get(symbol, [])
+                        if symbol_bars and len(symbol_bars) > 0:
+                            volumes = [b.volume for b in symbol_bars[-20:]]
+                            avg_volume = sum(volumes) / len(volumes) if volumes else 0
+                            
+                            # Upsert to cache
+                            adv_cache_col.update_one(
+                                {"symbol": symbol},
+                                {"$set": {
+                                    "symbol": symbol,
+                                    "avg_volume": avg_volume,
+                                    "sample_days": len(volumes),
+                                    "updated_at": datetime.now(timezone.utc).isoformat()
+                                }},
+                                upsert=True
+                            )
+                            cached += 1
+                    except Exception as e:
+                        logger.debug(f"Error processing {symbol}: {e}")
+                        errors += 1
+                
+                processed += len(batch)
+                logger.info(f"ADV cache progress: {processed}/{len(all_symbols)} ({cached} cached)")
+                
+                # Rate limit
+                await asyncio.sleep(0.5)
+                
+            except Exception as e:
+                logger.error(f"Error processing batch: {e}")
+                errors += len(batch)
+                processed += len(batch)
+        
+        # Create index
+        try:
+            adv_cache_col.create_index("avg_volume")
+            adv_cache_col.create_index("symbol", unique=True)
+        except:
+            pass
+        
+        return {
+            "success": True,
+            "total_symbols": len(all_symbols),
+            "cached": cached,
+            "errors": errors,
+            "message": f"ADV cache built for {cached} symbols"
+        }
+    
+    async def get_adv_cache_stats(self) -> Dict[str, Any]:
+        """Get statistics about the ADV cache"""
+        if self._db is None:
+            return {"cached": False, "count": 0}
+            
+        try:
+            adv_col = self._db["symbol_adv_cache"]
+            total = adv_col.count_documents({})
+            
+            # Count by ADV threshold
+            adv_100k = adv_col.count_documents({"avg_volume": {"$gte": 100_000}})
+            adv_500k = adv_col.count_documents({"avg_volume": {"$gte": 500_000}})
+            adv_1m = adv_col.count_documents({"avg_volume": {"$gte": 1_000_000}})
+            
+            return {
+                "cached": total > 0,
+                "total_symbols": total,
+                "adv_100k_plus": adv_100k,
+                "adv_500k_plus": adv_500k,
+                "adv_1m_plus": adv_1m
+            }
+        except Exception as e:
+            return {"cached": False, "error": str(e)}
+    
     async def get_liquid_symbols(self, min_adv: int = 100_000) -> List[str]:
         """
         Get liquid US stocks filtered by Average Daily Volume (ADV).
         
-        Uses pre-cached ADV data from market scanner or database.
-        This significantly reduces collection time by focusing on tradeable stocks.
+        Uses market scanner to dynamically fetch and filter the full universe.
         
         Args:
             min_adv: Minimum average daily volume (default 100K for broad coverage)
             
         Returns:
-            List of liquid symbols meeting ADV criteria (~2,000-4,000 stocks)
+            List of liquid symbols meeting ADV criteria
         """
         liquid_symbols = []
         
-        # Method 1: Check database for pre-computed ADV data
+        # Method 1: Use market scanner to get filtered universe (PREFERRED)
+        if self._market_scanner is not None:
+            try:
+                # Get the full symbol universe from market scanner
+                universe = await self._market_scanner.get_symbol_universe()
+                
+                if universe:
+                    # Filter by ADV if volume data is available
+                    for sym_data in universe:
+                        symbol = sym_data.get("symbol")
+                        # Check if we have volume data
+                        avg_volume = sym_data.get("avg_volume", 0) or sym_data.get("adv", 0)
+                        
+                        if avg_volume >= min_adv:
+                            liquid_symbols.append(symbol)
+                        elif avg_volume == 0:
+                            # No volume data - include based on exchange (major exchanges are liquid)
+                            exchange = sym_data.get("exchange", "")
+                            if exchange in ["NASDAQ", "NYSE", "ARCA", "BATS"]:
+                                liquid_symbols.append(symbol)
+                    
+                    if liquid_symbols:
+                        logger.info(f"Got {len(liquid_symbols)} symbols from market scanner (ADV >= {min_adv:,})")
+                        return liquid_symbols
+                        
+            except Exception as e:
+                logger.warning(f"Market scanner fetch failed: {e}")
+        
+        # Method 2: Check database for pre-computed ADV data
         if self._db is not None:
             try:
                 # Look for symbols with ADV data
@@ -254,10 +429,9 @@ class IBHistoricalCollector:
             except Exception as e:
                 logger.debug(f"ADV cache not available: {e}")
         
-        # Method 2: Use well-known liquid stock list (S&P 500 + Russell 1000 equivalent)
-        # These are stocks that typically have >500K ADV
+        # Method 3: Fall back to curated list (known liquid stocks)
         liquid_symbols = self._get_known_liquid_symbols()
-        logger.info(f"Using {len(liquid_symbols)} known liquid symbols (ADV > {min_adv:,})")
+        logger.info(f"Using {len(liquid_symbols)} known liquid symbols as fallback")
         
         return liquid_symbols
     
