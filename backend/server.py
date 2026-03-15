@@ -95,6 +95,7 @@ from services.ai_modules import (
     init_ai_consultation,
     init_timeseries_ai
 )
+from services.ai_modules.agent_data_service import get_agent_data_service, init_agent_data_service
 from services.market_intel_service import get_market_intel_service
 from services.hybrid_data_service import get_hybrid_data_service, init_hybrid_data_service
 from services.market_scanner_service import get_market_scanner_service, init_market_scanner_service
@@ -750,6 +751,10 @@ try:
         config=debate_config_dict
     )
     
+    # Initialize AgentDataService (NEW - breaks agent silos)
+    agent_data_service = init_agent_data_service(db=db)
+    debate_agents.set_data_service(agent_data_service)  # Connect to debate agents
+    
     # Initialize AI Risk Manager
     risk_config = ai_module_config.get_module_settings("ai_risk_manager")
     risk_config_dict = risk_config.custom_settings if risk_config else None
@@ -789,7 +794,8 @@ try:
         ai_risk_manager,
         institutional_flow,
         volume_anomaly,
-        ai_consultation
+        ai_consultation,
+        agent_data_service  # NEW
     )
     inject_timeseries_service(timeseries_ai)
     
@@ -802,6 +808,7 @@ try:
     register_service('volume_anomaly', volume_anomaly)
     register_service('ai_consultation', ai_consultation)
     register_service('timeseries_ai', timeseries_ai)
+    register_service('agent_data_service', agent_data_service)  # NEW
     
     print("AI Modules (Institutional-Grade) initialized")
     print("  - Module Config: Toggle individual AI modules on/off")

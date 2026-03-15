@@ -9,6 +9,7 @@ Provides endpoints for:
 - Performance reports
 - Institutional flow analysis
 - Volume anomaly detection
+- Agent historical context (NEW)
 """
 
 from fastapi import APIRouter, HTTPException, Query
@@ -28,6 +29,7 @@ _ai_risk_manager = None
 _institutional_flow = None
 _volume_anomaly = None
 _ai_consultation = None
+_agent_data_service = None  # NEW: AgentDataService
 
 
 def inject_services(
@@ -37,11 +39,12 @@ def inject_services(
     ai_risk_manager,
     institutional_flow=None,
     volume_anomaly=None,
-    ai_consultation=None
+    ai_consultation=None,
+    agent_data_service=None  # NEW
 ):
     """Inject service dependencies"""
     global _module_config, _shadow_tracker, _debate_agents, _ai_risk_manager
-    global _institutional_flow, _volume_anomaly, _ai_consultation
+    global _institutional_flow, _volume_anomaly, _ai_consultation, _agent_data_service
     _module_config = module_config
     _shadow_tracker = shadow_tracker
     _debate_agents = debate_agents
@@ -49,6 +52,12 @@ def inject_services(
     _institutional_flow = institutional_flow
     _volume_anomaly = volume_anomaly
     _ai_consultation = ai_consultation
+    _agent_data_service = agent_data_service
+    
+    # Connect data service to debate agents
+    if _debate_agents and _agent_data_service:
+        _debate_agents.set_data_service(_agent_data_service)
+        logger.info("AgentDataService connected to DebateAgents")
 
 
 # =====================
@@ -306,6 +315,63 @@ async def get_ai_advisor_status():
                 "neutral": "No contribution when AI has low confidence"
             }
         }
+    }
+
+
+@router.get("/agent-context/{symbol}")
+async def get_agent_context(
+    symbol: str,
+    setup_type: str = Query("", description="Setup type for context"),
+    direction: str = Query("long", description="Trade direction")
+):
+    """
+    Get historical context for a symbol that agents use in debate.
+    
+    Returns:
+    - Symbol trading history (win rate, avg R, trade count)
+    - Setup type performance
+    - User's overall stats
+    - Actionable insights
+    
+    This is the same data that Bull/Bear agents now receive during debates.
+    """
+    if not _agent_data_service:
+        return {
+            "success": False,
+            "error": "AgentDataService not initialized",
+            "context": None
+        }
+    
+    try:
+        context = await _agent_data_service.build_agent_context(
+            symbol=symbol.upper(),
+            setup_type=setup_type,
+            direction=direction
+        )
+        
+        return {
+            "success": True,
+            "symbol": symbol.upper(),
+            "context": context
+        }
+    except Exception as e:
+        logger.error(f"Error getting agent context for {symbol}: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "context": None
+        }
+
+
+@router.get("/agent-context/status")
+async def get_agent_data_service_status():
+    """Get status of the AgentDataService"""
+    return {
+        "success": True,
+        "service": "AgentDataService",
+        "initialized": _agent_data_service is not None,
+        "connected_to_debate": _debate_agents is not None and _debate_agents._data_service is not None,
+        "description": "Provides historical context to Bull/Bear agents during debates"
     }
 
 

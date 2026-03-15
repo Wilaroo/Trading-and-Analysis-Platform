@@ -64,11 +64,14 @@ class BullAgent:
     """
     The Bull Agent - Argues FOR the trade opportunity.
     
+    Enhanced (March 2026): Now receives historical context from AgentDataService.
+    
     Focuses on:
     - Technical setup strength
     - Favorable conditions
     - Risk/reward attractiveness
     - Momentum and trend alignment
+    - Historical success on this symbol/setup (NEW)
     """
     
     def __init__(self, llm_service=None):
@@ -79,10 +82,14 @@ class BullAgent:
         symbol: str,
         setup: Dict,
         market_context: Dict,
-        technical_data: Dict
+        technical_data: Dict,
+        historical_context: Dict = None
     ) -> Dict[str, Any]:
         """
         Build the bullish case for this trade.
+        
+        Args:
+            historical_context: Optional dict with symbol_context, setup_context, insights
         """
         arguments = []
         score = 0.0
@@ -150,6 +157,52 @@ class BullAgent:
             score += 0.05
         factors += 1
         
+        # ===== NEW: Historical Context Factors =====
+        if historical_context:
+            # Factor 8: User's historical success on this symbol
+            sym_ctx = historical_context.get("symbol_context", {})
+            if sym_ctx.get("total_trades", 0) >= 5:
+                win_rate = sym_ctx.get("win_rate", 0)
+                if win_rate >= 0.6:
+                    arguments.append(f"Strong track record on {symbol}: {win_rate*100:.0f}% win rate ({sym_ctx['total_trades']} trades)")
+                    score += 0.15
+                elif win_rate >= 0.5:
+                    arguments.append(f"Positive history on {symbol}: {win_rate*100:.0f}% win rate")
+                    score += 0.05
+                factors += 1
+                
+                # Check average R-multiple
+                avg_r = sym_ctx.get("avg_r_multiple", 0)
+                if avg_r >= 1.5:
+                    arguments.append(f"Historically profitable: avg {avg_r:.1f}R on {symbol}")
+                    score += 0.1
+                    factors += 1
+            
+            # Factor 9: Setup type historical performance
+            setup_ctx = historical_context.get("setup_context", {})
+            setup_type = setup.get("setup_type", "")
+            if setup_ctx.get("sample_size_adequate", False):
+                setup_wr = setup_ctx.get("win_rate", 0)
+                if setup_wr >= 0.55:
+                    arguments.append(f"{setup_type} setups have {setup_wr*100:.0f}% historical win rate")
+                    score += 0.1
+                    factors += 1
+                    
+                # Check if current regime matches best regime for this setup
+                best_regime = setup_ctx.get("best_regime", "")
+                if best_regime and best_regime == regime:
+                    arguments.append(f"Current {regime} regime is historically best for {setup_type}")
+                    score += 0.1
+                    factors += 1
+            
+            # Factor 10: Use insights from AgentDataService
+            insights = historical_context.get("insights", [])
+            for insight in insights:
+                if "strong" in insight.lower() or "positive" in insight.lower() or "%" in insight and "60" in insight:
+                    arguments.append(f"Historical: {insight}")
+                    score += 0.05
+                    break  # Only use one insight
+        
         # Normalize score to 0-1
         max_possible = factors * 0.2  # Approximate max
         normalized_score = min(1.0, score / max_possible) if max_possible > 0 else 0
@@ -168,11 +221,14 @@ class BearAgent:
     """
     The Bear Agent - Argues AGAINST the trade opportunity.
     
+    Enhanced (March 2026): Now receives historical context from AgentDataService.
+    
     Focuses on:
     - Risk factors and red flags
     - Unfavorable conditions
-    - Historical failure patterns
+    - Historical failure patterns (NEW)
     - Overexposure concerns
+    - User's poor track record on symbol/setup (NEW)
     """
     
     def __init__(self, llm_service=None, learning_provider=None):
@@ -185,10 +241,14 @@ class BearAgent:
         setup: Dict,
         market_context: Dict,
         technical_data: Dict,
-        portfolio: Dict = None
+        portfolio: Dict = None,
+        historical_context: Dict = None
     ) -> Dict[str, Any]:
         """
         Build the bearish case against this trade.
+        
+        Args:
+            historical_context: Optional dict with symbol_context, setup_context, insights
         """
         arguments = []
         score = 0.0
@@ -218,8 +278,13 @@ class BearAgent:
             score += 0.2
         factors += 1
         
-        # Factor 4: Historical Win Rate Concern
+        # Factor 4: Historical Win Rate Concern (use historical_context if available)
         historical_wr = setup.get("historical_win_rate", 0.5)
+        if historical_context:
+            setup_ctx = historical_context.get("setup_context", {})
+            if setup_ctx.get("sample_size_adequate", False):
+                historical_wr = setup_ctx.get("win_rate", historical_wr)
+                
         if historical_wr < 0.45:
             arguments.append(f"Poor historical win rate on this setup ({historical_wr*100:.0f}%)")
             score += 0.25
@@ -268,12 +333,62 @@ class BearAgent:
             score += 0.2
         factors += 1
         
+        # ===== NEW: Historical Context Factors for Bear Case =====
+        if historical_context:
+            # Factor 9: User's poor track record on this symbol
+            sym_ctx = historical_context.get("symbol_context", {})
+            if sym_ctx.get("total_trades", 0) >= 5:
+                win_rate = sym_ctx.get("win_rate", 0.5)
+                if win_rate <= 0.4:
+                    arguments.append(f"Poor track record on {symbol}: only {win_rate*100:.0f}% win rate ({sym_ctx['total_trades']} trades)")
+                    score += 0.2
+                    factors += 1
+                    
+                # Check if avg R is negative
+                avg_r = sym_ctx.get("avg_r_multiple", 0)
+                if avg_r < 0:
+                    arguments.append(f"Historically losing money on {symbol}: avg {avg_r:.1f}R")
+                    score += 0.15
+                    factors += 1
+                    
+                # Worst trade warning
+                worst_r = sym_ctx.get("worst_trade_r", 0)
+                if worst_r < -2:
+                    arguments.append(f"Large loss history on {symbol}: worst trade {worst_r:.1f}R")
+                    score += 0.1
+                    factors += 1
+            
+            # Factor 10: Setup type poor performance
+            setup_ctx = historical_context.get("setup_context", {})
+            setup_type = setup.get("setup_type", "")
+            if setup_ctx.get("sample_size_adequate", False):
+                setup_wr = setup_ctx.get("win_rate", 0.5)
+                if setup_wr < 0.45:
+                    arguments.append(f"{setup_type} setups have poor {setup_wr*100:.0f}% win rate historically")
+                    score += 0.15
+                    factors += 1
+                    
+                # Check if current regime is worst for this setup
+                worst_regime = setup_ctx.get("worst_regime", "")
+                if worst_regime and worst_regime == regime:
+                    arguments.append(f"Current {regime} regime is historically worst for {setup_type}")
+                    score += 0.15
+                    factors += 1
+            
+            # Factor 11: Use warning insights from AgentDataService
+            insights = historical_context.get("insights", [])
+            for insight in insights:
+                if "caution" in insight.lower() or "warning" in insight.lower() or "only" in insight.lower():
+                    arguments.append(f"Historical: {insight}")
+                    score += 0.1
+                    break  # Only use one insight
+        
         # Normalize
         max_possible = factors * 0.2
         normalized_score = min(1.0, score / max_possible) if max_possible > 0 else 0
         
         # Confidence based on number of significant concerns
-        major_concerns = len([a for a in arguments if "poor" in a.lower() or "high" in a.lower() or "risk" in a.lower()])
+        major_concerns = len([a for a in arguments if "poor" in a.lower() or "high" in a.lower() or "risk" in a.lower() or "only" in a.lower()])
         confidence = min(1.0, major_concerns * 0.15 + 0.3)
         
         return {
@@ -522,14 +637,16 @@ class DebateAgents:
     """
     Orchestrates the Bull/Bear Debate process.
     
-    Enhanced: Now includes Time-Series AI Advisor for ML-based input.
+    Enhanced (March 2026):
+    - Now includes Time-Series AI Advisor for ML-based input
+    - Now fetches historical context from AgentDataService
     
     Usage:
         debate = DebateAgents()
         result = await debate.run_debate(symbol, setup, market_context, technical_data, ai_forecast=forecast)
     """
     
-    def __init__(self, llm_service=None, learning_provider=None, config: Dict = None):
+    def __init__(self, llm_service=None, learning_provider=None, config: Dict = None, data_service=None):
         self._bull = BullAgent(llm_service)
         self._bear = BearAgent(llm_service, learning_provider)
         self._ai_advisor = TimeSeriesAdvisor(
@@ -537,6 +654,11 @@ class DebateAgents:
         )
         self._arbiter = ArbiterAgent(config)
         self._config = config or {}
+        self._data_service = data_service  # AgentDataService for historical context
+        
+    def set_data_service(self, data_service):
+        """Set the AgentDataService for historical context"""
+        self._data_service = data_service
         
     async def run_debate(
         self,
@@ -546,7 +668,8 @@ class DebateAgents:
         technical_data: Dict,
         portfolio: Dict = None,
         rounds: int = 1,
-        ai_forecast: Dict = None
+        ai_forecast: Dict = None,
+        historical_context: Dict = None
     ) -> DebateResult:
         """
         Run a full bull/bear debate on a trade opportunity.
@@ -559,6 +682,7 @@ class DebateAgents:
             portfolio: Current portfolio state (optional)
             rounds: Number of debate rounds (future: multi-round debates)
             ai_forecast: Time-Series AI forecast (optional, enhances debate)
+            historical_context: Pre-fetched historical context (optional)
             
         Returns:
             DebateResult with full debate outcome including AI advisor input
@@ -567,10 +691,30 @@ class DebateAgents:
         start_time = time.time()
         
         direction = setup.get("direction", "long")
+        setup_type = setup.get("setup_type", "")
         
-        # Run bull and bear cases in parallel
-        bull_case = await self._bull.make_case(symbol, setup, market_context, technical_data)
-        bear_case = await self._bear.make_case(symbol, setup, market_context, technical_data, portfolio)
+        # Fetch historical context if not provided and service is available
+        if historical_context is None and self._data_service:
+            try:
+                historical_context = await self._data_service.build_agent_context(
+                    symbol=symbol,
+                    setup_type=setup_type,
+                    direction=direction
+                )
+                logger.info(f"Fetched historical context for {symbol}: {len(historical_context.get('insights', []))} insights")
+            except Exception as e:
+                logger.warning(f"Could not fetch historical context for {symbol}: {e}")
+                historical_context = None
+        
+        # Run bull and bear cases (now with historical context)
+        bull_case = await self._bull.make_case(
+            symbol, setup, market_context, technical_data, 
+            historical_context=historical_context
+        )
+        bear_case = await self._bear.make_case(
+            symbol, setup, market_context, technical_data, portfolio,
+            historical_context=historical_context
+        )
         
         # Get AI Advisor's evaluation if forecast available
         ai_advisor_result = None
@@ -612,6 +756,13 @@ class DebateAgents:
             timestamp=datetime.now(timezone.utc).isoformat()
         )
         
+        # Add historical context to result if available
+        if historical_context:
+            # Include insights in reasoning
+            insights = historical_context.get("insights", [])
+            if insights and result.reasoning:
+                result.reasoning += f" Historical insights: {', '.join(insights[:2])}"
+        
         logger.info(
             f"Debate {symbol}: {result.winner} wins, recommendation={result.final_recommendation}"
             + (f", AI: {ai_advisor_result.get('supports_trade')}" if ai_advisor_result else "")
@@ -643,8 +794,15 @@ def get_debate_agents() -> DebateAgents:
     return _debate_agents
 
 
-def init_debate_agents(llm_service=None, learning_provider=None, config: Dict = None) -> DebateAgents:
+def init_debate_agents(llm_service=None, learning_provider=None, config: Dict = None, data_service=None) -> DebateAgents:
     """Initialize Debate Agents with dependencies"""
     global _debate_agents
-    _debate_agents = DebateAgents(llm_service, learning_provider, config)
+    _debate_agents = DebateAgents(llm_service, learning_provider, config, data_service)
     return _debate_agents
+
+
+def set_debate_data_service(data_service) -> None:
+    """Set the AgentDataService on existing debate agents instance"""
+    global _debate_agents
+    if _debate_agents:
+        _debate_agents.set_data_service(data_service)
