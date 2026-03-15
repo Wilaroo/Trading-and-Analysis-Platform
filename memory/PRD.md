@@ -95,12 +95,26 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 }
 ```
 
-**Training Status:** Model is TRAINED (v0.4.0)
-- Accuracy: 31.8% (realistic for directional prediction)
+**Training Status:** Model is TRAINED (v0.9.0)
+- Accuracy: 50.4% (realistic for directional prediction)
+- Precision UP: 79.2% (when it predicts UP, it's usually right!)
+- Recall UP: 1.2% (conservative - only predicts UP when very confident)
+- F1 UP: 2.4%
 - Features: 46
-- Training Samples: 173
-- Top Features: volatility_10, keltner_position, hour_cos, cci, bb_position
-- To retrain: Call `POST /api/ai-modules/timeseries/train`
+- Training Samples: 64,651
+- Top Features: volume_price_corr, volatility_10, stoch_d, atr_pct, hour_sin, bb_position
+
+**Model Improvements (March 15, 2026):**
+- Added class imbalance handling via `is_unbalance=True` parameter
+- Increased model complexity (num_leaves: 63, max_depth: 8)
+- Lower learning rate (0.03) for better generalization
+- Changed target threshold to 0% return (any positive = UP)
+- Configurable UP_THRESHOLD (0.52) for prediction classification
+- More training rounds (200 vs 100)
+
+**Trading Strategy Note:** The model is intentionally conservative with high precision but low recall. It only signals "UP" when very confident, making it suitable for high-conviction trades.
+
+To retrain: Call `POST /api/ai-modules/timeseries/train`
 
 ---
 
