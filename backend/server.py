@@ -898,7 +898,8 @@ try:
         shadow_tracker=get_shadow_tracker(),
         learning_loop=get_learning_loop_service(),
         scanner=get_service_optional('enhanced_scanner'),
-        simulation_engine=simulation_engine
+        simulation_engine=simulation_engine,
+        dynamic_thresholds=get_service_optional('dynamic_threshold_service')
     )
     
     register_service('learning_connectors', learning_connectors)
@@ -906,7 +907,7 @@ try:
     print("Learning Connectors initialized")
     print("  - Simulation → Time-Series Model retraining")
     print("  - Shadow Tracker → Module weight calibration")
-    print("  - Alert Outcomes → Scanner threshold tuning")
+    print("  - Alert Outcomes → Scanner threshold tuning (NOW AUTO-APPLIES)")
     print("  - Endpoints: /api/learning-connectors/*")
 except Exception as e:
     print(f"Learning Connectors initialization deferred: {e}")
