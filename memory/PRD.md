@@ -13,11 +13,23 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 - Leverages existing market scanner's caching, batching, and Alpaca integration
 - Verified via `/api/ib-collector/full-market-symbols` endpoint
 
+### Price Parameters Updated ✅
+- Changed ticker filters from $5-$500 to **$1-$1000**
+- Updated in: `ib_historical_collector.py`, `ib_collector_router.py`
+
+### Symbol Cache Extended to 7 Days ✅
+- Changed `_universe_cache_ttl` from 24 hours (86400s) to **7 days (604800s)**
+- Symbols don't change frequently, so longer cache reduces API calls
+- Cache stored in MongoDB `us_symbols` collection for persistence across restarts
+
 ### Simulation Jobs Status Clarification
 - **Not a bug**: Simulation jobs API works correctly (`/api/simulation/status/{job_id}`)
 - Recent simulations show 0 trades due to **missing Alpaca API keys in preview environment**
 - Historical job `sim_ff241dd1bba6` has 8 trades properly saved and retrievable
 - When user connects local environment with Alpaca credentials, simulations will generate trades
+
+### Future Enhancement (Saved)
+- **Overnight Scheduler for Full Market Collection**: Automatically trigger data collection at 10 PM ET daily to populate learning database without manual intervention
 
 ---
 

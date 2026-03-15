@@ -133,7 +133,7 @@ class IBHistoricalCollector:
         self._market_scanner = market_scanner
         logger.info("IB Collector: Using market scanner for symbol universe")
         
-    async def get_all_us_symbols(self, min_price: float = 5.0, max_price: float = 500.0) -> List[str]:
+    async def get_all_us_symbols(self, min_price: float = 1.0, max_price: float = 1000.0) -> List[str]:
         """
         Fetch all tradeable US stocks using the market scanner service.
         
@@ -227,8 +227,8 @@ class IBHistoricalCollector:
         self,
         bar_size: str = "1 day",
         duration: str = "1 M",
-        min_price: float = 5.0,
-        max_price: float = 500.0,
+        min_price: float = 1.0,
+        max_price: float = 1000.0,
         batch_size: int = 500
     ) -> Dict[str, Any]:
         """

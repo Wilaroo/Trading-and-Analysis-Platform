@@ -101,8 +101,8 @@ async def full_collection(days: int = 30):
 async def full_market_collection(
     bar_size: str = "1 day",
     days: int = 30,
-    min_price: float = 5.0,
-    max_price: float = 500.0
+    min_price: float = 1.0,
+    max_price: float = 1000.0
 ):
     """
     Start collection for ALL tradeable US stocks (8000+).
@@ -112,8 +112,8 @@ async def full_market_collection(
     
     - **bar_size**: Bar size (recommend "1 day" for full market - faster)
     - **days**: Number of days of data to collect
-    - **min_price**: Minimum stock price filter (default $5)
-    - **max_price**: Maximum stock price filter (default $500)
+    - **min_price**: Minimum stock price filter (default $1)
+    - **max_price**: Maximum stock price filter (default $1000)
     """
     try:
         collector = get_ib_collector()
@@ -228,7 +228,7 @@ async def get_default_symbols():
 
 
 @router.get("/full-market-symbols")
-async def get_full_market_symbols(min_price: float = 5.0, max_price: float = 500.0):
+async def get_full_market_symbols(min_price: float = 1.0, max_price: float = 1000.0):
     """
     Get the count of all tradeable US stocks.
     This fetches from Alpaca and caches the result.
