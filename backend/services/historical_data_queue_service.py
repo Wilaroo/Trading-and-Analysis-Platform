@@ -177,6 +177,31 @@ class HistoricalDataQueueService:
         if result.deleted_count > 0:
             logger.info(f"Cleaned up {result.deleted_count} old historical data requests")
     
+    def clear_pending_requests(self) -> Dict:
+        """
+        Clear all pending requests from the queue.
+        Use this to reset the queue before starting a new collection type.
+        
+        Returns:
+            Dict with count of cleared requests
+        """
+        try:
+            result = self.collection.delete_many({
+                "status": "pending"
+            })
+            logger.info(f"Cleared {result.deleted_count} pending requests from queue")
+            return {
+                "success": True,
+                "cleared": result.deleted_count
+            }
+        except Exception as e:
+            logger.error(f"Error clearing pending requests: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "cleared": 0
+            }
+    
     # =========================================================================
     # ASYNC BATCH COLLECTION METHODS
     # =========================================================================

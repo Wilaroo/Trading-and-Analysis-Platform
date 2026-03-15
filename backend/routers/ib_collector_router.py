@@ -368,6 +368,36 @@ async def cancel_queue_job(job_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/clear-pending")
+async def clear_pending_queue():
+    """
+    Clear ALL pending requests from the queue.
+    
+    Use this to reset the queue before starting a fresh collection.
+    This will NOT delete:
+    - Already collected data (stored in historical_ohlcv collection)
+    - Completed requests
+    - Currently processing (claimed) requests
+    
+    Only removes items waiting to be processed.
+    """
+    try:
+        from services.historical_data_queue_service import get_historical_data_queue_service
+        queue_service = get_historical_data_queue_service()
+        
+        # First cancel any running collection
+        collector = get_ib_collector()
+        collector.cancel_collection()
+        
+        # Clear the pending queue
+        result = queue_service.clear_pending_requests()
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error clearing pending queue: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/history")
 async def get_job_history(limit: int = 10):
     """Get history of collection jobs."""
