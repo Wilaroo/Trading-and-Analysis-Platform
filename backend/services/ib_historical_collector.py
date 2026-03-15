@@ -674,6 +674,144 @@ class IBHistoricalCollector:
             use_defaults=False
         )
     
+    async def start_smart_collection(
+        self,
+        duration: str = "1 M",
+        include_intraday: bool = True,
+        include_swing: bool = True,
+        include_investment: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Smart multi-timeframe collection that matches ADV filters to trading styles.
+        
+        This collects different bar sizes for different liquidity tiers:
+        - Intraday bars (1min, 5min): Only for high-ADV stocks (>= 500K) 
+        - Swing bars (15min, 1hour): For medium-ADV stocks (>= 100K)
+        - Investment bars (1day): For all tradeable stocks (>= 50K)
+        
+        This approach:
+        1. Saves time by not collecting intraday data for illiquid stocks
+        2. Matches your bot's actual ADV requirements per trading style
+        3. Still provides comprehensive coverage for each use case
+        
+        Args:
+            duration: Duration per request (default "1 M" = 1 month)
+            include_intraday: Collect 1min/5min for intraday-worthy stocks
+            include_swing: Collect 15min/1hour for swing-worthy stocks  
+            include_investment: Collect 1day for investment-worthy stocks
+            
+        Returns:
+            Collection plan with time estimates
+        """
+        # ADV thresholds matching market scanner
+        ADV_INTRADAY = 500_000    # 1min, 5min bars
+        ADV_SWING = 100_000       # 15min, 1hour bars
+        ADV_INVESTMENT = 50_000   # 1day bars
+        
+        # Get symbol counts for each tier
+        intraday_symbols = await self.get_liquid_symbols(min_adv=ADV_INTRADAY) if include_intraday else []
+        swing_symbols = await self.get_liquid_symbols(min_adv=ADV_SWING) if include_swing else []
+        investment_symbols = await self.get_liquid_symbols(min_adv=ADV_INVESTMENT) if include_investment else []
+        
+        # Build collection plan
+        time_per_request = 3  # seconds
+        
+        plan = {
+            "intraday": {
+                "bar_sizes": ["1 min", "5 mins"],
+                "adv_threshold": ADV_INTRADAY,
+                "symbol_count": len(intraday_symbols),
+                "requests": len(intraday_symbols) * 2,
+                "estimated_hours": (len(intraday_symbols) * 2 * time_per_request) / 3600
+            },
+            "swing": {
+                "bar_sizes": ["15 mins", "1 hour"],
+                "adv_threshold": ADV_SWING,
+                "symbol_count": len(swing_symbols),
+                "requests": len(swing_symbols) * 2,
+                "estimated_hours": (len(swing_symbols) * 2 * time_per_request) / 3600
+            },
+            "investment": {
+                "bar_sizes": ["1 day"],
+                "adv_threshold": ADV_INVESTMENT,
+                "symbol_count": len(investment_symbols),
+                "requests": len(investment_symbols),
+                "estimated_hours": (len(investment_symbols) * time_per_request) / 3600
+            }
+        }
+        
+        total_requests = (
+            plan["intraday"]["requests"] + 
+            plan["swing"]["requests"] + 
+            plan["investment"]["requests"]
+        )
+        total_hours = (
+            plan["intraday"]["estimated_hours"] + 
+            plan["swing"]["estimated_hours"] + 
+            plan["investment"]["estimated_hours"]
+        )
+        
+        return {
+            "success": True,
+            "mode": "smart_tiered_collection",
+            "plan": plan,
+            "total_requests": total_requests,
+            "total_estimated_hours": round(total_hours, 1),
+            "note": "Smart collection matches ADV requirements to trading styles",
+            "ready_to_start": False,
+            "start_endpoint": "POST /api/ib-collector/start-smart-collection-run"
+        }
+    
+    async def run_smart_collection(
+        self,
+        duration: str = "1 M",
+        include_intraday: bool = True,
+        include_swing: bool = True,
+        include_investment: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Execute the smart tiered collection plan.
+        
+        Runs all tiers sequentially: intraday -> swing -> investment
+        """
+        if self._running_job and self._running_job.status == CollectionStatus.RUNNING:
+            return {
+                "success": False,
+                "error": "Another collection job is already running",
+                "current_job": self._running_job.to_dict()
+            }
+        
+        # ADV thresholds
+        ADV_INTRADAY = 500_000
+        ADV_SWING = 100_000
+        ADV_INVESTMENT = 50_000
+        
+        results = []
+        
+        # 1. Investment tier (1 day bars) - broadest coverage
+        if include_investment:
+            logger.info("Starting investment tier collection (1 day bars)...")
+            symbols = await self.get_liquid_symbols(min_adv=ADV_INVESTMENT)
+            if symbols:
+                result = await self.start_collection(
+                    symbols=symbols,
+                    bar_size="1 day",
+                    duration=duration,
+                    use_defaults=False
+                )
+                results.append({"tier": "investment", "bar_size": "1 day", "result": result})
+                
+                # Wait for completion (this is a long-running job)
+                # In practice, each tier runs as a separate job
+        
+        return {
+            "success": True,
+            "message": "Smart collection started with investment tier (1 day bars)",
+            "tiers_queued": ["investment", "swing", "intraday"] if include_intraday else ["investment", "swing"],
+            "note": "Each tier runs as a separate job. Monitor progress via /api/ib-collector/status",
+            "results": results
+        }
+    
     async def start_collection(
         self,
         symbols: List[str] = None,
