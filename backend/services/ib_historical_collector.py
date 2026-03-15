@@ -1091,42 +1091,45 @@ class IBHistoricalCollector:
         duration: str
     ) -> int:
         """
-        Collect historical data for a single symbol.
+        Collect historical data for a single symbol via the IB Data Pusher queue.
+        
+        The cloud backend queues the request, and the local IB Data Pusher
+        fulfills it by fetching from IB Gateway.
         
         Returns number of bars collected.
         """
-        if not self._ib_service:
-            raise Exception("IB service not configured")
-            
         bars_collected = 0
         retries = 0
         
         while retries < self.MAX_RETRIES:
             try:
-                # Call IB service for historical data
-                # Returns a dict with 'success' and 'data' keys, or raises exception
-                result = await self._ib_service.get_historical_data(
+                # Use the historical data queue instead of direct IB connection
+                from services.historical_data_queue_service import get_historical_data_queue_service
+                
+                try:
+                    queue_service = get_historical_data_queue_service()
+                except Exception as e:
+                    logger.warning(f"Historical data queue not available: {e}")
+                    raise Exception("Historical data queue service not available - is the backend properly initialized?")
+                
+                # Create request in queue
+                request_id = queue_service.create_request(
                     symbol=symbol,
                     duration=duration,
                     bar_size=bar_size
                 )
                 
-                # Handle both return formats:
-                # 1. Dict with success/data keys: {"success": True, "data": [...]}
-                # 2. Direct list of bars: [...]
-                if isinstance(result, dict):
-                    if result.get("success") and result.get("data"):
-                        bars = result["data"]
-                    elif result.get("error"):
-                        raise Exception(result.get("error"))
-                    else:
-                        bars = result.get("data", [])
-                elif isinstance(result, list):
-                    bars = result
-                else:
-                    bars = []
+                logger.info(f"Created historical data request {request_id} for {symbol}")
                 
-                if bars:
+                # Wait for IB Data Pusher to fulfill the request (max 90 seconds)
+                result = queue_service.get_request_result(request_id, timeout=90.0)
+                
+                if result is None:
+                    raise Exception("Timeout waiting for IB Data Pusher response - is your local app running?")
+                
+                if result.get("status") == "completed" and result.get("data"):
+                    bars = result["data"]
+                    
                     # Store in database
                     if self._data_col is not None:
                         for bar in bars:
@@ -1151,14 +1154,15 @@ class IBHistoricalCollector:
                                 )
                                 bars_collected += 1
                             except Exception as e:
-                                # Duplicate key errors are fine
                                 if "duplicate" not in str(e).lower():
                                     logger.warning(f"Error storing bar for {symbol}: {e}")
                                     
                     return bars_collected
+                elif result.get("status") == "failed":
+                    error = result.get("error", "Unknown error from IB Data Pusher")
+                    raise Exception(error)
                 else:
-                    # No data returned - might be weekend/holiday or no data available
-                    logger.warning(f"No bars returned for {symbol}")
+                    logger.warning(f"No data returned for {symbol}")
                     return 0
                         
             except Exception:
