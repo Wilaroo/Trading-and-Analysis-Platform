@@ -5,6 +5,51 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ---
 
+## DATA STORAGE MANAGER ✅ NEW (March 15, 2026)
+
+### Purpose
+Centralized management of all learning and training data storage with proper indexing and retention policies.
+
+### Managed Collections (14 Total)
+
+**Historical Data:**
+- `ib_historical_data` - OHLCV from IB Gateway (4 indexes, no retention)
+- `ib_collection_jobs` - Collection job history (3 indexes, 90-day retention)
+
+**Simulation Data:**
+- `simulation_jobs` - Backtest jobs (4 indexes, no retention)
+- `simulated_trades` - Trades from simulations (4 indexes, no retention)
+- `simulation_decisions` - AI decisions in simulations (3 indexes, no retention)
+
+**Shadow Mode Data:**
+- `shadow_decisions` - Shadow mode AI decisions (4 indexes, no retention)
+
+**Model Data:**
+- `timeseries_predictions` - Model predictions (4 indexes, 365-day retention)
+- `timeseries_models` - Saved model metadata (3 indexes, no retention)
+
+**Learning System Data:**
+- `calibration_history` - Module calibrations (2 indexes, 365-day retention)
+- `learning_connectors` - Connection states (1 index, no retention)
+
+**Outcome Tracking:**
+- `alert_outcomes` - Alert performance (4 indexes, no retention)
+- `trade_outcomes` - Real trade outcomes (3 indexes, no retention)
+- `training_datasets` - Prepared training data (4 indexes, 180-day retention)
+
+### API Endpoints
+- `GET /api/data-storage/stats` - Storage statistics for all collections
+- `GET /api/data-storage/learning-summary` - Summary of learning data
+- `GET /api/data-storage/collections` - List all managed collections
+- `GET /api/data-storage/export/{source}` - Export data for training
+- `POST /api/data-storage/cleanup` - Clean up old data (with dry_run option)
+
+### Key Files
+- `/app/backend/services/data_storage_manager.py` - Core service
+- `/app/backend/routers/data_storage_router.py` - API endpoints
+
+---
+
 ## IB HISTORICAL DATA COLLECTOR ✅ NEW (March 15, 2026)
 
 ### Purpose
