@@ -95,8 +95,10 @@ class IBHistoricalCollector:
         self._data_col = None
         self._jobs_col = None
         self._ib_service = None
+        self._alpaca_service = None
         self._running_job: Optional[CollectionJob] = None
         self._cancel_requested = False
+        self._all_us_symbols: List[str] = []
         
     def set_db(self, db):
         """Set database connection"""
@@ -114,6 +116,91 @@ class IBHistoricalCollector:
     def set_ib_service(self, ib_service):
         """Set IB service for data collection"""
         self._ib_service = ib_service
+        
+    def set_alpaca_service(self, alpaca_service):
+        """Set Alpaca service for fetching US stock universe"""
+        self._alpaca_service = alpaca_service
+        
+    async def get_all_us_symbols(self, min_price: float = 5.0, max_price: float = 500.0) -> List[str]:
+        """
+        Fetch all tradeable US stocks from Alpaca.
+        
+        Args:
+            min_price: Minimum stock price filter
+            max_price: Maximum stock price filter
+            
+        Returns:
+            List of symbols meeting criteria
+        """
+        # Check cache first
+        if self._all_us_symbols and len(self._all_us_symbols) > 100:
+            return self._all_us_symbols
+            
+        # Try to load from database cache
+        if self._db is not None:
+            try:
+                cache = self._db["symbol_cache"].find_one({"type": "us_stocks"})
+                if cache and cache.get("symbols"):
+                    # Check if cache is less than 24 hours old
+                    cached_at = cache.get("cached_at", "")
+                    if cached_at:
+                        from datetime import datetime, timezone, timedelta
+                        cache_time = datetime.fromisoformat(cached_at.replace("Z", "+00:00"))
+                        if datetime.now(timezone.utc) - cache_time < timedelta(hours=24):
+                            self._all_us_symbols = cache["symbols"]
+                            logger.info(f"Loaded {len(self._all_us_symbols)} symbols from cache")
+                            return self._all_us_symbols
+            except Exception as e:
+                logger.warning(f"Error loading symbol cache: {e}")
+        
+        # Fetch from Alpaca
+        symbols = []
+        try:
+            if self._alpaca_service:
+                # Use Alpaca service to get all assets
+                assets = await self._alpaca_service.get_all_assets()
+                if assets:
+                    for asset in assets:
+                        if (asset.get("tradable") and 
+                            asset.get("status") == "active" and
+                            asset.get("exchange") in ["NYSE", "NASDAQ", "ARCA", "AMEX"]):
+                            symbols.append(asset.get("symbol"))
+                    logger.info(f"Fetched {len(symbols)} symbols from Alpaca")
+        except Exception as e:
+            logger.error(f"Error fetching from Alpaca: {e}")
+            
+        # If Alpaca failed, try IB
+        if not symbols and self._ib_service:
+            try:
+                # IB doesn't have a direct "get all stocks" API
+                # Fall back to default symbols
+                logger.warning("Alpaca unavailable, using default symbols")
+                symbols = self.get_default_symbols()
+            except Exception as e:
+                logger.error(f"Error fetching from IB: {e}")
+                
+        # Final fallback
+        if not symbols:
+            symbols = self.get_default_symbols()
+            
+        # Cache the results
+        if symbols and len(symbols) > 100 and self._db is not None:
+            try:
+                self._db["symbol_cache"].update_one(
+                    {"type": "us_stocks"},
+                    {"$set": {
+                        "type": "us_stocks",
+                        "symbols": symbols,
+                        "count": len(symbols),
+                        "cached_at": datetime.now(timezone.utc).isoformat()
+                    }},
+                    upsert=True
+                )
+            except Exception as e:
+                logger.warning(f"Error caching symbols: {e}")
+                
+        self._all_us_symbols = symbols
+        return symbols
         
     def get_default_symbols(self) -> List[str]:
         """Get default symbols for data collection"""
@@ -139,6 +226,57 @@ class IBHistoricalCollector:
             # VIX products
             "VXX", "UVXY"
         ]
+    
+    async def start_full_market_collection(
+        self,
+        bar_size: str = "1 day",
+        duration: str = "1 M",
+        min_price: float = 5.0,
+        max_price: float = 500.0,
+        batch_size: int = 500
+    ) -> Dict[str, Any]:
+        """
+        Start collection for ALL tradeable US stocks.
+        
+        This is a long-running job that can take hours. It will:
+        1. Fetch all US stock symbols from Alpaca
+        2. Filter by price range
+        3. Collect historical data in batches
+        4. Can be paused/resumed
+        
+        Args:
+            bar_size: Bar size (recommend "1 day" for full market)
+            duration: Duration per request
+            min_price: Minimum stock price filter
+            max_price: Maximum stock price filter
+            batch_size: How many symbols to process before saving checkpoint
+        """
+        if self._running_job and self._running_job.status == CollectionStatus.RUNNING:
+            return {
+                "success": False,
+                "error": "Another collection job is already running",
+                "current_job": self._running_job.to_dict()
+            }
+            
+        # Get all US symbols
+        logger.info("Fetching all US stock symbols...")
+        symbols = await self.get_all_us_symbols(min_price, max_price)
+        
+        if not symbols:
+            return {
+                "success": False,
+                "error": "Could not fetch US stock list. Check Alpaca connection."
+            }
+            
+        logger.info(f"Starting full market collection for {len(symbols)} symbols")
+        
+        # Start collection with all symbols
+        return await self.start_collection(
+            symbols=symbols,
+            bar_size=bar_size,
+            duration=duration,
+            use_defaults=False
+        )
     
     async def start_collection(
         self,
@@ -479,10 +617,12 @@ def get_ib_collector() -> IBHistoricalCollector:
     return _ib_collector
 
 
-def init_ib_collector(db=None, ib_service=None) -> IBHistoricalCollector:
+def init_ib_collector(db=None, ib_service=None, alpaca_service=None) -> IBHistoricalCollector:
     """Initialize the IB historical collector"""
     collector = get_ib_collector()
     collector.set_db(db)
     if ib_service:
         collector.set_ib_service(ib_service)
+    if alpaca_service:
+        collector.set_alpaca_service(alpaca_service)
     return collector

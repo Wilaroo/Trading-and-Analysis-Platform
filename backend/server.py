@@ -904,12 +904,20 @@ except Exception as e:
 try:
     from services.ib_historical_collector import init_ib_collector
     
-    ib_collector = init_ib_collector(db=db, ib_service=ib_service)
+    # Get Alpaca service for fetching US stock universe
+    alpaca_service = get_service_optional('alpaca_historical_service')
+    
+    ib_collector = init_ib_collector(
+        db=db, 
+        ib_service=ib_service,
+        alpaca_service=alpaca_service
+    )
     register_service('ib_collector', ib_collector)
     
     print("IB Historical Data Collector initialized")
     print("  - Collects OHLCV data from IB Gateway")
     print("  - Supports multiple bar sizes (1min, 5min, 1hour, 1day)")
+    print("  - Full market collection: ALL US stocks via Alpaca")
     print("  - Stores in MongoDB for model training")
     print("  - Endpoints: /api/ib-collector/*")
 except Exception as e:

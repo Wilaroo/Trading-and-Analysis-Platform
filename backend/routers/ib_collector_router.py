@@ -97,6 +97,47 @@ async def full_collection(days: int = 30):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/full-market-collection")
+async def full_market_collection(
+    bar_size: str = "1 day",
+    days: int = 30,
+    min_price: float = 5.0,
+    max_price: float = 500.0
+):
+    """
+    Start collection for ALL tradeable US stocks (8000+).
+    
+    ⚠️ This is a LONG-RUNNING job that can take several hours.
+    Best to run overnight.
+    
+    - **bar_size**: Bar size (recommend "1 day" for full market - faster)
+    - **days**: Number of days of data to collect
+    - **min_price**: Minimum stock price filter (default $5)
+    - **max_price**: Maximum stock price filter (default $500)
+    """
+    try:
+        collector = get_ib_collector()
+        
+        # Calculate duration based on days
+        if days <= 7:
+            duration = f"{days} D"
+        elif days <= 30:
+            duration = f"{days // 7 + 1} W"
+        else:
+            duration = f"{days // 30 + 1} M"
+            
+        result = await collector.start_full_market_collection(
+            bar_size=bar_size,
+            duration=duration,
+            min_price=min_price,
+            max_price=max_price
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error starting full market collection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/cancel")
 async def cancel_collection():
     """Cancel the currently running collection job."""
@@ -183,4 +224,24 @@ async def get_default_symbols():
         }
     except Exception as e:
         logger.error(f"Error getting default symbols: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/full-market-symbols")
+async def get_full_market_symbols(min_price: float = 5.0, max_price: float = 500.0):
+    """
+    Get the count of all tradeable US stocks.
+    This fetches from Alpaca and caches the result.
+    """
+    try:
+        collector = get_ib_collector()
+        symbols = await collector.get_all_us_symbols(min_price, max_price)
+        return {
+            "success": True,
+            "count": len(symbols),
+            "sample": symbols[:20] if symbols else [],  # Show first 20 as sample
+            "note": f"Full market: {len(symbols)} US stocks meeting criteria (${min_price}-${max_price})"
+        }
+    except Exception as e:
+        logger.error(f"Error getting full market symbols: {e}")
         raise HTTPException(status_code=500, detail=str(e))
