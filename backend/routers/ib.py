@@ -1306,6 +1306,9 @@ async def report_historical_data_result(request: Request):
     Report the result of a historical data fetch.
     Called by IB Data Pusher after fetching data from IB Gateway.
     Accepts JSON body with: request_id, symbol, success, data, error, fetched_at
+    
+    This endpoint now IMMEDIATELY stores data to the main collection,
+    making it resilient to monitoring loop failures.
     """
     service = _get_historical_data_service()
     if not service:
@@ -1319,17 +1322,67 @@ async def report_historical_data_result(request: Request):
         success = body.get("success", False)
         data = body.get("data")
         error = body.get("error")
+        bar_size = body.get("bar_size", "1 day")
         
         if not request_id:
             raise HTTPException(status_code=400, detail="request_id is required")
         
+        # Store in queue (for tracking)
         service.complete_request(
             request_id=request_id,
             success=success,
             data=data,
             error=error
         )
-        return {"success": True, "message": f"Result recorded for {request_id}"}
+        
+        # IMMEDIATELY store to main collection (resilient to monitoring failures)
+        bars_stored = 0
+        if success and data:
+            try:
+                from services.ib_historical_collector import get_ib_collector
+                collector = get_ib_collector()
+                
+                if collector._data_col is not None:
+                    from datetime import datetime, timezone
+                    for bar in data:
+                        try:
+                            collector._data_col.update_one(
+                                {
+                                    "symbol": symbol,
+                                    "bar_size": bar_size,
+                                    "date": bar.get("date") or bar.get("time")
+                                },
+                                {
+                                    "$set": {
+                                        "open": bar.get("open"),
+                                        "high": bar.get("high"),
+                                        "low": bar.get("low"),
+                                        "close": bar.get("close"),
+                                        "volume": bar.get("volume"),
+                                        "collected_at": datetime.now(timezone.utc).isoformat()
+                                    }
+                                },
+                                upsert=True
+                            )
+                            bars_stored += 1
+                        except Exception as e:
+                            if "duplicate" not in str(e).lower():
+                                logger.warning(f"Error storing bar for {symbol}: {e}")
+                    
+                    logger.info(f"Stored {bars_stored} bars for {symbol} directly from pusher report")
+            except Exception as e:
+                logger.warning(f"Could not store data directly: {e}")
+        
+        return {
+            "success": True, 
+            "message": f"Result recorded for {request_id}",
+            "bars_stored": bars_stored
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error reporting historical data result: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
