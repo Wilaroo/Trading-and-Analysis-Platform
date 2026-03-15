@@ -7,7 +7,51 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 15, 2026)
 
-### NIA (Neural Intelligence Agency) ✅ NEW (March 15, 2026)
+### Trading Report Card - NIA Enhancement ✅ NEW (March 15, 2026)
+**YOUR PERSONAL TRADING PERFORMANCE INSIGHTS** - See your trading patterns like the AI sees them.
+
+**What It Is:**
+A new panel in the NIA dashboard showing the user's personal trading statistics - the same data that AI agents use to make decisions.
+
+**Features:**
+- **Overall Stats**: Total trades, win rate, avg R-multiple, winners count
+- **Performance by Symbol**: Win rate breakdown by ticker (e.g., AAPL 67%, TSLA 42%)
+- **Performance by Setup Type**: Win rate by strategy (e.g., ORB 58%, VWAP Bounce 45%)
+- **AI-Generated Insights**: Smart observations like "Your best symbol is NVDA: 72% win rate"
+
+**Files Modified:**
+- `/app/frontend/src/components/NIA.jsx` - Added ReportCardPanel component and data fetching
+- `/app/backend/api/routers/ai_modules_router.py` - Added `/api/ai-modules/report-card` endpoint
+
+---
+
+### Strategy Promotion Wired to Trading Bot ✅ NEW (March 15, 2026)
+**THE AUTONOMOUS LOOP IS NOW COMPLETE** - Strategies must be LIVE to execute real trades.
+
+**What Changed:**
+- Trading Bot now checks each strategy's phase before executing
+- **LIVE strategies**: Execute real trades via broker
+- **PAPER strategies**: Record paper trade, no real execution
+- **SIMULATION strategies**: Skip real-time trading entirely
+
+**How It Works:**
+1. When trading bot wants to execute a trade, it calls `StrategyPromotionService.should_execute_trade()`
+2. Service returns: `(should_execute: bool, reason: str, should_paper_track: bool)`
+3. If `should_paper_track=True`, trade is recorded as paper trade for performance tracking
+4. Only LIVE strategies get real execution
+
+**Files Modified:**
+- `/app/backend/services/trading_bot_service.py` - Added strategy phase check in `_execute_trade()`
+- `/app/backend/server.py` - Connected StrategyPromotionService to TradingBot on startup
+
+**Impact:**
+- Strategies now have a safe path to production: prove themselves in simulation, then paper, then live
+- No strategy trades real money until it has proven itself AND received human approval
+- Paper trades are tracked for promotion evaluation
+
+---
+
+### NIA (Neural Intelligence Agency) ✅ (March 15, 2026)
 **NEW TOP-LEVEL SECTION** - Unified AI intelligence dashboard
 
 **What It Is:**

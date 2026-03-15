@@ -375,6 +375,125 @@ async def get_agent_data_service_status():
     }
 
 
+@router.get("/report-card")
+async def get_trading_report_card(days: int = 90):
+    """
+    Get your personal Trading Report Card.
+    
+    Shows your historical performance by symbol, setup type, and conditions.
+    This is the same data that AI agents use to make decisions about your trades.
+    
+    Args:
+        days: Number of days of history to analyze (default 90)
+    """
+    if not _agent_data_service:
+        return {
+            "success": False,
+            "error": "AgentDataService not initialized"
+        }
+    
+    try:
+        # Get overall user stats
+        user_stats = await _agent_data_service.get_user_trading_stats(days)
+        
+        # Get performance by symbol (top traded symbols)
+        symbol_performance = []
+        if _agent_data_service._db is not None:
+            # Get distinct symbols from trade_outcomes
+            try:
+                symbols = _agent_data_service._db["trade_outcomes"].distinct("symbol")
+                for symbol in symbols[:20]:  # Top 20 symbols
+                    if symbol:
+                        ctx = await _agent_data_service.get_symbol_context(symbol, days)
+                        if ctx.total_trades >= 1:
+                            symbol_performance.append(ctx.to_dict())
+                
+                # Sort by total trades descending
+                symbol_performance.sort(key=lambda x: x["total_trades"], reverse=True)
+            except Exception as e:
+                logger.warning(f"Error getting symbol performance: {e}")
+        
+        # Get performance by setup type
+        setup_performance = []
+        if _agent_data_service._db is not None:
+            try:
+                setup_types = _agent_data_service._db["alert_outcomes"].distinct("setup_type")
+                for setup_type in setup_types:
+                    if setup_type:
+                        ctx = await _agent_data_service.get_setup_type_context(setup_type, days)
+                        if ctx.total_alerts >= 1:
+                            setup_performance.append(ctx.to_dict())
+                
+                # Sort by traded count descending
+                setup_performance.sort(key=lambda x: x["traded_count"], reverse=True)
+            except Exception as e:
+                logger.warning(f"Error getting setup performance: {e}")
+        
+        # Generate insights
+        insights = []
+        
+        # Overall win rate insight
+        if user_stats.get("total_trades", 0) >= 5:
+            wr = user_stats.get("win_rate", 0)
+            if wr >= 0.55:
+                insights.append(f"Strong overall performance: {wr*100:.0f}% win rate")
+            elif wr >= 0.5:
+                insights.append(f"Solid win rate at {wr*100:.0f}%")
+            elif wr >= 0.45:
+                insights.append(f"Win rate needs improvement: {wr*100:.0f}%")
+            else:
+                insights.append(f"Focus on selectivity - current win rate is {wr*100:.0f}%")
+        
+        # Best symbol insight
+        if symbol_performance:
+            best_symbol = max(
+                [s for s in symbol_performance if s["total_trades"] >= 3],
+                key=lambda x: x["win_rate"],
+                default=None
+            )
+            if best_symbol and best_symbol["win_rate"] >= 0.5:
+                insights.append(f"Your best symbol is {best_symbol['symbol']}: {best_symbol['win_rate']*100:.0f}% win rate")
+        
+        # Best setup insight
+        if setup_performance:
+            best_setup = max(
+                [s for s in setup_performance if s["traded_count"] >= 3],
+                key=lambda x: x["win_rate"],
+                default=None
+            )
+            if best_setup and best_setup["win_rate"] >= 0.5:
+                insights.append(f"Your best setup is {best_setup['setup_type']}: {best_setup['win_rate']*100:.0f}% win rate")
+        
+        # Avg R insight
+        avg_r = user_stats.get("avg_r_multiple", 0)
+        if avg_r != 0:
+            if avg_r >= 1.0:
+                insights.append(f"Excellent avg R-multiple: {avg_r:.2f}R per trade")
+            elif avg_r >= 0.5:
+                insights.append(f"Good avg R-multiple: {avg_r:.2f}R per trade")
+            elif avg_r > 0:
+                insights.append(f"Avg R-multiple is positive but low: {avg_r:.2f}R")
+            else:
+                insights.append(f"Avg R-multiple is negative: {avg_r:.2f}R - review your stops")
+        
+        return {
+            "success": True,
+            "period_days": days,
+            "overall_stats": user_stats,
+            "by_symbol": symbol_performance[:10],  # Top 10
+            "by_setup": setup_performance[:10],  # Top 10
+            "insights": insights,
+            "has_data": user_stats.get("total_trades", 0) > 0
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating report card: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
 # =====================
 # Risk Manager Endpoints
 # =====================
