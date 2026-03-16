@@ -16,7 +16,7 @@ import {
   ChevronDown, DollarSign, Gauge, Wifi, Eye, Crosshair,
   MessageSquare, RefreshCw, Bell, Circle, Flame, Radio,
   BarChart3, Newspaper, Sunrise, BookOpen, Sparkles, ChevronRight,
-  Play, Pause, Settings, Bot, Sliders, WifiOff, Star
+  Play, Pause, Settings, Bot, Sliders, WifiOff, Star, Search
 } from 'lucide-react';
 import { toast } from 'sonner';
 import EnhancedTickerModal from './EnhancedTickerModal';
@@ -67,33 +67,42 @@ const formatFullTime = (timestamp) => {
 
 const TypingIndicator = ({ agentName = 'SENTCOM' }) => (
   <motion.div
-    initial={{ opacity: 0, y: 10 }}
-    animate={{ opacity: 1, y: 0 }}
-    exit={{ opacity: 0, y: -10 }}
-    className="flex items-start gap-3 p-3"
+    initial={{ opacity: 0, y: 10, scale: 0.98 }}
+    animate={{ opacity: 1, y: 0, scale: 1 }}
+    exit={{ opacity: 0, y: -10, scale: 0.98 }}
+    className="flex items-start gap-3"
   >
-    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500/30 to-violet-500/30 flex items-center justify-center flex-shrink-0">
-      <Brain className="w-4 h-4 text-cyan-400" />
+    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center flex-shrink-0 shadow-lg">
+      <Brain className="w-4 h-4 text-white" />
     </div>
-    <div className="flex flex-col">
-      <span className="text-xs text-cyan-400 font-medium mb-1">{agentName}</span>
-      <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/5">
-        <motion.span
-          className="w-2 h-2 rounded-full bg-cyan-400"
-          animate={{ opacity: [0.3, 1, 0.3] }}
-          transition={{ duration: 1, repeat: Infinity, delay: 0 }}
-        />
-        <motion.span
-          className="w-2 h-2 rounded-full bg-cyan-400"
-          animate={{ opacity: [0.3, 1, 0.3] }}
-          transition={{ duration: 1, repeat: Infinity, delay: 0.2 }}
-        />
-        <motion.span
-          className="w-2 h-2 rounded-full bg-cyan-400"
-          animate={{ opacity: [0.3, 1, 0.3] }}
-          transition={{ duration: 1, repeat: Infinity, delay: 0.4 }}
-        />
-        <span className="text-xs text-zinc-500 ml-2">thinking...</span>
+    <div className="flex-1 min-w-0 max-w-[85%]">
+      <div className="relative overflow-hidden rounded-2xl rounded-tl-sm p-4 bg-gradient-to-br from-violet-500/20 via-purple-500/10 to-violet-500/5 border border-violet-500/30 backdrop-blur-md shadow-lg shadow-black/10">
+        <div className="absolute inset-0 bg-gradient-to-br from-white/[0.08] to-transparent pointer-events-none" />
+        <div className="relative flex items-center gap-2 mb-2">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-violet-400">
+            {agentName}
+          </span>
+        </div>
+        <div className="relative flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            <motion.span
+              className="w-2 h-2 rounded-full bg-violet-400"
+              animate={{ opacity: [0.3, 1, 0.3], scale: [0.8, 1, 0.8] }}
+              transition={{ duration: 1.2, repeat: Infinity, delay: 0 }}
+            />
+            <motion.span
+              className="w-2 h-2 rounded-full bg-violet-400"
+              animate={{ opacity: [0.3, 1, 0.3], scale: [0.8, 1, 0.8] }}
+              transition={{ duration: 1.2, repeat: Infinity, delay: 0.2 }}
+            />
+            <motion.span
+              className="w-2 h-2 rounded-full bg-violet-400"
+              animate={{ opacity: [0.3, 1, 0.3], scale: [0.8, 1, 0.8] }}
+              transition={{ duration: 1.2, repeat: Infinity, delay: 0.4 }}
+            />
+          </div>
+          <span className="text-xs text-violet-300/70 ml-1">thinking...</span>
+        </div>
       </div>
     </div>
   </motion.div>
@@ -143,63 +152,172 @@ const HoverTimestamp = ({ timestamp, children, position = 'left' }) => {
 const StreamMessage = React.memo(({ msg, index }) => {
   const isUser = msg.metadata?.role === 'user';
   
+  // Determine message type for styling
+  const getMessageType = () => {
+    if (isUser) return 'user';
+    if (msg.action_type === 'chat_response') return 'sentcom';
+    if (msg.action_type === 'scanning' || msg.type === 'thought') return 'scanner';
+    if (msg.type === 'alert' || msg.action_type === 'stop_warning') return 'alert';
+    if (msg.type === 'filter') return 'filter';
+    if (msg.action_type === 'monitoring') return 'monitor';
+    return 'system';
+  };
+  
+  const messageType = getMessageType();
+  
+  // Color schemes for different message types
+  const colorSchemes = {
+    user: {
+      gradient: 'from-cyan-500/20 via-blue-500/10 to-cyan-500/5',
+      border: 'border-cyan-500/30',
+      icon: 'from-cyan-500 to-blue-500',
+      iconColor: 'text-white',
+      label: 'text-cyan-400',
+      text: 'text-cyan-100',
+      badge: 'bg-cyan-500/20 text-cyan-300'
+    },
+    sentcom: {
+      gradient: 'from-violet-500/20 via-purple-500/10 to-violet-500/5',
+      border: 'border-violet-500/30',
+      icon: 'from-violet-500 to-purple-600',
+      iconColor: 'text-white',
+      label: 'text-violet-400',
+      text: 'text-zinc-200',
+      badge: 'bg-violet-500/20 text-violet-300'
+    },
+    scanner: {
+      gradient: 'from-emerald-500/20 via-teal-500/10 to-emerald-500/5',
+      border: 'border-emerald-500/30',
+      icon: 'from-emerald-500 to-teal-500',
+      iconColor: 'text-white',
+      label: 'text-emerald-400',
+      text: 'text-zinc-200',
+      badge: 'bg-emerald-500/20 text-emerald-300'
+    },
+    alert: {
+      gradient: 'from-amber-500/20 via-orange-500/10 to-amber-500/5',
+      border: 'border-amber-500/30',
+      icon: 'from-amber-500 to-orange-500',
+      iconColor: 'text-white',
+      label: 'text-amber-400',
+      text: 'text-zinc-200',
+      badge: 'bg-amber-500/20 text-amber-300'
+    },
+    filter: {
+      gradient: 'from-pink-500/20 via-rose-500/10 to-pink-500/5',
+      border: 'border-pink-500/30',
+      icon: 'from-pink-500 to-rose-500',
+      iconColor: 'text-white',
+      label: 'text-pink-400',
+      text: 'text-zinc-200',
+      badge: 'bg-pink-500/20 text-pink-300'
+    },
+    monitor: {
+      gradient: 'from-blue-500/20 via-indigo-500/10 to-blue-500/5',
+      border: 'border-blue-500/30',
+      icon: 'from-blue-500 to-indigo-500',
+      iconColor: 'text-white',
+      label: 'text-blue-400',
+      text: 'text-zinc-200',
+      badge: 'bg-blue-500/20 text-blue-300'
+    },
+    system: {
+      gradient: 'from-zinc-500/20 via-zinc-600/10 to-zinc-500/5',
+      border: 'border-zinc-500/30',
+      icon: 'from-zinc-500 to-zinc-600',
+      iconColor: 'text-white',
+      label: 'text-zinc-400',
+      text: 'text-zinc-300',
+      badge: 'bg-zinc-500/20 text-zinc-300'
+    }
+  };
+  
+  const colors = colorSchemes[messageType];
+  
+  // Get icon based on message type
+  const getIcon = () => {
+    switch (messageType) {
+      case 'user': return <MessageSquare className="w-4 h-4" />;
+      case 'sentcom': return <Brain className="w-4 h-4" />;
+      case 'scanner': return <Search className="w-4 h-4" />;
+      case 'alert': return <AlertCircle className="w-4 h-4" />;
+      case 'filter': return <Target className="w-4 h-4" />;
+      case 'monitor': return <Activity className="w-4 h-4" />;
+      default: return <Radio className="w-4 h-4" />;
+    }
+  };
+  
+  // Get label based on message type
+  const getLabel = () => {
+    switch (messageType) {
+      case 'user': return 'YOU';
+      case 'sentcom': return 'SENTCOM';
+      case 'scanner': return 'SCANNER';
+      case 'alert': return 'ALERT';
+      case 'filter': return 'SMART FILTER';
+      case 'monitor': return 'MONITOR';
+      default: return 'SYSTEM';
+    }
+  };
+  
   return (
     <HoverTimestamp 
       timestamp={msg.timestamp}
       position={isUser ? 'right' : 'left'}
     >
       <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: Math.min(index * 0.03, 0.3) }}
+        initial={{ opacity: 0, y: 10, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ delay: Math.min(index * 0.05, 0.3), type: 'spring', stiffness: 200 }}
         className={`flex items-start gap-3 ${isUser ? 'flex-row-reverse' : ''}`}
       >
-        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-lg ${
-          isUser 
-            ? 'bg-gradient-to-br from-cyan-500/30 to-blue-600/30 shadow-cyan-500/20' 
-            : 'bg-gradient-to-br from-violet-500/30 to-purple-600/30 shadow-violet-500/20'
-        }`}>
-          {isUser ? (
-            <MessageSquare className="w-4 h-4 text-cyan-400" />
-          ) : msg.type === 'thought' || msg.action_type === 'scanning' ? (
-            <Brain className="w-4 h-4 text-violet-400" />
-          ) : msg.type === 'alert' ? (
-            <AlertCircle className="w-4 h-4 text-amber-400" />
-          ) : msg.type === 'filter' ? (
-            <Target className="w-4 h-4 text-cyan-400" />
-          ) : msg.action_type === 'chat_response' ? (
-            <Brain className="w-4 h-4 text-violet-400" />
-          ) : (
-            <Radio className="w-4 h-4 text-zinc-400" />
-          )}
+        {/* Icon with gradient background */}
+        <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${colors.icon} flex items-center justify-center flex-shrink-0 shadow-lg ${colors.iconColor}`}>
+          {getIcon()}
         </div>
-        <div className={`flex-1 min-w-0 ${isUser ? 'text-right' : ''}`}>
-          <div className={`flex items-center gap-2 mb-1 ${isUser ? 'justify-end' : ''}`}>
-            <span className={`text-[10px] font-bold uppercase tracking-wider ${
-              isUser ? 'text-cyan-400' : 'text-violet-400'
-            }`}>
-              {isUser ? 'YOU' :
-               msg.action_type === 'scanning' ? 'SCANNER' :
-               msg.action_type === 'monitoring' ? 'MONITOR' :
-               msg.action_type === 'chat_response' ? 'SENTCOM' :
-               msg.type === 'filter' ? 'SMART FILTER' :
-               msg.type === 'alert' ? 'ALERT' : 'SENTCOM'}
-            </span>
-            {msg.symbol && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400">
-                {msg.symbol}
+        
+        {/* Message bubble with glassmorphism */}
+        <div className={`flex-1 min-w-0 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
+          <div 
+            className={`
+              relative overflow-hidden rounded-2xl p-4
+              bg-gradient-to-br ${colors.gradient}
+              border ${colors.border}
+              backdrop-blur-md
+              shadow-lg shadow-black/10
+              ${isUser ? 'rounded-tr-sm' : 'rounded-tl-sm'}
+            `}
+          >
+            {/* Subtle inner glow */}
+            <div className="absolute inset-0 bg-gradient-to-br from-white/[0.08] to-transparent pointer-events-none" />
+            
+            {/* Header with label and symbol */}
+            <div className={`relative flex items-center gap-2 mb-2 ${isUser ? 'justify-end' : ''}`}>
+              <span className={`text-[10px] font-bold uppercase tracking-wider ${colors.label}`}>
+                {getLabel()}
               </span>
+              {msg.symbol && (
+                <span className={`text-[10px] px-2 py-0.5 rounded-full ${colors.badge} font-medium`}>
+                  {msg.symbol}
+                </span>
+              )}
+            </div>
+            
+            {/* Message content */}
+            <p className={`relative text-sm leading-relaxed ${colors.text}`}>
+              {msg.content}
+            </p>
+            
+            {/* Confidence indicator */}
+            {msg.confidence && (
+              <div className={`relative flex items-center gap-1.5 mt-3 pt-2 border-t border-white/10 ${isUser ? 'justify-end' : ''}`}>
+                <Gauge className={`w-3 h-3 ${colors.label}`} />
+                <span className={`text-[10px] ${colors.label}`}>
+                  Confidence: {msg.confidence}%
+                </span>
+              </div>
             )}
           </div>
-          <p className={`text-sm leading-relaxed ${
-            isUser ? 'text-cyan-200' : 'text-zinc-300'
-          }`}>{msg.content}</p>
-          {msg.confidence && (
-            <div className={`flex items-center gap-1 mt-2 ${isUser ? 'justify-end' : ''}`}>
-              <Gauge className="w-3 h-3 text-violet-400" />
-              <span className="text-[10px] text-violet-400">Confidence: {msg.confidence}%</span>
-            </div>
-          )}
         </div>
       </motion.div>
     </HoverTimestamp>
