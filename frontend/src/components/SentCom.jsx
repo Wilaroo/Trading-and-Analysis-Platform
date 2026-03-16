@@ -137,6 +137,82 @@ const HoverTimestamp = ({ timestamp, children, position = 'left' }) => {
 };
 
 // ============================================================================
+// MEMOIZED STREAM MESSAGE COMPONENT (prevents flickering)
+// ============================================================================
+
+const StreamMessage = React.memo(({ msg, index }) => {
+  const isUser = msg.metadata?.role === 'user';
+  
+  return (
+    <HoverTimestamp 
+      timestamp={msg.timestamp}
+      position={isUser ? 'right' : 'left'}
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: Math.min(index * 0.03, 0.3) }}
+        className={`flex items-start gap-3 ${isUser ? 'flex-row-reverse' : ''}`}
+      >
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-lg ${
+          isUser 
+            ? 'bg-gradient-to-br from-cyan-500/30 to-blue-600/30 shadow-cyan-500/20' 
+            : 'bg-gradient-to-br from-violet-500/30 to-purple-600/30 shadow-violet-500/20'
+        }`}>
+          {isUser ? (
+            <MessageSquare className="w-4 h-4 text-cyan-400" />
+          ) : msg.type === 'thought' || msg.action_type === 'scanning' ? (
+            <Brain className="w-4 h-4 text-violet-400" />
+          ) : msg.type === 'alert' ? (
+            <AlertCircle className="w-4 h-4 text-amber-400" />
+          ) : msg.type === 'filter' ? (
+            <Target className="w-4 h-4 text-cyan-400" />
+          ) : msg.action_type === 'chat_response' ? (
+            <Brain className="w-4 h-4 text-violet-400" />
+          ) : (
+            <Radio className="w-4 h-4 text-zinc-400" />
+          )}
+        </div>
+        <div className={`flex-1 min-w-0 ${isUser ? 'text-right' : ''}`}>
+          <div className={`flex items-center gap-2 mb-1 ${isUser ? 'justify-end' : ''}`}>
+            <span className={`text-[10px] font-bold uppercase tracking-wider ${
+              isUser ? 'text-cyan-400' : 'text-violet-400'
+            }`}>
+              {isUser ? 'YOU' :
+               msg.action_type === 'scanning' ? 'SCANNER' :
+               msg.action_type === 'monitoring' ? 'MONITOR' :
+               msg.action_type === 'chat_response' ? 'SENTCOM' :
+               msg.type === 'filter' ? 'SMART FILTER' :
+               msg.type === 'alert' ? 'ALERT' : 'SENTCOM'}
+            </span>
+            {msg.symbol && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400">
+                {msg.symbol}
+              </span>
+            )}
+          </div>
+          <p className={`text-sm leading-relaxed ${
+            isUser ? 'text-cyan-200' : 'text-zinc-300'
+          }`}>{msg.content}</p>
+          {msg.confidence && (
+            <div className={`flex items-center gap-1 mt-2 ${isUser ? 'justify-end' : ''}`}>
+              <Gauge className="w-3 h-3 text-violet-400" />
+              <span className="text-[10px] text-violet-400">Confidence: {msg.confidence}%</span>
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </HoverTimestamp>
+  );
+}, (prevProps, nextProps) => {
+  // Custom comparison - only re-render if ID or content changed
+  return prevProps.msg.id === nextProps.msg.id && 
+         prevProps.msg.content === nextProps.msg.content;
+});
+
+StreamMessage.displayName = 'StreamMessage';
+
+// ============================================================================
 // SHARED COMPONENTS
 // ============================================================================
 
@@ -1475,21 +1551,34 @@ const useSentComStatus = (pollInterval = 5000) => {
   return { status, loading, error, refresh: fetchStatus };
 };
 
-const useSentComStream = (pollInterval = 5000) => {
+const useSentComStream = (pollInterval = 8000) => {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
-  const lastMessageIdsRef = useRef('');
+  const lastFetchRef = useRef({ ids: '', chatCount: 0 });
 
   const fetchStream = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/sentcom/stream?limit=20`);
       const data = await res.json();
       if (data.success && data.messages) {
-        // Only update if messages actually changed (prevents flickering)
-        const newMessageIds = data.messages.map(m => m.id || m.timestamp).join(',');
-        if (newMessageIds !== lastMessageIdsRef.current) {
-          lastMessageIdsRef.current = newMessageIds;
-          setMessages(data.messages);
+        // Separate chat messages from status/system messages
+        const chatMessages = data.messages.filter(m => 
+          m.type === 'chat' || m.action_type === 'chat_response' || m.action_type === 'user_message'
+        );
+        const statusMessages = data.messages.filter(m => 
+          m.type !== 'chat' && m.action_type !== 'chat_response' && m.action_type !== 'user_message'
+        );
+        
+        // Only update if chat messages changed (ignore status message content changes)
+        const chatIds = chatMessages.map(m => m.id || m.timestamp).join(',');
+        const hasNewChat = chatIds !== lastFetchRef.current.ids || 
+                          chatMessages.length !== lastFetchRef.current.chatCount;
+        
+        if (hasNewChat || messages.length === 0) {
+          lastFetchRef.current = { ids: chatIds, chatCount: chatMessages.length };
+          // Keep status messages stable - only take the 2 most recent
+          const stableStatus = statusMessages.slice(0, 2);
+          setMessages([...stableStatus, ...chatMessages]);
         }
       }
     } catch (err) {
@@ -1497,7 +1586,7 @@ const useSentComStream = (pollInterval = 5000) => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [messages.length]);
 
   useEffect(() => {
     fetchStream();
@@ -3056,66 +3145,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
                 ) : (
                   <div className="space-y-3">
                     {allMessages.map((msg, i) => (
-                      <HoverTimestamp 
-                        key={msg.id || i}
-                        timestamp={msg.timestamp}
-                        position={msg.metadata?.role === 'user' ? 'right' : 'left'}
-                      >
-                        <motion.div
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: Math.min(i * 0.03, 0.3) }}
-                          className={`flex items-start gap-3 ${msg.metadata?.role === 'user' ? 'flex-row-reverse' : ''}`}
-                        >
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-lg ${
-                            msg.metadata?.role === 'user' 
-                              ? 'bg-gradient-to-br from-cyan-500/30 to-blue-600/30 shadow-cyan-500/20' 
-                              : 'bg-gradient-to-br from-violet-500/30 to-purple-600/30 shadow-violet-500/20'
-                          }`}>
-                            {msg.metadata?.role === 'user' ? (
-                              <MessageSquare className="w-4 h-4 text-cyan-400" />
-                            ) : msg.type === 'thought' || msg.action_type === 'scanning' ? (
-                              <Brain className="w-4 h-4 text-violet-400" />
-                            ) : msg.type === 'alert' ? (
-                              <AlertCircle className="w-4 h-4 text-amber-400" />
-                            ) : msg.type === 'filter' ? (
-                              <Target className="w-4 h-4 text-cyan-400" />
-                            ) : msg.action_type === 'chat_response' ? (
-                              <Brain className="w-4 h-4 text-violet-400" />
-                            ) : (
-                              <Radio className="w-4 h-4 text-zinc-400" />
-                            )}
-                          </div>
-                          <div className={`flex-1 min-w-0 ${msg.metadata?.role === 'user' ? 'text-right' : ''}`}>
-                            <div className={`flex items-center gap-2 mb-1 ${msg.metadata?.role === 'user' ? 'justify-end' : ''}`}>
-                              <span className={`text-[10px] font-bold uppercase tracking-wider ${
-                                msg.metadata?.role === 'user' ? 'text-cyan-400' : 'text-violet-400'
-                              }`}>
-                                {msg.metadata?.role === 'user' ? 'YOU' :
-                                 msg.action_type === 'scanning' ? 'SCANNER' :
-                                 msg.action_type === 'monitoring' ? 'MONITOR' :
-                                 msg.action_type === 'chat_response' ? 'SENTCOM' :
-                                 msg.type === 'filter' ? 'SMART FILTER' :
-                                 msg.type === 'alert' ? 'ALERT' : 'SENTCOM'}
-                              </span>
-                              {msg.symbol && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400">
-                                  {msg.symbol}
-                                </span>
-                              )}
-                            </div>
-                            <p className={`text-sm leading-relaxed ${
-                              msg.metadata?.role === 'user' ? 'text-cyan-200' : 'text-zinc-300'
-                            }`}>{msg.content}</p>
-                            {msg.confidence && (
-                              <div className={`flex items-center gap-1 mt-2 ${msg.metadata?.role === 'user' ? 'justify-end' : ''}`}>
-                                <Gauge className="w-3 h-3 text-violet-400" />
-                                <span className="text-[10px] text-violet-400">Confidence: {msg.confidence}%</span>
-                              </div>
-                            )}
-                          </div>
-                        </motion.div>
-                      </HoverTimestamp>
+                      <StreamMessage key={msg.id || `msg-${i}`} msg={msg} index={i} />
                     ))}
                     
                     {/* Typing indicator when waiting for response */}
