@@ -7,6 +7,25 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 16, 2026)
 
+### Real-Time ETA for Collections ✅ (March 16, 2026)
+**IMPLEMENTED: Estimated time remaining based on actual completion rate**
+
+**Backend Changes:**
+- `_calculate_eta_for_bar_size()` - Calculates ETA based on last 50 completions
+- Uses actual `completed_at` timestamps to calculate symbols/minute rate
+- Falls back to IB Gateway default (~3 sec/symbol) if no recent data
+- Returns: `eta_seconds`, `eta_display` (human readable), `symbols_per_minute`
+
+**Display Format:**
+- "~21s left" / "~1h 46m left" / "~2h 30m left" etc.
+- Also shows rate: "34 sym/min" / "2.3 sym/min"
+
+**Files Modified:**
+- `/app/backend/services/historical_data_queue_service.py` - Added ETA calculation methods
+- `/app/frontend/src/components/NIA.jsx` - Added ETA display with clock icon
+
+---
+
 ### Cancel & Save + Resume Collection ✅ (March 16, 2026)
 **IMPLEMENTED: Safe cancel that preserves data with ability to resume later**
 

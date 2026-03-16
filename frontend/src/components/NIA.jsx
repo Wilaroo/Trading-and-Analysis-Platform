@@ -740,7 +740,15 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
                       {detailedProgress.active_collections?.map((col) => (
                         <div key={col.bar_size} className="pb-3 border-b border-white/5 last:border-0 last:pb-0">
                           <div className="flex justify-between items-center text-xs mb-1">
-                            <span className="text-white font-medium">{col.bar_size}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-white font-medium">{col.bar_size}</span>
+                              {col.eta_display && (
+                                <span className="text-[10px] text-cyan-400 flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  ~{col.eta_display} left
+                                </span>
+                              )}
+                            </div>
                             <div className="flex items-center gap-2">
                               <span className="text-zinc-400">
                                 {col.completed}/{col.total} ({col.progress_pct}%)
@@ -770,6 +778,9 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
                             <span className="text-emerald-400">{col.completed} saved</span>
                             <span className="text-orange-400">{col.pending} pending</span>
                             {col.failed > 0 && <span className="text-red-400">{col.failed} failed</span>}
+                            {col.symbols_per_minute && (
+                              <span className="text-zinc-400">{col.symbols_per_minute} sym/min</span>
+                            )}
                           </div>
                         </div>
                       ))}

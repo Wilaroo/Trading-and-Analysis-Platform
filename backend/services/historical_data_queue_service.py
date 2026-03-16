@@ -378,8 +378,11 @@ class HistoricalDataQueueService:
         Get queue statistics broken down by bar_size.
         
         Returns:
-            Dict with progress for each bar_size type being collected
+            Dict with progress for each bar_size type being collected,
+            including estimated time remaining based on completion rate.
         """
+        from datetime import datetime, timedelta, timezone
+        
         pipeline = [
             {
                 "$group": {
@@ -419,6 +422,18 @@ class HistoricalDataQueueService:
             total = r["total"]
             done = completed + failed
             
+            # Calculate estimated time remaining
+            eta_seconds = None
+            eta_display = None
+            symbols_per_minute = None
+            
+            if pending > 0 or claimed > 0:
+                # Get recent completions to calculate rate
+                eta_result = self._calculate_eta_for_bar_size(bar_size, pending + claimed)
+                eta_seconds = eta_result.get("eta_seconds")
+                eta_display = eta_result.get("eta_display")
+                symbols_per_minute = eta_result.get("symbols_per_minute")
+            
             by_bar_size.append({
                 "bar_size": bar_size,
                 "pending": pending,
@@ -427,7 +442,10 @@ class HistoricalDataQueueService:
                 "failed": failed,
                 "total": total,
                 "progress_pct": round((done / total * 100), 1) if total > 0 else 0,
-                "is_active": pending > 0 or claimed > 0
+                "is_active": pending > 0 or claimed > 0,
+                "eta_seconds": eta_seconds,
+                "eta_display": eta_display,
+                "symbols_per_minute": symbols_per_minute
             })
         
         # Sort so active collections appear first
@@ -437,6 +455,119 @@ class HistoricalDataQueueService:
             "by_bar_size": by_bar_size,
             "active_collections": [b for b in by_bar_size if b["is_active"]]
         }
+
+    def _calculate_eta_for_bar_size(self, bar_size: str, remaining: int) -> Dict:
+        """
+        Calculate estimated time remaining for a bar_size based on recent completion rate.
+        
+        Uses the last 50 completions to calculate average time per symbol.
+        """
+        from datetime import datetime, timedelta, timezone
+        
+        # Get recent completed items with timestamps
+        recent_completions = list(self.collection.find(
+            {
+                "bar_size": bar_size,
+                "status": "completed",
+                "completed_at": {"$exists": True}
+            },
+            {"completed_at": 1, "_id": 0}
+        ).sort("completed_at", -1).limit(50))
+        
+        if len(recent_completions) < 2:
+            # Not enough data - use IB Gateway default rate (~3 seconds per symbol)
+            default_rate = 3.0  # seconds per symbol
+            eta_seconds = int(remaining * default_rate)
+            return {
+                "eta_seconds": eta_seconds,
+                "eta_display": self._format_eta(eta_seconds),
+                "symbols_per_minute": round(60 / default_rate, 1),
+                "rate_source": "default"
+            }
+        
+        # Calculate time span of recent completions
+        timestamps = [c["completed_at"] for c in recent_completions if c.get("completed_at")]
+        
+        if len(timestamps) < 2:
+            default_rate = 3.0
+            eta_seconds = int(remaining * default_rate)
+            return {
+                "eta_seconds": eta_seconds,
+                "eta_display": self._format_eta(eta_seconds),
+                "symbols_per_minute": round(60 / default_rate, 1),
+                "rate_source": "default"
+            }
+        
+        # Parse timestamps if they're strings
+        parsed_timestamps = []
+        for ts in timestamps:
+            if isinstance(ts, str):
+                try:
+                    parsed_timestamps.append(datetime.fromisoformat(ts.replace('Z', '+00:00')))
+                except (ValueError, TypeError):
+                    pass
+            elif isinstance(ts, datetime):
+                parsed_timestamps.append(ts)
+        
+        if len(parsed_timestamps) < 2:
+            default_rate = 3.0
+            eta_seconds = int(remaining * default_rate)
+            return {
+                "eta_seconds": eta_seconds,
+                "eta_display": self._format_eta(eta_seconds),
+                "symbols_per_minute": round(60 / default_rate, 1),
+                "rate_source": "default"
+            }
+        
+        # Calculate rate
+        newest = max(parsed_timestamps)
+        oldest = min(parsed_timestamps)
+        time_span = (newest - oldest).total_seconds()
+        
+        if time_span <= 0:
+            default_rate = 3.0
+            eta_seconds = int(remaining * default_rate)
+            return {
+                "eta_seconds": eta_seconds,
+                "eta_display": self._format_eta(eta_seconds),
+                "symbols_per_minute": round(60 / default_rate, 1),
+                "rate_source": "default"
+            }
+        
+        symbols_completed = len(parsed_timestamps)
+        seconds_per_symbol = time_span / symbols_completed
+        symbols_per_minute = round(60 / seconds_per_symbol, 1) if seconds_per_symbol > 0 else 0
+        
+        # Calculate ETA
+        eta_seconds = int(remaining * seconds_per_symbol)
+        
+        return {
+            "eta_seconds": eta_seconds,
+            "eta_display": self._format_eta(eta_seconds),
+            "symbols_per_minute": symbols_per_minute,
+            "rate_source": "calculated",
+            "sample_size": symbols_completed
+        }
+
+    def _format_eta(self, seconds: int) -> str:
+        """Format seconds into human-readable time remaining"""
+        if seconds is None or seconds <= 0:
+            return "calculating..."
+        
+        if seconds < 60:
+            return f"{seconds}s"
+        elif seconds < 3600:
+            minutes = seconds // 60
+            secs = seconds % 60
+            if secs > 0:
+                return f"{minutes}m {secs}s"
+            return f"{minutes}m"
+        else:
+            hours = seconds // 3600
+            minutes = (seconds % 3600) // 60
+            if minutes > 0:
+                return f"{hours}h {minutes}m"
+            return f"{hours}h"
 
     def cancel_by_bar_size(self, bar_size: str) -> Dict:
         """
