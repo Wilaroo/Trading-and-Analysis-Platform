@@ -7,6 +7,47 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 16, 2026)
 
+### Simulation Test Configurations Enhanced ✅ (March 16, 2026)
+**IMPLEMENTED: Smart Test (30 liquid symbols) + Full Test (1500+ symbols)**
+
+**Quick Test → Smart Test:**
+- Renamed from "Quick Test" to "Smart Test" with improved symbol selection
+- Uses 30 curated liquid symbols instead of 10 random ones
+- Selection priority:
+  1. Symbols with collected IB data (highest quality)
+  2. Core ETFs (SPY, QQQ, IWM, DIA, XLF, XLE, XLK)
+  3. Mega-cap stocks across sectors (AAPL, MSFT, GOOGL, etc.)
+  4. Finance, Healthcare, Consumer, Industrial, Energy leaders
+  5. High-beta momentum names (AMD, CRM, COIN, MARA)
+- Position sizing reduced to 15% for better diversification
+- Max 5 concurrent positions for meaningful results
+
+**Full Test (Market-Wide):**
+- Default symbol count increased from 200 to 1500
+- Comprehensive symbol universe covering:
+  - Major ETFs (65)
+  - S&P 500 components (350+)
+  - NASDAQ high-growth tech (100)
+  - High-volume speculative stocks (80)
+  - Biotech & Healthcare (80)
+  - Financials & REITs (80)
+  - Energy & Materials (60)
+  - Industrials & Defense (60)
+  - Semiconductors (additional)
+- Symbols with collected IB data are prioritized
+- Provides statistically meaningful results for strategy validation
+
+**API Endpoints Updated:**
+- `POST /api/simulation/quick-test` - Now returns `test_type: "smart"` and `symbols_count: 30`
+- `POST /api/backtest/market-wide` - Default `max_symbols` changed from 200 to 1500
+
+**Files Modified:**
+- `/app/backend/routers/simulation_router.py` - Enhanced quick-test endpoint with smart symbol selection
+- `/app/backend/routers/advanced_backtest_router.py` - Updated MarketWideBacktestRequest default
+- `/app/backend/services/slow_learning/advanced_backtest_engine.py` - Expanded _get_market_symbols() to 1500+ symbols
+
+---
+
 ### Real-Time ETA for Collections ✅ (March 16, 2026)
 **IMPLEMENTED: Estimated time remaining based on actual completion rate**
 

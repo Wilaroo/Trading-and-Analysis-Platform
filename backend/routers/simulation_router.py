@@ -297,8 +297,13 @@ async def get_simulation_summary(job_id: str):
 @router.post("/quick-test")
 async def quick_test_simulation():
     """
-    Run a quick test simulation on a few symbols to verify everything works.
-    Uses last 30 days and 10 liquid symbols from IB collected data.
+    Run a SMART test simulation using the most liquid, well-traded symbols.
+    Uses last 30 days and up to 30 "smart" symbols selected from:
+    1. Symbols with collected IB data (highest data quality)
+    2. Major liquid ETFs (SPY, QQQ, IWM)
+    3. High-volume large-cap stocks across sectors
+    
+    This provides meaningful, statistically-relevant results for testing strategies.
     """
     if not _simulation_engine:
         raise HTTPException(status_code=503, detail="Simulation engine not initialized")
@@ -306,34 +311,66 @@ async def quick_test_simulation():
     try:
         from services.historical_simulation_engine import SimulationConfig
         
-        # Get symbols that we have IB data for
         db = _simulation_engine._db
-        test_symbols = ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA", "AMD", "META", "AMZN", "JPM", "SPY"]
+        
+        # SMART symbol selection - prioritize stocks with good data quality
+        smart_symbols = []
+        
+        # Tier 1: Most liquid ETFs (always include - highest liquidity, best for testing)
+        core_etfs = ["SPY", "QQQ", "IWM", "DIA", "XLF", "XLE", "XLK"]
+        
+        # Tier 2: Mega-cap liquid stocks (diverse sectors)
+        mega_caps = [
+            # Tech leaders
+            "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
+            # Finance
+            "JPM", "BAC", "GS", "V", "MA",
+            # Healthcare
+            "UNH", "JNJ", "PFE",
+            # Consumer/Industrial
+            "WMT", "HD", "CAT", "BA",
+            # Energy
+            "XOM", "CVX",
+            # High-beta momentum names
+            "AMD", "CRM", "COIN", "MARA"
+        ]
         
         if db is not None:
-            # Check which symbols we actually have data for
-            available_symbols = db["ib_historical_data"].distinct("symbol")
-            available_set = set(available_symbols)
+            # Check which symbols we have quality IB data for
+            available_symbols = set(db["ib_historical_data"].distinct("symbol"))
             
-            # Use our preferred test symbols if available, otherwise grab from what we have
-            valid_symbols = [s for s in test_symbols if s in available_set]
+            # Prioritize symbols with collected data
+            for sym in core_etfs + mega_caps:
+                if sym in available_symbols:
+                    smart_symbols.append(sym)
             
-            if len(valid_symbols) < 5:
-                # Get high-volume symbols from our data
-                top_symbols = list(db["ib_historical_data"].aggregate([
+            # If we don't have enough from our preferred list, get top-volume from DB
+            if len(smart_symbols) < 15:
+                top_volume_symbols = list(db["ib_historical_data"].aggregate([
                     {"$match": {"bar_size": "1 day"}},
                     {"$group": {
                         "_id": "$symbol",
                         "avg_vol": {"$avg": "$volume"},
-                        "count": {"$sum": 1}
+                        "data_points": {"$sum": 1}
                     }},
-                    {"$match": {"count": {"$gte": 15}}},  # At least 15 days of data
+                    {"$match": {"data_points": {"$gte": 10}}},  # At least 10 days of data
                     {"$sort": {"avg_vol": -1}},
-                    {"$limit": 20}
+                    {"$limit": 50}
                 ]))
-                valid_symbols = [s["_id"] for s in top_symbols][:10]
-            
-            test_symbols = valid_symbols if valid_symbols else test_symbols
+                
+                for doc in top_volume_symbols:
+                    sym = doc["_id"]
+                    if sym not in smart_symbols:
+                        smart_symbols.append(sym)
+                        if len(smart_symbols) >= 30:
+                            break
+        
+        # Fallback if no DB data
+        if len(smart_symbols) < 10:
+            smart_symbols = core_etfs + mega_caps[:23]
+        
+        # Ensure we use 30 symbols max for smart test
+        smart_symbols = smart_symbols[:30]
         
         end_date = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
         start_date = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
@@ -341,15 +378,15 @@ async def quick_test_simulation():
         config = SimulationConfig(
             start_date=start_date,
             end_date=end_date,
-            min_adv=100_000,  # Lower threshold to match more stocks
+            min_adv=100_000,
             min_price=5.0,
             max_price=500.0,
             min_rvol=0.3,
             universe="custom",
-            custom_symbols=test_symbols[:10],
+            custom_symbols=smart_symbols,
             starting_capital=100_000.0,
-            max_position_pct=20.0,
-            max_open_positions=3,
+            max_position_pct=15.0,  # Slightly smaller positions for diversification
+            max_open_positions=5,   # Allow more concurrent positions
             use_ai_agents=True,
             data_source="ib"  # Use IB collected data
         )
@@ -359,10 +396,13 @@ async def quick_test_simulation():
         return {
             "success": True,
             "job_id": job_id,
-            "message": f"Quick test started: {start_date} to {end_date} with {len(test_symbols[:10])} symbols",
+            "message": f"Smart test started: {start_date} to {end_date} with {len(smart_symbols)} liquid symbols",
+            "test_type": "smart",
+            "symbols_count": len(smart_symbols),
+            "symbols": smart_symbols,
             "config": config.to_dict()
         }
         
     except Exception as e:
-        logger.error(f"Error starting quick test: {e}", exc_info=True)
+        logger.error(f"Error starting smart test: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

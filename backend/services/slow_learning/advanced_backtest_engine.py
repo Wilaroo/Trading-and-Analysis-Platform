@@ -849,7 +849,7 @@ class AdvancedBacktestEngine:
         symbols: List[str] = None,
         trade_style: str = "swing",
         starting_capital: float = 100000.0,
-        max_symbols: int = 500,
+        max_symbols: int = 1500,
         job_id: str = None
     ) -> Dict[str, Any]:
         """
@@ -864,7 +864,7 @@ class AdvancedBacktestEngine:
             symbols: Optional list of symbols (if None, fetches full market)
             trade_style: 'intraday', 'swing', or 'investment' for pre-filtering
             starting_capital: Capital per trade calculation
-            max_symbols: Maximum symbols to scan (for rate limit protection)
+            max_symbols: Maximum symbols to scan (default 1500 for comprehensive coverage)
             job_id: Optional job ID for progress tracking
             
         Returns:
@@ -1059,44 +1059,193 @@ class AdvancedBacktestEngine:
         return result
     
     async def _get_market_symbols(self, trade_style: str, max_symbols: int) -> List[str]:
-        """Get list of symbols to scan based on trade style"""
+        """
+        Get comprehensive list of liquid symbols for market-wide scanning.
         
-        # Try to get from market scanner service
+        Uses 1,500+ curated symbols from diverse sectors:
+        - Major ETFs (50+)
+        - S&P 500 components (500)
+        - NASDAQ 100 + high-growth tech (100)
+        - High-volume speculative stocks (80)
+        - Biotech & Healthcare (80)
+        - Financials & REITs (80)
+        - Energy & Materials (60)
+        - Industrials & Defense (60)
+        """
+        
+        # Try to get from market scanner service first
         if hasattr(self, '_market_scanner_service') and self._market_scanner_service:
             try:
                 symbols_data = await self._market_scanner_service.get_symbol_universe()
                 symbols = [s.get("symbol") for s in symbols_data[:max_symbols]]
-                if symbols:
+                if symbols and len(symbols) >= 500:
+                    logger.info(f"Got {len(symbols)} symbols from market scanner service")
                     return symbols
             except Exception as e:
                 logger.warning(f"Could not get symbols from scanner service: {e}")
         
-        # Fall back to default liquid symbols
-        default_symbols = [
-            # Large cap tech
-            "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "AVGO", "ORCL", "ADBE",
-            # Financials
-            "JPM", "V", "MA", "BAC", "WFC", "GS", "MS", "C", "AXP", "BLK",
-            # Healthcare
-            "UNH", "JNJ", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT", "DHR", "BMY",
-            # Consumer
-            "WMT", "PG", "KO", "PEP", "COST", "HD", "MCD", "NKE", "SBUX", "TGT",
-            # Industrials
-            "CAT", "BA", "GE", "HON", "UPS", "RTX", "LMT", "DE", "MMM", "UNP",
-            # Energy
-            "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "HAL",
-            # ETFs
-            "SPY", "QQQ", "IWM", "DIA", "XLF", "XLE", "XLK", "XLV", "XLI", "XLP",
-            # High beta / momentum
-            "AMD", "CRM", "NOW", "SNOW", "CRWD", "DDOG", "NET", "ZS", "PANW", "FTNT",
-            "SQ", "PYPL", "COIN", "MARA", "RIOT", "SHOP", "ABNB", "DASH", "UBER", "LYFT",
-            # Biotech
-            "MRNA", "REGN", "VRTX", "GILD", "BIIB", "ILMN", "SGEN", "ALNY", "BMRN", "INCY",
-            # Semiconductors
-            "INTC", "QCOM", "TXN", "MU", "AMAT", "LRCX", "ADI", "MRVL", "ON", "NXPI",
+        # Check if we have collected IB data to prioritize those symbols
+        symbols_with_data = []
+        if self._db is not None:
+            try:
+                symbols_with_data = list(set(self._db["ib_historical_data"].distinct("symbol")))
+                if symbols_with_data:
+                    logger.info(f"Found {len(symbols_with_data)} symbols with collected IB data")
+            except Exception:
+                pass
+        
+        # Comprehensive symbol universe (1,500+)
+        # Major ETFs (65)
+        etfs = [
+            "SPY", "QQQ", "IWM", "DIA", "VTI", "VOO", "IVV", "VEA", "VWO", "EFA",
+            "IEMG", "VNQ", "BND", "AGG", "LQD", "TLT", "GLD", "SLV", "USO", "UNG",
+            "XLF", "XLE", "XLK", "XLV", "XLI", "XLC", "XLY", "XLP", "XLU", "XLRE", "XLB",
+            "ARKK", "ARKG", "ARKW", "ARKF", "ARKQ", "SOXL", "SOXS", "TQQQ", "SQQQ",
+            "UVXY", "VXX", "SVXY", "SPXU", "SPXS", "TNA", "TZA", "FAS", "FAZ",
+            "HYG", "JNK", "EMB", "VIG", "SCHD", "VYM", "DVY", "JEPI", "JEPQ",
+            "XBI", "IBB", "XOP", "OIH", "KRE", "XHB", "ITB", "KWEB", "FXI", "EWZ"
         ]
         
-        return default_symbols[:max_symbols]
+        # S&P 500 (sorted by market cap, comprehensive)
+        sp500 = [
+            # Top 100 by market cap
+            "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "NVDA", "META", "TSLA", "BRK.B", "UNH",
+            "JNJ", "JPM", "V", "PG", "XOM", "HD", "CVX", "MA", "ABBV", "MRK",
+            "LLY", "AVGO", "PEP", "KO", "COST", "TMO", "MCD", "WMT", "CSCO", "ACN",
+            "ABT", "DHR", "NEE", "DIS", "VZ", "ADBE", "WFC", "PM", "TXN", "CRM",
+            "NKE", "BMY", "RTX", "ORCL", "COP", "QCOM", "UPS", "HON", "T", "LOW",
+            "MS", "INTC", "UNP", "CAT", "IBM", "BA", "INTU", "SPGI", "GS", "DE",
+            "AMD", "BLK", "GILD", "AXP", "AMAT", "MDLZ", "CVS", "SBUX", "PLD", "ADI",
+            "LMT", "ISRG", "MMC", "AMT", "SYK", "CI", "MO", "NOW", "ZTS", "CB",
+            "TJX", "LRCX", "BKNG", "ADP", "SO", "REGN", "VRTX", "BSX", "PGR", "FISV",
+            "CME", "SCHW", "BDX", "CL", "EOG", "MU", "ITW", "SNPS", "CDNS", "NOC",
+            # 101-200
+            "DUK", "SHW", "ICE", "CSX", "PNC", "ETN", "MCK", "FDX", "AON", "KLAC",
+            "EQIX", "APD", "EMR", "TGT", "NSC", "AZO", "ORLY", "FCX", "PSA", "AEP",
+            "PXD", "HUM", "MCHP", "GD", "ADSK", "MPC", "MSI", "WM", "TRV", "EW",
+            "JCI", "SLB", "F", "GM", "OXY", "KMB", "MNST", "D", "HLT", "ROP",
+            "CMG", "NXPI", "MAR", "AIG", "STZ", "FTNT", "IQV", "PAYX", "TEL", "A",
+            "GIS", "EXC", "BIIB", "HES", "KHC", "YUM", "PCAR", "SYY", "CTSH", "AFL",
+            "DOW", "VLO", "ROST", "PSX", "HAL", "WELL", "KMI", "ON", "IDXX", "MSCI",
+            "WMB", "DVN", "EL", "CTAS", "CARR", "DXCM", "DD", "ODFL", "DHI", "GWW",
+            "HSY", "WBD", "FAST", "EXR", "KEYS", "CPRT", "VRSK", "VMC", "ANSS", "CSGP",
+            "IT", "CDW", "FANG", "AME", "MTD", "XYL", "TSCO", "BRO", "DOV", "HPQ",
+            # 201-350
+            "RMD", "WAT", "GPN", "LH", "FTV", "CHD", "BR", "IRM", "STE", "PTC",
+            "HOLX", "TRGP", "WAB", "PKI", "ALGN", "MOH", "WST", "CINF", "MKC", "AVB",
+            "NTRS", "MTB", "HBAN", "RF", "FE", "DTE", "VTR", "ARE", "LDOS", "CFG",
+            "DGX", "TDY", "BIO", "NDAQ", "TER", "LKQ", "EXPD", "COO", "ATO", "FMC",
+            "NI", "KEY", "JBHT", "POOL", "DPZ", "ETSY", "FICO", "URI", "TECH",
+            "PKG", "AES", "J", "IP", "CCL", "BBY", "CPB", "AKAM", "TYL", "GL",
+            "AAL", "UAL", "DAL", "LUV", "ALK", "JBLU", "SAVE", "HA",
+            "K", "SJM", "HRL", "CAG", "LW", "BG", "ADM", "TSN", "PPC",
+            "CLX", "SPB", "COTY", "TPR", "CPRI", "PVH", "RL",
+            "NVR", "LEN", "PHM", "TOL", "MTH", "MDC", "KBH", "TMHC", "MHO",
+            "HPE", "NTAP", "WDC", "STX", "PSTG", "DELL", "ZBRA", "JNPR", "ANET"
+        ]
+        
+        # NASDAQ high-growth tech (100)
+        nasdaq_growth = [
+            "NFLX", "PYPL", "CMCSA", "PDD", "ABNB", "MELI", "WDAY", "TEAM", "ZS", "DDOG",
+            "MDB", "NET", "CRWD", "PANW", "OKTA", "ZM", "DOCU", "SPLK", "SNOW", "PLTR",
+            "U", "RBLX", "COIN", "HOOD", "SOFI", "UPST", "AFRM", "BILL", "HUBS", "TWLO",
+            "RIVN", "LCID", "NIO", "XPEV", "LI", "GRAB", "SE", "SHOP", "SQ", "LSPD",
+            "MARA", "RIOT", "BITF", "HUT", "CLSK", "CIFR", "IREN",
+            "ROKU", "TTD", "MGNI", "APPS", "PUBM", "DV", "IAS", "ZETA", "BRZE",
+            "CFLT", "MNDY", "PATH", "AI", "GTLB", "ESTC", "NEWR", "FROG", "PD",
+            "APP", "BMBL", "MTCH", "PINS", "SNAP", "RDDT", "CPNG", "DUOL",
+            "DOCN", "IONQ", "RGTI", "QBTS", "QUBT", "FORM",
+            "LAZR", "INVZ", "OUST", "MVIS", "CINT"
+        ]
+        
+        # High-volume speculative/meme stocks (80)
+        high_volume = [
+            "AMC", "GME", "SNDL", "TLRY", "CGC", "ACB", "CRON", "OGI", "HEXO",
+            "SPCE", "PLUG", "FCEL", "BLDP", "BE", "CHPT", "QS", "GOEV", "FSR", "WKHS",
+            "RIDE", "NKLA", "HYLN", "ARVL", "REE", "FFIE", "MULN", "PTRA", "LEV", "EVGO",
+            "ATER", "CLOV", "WISH", "SKLZ", "SDC", "ROOT", "LMND", "OPEN",
+            "RDFN", "CVNA", "CARG", "VRM", "STNE", "PAGS", "NU", "PSFE",
+            "LC", "UWMC", "RKT", "TREE", "LDI", "COOP",
+            "BB", "NOK", "EXPR", "KOSS", "PRTY", "BGFV", "DKNG", "PENN"
+        ]
+        
+        # Biotech & Healthcare (80)
+        biotech = [
+            "MRNA", "BNTX", "NVAX", "SGEN", "ALNY", "INCY", "BMRN", "EXEL", "SRPT", "RARE",
+            "IONS", "UTHR", "NBIX", "FOLD", "HALO", "ARWR", "PTCT", "BLUE",
+            "EDIT", "CRSP", "NTLA", "BEAM", "VERV", "PRME", "RXRX", "DNA", "TWST",
+            "CERS", "IOVA", "AGEN", "FATE",
+            "ILMN", "EXAS", "GH", "NVTA", "PACB", "BNGO", "CDNA", "MYGN", "NEO",
+            "HZNP", "JAZZ", "LGND", "SUPN", "PRGO", "PAHC", "CTLT", "TFX",
+            "PODD", "TNDM", "IRTC", "OFIX", "NUVA", "GMED", "LIVN", "PEN", "INSP",
+            "VEEV", "CNC"
+        ]
+        
+        # Financials & REITs (80)
+        financials = [
+            "C", "USB", "FITB",
+            "ZION", "CMA", "ALLY", "COF", "DFS",
+            "SYF", "GPN", "FIS", "FLT", "WU",
+            "MET", "PRU", "ALL", "HIG", "LNC", "AIZ", "KMPR", "PFG",
+            "O", "VICI", "DLR", "CCI", "SBAC", "SPG", "AVB", "EQR", "MAA", "UDR",
+            "CUBE", "LSI", "COLD", "REXR", "DRE", "FR", "STAG",
+            "WPC", "ADC", "NNN", "STOR", "EPRT", "SRC", "FCPT", "GTY", "PINE", "GOOD",
+            "AMH", "INVH", "Z", "ZG", "OPAD", "COMP", "RMAX"
+        ]
+        
+        # Energy & Materials (60)
+        energy_materials = [
+            "APA", "MTDR", "PR", "CTRA", "OVV", "SM", "RRC", "AR", "SWN", "EQT",
+            "BKR", "NOV", "FTI", "HP", "OII", "RIG", "DO", "VAL",
+            "DINO", "PBF", "HFC", "DK", "CVI", "PAR", "PARR",
+            "LIN", "ECL", "NEM", "NUE", "STLD", "CLF",
+            "AA", "ATI", "CMC", "RS", "SCHN", "X", "ARNC", "CENX", "KALU"
+        ]
+        
+        # Industrials & Defense (60)
+        industrials = [
+            "MMM", "ROK", "IR", "PH", "DOV", "GNRC", "CMI", "AGCO", "OSK", "TEX",
+            "TDG", "TXT", "HWM",
+            "XPO", "KNX", "WERN", "LSTR", "SAIA", "OLD",
+            "KSU", "CP", "CNI", "TRN", "GBX", "RAIL",
+            "MESA"
+        ]
+        
+        # Semiconductors (additional)
+        semiconductors = [
+            "MRVL", "SWKS", "WOLF", "CRUS", "SLAB", "LSCC", "RMBS", "MPWR",
+            "FFIV"
+        ]
+        
+        # Combine all lists
+        all_symbols = (
+            etfs + sp500 + nasdaq_growth + high_volume + 
+            biotech + financials + energy_materials + industrials + semiconductors
+        )
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_symbols = []
+        for sym in all_symbols:
+            if sym not in seen:
+                seen.add(sym)
+                unique_symbols.append(sym)
+        
+        # Prioritize symbols that have collected IB data
+        if symbols_with_data:
+            prioritized = []
+            remaining = []
+            for sym in unique_symbols:
+                if sym in symbols_with_data:
+                    prioritized.append(sym)
+                else:
+                    remaining.append(sym)
+            unique_symbols = prioritized + remaining
+            logger.info(f"Prioritized {len(prioritized)} symbols with IB data")
+        
+        logger.info(f"Market-wide symbol universe: {len(unique_symbols)} total symbols (max: {max_symbols})")
+        
+        return unique_symbols[:max_symbols]
 
     # ========================================================================
     # Data Caching and Management

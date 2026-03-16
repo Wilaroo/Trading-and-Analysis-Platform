@@ -104,7 +104,7 @@ class MarketWideBacktestRequest(BaseModel):
     start_date: Optional[str] = Field(None, description="Start date (default: 30 days ago)")
     end_date: Optional[str] = Field(None, description="End date (default: today)")
     starting_capital: float = Field(100000.0, description="Starting capital for trade sizing")
-    max_symbols: int = Field(200, description="Max symbols to scan (for rate limit protection)")
+    max_symbols: int = Field(1500, description="Max symbols to scan (default 1500 for comprehensive coverage)")
     symbols: Optional[List[str]] = Field(None, description="Specific symbols (None = scan market)")
     run_in_background: bool = Field(True, description="Run as background job")
 

@@ -1,1 +1,1 @@
-https://ai-trading-backtest.preview.emergentagent.com
+https://neural-trader-test.preview.emergentagent.com
