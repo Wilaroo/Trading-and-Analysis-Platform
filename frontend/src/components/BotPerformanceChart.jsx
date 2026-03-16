@@ -486,7 +486,7 @@ const BotPerformanceChart = ({
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        className={`relative overflow-hidden rounded-xl p-3 ${className} ${
+        className={`relative overflow-hidden rounded-xl p-3 w-full ${className} ${
           isPositive 
             ? 'bg-gradient-to-br from-emerald-500/5 via-zinc-900/50 to-zinc-900/50 border border-emerald-500/20' 
             : 'bg-gradient-to-br from-rose-500/5 via-zinc-900/50 to-zinc-900/50 border border-rose-500/20'
@@ -501,62 +501,58 @@ const BotPerformanceChart = ({
             ) : (
               <TrendingDown className="w-4 h-4 text-red-400" />
             )}
-            <span className="font-bold text-xs text-white">PERFORMANCE</span>
+            <span className="font-bold text-sm text-white">BOT PERFORMANCE</span>
             {isLoading && (
               <Activity className="w-3 h-3 text-cyan-400 animate-spin" />
             )}
           </div>
-          <span className={`font-mono text-sm font-bold ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
+          <span className={`font-mono text-base font-bold ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
             {isPositive ? '+' : ''}${todayPnl.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
           </span>
         </div>
         
-        {/* Mini Chart */}
-        <div className="w-full h-[80px] bg-gradient-to-b from-zinc-800/30 to-transparent rounded-lg overflow-hidden mb-2">
-          <CustomEquityChart data={chartData} width={300} height={80} />
+        {/* Chart - Full Width */}
+        <div className="w-full h-[100px] bg-gradient-to-b from-zinc-800/30 to-transparent rounded-lg overflow-hidden mb-3">
+          <CustomEquityChart data={chartData} width={400} height={100} />
         </div>
         
-        {/* Mini Stats - 2x2 Grid */}
-        <div className="grid grid-cols-2 gap-2">
-          <div className="text-center p-1.5 rounded-lg bg-black/20">
-            <p className="text-[10px] text-zinc-500">Trades</p>
-            <p className="text-sm font-bold text-white">{stats.totalTrades}</p>
+        {/* Stats Row - Horizontal */}
+        <div className="grid grid-cols-4 gap-2 mb-2">
+          <div className="text-center p-2 rounded-lg bg-black/20">
+            <p className="text-[9px] text-zinc-500 uppercase">Trades</p>
+            <p className="text-base font-bold text-white">{stats.totalTrades}</p>
           </div>
-          <div className="text-center p-1.5 rounded-lg bg-black/20">
-            <p className="text-[10px] text-zinc-500">Win Rate</p>
-            <p className={`text-sm font-bold ${stats.winRate >= 50 ? 'text-emerald-400' : 'text-red-400'}`}>
+          <div className="text-center p-2 rounded-lg bg-black/20">
+            <p className="text-[9px] text-zinc-500 uppercase">Win Rate</p>
+            <p className={`text-base font-bold ${stats.winRate >= 50 ? 'text-emerald-400' : 'text-red-400'}`}>
               {stats.winRate.toFixed(0)}%
             </p>
           </div>
-          {stats.openPositions > 0 && (
-            <div className="text-center p-1.5 rounded-lg bg-black/20">
-              <p className="text-[10px] text-zinc-500">Open</p>
-              <p className="text-sm font-bold text-cyan-400">{stats.openPositions}</p>
-            </div>
-          )}
-          {stats.unrealizedPnl !== 0 && (
-            <div className="text-center p-1.5 rounded-lg bg-black/20">
-              <p className="text-[10px] text-zinc-500">Unrealized</p>
-              <p className={`text-sm font-bold ${stats.unrealizedPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                {stats.unrealizedPnl >= 0 ? '+' : ''}{stats.unrealizedPnl.toFixed(0)}
-              </p>
-            </div>
-          )}
+          <div className="text-center p-2 rounded-lg bg-black/20">
+            <p className="text-[9px] text-zinc-500 uppercase">Open</p>
+            <p className="text-base font-bold text-cyan-400">{stats.openPositions || 0}</p>
+          </div>
+          <div className="text-center p-2 rounded-lg bg-black/20">
+            <p className="text-[9px] text-zinc-500 uppercase">Unrealized</p>
+            <p className={`text-base font-bold ${stats.unrealizedPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {stats.unrealizedPnl >= 0 ? '+' : ''}{Math.abs(stats.unrealizedPnl || 0).toFixed(0)}
+            </p>
+          </div>
         </div>
         
-        {/* Time Range - Mini */}
-        <div className="flex gap-1 mt-2 justify-center">
-          {['today', 'week', 'month'].map(range => (
+        {/* Time Range - Full Width */}
+        <div className="flex gap-1 justify-between">
+          {['today', 'week', 'month', 'ytd'].map(range => (
             <button
               key={range}
               onClick={() => setTimeRange(range)}
-              className={`px-2 py-0.5 text-[9px] rounded transition-all ${
+              className={`flex-1 px-2 py-1 text-[10px] rounded transition-all ${
                 timeRange === range 
-                  ? 'bg-cyan-400/20 text-cyan-400' 
-                  : 'text-zinc-500 hover:text-zinc-400'
+                  ? 'bg-cyan-400/20 text-cyan-400 font-medium' 
+                  : 'text-zinc-500 hover:text-zinc-400 hover:bg-white/5'
               }`}
             >
-              {range.charAt(0).toUpperCase() + range.slice(1)}
+              {range === 'ytd' ? 'YTD' : range.charAt(0).toUpperCase() + range.slice(1)}
             </button>
           ))}
         </div>

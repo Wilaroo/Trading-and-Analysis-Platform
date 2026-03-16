@@ -2807,6 +2807,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
   const [settingsTab, setSettingsTab] = useState('mode'); // 'mode', 'risk', or 'ai'
   const [showAIInsights, setShowAIInsights] = useState(false);
   const [showRiskPanel, setShowRiskPanel] = useState(false);
+  const [showTradeForm, setShowTradeForm] = useState(false);
   const conversationRef = useRef(null);
   
   // Initialize local messages with chat history when it loads
