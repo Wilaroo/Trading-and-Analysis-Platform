@@ -6,6 +6,10 @@
  * Uses "we" voice throughout for team partnership feeling.
  * 
  * Updated with glassy mockup styling and unified Trading Bot header controls.
+ * 
+ * Performance Optimization:
+ * - Uses DataCacheContext for persistent data across tab switches
+ * - Stale-while-revalidate pattern for instant display
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import ReactDOM from 'react-dom';
@@ -20,6 +24,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import EnhancedTickerModal from './EnhancedTickerModal';
+import { useDataCache } from '../contexts';
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL;
 
@@ -1641,8 +1646,13 @@ const useMarketSession = (pollInterval = 30000) => {
 };
 
 const useSentComStatus = (pollInterval = 5000) => {
-  const [status, setStatus] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { getCached, setCached } = useDataCache();
+  const isFirstMount = useRef(true);
+  
+  // Initialize from cache if available
+  const cachedStatus = getCached('sentcomStatus');
+  const [status, setStatus] = useState(cachedStatus?.data || null);
+  const [loading, setLoading] = useState(!cachedStatus?.data);
   const [error, setError] = useState(null);
 
   const fetchStatus = useCallback(async () => {
@@ -1651,6 +1661,7 @@ const useSentComStatus = (pollInterval = 5000) => {
       const data = await res.json();
       if (data.success) {
         setStatus(data.status);
+        setCached('sentcomStatus', data.status, 30000); // 30 second TTL
       }
       setError(null);
     } catch (err) {
@@ -1658,20 +1669,37 @@ const useSentComStatus = (pollInterval = 5000) => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setCached]);
 
   useEffect(() => {
-    fetchStatus();
+    // If we have cached data on first mount, use it immediately
+    const cached = getCached('sentcomStatus');
+    if (cached?.data && isFirstMount.current) {
+      setStatus(cached.data);
+      setLoading(false);
+      if (cached.isStale) {
+        fetchStatus();
+      }
+    } else {
+      fetchStatus();
+    }
+    isFirstMount.current = false;
+    
     const interval = setInterval(fetchStatus, pollInterval);
     return () => clearInterval(interval);
-  }, [fetchStatus, pollInterval]);
+  }, [fetchStatus, pollInterval, getCached]);
 
   return { status, loading, error, refresh: fetchStatus };
 };
 
 const useSentComStream = (pollInterval = 8000) => {
-  const [messages, setMessages] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { getCached, setCached } = useDataCache();
+  const isFirstMount = useRef(true);
+  
+  // Initialize from cache if available
+  const cachedStream = getCached('sentcomStream');
+  const [messages, setMessages] = useState(cachedStream?.data || []);
+  const [loading, setLoading] = useState(!cachedStream?.data);
   const lastFetchRef = useRef({ ids: '', chatCount: 0 });
 
   const fetchStream = useCallback(async () => {
@@ -1696,7 +1724,9 @@ const useSentComStream = (pollInterval = 8000) => {
           lastFetchRef.current = { ids: chatIds, chatCount: chatMessages.length };
           // Keep status messages stable - only take the 2 most recent
           const stableStatus = statusMessages.slice(0, 2);
-          setMessages([...stableStatus, ...chatMessages]);
+          const newMessages = [...stableStatus, ...chatMessages];
+          setMessages(newMessages);
+          setCached('sentcomStream', newMessages, 30000); // 30 second TTL
         }
       }
     } catch (err) {
@@ -1704,21 +1734,38 @@ const useSentComStream = (pollInterval = 8000) => {
     } finally {
       setLoading(false);
     }
-  }, [messages.length]);
+  }, [messages.length, setCached]);
 
   useEffect(() => {
-    fetchStream();
+    // If we have cached data on first mount, use it immediately
+    const cached = getCached('sentcomStream');
+    if (cached?.data && isFirstMount.current) {
+      setMessages(cached.data);
+      setLoading(false);
+      if (cached.isStale) {
+        fetchStream();
+      }
+    } else {
+      fetchStream();
+    }
+    isFirstMount.current = false;
+    
     const interval = setInterval(fetchStream, pollInterval);
     return () => clearInterval(interval);
-  }, [fetchStream, pollInterval]);
+  }, [fetchStream, pollInterval, getCached]);
 
   return { messages, loading, refresh: fetchStream };
 };
 
 const useSentComPositions = (pollInterval = 5000) => {
-  const [positions, setPositions] = useState([]);
-  const [totalPnl, setTotalPnl] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const { getCached, setCached } = useDataCache();
+  const isFirstMount = useRef(true);
+  
+  // Initialize from cache if available
+  const cachedPositions = getCached('sentcomPositions');
+  const [positions, setPositions] = useState(cachedPositions?.data?.positions || []);
+  const [totalPnl, setTotalPnl] = useState(cachedPositions?.data?.totalPnl || 0);
+  const [loading, setLoading] = useState(!cachedPositions?.data);
 
   const fetchPositions = useCallback(async () => {
     try {
@@ -1727,26 +1774,45 @@ const useSentComPositions = (pollInterval = 5000) => {
       if (data.success) {
         setPositions(data.positions || []);
         setTotalPnl(data.total_pnl || 0);
+        setCached('sentcomPositions', { positions: data.positions || [], totalPnl: data.total_pnl || 0 }, 15000); // 15 second TTL (positions update more frequently)
       }
     } catch (err) {
       console.error('Error fetching positions:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setCached]);
 
   useEffect(() => {
-    fetchPositions();
+    // If we have cached data on first mount, use it immediately
+    const cached = getCached('sentcomPositions');
+    if (cached?.data && isFirstMount.current) {
+      setPositions(cached.data.positions || []);
+      setTotalPnl(cached.data.totalPnl || 0);
+      setLoading(false);
+      if (cached.isStale) {
+        fetchPositions();
+      }
+    } else {
+      fetchPositions();
+    }
+    isFirstMount.current = false;
+    
     const interval = setInterval(fetchPositions, pollInterval);
     return () => clearInterval(interval);
-  }, [fetchPositions, pollInterval]);
+  }, [fetchPositions, pollInterval, getCached]);
 
   return { positions, totalPnl, loading, refresh: fetchPositions };
 };
 
 const useSentComSetups = (pollInterval = 10000) => {
-  const [setups, setSetups] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { getCached, setCached } = useDataCache();
+  const isFirstMount = useRef(true);
+  
+  // Initialize from cache if available
+  const cachedSetups = getCached('sentcomSetups');
+  const [setups, setSetups] = useState(cachedSetups?.data || []);
+  const [loading, setLoading] = useState(!cachedSetups?.data);
 
   const fetchSetups = useCallback(async () => {
     try {
@@ -1754,26 +1820,44 @@ const useSentComSetups = (pollInterval = 10000) => {
       const data = await res.json();
       if (data.success) {
         setSetups(data.setups || []);
+        setCached('sentcomSetups', data.setups || [], 30000); // 30 second TTL
       }
     } catch (err) {
       console.error('Error fetching setups:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setCached]);
 
   useEffect(() => {
-    fetchSetups();
+    // If we have cached data on first mount, use it immediately
+    const cached = getCached('sentcomSetups');
+    if (cached?.data && isFirstMount.current) {
+      setSetups(cached.data);
+      setLoading(false);
+      if (cached.isStale) {
+        fetchSetups();
+      }
+    } else {
+      fetchSetups();
+    }
+    isFirstMount.current = false;
+    
     const interval = setInterval(fetchSetups, pollInterval);
     return () => clearInterval(interval);
-  }, [fetchSetups, pollInterval]);
+  }, [fetchSetups, pollInterval, getCached]);
 
   return { setups, loading, refresh: fetchSetups };
 };
 
 const useSentComContext = (pollInterval = 30000) => {
-  const [context, setContext] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { getCached, setCached } = useDataCache();
+  const isFirstMount = useRef(true);
+  
+  // Initialize from cache if available
+  const cachedContext = getCached('sentcomContext');
+  const [context, setContext] = useState(cachedContext?.data || null);
+  const [loading, setLoading] = useState(!cachedContext?.data);
 
   const fetchContext = useCallback(async () => {
     try {
@@ -1781,26 +1865,44 @@ const useSentComContext = (pollInterval = 30000) => {
       const data = await res.json();
       if (data.success) {
         setContext(data.context);
+        setCached('sentcomContext', data.context, 60000); // 60 second TTL (context changes slowly)
       }
     } catch (err) {
       console.error('Error fetching context:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setCached]);
 
   useEffect(() => {
-    fetchContext();
+    // If we have cached data on first mount, use it immediately
+    const cached = getCached('sentcomContext');
+    if (cached?.data && isFirstMount.current) {
+      setContext(cached.data);
+      setLoading(false);
+      if (cached.isStale) {
+        fetchContext();
+      }
+    } else {
+      fetchContext();
+    }
+    isFirstMount.current = false;
+    
     const interval = setInterval(fetchContext, pollInterval);
     return () => clearInterval(interval);
-  }, [fetchContext, pollInterval]);
+  }, [fetchContext, pollInterval, getCached]);
 
   return { context, loading, refresh: fetchContext };
 };
 
 const useSentComAlerts = (pollInterval = 5000) => {
-  const [alerts, setAlerts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { getCached, setCached } = useDataCache();
+  const isFirstMount = useRef(true);
+  
+  // Initialize from cache if available
+  const cachedAlerts = getCached('sentcomAlerts');
+  const [alerts, setAlerts] = useState(cachedAlerts?.data || []);
+  const [loading, setLoading] = useState(!cachedAlerts?.data);
 
   const fetchAlerts = useCallback(async () => {
     try {
@@ -1808,19 +1910,32 @@ const useSentComAlerts = (pollInterval = 5000) => {
       const data = await res.json();
       if (data.success) {
         setAlerts(data.alerts || []);
+        setCached('sentcomAlerts', data.alerts || [], 15000); // 15 second TTL (alerts update frequently)
       }
     } catch (err) {
       console.error('Error fetching alerts:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setCached]);
 
   useEffect(() => {
-    fetchAlerts();
+    // If we have cached data on first mount, use it immediately
+    const cached = getCached('sentcomAlerts');
+    if (cached?.data && isFirstMount.current) {
+      setAlerts(cached.data);
+      setLoading(false);
+      if (cached.isStale) {
+        fetchAlerts();
+      }
+    } else {
+      fetchAlerts();
+    }
+    isFirstMount.current = false;
+    
     const interval = setInterval(fetchAlerts, pollInterval);
     return () => clearInterval(interval);
-  }, [fetchAlerts, pollInterval]);
+  }, [fetchAlerts, pollInterval, getCached]);
 
   return { alerts, loading, refresh: fetchAlerts };
 };
@@ -1867,8 +1982,13 @@ const useChatHistory = () => {
 
 // Hook for Trading Bot status and controls
 const useTradingBotControl = (pollInterval = 5000) => {
-  const [botStatus, setBotStatus] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { getCached, setCached } = useDataCache();
+  const isFirstMount = useRef(true);
+  
+  // Initialize from cache if available
+  const cachedBotStatus = getCached('botStatus');
+  const [botStatus, setBotStatus] = useState(cachedBotStatus?.data || null);
+  const [loading, setLoading] = useState(!cachedBotStatus?.data);
   const [actionLoading, setActionLoading] = useState(null);
 
   const fetchBotStatus = useCallback(async () => {
@@ -1877,13 +1997,14 @@ const useTradingBotControl = (pollInterval = 5000) => {
       const data = await res.json();
       if (data.success) {
         setBotStatus(data);
+        setCached('botStatus', data, 15000); // 15 second TTL
       }
     } catch (err) {
       console.error('Error fetching bot status:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setCached]);
 
   const toggleBot = useCallback(async () => {
     setActionLoading('toggle');
@@ -1939,10 +2060,22 @@ const useTradingBotControl = (pollInterval = 5000) => {
   }, [fetchBotStatus]);
 
   useEffect(() => {
-    fetchBotStatus();
+    // If we have cached data on first mount, use it immediately
+    const cached = getCached('botStatus');
+    if (cached?.data && isFirstMount.current) {
+      setBotStatus(cached.data);
+      setLoading(false);
+      if (cached.isStale) {
+        fetchBotStatus();
+      }
+    } else {
+      fetchBotStatus();
+    }
+    isFirstMount.current = false;
+    
     const interval = setInterval(fetchBotStatus, pollInterval);
     return () => clearInterval(interval);
-  }, [fetchBotStatus, pollInterval]);
+  }, [fetchBotStatus, pollInterval, getCached]);
 
   return { botStatus, loading, actionLoading, toggleBot, changeMode, updateRiskParams, refresh: fetchBotStatus };
 };

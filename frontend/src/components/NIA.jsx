@@ -9,9 +9,13 @@
  * 2. AI Performance - Time-Series AI accuracy, module comparison
  * 3. Strategy Lifecycle - SIMULATION → PAPER → LIVE progression
  * 4. Learning Connectors - Data flow health and calibration
+ * 
+ * Performance Optimization:
+ * - Uses DataCacheContext for persistent data across tab switches
+ * - Stale-while-revalidate pattern for instant display
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Brain,
@@ -53,6 +57,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '../utils/api';
+import { useDataCache } from '../contexts';
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL;
 
@@ -2458,38 +2463,52 @@ const ReportCardPanel = ({ reportCard, loading }) => {
 // ==================== MAIN COMPONENT ====================
 
 const NIA = () => {
+  // Data cache for persistent data across tab switches
+  const { getCached, setCached, shouldRefresh } = useDataCache();
+  const isFirstMount = useRef(true);
+  
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [data, setData] = useState({
-    // Overview metrics
-    aiAccuracy: null,
-    aiAccuracyTrend: null,
-    liveStrategies: 0,
-    paperStrategies: 0,
-    learningHealth: null,
-    calibrationsToday: 0,
-    
-    // AI Performance
-    timeseriesAccuracy: null,
-    timeseriesPredictions: 0,
-    bullWinRate: null,
-    bullDebates: 0,
-    bearWinRate: null,
-    bearDebates: 0,
-    riskInterventions: 0,
-    riskSaved: 0,
-    aiAdvisorWeight: 0.15,
-    
-    // Strategy Lifecycle
-    phases: null,
-    candidates: [],
-    
-    // Learning Connectors
-    connectors: null,
-    thresholds: {},
-    
-    // Report Card (NEW)
-    reportCard: null
+  
+  // Initialize data from cache if available
+  const cachedData = getCached('niaData');
+  const [data, setData] = useState(() => {
+    // If we have cached data, use it immediately
+    if (cachedData?.data) {
+      return cachedData.data;
+    }
+    // Default initial state
+    return {
+      // Overview metrics
+      aiAccuracy: null,
+      aiAccuracyTrend: null,
+      liveStrategies: 0,
+      paperStrategies: 0,
+      learningHealth: null,
+      calibrationsToday: 0,
+      
+      // AI Performance
+      timeseriesAccuracy: null,
+      timeseriesPredictions: 0,
+      bullWinRate: null,
+      bullDebates: 0,
+      bearWinRate: null,
+      bearDebates: 0,
+      riskInterventions: 0,
+      riskSaved: 0,
+      aiAdvisorWeight: 0.15,
+      
+      // Strategy Lifecycle
+      phases: null,
+      candidates: [],
+      
+      // Learning Connectors
+      connectors: null,
+      thresholds: {},
+      
+      // Report Card (NEW)
+      reportCard: null
+    };
   });
 
   const fetchAllData = useCallback(async (showToast = false) => {
@@ -2613,6 +2632,9 @@ const NIA = () => {
       newData.alertsAnalyzed = newData.calibrationsApplied * 5; // Estimate
 
       setData(newData);
+      
+      // Save to cache for instant display on tab switches (60 second TTL)
+      setCached('niaData', newData, 60000);
 
       if (showToast) {
         toast.success('NIA intel refreshed');
@@ -2626,14 +2648,27 @@ const NIA = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [setCached]);
 
   useEffect(() => {
-    fetchAllData();
+    // If we have cached data, show it immediately and refresh in background
+    const cached = getCached('niaData');
+    if (cached?.data && isFirstMount.current) {
+      setData(cached.data);
+      setLoading(false);
+      // Background refresh if cache is stale
+      if (cached.isStale) {
+        fetchAllData();
+      }
+    } else {
+      fetchAllData();
+    }
+    isFirstMount.current = false;
+    
     // Refresh every 60 seconds
     const interval = setInterval(() => fetchAllData(), 60000);
     return () => clearInterval(interval);
-  }, [fetchAllData]);
+  }, [fetchAllData, getCached]);
 
   const handlePromote = async (strategyName, targetPhase) => {
     try {

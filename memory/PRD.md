@@ -7,6 +7,47 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (December 2025)
 
+### Tab Switching Performance Optimization ✅ (December 2025)
+**FIXED: Data now persists across tab switches - instant display with background refresh**
+
+**Problem:**
+Switching between Command Center and NIA tabs caused slow load times because:
+1. Components fully unmounted/remounted on tab switch
+2. All API calls re-fetched from scratch (10+ calls per tab)
+3. No data persistence between views
+
+**Solution Implemented:**
+
+**1. DataCacheContext** (`/app/frontend/src/contexts/DataCacheContext.jsx`):
+- Created a React Context that persists data across tab switches
+- Implements "stale-while-revalidate" pattern
+- Configurable TTL per data type (15-60 seconds)
+- Data shows instantly from cache, refreshes in background
+
+**2. Updated Hooks** (SentCom.jsx, NIA.jsx):
+- `useSentComStatus` - 30 second TTL
+- `useSentComStream` - 30 second TTL
+- `useSentComPositions` - 15 second TTL (positions update frequently)
+- `useSentComSetups` - 30 second TTL
+- `useSentComAlerts` - 15 second TTL
+- `useSentComContext` - 60 second TTL
+- `useTradingBotControl` - 15 second TTL
+- NIA `fetchAllData` - 60 second TTL
+
+**3. Cache Behavior**:
+- First load: Shows loading, fetches data, caches it
+- Tab switch: Shows cached data INSTANTLY, background refresh if stale
+- User sees data immediately, updates appear seamlessly
+
+**Files Modified:**
+- `/app/frontend/src/contexts/DataCacheContext.jsx` - NEW
+- `/app/frontend/src/contexts/index.js` - NEW
+- `/app/frontend/src/App.js` - Added DataCacheProvider wrapper
+- `/app/frontend/src/components/SentCom.jsx` - Updated 6 hooks with caching
+- `/app/frontend/src/components/NIA.jsx` - Updated main data fetch with caching
+
+---
+
 ### Scanner Invalid Ticker Filter Fix ✅ (December 2025)
 **FIXED: Scanner no longer generates alerts for invalid/illiquid tickers like "ALEX"**
 
