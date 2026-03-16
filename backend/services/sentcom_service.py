@@ -339,6 +339,33 @@ class SentComService:
                     symbol = getattr(alert, 'symbol', '')
                     score = getattr(alert, 'score', 0)
                     entry_price = getattr(alert, 'entry_price', None)
+                    stop_price = getattr(alert, 'stop_price', None)
+                    target_price = getattr(alert, 'target_price', None)
+                    timeframe = getattr(alert, 'timeframe', None)
+                    
+                    # Infer trade_type and timeframe from setup_name if not provided
+                    setup_lower = setup_name.lower()
+                    if not timeframe:
+                        if 'scalp' in setup_lower or '9_ema' in setup_lower:
+                            timeframe = '5min'
+                            trade_type = 'Scalp'
+                        elif 'swing' in setup_lower or 'daily' in setup_lower:
+                            timeframe = 'Daily'
+                            trade_type = 'Swing'
+                        elif 'gap' in setup_lower or 'open' in setup_lower:
+                            timeframe = '1min'
+                            trade_type = 'Scalp'
+                        else:
+                            timeframe = '15min'
+                            trade_type = 'Day Trade'
+                    else:
+                        # Infer trade_type from timeframe
+                        if timeframe in ['1min', '5min']:
+                            trade_type = 'Scalp'
+                        elif timeframe in ['Daily', '1week']:
+                            trade_type = 'Swing'
+                        else:
+                            trade_type = 'Day Trade'
                     
                     # Format setup name for display
                     setup_display = setup_name.replace('_', ' ').title()
@@ -362,6 +389,10 @@ class SentComService:
                             "setup_type": setup_name,
                             "score": score,
                             "entry_price": entry_price,
+                            "stop_price": stop_price,
+                            "target_price": target_price,
+                            "trade_type": trade_type,
+                            "timeframe": timeframe,
                             "reasoning": f"Pattern matches {setup_display} criteria with confluence of technical factors."
                         }
                     ))
@@ -729,6 +760,8 @@ class SentComService:
         
         demo_symbols = ["NVDA", "AAPL", "MSFT", "AMD", "META", "TSLA", "GOOGL"]
         demo_setups = ["momentum_breakout", "gap_and_go", "vwap_bounce", "9_ema_scalp", "pullback_entry"]
+        demo_trade_types = ["Scalp", "Day Trade", "Swing"]
+        demo_timeframes = ["1min", "5min", "15min", "1hr", "Daily"]
         
         messages = []
         base_time = datetime.now(timezone.utc)
@@ -752,10 +785,14 @@ class SentComService:
         setup_symbol = random.choice(demo_symbols)
         setup_type = random.choice(demo_setups)
         setup_price = round(random.uniform(100, 500), 2)
+        trade_type = random.choice(demo_trade_types)
+        timeframe = random.choice(demo_timeframes)
+        stop_dist = round(setup_price * random.uniform(0.01, 0.03), 2)
+        target_dist = round(setup_price * random.uniform(0.03, 0.08), 2)
         messages.append(SentComMessage(
             id=self._generate_message_id(),
             type="alert",
-            content=f"Found setup: {setup_symbol} {setup_type.replace('_', ' ').title()}",
+            content=f"Found setup: {setup_symbol} {setup_type.replace('_', ' ').title()} @ ${setup_price:.2f}",
             timestamp=(base_time - timedelta(seconds=random.randint(16, 30))).isoformat(),
             confidence=random.randint(70, 90),
             symbol=setup_symbol,
@@ -764,6 +801,11 @@ class SentComService:
                 "source": "demo",
                 "setup_type": setup_type,
                 "entry_price": setup_price,
+                "stop_price": round(setup_price - stop_dist, 2),
+                "target_price": round(setup_price + target_dist, 2),
+                "trade_type": trade_type,
+                "timeframe": timeframe,
+                "score": round(random.uniform(7, 9.5), 1),
                 "reasoning": f"Pattern matches {setup_type.replace('_', ' ')} criteria with strong volume confirmation."
             }
         ))
@@ -809,10 +851,13 @@ class SentComService:
         # 5. Position monitoring (stop level)
         pos_symbol = random.choice(demo_symbols)
         stop_price = round(random.uniform(80, 200), 2)
+        current_price = round(stop_price * random.uniform(1.01, 1.05), 2)
+        watch_trade_type = random.choice(demo_trade_types)
+        watch_timeframe = random.choice(demo_timeframes)
         messages.append(SentComMessage(
             id=self._generate_message_id(),
             type="monitor",
-            content=f"Monitoring {pos_symbol} stop @ ${stop_price:.2f}",
+            content=f"Monitoring {pos_symbol} stop @ ${stop_price:.2f} — {round((current_price - stop_price) / current_price * 100, 1)}% away",
             timestamp=(base_time - timedelta(seconds=random.randint(61, 75))).isoformat(),
             confidence=60,
             symbol=pos_symbol,
@@ -820,6 +865,9 @@ class SentComService:
             metadata={
                 "source": "demo",
                 "stop_price": stop_price,
+                "current_price": current_price,
+                "trade_type": watch_trade_type,
+                "timeframe": watch_timeframe,
                 "reasoning": "Tracking stop level to protect capital."
             }
         ))
@@ -866,6 +914,8 @@ class SentComService:
             exit_price = round(entry_price * (1 - random.uniform(0.01, 0.03)), 2)
         pnl = round((exit_price - entry_price) * random.randint(50, 200), 2)
         pnl_pct = round(((exit_price - entry_price) / entry_price) * 100, 1)
+        exec_trade_type = random.choice(demo_trade_types)
+        exec_timeframe = random.choice(demo_timeframes)
         
         messages.append(SentComMessage(
             id=self._generate_message_id(),
@@ -882,7 +932,9 @@ class SentComService:
                 "exit_price": exit_price,
                 "pnl": pnl,
                 "pnl_percent": pnl_pct,
-                "reasoning": f"{'Winner' if pnl > 0 else 'Loser'}: {'Hit target' if pnl > 0 else 'Stopped out'} on {trade_symbol} momentum trade."
+                "trade_type": exec_trade_type,
+                "timeframe": exec_timeframe,
+                "reasoning": f"{'Winner' if pnl > 0 else 'Loser'}: {'Hit target' if pnl > 0 else 'Stopped out'} on {trade_symbol} {exec_trade_type.lower()}."
             }
         ))
         
@@ -891,12 +943,14 @@ class SentComService:
         decision_setup = random.choice(demo_setups)
         take_trade = random.random() > 0.3  # 70% approve rate
         decision_price = round(random.uniform(80, 300), 2)
+        decision_trade_type = random.choice(demo_trade_types)
+        decision_timeframe = random.choice(demo_timeframes)
         
         if take_trade:
             content = f"TAKING TRADE: {decision_symbol} {decision_setup.replace('_', ' ')} @ ${decision_price:.2f}"
             decision_type = "approved"
         else:
-            content = f"PASSING: {decision_symbol} doesn't meet our criteria - waiting for better setup"
+            content = f"PASSING: {decision_symbol} doesn't meet our criteria — waiting for better R:R"
             decision_type = "rejected"
         
         messages.append(SentComMessage(
@@ -912,6 +966,8 @@ class SentComService:
                 "decision": decision_type,
                 "setup_type": decision_setup,
                 "price": decision_price,
+                "trade_type": decision_trade_type,
+                "timeframe": decision_timeframe,
                 "reasoning": f"{'Setup meets our criteria with good risk/reward' if take_trade else 'Risk/reward not favorable or setup quality below threshold'}."
             }
         ))

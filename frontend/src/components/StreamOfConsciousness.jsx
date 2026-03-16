@@ -1,8 +1,8 @@
 /**
  * StreamOfConsciousness.jsx - SentCom S.O.C. Panel
  * 
- * Rich, terminal-style panel showing the bot's background activity with
- * detailed information per entry including icons, data, and reasoning.
+ * Rich terminal-style panel with Space Grotesk font, gradient accent bars,
+ * glassmorphism effects, and prominent hover glow.
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -17,9 +17,9 @@ import {
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL;
 
-// Format timestamp for terminal style display
-const formatTerminalTime = (timestamp) => {
-  if (!timestamp) return '--:--:--';
+// Format timestamp
+const formatTime = (timestamp) => {
+  if (!timestamp) return '--:--';
   const time = new Date(timestamp);
   return time.toLocaleTimeString('en-US', { 
     hour: '2-digit', 
@@ -41,14 +41,12 @@ export const useSOCStream = (pollInterval = 3000) => {
       const data = await res.json();
       
       if (data.success && data.messages) {
-        // Filter for non-chat messages (thoughts, scans, alerts, status)
         const socMessages = data.messages.filter(m => 
           m.type !== 'chat' && 
           m.action_type !== 'chat_response' && 
           m.action_type !== 'user_message'
         );
         
-        // Only update if data actually changed
         const newDataStr = JSON.stringify(socMessages.map(m => m.id || m.timestamp));
         if (newDataStr !== lastDataRef.current) {
           lastDataRef.current = newDataStr;
@@ -71,389 +69,524 @@ export const useSOCStream = (pollInterval = 3000) => {
   return { thoughts, loading, refresh: fetchThoughts };
 };
 
-// Rich S.O.C. Entry Component with detailed data display
+// Get styling config based on entry type
+const getEntryStyle = (entry) => {
+  const type = entry.type;
+  const actionType = entry.action_type;
+  
+  // Trade executed
+  if (actionType === 'trade_executed' || actionType === 'order_filled') {
+    const side = entry.metadata?.side || entry.metadata?.action || '';
+    const isSell = side.toLowerCase() === 'sell' || side.toLowerCase() === 'short';
+    return {
+      icon: isSell ? <ArrowDownRight className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />,
+      label: 'TRADE',
+      gradient: isSell ? 'from-rose-500 to-orange-500' : 'from-emerald-500 to-cyan-500',
+      glowColor: isSell ? 'rgba(244,63,94,0.4)' : 'rgba(16,185,129,0.4)',
+      textColor: isSell ? 'text-rose-400' : 'text-emerald-400',
+      bgColor: isSell ? 'bg-rose-500/20' : 'bg-emerald-500/20',
+    };
+  }
+  
+  // Trade decision
+  if (actionType === 'trade_decision' || type === 'decision') {
+    const decision = entry.metadata?.decision || '';
+    const isApproved = decision.toLowerCase().includes('approved') || decision.toLowerCase().includes('take');
+    return {
+      icon: isApproved ? <ThumbsUp className="w-4 h-4" /> : <ThumbsDown className="w-4 h-4" />,
+      label: 'DECISION',
+      gradient: isApproved ? 'from-emerald-500 to-teal-500' : 'from-amber-500 to-orange-500',
+      glowColor: isApproved ? 'rgba(16,185,129,0.4)' : 'rgba(245,158,11,0.4)',
+      textColor: isApproved ? 'text-emerald-400' : 'text-amber-400',
+      bgColor: isApproved ? 'bg-emerald-500/20' : 'bg-amber-500/20',
+    };
+  }
+  
+  // Setup found
+  if (actionType === 'setup_found' || type === 'setup' || type === 'alert') {
+    return {
+      icon: <Target className="w-4 h-4" />,
+      label: 'SETUP',
+      gradient: 'from-cyan-500 to-blue-500',
+      glowColor: 'rgba(34,211,238,0.4)',
+      textColor: 'text-cyan-400',
+      bgColor: 'bg-cyan-500/20',
+    };
+  }
+  
+  // Risk updates
+  if (actionType === 'risk_update' || type === 'risk') {
+    return {
+      icon: <Shield className="w-4 h-4" />,
+      label: 'RISK',
+      gradient: 'from-rose-500 to-pink-500',
+      glowColor: 'rgba(244,63,94,0.4)',
+      textColor: 'text-rose-400',
+      bgColor: 'bg-rose-500/20',
+    };
+  }
+  
+  // Market regime
+  if (actionType === 'regime_update' || actionType === 'breadth_update' || type === 'market') {
+    const isRiskOn = entry.content?.toLowerCase().includes('risk_on') || entry.content?.toLowerCase().includes('risk on');
+    return {
+      icon: <BarChart2 className="w-4 h-4" />,
+      label: 'MARKET',
+      gradient: isRiskOn ? 'from-emerald-500 to-green-500' : 'from-amber-500 to-yellow-500',
+      glowColor: isRiskOn ? 'rgba(16,185,129,0.4)' : 'rgba(245,158,11,0.4)',
+      textColor: isRiskOn ? 'text-emerald-400' : 'text-amber-400',
+      bgColor: isRiskOn ? 'bg-emerald-500/20' : 'bg-amber-500/20',
+    };
+  }
+  
+  // Position monitoring
+  if (actionType === 'monitoring' || type === 'monitor') {
+    return {
+      icon: <Eye className="w-4 h-4" />,
+      label: 'WATCH',
+      gradient: 'from-violet-500 to-purple-500',
+      glowColor: 'rgba(139,92,246,0.4)',
+      textColor: 'text-violet-400',
+      bgColor: 'bg-violet-500/20',
+    };
+  }
+  
+  // Price updates
+  if (actionType === 'price_update' || type === 'position') {
+    const pnl = entry.metadata?.pnl_percent || 0;
+    return {
+      icon: pnl >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />,
+      label: 'POS',
+      gradient: pnl >= 0 ? 'from-emerald-500 to-teal-500' : 'from-rose-500 to-red-500',
+      glowColor: pnl >= 0 ? 'rgba(16,185,129,0.35)' : 'rgba(244,63,94,0.35)',
+      textColor: pnl >= 0 ? 'text-emerald-400' : 'text-rose-400',
+      bgColor: pnl >= 0 ? 'bg-emerald-500/20' : 'bg-rose-500/20',
+    };
+  }
+  
+  // Entry zone
+  if (actionType === 'entry_zone') {
+    return {
+      icon: <Crosshair className="w-4 h-4" />,
+      label: 'ENTRY',
+      gradient: 'from-emerald-500 to-cyan-500',
+      glowColor: 'rgba(16,185,129,0.4)',
+      textColor: 'text-emerald-400',
+      bgColor: 'bg-emerald-500/20',
+    };
+  }
+  
+  // Stop warnings
+  if (actionType === 'stop_warning') {
+    return {
+      icon: <AlertTriangle className="w-4 h-4" />,
+      label: 'STOP',
+      gradient: 'from-amber-500 to-red-500',
+      glowColor: 'rgba(245,158,11,0.4)',
+      textColor: 'text-amber-400',
+      bgColor: 'bg-amber-500/20',
+    };
+  }
+  
+  // Filter decisions
+  if (type === 'filter' || actionType === 'filter') {
+    const decision = entry.metadata?.decision || entry.action_type || '';
+    const isPassed = decision.toLowerCase().includes('pass') || decision.toLowerCase().includes('approved');
+    return {
+      icon: isPassed ? <CheckCircle className="w-4 h-4" /> : <Ban className="w-4 h-4" />,
+      label: 'FILTER',
+      gradient: isPassed ? 'from-emerald-500 to-green-500' : 'from-zinc-500 to-gray-500',
+      glowColor: isPassed ? 'rgba(16,185,129,0.3)' : 'rgba(113,113,122,0.3)',
+      textColor: isPassed ? 'text-emerald-400' : 'text-zinc-400',
+      bgColor: isPassed ? 'bg-emerald-500/20' : 'bg-zinc-500/20',
+    };
+  }
+  
+  // Scanning
+  if (actionType === 'scanning' || type === 'thought') {
+    return {
+      icon: <Search className="w-4 h-4" />,
+      label: 'SCAN',
+      gradient: 'from-violet-500 to-indigo-500',
+      glowColor: 'rgba(139,92,246,0.3)',
+      textColor: 'text-violet-400',
+      bgColor: 'bg-violet-500/20',
+    };
+  }
+  
+  // Default
+  return {
+    icon: <Radio className="w-4 h-4" />,
+    label: 'SYS',
+    gradient: 'from-zinc-500 to-gray-500',
+    glowColor: 'rgba(113,113,122,0.3)',
+    textColor: 'text-zinc-400',
+    bgColor: 'bg-zinc-500/20',
+  };
+};
+
+// Build data chips based on entry type and metadata
+const buildDataChips = (entry) => {
+  const chips = [];
+  const meta = entry.metadata || {};
+  const actionType = entry.action_type;
+  
+  // Trade type / timeframe
+  if (meta.trade_type || meta.timeframe || meta.setup_type) {
+    const tradeType = meta.trade_type || meta.setup_type?.replace(/_/g, ' ') || '';
+    const timeframe = meta.timeframe || '';
+    if (tradeType || timeframe) {
+      chips.push({ 
+        label: [tradeType, timeframe].filter(Boolean).join(' • '), 
+        color: 'text-violet-400', 
+        bg: 'bg-violet-500/10 border-violet-500/30' 
+      });
+    }
+  }
+  
+  // Entry price
+  if (meta.entry_price) {
+    chips.push({ 
+      icon: <DollarSign className="w-3 h-3" />,
+      label: `Entry $${parseFloat(meta.entry_price).toFixed(2)}`, 
+      color: 'text-cyan-400', 
+      bg: 'bg-cyan-500/10 border-cyan-500/30' 
+    });
+  }
+  
+  // Exit price
+  if (meta.exit_price) {
+    chips.push({ 
+      icon: <DollarSign className="w-3 h-3" />,
+      label: `Exit $${parseFloat(meta.exit_price).toFixed(2)}`, 
+      color: 'text-cyan-400', 
+      bg: 'bg-cyan-500/10 border-cyan-500/30' 
+    });
+  }
+  
+  // Current price (for positions)
+  if (meta.current_price && !meta.exit_price) {
+    chips.push({ 
+      icon: <DollarSign className="w-3 h-3" />,
+      label: `$${parseFloat(meta.current_price).toFixed(2)}`, 
+      color: 'text-white', 
+      bg: 'bg-white/10 border-white/20' 
+    });
+  }
+  
+  // Stop price
+  if (meta.stop_price) {
+    chips.push({ 
+      icon: <StopCircle className="w-3 h-3" />,
+      label: `Stop $${parseFloat(meta.stop_price).toFixed(2)}`, 
+      color: 'text-rose-400', 
+      bg: 'bg-rose-500/10 border-rose-500/30' 
+    });
+  }
+  
+  // P&L
+  if (meta.pnl !== undefined && meta.pnl !== null) {
+    const pnl = parseFloat(meta.pnl);
+    const pnlPct = meta.pnl_percent ? parseFloat(meta.pnl_percent) : null;
+    const sign = pnl >= 0 ? '+' : '';
+    let label = `${sign}$${Math.abs(pnl).toFixed(0)}`;
+    if (pnlPct !== null) {
+      label += ` (${sign}${pnlPct.toFixed(1)}%)`;
+    }
+    chips.push({ 
+      icon: pnl >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />,
+      label, 
+      color: pnl >= 0 ? 'text-emerald-400' : 'text-rose-400', 
+      bg: pnl >= 0 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-rose-500/10 border-rose-500/30' 
+    });
+  } else if (meta.pnl_percent !== undefined) {
+    const pnlPct = parseFloat(meta.pnl_percent);
+    const sign = pnlPct >= 0 ? '+' : '';
+    chips.push({ 
+      icon: pnlPct >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />,
+      label: `${sign}${pnlPct.toFixed(1)}%`, 
+      color: pnlPct >= 0 ? 'text-emerald-400' : 'text-rose-400', 
+      bg: pnlPct >= 0 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-rose-500/10 border-rose-500/30' 
+    });
+  }
+  
+  // VIX
+  if (meta.vix !== undefined) {
+    const vixChange = meta.vix_change;
+    chips.push({ 
+      icon: <Activity className="w-3 h-3" />,
+      label: `VIX ${parseFloat(meta.vix).toFixed(1)}${vixChange ? ` (${vixChange > 0 ? '+' : ''}${vixChange.toFixed(1)}%)` : ''}`, 
+      color: 'text-amber-400', 
+      bg: 'bg-amber-500/10 border-amber-500/30' 
+    });
+  }
+  
+  // Risk multiplier
+  if (meta.multiplier !== undefined) {
+    chips.push({ 
+      icon: <Gauge className="w-3 h-3" />,
+      label: `${parseFloat(meta.multiplier).toFixed(1)}x Risk`, 
+      color: 'text-rose-400', 
+      bg: 'bg-rose-500/10 border-rose-500/30' 
+    });
+  }
+  
+  // Score
+  if (meta.score !== undefined) {
+    chips.push({ 
+      icon: <BarChart2 className="w-3 h-3" />,
+      label: `Score ${parseFloat(meta.score).toFixed(1)}`, 
+      color: 'text-cyan-400', 
+      bg: 'bg-cyan-500/10 border-cyan-500/30' 
+    });
+  }
+  
+  // Regime
+  if (meta.regime) {
+    const isOn = meta.regime.toLowerCase().includes('on');
+    chips.push({ 
+      icon: <Shield className="w-3 h-3" />,
+      label: meta.regime.replace('_', ' '), 
+      color: isOn ? 'text-emerald-400' : 'text-amber-400', 
+      bg: isOn ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-amber-500/10 border-amber-500/30' 
+    });
+  }
+  
+  // Breadth
+  if (meta.breadth !== undefined) {
+    chips.push({ 
+      icon: <PieChart className="w-3 h-3" />,
+      label: `${meta.breadth}% Breadth`, 
+      color: 'text-cyan-400', 
+      bg: 'bg-cyan-500/10 border-cyan-500/30' 
+    });
+  }
+  
+  return chips;
+};
+
+// S.O.C. Entry Component
 const SOCEntry = React.memo(({ entry, index }) => {
   const [expanded, setExpanded] = useState(false);
-  
-  // Get entry configuration based on type
-  const getEntryConfig = () => {
-    const type = entry.type;
-    const actionType = entry.action_type;
-    
-    // Trade executed
-    if (actionType === 'trade_executed' || actionType === 'order_filled') {
-      const side = entry.metadata?.side || entry.metadata?.action || '';
-      return {
-        icon: side.toLowerCase() === 'sell' ? <ArrowDownRight className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />,
-        color: side.toLowerCase() === 'sell' ? 'text-rose-400' : 'text-emerald-400',
-        bgColor: side.toLowerCase() === 'sell' ? 'bg-rose-500/10' : 'bg-emerald-500/10',
-        borderColor: side.toLowerCase() === 'sell' ? 'border-rose-500/30' : 'border-emerald-500/30',
-        label: 'TRADE',
-        priority: 'high'
-      };
-    }
-    
-    // Trade decision / Smart filter
-    if (actionType === 'trade_decision' || type === 'decision') {
-      const decision = entry.metadata?.decision || '';
-      const isApproved = decision.toLowerCase().includes('approved') || decision.toLowerCase().includes('take');
-      return {
-        icon: isApproved ? <ThumbsUp className="w-4 h-4" /> : <ThumbsDown className="w-4 h-4" />,
-        color: isApproved ? 'text-emerald-400' : 'text-amber-400',
-        bgColor: isApproved ? 'bg-emerald-500/10' : 'bg-amber-500/10',
-        borderColor: isApproved ? 'border-emerald-500/30' : 'border-amber-500/30',
-        label: 'DECISION',
-        priority: 'high'
-      };
-    }
-    
-    // Setup found
-    if (actionType === 'setup_found' || type === 'setup' || type === 'alert') {
-      return {
-        icon: <Target className="w-4 h-4" />,
-        color: 'text-cyan-400',
-        bgColor: 'bg-cyan-500/10',
-        borderColor: 'border-cyan-500/30',
-        label: 'SETUP',
-        priority: 'high'
-      };
-    }
-    
-    // Risk updates
-    if (actionType === 'risk_update' || type === 'risk') {
-      return {
-        icon: <Shield className="w-4 h-4" />,
-        color: 'text-rose-400',
-        bgColor: 'bg-rose-500/10',
-        borderColor: 'border-rose-500/30',
-        label: 'RISK',
-        priority: 'medium'
-      };
-    }
-    
-    // Market regime / VIX
-    if (actionType === 'regime_update' || actionType === 'breadth_update' || type === 'market') {
-      const isRiskOn = entry.content?.toLowerCase().includes('risk_on') || entry.content?.toLowerCase().includes('risk on');
-      return {
-        icon: <BarChart2 className="w-4 h-4" />,
-        color: isRiskOn ? 'text-emerald-400' : 'text-amber-400',
-        bgColor: isRiskOn ? 'bg-emerald-500/10' : 'bg-amber-500/10',
-        borderColor: isRiskOn ? 'border-emerald-500/30' : 'border-amber-500/30',
-        label: 'MARKET',
-        priority: 'medium'
-      };
-    }
-    
-    // Position monitoring
-    if (actionType === 'monitoring' || type === 'monitor') {
-      return {
-        icon: <Eye className="w-4 h-4" />,
-        color: 'text-blue-400',
-        bgColor: 'bg-blue-500/10',
-        borderColor: 'border-blue-500/30',
-        label: 'WATCH',
-        priority: 'medium'
-      };
-    }
-    
-    // Price updates
-    if (actionType === 'price_update' || type === 'position') {
-      const pnl = entry.metadata?.pnl_percent || 0;
-      return {
-        icon: pnl >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />,
-        color: pnl >= 0 ? 'text-emerald-400' : 'text-rose-400',
-        bgColor: pnl >= 0 ? 'bg-emerald-500/10' : 'bg-rose-500/10',
-        borderColor: pnl >= 0 ? 'border-emerald-500/30' : 'border-rose-500/30',
-        label: 'POS',
-        priority: 'low'
-      };
-    }
-    
-    // Entry zone
-    if (actionType === 'entry_zone') {
-      return {
-        icon: <Crosshair className="w-4 h-4" />,
-        color: 'text-emerald-400',
-        bgColor: 'bg-emerald-500/10',
-        borderColor: 'border-emerald-500/30',
-        label: 'ENTRY',
-        priority: 'high'
-      };
-    }
-    
-    // Stop warnings
-    if (actionType === 'stop_warning') {
-      return {
-        icon: <AlertTriangle className="w-4 h-4" />,
-        color: 'text-amber-400',
-        bgColor: 'bg-amber-500/10',
-        borderColor: 'border-amber-500/30',
-        label: 'STOP',
-        priority: 'high'
-      };
-    }
-    
-    // Filter decisions
-    if (type === 'filter' || actionType === 'filter') {
-      const decision = entry.metadata?.decision || entry.action_type || '';
-      const isPassed = decision.toLowerCase().includes('pass') || decision.toLowerCase().includes('approved');
-      return {
-        icon: isPassed ? <CheckCircle className="w-4 h-4" /> : <Ban className="w-4 h-4" />,
-        color: isPassed ? 'text-emerald-400' : 'text-zinc-400',
-        bgColor: isPassed ? 'bg-emerald-500/10' : 'bg-zinc-500/10',
-        borderColor: isPassed ? 'border-emerald-500/30' : 'border-zinc-500/30',
-        label: 'FILTER',
-        priority: 'low'
-      };
-    }
-    
-    // Scanning
-    if (actionType === 'scanning' || type === 'thought') {
-      return {
-        icon: <Search className="w-4 h-4" />,
-        color: 'text-violet-400',
-        bgColor: 'bg-violet-500/10',
-        borderColor: 'border-violet-500/30',
-        label: 'SCAN',
-        priority: 'low'
-      };
-    }
-    
-    // Default
-    return {
-      icon: <Radio className="w-4 h-4" />,
-      color: 'text-zinc-400',
-      bgColor: 'bg-zinc-500/10',
-      borderColor: 'border-zinc-500/30',
-      label: 'SYS',
-      priority: 'low'
-    };
-  };
-  
-  const config = getEntryConfig();
-  const metadata = entry.metadata || {};
-  const reasoning = metadata.reasoning || entry.reasoning;
-  
-  // Extract key data points for display
-  const getDataPoints = () => {
-    const points = [];
-    
-    // Symbol
-    if (entry.symbol) {
-      points.push({ icon: <Hash className="w-3 h-3" />, label: entry.symbol, color: 'text-white font-bold' });
-    }
-    
-    // Price
-    if (metadata.price || metadata.entry_price || metadata.current_price) {
-      const price = metadata.price || metadata.entry_price || metadata.current_price;
-      points.push({ icon: <DollarSign className="w-3 h-3" />, label: `$${parseFloat(price).toFixed(2)}`, color: 'text-cyan-400' });
-    }
-    
-    // Stop price
-    if (metadata.stop_price) {
-      points.push({ icon: <StopCircle className="w-3 h-3" />, label: `Stop $${parseFloat(metadata.stop_price).toFixed(2)}`, color: 'text-rose-400' });
-    }
-    
-    // P&L
-    if (metadata.pnl_percent !== undefined) {
-      const pnl = parseFloat(metadata.pnl_percent);
-      points.push({ 
-        icon: pnl >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />, 
-        label: `${pnl >= 0 ? '+' : ''}${pnl.toFixed(1)}%`, 
-        color: pnl >= 0 ? 'text-emerald-400' : 'text-rose-400' 
-      });
-    }
-    
-    // VIX
-    if (metadata.vix !== undefined) {
-      points.push({ icon: <Activity className="w-3 h-3" />, label: `VIX ${parseFloat(metadata.vix).toFixed(1)}`, color: 'text-amber-400' });
-    }
-    
-    // Risk multiplier
-    if (metadata.multiplier !== undefined) {
-      points.push({ icon: <Gauge className="w-3 h-3" />, label: `${parseFloat(metadata.multiplier).toFixed(1)}x`, color: 'text-rose-400' });
-    }
-    
-    // Score
-    if (metadata.score !== undefined) {
-      points.push({ icon: <BarChart2 className="w-3 h-3" />, label: `Score ${parseFloat(metadata.score).toFixed(1)}`, color: 'text-cyan-400' });
-    }
-    
-    // Setup type
-    if (metadata.setup_type) {
-      points.push({ icon: <Target className="w-3 h-3" />, label: metadata.setup_type.replace(/_/g, ' '), color: 'text-violet-400' });
-    }
-    
-    // Regime
-    if (metadata.regime) {
-      const isRiskOn = metadata.regime.toLowerCase().includes('on');
-      points.push({ 
-        icon: <Shield className="w-3 h-3" />, 
-        label: metadata.regime.replace('_', ' '), 
-        color: isRiskOn ? 'text-emerald-400' : 'text-amber-400' 
-      });
-    }
-    
-    // Breadth
-    if (metadata.breadth !== undefined) {
-      points.push({ icon: <PieChart className="w-3 h-3" />, label: `${metadata.breadth}% breadth`, color: 'text-cyan-400' });
-    }
-    
-    return points;
-  };
-  
-  const dataPoints = getDataPoints();
-  const isPriority = config.priority === 'high';
+  const style = getEntryStyle(entry);
+  const chips = buildDataChips(entry);
+  const reasoning = entry.metadata?.reasoning || entry.reasoning;
   
   return (
     <motion.div
-      initial={{ opacity: 0, x: -10 }}
+      initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: Math.min(index * 0.02, 0.15) }}
-      className={`group border-b border-white/5 py-2.5 px-3 hover:bg-white/[0.02] transition-colors cursor-pointer ${isPriority ? 'bg-white/[0.01]' : ''}`}
+      transition={{ delay: Math.min(index * 0.03, 0.2), type: 'spring', stiffness: 300 }}
       onClick={() => reasoning && setExpanded(!expanded)}
+      className="group relative mb-3 cursor-pointer"
       data-testid={`soc-entry-${index}`}
     >
-      {/* Header Row: Icon + Label + Timestamp */}
-      <div className="flex items-center justify-between mb-1.5">
-        <div className="flex items-center gap-2">
-          <div className={`w-6 h-6 rounded-lg ${config.bgColor} border ${config.borderColor} flex items-center justify-center`}>
-            <span className={config.color}>{config.icon}</span>
-          </div>
-          <span className={`text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded ${config.bgColor} ${config.color}`}>
-            {config.label}
-          </span>
-          {entry.symbol && (
-            <span className="text-xs font-bold text-white bg-white/10 px-1.5 py-0.5 rounded">
-              {entry.symbol}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[9px] font-mono text-zinc-600">
-            {formatTerminalTime(entry.timestamp)}
-          </span>
-          {reasoning && (
-            <motion.div animate={{ rotate: expanded ? 180 : 0 }} className="text-zinc-600">
-              <ChevronDown className="w-3 h-3" />
-            </motion.div>
-          )}
-        </div>
-      </div>
-      
-      {/* Content - Full Width */}
-      <p className="text-sm text-zinc-200 leading-relaxed mb-2">
-        {entry.content}
-      </p>
-      
-      {/* Data Points + Confidence Row */}
-      {(dataPoints.length > 0 || entry.confidence) && (
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          {/* Data Points */}
-          <div className="flex items-center gap-3 flex-wrap">
-            {dataPoints.filter(p => !p.label.includes(entry.symbol)).map((point, i) => (
-              <div key={i} className={`flex items-center gap-1 text-[10px] ${point.color}`}>
-                {point.icon}
-                <span>{point.label}</span>
+      {/* Glassmorphism Card with Gradient Border */}
+      <div 
+        className="relative overflow-hidden rounded-xl transition-all duration-300"
+        style={{
+          background: 'rgba(255,255,255,0.03)',
+          backdropFilter: 'blur(12px)',
+          border: '1px solid rgba(255,255,255,0.08)',
+          boxShadow: `0 4px 20px rgba(0,0,0,0.3)`,
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.boxShadow = `0 8px 40px ${style.glowColor}, 0 4px 20px rgba(0,0,0,0.4)`;
+          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.3)';
+          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+        }}
+      >
+        {/* Gradient Left Border */}
+        <div className={`absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b ${style.gradient}`} />
+        
+        {/* Content */}
+        <div className="pl-4 pr-4 py-3">
+          {/* Header Row */}
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-3">
+              {/* Icon */}
+              <div className={`w-8 h-8 rounded-lg ${style.bgColor} border border-white/10 flex items-center justify-center ${style.textColor}`}>
+                {style.icon}
               </div>
-            ))}
+              
+              {/* Label Badge */}
+              <span 
+                className={`text-[10px] font-bold tracking-wider px-2 py-1 rounded-md ${style.bgColor} ${style.textColor}`}
+                style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+              >
+                {style.label}
+              </span>
+              
+              {/* Symbol */}
+              {entry.symbol && (
+                <span 
+                  className="text-sm font-bold text-white bg-white/10 px-2 py-0.5 rounded-md"
+                  style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+                >
+                  {entry.symbol}
+                </span>
+              )}
+            </div>
+            
+            {/* Timestamp + Expand */}
+            <div className="flex items-center gap-2">
+              <span 
+                className="text-[10px] text-zinc-500"
+                style={{ fontFamily: "'JetBrains Mono', monospace" }}
+              >
+                {formatTime(entry.timestamp)}
+              </span>
+              {reasoning && (
+                <motion.div 
+                  animate={{ rotate: expanded ? 180 : 0 }}
+                  className="text-zinc-500"
+                >
+                  <ChevronDown className="w-4 h-4" />
+                </motion.div>
+              )}
+            </div>
           </div>
+          
+          {/* Content Text */}
+          <p 
+            className="text-[13px] text-zinc-200 leading-relaxed mb-3"
+            style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+          >
+            {entry.content}
+          </p>
+          
+          {/* Data Chips */}
+          {chips.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap">
+              {chips.map((chip, i) => (
+                <div 
+                  key={i}
+                  className={`flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-lg border ${chip.color} ${chip.bg}`}
+                  style={{ fontFamily: "'JetBrains Mono', monospace" }}
+                >
+                  {chip.icon}
+                  <span>{chip.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
           
           {/* Confidence Bar */}
           {entry.confidence && (
-            <div className="flex items-center gap-1.5">
-              <div className="h-1 w-16 bg-zinc-800 rounded-full overflow-hidden">
+            <div className="flex items-center gap-2 mt-3">
+              <div className="h-1 flex-1 max-w-[100px] bg-zinc-800 rounded-full overflow-hidden">
                 <motion.div 
                   initial={{ width: 0 }}
                   animate={{ width: `${entry.confidence}%` }}
-                  className={`h-full ${config.bgColor.replace('/10', '/60')}`}
+                  transition={{ duration: 0.5 }}
+                  className={`h-full bg-gradient-to-r ${style.gradient}`}
                 />
               </div>
-              <span className="text-[9px] text-zinc-500">{entry.confidence}%</span>
+              <span 
+                className="text-[9px] text-zinc-500"
+                style={{ fontFamily: "'JetBrains Mono', monospace" }}
+              >
+                {entry.confidence}%
+              </span>
             </div>
           )}
+          
+          {/* Expanded Reasoning */}
+          <AnimatePresence>
+            {expanded && reasoning && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="mt-3 pt-3 border-t border-white/10"
+              >
+                <div className="flex items-start gap-2">
+                  <Brain className="w-4 h-4 text-violet-400 mt-0.5 flex-shrink-0" />
+                  <p 
+                    className="text-xs text-zinc-400 leading-relaxed"
+                    style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+                  >
+                    {reasoning}
+                  </p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
-      )}
-      
-      {/* Expanded Reasoning */}
-      <AnimatePresence>
-        {expanded && reasoning && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="mt-2 pt-2 border-t border-white/5"
-          >
-            <div className="flex items-start gap-2">
-              <Brain className="w-3.5 h-3.5 text-violet-400 mt-0.5 flex-shrink-0" />
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                {reasoning}
-              </p>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      </div>
     </motion.div>
   );
 });
 
 SOCEntry.displayName = 'SOCEntry';
 
-// Main S.O.C. Panel Component
+// Main S.O.C. Panel
 const StreamOfConsciousness = ({ className = '' }) => {
   const { thoughts, loading, refresh } = useSOCStream();
   const scrollRef = useRef(null);
   const [autoScroll, setAutoScroll] = useState(true);
   
-  // Auto-scroll to bottom when new thoughts arrive
   useEffect(() => {
     if (autoScroll && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [thoughts, autoScroll]);
   
-  // Detect manual scroll to pause auto-scroll
   const handleScroll = (e) => {
     const { scrollTop, scrollHeight, clientHeight } = e.target;
     const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
     setAutoScroll(isAtBottom);
   };
   
-  // Count by priority
   const highPriorityCount = thoughts.filter(t => 
     ['trade_executed', 'trade_decision', 'setup_found', 'entry_zone', 'stop_warning'].includes(t.action_type) ||
-    ['setup', 'alert', 'decision'].includes(t.type)
+    ['setup', 'alert', 'decision', 'trade'].includes(t.type)
   ).length;
   
   return (
-    <div className={`flex flex-col h-full bg-[#050505] ${className}`} data-testid="soc-panel">
+    <div 
+      className={`flex flex-col h-full ${className}`} 
+      style={{ 
+        background: 'linear-gradient(180deg, #0a0a0f 0%, #050508 100%)',
+        fontFamily: "'Space Grotesk', sans-serif"
+      }}
+      data-testid="soc-panel"
+    >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-black/40">
+      <div 
+        className="flex items-center justify-between px-4 py-3 border-b border-white/10"
+        style={{ background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(10px)' }}
+      >
         <div className="flex items-center gap-3">
           <div className="relative">
-            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-            <div className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping opacity-50" />
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+            <div className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping opacity-60" />
           </div>
           <div>
-            <span className="text-sm font-bold text-emerald-400 uppercase tracking-wider">
+            <span className="text-sm font-bold text-emerald-400 tracking-wide">
               SentCom S.O.C.
             </span>
-            <p className="text-[9px] text-zinc-500">Stream of Consciousness</p>
+            <p className="text-[9px] text-zinc-500 tracking-wider">STREAM OF CONSCIOUSNESS</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
           {highPriorityCount > 0 && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+            <span 
+              className="text-[10px] px-2.5 py-1 rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 font-semibold"
+            >
               {highPriorityCount} alerts
             </span>
           )}
           <button
             onClick={refresh}
-            className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+            className="p-2 hover:bg-white/10 rounded-lg transition-colors"
             title="Refresh"
             data-testid="soc-refresh-btn"
           >
-            <RefreshCw className="w-3.5 h-3.5 text-zinc-500 hover:text-zinc-300" />
+            <RefreshCw className="w-4 h-4 text-zinc-500 hover:text-zinc-300" />
           </button>
         </div>
       </div>
@@ -462,7 +595,7 @@ const StreamOfConsciousness = ({ className = '' }) => {
       <div 
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto font-mono custom-scrollbar"
+        className="flex-1 overflow-y-auto p-3 custom-scrollbar"
         data-testid="soc-content"
       >
         {loading && thoughts.length === 0 ? (
@@ -475,24 +608,32 @@ const StreamOfConsciousness = ({ className = '' }) => {
         ) : thoughts.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
-              <Brain className="w-8 h-8 text-zinc-600 mx-auto mb-3" />
+              <Brain className="w-10 h-10 text-zinc-700 mx-auto mb-3" />
               <p className="text-sm text-zinc-500">Waiting for activity...</p>
-              <p className="text-[10px] text-zinc-600 mt-1">Bot thoughts and trade decisions will appear here</p>
+              <p className="text-[10px] text-zinc-600 mt-1">Trade decisions and alerts will appear here</p>
             </div>
           </div>
         ) : (
-          <div>
+          <>
             {thoughts.map((thought, i) => (
               <SOCEntry key={thought.id || `thought-${i}`} entry={thought} index={i} />
             ))}
-          </div>
+          </>
         )}
       </div>
       
-      {/* Footer status bar */}
-      <div className="px-4 py-2 border-t border-white/10 bg-black/60 flex items-center justify-between">
+      {/* Footer */}
+      <div 
+        className="px-4 py-2 border-t border-white/10 flex items-center justify-between"
+        style={{ background: 'rgba(0,0,0,0.5)' }}
+      >
         <div className="flex items-center gap-3">
-          <span className="text-[10px] text-zinc-600">{thoughts.length} entries</span>
+          <span 
+            className="text-[10px] text-zinc-600"
+            style={{ fontFamily: "'JetBrains Mono', monospace" }}
+          >
+            {thoughts.length} entries
+          </span>
           {!autoScroll && (
             <button
               onClick={() => {
@@ -510,7 +651,10 @@ const StreamOfConsciousness = ({ className = '' }) => {
         </div>
         <div className="flex items-center gap-2">
           <div className={`w-1.5 h-1.5 rounded-full ${autoScroll ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-          <span className="text-[10px] text-zinc-600 font-mono">
+          <span 
+            className="text-[10px] text-zinc-600"
+            style={{ fontFamily: "'JetBrains Mono', monospace" }}
+          >
             {autoScroll ? 'LIVE' : 'PAUSED'}
           </span>
         </div>
