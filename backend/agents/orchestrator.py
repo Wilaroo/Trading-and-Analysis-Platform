@@ -99,7 +99,9 @@ class AgentOrchestrator:
         self._services = services
         
         # Create data fetcher for orchestrator-level handlers (scanner, quote, risk)
+        # This is critical - without it, many handlers will fail
         self._data_fetcher = DataFetcher(services)
+        logger.info(f"DataFetcher initialized with services: {list(services.keys())}")
         
         # Inject into trade executor (needs positions, order queue)
         self.trade_executor.inject_services({
@@ -321,6 +323,16 @@ class AgentOrchestrator:
         """
         start = time.time()
         
+        # Safety check for data fetcher
+        if not self._data_fetcher:
+            return AgentResponse(
+                success=True,
+                content={"message": "## Scanner Results\n\n**We're still initializing our scanner.** We'll have trade opportunities ready once we're fully connected."},
+                agent_type="scanner_handler",
+                latency_ms=(time.time() - start) * 1000,
+                model_used="code_only"
+            )
+        
         try:
             # Get scanner alerts from the enhanced scanner
             alerts = await self._data_fetcher.get_scanner_alerts(limit=10)
@@ -411,6 +423,16 @@ Check back soon or run a market-wide scan for more opportunities."""
                 error="No symbol provided"
             )
         
+        # Safety check for data fetcher
+        if not self._data_fetcher:
+            return AgentResponse(
+                success=True,
+                content={"message": f"## {symbols[0]} Quote\n\n**We're still connecting to our data feeds.** We'll have real-time quotes ready shortly."},
+                agent_type="quote_handler",
+                latency_ms=(time.time() - start) * 1000,
+                model_used="code_only"
+            )
+        
         try:
             quotes_data = []
             for symbol in symbols[:5]:  # Limit to 5 symbols
@@ -487,6 +509,16 @@ Check back soon or run a market-wide scan for more opportunities."""
         Examples: "what's my risk exposure", "how much am I risking", "portfolio risk"
         """
         start = time.time()
+        
+        # Safety check for data fetcher
+        if not self._data_fetcher:
+            return AgentResponse(
+                success=True,
+                content={"message": "## Risk Check\n\n**We're still initializing.** We'll be able to check your risk exposure once we're fully connected."},
+                agent_type="risk_handler",
+                latency_ms=(time.time() - start) * 1000,
+                model_used="code_only"
+            )
         
         try:
             # Get positions

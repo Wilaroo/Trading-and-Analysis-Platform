@@ -290,7 +290,7 @@ trading_bot._perf_service = perf_service
 init_learning_dashboard(perf_service)
 
 # Initialize SentCom - Unified AI Command Center
-from agents.orchestrator import get_orchestrator
+from agents.orchestrator import get_orchestrator, init_orchestrator
 try:
     from services.order_queue_service import get_order_queue_service
     _order_queue = get_order_queue_service()
@@ -305,9 +305,27 @@ try:
 except Exception as e:
     print(f"[SERVER] Warning: Historical Data Queue Service not initialized: {e}")
 
+# Initialize the orchestrator with basic services first
+# More services will be injected later when they're ready
+orchestrator_services = {
+    "ib_router": ib_service,
+    "scanner": None,  # Will be injected later
+    "order_queue": _order_queue,
+    "db": db,
+    "performance_analyzer": perf_service,
+    "technical_service": None,  # Will be injected later
+    "sector_service": None,
+    "sentiment_service": None,
+    "tqs_engine": None,  # Will be injected later
+}
+
+# Initialize orchestrator with services injected
+_orchestrator = init_orchestrator(services=orchestrator_services)
+print("[SERVER] Orchestrator initialized (basic services)")
+
 sentcom_services = {
     "trading_bot": trading_bot,
-    "orchestrator": get_orchestrator(),
+    "orchestrator": _orchestrator,
     "ib_service": ib_service,
     "regime_engine": None,  # Will be set later when regime engine is ready
     "order_queue": _order_queue,
@@ -451,8 +469,8 @@ register_service('execution_tracker', execution_tracker)
 register_service('alpaca_service', alpaca_service)
 
 print("Three-Speed Learning Architecture Phase 1 initialized")
-print(f"  - Collections: trade_outcomes, learning_stats, calibration_log, trader_profile")
-print(f"  - Services: LearningLoop, TradeContext, ExecutionTracker, GracefulDegradation")
+print("  - Collections: trade_outcomes, learning_stats, calibration_log, trader_profile")
+print("  - Services: LearningLoop, TradeContext, ExecutionTracker, GracefulDegradation")
 
 # ===================== TQS ENGINE (Phase 2) =====================
 # Initialize Trade Quality Score engine with all 5 pillars
@@ -467,11 +485,28 @@ tqs_engine = init_tqs_engine(
 )
 
 print("TQS Engine (Phase 2) initialized")
-print(f"  - Pillars: Setup(25%), Technical(25%), Fundamental(15%), Context(20%), Execution(15%)")
-print(f"  - Endpoints: /api/tqs/score, /api/tqs/breakdown, /api/tqs/batch")
+print("  - Pillars: Setup(25%), Technical(25%), Fundamental(15%), Context(20%), Execution(15%)")
+print("  - Endpoints: /api/tqs/score, /api/tqs/breakdown, /api/tqs/batch")
 
 # Register TQS engine
 register_service('tqs_engine', tqs_engine)
+
+# Late injection of full services to orchestrator (now that TQS and scanner are ready)
+try:
+    _orchestrator.inject_services({
+        "ib_router": ib_service,
+        "scanner": background_scanner,
+        "order_queue": _order_queue,
+        "db": db,
+        "performance_analyzer": perf_service,
+        "technical_service": realtime_tech_service,
+        "sector_service": sector_service,
+        "sentiment_service": None,
+        "tqs_engine": tqs_engine,
+    })
+    print("[SERVER] Orchestrator fully wired with all services (scanner, TQS, technical)")
+except Exception as e:
+    print(f"[SERVER] Warning: Orchestrator late injection failed: {e}")
 
 # ===================== MARKET REGIME ENGINE (Phase 2.5) =====================
 # Initialize Market Regime Engine for market state detection
@@ -485,9 +520,9 @@ init_market_regime_engine(market_regime_engine)
 register_service('market_regime_engine', market_regime_engine)
 
 print("Market Regime Engine (Phase 2.5) initialized")
-print(f"  - Signal Blocks: SPY/QQQ breadth, VIX, sector rotation, volume, internals")
-print(f"  - States: RISK_ON, CAUTION, RISK_OFF, CONFIRMED_DOWN")
-print(f"  - Endpoints: /api/market-regime/current, /api/market-regime/summary")
+print("  - Signal Blocks: SPY/QQQ breadth, VIX, sector rotation, volume, internals")
+print("  - States: RISK_ON, CAUTION, RISK_OFF, CONFIRMED_DOWN")
+print("  - Endpoints: /api/market-regime/current, /api/market-regime/summary")
 
 # Wire Market Regime to Trading Bot for regime-aware position sizing
 trading_bot.set_market_regime_engine(market_regime_engine)
@@ -576,10 +611,10 @@ health_monitor_service = init_health_monitor_service(
 )
 
 print("Fast Learning (Phase 3A & 3B) initialized")
-print(f"  - Circuit Breakers: daily_loss, consecutive_losses, trade_frequency, tilt_detection")
-print(f"  - Position Sizing: TQS-scaled, volatility-adjusted, circuit breaker-constrained")
-print(f"  - Dynamic Thresholds: regime-based, time-based, VIX-based")
-print(f"  - Endpoints: /api/risk/circuit-breakers, /api/risk/position-sizing, /api/risk/thresholds")
+print("  - Circuit Breakers: daily_loss, consecutive_losses, trade_frequency, tilt_detection")
+print("  - Position Sizing: TQS-scaled, volatility-adjusted, circuit breaker-constrained")
+print("  - Dynamic Thresholds: regime-based, time-based, VIX-based")
+print("  - Endpoints: /api/risk/circuit-breakers, /api/risk/position-sizing, /api/risk/thresholds")
 
 # ===================== RAG KNOWLEDGE BASE (Phase 4) =====================
 # Initialize Retrieval-Augmented Generation for personalized AI context
@@ -588,9 +623,9 @@ try:
     rag_service = init_rag_service(db=db, learning_loop=learning_loop_service)
     register_service('rag_service', rag_service)
     print("RAG Knowledge Base (Phase 4) initialized")
-    print(f"  - Vector Store: ChromaDB at /app/backend/data/chromadb")
-    print(f"  - Collections: trade_outcomes, playbooks, patterns, daily_insights")
-    print(f"  - Endpoints: /api/rag/retrieve, /api/rag/augment-prompt, /api/rag/sync")
+    print("  - Vector Store: ChromaDB at /app/backend/data/chromadb")
+    print("  - Collections: trade_outcomes, playbooks, patterns, daily_insights")
+    print("  - Endpoints: /api/rag/retrieve, /api/rag/augment-prompt, /api/rag/sync")
 except Exception as e:
     print(f"RAG Knowledge Base initialization deferred: {e}")
     print("  - Will initialize on first use (embedding model loading)")
@@ -2968,7 +3003,7 @@ async def get_index_symbols(index_type: str):
     except ValueError:
         raise HTTPException(
             status_code=400, 
-            detail=f"Invalid index type. Valid: sp500, nasdaq100, russell2000, etf"
+            detail="Invalid index type. Valid: sp500, nasdaq100, russell2000, etf"
         )
     
     symbols = index_universe.get_index_symbols(idx_type)
@@ -4202,7 +4237,7 @@ async def startup_event():
     try:
         await trading_bot.start()
         print(f"🤖 Trading bot auto-started in {trading_bot.get_mode().value.upper()} mode")
-        print(f"   Trading hours: 7:30 AM - 5:00 PM ET")
+        print("   Trading hours: 7:30 AM - 5:00 PM ET")
         print(f"   Max position: {trading_bot.risk_params.max_position_pct}% of account")
         print(f"   Max daily loss: {trading_bot.risk_params.max_daily_loss_pct}% of account")
     except Exception as e:
