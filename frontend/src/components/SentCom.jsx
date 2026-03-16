@@ -7,7 +7,7 @@
  * 
  * Updated with glassy mockup styling and unified Trading Bot header controls.
  */
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -2185,6 +2185,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState('mode'); // 'mode', 'risk', or 'ai'
   const [showAIInsights, setShowAIInsights] = useState(false);
+  const streamRef = useRef(null);
   
   // Initialize local messages with chat history when it loads
   useEffect(() => {
@@ -2193,21 +2194,29 @@ const SentCom = ({ compact = false, embedded = false }) => {
     }
   }, [chatHistory, localMessages.length]);
 
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (streamRef.current) {
+      streamRef.current.scrollTop = streamRef.current.scrollHeight;
+    }
+  }, [localMessages]);
+
   const handleChat = async (message) => {
     if (!message.trim() || chatLoading) return;
     
     setChatLoading(true);
+    const userTimestamp = new Date().toISOString();
     
     // Add user message to local messages immediately
     const userMsg = {
       id: `user_${Date.now()}`,
       type: 'chat',
       content: message,
-      timestamp: new Date().toISOString(),
+      timestamp: userTimestamp,
       action_type: 'user_message',
       metadata: { role: 'user' }
     };
-    setLocalMessages(prev => [userMsg, ...prev]);
+    setLocalMessages(prev => [...prev, userMsg]);
     setChatInput('');
     
     try {
@@ -2218,19 +2227,19 @@ const SentCom = ({ compact = false, embedded = false }) => {
       });
       const data = await res.json();
       
-      // Add assistant response to local messages
+      // Add assistant response AFTER user message (slightly later timestamp)
       const assistantMsg = {
         id: `assistant_${Date.now()}`,
         type: 'chat',
         content: data.response || "We're processing your request...",
-        timestamp: new Date().toISOString(),
+        timestamp: new Date().toISOString(), // Will be after userTimestamp
         action_type: 'chat_response',
         metadata: { role: 'assistant', source: data.source }
       };
-      setLocalMessages(prev => [assistantMsg, ...prev]);
+      setLocalMessages(prev => [...prev, assistantMsg]);
       
-      // Refresh stream to sync with backend
-      setTimeout(refreshStream, 1000);
+      // DON'T refresh stream here - it causes duplicate/reordering issues
+      // The chat messages are already in localMessages
       return data;
     } catch (err) {
       console.error('Chat error:', err);
@@ -2243,7 +2252,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
         action_type: 'error',
         metadata: { role: 'assistant' }
       };
-      setLocalMessages(prev => [errorMsg, ...prev]);
+      setLocalMessages(prev => [...prev, errorMsg]);
     } finally {
       setChatLoading(false);
     }
@@ -2262,7 +2271,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
       action_type: 'user_message',
       metadata: { role: 'user', quickAction: action.id }
     };
-    setLocalMessages(prev => [userMsg, ...prev]);
+    setLocalMessages(prev => [...prev, userMsg]);
     
     try {
       let response;
@@ -2292,7 +2301,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
         action_type: 'chat_response',
         metadata: { role: 'assistant', source: action.id }
       };
-      setLocalMessages(prev => [assistantMsg, ...prev]);
+      setLocalMessages(prev => [...prev, assistantMsg]);
       
     } catch (err) {
       console.error('Quick action error:', err);
@@ -2304,7 +2313,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
         action_type: 'error',
         metadata: { role: 'assistant' }
       };
-      setLocalMessages(prev => [errorMsg, ...prev]);
+      setLocalMessages(prev => [...prev, errorMsg]);
     } finally {
       setQuickActionLoading(null);
     }
@@ -2322,7 +2331,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
       action_type: 'user_message',
       metadata: { role: 'user', tradeCheck: data }
     };
-    setLocalMessages(prev => [userMsg, ...prev]);
+    setLocalMessages(prev => [...prev, userMsg]);
     
     try {
       // Call both endpoints in parallel
@@ -2362,7 +2371,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
         action_type: 'chat_response',
         metadata: { role: 'assistant', source: 'trade_check' }
       };
-      setLocalMessages(prev => [assistantMsg, ...prev]);
+      setLocalMessages(prev => [...prev, assistantMsg]);
       
     } catch (err) {
       console.error('Trade check error:', err);
@@ -2374,17 +2383,29 @@ const SentCom = ({ compact = false, embedded = false }) => {
         action_type: 'error',
         metadata: { role: 'assistant' }
       };
-      setLocalMessages(prev => [errorMsg, ...prev]);
+      setLocalMessages(prev => [...prev, errorMsg]);
     } finally {
       setQuickActionLoading(null);
       setShowTradeForm(false);
     }
   };
 
-  // Combine API messages with local chat messages
-  const allMessages = [...localMessages, ...messages].sort((a, b) => 
-    new Date(b.timestamp) - new Date(a.timestamp)
-  ).slice(0, 30);
+  // Combine API messages with local chat messages, deduplicating by ID
+  // Sort oldest to newest (chronological order for chat display)
+  const allMessages = React.useMemo(() => {
+    const combined = [...localMessages, ...messages];
+    // Deduplicate by ID
+    const seen = new Set();
+    const unique = combined.filter(msg => {
+      if (seen.has(msg.id)) return false;
+      seen.add(msg.id);
+      return true;
+    });
+    // Sort by timestamp ascending (oldest first) - chat messages should flow naturally
+    return unique.sort((a, b) => 
+      new Date(a.timestamp) - new Date(b.timestamp)
+    ).slice(-30); // Keep last 30 messages
+  }, [localMessages, messages]);
 
   // =========================================================================
   // EMBEDDED MODE - For Command Center (full-featured but fits in dashboard)
@@ -2901,7 +2922,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
             {/* Stream Content - Glassy */}
             <div className="flex-1 relative overflow-hidden rounded-xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] border border-white/10 p-4 mb-4">
               <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 via-transparent to-violet-500/5 pointer-events-none" />
-              <div className="relative h-[320px] overflow-y-auto pr-2 custom-scrollbar">
+              <div ref={streamRef} className="relative h-[320px] overflow-y-auto pr-2 custom-scrollbar" data-testid="live-team-stream">
                 {streamLoading && allMessages.length === 0 ? (
                   <div className="flex items-center justify-center h-full">
                     <Loader className="w-6 h-6 text-cyan-400 animate-spin" />
