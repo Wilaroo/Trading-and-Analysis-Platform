@@ -7,7 +7,39 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 16, 2026)
 
-### NIA v2.0 - Unified Training Hub ✅ NEW (March 16, 2026)
+### Multi-Timeframe Data Collection & Simulation ✅ NEW (March 16, 2026)
+**COLLECT INTRADAY & LONG-TERM DATA FOR COMPREHENSIVE BACKTESTING**
+
+**Major Changes:**
+1. **New Multi-Timeframe Collection Panel in NIA** - Collect data with flexible bar sizes and lookback periods
+   - Bar Sizes: 1 min (Scalping), 5 mins (Day Trading), 15 mins (Swing Entry), 1 hour (Swing), 1 day (Position), 1 week (Investment)
+   - Lookback Periods: 1 day, 1 week, 30 days, 6 months, 1 year, 2 years, 5 years
+   - Collection Types: Smart (ADV-matched), Liquid (ADV >= 100K), Full Market
+2. **Quick Presets** - One-click presets for common trading styles:
+   - Scalping (1 min, 1 day)
+   - Day Trading (5 mins, 1 week)
+   - Swing Intraday (15 mins, 30 days)
+   - Swing Daily (1 day, 30 days)
+   - Position Trading (1 day, 1 year)
+   - Long-term Analysis (1 day, 5 years)
+   - Weekly Investment (1 week, 5 years)
+3. **Timeframe Stats** - View collected data breakdown by bar_size
+4. **Simulation Bar Size Support** - Backtest using different timeframes
+
+**New Backend Endpoints:**
+- `POST /api/ib-collector/multi-timeframe-collection` - Start collection with bar_size, lookback, collection_type
+- `GET /api/ib-collector/collection-presets` - Get recommended presets
+- `GET /api/ib-collector/timeframe-stats` - Get data stats by timeframe
+
+**Files Modified:**
+- `/app/backend/routers/ib_collector_router.py` - Added multi-timeframe-collection, collection-presets, timeframe-stats endpoints
+- `/app/backend/routers/simulation_router.py` - Added bar_size to SimulationConfigRequest
+- `/app/backend/services/historical_simulation_engine.py` - Added bar_size to SimulationConfig, updated _get_historical_bars
+- `/app/frontend/src/components/NIA.jsx` - Added MultiTimeframeCollectionPanel, updated SimulationQuickPanel with bar_size selector
+
+---
+
+### NIA v2.0 - Unified Training Hub ✅ (March 16, 2026)
 **TRAIN EVERYTHING IN ONE PLACE** - Consolidated all learning and training into NIA.
 
 **Major Changes:**
