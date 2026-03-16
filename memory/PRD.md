@@ -7,6 +7,27 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 16, 2026)
 
+### Time-Series AI Learning Progress Fix ✅ (March 16, 2026)
+**FIXED: Model training status now correctly reflected in NIA dashboard**
+
+**Root Cause:**
+Frontend was reading the wrong metric field (`test_accuracy` instead of `accuracy`) and not checking the `model.trained` flag.
+
+**Fix Applied:**
+1. Changed metric path from `ts?.model?.metrics?.test_accuracy` to `ts?.model?.metrics?.accuracy`
+2. Added check for `model.trained` flag directly
+3. Updated `modelTrained` calculation to check BOTH trained flag and accuracy
+
+**Result:**
+- Learning Progress now shows 75% overall (was 38%)
+- AI Model Training shows "Model trained (50.4% accuracy)" with ✅ Ready badge
+- AI Accuracy card in Intel Overview displays correct percentage
+
+**Files Modified:**
+- `/app/frontend/src/components/NIA.jsx` - Lines 2240-2293
+
+---
+
 ### Multi-Timeframe Data Collection & Simulation ✅ NEW (March 16, 2026)
 **COLLECT INTRADAY & LONG-TERM DATA FOR COMPREHENSIVE BACKTESTING**
 
