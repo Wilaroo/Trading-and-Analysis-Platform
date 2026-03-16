@@ -251,57 +251,46 @@ goto quick_port_check
 :start_ib_fresh
 echo       Starting IB Gateway fresh...
 start "" "%IB_GATEWAY_PATH%"
-echo       Waiting for IB Gateway window (8 seconds)...
-timeout /t 8 /nobreak >nul
+echo       Waiting for IB Gateway window (10 seconds)...
+timeout /t 10 /nobreak >nul
 
 :: Auto-login with PAPER TRADING account - FAST VERSION
 echo       Fast auto-login to PAPER account...
 (
     echo Set WshShell = CreateObject^("WScript.Shell"^)
-    echo WScript.Sleep 500
+    echo WScript.Sleep 800
     echo WshShell.AppActivate "IB Gateway"
-    echo WScript.Sleep 300
+    echo WScript.Sleep 400
     echo If Not WshShell.AppActivate^("IB Gateway"^) Then WshShell.AppActivate "IBKR Gateway"
-    echo WScript.Sleep 200
+    echo WScript.Sleep 300
     echo WshShell.SendKeys "paperesw100000"
-    echo WScript.Sleep 150
+    echo WScript.Sleep 200
     echo WshShell.SendKeys "{TAB}"
-    echo WScript.Sleep 100
-    echo WshShell.SendKeys "Socr1025!@!?"
     echo WScript.Sleep 150
+    echo WshShell.SendKeys "Socr1025!@!?"
+    echo WScript.Sleep 200
     echo WshShell.SendKeys "{ENTER}"
 ) > "%TEMP%\ib_login.vbs"
 cscript //nologo "%TEMP%\ib_login.vbs"
 del "%TEMP%\ib_login.vbs" 2>nul
 
-:: Dismiss warnings - FAST VERSION (start checking earlier)
-echo       Waiting for login (checking every 2s)...
-set LOGIN_WAIT=0
+:: Wait for IB to process login (this takes time for authentication)
+echo       Waiting for authentication (10 seconds)...
+timeout /t 10 /nobreak >nul
 
-:login_wait_loop
-set /a LOGIN_WAIT+=1
-if %LOGIN_WAIT% GTR 10 goto dismiss_dialogs
-
-:: Check if API port is already up (login succeeded fast)
-netstat -an | findstr ":%IB_PORT% " | findstr "LISTENING" >nul 2>&1
-if %errorlevel%==0 (
-    echo       Login succeeded early!
-    goto ib_gateway_done
-)
-timeout /t 2 /nobreak >nul
-goto login_wait_loop
-
-:dismiss_dialogs
+:: Dismiss any warning popups that appear after login
 echo       Dismissing any popups...
 (
     echo Set WshShell = CreateObject^("WScript.Shell"^)
-    echo WScript.Sleep 200
-    echo WshShell.AppActivate "IBKR"
-    echo WScript.Sleep 150
-    echo WshShell.SendKeys "{ENTER}"
-    echo WScript.Sleep 500
-    echo WshShell.SendKeys "{ENTER}"
     echo WScript.Sleep 300
+    echo WshShell.AppActivate "Warning"
+    echo WScript.Sleep 200
+    echo WshShell.SendKeys "{ENTER}"
+    echo WScript.Sleep 400
+    echo WshShell.AppActivate "IBKR"
+    echo WScript.Sleep 200
+    echo WshShell.SendKeys "{ENTER}"
+    echo WScript.Sleep 400
     echo WshShell.SendKeys "{ENTER}"
 ) > "%TEMP%\ib_dismiss.vbs"
 cscript //nologo "%TEMP%\ib_dismiss.vbs"
