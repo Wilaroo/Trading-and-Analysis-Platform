@@ -1022,7 +1022,7 @@ class HistoricalSimulationEngine:
         job.losing_trades = sum(1 for t in closed_trades if t.realized_pnl <= 0)
         job.total_pnl = sum(t.realized_pnl for t in closed_trades)
         
-        job.win_rate = job.winning_trades / job.total_trades * 100 if job.total_trades > 0 else 0
+        job.win_rate = job.winning_trades / job.total_trades if job.total_trades > 0 else 0  # Store as decimal 0.0-1.0
         
         winning = [t.realized_pnl for t in closed_trades if t.realized_pnl > 0]
         losing = [abs(t.realized_pnl) for t in closed_trades if t.realized_pnl <= 0]
