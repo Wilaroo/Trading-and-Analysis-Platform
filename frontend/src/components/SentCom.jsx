@@ -76,8 +76,8 @@ const TypingIndicator = ({ agentName = 'SENTCOM' }) => (
       <Brain className="w-4 h-4 text-white" />
     </div>
     <div className="flex-1 min-w-0 max-w-[85%]">
-      <div className="relative overflow-hidden rounded-2xl rounded-tl-sm p-4 bg-gradient-to-br from-violet-500/20 via-purple-500/10 to-violet-500/5 border border-violet-500/30 backdrop-blur-md shadow-lg shadow-black/10">
-        <div className="absolute inset-0 bg-gradient-to-br from-white/[0.08] to-transparent pointer-events-none" />
+      <div className="relative overflow-hidden rounded-2xl rounded-tl-sm p-4 bg-gradient-to-br from-violet-500/10 via-purple-500/5 to-transparent border border-violet-500/20 backdrop-blur-xl bg-white/[0.02] shadow-lg shadow-black/5">
+        <div className="absolute inset-0 bg-gradient-to-br from-white/[0.03] via-transparent to-transparent pointer-events-none" />
         <div className="relative flex items-center gap-2 mb-2">
           <span className="text-[10px] font-bold uppercase tracking-wider text-violet-400">
             {agentName}
@@ -165,70 +165,70 @@ const StreamMessage = React.memo(({ msg, index }) => {
   
   const messageType = getMessageType();
   
-  // Color schemes for different message types
+  // Color schemes for different message types - more transparent/glass-like
   const colorSchemes = {
     user: {
-      gradient: 'from-cyan-500/20 via-blue-500/10 to-cyan-500/5',
-      border: 'border-cyan-500/30',
+      gradient: 'from-cyan-500/10 via-blue-500/5 to-transparent',
+      border: 'border-cyan-500/20',
       icon: 'from-cyan-500 to-blue-500',
       iconColor: 'text-white',
       label: 'text-cyan-400',
       text: 'text-cyan-100',
-      badge: 'bg-cyan-500/20 text-cyan-300'
+      badge: 'bg-cyan-500/15 text-cyan-300'
     },
     sentcom: {
-      gradient: 'from-violet-500/20 via-purple-500/10 to-violet-500/5',
-      border: 'border-violet-500/30',
+      gradient: 'from-violet-500/10 via-purple-500/5 to-transparent',
+      border: 'border-violet-500/20',
       icon: 'from-violet-500 to-purple-600',
       iconColor: 'text-white',
       label: 'text-violet-400',
       text: 'text-zinc-200',
-      badge: 'bg-violet-500/20 text-violet-300'
+      badge: 'bg-violet-500/15 text-violet-300'
     },
     scanner: {
-      gradient: 'from-emerald-500/20 via-teal-500/10 to-emerald-500/5',
-      border: 'border-emerald-500/30',
+      gradient: 'from-emerald-500/10 via-teal-500/5 to-transparent',
+      border: 'border-emerald-500/20',
       icon: 'from-emerald-500 to-teal-500',
       iconColor: 'text-white',
       label: 'text-emerald-400',
       text: 'text-zinc-200',
-      badge: 'bg-emerald-500/20 text-emerald-300'
+      badge: 'bg-emerald-500/15 text-emerald-300'
     },
     alert: {
-      gradient: 'from-amber-500/20 via-orange-500/10 to-amber-500/5',
-      border: 'border-amber-500/30',
+      gradient: 'from-amber-500/10 via-orange-500/5 to-transparent',
+      border: 'border-amber-500/20',
       icon: 'from-amber-500 to-orange-500',
       iconColor: 'text-white',
       label: 'text-amber-400',
       text: 'text-zinc-200',
-      badge: 'bg-amber-500/20 text-amber-300'
+      badge: 'bg-amber-500/15 text-amber-300'
     },
     filter: {
-      gradient: 'from-pink-500/20 via-rose-500/10 to-pink-500/5',
-      border: 'border-pink-500/30',
+      gradient: 'from-pink-500/10 via-rose-500/5 to-transparent',
+      border: 'border-pink-500/20',
       icon: 'from-pink-500 to-rose-500',
       iconColor: 'text-white',
       label: 'text-pink-400',
       text: 'text-zinc-200',
-      badge: 'bg-pink-500/20 text-pink-300'
+      badge: 'bg-pink-500/15 text-pink-300'
     },
     monitor: {
-      gradient: 'from-blue-500/20 via-indigo-500/10 to-blue-500/5',
-      border: 'border-blue-500/30',
+      gradient: 'from-blue-500/10 via-indigo-500/5 to-transparent',
+      border: 'border-blue-500/20',
       icon: 'from-blue-500 to-indigo-500',
       iconColor: 'text-white',
       label: 'text-blue-400',
       text: 'text-zinc-200',
-      badge: 'bg-blue-500/20 text-blue-300'
+      badge: 'bg-blue-500/15 text-blue-300'
     },
     system: {
-      gradient: 'from-zinc-500/20 via-zinc-600/10 to-zinc-500/5',
-      border: 'border-zinc-500/30',
+      gradient: 'from-zinc-500/10 via-zinc-600/5 to-transparent',
+      border: 'border-zinc-500/20',
       icon: 'from-zinc-500 to-zinc-600',
       iconColor: 'text-white',
       label: 'text-zinc-400',
       text: 'text-zinc-300',
-      badge: 'bg-zinc-500/20 text-zinc-300'
+      badge: 'bg-zinc-500/15 text-zinc-300'
     }
   };
   
@@ -283,13 +283,13 @@ const StreamMessage = React.memo(({ msg, index }) => {
               relative overflow-hidden rounded-2xl p-4
               bg-gradient-to-br ${colors.gradient}
               border ${colors.border}
-              backdrop-blur-md
-              shadow-lg shadow-black/10
+              backdrop-blur-xl bg-white/[0.02]
+              shadow-lg shadow-black/5
               ${isUser ? 'rounded-tr-sm' : 'rounded-tl-sm'}
             `}
           >
-            {/* Subtle inner glow */}
-            <div className="absolute inset-0 bg-gradient-to-br from-white/[0.08] to-transparent pointer-events-none" />
+            {/* Subtle glass reflection */}
+            <div className="absolute inset-0 bg-gradient-to-br from-white/[0.03] via-transparent to-transparent pointer-events-none" />
             
             {/* Header with label and symbol */}
             <div className={`relative flex items-center gap-2 mb-2 ${isUser ? 'justify-end' : ''}`}>
