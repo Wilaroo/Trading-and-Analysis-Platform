@@ -181,15 +181,53 @@ class DataFetcher:
         self.services = services
     
     async def get_positions(self) -> List[Dict]:
-        """Get positions from IB (CODE - verified data)"""
+        """Get positions from unified source (Trading Bot + IB)"""
+        positions = []
+        
+        # First try sentcom service for unified positions
+        try:
+            from services.sentcom_service import get_sentcom_service
+            sentcom = get_sentcom_service()
+            if sentcom:
+                raw_positions = await sentcom.get_our_positions()
+                if raw_positions:
+                    # Normalize keys to match expected format
+                    for pos in raw_positions:
+                        normalized = {
+                            "symbol": pos.get("symbol"),
+                            "position": pos.get("shares", pos.get("position", 0)),
+                            "marketPrice": pos.get("current_price", pos.get("marketPrice", 0)),
+                            "avgCost": pos.get("entry_price", pos.get("avgCost", 0)),
+                            "unrealizedPNL": pos.get("pnl", pos.get("unrealizedPNL", pos.get("unrealized_pnl", 0))),
+                            "unrealized_pnl": pos.get("pnl", pos.get("unrealizedPNL", pos.get("unrealized_pnl", 0))),
+                            "direction": pos.get("direction", "long"),
+                            "status": pos.get("status", "open"),
+                            "trade_id": pos.get("trade_id"),
+                            "source": pos.get("source", "unified"),
+                        }
+                        positions.append(normalized)
+                    return positions
+        except Exception as e:
+            logger.warning(f"Sentcom positions error: {e}")
+        
+        # Fallback to IB pushed positions
         ib_router = self.services.get("ib_router")
         if ib_router:
             try:
-                # Import the module to access its functions
                 import routers.ib as ib_module
                 return ib_module.get_pushed_positions()
             except Exception as e:
-                logger.error(f"Error fetching positions: {e}")
+                logger.error(f"Error fetching IB positions: {e}")
+        
+        # Final fallback: try trading bot directly
+        try:
+            from services.trading_bot_service import get_trading_bot_service
+            bot = get_trading_bot_service()
+            if bot:
+                return bot.get_open_trades() or []
+        except Exception as e:
+            logger.warning(f"Trading bot positions error: {e}")
+        
         return []
     
     async def get_account_data(self) -> Dict:
