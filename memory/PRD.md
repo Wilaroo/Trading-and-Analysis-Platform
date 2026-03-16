@@ -5,9 +5,49 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ---
 
-## LATEST UPDATE (March 15, 2026)
+## LATEST UPDATE (March 16, 2026)
 
-### Trading Report Card - NIA Enhancement ✅ NEW (March 15, 2026)
+### NIA v2.0 - Unified Training Hub ✅ NEW (March 16, 2026)
+**TRAIN EVERYTHING IN ONE PLACE** - Consolidated all learning and training into NIA.
+
+**Major Changes:**
+1. **Deprecated Training Center** - Removed from sidebar, functionality moved to NIA
+2. **"Train All" Button** - One-click system improvement that runs:
+   - Train Time-Series AI Model
+   - Sync Learning Connectors
+   - Calibrate Scanner Thresholds
+   - Update Strategy Scores
+3. **Learning Progress Tracker** - Clear progress bars replacing confusing connector status:
+   - AI Model Training: X% with "Ready" indicator
+   - Scanner Calibration: X% optimized
+   - Prediction Tracking: X% verified
+   - Strategy Simulations: X% completed
+4. **Data Collection Panel** - Shows historical data fetch status and symbol counts
+5. **Simulation Quick Panel** - Start backtests, view job history directly from NIA
+
+**Files Modified:**
+- `/app/frontend/src/components/NIA.jsx` - Added TrainAllPanel, LearningProgressPanel, DataCollectionPanel, SimulationQuickPanel (~550 lines)
+- `/app/frontend/src/components/Sidebar.js` - Removed Training Center
+- `/app/frontend/src/App.js` - Removed Training Center routing
+- `/app/frontend/src/components/tabs/AnalyticsTab.jsx` - Removed LearningIntelligenceHub, added redirect banner to NIA
+
+**Deprecated Files (renamed with _deprecated_ prefix):**
+- `_deprecated_TrainingCenter.jsx`
+- `_deprecated_LearningDashboard.jsx`
+- `_deprecated_LearningIntelligenceHub.jsx`
+
+---
+
+### Clear Pending Queue Endpoint ✅ NEW (March 16, 2026)
+Added `/api/ib-collector/clear-pending` to reset the collection queue before starting a new collection type.
+
+**Files Modified:**
+- `/app/backend/services/historical_data_queue_service.py` - Added `clear_pending_requests()` method
+- `/app/backend/routers/ib_collector_router.py` - Added `/clear-pending` endpoint
+
+---
+
+### Trading Report Card - NIA Enhancement ✅ (March 15, 2026)
 **YOUR PERSONAL TRADING PERFORMANCE INSIGHTS** - See your trading patterns like the AI sees them.
 
 **What It Is:**

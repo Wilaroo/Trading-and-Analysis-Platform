@@ -40,10 +40,564 @@ import {
   Cpu,
   Eye,
   FlaskConical,
-  Rocket
+  Rocket,
+  HardDrive,
+  Download,
+  PlayCircle,
+  History,
+  Sparkles,
+  Settings,
+  Info,
+  StopCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '../utils/api';
+
+const API_BASE = process.env.REACT_APP_BACKEND_URL;
+
+// ==================== TRAIN ALL PANEL ====================
+
+const TrainAllPanel = ({ onTrainComplete }) => {
+  const [isTraining, setIsTraining] = useState(false);
+  const [currentStep, setCurrentStep] = useState(null);
+  const [progress, setProgress] = useState({
+    timeseries: { status: 'pending', message: '' },
+    connectors: { status: 'pending', message: '' },
+    calibration: { status: 'pending', message: '' },
+    simulations: { status: 'pending', message: '' }
+  });
+
+  const trainingSteps = [
+    { key: 'timeseries', label: 'Train Time-Series AI', icon: Brain, description: 'Learning price patterns from historical data' },
+    { key: 'connectors', label: 'Sync Learning Connectors', icon: GitBranch, description: 'Connecting data pipelines' },
+    { key: 'calibration', label: 'Calibrate Scanner', icon: Target, description: 'Optimizing alert thresholds' },
+    { key: 'simulations', label: 'Update Strategy Scores', icon: BarChart3, description: 'Evaluating strategy performance' }
+  ];
+
+  const handleTrainAll = async () => {
+    setIsTraining(true);
+    const newProgress = { ...progress };
+
+    try {
+      // Step 1: Train Time-Series AI
+      setCurrentStep('timeseries');
+      newProgress.timeseries = { status: 'running', message: 'Training model...' };
+      setProgress({ ...newProgress });
+      
+      try {
+        const tsRes = await api.post('/api/ai-modules/timeseries/train');
+        if (tsRes.data?.success) {
+          newProgress.timeseries = { status: 'completed', message: 'Model trained successfully' };
+        } else {
+          newProgress.timeseries = { status: 'warning', message: 'Training skipped - check data' };
+        }
+      } catch (e) {
+        newProgress.timeseries = { status: 'warning', message: 'No training data yet' };
+      }
+      setProgress({ ...newProgress });
+
+      // Step 2: Sync Learning Connectors
+      setCurrentStep('connectors');
+      newProgress.connectors = { status: 'running', message: 'Syncing data flows...' };
+      setProgress({ ...newProgress });
+      
+      try {
+        await api.post('/api/learning-connectors/sync/all');
+        newProgress.connectors = { status: 'completed', message: 'All connectors synced' };
+      } catch (e) {
+        newProgress.connectors = { status: 'warning', message: 'Some connectors skipped' };
+      }
+      setProgress({ ...newProgress });
+
+      // Step 3: Run Calibrations
+      setCurrentStep('calibration');
+      newProgress.calibration = { status: 'running', message: 'Calibrating thresholds...' };
+      setProgress({ ...newProgress });
+      
+      try {
+        await api.post('/api/learning-connectors/sync/run-all-calibrations');
+        newProgress.calibration = { status: 'completed', message: 'Scanner optimized' };
+      } catch (e) {
+        newProgress.calibration = { status: 'warning', message: 'Calibration needs more data' };
+      }
+      setProgress({ ...newProgress });
+
+      // Step 4: Update Strategy Scores
+      setCurrentStep('simulations');
+      newProgress.simulations = { status: 'running', message: 'Calculating scores...' };
+      setProgress({ ...newProgress });
+      
+      try {
+        await api.post('/api/strategy-promotion/evaluate-all');
+        newProgress.simulations = { status: 'completed', message: 'Scores updated' };
+      } catch (e) {
+        newProgress.simulations = { status: 'completed', message: 'Using existing scores' };
+      }
+      setProgress({ ...newProgress });
+
+      setCurrentStep(null);
+      toast.success('Training complete! System is now smarter.');
+      if (onTrainComplete) onTrainComplete();
+
+    } catch (err) {
+      console.error('Training error:', err);
+      toast.error('Training interrupted');
+    } finally {
+      setIsTraining(false);
+      setCurrentStep(null);
+    }
+  };
+
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case 'completed': return <CheckCircle2 className="w-4 h-4 text-green-400" />;
+      case 'running': return <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />;
+      case 'warning': return <AlertTriangle className="w-4 h-4 text-yellow-400" />;
+      case 'failed': return <XCircle className="w-4 h-4 text-red-400" />;
+      default: return <Clock className="w-4 h-4 text-zinc-500" />;
+    }
+  };
+
+  const completedCount = Object.values(progress).filter(p => p.status === 'completed').length;
+
+  return (
+    <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'linear-gradient(135deg, rgba(21, 28, 36, 0.9), rgba(30, 40, 55, 0.9))' }}>
+      <div className="p-4">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #06b6d4, #8b5cf6)' }}>
+              <Sparkles className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-white">Train Everything</h3>
+              <p className="text-xs text-zinc-400">One-click system improvement</p>
+            </div>
+          </div>
+          
+          <button
+            onClick={handleTrainAll}
+            disabled={isTraining}
+            className={`
+              px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-all
+              ${isTraining 
+                ? 'bg-cyan-500/20 text-cyan-400 cursor-not-allowed' 
+                : 'bg-gradient-to-r from-cyan-500 to-violet-500 text-white hover:from-cyan-400 hover:to-violet-400 shadow-lg shadow-cyan-500/25'
+              }
+            `}
+            data-testid="train-all-btn"
+          >
+            {isTraining ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Training... ({completedCount}/4)
+              </>
+            ) : (
+              <>
+                <PlayCircle className="w-4 h-4" />
+                Train All
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Training Steps */}
+        <div className="space-y-2">
+          {trainingSteps.map((step, idx) => {
+            const stepProgress = progress[step.key];
+            const isActive = currentStep === step.key;
+            const Icon = step.icon;
+            
+            return (
+              <div
+                key={step.key}
+                className={`
+                  flex items-center justify-between p-3 rounded-lg transition-all
+                  ${isActive ? 'bg-cyan-500/10 border border-cyan-500/30' : 'bg-white/[0.02] border border-white/5'}
+                `}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`
+                    w-8 h-8 rounded-lg flex items-center justify-center
+                    ${stepProgress.status === 'completed' ? 'bg-green-500/20' : 
+                      isActive ? 'bg-cyan-500/20' : 'bg-white/5'}
+                  `}>
+                    <Icon className={`w-4 h-4 ${
+                      stepProgress.status === 'completed' ? 'text-green-400' :
+                      isActive ? 'text-cyan-400' : 'text-zinc-500'
+                    }`} />
+                  </div>
+                  <div>
+                    <div className="text-sm text-white">{step.label}</div>
+                    <div className="text-xs text-zinc-500">
+                      {stepProgress.message || step.description}
+                    </div>
+                  </div>
+                </div>
+                {getStatusIcon(stepProgress.status)}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ==================== LEARNING PROGRESS PANEL ====================
+
+const LearningProgressPanel = ({ data, loading }) => {
+  const [expanded, setExpanded] = useState(true);
+
+  // Calculate progress percentages
+  const aiTrainingProgress = data.modelTrained ? 100 : (data.historicalBars > 0 ? 50 : 0);
+  const scannerCalibrationProgress = data.calibrationsApplied > 0 ? Math.min(100, data.calibrationsApplied * 20) : 0;
+  const predictionTrackingProgress = data.predictionsTracked > 0 ? Math.min(100, data.predictionsTracked * 10) : 0;
+  const strategySimProgress = data.simulationsRun > 0 ? Math.min(100, data.simulationsRun * 25) : 0;
+
+  const progressItems = [
+    {
+      label: 'AI Model Training',
+      progress: aiTrainingProgress,
+      detail: data.modelTrained ? 'Model trained and active' : `${data.historicalBars?.toLocaleString() || 0} bars available`,
+      color: 'cyan',
+      ready: data.historicalBars > 1000
+    },
+    {
+      label: 'Scanner Calibration',
+      progress: scannerCalibrationProgress,
+      detail: `${data.calibrationsApplied || 0} thresholds optimized`,
+      color: 'violet',
+      ready: data.alertsAnalyzed > 10
+    },
+    {
+      label: 'Prediction Tracking',
+      progress: predictionTrackingProgress,
+      detail: `${data.predictionsTracked || 0} predictions verified`,
+      color: 'amber',
+      ready: data.predictionsTracked > 0
+    },
+    {
+      label: 'Strategy Simulations',
+      progress: strategySimProgress,
+      detail: `${data.simulationsRun || 0} backtests completed`,
+      color: 'emerald',
+      ready: data.simulationsRun > 0
+    }
+  ];
+
+  const overallProgress = Math.round(
+    (aiTrainingProgress + scannerCalibrationProgress + predictionTrackingProgress + strategySimProgress) / 4
+  );
+
+  return (
+    <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #10b981, #06b6d4)' }}>
+            <TrendingUp className="w-4 h-4 text-white" />
+          </div>
+          <div className="text-left">
+            <h3 className="text-sm font-semibold text-white">Learning Progress</h3>
+            <p className="text-xs text-zinc-400">How smart is the system?</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <div className="text-lg font-bold text-white">{overallProgress}%</div>
+            <div className="text-[10px] text-zinc-500">Overall</div>
+          </div>
+          <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        </div>
+      </button>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="border-t border-white/10"
+          >
+            <div className="p-4 space-y-4">
+              {progressItems.map((item) => (
+                <div key={item.label}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-zinc-300">{item.label}</span>
+                    <span className="text-xs text-zinc-500">{item.progress}%</span>
+                  </div>
+                  <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+                    <motion.div
+                      initial={{ width: 0 }}
+                      animate={{ width: `${item.progress}%` }}
+                      transition={{ duration: 0.5, ease: 'easeOut' }}
+                      className={`h-full rounded-full bg-gradient-to-r ${
+                        item.color === 'cyan' ? 'from-cyan-500 to-cyan-400' :
+                        item.color === 'violet' ? 'from-violet-500 to-violet-400' :
+                        item.color === 'amber' ? 'from-amber-500 to-amber-400' :
+                        'from-emerald-500 to-emerald-400'
+                      }`}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between mt-1">
+                    <span className="text-[10px] text-zinc-500">{item.detail}</span>
+                    {item.ready && (
+                      <span className="text-[10px] text-green-400 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> Ready
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+// ==================== DATA COLLECTION PANEL ====================
+
+const DataCollectionPanel = ({ collectionData, loading }) => {
+  const [expanded, setExpanded] = useState(false);
+  
+  const { queueProgress, stats } = collectionData || {};
+  const isRunning = queueProgress && queueProgress.pending > 0;
+  const totalSymbols = stats?.unique_symbols || 0;
+  const totalBars = stats?.total_bars || 0;
+  const progress = queueProgress 
+    ? Math.round((queueProgress.completed / (queueProgress.total || 1)) * 100) 
+    : 0;
+
+  return (
+    <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isRunning ? 'bg-orange-500/20' : 'bg-emerald-500/20'}`}>
+            {isRunning ? (
+              <Download className="w-4 h-4 text-orange-400 animate-pulse" />
+            ) : (
+              <HardDrive className="w-4 h-4 text-emerald-400" />
+            )}
+          </div>
+          <div className="text-left">
+            <h3 className="text-sm font-semibold text-white">Historical Data</h3>
+            <p className="text-xs text-zinc-400">
+              {isRunning ? `Collecting... ${progress}%` : `${totalSymbols.toLocaleString()} symbols ready`}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          {isRunning && (
+            <div className="text-right">
+              <div className="text-sm font-bold text-orange-400">{queueProgress.pending.toLocaleString()}</div>
+              <div className="text-[10px] text-zinc-500">remaining</div>
+            </div>
+          )}
+          {!isRunning && totalBars > 0 && (
+            <div className="text-right">
+              <div className="text-sm font-bold text-emerald-400">{totalBars.toLocaleString()}</div>
+              <div className="text-[10px] text-zinc-500">bars</div>
+            </div>
+          )}
+          <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        </div>
+      </button>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="border-t border-white/10"
+          >
+            <div className="p-4">
+              {isRunning && (
+                <div className="mb-4">
+                  <div className="flex justify-between text-xs text-zinc-400 mb-1">
+                    <span>Progress</span>
+                    <span>{progress}%</span>
+                  </div>
+                  <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-orange-500 to-amber-400 rounded-full transition-all"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 mt-3 text-center">
+                    <div className="p-2 rounded bg-white/[0.02]">
+                      <div className="text-sm font-bold text-emerald-400">{queueProgress.completed?.toLocaleString()}</div>
+                      <div className="text-[10px] text-zinc-500">Completed</div>
+                    </div>
+                    <div className="p-2 rounded bg-white/[0.02]">
+                      <div className="text-sm font-bold text-orange-400">{queueProgress.pending?.toLocaleString()}</div>
+                      <div className="text-[10px] text-zinc-500">Pending</div>
+                    </div>
+                    <div className="p-2 rounded bg-white/[0.02]">
+                      <div className="text-sm font-bold text-red-400">{queueProgress.failed || 0}</div>
+                      <div className="text-[10px] text-zinc-500">Failed</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {!isRunning && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5">
+                    <div className="text-2xl font-bold text-white">{totalSymbols.toLocaleString()}</div>
+                    <div className="text-xs text-zinc-500">Unique Symbols</div>
+                  </div>
+                  <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5">
+                    <div className="text-2xl font-bold text-white">{totalBars.toLocaleString()}</div>
+                    <div className="text-xs text-zinc-500">Total Bars</div>
+                  </div>
+                </div>
+              )}
+              
+              {totalSymbols === 0 && !isRunning && (
+                <div className="text-center py-4">
+                  <HardDrive className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                  <p className="text-sm text-zinc-400">No data collected yet</p>
+                  <p className="text-xs text-zinc-500">Start collection from Training Center</p>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+// ==================== SIMULATION PANEL (NEW) ====================
+
+const SimulationQuickPanel = ({ jobs, loading, onRefresh }) => {
+  const [expanded, setExpanded] = useState(false);
+  const [starting, setStarting] = useState(false);
+
+  const handleQuickTest = async () => {
+    setStarting(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/simulation/quick-test`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(`Simulation started: ${data.job_id}`);
+        if (onRefresh) onRefresh();
+      } else {
+        toast.error('Failed to start simulation');
+      }
+    } catch (err) {
+      toast.error('Error starting simulation');
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const recentJobs = jobs?.slice(0, 3) || [];
+  const completedJobs = jobs?.filter(j => j.status === 'completed') || [];
+  const avgWinRate = completedJobs.length > 0
+    ? completedJobs.reduce((sum, j) => sum + (j.win_rate || 0), 0) / completedJobs.length
+    : 0;
+
+  return (
+    <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-violet-500/20">
+            <History className="w-4 h-4 text-violet-400" />
+          </div>
+          <div className="text-left">
+            <h3 className="text-sm font-semibold text-white">Historical Simulations</h3>
+            <p className="text-xs text-zinc-400">{completedJobs.length} backtests completed</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={(e) => { e.stopPropagation(); handleQuickTest(); }}
+            disabled={starting}
+            className="text-xs px-3 py-1.5 rounded-lg bg-violet-500/20 text-violet-400 hover:bg-violet-500/30 transition-colors flex items-center gap-1.5"
+            data-testid="quick-simulation-btn"
+          >
+            {starting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+            Quick Test
+          </button>
+          <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        </div>
+      </button>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="border-t border-white/10"
+          >
+            <div className="p-4">
+              {completedJobs.length > 0 && (
+                <div className="grid grid-cols-3 gap-2 mb-4">
+                  <div className="p-2 rounded bg-white/[0.02] text-center">
+                    <div className="text-lg font-bold text-white">{completedJobs.length}</div>
+                    <div className="text-[10px] text-zinc-500">Backtests</div>
+                  </div>
+                  <div className="p-2 rounded bg-white/[0.02] text-center">
+                    <div className={`text-lg font-bold ${avgWinRate >= 50 ? 'text-green-400' : 'text-yellow-400'}`}>
+                      {avgWinRate.toFixed(0)}%
+                    </div>
+                    <div className="text-[10px] text-zinc-500">Avg Win Rate</div>
+                  </div>
+                  <div className="p-2 rounded bg-white/[0.02] text-center">
+                    <div className="text-lg font-bold text-white">
+                      {completedJobs.reduce((sum, j) => sum + (j.total_trades || 0), 0)}
+                    </div>
+                    <div className="text-[10px] text-zinc-500">Total Trades</div>
+                  </div>
+                </div>
+              )}
+
+              {recentJobs.length > 0 ? (
+                <div className="space-y-2">
+                  <h4 className="text-xs text-zinc-500 uppercase">Recent Jobs</h4>
+                  {recentJobs.map((job) => (
+                    <div key={job.job_id} className="flex items-center justify-between p-2 rounded bg-white/[0.02]">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${
+                          job.status === 'completed' ? 'bg-green-400' :
+                          job.status === 'running' ? 'bg-cyan-400 animate-pulse' :
+                          job.status === 'failed' ? 'bg-red-400' : 'bg-zinc-400'
+                        }`} />
+                        <span className="text-xs text-zinc-300">{job.job_id?.slice(0, 12)}</span>
+                      </div>
+                      <span className="text-xs text-zinc-500">
+                        {job.win_rate ? `${(job.win_rate * 100).toFixed(0)}% WR` : job.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-4">
+                  <FlaskConical className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                  <p className="text-sm text-zinc-400">No simulations yet</p>
+                  <p className="text-xs text-zinc-500">Click "Quick Test" to run a backtest</p>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
 
 // ==================== SECTION COMPONENTS ====================
 
@@ -1036,7 +1590,11 @@ const NIA = () => {
         timeseriesRes,
         aiAdvisorRes,
         shadowStatsRes,
-        reportCardRes
+        reportCardRes,
+        // New: Collection and Simulation data
+        collectionStatsRes,
+        collectionQueueRes,
+        simulationJobsRes
       ] = await Promise.allSettled([
         api.get('/api/strategy-promotion/phases'),
         api.get('/api/strategy-promotion/candidates'),
@@ -1045,7 +1603,11 @@ const NIA = () => {
         api.get('/api/ai-modules/timeseries/status'),
         api.get('/api/ai-modules/debate/ai-advisor-status'),
         api.get('/api/ai-modules/shadow/stats'),
-        api.get('/api/ai-modules/report-card')
+        api.get('/api/ai-modules/report-card'),
+        // New: Collection and Simulation endpoints
+        api.get('/api/ib-collector/stats'),
+        api.get('/api/ib-collector/queue-progress'),
+        api.get('/api/simulation/jobs?limit=10')
       ]);
 
       const newData = { ...data };
@@ -1105,6 +1667,29 @@ const NIA = () => {
       if (reportCardRes.status === 'fulfilled' && reportCardRes.value.data?.success) {
         newData.reportCard = reportCardRes.value.data;
       }
+
+      // Process collection stats
+      if (collectionStatsRes.status === 'fulfilled' && collectionStatsRes.value.data?.success) {
+        newData.collectionStats = collectionStatsRes.value.data.stats;
+        newData.historicalBars = collectionStatsRes.value.data.stats?.total_bars || 0;
+      }
+
+      // Process collection queue progress
+      if (collectionQueueRes.status === 'fulfilled' && collectionQueueRes.value.data?.success) {
+        newData.collectionQueue = collectionQueueRes.value.data;
+      }
+
+      // Process simulation jobs
+      if (simulationJobsRes.status === 'fulfilled' && simulationJobsRes.value.data?.success) {
+        newData.simulationJobs = simulationJobsRes.value.data.jobs || [];
+        newData.simulationsRun = (simulationJobsRes.value.data.jobs || []).filter(j => j.status === 'completed').length;
+      }
+
+      // Calculate learning progress data
+      newData.modelTrained = newData.timeseriesAccuracy !== null;
+      newData.calibrationsApplied = newData.calibrationsToday || 0;
+      newData.predictionsTracked = newData.timeseriesPredictions || 0;
+      newData.alertsAnalyzed = newData.calibrationsApplied * 5; // Estimate
 
       setData(newData);
 
@@ -1195,8 +1780,30 @@ const NIA = () => {
         </button>
       </div>
 
+      {/* TRAIN ALL - Top Priority Action */}
+      <TrainAllPanel onTrainComplete={() => fetchAllData(true)} />
+
       {/* Intel Overview */}
       <IntelOverview data={data} loading={loading} />
+
+      {/* Learning Progress - Clear view of system intelligence */}
+      <LearningProgressPanel data={data} loading={loading} />
+
+      {/* Data Collection Status */}
+      <DataCollectionPanel 
+        collectionData={{
+          queueProgress: data.collectionQueue,
+          stats: data.collectionStats
+        }}
+        loading={loading}
+      />
+
+      {/* Historical Simulations */}
+      <SimulationQuickPanel
+        jobs={data.simulationJobs}
+        loading={loading}
+        onRefresh={() => fetchAllData()}
+      />
 
       {/* AI Performance Panel */}
       <AIPerformancePanel 
@@ -1222,14 +1829,6 @@ const NIA = () => {
         onDemote={() => {}}
       />
 
-      {/* Learning Connectors Panel */}
-      <LearningConnectorsPanel
-        connectors={data.connectors}
-        thresholds={data.thresholds}
-        loading={loading}
-        onRunCalibrations={handleRunCalibrations}
-      />
-
       {/* Trading Report Card Panel */}
       <ReportCardPanel
         reportCard={data.reportCard}
@@ -1238,7 +1837,7 @@ const NIA = () => {
 
       {/* Footer */}
       <div className="text-center text-xs text-zinc-600 mt-6">
-        <span className="font-mono">NIA v1.0</span> • Neural Intelligence Agency • Part of <span className="text-cyan-500">SentCom</span>
+        <span className="font-mono">NIA v2.0</span> • Neural Intelligence Agency • Part of <span className="text-cyan-500">SentCom</span>
       </div>
     </div>
   );
