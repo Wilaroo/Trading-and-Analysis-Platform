@@ -3012,21 +3012,32 @@ const SentCom = ({ compact = false, embedded = false }) => {
     }
   };
 
-  // Combine API messages with local chat messages, deduplicating by ID
-  // Sort oldest to newest (chronological order for chat display)
+  // Separate chat messages from stream - these should NOT cause conversation re-renders
+  // S.O.C. gets stream data, Conversation gets ONLY local user chat
+  const chatOnlyMessages = React.useMemo(() => {
+    // Only use localMessages for the conversation panel
+    // These only change when the user sends a message or receives a response
+    return localMessages.filter(m => 
+      m.type === 'chat' || 
+      m.action_type === 'chat_response' || 
+      m.action_type === 'user_message'
+    ).sort((a, b) => 
+      new Date(a.timestamp) - new Date(b.timestamp)
+    ).slice(-30);
+  }, [localMessages]);
+  
+  // allMessages is only used for StopFixPanel - not for Conversation
   const allMessages = React.useMemo(() => {
     const combined = [...localMessages, ...messages];
-    // Deduplicate by ID
     const seen = new Set();
     const unique = combined.filter(msg => {
       if (seen.has(msg.id)) return false;
       seen.add(msg.id);
       return true;
     });
-    // Sort by timestamp ascending (oldest first) - chat messages should flow naturally
     return unique.sort((a, b) => 
       new Date(a.timestamp) - new Date(b.timestamp)
-    ).slice(-30); // Keep last 30 messages
+    ).slice(-30);
   }, [localMessages, messages]);
 
   // =========================================================================
@@ -3421,7 +3432,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
             {/* Right: Conversation Panel - 60% */}
             <div className="col-span-7 border-l border-white/10 h-full overflow-hidden">
               <ConversationPanel
-                messages={allMessages}
+                messages={chatOnlyMessages}
                 onSendMessage={handleChat}
                 onQuickAction={handleQuickAction}
                 onCheckTrade={handleCheckTrade}

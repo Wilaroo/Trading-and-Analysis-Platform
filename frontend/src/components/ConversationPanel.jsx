@@ -4,7 +4,7 @@
  * Clean chat interface for user-AI dialogue, separate from the 
  * Stream of Consciousness. This is the right side of the Neural Split layout.
  */
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Send, Brain, MessageSquare, Loader, Gauge, 
@@ -273,8 +273,8 @@ const CheckTradeForm = ({ onSubmit, loading, onClose }) => {
   );
 };
 
-// Main Conversation Panel Component
-const ConversationPanel = ({ 
+// Main Conversation Panel Component - Memoized to prevent flickering
+const ConversationPanel = React.memo(({ 
   messages = [], 
   onSendMessage, 
   onQuickAction,
@@ -286,27 +286,32 @@ const ConversationPanel = ({
   const [inputValue, setInputValue] = useState('');
   const [showTradeForm, setShowTradeForm] = useState(false);
   const scrollRef = useRef(null);
+  const prevMessagesLengthRef = useRef(messages.length);
   
-  // Auto-scroll to bottom when new messages arrive
+  // Only auto-scroll when new messages are added, not on every render
   useEffect(() => {
-    if (scrollRef.current) {
+    if (scrollRef.current && messages.length > prevMessagesLengthRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, loading]);
+    prevMessagesLengthRef.current = messages.length;
+  }, [messages.length]);
   
-  const handleSubmit = (e) => {
+  // Also scroll when loading changes to true (user sent message)
+  useEffect(() => {
+    if (loading && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [loading]);
+  
+  const handleSubmit = useCallback((e) => {
     e.preventDefault();
     if (!inputValue.trim() || loading) return;
     onSendMessage(inputValue);
     setInputValue('');
-  };
+  }, [inputValue, loading, onSendMessage]);
   
-  // Filter to only show chat messages (not system/status)
-  const chatMessages = messages.filter(m => 
-    m.type === 'chat' || 
-    m.action_type === 'chat_response' || 
-    m.action_type === 'user_message'
-  );
+  // Messages are already filtered by parent - use directly
+  const chatMessages = messages;
   
   return (
     <div className={`flex flex-col h-full bg-[#0F1419] overflow-hidden ${className}`} data-testid="conversation-panel">
@@ -397,6 +402,6 @@ const ConversationPanel = ({
       </div>
     </div>
   );
-};
+});
 
 export default ConversationPanel;
