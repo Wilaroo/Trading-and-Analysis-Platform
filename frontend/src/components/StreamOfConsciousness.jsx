@@ -314,81 +314,85 @@ const SOCEntry = React.memo(({ entry, index }) => {
       onClick={() => reasoning && setExpanded(!expanded)}
       data-testid={`soc-entry-${index}`}
     >
-      {/* Main Row */}
-      <div className="flex items-start gap-3">
-        {/* Timestamp + Icon Column */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <span className="text-[10px] font-mono text-zinc-600 w-[52px]">
-            {formatTerminalTime(entry.timestamp)}
-          </span>
-          <div className={`w-7 h-7 rounded-lg ${config.bgColor} border ${config.borderColor} flex items-center justify-center`}>
+      {/* Header Row: Icon + Label + Timestamp */}
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-2">
+          <div className={`w-6 h-6 rounded-lg ${config.bgColor} border ${config.borderColor} flex items-center justify-center`}>
             <span className={config.color}>{config.icon}</span>
           </div>
-        </div>
-        
-        {/* Content Column */}
-        <div className="flex-1 min-w-0">
-          {/* Label + Content */}
-          <div className="flex items-start gap-2">
-            <span className={`text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded ${config.bgColor} ${config.color} flex-shrink-0`}>
-              {config.label}
+          <span className={`text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded ${config.bgColor} ${config.color}`}>
+            {config.label}
+          </span>
+          {entry.symbol && (
+            <span className="text-xs font-bold text-white bg-white/10 px-1.5 py-0.5 rounded">
+              {entry.symbol}
             </span>
-            <p className="text-sm text-zinc-200 leading-relaxed flex-1">
-              {entry.content}
-            </p>
-            {reasoning && (
-              <motion.div animate={{ rotate: expanded ? 180 : 0 }} className="text-zinc-600 flex-shrink-0 mt-0.5">
-                <ChevronDown className="w-3.5 h-3.5" />
-              </motion.div>
-            )}
-          </div>
-          
-          {/* Data Points Row */}
-          {dataPoints.length > 0 && (
-            <div className="flex items-center gap-3 mt-2 flex-wrap">
-              {dataPoints.map((point, i) => (
-                <div key={i} className={`flex items-center gap-1 text-[10px] ${point.color}`}>
-                  {point.icon}
-                  <span>{point.label}</span>
-                </div>
-              ))}
-            </div>
           )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[9px] font-mono text-zinc-600">
+            {formatTerminalTime(entry.timestamp)}
+          </span>
+          {reasoning && (
+            <motion.div animate={{ rotate: expanded ? 180 : 0 }} className="text-zinc-600">
+              <ChevronDown className="w-3 h-3" />
+            </motion.div>
+          )}
+        </div>
+      </div>
+      
+      {/* Content - Full Width */}
+      <p className="text-sm text-zinc-200 leading-relaxed mb-2">
+        {entry.content}
+      </p>
+      
+      {/* Data Points + Confidence Row */}
+      {(dataPoints.length > 0 || entry.confidence) && (
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          {/* Data Points */}
+          <div className="flex items-center gap-3 flex-wrap">
+            {dataPoints.filter(p => !p.label.includes(entry.symbol)).map((point, i) => (
+              <div key={i} className={`flex items-center gap-1 text-[10px] ${point.color}`}>
+                {point.icon}
+                <span>{point.label}</span>
+              </div>
+            ))}
+          </div>
           
           {/* Confidence Bar */}
           {entry.confidence && (
-            <div className="flex items-center gap-2 mt-2">
-              <div className="h-1.5 w-24 bg-zinc-800 rounded-full overflow-hidden">
+            <div className="flex items-center gap-1.5">
+              <div className="h-1 w-16 bg-zinc-800 rounded-full overflow-hidden">
                 <motion.div 
                   initial={{ width: 0 }}
                   animate={{ width: `${entry.confidence}%` }}
                   className={`h-full ${config.bgColor.replace('/10', '/60')}`}
                 />
               </div>
-              <span className="text-[9px] text-zinc-500">{entry.confidence}% conf</span>
+              <span className="text-[9px] text-zinc-500">{entry.confidence}%</span>
             </div>
           )}
-          
-          {/* Expanded Reasoning */}
-          <AnimatePresence>
-            {expanded && reasoning && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="mt-3 pt-2 border-t border-white/5"
-              >
-                <div className="flex items-start gap-2">
-                  <Brain className="w-3.5 h-3.5 text-violet-400 mt-0.5 flex-shrink-0" />
-                  <p className="text-xs text-zinc-400 leading-relaxed">
-                    {reasoning}
-                  </p>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
         </div>
-      </div>
+      )}
+      
+      {/* Expanded Reasoning */}
+      <AnimatePresence>
+        {expanded && reasoning && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mt-2 pt-2 border-t border-white/5"
+          >
+            <div className="flex items-start gap-2">
+              <Brain className="w-3.5 h-3.5 text-violet-400 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                {reasoning}
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 });
