@@ -403,3 +403,87 @@ async def set_volume_filter(
         "message": f"Volume filters set: General>={min_adv_general:,}, Intraday>={min_adv_intraday:,}"
     }
 
+
+
+# ===================== Symbol Blacklist Management =====================
+
+class BlacklistRequest(BaseModel):
+    symbols: List[str] = Field(..., description="Symbols to add/remove from blacklist")
+
+
+@router.get("/config/blacklist")
+async def get_blacklist():
+    """
+    Get the current list of blacklisted symbols.
+    
+    Blacklisted symbols will NEVER generate scanner alerts, even if they
+    pass all other filters. Use this to block known illiquid or problematic tickers.
+    """
+    if not _scanner:
+        raise HTTPException(status_code=500, detail="Scanner not initialized")
+    
+    return {
+        "success": True,
+        "blacklisted_symbols": _scanner.get_blacklist(),
+        "count": len(_scanner.get_blacklist())
+    }
+
+
+@router.post("/config/blacklist/add")
+async def add_to_blacklist(request: BlacklistRequest):
+    """
+    Add symbols to the scanner blacklist.
+    
+    Blacklisted symbols will be permanently blocked from generating alerts
+    until removed from the blacklist.
+    """
+    if not _scanner:
+        raise HTTPException(status_code=500, detail="Scanner not initialized")
+    
+    result = _scanner.add_to_blacklist(request.symbols)
+    
+    return {
+        "success": True,
+        "added": result["added"],
+        "total_blacklisted": result["total_blacklisted"],
+        "message": f"Added {result['added']} symbols to blacklist"
+    }
+
+
+@router.post("/config/blacklist/remove")
+async def remove_from_blacklist(request: BlacklistRequest):
+    """
+    Remove symbols from the scanner blacklist.
+    
+    Removed symbols will be allowed to generate alerts again if they
+    pass volume and quality filters.
+    """
+    if not _scanner:
+        raise HTTPException(status_code=500, detail="Scanner not initialized")
+    
+    result = _scanner.remove_from_blacklist(request.symbols)
+    
+    return {
+        "success": True,
+        "removed": result["removed"],
+        "total_blacklisted": result["total_blacklisted"],
+        "message": f"Removed {result['removed']} symbols from blacklist"
+    }
+
+
+@router.get("/config/blacklist/check/{symbol}")
+async def check_blacklist(symbol: str):
+    """
+    Check if a specific symbol is blacklisted.
+    """
+    if not _scanner:
+        raise HTTPException(status_code=500, detail="Scanner not initialized")
+    
+    is_blacklisted = _scanner.is_blacklisted(symbol)
+    
+    return {
+        "success": True,
+        "symbol": symbol.upper(),
+        "is_blacklisted": is_blacklisted
+    }
+

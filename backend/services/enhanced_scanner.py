@@ -590,6 +590,23 @@ class EnhancedBackgroundScanner:
         self._adv_cache: Dict[str, Tuple[int, datetime]] = {}  # Cache ADV values with timestamp
         self._adv_cache_ttl = 3600  # 1 hour (ADV doesn't change much intraday)
         
+        # Symbol validation - known invalid/illiquid symbols that pass through due to data errors
+        # These are symbols that should NEVER generate alerts
+        self._blacklisted_symbols: Set[str] = {
+            # Known illiquid REITs that slip through
+            "ALEX", "AIV", "AKR", "CIO", "CLPR", "DEA", "DEI", "ELME", "GMRE", "GTY", "HIW",
+            "JBGS", "MDV", "OFC", "OUT", "PDM", "PEB",
+            # Very low volume small caps often with data issues
+            "ALJJ", "ALOT", "AMTB", "AMYT", "ANTE", "APDN", "APTX", "AQMS", "ARAV", "ASXC",
+            # Penny stocks / de-listed / halted that may appear
+            "DWAC", "SOLO", "AYRO", "XL", "VLDR", "ARVL", "PTRA", "QS",
+            # Known symbols with frequent data quality issues
+            "GEO", "MPW", "INN",
+        }
+        
+        # Minimum volume to allow even on API errors (fail closed)
+        self._adv_error_default = 0  # If ADV fetch fails, assume 0 volume (fail closed)
+        
         # Intraday/scalp setups requiring higher volume
         self._intraday_setups = {
             "first_vwap_pullback", "first_move_up", "first_move_down", "bella_fade",
@@ -824,8 +841,67 @@ class EnhancedBackgroundScanner:
             "min_adv_general": self._min_adv_general,
             "min_adv_intraday": self._min_adv_intraday,
             "intraday_setups": list(self._intraday_setups),
-            "symbols_skipped_adv_last_scan": getattr(self, '_symbols_skipped_adv', 0)
+            "symbols_skipped_adv_last_scan": getattr(self, '_symbols_skipped_adv', 0),
+            "blacklisted_symbols_count": len(self._blacklisted_symbols),
+            "fail_closed_enabled": self._adv_error_default == 0,
         }
+    
+    def add_to_blacklist(self, symbols: List[str]) -> Dict:
+        """
+        Add symbols to the blacklist. These symbols will never generate alerts.
+        
+        Args:
+            symbols: List of symbols to blacklist
+        
+        Returns:
+            Dict with added count and current blacklist size
+        """
+        added = 0
+        for symbol in symbols:
+            symbol = symbol.upper()
+            if symbol not in self._blacklisted_symbols:
+                self._blacklisted_symbols.add(symbol)
+                added += 1
+                # Clear any cached ADV for this symbol
+                if symbol in self._adv_cache:
+                    del self._adv_cache[symbol]
+        
+        logger.info(f"Added {added} symbols to scanner blacklist. Total: {len(self._blacklisted_symbols)}")
+        return {
+            "added": added,
+            "total_blacklisted": len(self._blacklisted_symbols)
+        }
+    
+    def remove_from_blacklist(self, symbols: List[str]) -> Dict:
+        """
+        Remove symbols from the blacklist.
+        
+        Args:
+            symbols: List of symbols to remove
+        
+        Returns:
+            Dict with removed count and current blacklist size
+        """
+        removed = 0
+        for symbol in symbols:
+            symbol = symbol.upper()
+            if symbol in self._blacklisted_symbols:
+                self._blacklisted_symbols.discard(symbol)
+                removed += 1
+        
+        logger.info(f"Removed {removed} symbols from scanner blacklist. Total: {len(self._blacklisted_symbols)}")
+        return {
+            "removed": removed,
+            "total_blacklisted": len(self._blacklisted_symbols)
+        }
+    
+    def get_blacklist(self) -> List[str]:
+        """Get the current blacklist of symbols"""
+        return sorted(list(self._blacklisted_symbols))
+    
+    def is_blacklisted(self, symbol: str) -> bool:
+        """Check if a symbol is blacklisted"""
+        return symbol.upper() in self._blacklisted_symbols
     
     async def _auto_execute_alert(self, alert: LiveAlert):
         """Auto-execute an alert through the trading bot"""
@@ -1621,13 +1697,23 @@ class EnhancedBackgroundScanner:
         
         Uses cached ADV when available, fetches fresh data for unknown symbols.
         Symbols below minimum ADV are completely skipped (no further processing).
+        
+        FAIL CLOSED: If ADV data cannot be fetched, the symbol is REJECTED (not allowed through).
+        This prevents illiquid or problematic symbols from generating alerts due to data errors.
         """
         now = datetime.now(timezone.utc)
         qualified_symbols = []
         symbols_needing_adv = []
+        symbols_blacklisted = 0
         
         # Check cache first for quick filtering
         for symbol in symbols:
+            # FIRST: Check blacklist - immediately reject known bad symbols
+            if symbol in self._blacklisted_symbols:
+                symbols_blacklisted += 1
+                self._symbols_skipped_adv += 1
+                continue
+            
             if symbol in self._adv_cache:
                 cached_adv, cached_time = self._adv_cache[symbol]
                 if (now - cached_time).total_seconds() < self._adv_cache_ttl:
@@ -1648,17 +1734,26 @@ class EnhancedBackgroundScanner:
                 adv_data = await self._batch_fetch_adv(symbols_needing_adv)
                 
                 for symbol in symbols_needing_adv:
-                    adv = adv_data.get(symbol, 0)
+                    adv = adv_data.get(symbol, self._adv_error_default)  # Default to 0 (fail closed)
                     self._adv_cache[symbol] = (adv, now)
                     
                     if adv >= self._min_adv_general:
                         qualified_symbols.append(symbol)
                     else:
                         self._symbols_skipped_adv += 1
+                        if adv == 0:
+                            logger.debug(f"ADV filter blocked {symbol}: volume data unavailable (fail closed)")
                         
             except Exception as e:
-                logger.warning(f"ADV batch fetch failed, allowing all: {e}")
-                qualified_symbols.extend(symbols_needing_adv)
+                # FAIL CLOSED: On error, do NOT allow symbols through
+                logger.warning(f"ADV batch fetch failed, blocking all {len(symbols_needing_adv)} symbols (fail closed): {e}")
+                self._symbols_skipped_adv += len(symbols_needing_adv)
+                # Cache as 0 to prevent repeated fetches
+                for symbol in symbols_needing_adv:
+                    self._adv_cache[symbol] = (0, now)
+        
+        if symbols_blacklisted > 0:
+            logger.debug(f"Blacklist filter blocked {symbols_blacklisted} known illiquid symbols")
         
         return qualified_symbols
     
@@ -1666,6 +1761,9 @@ class EnhancedBackgroundScanner:
         """
         Fetch average daily volume for multiple symbols efficiently.
         Returns dict of {symbol: avg_daily_volume}
+        
+        FAIL CLOSED: On any error, returns 0 for the symbol (not minimum threshold).
+        This ensures symbols with data issues don't slip through.
         """
         adv_data = {}
         
@@ -1685,8 +1783,9 @@ class EnhancedBackgroundScanner:
                 
                 for symbol, result in zip(chunk, results):
                     if isinstance(result, Exception):
-                        # Default to allowing through on error
-                        adv_data[symbol] = self._min_adv_general
+                        # FAIL CLOSED: Default to 0 on error (will be filtered out)
+                        adv_data[symbol] = self._adv_error_default
+                        logger.debug(f"ADV fetch error for {symbol}, defaulting to 0: {result}")
                     else:
                         adv_data[symbol] = result
                 
@@ -1696,10 +1795,10 @@ class EnhancedBackgroundScanner:
                         
         except Exception as e:
             logger.warning(f"Batch ADV fetch failed: {e}")
-            # Default all symbols to pass through
+            # FAIL CLOSED: Default all symbols to 0 (will be filtered out)
             for symbol in symbols:
                 if symbol not in adv_data:
-                    adv_data[symbol] = self._min_adv_general
+                    adv_data[symbol] = self._adv_error_default
         
         return adv_data
     
@@ -3665,7 +3764,10 @@ class EnhancedBackgroundScanner:
             "min_adv_general": self._min_adv_general,
             "min_adv_intraday": self._min_adv_intraday,
             "adv_cache_size": len(self._adv_cache),
-            "wave_scanner": wave_info
+            "wave_scanner": wave_info,
+            # New: Blacklist and fail-closed status
+            "blacklisted_symbols_count": len(self._blacklisted_symbols),
+            "fail_closed_enabled": self._adv_error_default == 0,
         }
 
 

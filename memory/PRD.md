@@ -5,7 +5,45 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ---
 
-## LATEST UPDATE (March 16, 2026)
+## LATEST UPDATE (December 2025)
+
+### Scanner Invalid Ticker Filter Fix ✅ (December 2025)
+**FIXED: Scanner no longer generates alerts for invalid/illiquid tickers like "ALEX"**
+
+**Problem:**
+The live scanner was generating alerts for symbols like "ALEX" (a low-volume REIT) that should have been filtered out. The root cause was that the ADV (Average Daily Volume) filter was using a "fail open" approach - when API calls failed to fetch volume data, symbols were allowed through by default.
+
+**Solution Implemented:**
+
+**1. Fail-Closed Filtering:**
+- Changed error handling from "fail open" to "fail closed"
+- If ADV data cannot be fetched, symbols are now REJECTED (not allowed through)
+- Prevents illiquid symbols from generating alerts due to data errors
+- `_adv_error_default = 0` ensures symbols default to 0 volume on error
+
+**2. Symbol Blacklist:**
+- Added a configurable blacklist of known illiquid/problematic symbols
+- 38 symbols pre-blacklisted including: ALEX, AIV, AKR, CIO, CLPR, etc.
+- Blacklisted symbols are ALWAYS blocked regardless of ADV data
+- User can add/remove symbols via API
+
+**3. New API Endpoints:**
+- `GET /api/live-scanner/config/blacklist` - Get current blacklist
+- `POST /api/live-scanner/config/blacklist/add` - Add symbols to blacklist
+- `POST /api/live-scanner/config/blacklist/remove` - Remove symbols from blacklist
+- `GET /api/live-scanner/config/blacklist/check/{symbol}` - Check if symbol is blacklisted
+
+**4. Stats Enhancements:**
+- Scanner status now shows `blacklisted_symbols_count` and `fail_closed_enabled`
+- Volume filter config shows blacklist info
+
+**Files Modified:**
+- `/app/backend/services/enhanced_scanner.py` - Added blacklist, fail-closed logic, new methods
+- `/app/backend/routers/live_scanner.py` - Added blacklist management endpoints
+
+---
+
+## PREVIOUS UPDATE (March 16, 2026)
 
 ### Multi-Timeframe Backtesting & NIA Enhancements ✅ (March 16, 2026)
 **IMPLEMENTED: Full multi-timeframe support with unified NIA simulation controls**

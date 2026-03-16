@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://neural-trader-test.preview.emergentagent.com
+https://market-alerts-31.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://neural-trader-test.preview.emergentagent.com
+https://market-alerts-31.preview.emergentagent.com
 ```

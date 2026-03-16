@@ -273,7 +273,7 @@ class TestRegimePerformanceAPI:
         import httpx
         
         # Get the API URL from env
-        api_url = "https://neural-trader-test.preview.emergentagent.com"
+        api_url = "https://market-alerts-31.preview.emergentagent.com"
         
         endpoints = [
             "/api/regime-performance/summary",

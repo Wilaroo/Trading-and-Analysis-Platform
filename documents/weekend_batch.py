@@ -6,7 +6,7 @@ This script runs after StartTrading.bat to automatically trigger
 batch operations like data collection, model training, and simulations.
 
 Usage:
-    python weekend_batch.py --cloud-url https://neural-trader-test.preview.emergentagent.com
+    python weekend_batch.py --cloud-url https://market-alerts-31.preview.emergentagent.com
     python weekend_batch.py --cloud-url https://... --mode weekend
     python weekend_batch.py --cloud-url https://... --mode nightly
     python weekend_batch.py --cloud-url https://... --mode auto
