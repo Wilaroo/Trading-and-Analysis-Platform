@@ -744,10 +744,14 @@ class HistoricalSimulationEngine:
         
         # Detect setups
         
-        # Gap and Go (>2% gap up with volume)
+        # ===== GAP STRATEGIES =====
+        
+        # Gap and Go (>2% gap up with volume) - Your favorite!
         if len(bars) >= 2:
             prev_close = bars[-2].get("close", 0)
             gap_pct = (open_price - prev_close) / prev_close * 100 if prev_close > 0 else 0
+            
+            # Gap and Go LONG (gap up)
             if gap_pct > 2 and rvol > 1.5:
                 signals.append({
                     "type": "gap_and_go",
@@ -757,6 +761,32 @@ class HistoricalSimulationEngine:
                     "target_price": close * 1.03,
                     "strength": min(gap_pct / 5 * 100, 100)
                 })
+            
+            # Gap Give and Go (gap fills partially then resumes)
+            if gap_pct > 3 and close > (prev_close + open_price) / 2:  # Holding above 50% of gap
+                if close > open_price and rvol > 1.2:  # Green candle with volume
+                    signals.append({
+                        "type": "gap_give_go",
+                        "direction": "long",
+                        "entry_price": close,
+                        "stop_price": prev_close * 1.005,  # Just above gap fill
+                        "target_price": open_price * 1.02,  # Back to gap high
+                        "strength": 72
+                    })
+            
+            # Gap Down Reversal (SHORT setup)
+            if gap_pct < -2 and rvol > 1.5:
+                if close < open_price:  # Red candle confirming weakness
+                    signals.append({
+                        "type": "gap_down_fade",
+                        "direction": "short",
+                        "entry_price": close,
+                        "stop_price": high * 1.02,
+                        "target_price": close * 0.97,
+                        "strength": 65
+                    })
+        
+        # ===== VWAP STRATEGIES =====
         
         # VWAP Bounce (price pulls back to VWAP and bounces)
         if close > sma20 and abs(low - vwap) / vwap < 0.005:  # Within 0.5% of VWAP
@@ -770,6 +800,61 @@ class HistoricalSimulationEngine:
                     "strength": 70
                 })
         
+        # First VWAP Pullback (INT-35) - First touch of VWAP after move
+        if close > sma20 and low <= vwap * 1.002 and close > vwap:
+            if rvol > 1.0:
+                signals.append({
+                    "type": "first_vwap_pullback",
+                    "direction": "long", 
+                    "entry_price": close,
+                    "stop_price": vwap * 0.985,
+                    "target_price": close * 1.025,
+                    "strength": 75
+                })
+        
+        # VWAP Fade (price extended above VWAP, mean reversion SHORT)
+        if close > vwap * 1.03 and rsi > 70:  # >3% above VWAP and overbought
+            signals.append({
+                "type": "vwap_fade",
+                "direction": "short",
+                "entry_price": close,
+                "stop_price": high * 1.01,
+                "target_price": vwap * 1.01,  # Back toward VWAP
+                "strength": 65
+            })
+        
+        # ===== MOMENTUM STRATEGIES =====
+        
+        # HitchHiker (Gap + Hold + Continuation)
+        if len(bars) >= 2:
+            prev_close = bars[-2].get("close", 0)
+            gap_pct = (open_price - prev_close) / prev_close * 100 if prev_close > 0 else 0
+            if gap_pct > 2 and close > vwap and rvol >= 2.0:
+                dist_from_high = (high - close) / close * 100
+                if dist_from_high < 1.5:  # Consolidating near highs
+                    signals.append({
+                        "type": "hitchhiker",
+                        "direction": "long",
+                        "entry_price": close,
+                        "stop_price": vwap * 0.98,
+                        "target_price": high * 1.03,
+                        "strength": 80
+                    })
+        
+        # Trend Momentum Continuation
+        if close > sma20 and closes[-1] > closes[-2] > closes[-3]:  # 3 green days
+            if rvol > 1.0:
+                signals.append({
+                    "type": "trend_continuation",
+                    "direction": "long",
+                    "entry_price": close,
+                    "stop_price": sma20 * 0.98,
+                    "target_price": close * 1.04,
+                    "strength": 68
+                })
+        
+        # ===== REVERSAL STRATEGIES =====
+        
         # Oversold bounce (RSI < 30 with reversal)
         if rsi < 30 and close > open_price:
             signals.append({
@@ -780,6 +865,19 @@ class HistoricalSimulationEngine:
                 "target_price": close * 1.04,
                 "strength": 60
             })
+        
+        # Overbought Fade (RSI > 70 with reversal)
+        if rsi > 70 and close < open_price:
+            signals.append({
+                "type": "overbought_fade",
+                "direction": "short",
+                "entry_price": close,
+                "stop_price": high * 1.02,
+                "target_price": close * 0.96,
+                "strength": 60
+            })
+        
+        # ===== BREAKOUT STRATEGIES =====
         
         # Breakout (new 20-day high with volume)
         high_20 = max(b.get("high", 0) for b in bars[-21:-1]) if len(bars) > 20 else high
@@ -792,6 +890,52 @@ class HistoricalSimulationEngine:
                 "target_price": close * 1.05,
                 "strength": 75
             })
+        
+        # Breakdown (new 20-day low with volume) - SHORT
+        low_20 = min(b.get("low", float('inf')) for b in bars[-21:-1]) if len(bars) > 20 else low
+        if close < low_20 and rvol > 1.2:
+            signals.append({
+                "type": "breakdown",
+                "direction": "short",
+                "entry_price": close,
+                "stop_price": low_20 * 1.02,
+                "target_price": close * 0.95,
+                "strength": 75
+            })
+        
+        # ===== CONSOLIDATION/FLAG STRATEGIES =====
+        
+        # Bull Flag (uptrend, tight consolidation, breakout)
+        if len(bars) >= 5:
+            # Check for prior uptrend (5-day gain)
+            five_day_return = (close - bars[-5].get("close", close)) / bars[-5].get("close", close) * 100
+            # Check for tight range in last 3 days
+            recent_range = max(b.get("high", 0) for b in bars[-3:]) - min(b.get("low", float('inf')) for b in bars[-3:])
+            avg_range = sum(b.get("high", 0) - b.get("low", 0) for b in bars[-10:-3]) / 7 if len(bars) >= 10 else recent_range
+            
+            if five_day_return > 5 and recent_range < avg_range * 0.6:  # Tight consolidation after run
+                if close > open_price:  # Breakout candle
+                    signals.append({
+                        "type": "bull_flag",
+                        "direction": "long",
+                        "entry_price": close,
+                        "stop_price": min(b.get("low", close) for b in bars[-3:]) * 0.99,
+                        "target_price": close * 1.05,
+                        "strength": 78
+                    })
+        
+        # Puppy Dog Consolidation (tight range after gap)
+        if len(bars) >= 3:
+            recent_range_pct = (max(b.get("high", 0) for b in bars[-3:]) - min(b.get("low", float('inf')) for b in bars[-3:])) / close * 100
+            if recent_range_pct < 3 and close > sma20:  # Very tight, in uptrend
+                signals.append({
+                    "type": "puppy_dog",
+                    "direction": "long",
+                    "entry_price": close,
+                    "stop_price": min(b.get("low", close) for b in bars[-3:]) * 0.99,
+                    "target_price": close * 1.03,
+                    "strength": 65
+                })
         
         return signals
     
