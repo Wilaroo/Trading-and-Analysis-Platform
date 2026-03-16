@@ -917,10 +917,11 @@ class IBHistoricalCollector:
         Returns:
             Collection plan with time estimates
         """
-        # ADV thresholds matching market scanner
-        ADV_INTRADAY = 500_000    # 1min, 5min bars
-        ADV_SWING = 100_000       # 15min, 1hour bars
-        ADV_INVESTMENT = 50_000   # 1day bars
+        # ADV thresholds (share volume, not dollar volume)
+        # These match typical scanner filters for tradeable stocks
+        ADV_INTRADAY = 500_000    # 500K shares/day - liquid enough for scalping/day trading
+        ADV_SWING = 100_000       # 100K shares/day - liquid enough for swing trades  
+        ADV_INVESTMENT = 50_000   # 50K shares/day - minimum for any position
         
         # Get symbol counts for each tier
         intraday_symbols = await self.get_liquid_symbols(min_adv=ADV_INTRADAY) if include_intraday else []
