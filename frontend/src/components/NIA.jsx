@@ -1058,11 +1058,25 @@ const SimulationQuickPanel = ({ jobs, loading, onRefresh }) => {
   const [starting, setStarting] = useState(null); // null, 'quick', or 'market'
   const [simBarSize, setSimBarSize] = useState('1 day');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [useMultiTimeframe, setUseMultiTimeframe] = useState(false);
+  const [selectedStrategy, setSelectedStrategy] = useState('default');
+  const [maxSymbols, setMaxSymbols] = useState(1500);
+
+  // Predefined strategies from the system
+  const strategies = [
+    { value: 'default', label: 'Default (Momentum)', setup_type: 'MOMENTUM' },
+    { value: 'gap_go', label: 'Gap & Go', setup_type: 'GAP_AND_GO' },
+    { value: 'orb', label: 'Opening Range Breakout', setup_type: 'ORB' },
+    { value: 'vwap_bounce', label: 'VWAP Bounce', setup_type: 'VWAP_BOUNCE' },
+    { value: 'rvol_surge', label: 'RVOL Surge', setup_type: 'RVOL_SURGE' },
+    { value: 'rubberband', label: 'Rubberband Long', setup_type: 'RUBBERBAND_LONG' }
+  ];
 
   // Bar size options for simulation
   const simBarSizes = [
     { value: '1 min', label: '1 Min', description: 'Scalp' },
     { value: '5 mins', label: '5 Min', description: 'Intraday' },
+    { value: '15 mins', label: '15 Min', description: 'Day Trade' },
     { value: '1 day', label: 'Daily', description: 'Swing' }
   ];
 
@@ -1072,7 +1086,7 @@ const SimulationQuickPanel = ({ jobs, loading, onRefresh }) => {
       const res = await fetch(`${API_BASE}/api/simulation/quick-test?bar_size=${encodeURIComponent(simBarSize)}`, { method: 'POST' });
       const data = await res.json();
       if (data.success) {
-        toast.success(`Quick test started: ${simBarSize} bars`);
+        toast.success(`Smart Test started: ${data.symbols_count} symbols on ${simBarSize} bars`);
         if (onRefresh) onRefresh();
       } else {
         toast.error('Failed to start simulation');
@@ -1087,22 +1101,32 @@ const SimulationQuickPanel = ({ jobs, loading, onRefresh }) => {
   const handleMarketWideBacktest = async () => {
     setStarting('market');
     try {
+      const strategyConfig = strategies.find(s => s.value === selectedStrategy) || strategies[0];
+      
       const res = await fetch(`${API_BASE}/api/backtest/market-wide`, { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          days_back: 30,
-          strategies: ['all'],
-          max_symbols: 1000,
-          bar_size: simBarSize
+          strategy: {
+            name: strategyConfig.label,
+            setup_type: strategyConfig.setup_type,
+            min_tqs_score: 60,
+            stop_pct: 2.0,
+            target_pct: 4.0
+          },
+          bar_size: simBarSize,
+          use_multi_timeframe: useMultiTimeframe,
+          max_symbols: maxSymbols,
+          run_in_background: true
         })
       });
       const data = await res.json();
       if (data.success || data.job_id) {
-        toast.success(`Market-wide backtest started (${simBarSize} bars)`);
+        const mtfNote = useMultiTimeframe ? ' (Multi-TF)' : '';
+        toast.success(`Market-wide backtest started: ${maxSymbols} symbols, ${simBarSize}${mtfNote}`);
         if (onRefresh) onRefresh();
       } else {
-        toast.error(data.error || 'Failed to start market-wide backtest');
+        toast.error(data.error || data.detail || 'Failed to start market-wide backtest');
       }
     } catch (err) {
       toast.error('Error starting market-wide backtest');
@@ -1179,31 +1203,97 @@ const SimulationQuickPanel = ({ jobs, loading, onRefresh }) => {
                       initial={{ height: 0, opacity: 0 }}
                       animate={{ height: 'auto', opacity: 1 }}
                       exit={{ height: 0, opacity: 0 }}
-                      className="mb-3"
+                      className="mb-3 space-y-3"
                     >
-                      <label className="block text-xs text-zinc-400 mb-1.5">Bar Size for Backtest</label>
-                      <div className="flex gap-2">
-                        {simBarSizes.map((opt) => {
-                          const isSelected = simBarSize === opt.value;
-                          return (
-                            <button
-                              key={opt.value}
-                              onClick={() => setSimBarSize(opt.value)}
-                              className={`flex-1 px-2 py-1.5 rounded-lg border text-xs transition-all ${
-                                isSelected
-                                  ? 'bg-violet-500/20 border-violet-500/50 text-violet-400'
-                                  : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
-                              }`}
-                              data-testid={`sim-bar-size-${opt.value.replace(/\s+/g, '-')}`}
-                            >
-                              <div className="font-medium">{opt.label}</div>
-                              <div className="text-[10px] text-zinc-500">{opt.description}</div>
-                            </button>
-                          );
-                        })}
+                      {/* Bar Size Selection */}
+                      <div>
+                        <label className="block text-xs text-zinc-400 mb-1.5">Timeframe</label>
+                        <div className="flex gap-2">
+                          {simBarSizes.map((opt) => {
+                            const isSelected = simBarSize === opt.value;
+                            return (
+                              <button
+                                key={opt.value}
+                                onClick={() => setSimBarSize(opt.value)}
+                                className={`flex-1 px-2 py-1.5 rounded-lg border text-xs transition-all ${
+                                  isSelected
+                                    ? 'bg-violet-500/20 border-violet-500/50 text-violet-400'
+                                    : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
+                                }`}
+                                data-testid={`sim-bar-size-${opt.value.replace(/\s+/g, '-')}`}
+                              >
+                                <div className="font-medium">{opt.label}</div>
+                                <div className="text-[10px] text-zinc-500">{opt.description}</div>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                      <p className="text-[10px] text-zinc-500 mt-1.5">
-                        Note: Intraday simulations require collected intraday data
+
+                      {/* Strategy Selection */}
+                      <div>
+                        <label className="block text-xs text-zinc-400 mb-1.5">Strategy</label>
+                        <select
+                          value={selectedStrategy}
+                          onChange={(e) => setSelectedStrategy(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg bg-white/[0.02] border border-white/5 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/50"
+                          data-testid="strategy-select"
+                        >
+                          {strategies.map((s) => (
+                            <option key={s.value} value={s.value}>{s.label}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Max Symbols Slider */}
+                      <div>
+                        <label className="block text-xs text-zinc-400 mb-1.5">
+                          Max Symbols: <span className="text-violet-400">{maxSymbols.toLocaleString()}</span>
+                        </label>
+                        <input
+                          type="range"
+                          min="100"
+                          max="1500"
+                          step="100"
+                          value={maxSymbols}
+                          onChange={(e) => setMaxSymbols(parseInt(e.target.value))}
+                          className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-violet-500"
+                          data-testid="max-symbols-slider"
+                        />
+                        <div className="flex justify-between text-[10px] text-zinc-500 mt-0.5">
+                          <span>100</span>
+                          <span>1,500</span>
+                        </div>
+                      </div>
+
+                      {/* Multi-Timeframe Toggle */}
+                      <div className="flex items-center justify-between p-2 rounded-lg bg-white/[0.02] border border-white/5">
+                        <div>
+                          <div className="text-xs text-zinc-300">Multi-Timeframe Analysis</div>
+                          <div className="text-[10px] text-zinc-500">
+                            Daily trend + {simBarSize} entries
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setUseMultiTimeframe(!useMultiTimeframe)}
+                          className={`w-10 h-5 rounded-full transition-all ${
+                            useMultiTimeframe 
+                              ? 'bg-violet-500' 
+                              : 'bg-zinc-700'
+                          }`}
+                          data-testid="multi-timeframe-toggle"
+                        >
+                          <div className={`w-4 h-4 rounded-full bg-white shadow transform transition-transform ${
+                            useMultiTimeframe ? 'translate-x-5' : 'translate-x-0.5'
+                          }`} />
+                        </button>
+                      </div>
+
+                      <p className="text-[10px] text-zinc-500">
+                        {useMultiTimeframe 
+                          ? 'Only takes trades aligned with daily trend direction'
+                          : 'Intraday simulations require collected intraday data'
+                        }
                       </p>
                     </motion.div>
                   )}
@@ -1223,8 +1313,8 @@ const SimulationQuickPanel = ({ jobs, loading, onRefresh }) => {
                   ) : (
                     <Zap className="w-4 h-4" />
                   )}
-                  Quick Test
-                  <span className="text-[10px] text-violet-400/60">(10 symbols)</span>
+                  Smart Test
+                  <span className="text-[10px] text-violet-400/60">(30 symbols)</span>
                 </button>
                 <button
                   onClick={handleMarketWideBacktest}
@@ -1237,8 +1327,8 @@ const SimulationQuickPanel = ({ jobs, loading, onRefresh }) => {
                   ) : (
                     <BarChart3 className="w-4 h-4" />
                   )}
-                  Market-Wide
-                  <span className="text-[10px] text-cyan-400/60">(1000 symbols)</span>
+                  Full Test
+                  <span className="text-[10px] text-cyan-400/60">({maxSymbols.toLocaleString()} symbols)</span>
                 </button>
               </div>
 

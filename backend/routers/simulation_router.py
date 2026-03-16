@@ -295,13 +295,18 @@ async def get_simulation_summary(job_id: str):
 
 
 @router.post("/quick-test")
-async def quick_test_simulation():
+async def quick_test_simulation(bar_size: str = "1 day"):
     """
     Run a SMART test simulation using the most liquid, well-traded symbols.
     Uses last 30 days and up to 30 "smart" symbols selected from:
     1. Symbols with collected IB data (highest data quality)
     2. Major liquid ETFs (SPY, QQQ, IWM)
     3. High-volume large-cap stocks across sectors
+    
+    Supports multiple bar sizes:
+    - "1 day" (default): Daily bars for swing trading analysis
+    - "5 mins": 5-minute bars for intraday strategies
+    - "1 min": 1-minute bars for scalping strategies
     
     This provides meaningful, statistically-relevant results for testing strategies.
     """
@@ -312,6 +317,15 @@ async def quick_test_simulation():
         from services.historical_simulation_engine import SimulationConfig
         
         db = _simulation_engine._db
+        
+        # Normalize bar_size to IB format
+        bar_size_map = {
+            "1day": "1 day", "1d": "1 day", "daily": "1 day",
+            "5min": "5 mins", "5m": "5 mins", "5mins": "5 mins",
+            "1min": "1 min", "1m": "1 min",
+            "15min": "15 mins", "15m": "15 mins", "15mins": "15 mins",
+        }
+        normalized_bar_size = bar_size_map.get(bar_size.lower().replace(" ", ""), bar_size)
         
         # SMART symbol selection - prioritize stocks with good data quality
         smart_symbols = []
@@ -388,7 +402,8 @@ async def quick_test_simulation():
             max_position_pct=15.0,  # Slightly smaller positions for diversification
             max_open_positions=5,   # Allow more concurrent positions
             use_ai_agents=True,
-            data_source="ib"  # Use IB collected data
+            data_source="ib",  # Use IB collected data
+            bar_size=normalized_bar_size  # Use requested timeframe
         )
         
         job_id = await _simulation_engine.start_simulation(config)
@@ -396,8 +411,9 @@ async def quick_test_simulation():
         return {
             "success": True,
             "job_id": job_id,
-            "message": f"Smart test started: {start_date} to {end_date} with {len(smart_symbols)} liquid symbols",
+            "message": f"Smart test started: {start_date} to {end_date} with {len(smart_symbols)} liquid symbols on {normalized_bar_size} bars",
             "test_type": "smart",
+            "bar_size": normalized_bar_size,
             "symbols_count": len(smart_symbols),
             "symbols": smart_symbols,
             "config": config.to_dict()

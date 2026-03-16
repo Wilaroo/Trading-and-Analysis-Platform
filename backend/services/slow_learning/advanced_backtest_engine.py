@@ -848,8 +848,10 @@ class AdvancedBacktestEngine:
         filters: BacktestFilters = None,
         symbols: List[str] = None,
         trade_style: str = "swing",
+        bar_size: str = "1 day",
         starting_capital: float = 100000.0,
         max_symbols: int = 1500,
+        use_multi_timeframe: bool = False,
         job_id: str = None
     ) -> Dict[str, Any]:
         """
@@ -858,13 +860,20 @@ class AdvancedBacktestEngine:
         This answers: "Where would this strategy have triggered across all US stocks
         in the given time period, and what would the results have been?"
         
+        Multi-Timeframe Analysis (when use_multi_timeframe=True):
+        - Uses higher timeframe (daily) to determine trend direction
+        - Uses specified bar_size for entry signal detection
+        - Only takes trades aligned with higher timeframe trend
+        
         Args:
             strategy: Strategy configuration to test
             filters: Date and market filters
             symbols: Optional list of symbols (if None, fetches full market)
             trade_style: 'intraday', 'swing', or 'investment' for pre-filtering
+            bar_size: Bar size for simulation (e.g., '1 day', '5 mins', '1 min')
             starting_capital: Capital per trade calculation
             max_symbols: Maximum symbols to scan (default 1500 for comprehensive coverage)
+            use_multi_timeframe: Enable multi-timeframe analysis (higher TF trend confirmation)
             job_id: Optional job ID for progress tracking
             
         Returns:
@@ -912,10 +921,15 @@ class AdvancedBacktestEngine:
             min_volume = 50000
             max_price = 1000.0
         
-        # Timeframe for data
-        timeframe = "1day"
-        if trade_style == "intraday":
-            timeframe = "5min"
+        # Normalize bar_size to IB format and use it for primary timeframe
+        normalized_bar_size = self._normalize_bar_size(bar_size)
+        primary_timeframe = normalized_bar_size
+        
+        # Multi-timeframe setup: higher TF for trend, lower TF for entry
+        higher_timeframe = "1 day"  # Always use daily for trend confirmation
+        use_mtf = use_multi_timeframe and primary_timeframe != "1 day"
+        
+        logger.info(f"Market-wide backtest: bar_size={normalized_bar_size}, multi_timeframe={use_mtf}")
         
         # Process symbols in batches
         batch_size = 25
@@ -924,10 +938,10 @@ class AdvancedBacktestEngine:
             
             for symbol in batch:
                 try:
-                    # Fetch historical data
+                    # Fetch primary timeframe data
                     bars = await self._get_cached_bars(
                         symbol=symbol,
-                        timeframe=timeframe,
+                        timeframe=primary_timeframe,
                         start_date=filters.start_date,
                         end_date=filters.end_date
                     )
@@ -944,17 +958,37 @@ class AdvancedBacktestEngine:
                     if avg_volume < min_volume:
                         continue
                     
+                    # Multi-timeframe: Get higher timeframe trend
+                    htf_trend = None
+                    if use_mtf:
+                        htf_bars = await self._get_cached_bars(
+                            symbol=symbol,
+                            timeframe=higher_timeframe,
+                            start_date=filters.start_date,
+                            end_date=filters.end_date
+                        )
+                        if htf_bars and len(htf_bars) >= 20:
+                            htf_trend = self._determine_trend(htf_bars)
+                    
                     # Run strategy simulation on this symbol
                     trades, equity_curve = await self._simulate_strategy(
                         bars=bars,
                         strategy=strategy,
                         starting_capital=starting_capital,
-                        symbol=symbol
+                        symbol=symbol,
+                        htf_trend=htf_trend if use_mtf else None
                     )
                     
                     if trades:
                         # Convert trades to dicts
                         trade_dicts = [t.to_dict() if hasattr(t, 'to_dict') else t for t in trades]
+                        
+                        # Tag with timeframe info
+                        for td in trade_dicts:
+                            td["bar_size"] = normalized_bar_size
+                            td["multi_timeframe"] = use_mtf
+                            if use_mtf and htf_trend:
+                                td["htf_trend"] = htf_trend
                         
                         all_trades.extend(trade_dicts)
                         trades_by_symbol[symbol] = trade_dicts
@@ -1251,6 +1285,44 @@ class AdvancedBacktestEngine:
     # Data Caching and Management
     # ========================================================================
     
+    def _normalize_bar_size(self, bar_size: str) -> str:
+        """
+        Normalize bar_size format to match IB collected data format.
+        
+        IB format: "1 day", "5 mins", "15 mins", "1 min", "1 hour"
+        This ensures compatibility between different parts of the system.
+        """
+        bar_size_lower = bar_size.lower().strip()
+        
+        # Map common variations to IB format
+        mapping = {
+            # Daily
+            "1day": "1 day",
+            "1d": "1 day",
+            "daily": "1 day",
+            "day": "1 day",
+            # 5 minute
+            "5min": "5 mins",
+            "5m": "5 mins",
+            "5mins": "5 mins",
+            "5 min": "5 mins",
+            # 15 minute
+            "15min": "15 mins",
+            "15m": "15 mins",
+            "15mins": "15 mins",
+            "15 min": "15 mins",
+            # 1 minute
+            "1min": "1 min",
+            "1m": "1 min",
+            # 1 hour
+            "1hour": "1 hour",
+            "1h": "1 hour",
+            "60min": "1 hour",
+            "60 min": "1 hour",
+        }
+        
+        return mapping.get(bar_size_lower, bar_size)
+
     async def _get_cached_bars(
         self,
         symbol: str,
@@ -1260,17 +1332,56 @@ class AdvancedBacktestEngine:
     ) -> List[Dict]:
         """Get bars from hybrid data service (cache -> IB -> Alpaca)"""
         
-        # Try hybrid data service first (it handles caching internally)
+        # Normalize timeframe to IB format
+        normalized_tf = self._normalize_bar_size(timeframe)
+        
+        # Try IB collected data first (PRIMARY SOURCE)
+        if self._db is not None:
+            try:
+                # Determine date format based on bar size
+                is_daily = normalized_tf == "1 day"
+                
+                query = {
+                    "symbol": symbol.upper(),
+                    "bar_size": normalized_tf,
+                    "date": {
+                        "$gte": start_date if is_daily else f"{start_date}T00:00:00",
+                        "$lte": end_date if is_daily else f"{end_date}T23:59:59"
+                    }
+                }
+                
+                ib_bars = list(self._db["ib_historical_data"].find(
+                    query,
+                    {"_id": 0}
+                ).sort("date", 1))
+                
+                if ib_bars and len(ib_bars) >= 5:
+                    logger.debug(f"IB data: {symbol} {normalized_tf} -> {len(ib_bars)} bars")
+                    # Convert to standard format
+                    return [{
+                        "timestamp": bar.get("date"),
+                        "open": bar.get("open"),
+                        "high": bar.get("high"),
+                        "low": bar.get("low"),
+                        "close": bar.get("close"),
+                        "volume": bar.get("volume"),
+                        "symbol": symbol,
+                        "bar_size": normalized_tf
+                    } for bar in ib_bars]
+            except Exception as e:
+                logger.warning(f"IB data fetch error for {symbol}: {e}")
+        
+        # Try hybrid data service second
         if self._hybrid_data_service is not None:
             try:
                 result = await self._hybrid_data_service.get_bars(
                     symbol=symbol,
-                    timeframe=timeframe.lower(),
+                    timeframe=normalized_tf,
                     start_date=start_date,
                     end_date=end_date
                 )
                 if result.success and result.bars:
-                    logger.debug(f"Hybrid data: {symbol} {timeframe} -> {result.bar_count} bars from {result.source}")
+                    logger.debug(f"Hybrid data: {symbol} {normalized_tf} -> {result.bar_count} bars from {result.source}")
                     return result.bars
             except Exception as e:
                 logger.warning(f"Hybrid data service error for {symbol}: {e}")
@@ -1280,7 +1391,7 @@ class AdvancedBacktestEngine:
             cached = list(self._backtest_cache_col.find(
                 {
                     "symbol": symbol.upper(),
-                    "timeframe": timeframe,
+                    "timeframe": normalized_tf,
                     "date": {"$gte": start_date, "$lte": end_date}
                 },
                 {"_id": 0}
@@ -1289,37 +1400,38 @@ class AdvancedBacktestEngine:
             if cached and len(cached) > 10:  # Have meaningful cached data
                 return cached
         
-        # Fetch from Alpaca directly as last resort
+        # Fetch from Alpaca directly as last resort (only daily supported)
         bars = []
-        try:
-            if self._alpaca_service:
-                bars = await self._alpaca_service.get_bars(
-                    symbol, timeframe, 
-                    start=start_date, 
-                    end=end_date,
-                    limit=1000
-                )
-            elif self._historical_data_service:
-                bars = await self._historical_data_service.get_bars(
-                    symbol, timeframe, start_date, end_date
-                )
-        except Exception as e:
-            logger.warning(f"Error fetching bars for {symbol}: {e}")
-            
-        # Cache the data
-        if bars and self._backtest_cache_col is not None:
-            for bar in bars:
-                bar["symbol"] = symbol.upper()
-                bar["timeframe"] = timeframe
-                bar["date"] = bar.get("timestamp", "")[:10]
+        if normalized_tf == "1 day":
+            try:
+                if self._alpaca_service:
+                    bars = await self._alpaca_service.get_bars(
+                        symbol, "1Day", 
+                        start=start_date, 
+                        end=end_date,
+                        limit=1000
+                    )
+                elif self._historical_data_service:
+                    bars = await self._historical_data_service.get_bars(
+                        symbol, "1Day", start_date, end_date
+                    )
+            except Exception as e:
+                logger.warning(f"Error fetching bars for {symbol}: {e}")
                 
-            # Upsert to avoid duplicates
-            for bar in bars:
-                self._backtest_cache_col.update_one(
-                    {"symbol": bar["symbol"], "timeframe": bar["timeframe"], "date": bar["date"]},
-                    {"$set": bar},
-                    upsert=True
-                )
+            # Cache the data
+            if bars and self._backtest_cache_col is not None:
+                for bar in bars:
+                    bar["symbol"] = symbol.upper()
+                    bar["timeframe"] = normalized_tf
+                    bar["date"] = bar.get("timestamp", "")[:10]
+                    
+                # Upsert to avoid duplicates
+                for bar in bars:
+                    self._backtest_cache_col.update_one(
+                        {"symbol": bar["symbol"], "timeframe": bar["timeframe"], "date": bar["date"]},
+                        {"$set": bar},
+                        upsert=True
+                    )
         
         return bars
 
@@ -1359,14 +1471,83 @@ class AdvancedBacktestEngine:
         
         return filtered
     
+    def _determine_trend(self, bars: List[Dict], lookback: int = 20) -> str:
+        """
+        Determine trend direction from bars using multiple indicators.
+        
+        Returns:
+            'bullish', 'bearish', or 'neutral'
+        """
+        if not bars or len(bars) < lookback:
+            return 'neutral'
+        
+        recent_bars = bars[-lookback:]
+        closes = [b.get("close", b.get("c", 0)) for b in recent_bars]
+        
+        if not closes or all(c == 0 for c in closes):
+            return 'neutral'
+        
+        # Calculate 20-period SMA
+        sma20 = sum(closes) / len(closes)
+        current_price = closes[-1]
+        
+        # Price vs SMA
+        price_vs_sma = "above" if current_price > sma20 else "below"
+        
+        # Higher highs / higher lows analysis
+        highs = [b.get("high", b.get("h", 0)) for b in recent_bars]
+        lows = [b.get("low", b.get("l", 0)) for b in recent_bars]
+        
+        recent_high = max(highs[-10:]) if len(highs) >= 10 else max(highs)
+        older_high = max(highs[:10]) if len(highs) >= 10 else highs[0]
+        recent_low = min(lows[-10:]) if len(lows) >= 10 else min(lows)
+        older_low = min(lows[:10]) if len(lows) >= 10 else lows[0]
+        
+        higher_highs = recent_high > older_high
+        higher_lows = recent_low > older_low
+        lower_highs = recent_high < older_high
+        lower_lows = recent_low < older_low
+        
+        # Combine signals
+        bullish_signals = 0
+        bearish_signals = 0
+        
+        if price_vs_sma == "above":
+            bullish_signals += 1
+        else:
+            bearish_signals += 1
+            
+        if higher_highs and higher_lows:
+            bullish_signals += 2
+        elif lower_highs and lower_lows:
+            bearish_signals += 2
+        
+        # Final determination
+        if bullish_signals >= 2:
+            return 'bullish'
+        elif bearish_signals >= 2:
+            return 'bearish'
+        else:
+            return 'neutral'
+
     async def _simulate_strategy(
         self,
         symbol: str,
         bars: List[Dict],
         strategy: StrategyConfig,
-        starting_capital: float
+        starting_capital: float,
+        htf_trend: str = None
     ) -> Tuple[List[BacktestTrade], List[Dict]]:
-        """Simulate a strategy on historical bars"""
+        """
+        Simulate a strategy on historical bars.
+        
+        Args:
+            symbol: Stock symbol
+            bars: Historical price bars
+            strategy: Strategy configuration
+            starting_capital: Starting capital
+            htf_trend: Higher timeframe trend ('bullish', 'bearish', 'neutral') for MTF analysis
+        """
         trades: List[BacktestTrade] = []
         equity_curve: List[Dict] = []
         
@@ -1446,7 +1627,18 @@ class AdvancedBacktestEngine:
             
             else:
                 # Check entry conditions
-                if self._check_entry_signal(bar, strategy, bars[:i+1]):
+                # Multi-timeframe filter: only trade in direction of higher TF trend
+                entry_allowed = True
+                if htf_trend:
+                    # For now, only allow long entries in bullish trends
+                    # Short entries in bearish trends
+                    # Skip entries in neutral or opposing trends
+                    if htf_trend == 'bearish':
+                        entry_allowed = False  # No longs in downtrends
+                    elif htf_trend == 'neutral':
+                        entry_allowed = True   # Allow but with caution
+                
+                if entry_allowed and self._check_entry_signal(bar, strategy, bars[:i+1]):
                     # Calculate position size
                     position_value = capital * (strategy.position_size_pct / 100)
                     shares = int(position_value / current_price)

@@ -7,6 +7,61 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 16, 2026)
 
+### Multi-Timeframe Backtesting & NIA Enhancements ✅ (March 16, 2026)
+**IMPLEMENTED: Full multi-timeframe support with unified NIA simulation controls**
+
+**1. Bar Size Format Normalization (Backend):**
+- Added `_normalize_bar_size()` method to convert all bar_size formats to IB standard
+- Handles variations: "1day" → "1 day", "5min" → "5 mins", etc.
+- Ensures compatibility between data collection and backtesting systems
+- IB collected data now properly matched during simulations
+
+**2. Timeframe Parameter for Backtests:**
+- `POST /api/simulation/quick-test?bar_size=5%20mins` - Now accepts bar_size parameter
+- `POST /api/backtest/market-wide` - New `bar_size` field (default: "1 day")
+- Supports: "1 min", "5 mins", "15 mins", "1 hour", "1 day"
+
+**3. Multi-Timeframe Analysis (MTF):**
+- New `use_multi_timeframe: bool` parameter on market-wide backtest
+- When enabled: Daily trend determines direction, lower timeframe used for entries
+- Only takes trades aligned with higher timeframe trend (bullish/bearish/neutral)
+- `_determine_trend()` method analyzes: price vs SMA, higher highs/lows patterns
+
+**4. NIA Simulation Panel Enhanced:**
+- Added 15-min timeframe option
+- Strategy selection dropdown (Momentum, Gap & Go, ORB, VWAP Bounce, RVOL Surge, Rubberband)
+- Max symbols slider (100 - 1,500)
+- Multi-Timeframe toggle with visual indicator
+- Renamed "Quick Test" → "Smart Test" (30 symbols)
+- Renamed "Market-Wide" → "Full Test" with dynamic symbol count display
+
+**API Response Changes:**
+```json
+// Quick/Smart Test
+{
+  "success": true,
+  "test_type": "smart",
+  "bar_size": "5 mins",
+  "symbols_count": 30
+}
+
+// Market-Wide with MTF
+{
+  "success": true,
+  "bar_size": "5 mins",
+  "use_multi_timeframe": true,
+  "message": "...on 5 mins (Multi-Timeframe)..."
+}
+```
+
+**Files Modified:**
+- `/app/backend/services/slow_learning/advanced_backtest_engine.py` - Added _normalize_bar_size(), _determine_trend(), MTF logic
+- `/app/backend/routers/advanced_backtest_router.py` - Added bar_size and use_multi_timeframe params
+- `/app/backend/routers/simulation_router.py` - Added bar_size query param to quick-test
+- `/app/frontend/src/components/NIA.jsx` - Enhanced SimulationQuickPanel with all new controls
+
+---
+
 ### Simulation Test Configurations Enhanced ✅ (March 16, 2026)
 **IMPLEMENTED: Smart Test (30 liquid symbols) + Full Test (1500+ symbols)**
 

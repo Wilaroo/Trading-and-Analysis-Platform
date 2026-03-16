@@ -101,12 +101,14 @@ class MarketWideBacktestRequest(BaseModel):
     """Request for market-wide backtest (scan entire US market with a strategy)"""
     strategy: StrategyConfigModel = Field(..., description="Strategy to test across the market")
     trade_style: str = Field("swing", description="Trade style: intraday, swing, investment")
+    bar_size: str = Field("1 day", description="Bar size for simulation: '1 min', '5 mins', '15 mins', '1 hour', '1 day'")
     start_date: Optional[str] = Field(None, description="Start date (default: 30 days ago)")
     end_date: Optional[str] = Field(None, description="End date (default: today)")
     starting_capital: float = Field(100000.0, description="Starting capital for trade sizing")
     max_symbols: int = Field(1500, description="Max symbols to scan (default 1500 for comprehensive coverage)")
     symbols: Optional[List[str]] = Field(None, description="Specific symbols (None = scan market)")
     run_in_background: bool = Field(True, description="Run as background job")
+    use_multi_timeframe: bool = Field(False, description="Enable multi-timeframe analysis (higher TF trend + lower TF entry)")
 
 
 # ============================================================================
@@ -449,6 +451,10 @@ async def run_market_wide_backtest(
     This answers: "Where would this strategy have triggered across all US stocks
     in the given time period, and what would the results have been?"
     
+    Supports multi-timeframe analysis when use_multi_timeframe=True:
+    - Higher timeframe (e.g., daily) determines trend direction
+    - Lower timeframe (e.g., 5 min) used for precise entry signals
+    
     Example use case:
     - "Show me every stock where Rubberband Long Scalp would have triggered in the last 30 days"
     - "What trades would Momentum Swing have taken across the whole market last month?"
@@ -490,7 +496,9 @@ async def run_market_wide_backtest(
             {
                 "strategy": strategy.to_dict() if hasattr(strategy, 'to_dict') else request.strategy.dict(),
                 "trade_style": request.trade_style,
-                "max_symbols": request.max_symbols
+                "bar_size": request.bar_size,
+                "max_symbols": request.max_symbols,
+                "use_multi_timeframe": request.use_multi_timeframe
             }
         )
         
@@ -501,14 +509,20 @@ async def run_market_wide_backtest(
             filters,
             request.symbols,
             request.trade_style,
+            request.bar_size,
             request.starting_capital,
-            request.max_symbols
+            request.max_symbols,
+            request.use_multi_timeframe
         )
         
+        bar_size_display = request.bar_size
+        mtf_note = " (Multi-Timeframe)" if request.use_multi_timeframe else ""
         return {
             "success": True,
             "job_id": job.id,
-            "message": f"Market-wide backtest started for {request.strategy.name}. Scanning up to {request.max_symbols} symbols. Poll /api/backtest/job/{job.id} for status."
+            "bar_size": bar_size_display,
+            "use_multi_timeframe": request.use_multi_timeframe,
+            "message": f"Market-wide backtest started for {request.strategy.name} on {bar_size_display}{mtf_note}. Scanning up to {request.max_symbols} symbols. Poll /api/backtest/job/{job.id} for status."
         }
     
     try:
@@ -517,8 +531,10 @@ async def run_market_wide_backtest(
             filters=filters,
             symbols=request.symbols,
             trade_style=request.trade_style,
+            bar_size=request.bar_size,
             starting_capital=request.starting_capital,
-            max_symbols=request.max_symbols
+            max_symbols=request.max_symbols,
+            use_multi_timeframe=request.use_multi_timeframe
         )
         
         return {
@@ -535,8 +551,10 @@ async def _run_market_wide_job(
     filters,
     symbols,
     trade_style: str,
+    bar_size: str,
     starting_capital: float,
-    max_symbols: int
+    max_symbols: int,
+    use_multi_timeframe: bool = False
 ):
     """Background task for market-wide backtest"""
     try:
@@ -545,8 +563,10 @@ async def _run_market_wide_job(
             filters=filters,
             symbols=symbols,
             trade_style=trade_style,
+            bar_size=bar_size,
             starting_capital=starting_capital,
             max_symbols=max_symbols,
+            use_multi_timeframe=use_multi_timeframe,
             job_id=job_id
         )
         
