@@ -24,6 +24,119 @@ import EnhancedTickerModal from './EnhancedTickerModal';
 const API_BASE = process.env.REACT_APP_BACKEND_URL;
 
 // ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+// Format timestamp to relative time (e.g., "2 mins ago", "Just now")
+const formatRelativeTime = (timestamp) => {
+  if (!timestamp) return '';
+  
+  const now = new Date();
+  const time = new Date(timestamp);
+  const diffMs = now - time;
+  const diffSecs = Math.floor(diffMs / 1000);
+  const diffMins = Math.floor(diffSecs / 60);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+  
+  if (diffSecs < 10) return 'Just now';
+  if (diffSecs < 60) return `${diffSecs}s ago`;
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays}d ago`;
+  
+  return time.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
+// Format timestamp to full time (e.g., "2:05:36 PM")
+const formatFullTime = (timestamp) => {
+  if (!timestamp) return '';
+  const time = new Date(timestamp);
+  return time.toLocaleTimeString('en-US', { 
+    hour: 'numeric', 
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true 
+  });
+};
+
+// ============================================================================
+// TYPING INDICATOR COMPONENT
+// ============================================================================
+
+const TypingIndicator = ({ agentName = 'SENTCOM' }) => (
+  <motion.div
+    initial={{ opacity: 0, y: 10 }}
+    animate={{ opacity: 1, y: 0 }}
+    exit={{ opacity: 0, y: -10 }}
+    className="flex items-start gap-3 p-3"
+  >
+    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500/30 to-violet-500/30 flex items-center justify-center flex-shrink-0">
+      <Brain className="w-4 h-4 text-cyan-400" />
+    </div>
+    <div className="flex flex-col">
+      <span className="text-xs text-cyan-400 font-medium mb-1">{agentName}</span>
+      <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/5">
+        <motion.span
+          className="w-2 h-2 rounded-full bg-cyan-400"
+          animate={{ opacity: [0.3, 1, 0.3] }}
+          transition={{ duration: 1, repeat: Infinity, delay: 0 }}
+        />
+        <motion.span
+          className="w-2 h-2 rounded-full bg-cyan-400"
+          animate={{ opacity: [0.3, 1, 0.3] }}
+          transition={{ duration: 1, repeat: Infinity, delay: 0.2 }}
+        />
+        <motion.span
+          className="w-2 h-2 rounded-full bg-cyan-400"
+          animate={{ opacity: [0.3, 1, 0.3] }}
+          transition={{ duration: 1, repeat: Infinity, delay: 0.4 }}
+        />
+        <span className="text-xs text-zinc-500 ml-2">thinking...</span>
+      </div>
+    </div>
+  </motion.div>
+);
+
+// ============================================================================
+// HOVER TIMESTAMP COMPONENT
+// ============================================================================
+
+const HoverTimestamp = ({ timestamp, children, position = 'left' }) => {
+  const [showFull, setShowFull] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  
+  return (
+    <div 
+      className="relative group"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => { setIsHovered(false); setShowFull(false); }}
+    >
+      {children}
+      
+      <AnimatePresence>
+        {isHovered && (
+          <motion.div
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 5 }}
+            className={`absolute ${position === 'right' ? 'right-0' : 'left-0'} -top-6 z-50`}
+          >
+            <button
+              onClick={() => setShowFull(!showFull)}
+              className="px-2 py-0.5 rounded bg-zinc-800/95 border border-white/10 text-[10px] text-zinc-400 hover:text-zinc-300 whitespace-nowrap shadow-lg backdrop-blur-sm transition-colors"
+            >
+              {showFull ? formatFullTime(timestamp) : formatRelativeTime(timestamp)}
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+// ============================================================================
 // SHARED COMPONENTS
 // ============================================================================
 
@@ -1362,16 +1475,22 @@ const useSentComStatus = (pollInterval = 5000) => {
   return { status, loading, error, refresh: fetchStatus };
 };
 
-const useSentComStream = (pollInterval = 3000) => {
+const useSentComStream = (pollInterval = 5000) => {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
+  const lastMessageIdsRef = useRef('');
 
   const fetchStream = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/sentcom/stream?limit=20`);
       const data = await res.json();
-      if (data.success) {
-        setMessages(data.messages || []);
+      if (data.success && data.messages) {
+        // Only update if messages actually changed (prevents flickering)
+        const newMessageIds = data.messages.map(m => m.id || m.timestamp).join(',');
+        if (newMessageIds !== lastMessageIdsRef.current) {
+          lastMessageIdsRef.current = newMessageIds;
+          setMessages(data.messages);
+        }
       }
     } catch (err) {
       console.error('Error fetching stream:', err);
@@ -2937,65 +3056,74 @@ const SentCom = ({ compact = false, embedded = false }) => {
                 ) : (
                   <div className="space-y-3">
                     {allMessages.map((msg, i) => (
-                      <motion.div
+                      <HoverTimestamp 
                         key={msg.id || i}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: i * 0.03 }}
-                        className={`flex items-start gap-3 ${msg.metadata?.role === 'user' ? 'flex-row-reverse' : ''}`}
+                        timestamp={msg.timestamp}
+                        position={msg.metadata?.role === 'user' ? 'right' : 'left'}
                       >
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-lg ${
-                          msg.metadata?.role === 'user' 
-                            ? 'bg-gradient-to-br from-cyan-500/30 to-blue-600/30 shadow-cyan-500/20' 
-                            : 'bg-gradient-to-br from-violet-500/30 to-purple-600/30 shadow-violet-500/20'
-                        }`}>
-                          {msg.metadata?.role === 'user' ? (
-                            <MessageSquare className="w-4 h-4 text-cyan-400" />
-                          ) : msg.type === 'thought' || msg.action_type === 'scanning' ? (
-                            <Brain className="w-4 h-4 text-violet-400" />
-                          ) : msg.type === 'alert' ? (
-                            <AlertCircle className="w-4 h-4 text-amber-400" />
-                          ) : msg.type === 'filter' ? (
-                            <Target className="w-4 h-4 text-cyan-400" />
-                          ) : msg.action_type === 'chat_response' ? (
-                            <Brain className="w-4 h-4 text-violet-400" />
-                          ) : (
-                            <Radio className="w-4 h-4 text-zinc-400" />
-                          )}
-                        </div>
-                        <div className={`flex-1 min-w-0 ${msg.metadata?.role === 'user' ? 'text-right' : ''}`}>
-                          <div className={`flex items-center gap-2 mb-1 ${msg.metadata?.role === 'user' ? 'justify-end' : ''}`}>
-                            <span className={`text-[10px] font-bold uppercase tracking-wider ${
-                              msg.metadata?.role === 'user' ? 'text-cyan-400' : 'text-violet-400'
-                            }`}>
-                              {msg.metadata?.role === 'user' ? 'YOU' :
-                               msg.action_type === 'scanning' ? 'SCANNER' :
-                               msg.action_type === 'monitoring' ? 'MONITOR' :
-                               msg.action_type === 'chat_response' ? 'SENTCOM' :
-                               msg.type === 'filter' ? 'SMART FILTER' :
-                               msg.type === 'alert' ? 'ALERT' : 'SENTCOM'}
-                            </span>
-                            {msg.symbol && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400">
-                                {msg.symbol}
-                              </span>
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: Math.min(i * 0.03, 0.3) }}
+                          className={`flex items-start gap-3 ${msg.metadata?.role === 'user' ? 'flex-row-reverse' : ''}`}
+                        >
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-lg ${
+                            msg.metadata?.role === 'user' 
+                              ? 'bg-gradient-to-br from-cyan-500/30 to-blue-600/30 shadow-cyan-500/20' 
+                              : 'bg-gradient-to-br from-violet-500/30 to-purple-600/30 shadow-violet-500/20'
+                          }`}>
+                            {msg.metadata?.role === 'user' ? (
+                              <MessageSquare className="w-4 h-4 text-cyan-400" />
+                            ) : msg.type === 'thought' || msg.action_type === 'scanning' ? (
+                              <Brain className="w-4 h-4 text-violet-400" />
+                            ) : msg.type === 'alert' ? (
+                              <AlertCircle className="w-4 h-4 text-amber-400" />
+                            ) : msg.type === 'filter' ? (
+                              <Target className="w-4 h-4 text-cyan-400" />
+                            ) : msg.action_type === 'chat_response' ? (
+                              <Brain className="w-4 h-4 text-violet-400" />
+                            ) : (
+                              <Radio className="w-4 h-4 text-zinc-400" />
                             )}
-                            <span className="text-[10px] text-zinc-600">
-                              {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
                           </div>
-                          <p className={`text-sm leading-relaxed ${
-                            msg.metadata?.role === 'user' ? 'text-cyan-200' : 'text-zinc-300'
-                          }`}>{msg.content}</p>
-                          {msg.confidence && (
-                            <div className={`flex items-center gap-1 mt-2 ${msg.metadata?.role === 'user' ? 'justify-end' : ''}`}>
-                              <Gauge className="w-3 h-3 text-violet-400" />
-                              <span className="text-[10px] text-violet-400">Confidence: {msg.confidence}%</span>
+                          <div className={`flex-1 min-w-0 ${msg.metadata?.role === 'user' ? 'text-right' : ''}`}>
+                            <div className={`flex items-center gap-2 mb-1 ${msg.metadata?.role === 'user' ? 'justify-end' : ''}`}>
+                              <span className={`text-[10px] font-bold uppercase tracking-wider ${
+                                msg.metadata?.role === 'user' ? 'text-cyan-400' : 'text-violet-400'
+                              }`}>
+                                {msg.metadata?.role === 'user' ? 'YOU' :
+                                 msg.action_type === 'scanning' ? 'SCANNER' :
+                                 msg.action_type === 'monitoring' ? 'MONITOR' :
+                                 msg.action_type === 'chat_response' ? 'SENTCOM' :
+                                 msg.type === 'filter' ? 'SMART FILTER' :
+                                 msg.type === 'alert' ? 'ALERT' : 'SENTCOM'}
+                              </span>
+                              {msg.symbol && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400">
+                                  {msg.symbol}
+                                </span>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      </motion.div>
+                            <p className={`text-sm leading-relaxed ${
+                              msg.metadata?.role === 'user' ? 'text-cyan-200' : 'text-zinc-300'
+                            }`}>{msg.content}</p>
+                            {msg.confidence && (
+                              <div className={`flex items-center gap-1 mt-2 ${msg.metadata?.role === 'user' ? 'justify-end' : ''}`}>
+                                <Gauge className="w-3 h-3 text-violet-400" />
+                                <span className="text-[10px] text-violet-400">Confidence: {msg.confidence}%</span>
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      </HoverTimestamp>
                     ))}
+                    
+                    {/* Typing indicator when waiting for response */}
+                    <AnimatePresence>
+                      {chatLoading && (
+                        <TypingIndicator agentName="SENTCOM" />
+                      )}
+                    </AnimatePresence>
                   </div>
                 )}
               </div>
