@@ -82,13 +82,30 @@ class IBHistoricalCollector:
     REQUEST_DELAY_SECONDS = 2.0  # Wait between requests
     MAX_RETRIES = 3
     
-    # Bar size configurations
+    # Bar size configurations (IB limits)
     BAR_CONFIGS = {
         "1 min": {"max_duration": "1 D", "max_history_days": 365},
+        "3 mins": {"max_duration": "1 D", "max_history_days": 365},
         "5 mins": {"max_duration": "2 D", "max_history_days": 730},
         "15 mins": {"max_duration": "1 W", "max_history_days": 730},
+        "30 mins": {"max_duration": "1 W", "max_history_days": 730},
         "1 hour": {"max_duration": "1 M", "max_history_days": 1825},
         "1 day": {"max_duration": "1 Y", "max_history_days": 7300},
+        "1 week": {"max_duration": "1 Y", "max_history_days": 7300},
+    }
+    
+    # Timeframes to collect based on stock's ADV tier
+    TIER_TIMEFRAMES = {
+        "intraday": ["1 min", "3 mins", "5 mins", "15 mins", "30 mins", "1 hour", "1 day"],  # 500K+ shares/day
+        "swing": ["15 mins", "30 mins", "1 hour", "1 day"],  # 100K+ shares/day
+        "investment": ["1 day", "1 week"],  # 50K+ shares/day
+    }
+    
+    # ADV thresholds (in shares, not dollars)
+    ADV_THRESHOLDS = {
+        "intraday": 500_000,   # 500K shares/day
+        "swing": 100_000,      # 100K shares/day
+        "investment": 50_000,  # 50K shares/day
     }
     
     def __init__(self):
@@ -1039,6 +1056,135 @@ class IBHistoricalCollector:
             "skip_recent": skip_recent,
             "recent_days_threshold": recent_days_threshold,
             "results": results
+        }
+    
+    def get_symbol_tier(self, avg_volume: float) -> str:
+        """Determine which tier a symbol belongs to based on ADV."""
+        if avg_volume >= self.ADV_THRESHOLDS["intraday"]:
+            return "intraday"
+        elif avg_volume >= self.ADV_THRESHOLDS["swing"]:
+            return "swing"
+        elif avg_volume >= self.ADV_THRESHOLDS["investment"]:
+            return "investment"
+        return "skip"  # Below minimum threshold
+    
+    async def run_per_stock_collection(
+        self,
+        lookback_days: int = 30,
+        skip_recent: bool = True,
+        recent_days_threshold: int = 7,
+        max_symbols: int = None
+    ) -> Dict[str, Any]:
+        """
+        Collect ALL applicable timeframes for each stock before moving to the next.
+        
+        This approach ensures complete data per symbol:
+        - TSLA (500K+ ADV): 1min, 3min, 5min, 15min, 30min, 1hr, 1day collected
+        - Then AAPL: 1min, 3min, 5min, 15min, 30min, 1hr, 1day collected
+        - etc.
+        
+        A stock with 100K ADV would only get: 15min, 30min, 1hr, 1day
+        A stock with 50K ADV would only get: 1day, 1week
+        
+        Args:
+            lookback_days: How many days of history to fetch
+            skip_recent: Skip symbols that were collected within recent_days_threshold
+            recent_days_threshold: Days threshold for "recent" data
+            max_symbols: Limit number of symbols (None = all)
+            
+        Returns:
+            Collection job info
+        """
+        logger.info("=" * 60)
+        logger.info("STARTING PER-STOCK MULTI-TIMEFRAME COLLECTION")
+        logger.info(f"Lookback: {lookback_days} days | Skip recent: {skip_recent}")
+        logger.info("=" * 60)
+        
+        await self._ensure_initialized()
+        
+        # Get ADV data for all symbols
+        adv_col = self._db["adv_cache"]
+        symbols_with_adv = list(adv_col.find(
+            {"avg_volume": {"$gte": self.ADV_THRESHOLDS["investment"]}},
+            {"symbol": 1, "avg_volume": 1}
+        ).sort("avg_volume", -1))
+        
+        if not symbols_with_adv:
+            return {"success": False, "error": "No symbols found with sufficient ADV. Run ADV cache refresh first."}
+        
+        if max_symbols:
+            symbols_with_adv = symbols_with_adv[:max_symbols]
+        
+        logger.info(f"Found {len(symbols_with_adv)} symbols to process")
+        
+        # Count by tier
+        tier_counts = {"intraday": 0, "swing": 0, "investment": 0}
+        for sym_data in symbols_with_adv:
+            tier = self.get_symbol_tier(sym_data.get("avg_volume", 0))
+            if tier in tier_counts:
+                tier_counts[tier] += 1
+        
+        logger.info(f"Tier breakdown: {tier_counts}")
+        
+        # Queue all requests per-stock
+        queue_service = IBCollectionQueue()
+        total_queued = 0
+        
+        for sym_data in symbols_with_adv:
+            symbol = sym_data["symbol"]
+            avg_volume = sym_data.get("avg_volume", 0)
+            tier = self.get_symbol_tier(avg_volume)
+            
+            if tier == "skip":
+                continue
+            
+            timeframes = self.TIER_TIMEFRAMES.get(tier, ["1 day"])
+            
+            # Queue each timeframe for this symbol
+            for bar_size in timeframes:
+                bar_config = self.BAR_CONFIGS.get(bar_size, {})
+                
+                # Determine duration based on lookback and bar size limits
+                if bar_size in ["1 min", "3 mins"]:
+                    duration = "1 D"  # IB limit for minute bars
+                elif bar_size == "5 mins":
+                    duration = "2 D"
+                elif bar_size in ["15 mins", "30 mins"]:
+                    duration = "1 W"
+                elif bar_size == "1 hour":
+                    duration = "1 M"
+                else:  # 1 day, 1 week
+                    duration = f"{lookback_days} D" if lookback_days <= 365 else "1 Y"
+                
+                # Check if we should skip (already have recent data)
+                if skip_recent:
+                    existing = self._data_col.find_one({
+                        "symbol": symbol,
+                        "bar_size": bar_size,
+                        "collected_at": {"$gte": (datetime.now(timezone.utc) - timedelta(days=recent_days_threshold)).isoformat()}
+                    })
+                    if existing:
+                        continue
+                
+                # Queue this request
+                queue_service.add_to_queue(
+                    symbol=symbol,
+                    bar_size=bar_size,
+                    duration=duration
+                )
+                total_queued += 1
+        
+        logger.info(f"Queued {total_queued} requests across {len(symbols_with_adv)} symbols")
+        
+        return {
+            "success": True,
+            "message": f"Per-stock collection queued: {total_queued} requests for {len(symbols_with_adv)} symbols",
+            "symbols": len(symbols_with_adv),
+            "tier_counts": tier_counts,
+            "total_requests": total_queued,
+            "timeframes_by_tier": self.TIER_TIMEFRAMES,
+            "estimated_hours": round(total_queued * 3 / 3600, 1),
+            "note": "Collection processes queue in order - each stock gets all its timeframes before moving to next"
         }
     
     async def start_collection(

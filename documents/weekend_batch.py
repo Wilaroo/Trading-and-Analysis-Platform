@@ -101,36 +101,37 @@ class WeekendBatchRunner:
         return False
     
     def trigger_smart_collection(self) -> dict:
-        """Start Smart Collection (ADV-filtered stocks)."""
+        """Start Smart Collection - now uses per-stock multi-timeframe approach."""
         logger.info("=" * 50)
-        logger.info("STARTING SMART COLLECTION")
+        logger.info("STARTING PER-STOCK MULTI-TIMEFRAME COLLECTION")
         logger.info("=" * 50)
         
         try:
-            # First get the plan
-            resp = requests.get(f"{self.api_base}/ib-collector/smart-collection-plan", timeout=30)
-            if resp.ok:
-                plan = resp.json()
-                logger.info(f"Smart Collection Plan:")
-                logger.info(f"  Total Requests: {plan.get('total_requests', 'N/A')}")
-                logger.info(f"  Estimated Time: {plan.get('total_estimated_hours', 'N/A')} hours")
-            
-            # Start the collection
+            # Use the new per-stock collection endpoint
             resp = requests.post(
-                f"{self.api_base}/ib-collector/smart-collection-run?days=30",
+                f"{self.api_base}/ib-collector/per-stock-collection",
+                params={
+                    "lookback_days": 30,
+                    "skip_recent": True,
+                    "recent_days_threshold": 7
+                },
                 timeout=30
             )
             
             if resp.ok:
                 result = resp.json()
-                logger.info(f"Smart Collection started: {result}")
+                logger.info(f"Per-stock collection started:")
+                logger.info(f"  Symbols: {result.get('symbols', 'N/A')}")
+                logger.info(f"  Total Requests: {result.get('total_requests', 'N/A')}")
+                logger.info(f"  Estimated Hours: {result.get('estimated_hours', 'N/A')}")
+                logger.info(f"  Tier counts: {result.get('tier_counts', {})}")
                 return result
             else:
                 logger.error(f"Failed to start: {resp.status_code} - {resp.text}")
                 return {"success": False, "error": resp.text}
                 
         except Exception as e:
-            logger.error(f"Error starting Smart Collection: {e}")
+            logger.error(f"Error starting per-stock collection: {e}")
             return {"success": False, "error": str(e)}
     
     def trigger_full_market_collection(self) -> dict:

@@ -899,6 +899,46 @@ async def run_smart_collection(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/per-stock-collection")
+async def per_stock_collection(
+    lookback_days: int = 30,
+    skip_recent: bool = True,
+    recent_days_threshold: int = 7,
+    max_symbols: int = None
+):
+    """
+    Start per-stock multi-timeframe collection.
+    
+    Collects ALL applicable timeframes for each stock before moving to the next:
+    - TSLA (500K+ ADV): Gets 1min, 3min, 5min, 15min, 30min, 1hr, 1day
+    - Then AAPL: Gets 1min, 3min, 5min, 15min, 30min, 1hr, 1day
+    - Lower volume stocks get fewer timeframes based on their tier
+    
+    Args:
+        lookback_days: How many days of history to fetch (default 30)
+        skip_recent: Skip symbols collected within recent_days_threshold (default True)
+        recent_days_threshold: Days threshold for "recent" data (default 7)
+        max_symbols: Limit number of symbols to process (default None = all)
+    
+    Returns:
+        Collection job info with queue details
+    
+    Example:
+        POST /api/ib-collector/per-stock-collection?lookback_days=30&max_symbols=100
+    """
+    try:
+        collector = IBHistoricalCollector()
+        result = await collector.run_per_stock_collection(
+            lookback_days=lookback_days,
+            skip_recent=skip_recent,
+            recent_days_threshold=recent_days_threshold,
+            max_symbols=max_symbols
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error starting per-stock collection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # ==================== MULTI-TIMEFRAME COLLECTION ====================
 
