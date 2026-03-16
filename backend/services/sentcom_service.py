@@ -773,6 +773,13 @@ class SentComService:
             if scanner:
                 live_alerts = scanner.get_live_alerts()
                 for alert in live_alerts[:6]:
+                    # Handle timestamp - could be datetime or string
+                    timestamp = alert.created_at
+                    if hasattr(timestamp, 'isoformat'):
+                        timestamp = timestamp.isoformat()
+                    elif not timestamp:
+                        timestamp = datetime.now(timezone.utc).isoformat()
+                    
                     setups.append({
                         "symbol": alert.symbol,
                         "setup_type": alert.setup_type or alert.strategy_name,
@@ -781,14 +788,15 @@ class SentComService:
                         "stop_price": alert.stop_loss,
                         "target_price": alert.target,
                         "risk_reward": f"{alert.risk_reward:.1f}:1" if alert.risk_reward else "2:1",
-                        "confidence": int(alert.tqs_score) if alert.tqs_score else int(alert.trigger_probability * 100),
+                        "confidence": int(alert.tqs_score) if alert.tqs_score else int(alert.trigger_probability * 100) if alert.trigger_probability else 60,
                         "grade": alert.tqs_grade or alert.trade_grade,
                         "priority": alert.priority.value if alert.priority else "medium",
                         "headline": alert.headline,
-                        "timestamp": alert.created_at.isoformat() if alert.created_at else datetime.now(timezone.utc).isoformat(),
+                        "timestamp": timestamp,
                         "source": "live_scanner",
                         "alert_id": alert.id
                     })
+                    logger.info(f"Added scanner setup: {alert.symbol} - {alert.setup_type}")
         except Exception as e:
             logger.error(f"Error getting live scanner alerts: {e}")
         
@@ -899,6 +907,13 @@ class SentComService:
             if scanner:
                 live_alerts = scanner.get_live_alerts()
                 for alert in live_alerts[:5]:
+                    # Handle timestamp - could be datetime or string
+                    timestamp = alert.created_at
+                    if hasattr(timestamp, 'isoformat'):
+                        timestamp = timestamp.isoformat()
+                    elif not timestamp:
+                        timestamp = datetime.now(timezone.utc).isoformat()
+                    
                     alerts.append({
                         "id": alert.id,
                         "type": "new_setup",
@@ -910,7 +925,7 @@ class SentComService:
                         "setup_type": alert.setup_type,
                         "grade": alert.tqs_grade or alert.trade_grade,
                         "risk_reward": alert.risk_reward,
-                        "timestamp": alert.created_at.isoformat() if alert.created_at else datetime.now(timezone.utc).isoformat(),
+                        "timestamp": timestamp,
                         "action_suggestion": f"Entry: ${alert.trigger_price:.2f} | Stop: ${alert.stop_loss:.2f}" if alert.trigger_price and alert.stop_loss else "Review setup"
                     })
         except Exception as e:
