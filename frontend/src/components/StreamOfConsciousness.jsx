@@ -79,7 +79,8 @@ const SOCEntry = React.memo(({ entry, index }) => {
     const type = entry.type;
     const actionType = entry.action_type;
     
-    if (actionType === 'scanning' || type === 'thought') {
+    // Scanner / Scanning activity
+    if (actionType === 'scanning' || (type === 'thought' && !actionType)) {
       return {
         icon: <Search className="w-3.5 h-3.5" />,
         color: 'text-violet-400',
@@ -88,33 +89,19 @@ const SOCEntry = React.memo(({ entry, index }) => {
         label: 'SCAN'
       };
     }
-    if (actionType === 'stop_warning' || type === 'alert') {
-      return {
-        icon: <AlertTriangle className="w-3.5 h-3.5" />,
-        color: 'text-amber-400',
-        bgColor: 'bg-amber-500/10',
-        borderColor: 'border-amber-500/20',
-        label: 'ALERT'
-      };
-    }
+    
+    // Setup found
     if (actionType === 'setup_found' || type === 'setup') {
       return {
-        icon: <Target className="w-3.5 h-3.5" />,
+        icon: <Zap className="w-3.5 h-3.5" />,
         color: 'text-emerald-400',
         bgColor: 'bg-emerald-500/10',
         borderColor: 'border-emerald-500/20',
         label: 'SETUP'
       };
     }
-    if (actionType === 'monitoring' || type === 'monitor') {
-      return {
-        icon: <Eye className="w-3.5 h-3.5" />,
-        color: 'text-cyan-400',
-        bgColor: 'bg-cyan-500/10',
-        borderColor: 'border-cyan-500/20',
-        label: 'WATCH'
-      };
-    }
+    
+    // Risk updates
     if (actionType === 'risk_update' || type === 'risk') {
       return {
         icon: <Gauge className="w-3.5 h-3.5" />,
@@ -124,6 +111,63 @@ const SOCEntry = React.memo(({ entry, index }) => {
         label: 'RISK'
       };
     }
+    
+    // Market regime / VIX updates
+    if (actionType === 'regime_update' || actionType === 'breadth_update' || type === 'market') {
+      return {
+        icon: <TrendingUp className="w-3.5 h-3.5" />,
+        color: 'text-cyan-400',
+        bgColor: 'bg-cyan-500/10',
+        borderColor: 'border-cyan-500/20',
+        label: 'MKT'
+      };
+    }
+    
+    // Position monitoring / Stop watching
+    if (actionType === 'monitoring' || type === 'monitor') {
+      return {
+        icon: <Eye className="w-3.5 h-3.5" />,
+        color: 'text-blue-400',
+        bgColor: 'bg-blue-500/10',
+        borderColor: 'border-blue-500/20',
+        label: 'WATCH'
+      };
+    }
+    
+    // Price updates for positions
+    if (actionType === 'price_update' || type === 'position') {
+      return {
+        icon: <Activity className="w-3.5 h-3.5" />,
+        color: 'text-cyan-400',
+        bgColor: 'bg-cyan-500/10',
+        borderColor: 'border-cyan-500/20',
+        label: 'POS'
+      };
+    }
+    
+    // Entry zone cleared
+    if (actionType === 'entry_zone') {
+      return {
+        icon: <CheckCircle className="w-3.5 h-3.5" />,
+        color: 'text-emerald-400',
+        bgColor: 'bg-emerald-500/10',
+        borderColor: 'border-emerald-500/20',
+        label: 'ENTRY'
+      };
+    }
+    
+    // Stop warnings / alerts
+    if (actionType === 'stop_warning' || type === 'alert') {
+      return {
+        icon: <AlertTriangle className="w-3.5 h-3.5" />,
+        color: 'text-amber-400',
+        bgColor: 'bg-amber-500/10',
+        borderColor: 'border-amber-500/20',
+        label: 'ALERT'
+      };
+    }
+    
+    // Filter decisions
     if (type === 'filter') {
       return {
         icon: <Filter className="w-3.5 h-3.5" />,
@@ -133,6 +177,8 @@ const SOCEntry = React.memo(({ entry, index }) => {
         label: 'FILTER'
       };
     }
+    
+    // Trade execution
     if (actionType === 'trade_executed' || type === 'trade') {
       return {
         icon: <Zap className="w-3.5 h-3.5" />,

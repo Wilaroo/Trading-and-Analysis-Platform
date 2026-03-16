@@ -318,141 +318,321 @@ class SentComService:
     async def get_unified_stream(self, limit: int = 20) -> List[SentComMessage]:
         """
         Get unified stream of SentCom messages.
-        Combines bot thoughts, chat history, alerts, and filter decisions.
-        All in "we" voice.
+        Combines bot thoughts, chat history, alerts, filter decisions,
+        market data, risk updates, and scanner alerts.
+        All in "we" voice with rich contextual information.
         """
         messages: List[SentComMessage] = []
         trading_bot = self._get_trading_bot()
         
-        # 1. Get bot thoughts and position updates
+        # =====================================================================
+        # 1. SCANNER ALERTS - Live setup detection
+        # =====================================================================
+        try:
+            from services.enhanced_scanner import get_enhanced_scanner
+            scanner = get_enhanced_scanner()
+            if scanner:
+                # Get live alerts with setup details
+                live_alerts = scanner.get_live_alerts() if hasattr(scanner, 'get_live_alerts') else []
+                for alert in live_alerts[:5]:  # Top 5 alerts
+                    setup_name = getattr(alert, 'setup_type', 'setup') or 'setup'
+                    symbol = getattr(alert, 'symbol', '')
+                    score = getattr(alert, 'score', 0)
+                    entry_price = getattr(alert, 'entry_price', None)
+                    
+                    # Format setup name for display
+                    setup_display = setup_name.replace('_', ' ').title()
+                    
+                    content = f"Found setup: {symbol} {setup_display}"
+                    if entry_price:
+                        content += f" @ ${entry_price:.2f}"
+                    if score and score > 7:
+                        content += f" (Score: {score:.1f})"
+                    
+                    messages.append(SentComMessage(
+                        id=self._generate_message_id(),
+                        type="alert",
+                        content=content,
+                        timestamp=getattr(alert, 'timestamp', datetime.now(timezone.utc)).isoformat() if hasattr(getattr(alert, 'timestamp', None), 'isoformat') else datetime.now(timezone.utc).isoformat(),
+                        confidence=int(score * 10) if score else 70,
+                        symbol=symbol,
+                        action_type="setup_found",
+                        metadata={
+                            "source": "scanner",
+                            "setup_type": setup_name,
+                            "score": score,
+                            "entry_price": entry_price,
+                            "reasoning": f"Pattern matches {setup_display} criteria with confluence of technical factors."
+                        }
+                    ))
+                
+                # Scanner status message
+                scan_count = scanner._scan_count if hasattr(scanner, '_scan_count') else 0
+                symbol_count = len(getattr(scanner, '_liquid_symbols', [])) if hasattr(scanner, '_liquid_symbols') else 0
+                if symbol_count > 0:
+                    messages.append(SentComMessage(
+                        id=self._generate_message_id(),
+                        type="thought",
+                        content=f"Scanning {symbol_count} liquid symbols...",
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        confidence=50,
+                        action_type="scanning",
+                        metadata={"source": "scanner", "symbol_count": symbol_count, "scan_count": scan_count}
+                    ))
+        except Exception as e:
+            logger.debug(f"Scanner alerts not available: {e}")
+        
+        # =====================================================================
+        # 2. DYNAMIC RISK ENGINE - Risk adjustments
+        # =====================================================================
+        try:
+            risk_engine = self._get_dynamic_risk_engine()
+            if risk_engine:
+                risk_status = risk_engine.get_status()
+                if risk_status:
+                    multiplier = risk_status.get("current_multiplier", 1.0)
+                    risk_level = risk_status.get("risk_level", "NORMAL")
+                    factors = risk_status.get("factors", {})
+                    
+                    # Only show if risk is not normal
+                    if multiplier != 1.0 or risk_level != "NORMAL":
+                        # Determine primary factor
+                        primary_factor = "market conditions"
+                        if factors:
+                            # Find highest weight factor
+                            market_factor = factors.get("market_regime", {})
+                            if market_factor.get("vix_level"):
+                                vix = market_factor.get("vix_level", 0)
+                                if vix > 25:
+                                    primary_factor = f"elevated VIX ({vix:.1f})"
+                                elif vix < 15:
+                                    primary_factor = f"low VIX ({vix:.1f})"
+                                else:
+                                    primary_factor = f"VIX at {vix:.1f}"
+                        
+                        content = f"Risk adjusted → {multiplier:.1f}x based on {primary_factor}"
+                        messages.append(SentComMessage(
+                            id=self._generate_message_id(),
+                            type="risk",
+                            content=content,
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                            confidence=80,
+                            action_type="risk_update",
+                            metadata={
+                                "source": "dynamic_risk",
+                                "multiplier": multiplier,
+                                "risk_level": risk_level,
+                                "reasoning": f"Position sizing adjusted to {multiplier:.1f}x based on {primary_factor}. {risk_level} risk conditions."
+                            }
+                        ))
+        except Exception as e:
+            logger.debug(f"Risk engine not available: {e}")
+        
+        # =====================================================================
+        # 3. MARKET REGIME / VIX - Market conditions
+        # =====================================================================
+        try:
+            from routers.ib import _pushed_ib_data, get_vix_from_pushed_data
+            
+            # VIX data
+            vix_data = get_vix_from_pushed_data()
+            if vix_data and vix_data.get("price"):
+                vix_price = vix_data.get("price", 0)
+                vix_change = vix_data.get("change_percent", 0)
+                
+                # Determine regime signal
+                if vix_change < -5:
+                    regime_signal = "RISK_ON"
+                    content = f"VIX down {abs(vix_change):.1f}% - {regime_signal} signal"
+                elif vix_change > 5:
+                    regime_signal = "RISK_OFF"
+                    content = f"VIX up {vix_change:.1f}% - {regime_signal} signal"
+                elif vix_price < 15:
+                    regime_signal = "RISK_ON"
+                    content = f"VIX at {vix_price:.1f} (low) - {regime_signal} conditions"
+                elif vix_price > 25:
+                    regime_signal = "RISK_OFF"
+                    content = f"VIX at {vix_price:.1f} (elevated) - {regime_signal} conditions"
+                else:
+                    regime_signal = "NEUTRAL"
+                    content = f"VIX at {vix_price:.1f} - {regime_signal} market"
+                
+                messages.append(SentComMessage(
+                    id=self._generate_message_id(),
+                    type="market",
+                    content=content,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    confidence=75,
+                    action_type="regime_update",
+                    metadata={
+                        "source": "market_data",
+                        "vix": vix_price,
+                        "vix_change": vix_change,
+                        "regime": regime_signal,
+                        "reasoning": f"VIX is a key volatility indicator. Current level suggests {regime_signal.lower().replace('_', ' ')} conditions."
+                    }
+                ))
+            
+            # Market breadth from SPY/QQQ
+            spy_data = _pushed_ib_data.get("market_snapshot", {}).get("SPY", {})
+            if spy_data:
+                spy_change = spy_data.get("change_percent", 0)
+                if abs(spy_change) > 0.5:
+                    direction = "up" if spy_change > 0 else "down"
+                    content = f"SPY {direction} {abs(spy_change):.2f}% - market {'strengthening' if spy_change > 0 else 'weakening'}"
+                    messages.append(SentComMessage(
+                        id=self._generate_message_id(),
+                        type="market",
+                        content=content,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        confidence=70,
+                        action_type="breadth_update",
+                        metadata={
+                            "source": "market_data",
+                            "spy_change": spy_change,
+                            "reasoning": "Broad market direction influences individual stock momentum."
+                        }
+                    ))
+        except Exception as e:
+            logger.debug(f"Market data not available: {e}")
+        
+        # =====================================================================
+        # 4. POSITION MONITORING - Stop levels & P&L
+        # =====================================================================
         if trading_bot:
             try:
                 bot_status = trading_bot.get_status()
                 
                 if isinstance(bot_status, dict):
-                    # Generate thoughts from open trades
                     open_trades = bot_status.get("open_trades", [])
                     if isinstance(open_trades, list):
-                        for trade in open_trades[:3]:
+                        for trade in open_trades[:5]:
                             symbol = trade.get("symbol")
                             pnl_pct = trade.get("pnl_percent", 0)
-                            status = trade.get("status", "open")
                             stop = trade.get("stop_price")
-                            target = trade.get("target_prices", [None])[0] if trade.get("target_prices") else None
+                            current_price = trade.get("current_price")
+                            entry = trade.get("entry_price")
                             
-                            thought_text = f"We're monitoring our {symbol} position. "
-                            if pnl_pct > 0:
-                                thought_text += f"Currently up {pnl_pct:.1f}%. "
-                            elif pnl_pct < 0:
-                                thought_text += f"Currently down {abs(pnl_pct):.1f}%. "
+                            # Stop monitoring message
+                            if stop and symbol:
+                                content = f"Monitoring {symbol} stop @ ${stop:.2f}"
+                                if current_price and stop:
+                                    distance = ((current_price - stop) / current_price) * 100 if current_price > 0 else 0
+                                    if distance < 2:
+                                        content += f" (CLOSE - {distance:.1f}% away)"
+                                
+                                messages.append(SentComMessage(
+                                    id=self._generate_message_id(),
+                                    type="monitor",
+                                    content=content,
+                                    timestamp=datetime.now(timezone.utc).isoformat(),
+                                    confidence=60,
+                                    symbol=symbol,
+                                    action_type="monitoring",
+                                    metadata={
+                                        "source": "trading_bot",
+                                        "stop_price": stop,
+                                        "current_price": current_price,
+                                        "pnl_percent": pnl_pct,
+                                        "reasoning": f"Tracking stop level to protect {'profits' if pnl_pct > 0 else 'capital'}."
+                                    }
+                                ))
                             
-                            if stop:
-                                thought_text += f"Our stop at ${stop:.2f} is in place. "
-                            if target:
-                                thought_text += f"Target at ${target:.2f}."
-                            
-                            messages.append(SentComMessage(
-                                id=self._generate_message_id(),
-                                type="thought",
-                                content=thought_text.strip(),
-                                timestamp=datetime.now(timezone.utc).isoformat(),
-                                confidence=60,
-                                symbol=symbol,
-                                action_type="monitoring",
-                                metadata={"source": "trading_bot", "pnl_percent": pnl_pct}
-                            ))
+                            # Entry zone cleared message
+                            if entry and current_price and pnl_pct > 1:
+                                messages.append(SentComMessage(
+                                    id=self._generate_message_id(),
+                                    type="alert",
+                                    content=f"{symbol} cleared for profit taking zone (+{pnl_pct:.1f}%)",
+                                    timestamp=datetime.now(timezone.utc).isoformat(),
+                                    confidence=70,
+                                    symbol=symbol,
+                                    action_type="entry_zone",
+                                    metadata={
+                                        "source": "trading_bot",
+                                        "pnl_percent": pnl_pct,
+                                        "reasoning": "Position has moved favorably past entry, consider trailing stop or partial profit taking."
+                                    }
+                                ))
                     
-                    # Add scanning status with more context
+                    # Scanning status
                     mode = bot_status.get("mode", "confirmation")
                     running = bot_status.get("running", False)
                     if running:
-                        # Check if we have real market data
-                        has_market_data = False
-                        scanner_status = ""
-                        try:
-                            from services.enhanced_scanner import get_enhanced_scanner
-                            scanner = get_enhanced_scanner()
-                            if scanner:
-                                active_alerts = scanner.get_live_alerts() if hasattr(scanner, 'get_live_alerts') else []
-                                scan_count = scanner._scan_count if hasattr(scanner, '_scan_count') else 0
-                                has_market_data = scan_count > 0 and len(active_alerts) > 0
-                                if has_market_data:
-                                    scanner_status = f"Found {len(active_alerts)} potential setups."
-                                elif scan_count > 0:
-                                    scanner_status = "No setups meeting our criteria right now."
-                        except Exception:
-                            pass
-                        
-                        if has_market_data:
-                            scan_thought = f"We're actively scanning for opportunities in {mode} mode. {scanner_status}"
-                        else:
-                            scan_thought = f"We're actively scanning for opportunities in {mode} mode."
-                        
                         messages.append(SentComMessage(
                             id=self._generate_message_id(),
                             type="thought",
-                            content=scan_thought,
+                            content=f"Active in {mode} mode - ready to execute on confirmed setups",
                             timestamp=datetime.now(timezone.utc).isoformat(),
                             confidence=50,
                             action_type="scanning",
-                            metadata={"source": "trading_bot", "mode": mode, "has_live_data": has_market_data}
+                            metadata={"source": "trading_bot", "mode": mode}
                         ))
-                
-                # Get filter thoughts (smart strategy filtering)
-                try:
-                    filter_thoughts = trading_bot.get_filter_thoughts(limit=5)
-                    for ft in filter_thoughts:
-                        messages.append(SentComMessage(
-                            id=self._generate_message_id(),
-                            type="filter",
-                            content=self._ensure_we_voice(ft.get("text", ft.get("reasoning", ""))),
-                            timestamp=ft.get("timestamp", datetime.now(timezone.utc).isoformat()),
-                            confidence=ft.get("confidence"),
-                            symbol=ft.get("symbol"),
-                            action_type=ft.get("decision", "filter"),
-                            metadata={
-                                "source": "smart_filter",
-                                "decision": ft.get("decision"),
-                                "win_rate": ft.get("win_rate"),
-                                "setup_type": ft.get("setup_type")
-                            }
-                        ))
-                except Exception as e:
-                    logger.debug(f"No filter thoughts: {e}")
-                
+                    
+                    # Get filter thoughts
+                    try:
+                        filter_thoughts = trading_bot.get_filter_thoughts(limit=3)
+                        for ft in filter_thoughts:
+                            messages.append(SentComMessage(
+                                id=self._generate_message_id(),
+                                type="filter",
+                                content=self._ensure_we_voice(ft.get("text", ft.get("reasoning", ""))),
+                                timestamp=ft.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                                confidence=ft.get("confidence"),
+                                symbol=ft.get("symbol"),
+                                action_type=ft.get("decision", "filter"),
+                                metadata={
+                                    "source": "smart_filter",
+                                    "decision": ft.get("decision"),
+                                    "reasoning": ft.get("reasoning", "Based on our trading rules and historical performance.")
+                                }
+                            ))
+                    except Exception:
+                        pass
+                        
             except Exception as e:
                 logger.error(f"Error getting bot thoughts: {e}")
         
-        # 2. Add IB position summaries
+        # =====================================================================
+        # 5. IB POSITIONS SUMMARY
+        # =====================================================================
         try:
             from routers.ib import _pushed_ib_data
             ib_positions = _pushed_ib_data.get("positions", [])
             if ib_positions:
-                # Generate a summary thought about IB positions
-                pos_count = len(ib_positions)
-                total_unrealized = sum(p.get("unrealizedPNL", p.get("unrealizedPnL", 0)) for p in ib_positions)
-                
-                summary_text = f"We're monitoring {pos_count} active positions"
-                if total_unrealized > 0:
-                    summary_text += f", currently up ${total_unrealized:,.2f}"
-                elif total_unrealized < 0:
-                    summary_text += f", currently down ${abs(total_unrealized):,.2f}"
-                summary_text += " and scanning for setups."
-                
-                messages.append(SentComMessage(
-                    id=self._generate_message_id(),
-                    type="system",
-                    content=summary_text,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    confidence=50,
-                    action_type="status",
-                    metadata={"source": "ib_positions", "position_count": pos_count}
-                ))
+                # Price updates for each position
+                for pos in ib_positions[:3]:
+                    symbol = pos.get("symbol", pos.get("contract", {}).get("symbol", ""))
+                    price = pos.get("marketPrice", pos.get("avgCost", 0))
+                    pnl = pos.get("unrealizedPNL", pos.get("unrealizedPnL", 0))
+                    pnl_pct = (pnl / (pos.get("avgCost", 1) * pos.get("position", 1))) * 100 if pos.get("avgCost") and pos.get("position") else 0
+                    
+                    if symbol and price:
+                        direction = "▲" if pnl >= 0 else "▼"
+                        content = f"{symbol} @ ${price:.2f} {direction}{abs(pnl_pct):.2f}%"
+                        messages.append(SentComMessage(
+                            id=self._generate_message_id(),
+                            type="position",
+                            content=content,
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                            confidence=80,
+                            symbol=symbol,
+                            action_type="price_update",
+                            metadata={
+                                "source": "ib_positions",
+                                "price": price,
+                                "pnl": pnl,
+                                "pnl_percent": pnl_pct,
+                                "reasoning": f"Position {'profitable' if pnl >= 0 else 'at a loss'} - monitoring for exit signals."
+                            }
+                        ))
         except Exception as e:
             logger.debug(f"No IB positions for stream: {e}")
         
-        # 3. Add chat history
-        for chat in self._chat_history[-10:]:
+        # =====================================================================
+        # 6. CHAT HISTORY (Limited)
+        # =====================================================================
+        for chat in self._chat_history[-5:]:
             messages.append(SentComMessage(
                 id=chat.get("id", self._generate_message_id()),
                 type="chat",
@@ -460,11 +640,21 @@ class SentComService:
                 timestamp=chat.get("timestamp", datetime.now(timezone.utc).isoformat()),
                 confidence=chat.get("confidence"),
                 symbol=chat.get("symbol"),
-                action_type="chat_response",
+                action_type="chat_response" if chat.get("role") == "assistant" else "user_message",
                 metadata={"source": "sentcom_chat", "role": chat.get("role", "assistant")}
             ))
         
-        # 4. Generate system status message if no activity
+        # =====================================================================
+        # 7. DEMO MODE - Generate sample messages when no real data
+        # =====================================================================
+        non_chat_messages = [m for m in messages if m.type != 'chat']
+        if len(non_chat_messages) < 3:
+            demo_messages = self._generate_demo_stream_messages()
+            messages.extend(demo_messages)
+        
+        # =====================================================================
+        # 8. FALLBACK - System status if no activity
+        # =====================================================================
         if len(messages) == 0:
             status = await self.get_status()
             state_message = self._generate_state_message(status)
@@ -481,6 +671,145 @@ class SentComService:
         # Sort by timestamp (newest first) and limit
         messages.sort(key=lambda m: m.timestamp, reverse=True)
         return messages[:limit]
+    
+    def _generate_demo_stream_messages(self) -> List[SentComMessage]:
+        """
+        Generate realistic demo S.O.C. messages when real market data isn't available.
+        This shows the user what the stream looks like when fully operational.
+        """
+        import random
+        from datetime import timedelta
+        
+        demo_symbols = ["NVDA", "AAPL", "MSFT", "AMD", "META", "TSLA", "GOOGL"]
+        demo_setups = ["momentum_breakout", "gap_and_go", "vwap_bounce", "9_ema_scalp", "pullback_entry"]
+        
+        messages = []
+        base_time = datetime.now(timezone.utc)
+        
+        # 1. Scanner scanning message
+        symbol_count = random.randint(180, 250)
+        messages.append(SentComMessage(
+            id=self._generate_message_id(),
+            type="thought",
+            content=f"Scanning {symbol_count} liquid symbols...",
+            timestamp=(base_time - timedelta(seconds=random.randint(5, 15))).isoformat(),
+            confidence=50,
+            action_type="scanning",
+            metadata={
+                "source": "demo",
+                "reasoning": "Analyzing price action, volume patterns, and technical indicators across the watchlist."
+            }
+        ))
+        
+        # 2. Setup found
+        setup_symbol = random.choice(demo_symbols)
+        setup_type = random.choice(demo_setups)
+        setup_price = round(random.uniform(100, 500), 2)
+        messages.append(SentComMessage(
+            id=self._generate_message_id(),
+            type="alert",
+            content=f"Found setup: {setup_symbol} {setup_type.replace('_', ' ').title()}",
+            timestamp=(base_time - timedelta(seconds=random.randint(16, 30))).isoformat(),
+            confidence=random.randint(70, 90),
+            symbol=setup_symbol,
+            action_type="setup_found",
+            metadata={
+                "source": "demo",
+                "setup_type": setup_type,
+                "entry_price": setup_price,
+                "reasoning": f"Pattern matches {setup_type.replace('_', ' ')} criteria with strong volume confirmation."
+            }
+        ))
+        
+        # 3. Risk adjustment
+        vix_level = round(random.uniform(12, 28), 1)
+        risk_mult = round(1.0 + (20 - vix_level) / 40, 1)  # Higher mult when VIX is low
+        risk_mult = max(0.5, min(1.5, risk_mult))
+        messages.append(SentComMessage(
+            id=self._generate_message_id(),
+            type="risk",
+            content=f"Risk adjusted → {risk_mult}x based on VIX at {vix_level}",
+            timestamp=(base_time - timedelta(seconds=random.randint(31, 45))).isoformat(),
+            confidence=80,
+            action_type="risk_update",
+            metadata={
+                "source": "demo",
+                "multiplier": risk_mult,
+                "vix": vix_level,
+                "reasoning": f"Position sizing adjusted based on current volatility environment."
+            }
+        ))
+        
+        # 4. VIX / Market regime
+        vix_change = round(random.uniform(-8, 8), 1)
+        regime = "RISK_ON" if vix_change < -3 else ("RISK_OFF" if vix_change > 3 else "NEUTRAL")
+        direction = "down" if vix_change < 0 else "up"
+        messages.append(SentComMessage(
+            id=self._generate_message_id(),
+            type="market",
+            content=f"VIX {direction} {abs(vix_change):.1f}% - {regime} signal",
+            timestamp=(base_time - timedelta(seconds=random.randint(46, 60))).isoformat(),
+            confidence=75,
+            action_type="regime_update",
+            metadata={
+                "source": "demo",
+                "vix_change": vix_change,
+                "regime": regime,
+                "reasoning": f"Market volatility indicator suggests {regime.lower().replace('_', ' ')} conditions."
+            }
+        ))
+        
+        # 5. Position monitoring (stop level)
+        pos_symbol = random.choice(demo_symbols)
+        stop_price = round(random.uniform(80, 200), 2)
+        messages.append(SentComMessage(
+            id=self._generate_message_id(),
+            type="monitor",
+            content=f"Monitoring {pos_symbol} stop @ ${stop_price:.2f}",
+            timestamp=(base_time - timedelta(seconds=random.randint(61, 75))).isoformat(),
+            confidence=60,
+            symbol=pos_symbol,
+            action_type="monitoring",
+            metadata={
+                "source": "demo",
+                "stop_price": stop_price,
+                "reasoning": "Tracking stop level to protect capital."
+            }
+        ))
+        
+        # 6. Breadth update
+        breadth_pct = random.randint(45, 70)
+        messages.append(SentComMessage(
+            id=self._generate_message_id(),
+            type="market",
+            content=f"Breadth {'improving' if breadth_pct > 55 else 'declining'}: {breadth_pct}% > 20MA",
+            timestamp=(base_time - timedelta(seconds=random.randint(76, 90))).isoformat(),
+            confidence=70,
+            action_type="breadth_update",
+            metadata={
+                "source": "demo",
+                "breadth": breadth_pct,
+                "reasoning": "Market breadth indicates overall market participation."
+            }
+        ))
+        
+        # 7. Entry zone cleared
+        entry_symbol = random.choice(demo_symbols)
+        messages.append(SentComMessage(
+            id=self._generate_message_id(),
+            type="alert",
+            content=f"{entry_symbol} cleared for entry zone",
+            timestamp=(base_time - timedelta(seconds=random.randint(91, 105))).isoformat(),
+            confidence=75,
+            symbol=entry_symbol,
+            action_type="entry_zone",
+            metadata={
+                "source": "demo",
+                "reasoning": "Price action confirms favorable entry conditions."
+            }
+        ))
+        
+        return messages
     
     def _generate_state_message(self, status: SentComStatus) -> str:
         """Generate a status message in 'we' voice"""
