@@ -7,6 +7,44 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 2026)
 
+### Header Consolidation + Layout Optimization ✅ (March 2026)
+**FIXED: Removed redundant headers, moved Bot Performance to sidebar**
+
+**Problem:**
+- Multiple redundant header bars showing duplicate information
+- Bot Performance chart taking up full-width space below SentCom
+- Chat input was cut off due to vertical space issues
+
+**Solution Implemented:**
+
+**1. Removed Redundant DashboardHeader**
+- Deleted the secondary header from `NewDashboard.jsx` that showed AI Credits, Market Status, Account info
+- These are already displayed in the main `HeaderBar.jsx` at the top
+- Reduces vertical clutter and frees space for SentCom
+
+**2. Moved Bot Performance to Right Sidebar**
+- Added `compact` prop to `BotPerformanceChart` component
+- Compact mode shows:
+  - Mini equity curve chart (80px height)
+  - 2x2 grid of key stats (Trades, Win Rate, Open, Unrealized)
+  - Simplified time range selector (Today/Week/Month)
+- Now renders below Market Regime in the right column
+
+**3. Layout Structure (Clean)**
+- Top: CommandCenter header (AI Credits, Ollama, System Status)
+- Tabs: Command | Charts | Analytics
+- Main Grid:
+  - Left 8 cols: SENTCOM (positions + S.O.C. + Conversation)
+  - Right 4 cols: Learning Insights → Market Regime → Performance (compact)
+- Bottom: Scanner Alerts strip
+
+**Files Modified:**
+- `/app/frontend/src/components/NewDashboard.jsx` - Removed DashboardHeader, moved BotPerformanceChart to sidebar
+- `/app/frontend/src/components/BotPerformanceChart.jsx` - Added compact mode with mini chart and stats grid
+- `/app/frontend/src/components/SentCom.jsx` - Layout fixes from previous update
+
+---
+
 ### Chat Input Visibility Bug Fix ✅ (March 2026)
 **FIXED: Chat input and scrollbar now visible in Conversation panel**
 

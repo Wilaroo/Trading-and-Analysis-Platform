@@ -570,19 +570,7 @@ const NewDashboard = ({
   
   return (
     <div className="space-y-3">
-      {/* Header - Compact */}
-      <DashboardHeader
-        botStatus={effectiveBotStatus}
-        marketSession={marketSession}
-        regime={regime}
-        todayPnl={effectiveTodayPnl}
-        openPnl={effectiveOpenPnl}
-        accountData={accountData}
-        riskStatus={riskStatus}
-        onBriefMe={onBriefMe}
-      />
-      
-      {/* Main Grid - SentCom is Primary */}
+      {/* Main Grid - SentCom is Primary, no redundant header */}
       <div className="grid grid-cols-12 gap-3">
         {/* Left Column (8 cols) - SentCom takes full width */}
         <div className="col-span-8">
@@ -591,19 +579,20 @@ const NewDashboard = ({
           <SentCom embedded={true} />
         </div>
         
-        {/* Right Column (4 cols) - Learning Insights + Market Regime */}
+        {/* Right Column (4 cols) - Learning Insights + Market Regime + Bot Performance */}
         <div className="col-span-4 space-y-3">
           {children}
+          
+          {/* Bot Performance Chart - Compact version in sidebar */}
+          <BotPerformanceChart
+            trades={closedTrades}
+            todayPnl={effectiveTodayPnl}
+            onViewFullAnalytics={onViewAnalytics}
+            autoRefresh={true}
+            compact={true}
+          />
         </div>
       </div>
-      
-      {/* Bot Performance Chart - Moved below main grid */}
-      <BotPerformanceChart
-        trades={closedTrades}
-        todayPnl={effectiveTodayPnl}
-        onViewFullAnalytics={onViewAnalytics}
-        autoRefresh={true}
-      />
       
       {/* Scanner Alerts Strip */}
       <ScannerAlertsStrip 
