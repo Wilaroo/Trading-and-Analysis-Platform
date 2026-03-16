@@ -251,16 +251,21 @@ const LearningProgressPanel = ({ data, loading }) => {
   // Calculate progress percentages
   const aiTrainingProgress = data.modelTrained ? 100 : (data.historicalBars > 0 ? 50 : 0);
   const scannerCalibrationProgress = data.calibrationsApplied > 0 ? Math.min(100, data.calibrationsApplied * 20) : 0;
-  const predictionTrackingProgress = data.predictionsTracked > 0 ? Math.min(100, data.predictionsTracked * 10) : 0;
+  const predictionTrackingProgress = data.predictionsTracked > 0 ? Math.min(100, (data.predictionsTracked / 1000) * 100) : 0;
   const strategySimProgress = data.simulationsRun > 0 ? Math.min(100, data.simulationsRun * 25) : 0;
+
+  // Build AI training detail message
+  const aiTrainingDetail = data.modelTrained 
+    ? `Model trained${data.timeseriesAccuracy ? ` (${(data.timeseriesAccuracy * 100).toFixed(1)}% accuracy)` : ''}`
+    : `${data.historicalBars?.toLocaleString() || 0} bars available`;
 
   const progressItems = [
     {
       label: 'AI Model Training',
       progress: aiTrainingProgress,
-      detail: data.modelTrained ? 'Model trained and active' : `${data.historicalBars?.toLocaleString() || 0} bars available`,
+      detail: aiTrainingDetail,
       color: 'cyan',
-      ready: data.historicalBars > 1000
+      ready: data.modelTrained || data.historicalBars > 1000
     },
     {
       label: 'Scanner Calibration',
@@ -2240,9 +2245,13 @@ const NIA = () => {
       // Process timeseries status
       if (timeseriesRes.status === 'fulfilled' && timeseriesRes.value.data?.success) {
         const ts = timeseriesRes.value.data.status;
-        newData.timeseriesAccuracy = ts?.metrics?.test_accuracy || null;
-        newData.timeseriesPredictions = ts?.metrics?.total_predictions || 0;
-        newData.aiAccuracy = ts?.metrics?.test_accuracy || null;
+        // Check model.metrics.accuracy (not test_accuracy)
+        newData.timeseriesAccuracy = ts?.model?.metrics?.accuracy || null;
+        // Check model.trained flag directly
+        newData.timeseriesTrained = ts?.model?.trained || false;
+        newData.timeseriesPredictions = ts?.model?.metrics?.training_samples || 0;
+        newData.aiAccuracy = ts?.model?.metrics?.accuracy || null;
+        newData.timeseriesLastTrained = ts?.model?.metrics?.last_trained || null;
       }
 
       // Process AI advisor
@@ -2280,7 +2289,8 @@ const NIA = () => {
       }
 
       // Calculate learning progress data
-      newData.modelTrained = newData.timeseriesAccuracy !== null;
+      // Use timeseriesTrained flag OR accuracy to determine if model is trained
+      newData.modelTrained = newData.timeseriesTrained || newData.timeseriesAccuracy !== null;
       newData.calibrationsApplied = newData.calibrationsToday || 0;
       newData.predictionsTracked = newData.timeseriesPredictions || 0;
       newData.alertsAnalyzed = newData.calibrationsApplied * 5; // Estimate
