@@ -1322,10 +1322,23 @@ async def report_historical_data_result(request: Request):
         success = body.get("success", False)
         data = body.get("data")
         error = body.get("error")
-        bar_size = body.get("bar_size", "1 day")
+        bar_size = body.get("bar_size")
         
         if not request_id:
             raise HTTPException(status_code=400, detail="request_id is required")
+        
+        # If bar_size not provided in result, look it up from the original request
+        if not bar_size:
+            try:
+                original_request = service.collection.find_one({"request_id": request_id})
+                if original_request:
+                    bar_size = original_request.get("bar_size", "1 day")
+                    logger.info(f"Got bar_size '{bar_size}' from original request for {symbol}")
+                else:
+                    bar_size = "1 day"
+            except Exception as e:
+                logger.warning(f"Could not look up bar_size for {request_id}: {e}")
+                bar_size = "1 day"
         
         # Store in queue (for tracking)
         service.complete_request(
