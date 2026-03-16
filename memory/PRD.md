@@ -7,6 +7,30 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 16, 2026)
 
+### Data Collection Panel - Per-Timeframe Progress & Modal ✅ (March 16, 2026)
+**IMPLEMENTED: Detailed progress by bar_size with conflict management modal**
+
+**New Backend Endpoints:**
+- `GET /api/ib-collector/queue-progress-detailed` - Returns progress broken down by bar_size
+- `POST /api/ib-collector/cancel-by-barsize` - Cancel specific bar_size collection
+- `POST /api/ib-collector/cancel-all-pending` - Cancel all pending collections
+
+**Frontend Changes:**
+- Data Collection panel now shows progress per bar_size (1 day, 5 mins, 1 min, etc.)
+- Shows "Active" badge when collections are running
+- Each active collection shows: completed/total, progress %, pending count, failed count
+- Cancel button to stop specific bar_size collections
+- **Conflict Modal**: When starting a new collection while one is running:
+  - "Cancel Current & Start New" - Cancels all pending and starts fresh
+  - "Add to Queue (Run After Current)" - Queues the new collection
+
+**Files Modified:**
+- `/app/backend/services/historical_data_queue_service.py` - Added get_queue_stats_by_bar_size(), cancel_by_bar_size(), clear_all_pending()
+- `/app/backend/routers/ib_collector_router.py` - Added queue-progress-detailed, cancel-by-barsize, cancel-all-pending endpoints
+- `/app/frontend/src/components/NIA.jsx` - Rewrote DataCollectionPanel with detailed progress and modal
+
+---
+
 ### UI Panel Consolidation ✅ (March 16, 2026)
 **MERGED: Multi-Timeframe Data + Historical Data (Legacy) → Data Collection**
 

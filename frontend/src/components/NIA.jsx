@@ -24,6 +24,7 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
+  AlertCircle,
   RefreshCw,
   ChevronRight,
   ChevronDown,
@@ -377,6 +378,12 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
   const [timeframeStats, setTimeframeStats] = useState([]);
   const [loadingPresets, setLoadingPresets] = useState(false);
   const [activeTab, setActiveTab] = useState('overview'); // 'overview' or 'collect'
+  
+  // New state for detailed progress and modal
+  const [detailedProgress, setDetailedProgress] = useState({ by_bar_size: [], active_collections: [] });
+  const [showCollectionModal, setShowCollectionModal] = useState(false);
+  const [pendingCollection, setPendingCollection] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
 
   // Bar size options (prioritized for user's preference: 1min, 5min)
   const barSizeOptions = [
@@ -406,14 +413,15 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
     { value: 'full_market', label: 'Full', description: 'All stocks (slow)' }
   ];
 
-  // Fetch presets and timeframe stats
+  // Fetch presets, timeframe stats, and detailed progress
   useEffect(() => {
     const fetchData = async () => {
       setLoadingPresets(true);
       try {
-        const [presetsRes, statsRes] = await Promise.allSettled([
+        const [presetsRes, statsRes, progressRes] = await Promise.allSettled([
           fetch(`${API_BASE}/api/ib-collector/collection-presets`),
-          fetch(`${API_BASE}/api/ib-collector/timeframe-stats`)
+          fetch(`${API_BASE}/api/ib-collector/timeframe-stats`),
+          fetch(`${API_BASE}/api/ib-collector/queue-progress-detailed`)
         ]);
         
         if (presetsRes.status === 'fulfilled') {
@@ -425,6 +433,17 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
           const data = await statsRes.value.json();
           if (data.success) setTimeframeStats(data.by_timeframe || []);
         }
+        
+        if (progressRes.status === 'fulfilled') {
+          const data = await progressRes.value.json();
+          if (data.success) {
+            setDetailedProgress({
+              by_bar_size: data.by_bar_size || [],
+              active_collections: data.active_collections || [],
+              overall: data.overall || {}
+            });
+          }
+        }
       } catch (err) {
         console.error('Error fetching collection data:', err);
       } finally {
@@ -432,18 +451,37 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
       }
     };
     fetchData();
+    
+    // Poll for progress updates every 5 seconds
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
   }, []);
 
-  const handleStartCollection = async () => {
+  // Check if there are active collections
+  const hasActiveCollections = detailedProgress.active_collections?.length > 0;
+
+  const handleStartCollectionClick = () => {
+    if (hasActiveCollections) {
+      // Show modal to ask user what to do
+      setPendingCollection({ barSize, lookback, collectionType });
+      setShowCollectionModal(true);
+    } else {
+      // No active collections, start directly
+      startCollection(barSize, lookback, collectionType);
+    }
+  };
+
+  const startCollection = async (bs, lb, ct) => {
     setCollecting(true);
+    setShowCollectionModal(false);
     try {
-      const res = await fetch(`${API_BASE}/api/ib-collector/multi-timeframe-collection?bar_size=${encodeURIComponent(barSize)}&lookback=${lookback}&collection_type=${collectionType}`, {
+      const res = await fetch(`${API_BASE}/api/ib-collector/multi-timeframe-collection?bar_size=${encodeURIComponent(bs)}&lookback=${lb}&collection_type=${ct}`, {
         method: 'POST'
       });
       const data = await res.json();
       
       if (data.success) {
-        toast.success(`Collection started: ${barSize} bars, ${lookback.replace('_', ' ')} lookback`);
+        toast.success(`Collection started: ${bs} bars, ${lb.replace('_', ' ')} lookback`);
         if (onRefresh) onRefresh();
       } else {
         toast.error(data.error || 'Failed to start collection');
@@ -452,6 +490,53 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
       toast.error('Error starting collection');
     } finally {
       setCollecting(false);
+      setPendingCollection(null);
+    }
+  };
+
+  const handleCancelAndStart = async () => {
+    setCancelling(true);
+    try {
+      // Cancel all pending collections
+      const res = await fetch(`${API_BASE}/api/ib-collector/cancel-all-pending`, { method: 'POST' });
+      const data = await res.json();
+      
+      if (data.success) {
+        toast.info(`Cancelled ${data.cancelled} pending requests`);
+        // Now start the new collection
+        if (pendingCollection) {
+          await startCollection(pendingCollection.barSize, pendingCollection.lookback, pendingCollection.collectionType);
+        }
+      } else {
+        toast.error('Failed to cancel current collections');
+      }
+    } catch (err) {
+      toast.error('Error cancelling collections');
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const handleQueueNewCollection = () => {
+    // Just start the new collection (it will queue behind existing)
+    if (pendingCollection) {
+      startCollection(pendingCollection.barSize, pendingCollection.lookback, pendingCollection.collectionType);
+    }
+  };
+
+  const handleCancelBarSize = async (barSizeToCancel) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/ib-collector/cancel-by-barsize?bar_size=${encodeURIComponent(barSizeToCancel)}`, { method: 'POST' });
+      const data = await res.json();
+      
+      if (data.success) {
+        toast.success(`Cancelled ${data.cancelled} pending ${barSizeToCancel} requests`);
+        if (onRefresh) onRefresh();
+      } else {
+        toast.error('Failed to cancel');
+      }
+    } catch (err) {
+      toast.error('Error cancelling');
     }
   };
 
@@ -465,10 +550,6 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
   };
 
   const { queueProgress, stats } = collectionData || {};
-  const isRunning = queueProgress && queueProgress.pending > 0;
-  const progress = queueProgress 
-    ? Math.round((queueProgress.completed / (queueProgress.total || 1)) * 100) 
-    : 0;
   const totalSymbols = stats?.unique_symbols || 0;
   const totalBars = stats?.total_bars || 0;
 
@@ -479,89 +560,188 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
   const displayBars = totalBars || totalTimeframeBars;
 
   return (
-    <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
-        data-testid="data-collection-panel-toggle"
-      >
-        <div className="flex items-center gap-3">
-          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isRunning ? 'bg-orange-500/20' : 'bg-emerald-500/20'}`}>
-            {isRunning ? (
-              <Download className="w-4 h-4 text-orange-400 animate-pulse" />
-            ) : (
-              <Database className="w-4 h-4 text-emerald-400" />
-            )}
-          </div>
-          <div className="text-left">
-            <h3 className="text-sm font-semibold text-white">Data Collection</h3>
-            <p className="text-xs text-zinc-400">
-              {isRunning 
-                ? `Collecting... ${progress}%` 
-                : displaySymbols > 0 
-                  ? `${displaySymbols.toLocaleString()} symbols • ${displayBars.toLocaleString()} bars`
-                  : 'No data collected yet'
-              }
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {isRunning && (
-            <div className="text-right mr-2">
-              <div className="text-sm font-bold text-orange-400">{queueProgress.pending.toLocaleString()}</div>
-              <div className="text-[10px] text-zinc-500">remaining</div>
-            </div>
-          )}
-          {timeframeStats.length > 0 && !isRunning && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">
-              {timeframeStats.length} timeframe{timeframeStats.length !== 1 ? 's' : ''}
-            </span>
-          )}
-          <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-        </div>
-      </button>
-
+    <>
+      {/* Collection Conflict Modal */}
       <AnimatePresence>
-        {expanded && (
+        {showCollectionModal && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="border-t border-white/10"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setShowCollectionModal(false)}
           >
-            <div className="p-4">
-              {/* Collection Progress (when running) */}
-              {isRunning && (
-                <div className="mb-4 p-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
-                  <div className="flex justify-between text-xs text-zinc-400 mb-2">
-                    <span className="text-orange-400 font-medium">Collection in progress</span>
-                    <span>{progress}%</span>
-                  </div>
-                  <div className="h-2 bg-white/5 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-orange-500 to-amber-400 rounded-full transition-all"
-                      style={{ width: `${progress}%` }}
-                    />
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 mt-2 text-center">
-                    <div>
-                      <div className="text-xs font-bold text-emerald-400">{queueProgress.completed?.toLocaleString()}</div>
-                      <div className="text-[10px] text-zinc-500">Done</div>
-                    </div>
-                    <div>
-                      <div className="text-xs font-bold text-orange-400">{queueProgress.pending?.toLocaleString()}</div>
-                      <div className="text-[10px] text-zinc-500">Pending</div>
-                    </div>
-                    <div>
-                      <div className="text-xs font-bold text-red-400">{queueProgress.failed || 0}</div>
-                      <div className="text-[10px] text-zinc-500">Failed</div>
-                    </div>
-                  </div>
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-zinc-900 border border-white/10 rounded-xl p-6 max-w-md w-full shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center">
+                  <AlertCircle className="w-5 h-5 text-amber-400" />
                 </div>
-              )}
+                <div>
+                  <h3 className="text-lg font-semibold text-white">Collection In Progress</h3>
+                  <p className="text-sm text-zinc-400">
+                    {detailedProgress.active_collections?.length} active collection(s) running
+                  </p>
+                </div>
+              </div>
 
-              {/* Tab Switcher */}
-              {!isRunning && (
+              {/* Show active collections */}
+              <div className="mb-4 p-3 rounded-lg bg-white/5 border border-white/10">
+                <div className="text-xs text-zinc-400 mb-2">Currently collecting:</div>
+                <div className="space-y-2">
+                  {detailedProgress.active_collections?.map((col) => (
+                    <div key={col.bar_size} className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-white">{col.bar_size}</span>
+                      <div className="flex items-center gap-2">
+                        <div className="w-24 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-cyan-500 rounded-full" 
+                            style={{ width: `${col.progress_pct}%` }}
+                          />
+                        </div>
+                        <span className="text-xs text-zinc-400">{col.progress_pct}%</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <p className="text-sm text-zinc-300 mb-4">
+                You're about to start a new <span className="text-cyan-400 font-medium">{pendingCollection?.barSize}</span> collection. 
+                What would you like to do?
+              </p>
+
+              <div className="space-y-2">
+                <button
+                  onClick={handleCancelAndStart}
+                  disabled={cancelling}
+                  className="w-full py-2.5 px-4 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-400 text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                >
+                  {cancelling ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <XCircle className="w-4 h-4" />
+                  )}
+                  Cancel Current & Start New
+                </button>
+                
+                <button
+                  onClick={handleQueueNewCollection}
+                  disabled={collecting}
+                  className="w-full py-2.5 px-4 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 text-cyan-400 text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                >
+                  <PlayCircle className="w-4 h-4" />
+                  Add to Queue (Run After Current)
+                </button>
+                
+                <button
+                  onClick={() => setShowCollectionModal(false)}
+                  className="w-full py-2.5 px-4 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 text-sm font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Main Panel */}
+      <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }}>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
+          data-testid="data-collection-panel-toggle"
+        >
+          <div className="flex items-center gap-3">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${hasActiveCollections ? 'bg-orange-500/20' : 'bg-emerald-500/20'}`}>
+              {hasActiveCollections ? (
+                <Download className="w-4 h-4 text-orange-400 animate-pulse" />
+              ) : (
+                <Database className="w-4 h-4 text-emerald-400" />
+              )}
+            </div>
+            <div className="text-left">
+              <h3 className="text-sm font-semibold text-white">Data Collection</h3>
+              <p className="text-xs text-zinc-400">
+                {hasActiveCollections 
+                  ? `${detailedProgress.active_collections?.length} collection(s) running` 
+                  : displaySymbols > 0 
+                    ? `${displaySymbols.toLocaleString()} symbols • ${displayBars.toLocaleString()} bars`
+                    : 'No data collected yet'
+                }
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {hasActiveCollections && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 animate-pulse">
+                Active
+              </span>
+            )}
+            {timeframeStats.length > 0 && !hasActiveCollections && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">
+                {timeframeStats.length} timeframe{timeframeStats.length !== 1 ? 's' : ''}
+              </span>
+            )}
+            <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+          </div>
+        </button>
+
+        <AnimatePresence>
+          {expanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="border-t border-white/10"
+            >
+              <div className="p-4">
+                {/* Active Collections Progress (when running) */}
+                {hasActiveCollections && (
+                  <div className="mb-4 p-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs font-medium text-orange-400">Active Collections</span>
+                      <button
+                        onClick={() => handleCancelBarSize(detailedProgress.active_collections[0]?.bar_size)}
+                        className="text-[10px] text-red-400 hover:text-red-300 flex items-center gap-1"
+                      >
+                        <XCircle className="w-3 h-3" />
+                        Cancel
+                      </button>
+                    </div>
+                    <div className="space-y-3">
+                      {detailedProgress.active_collections?.map((col) => (
+                        <div key={col.bar_size}>
+                          <div className="flex justify-between text-xs mb-1">
+                            <span className="text-white font-medium">{col.bar_size}</span>
+                            <span className="text-zinc-400">
+                              {col.completed + col.failed}/{col.total} ({col.progress_pct}%)
+                            </span>
+                          </div>
+                          <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-orange-500 to-amber-400 rounded-full transition-all"
+                              style={{ width: `${col.progress_pct}%` }}
+                            />
+                          </div>
+                          <div className="flex justify-between mt-1 text-[10px] text-zinc-500">
+                            <span className="text-emerald-400">{col.completed} done</span>
+                            <span className="text-orange-400">{col.pending} pending</span>
+                            {col.failed > 0 && <span className="text-red-400">{col.failed} failed</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab Switcher */}
                 <div className="flex gap-1 p-1 rounded-lg bg-white/5 mb-4">
                   <button
                     onClick={() => setActiveTab('overview')}
@@ -584,206 +764,206 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
                     + Collect New
                   </button>
                 </div>
-              )}
 
-              {/* Overview Tab */}
-              {activeTab === 'overview' && !isRunning && (
-                <div className="space-y-4">
-                  {/* Summary Stats */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5">
-                      <div className="text-2xl font-bold text-white">{displaySymbols.toLocaleString()}</div>
-                      <div className="text-xs text-zinc-500">Unique Symbols</div>
-                    </div>
-                    <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5">
-                      <div className="text-2xl font-bold text-white">{(displayBars / 1000).toFixed(0)}K</div>
-                      <div className="text-xs text-zinc-500">Total Bars</div>
-                    </div>
-                  </div>
-
-                  {/* Timeframe Breakdown */}
-                  {timeframeStats.length > 0 ? (
-                    <div>
-                      <div className="text-xs text-zinc-400 mb-2">Data by Timeframe</div>
-                      <div className="space-y-2">
-                        {timeframeStats.map((stat) => (
-                          <div 
-                            key={stat.bar_size} 
-                            className="flex items-center justify-between p-2 rounded-lg bg-white/[0.02] border border-white/5"
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-medium text-white">{stat.bar_size}</span>
-                              <span className="text-[10px] text-zinc-500">
-                                {stat.date_range?.start && stat.date_range?.end 
-                                  ? `${stat.date_range.start.slice(5)} → ${stat.date_range.end.slice(5)}`
-                                  : ''
-                                }
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-3 text-xs">
-                              <span className="text-emerald-400">{stat.unique_symbols?.toLocaleString()} sym</span>
-                              <span className="text-zinc-400">{(stat.total_bars / 1000).toFixed(0)}K bars</span>
-                            </div>
-                          </div>
-                        ))}
+                {/* Overview Tab */}
+                {activeTab === 'overview' && (
+                  <div className="space-y-4">
+                    {/* Summary Stats */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5">
+                        <div className="text-2xl font-bold text-white">{displaySymbols.toLocaleString()}</div>
+                        <div className="text-xs text-zinc-500">Unique Symbols</div>
+                      </div>
+                      <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5">
+                        <div className="text-2xl font-bold text-white">{(displayBars / 1000).toFixed(0)}K</div>
+                        <div className="text-xs text-zinc-500">Total Bars</div>
                       </div>
                     </div>
-                  ) : (
-                    <div className="text-center py-4">
-                      <HardDrive className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
-                      <p className="text-sm text-zinc-400">No data collected yet</p>
-                      <button
-                        onClick={() => setActiveTab('collect')}
-                        className="mt-2 text-xs text-cyan-400 hover:text-cyan-300"
-                      >
-                        Start collecting →
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
 
-              {/* Collect New Tab */}
-              {activeTab === 'collect' && !isRunning && (
-                <div className="space-y-4">
-                  {/* Quick Presets */}
-                  <div>
-                    <button
-                      onClick={() => setShowPresets(!showPresets)}
-                      className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 mb-2"
-                      data-testid="show-presets-btn"
-                    >
-                      <Sparkles className="w-3 h-3" />
-                      {showPresets ? 'Hide Presets' : 'Quick Presets'}
-                    </button>
-                    
-                    <AnimatePresence>
-                      {showPresets && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: 'auto', opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          className="grid grid-cols-2 gap-2 pb-3 border-b border-white/5"
-                        >
-                          {presets.slice(0, 6).map((preset) => (
-                            <button
-                              key={preset.name}
-                              onClick={() => handleApplyPreset(preset)}
-                              className="p-2 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 text-left transition-colors"
-                              data-testid={`preset-${preset.name.toLowerCase().replace(/\s+/g, '-')}`}
+                    {/* Timeframe Breakdown */}
+                    {timeframeStats.length > 0 ? (
+                      <div>
+                        <div className="text-xs text-zinc-400 mb-2">Data by Timeframe</div>
+                        <div className="space-y-2">
+                          {timeframeStats.map((stat) => (
+                            <div 
+                              key={stat.bar_size} 
+                              className="flex items-center justify-between p-2 rounded-lg bg-white/[0.02] border border-white/5"
                             >
-                              <div className="text-xs font-medium text-white">{preset.name}</div>
-                              <div className="text-[10px] text-zinc-500">{preset.bar_size} • {preset.lookback.replace('_', ' ')}</div>
-                            </button>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-medium text-white">{stat.bar_size}</span>
+                                <span className="text-[10px] text-zinc-500">
+                                  {stat.date_range?.start && stat.date_range?.end 
+                                    ? `${stat.date_range.start.slice(5)} → ${stat.date_range.end.slice(5)}`
+                                    : ''
+                                  }
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-3 text-xs">
+                                <span className="text-emerald-400">{stat.unique_symbols?.toLocaleString()} sym</span>
+                                <span className="text-zinc-400">{(stat.total_bars / 1000).toFixed(0)}K bars</span>
+                              </div>
+                            </div>
                           ))}
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-
-                  {/* Bar Size Selector */}
-                  <div>
-                    <label className="block text-xs text-zinc-400 mb-2">Bar Size</label>
-                    <div className="grid grid-cols-6 gap-1">
-                      {barSizeOptions.map((opt) => {
-                        const isSelected = barSize === opt.value;
-                        return (
-                          <button
-                            key={opt.value}
-                            onClick={() => setBarSize(opt.value)}
-                            className={`p-2 rounded-lg border text-center transition-all ${
-                              isSelected
-                                ? 'bg-amber-500/20 border-amber-500/50 text-amber-400'
-                                : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
-                            }`}
-                            data-testid={`bar-size-${opt.value.replace(/\s+/g, '-')}`}
-                          >
-                            <div className="text-[10px] font-medium">{opt.label}</div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Lookback Period */}
-                  <div>
-                    <label className="block text-xs text-zinc-400 mb-2">Lookback Period</label>
-                    <div className="flex flex-wrap gap-1">
-                      {lookbackOptions.map((opt) => {
-                        const isSelected = lookback === opt.value;
-                        return (
-                          <button
-                            key={opt.value}
-                            onClick={() => setLookback(opt.value)}
-                            className={`px-2 py-1 rounded text-[10px] border transition-all ${
-                              isSelected
-                                ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400'
-                                : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
-                            }`}
-                            data-testid={`lookback-${opt.value}`}
-                          >
-                            {opt.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Collection Type */}
-                  <div>
-                    <label className="block text-xs text-zinc-400 mb-2">Collection Scope</label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {collectionTypeOptions.map((opt) => {
-                        const isSelected = collectionType === opt.value;
-                        return (
-                          <button
-                            key={opt.value}
-                            onClick={() => setCollectionType(opt.value)}
-                            className={`p-2 rounded-lg border text-center transition-all ${
-                              isSelected
-                                ? 'bg-violet-500/20 border-violet-500/50 text-violet-400'
-                                : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
-                            }`}
-                            data-testid={`collection-type-${opt.value}`}
-                          >
-                            <div className="text-xs font-medium">{opt.label}</div>
-                            <div className="text-[10px] text-zinc-500">{opt.description}</div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Start Button */}
-                  <button
-                    onClick={handleStartCollection}
-                    disabled={collecting}
-                    className="w-full flex items-center justify-center gap-2 py-3 rounded-lg font-medium text-sm transition-all"
-                    style={{
-                      background: collecting ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg, #10b981, #06b6d4)',
-                      color: collecting ? 'rgba(255,255,255,0.5)' : 'white'
-                    }}
-                    data-testid="start-collection-btn"
-                  >
-                    {collecting ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Starting...
-                      </>
+                        </div>
+                      </div>
                     ) : (
-                      <>
-                        <PlayCircle className="w-4 h-4" />
-                        Start Collection
-                      </>
+                      <div className="text-center py-4">
+                        <HardDrive className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                        <p className="text-sm text-zinc-400">No data collected yet</p>
+                        <button
+                          onClick={() => setActiveTab('collect')}
+                          className="mt-2 text-xs text-cyan-400 hover:text-cyan-300"
+                        >
+                          Start collecting →
+                        </button>
+                      </div>
                     )}
-                  </button>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+                  </div>
+                )}
+
+                {/* Collect New Tab */}
+                {activeTab === 'collect' && (
+                  <div className="space-y-4">
+                    {/* Quick Presets */}
+                    <div>
+                      <button
+                        onClick={() => setShowPresets(!showPresets)}
+                        className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 mb-2"
+                        data-testid="show-presets-btn"
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        {showPresets ? 'Hide Presets' : 'Quick Presets'}
+                      </button>
+                      
+                      <AnimatePresence>
+                        {showPresets && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            className="grid grid-cols-2 gap-2 pb-3 border-b border-white/5"
+                          >
+                            {presets.slice(0, 6).map((preset) => (
+                              <button
+                                key={preset.name}
+                                onClick={() => handleApplyPreset(preset)}
+                                className="p-2 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 text-left transition-colors"
+                                data-testid={`preset-${preset.name.toLowerCase().replace(/\s+/g, '-')}`}
+                              >
+                                <div className="text-xs font-medium text-white">{preset.name}</div>
+                                <div className="text-[10px] text-zinc-500">{preset.bar_size} • {preset.lookback.replace('_', ' ')}</div>
+                              </button>
+                            ))}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
+                    {/* Bar Size Selector */}
+                    <div>
+                      <label className="block text-xs text-zinc-400 mb-2">Bar Size</label>
+                      <div className="grid grid-cols-6 gap-1">
+                        {barSizeOptions.map((opt) => {
+                          const isSelected = barSize === opt.value;
+                          return (
+                            <button
+                              key={opt.value}
+                              onClick={() => setBarSize(opt.value)}
+                              className={`p-2 rounded-lg border text-center transition-all ${
+                                isSelected
+                                  ? 'bg-amber-500/20 border-amber-500/50 text-amber-400'
+                                  : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
+                              }`}
+                              data-testid={`bar-size-${opt.value.replace(/\s+/g, '-')}`}
+                            >
+                              <div className="text-[10px] font-medium">{opt.label}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Lookback Period */}
+                    <div>
+                      <label className="block text-xs text-zinc-400 mb-2">Lookback Period</label>
+                      <div className="flex flex-wrap gap-1">
+                        {lookbackOptions.map((opt) => {
+                          const isSelected = lookback === opt.value;
+                          return (
+                            <button
+                              key={opt.value}
+                              onClick={() => setLookback(opt.value)}
+                              className={`px-2 py-1 rounded text-[10px] border transition-all ${
+                                isSelected
+                                  ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400'
+                                  : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
+                              }`}
+                              data-testid={`lookback-${opt.value}`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Collection Type */}
+                    <div>
+                      <label className="block text-xs text-zinc-400 mb-2">Collection Scope</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {collectionTypeOptions.map((opt) => {
+                          const isSelected = collectionType === opt.value;
+                          return (
+                            <button
+                              key={opt.value}
+                              onClick={() => setCollectionType(opt.value)}
+                              className={`p-2 rounded-lg border text-center transition-all ${
+                                isSelected
+                                  ? 'bg-violet-500/20 border-violet-500/50 text-violet-400'
+                                  : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
+                              }`}
+                              data-testid={`collection-type-${opt.value}`}
+                            >
+                              <div className="text-xs font-medium">{opt.label}</div>
+                              <div className="text-[10px] text-zinc-500">{opt.description}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Start Button */}
+                    <button
+                      onClick={handleStartCollectionClick}
+                      disabled={collecting}
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-lg font-medium text-sm transition-all"
+                      style={{
+                        background: collecting ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg, #10b981, #06b6d4)',
+                        color: collecting ? 'rgba(255,255,255,0.5)' : 'white'
+                      }}
+                      data-testid="start-collection-btn"
+                    >
+                      {collecting ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Starting...
+                        </>
+                      ) : (
+                        <>
+                          <PlayCircle className="w-4 h-4" />
+                          Start Collection
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </>
   );
 };
 

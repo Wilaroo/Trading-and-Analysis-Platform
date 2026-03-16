@@ -339,6 +339,84 @@ async def get_queue_progress(job_id: Optional[str] = None):
         }
 
 
+@router.get("/queue-progress-detailed")
+async def get_queue_progress_detailed():
+    """
+    Get detailed queue progress broken down by bar_size.
+    
+    Returns progress for each type of data being collected (1 min, 5 mins, 1 day, etc.)
+    so you can see exactly what's happening with each collection type.
+    
+    Response includes:
+    - **by_bar_size**: List of progress for each bar_size
+    - **active_collections**: Only bar_sizes with pending/in-progress work
+    """
+    try:
+        from services.historical_data_queue_service import get_historical_data_queue_service
+        queue_service = get_historical_data_queue_service()
+        
+        detailed = queue_service.get_queue_stats_by_bar_size()
+        overall = queue_service.get_overall_queue_stats()
+        
+        return {
+            "success": True,
+            "overall": overall,
+            **detailed
+        }
+    except Exception as e:
+        logger.error(f"Error getting detailed queue progress: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@router.post("/cancel-by-barsize")
+async def cancel_collection_by_barsize(bar_size: str):
+    """
+    Cancel all pending requests for a specific bar_size.
+    
+    Use this to cancel a specific collection without affecting others.
+    For example, cancel "5 mins" collection while letting "1 day" continue.
+    
+    - **bar_size**: The bar size to cancel (e.g., "5 mins", "1 day", "1 min")
+    """
+    try:
+        from services.historical_data_queue_service import get_historical_data_queue_service
+        queue_service = get_historical_data_queue_service()
+        
+        result = queue_service.cancel_by_bar_size(bar_size)
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error cancelling collection for bar_size {bar_size}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/cancel-all-pending")
+async def cancel_all_pending_collections():
+    """
+    Cancel ALL pending collections across all bar_sizes.
+    
+    Use this to completely clear the queue and start fresh.
+    Already completed data is NOT affected.
+    """
+    try:
+        from services.historical_data_queue_service import get_historical_data_queue_service
+        queue_service = get_historical_data_queue_service()
+        
+        result = queue_service.clear_all_pending()
+        
+        # Also signal collector to stop
+        collector = get_ib_collector()
+        collector.cancel_collection()
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error cancelling all pending collections: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/queue-cancel")
 async def cancel_queue_job(job_id: str):
     """

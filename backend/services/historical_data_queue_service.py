@@ -373,6 +373,110 @@ class HistoricalDataQueueService:
         
         return stats
 
+    def get_queue_stats_by_bar_size(self) -> Dict:
+        """
+        Get queue statistics broken down by bar_size.
+        
+        Returns:
+            Dict with progress for each bar_size type being collected
+        """
+        pipeline = [
+            {
+                "$group": {
+                    "_id": {
+                        "bar_size": "$bar_size",
+                        "status": "$status"
+                    },
+                    "count": {"$sum": 1}
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$_id.bar_size",
+                    "statuses": {
+                        "$push": {
+                            "status": "$_id.status",
+                            "count": "$count"
+                        }
+                    },
+                    "total": {"$sum": "$count"}
+                }
+            },
+            {"$sort": {"_id": 1}}
+        ]
+        
+        results = list(self.collection.aggregate(pipeline))
+        
+        by_bar_size = []
+        for r in results:
+            bar_size = r["_id"]
+            statuses = {s["status"]: s["count"] for s in r["statuses"]}
+            
+            pending = statuses.get("pending", 0)
+            claimed = statuses.get("claimed", 0)
+            completed = statuses.get("completed", 0)
+            failed = statuses.get("failed", 0)
+            total = r["total"]
+            done = completed + failed
+            
+            by_bar_size.append({
+                "bar_size": bar_size,
+                "pending": pending,
+                "in_progress": claimed,
+                "completed": completed,
+                "failed": failed,
+                "total": total,
+                "progress_pct": round((done / total * 100), 1) if total > 0 else 0,
+                "is_active": pending > 0 or claimed > 0
+            })
+        
+        # Sort so active collections appear first
+        by_bar_size.sort(key=lambda x: (not x["is_active"], x["bar_size"]))
+        
+        return {
+            "by_bar_size": by_bar_size,
+            "active_collections": [b for b in by_bar_size if b["is_active"]]
+        }
+
+    def cancel_by_bar_size(self, bar_size: str) -> Dict:
+        """
+        Cancel all pending requests for a specific bar_size.
+        
+        Args:
+            bar_size: The bar size to cancel (e.g., "5 mins", "1 day")
+            
+        Returns:
+            Dict with count of cancelled requests
+        """
+        result = self.collection.delete_many({
+            "bar_size": bar_size,
+            "status": "pending"
+        })
+        
+        logger.info(f"Cancelled {result.deleted_count} pending requests for bar_size={bar_size}")
+        
+        return {
+            "success": True,
+            "bar_size": bar_size,
+            "cancelled": result.deleted_count
+        }
+
+    def clear_all_pending(self) -> Dict:
+        """
+        Clear ALL pending requests from the queue.
+        Use with caution - cancels all active collections.
+        """
+        result = self.collection.delete_many({
+            "status": "pending"
+        })
+        
+        logger.info(f"Cleared ALL {result.deleted_count} pending requests")
+        
+        return {
+            "success": True,
+            "cancelled": result.deleted_count
+        }
+
 
 def init_historical_data_queue_service(db: Database):
     """Initialize the service with a database connection"""
