@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://market-alerts-31.preview.emergentagent.com
+https://dual-stream-chat-1.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://market-alerts-31.preview.emergentagent.com
+https://dual-stream-chat-1.preview.emergentagent.com
 ```

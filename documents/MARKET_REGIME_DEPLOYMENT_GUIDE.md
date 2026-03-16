@@ -101,7 +101,7 @@ from routers.market_regime import router as market_regime_router
 app.include_router(market_regime_router)
 
 # Test with curl:
-# curl https://market-alerts-31.preview.emergentagent.com/api/market-regime/summary
+# curl https://dual-stream-chat-1.preview.emergentagent.com/api/market-regime/summary
 ```
 
 ## Integration with Other Systems

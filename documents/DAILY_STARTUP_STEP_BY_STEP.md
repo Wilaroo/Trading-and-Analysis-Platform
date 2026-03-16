@@ -74,7 +74,7 @@ Forwarding                    https://pseudoaccidentally-linty-addie.ngrok-free.
 2. Go to this address:
 
 ```
-https://market-alerts-31.preview.emergentagent.com
+https://dual-stream-chat-1.preview.emergentagent.com
 ```
 
 ✅ **Done!** TradeCommand is now running with AI enabled.
@@ -141,5 +141,5 @@ ollama serve
 
 **App URL:**
 ```
-https://market-alerts-31.preview.emergentagent.com
+https://dual-stream-chat-1.preview.emergentagent.com
 ```
