@@ -7,6 +7,33 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 16, 2026)
 
+### Cancel & Save + Resume Collection ✅ (March 16, 2026)
+**IMPLEMENTED: Safe cancel that preserves data with ability to resume later**
+
+**New Backend Endpoints:**
+- `GET /api/ib-collector/resumable-collections` - Get collections that can be resumed
+- `POST /api/ib-collector/resume-collection` - Resume a cancelled collection, picking up where it left off
+
+**Backend Changes:**
+- `cancel_by_bar_size()` now returns count of saved symbols
+- Added `get_resumable_collections()` - finds partial collections that aren't active
+- Added `get_completed_symbols()` - gets symbols already collected for a bar_size
+- Added `get_failed_symbols()` - gets symbols that failed (can be retried on resume)
+- Added `clear_failed_for_retry()` - clears failed entries so they can be re-queued
+
+**Frontend Changes:**
+- Changed "Cancel" to "Cancel & Save" (amber button with StopCircle icon)
+- Shows individual Cancel & Save button per bar_size
+- Added "Resumable Collections" section (cyan) that appears when a collection is paused
+- Resume button picks up where collection left off, optionally retrying failed symbols
+
+**Files Modified:**
+- `/app/backend/services/historical_data_queue_service.py` - Added resume support methods
+- `/app/backend/routers/ib_collector_router.py` - Added resumable-collections and resume-collection endpoints
+- `/app/frontend/src/components/NIA.jsx` - Updated UI with Cancel & Save and Resume buttons
+
+---
+
 ### Data Collection Panel - Per-Timeframe Progress & Modal ✅ (March 16, 2026)
 **IMPLEMENTED: Detailed progress by bar_size with conflict management modal**
 

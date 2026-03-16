@@ -417,6 +417,137 @@ async def cancel_all_pending_collections():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/resumable-collections")
+async def get_resumable_collections():
+    """
+    Get collections that can be resumed.
+    
+    Returns bar_sizes that have partial data collected but are not currently active.
+    These can be resumed to continue where they left off.
+    """
+    try:
+        from services.historical_data_queue_service import get_historical_data_queue_service
+        queue_service = get_historical_data_queue_service()
+        
+        resumable = queue_service.get_resumable_collections()
+        
+        return {
+            "success": True,
+            "resumable": resumable,
+            "count": len(resumable)
+        }
+    except Exception as e:
+        logger.error(f"Error getting resumable collections: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/resume-collection")
+async def resume_barsize_collection(
+    bar_size: str,
+    retry_failed: bool = True,
+    collection_type: str = "smart"
+):
+    """
+    Resume a previously cancelled/paused collection.
+    
+    This will:
+    1. Get the list of symbols that have already been collected for this bar_size
+    2. Get the original symbol list based on collection_type
+    3. Queue only the symbols that haven't been collected yet
+    4. Optionally retry failed symbols
+    
+    - **bar_size**: The bar size to resume (e.g., "5 mins", "1 day")
+    - **retry_failed**: If True, also retry symbols that previously failed
+    - **collection_type**: How to determine the full symbol list (smart, liquid, full_market)
+    """
+    try:
+        from services.historical_data_queue_service import get_historical_data_queue_service
+        queue_service = get_historical_data_queue_service()
+        collector = get_ib_collector()
+        
+        # Get symbols already completed
+        completed_symbols = set(queue_service.get_completed_symbols(bar_size))
+        
+        # Get failed symbols if we're retrying them
+        failed_symbols = []
+        if retry_failed:
+            failed_symbols = queue_service.get_failed_symbols(bar_size)
+            # Clear the failed entries so they can be re-queued
+            queue_service.clear_failed_for_retry(bar_size)
+        
+        # Determine ADV threshold based on bar size
+        adv_thresholds = {
+            "1 min": 500_000,
+            "5 mins": 500_000,
+            "15 mins": 100_000,
+            "1 hour": 100_000,
+            "1 day": 50_000,
+            "1 week": 50_000
+        }
+        
+        # Get the full symbol list based on collection type
+        if collection_type == "full_market":
+            all_symbols = await collector.get_all_us_symbols(min_price=1.0, max_price=1000.0)
+        elif collection_type == "smart":
+            min_adv = adv_thresholds.get(bar_size, 100_000)
+            all_symbols = await collector.get_liquid_symbols(min_adv=min_adv)
+        else:  # liquid
+            all_symbols = await collector.get_liquid_symbols(min_adv=100_000)
+        
+        # Filter out already completed symbols
+        symbols_to_collect = [s for s in all_symbols if s not in completed_symbols]
+        
+        # Add back failed symbols if retrying
+        if retry_failed and failed_symbols:
+            # Add failed symbols that aren't already in the list
+            for sym in failed_symbols:
+                if sym not in symbols_to_collect:
+                    symbols_to_collect.append(sym)
+        
+        if not symbols_to_collect:
+            return {
+                "success": True,
+                "message": "Nothing to resume - all symbols already collected",
+                "completed": len(completed_symbols),
+                "remaining": 0
+            }
+        
+        # Determine duration based on bar_size (use reasonable defaults)
+        duration_map = {
+            "1 min": "1 D",
+            "5 mins": "1 W",
+            "15 mins": "1 M",
+            "1 hour": "1 M",
+            "1 day": "1 M",
+            "1 week": "6 M"
+        }
+        duration = duration_map.get(bar_size, "1 M")
+        
+        logger.info(f"Resuming {bar_size} collection: {len(symbols_to_collect)} symbols to collect ({len(completed_symbols)} already done)")
+        
+        # Start collection for remaining symbols
+        result = await collector.start_collection(
+            symbols=symbols_to_collect,
+            bar_size=bar_size,
+            duration=duration,
+            use_defaults=False,
+            skip_recent=False,  # Don't skip - we've already filtered
+            force_refresh=False
+        )
+        
+        if result.get("success"):
+            result["resumed"] = True
+            result["already_completed"] = len(completed_symbols)
+            result["retrying_failed"] = len(failed_symbols) if retry_failed else 0
+            result["new_to_collect"] = len(symbols_to_collect)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error resuming collection for {bar_size}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/queue-cancel")
 async def cancel_queue_job(job_id: str):
     """

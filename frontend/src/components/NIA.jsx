@@ -525,18 +525,46 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
   };
 
   const handleCancelBarSize = async (barSizeToCancel) => {
+    setCancelling(true);
     try {
       const res = await fetch(`${API_BASE}/api/ib-collector/cancel-by-barsize?bar_size=${encodeURIComponent(barSizeToCancel)}`, { method: 'POST' });
       const data = await res.json();
       
       if (data.success) {
-        toast.success(`Cancelled ${data.cancelled} pending ${barSizeToCancel} requests`);
+        toast.success(data.message || `Cancelled. ${data.saved || 0} symbols saved.`);
         if (onRefresh) onRefresh();
       } else {
         toast.error('Failed to cancel');
       }
     } catch (err) {
       toast.error('Error cancelling');
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const handleResumeCollection = async (barSizeToResume) => {
+    setCollecting(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/ib-collector/resume-collection?bar_size=${encodeURIComponent(barSizeToResume)}&retry_failed=true&collection_type=smart`, { 
+        method: 'POST' 
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        if (data.new_to_collect === 0) {
+          toast.info(data.message || 'All symbols already collected');
+        } else {
+          toast.success(`Resumed: ${data.new_to_collect} symbols to collect (${data.already_completed} already done)`);
+        }
+        if (onRefresh) onRefresh();
+      } else {
+        toast.error(data.error || 'Failed to resume');
+      }
+    } catch (err) {
+      toast.error('Error resuming collection');
+    } finally {
+      setCollecting(false);
     }
   };
 
@@ -707,22 +735,30 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
                   <div className="mb-4 p-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
                     <div className="flex items-center justify-between mb-3">
                       <span className="text-xs font-medium text-orange-400">Active Collections</span>
-                      <button
-                        onClick={() => handleCancelBarSize(detailedProgress.active_collections[0]?.bar_size)}
-                        className="text-[10px] text-red-400 hover:text-red-300 flex items-center gap-1"
-                      >
-                        <XCircle className="w-3 h-3" />
-                        Cancel
-                      </button>
                     </div>
                     <div className="space-y-3">
                       {detailedProgress.active_collections?.map((col) => (
-                        <div key={col.bar_size}>
-                          <div className="flex justify-between text-xs mb-1">
+                        <div key={col.bar_size} className="pb-3 border-b border-white/5 last:border-0 last:pb-0">
+                          <div className="flex justify-between items-center text-xs mb-1">
                             <span className="text-white font-medium">{col.bar_size}</span>
-                            <span className="text-zinc-400">
-                              {col.completed + col.failed}/{col.total} ({col.progress_pct}%)
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-zinc-400">
+                                {col.completed}/{col.total} ({col.progress_pct}%)
+                              </span>
+                              <button
+                                onClick={() => handleCancelBarSize(col.bar_size)}
+                                disabled={cancelling}
+                                className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/10 hover:bg-amber-500/20 transition-colors"
+                                title="Cancel and save already collected data"
+                              >
+                                {cancelling ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <StopCircle className="w-3 h-3" />
+                                )}
+                                Cancel & Save
+                              </button>
+                            </div>
                           </div>
                           <div className="h-2 bg-white/5 rounded-full overflow-hidden">
                             <div
@@ -731,10 +767,47 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
                             />
                           </div>
                           <div className="flex justify-between mt-1 text-[10px] text-zinc-500">
-                            <span className="text-emerald-400">{col.completed} done</span>
+                            <span className="text-emerald-400">{col.completed} saved</span>
                             <span className="text-orange-400">{col.pending} pending</span>
                             {col.failed > 0 && <span className="text-red-400">{col.failed} failed</span>}
                           </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Resumable Collections (paused/cancelled that can be continued) */}
+                {!hasActiveCollections && detailedProgress.by_bar_size?.some(col => 
+                  col.completed > 0 && col.progress_pct < 100 && !col.is_active
+                ) && (
+                  <div className="mb-4 p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs font-medium text-cyan-400">Resumable Collections</span>
+                    </div>
+                    <div className="space-y-2">
+                      {detailedProgress.by_bar_size?.filter(col => 
+                        col.completed > 0 && col.progress_pct < 100 && !col.is_active
+                      ).map((col) => (
+                        <div key={col.bar_size} className="flex items-center justify-between p-2 rounded bg-white/[0.02]">
+                          <div>
+                            <span className="text-xs font-medium text-white">{col.bar_size}</span>
+                            <span className="text-[10px] text-zinc-500 ml-2">
+                              {col.completed}/{col.total} ({col.progress_pct}%)
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => handleResumeCollection(col.bar_size)}
+                            disabled={collecting}
+                            className="text-[10px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 px-2 py-1 rounded bg-cyan-500/10 hover:bg-cyan-500/20 transition-colors"
+                          >
+                            {collecting ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <PlayCircle className="w-3 h-3" />
+                            )}
+                            Resume
+                          </button>
                         </div>
                       ))}
                     </div>

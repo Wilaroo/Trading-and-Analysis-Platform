@@ -441,25 +441,94 @@ class HistoricalDataQueueService:
     def cancel_by_bar_size(self, bar_size: str) -> Dict:
         """
         Cancel all pending requests for a specific bar_size.
+        Already completed data is preserved.
         
         Args:
             bar_size: The bar size to cancel (e.g., "5 mins", "1 day")
             
         Returns:
-            Dict with count of cancelled requests
+            Dict with count of cancelled requests and saved data info
         """
+        # First get counts before cancelling
+        completed_count = self.collection.count_documents({
+            "bar_size": bar_size,
+            "status": "completed"
+        })
+        
         result = self.collection.delete_many({
             "bar_size": bar_size,
             "status": "pending"
         })
         
-        logger.info(f"Cancelled {result.deleted_count} pending requests for bar_size={bar_size}")
+        logger.info(f"Cancelled {result.deleted_count} pending requests for bar_size={bar_size}, {completed_count} already saved")
         
         return {
             "success": True,
             "bar_size": bar_size,
-            "cancelled": result.deleted_count
+            "cancelled": result.deleted_count,
+            "saved": completed_count,
+            "message": f"Cancelled {result.deleted_count} pending. {completed_count} symbols already collected and saved."
         }
+
+    def get_resumable_collections(self) -> List[Dict]:
+        """
+        Get collections that can be resumed (have completed work but no pending items).
+        
+        Returns:
+            List of bar_sizes that have partial data but are not currently collecting
+        """
+        stats = self.get_queue_stats_by_bar_size()
+        
+        resumable = []
+        for item in stats.get("by_bar_size", []):
+            # Resumable if: has completed work, not 100% done, and not currently active
+            if (item["completed"] > 0 and 
+                item["progress_pct"] < 100 and 
+                not item["is_active"]):
+                resumable.append({
+                    "bar_size": item["bar_size"],
+                    "completed": item["completed"],
+                    "failed": item["failed"],
+                    "total": item["total"],
+                    "progress_pct": item["progress_pct"],
+                    "remaining": item["total"] - item["completed"] - item["failed"]
+                })
+        
+        return resumable
+
+    def get_failed_symbols(self, bar_size: str) -> List[str]:
+        """
+        Get symbols that failed for a specific bar_size.
+        These can be retried in a resume operation.
+        """
+        failed_docs = self.collection.find(
+            {"bar_size": bar_size, "status": "failed"},
+            {"symbol": 1, "_id": 0}
+        )
+        return [doc["symbol"] for doc in failed_docs]
+
+    def get_completed_symbols(self, bar_size: str) -> List[str]:
+        """
+        Get symbols that have already been completed for a bar_size.
+        Used to determine what NOT to re-collect on resume.
+        """
+        completed_docs = self.collection.find(
+            {"bar_size": bar_size, "status": "completed"},
+            {"symbol": 1, "_id": 0}
+        )
+        return [doc["symbol"] for doc in completed_docs]
+
+    def clear_failed_for_retry(self, bar_size: str) -> int:
+        """
+        Clear failed requests so they can be retried.
+        Returns count of cleared failures.
+        """
+        result = self.collection.delete_many({
+            "bar_size": bar_size,
+            "status": "failed"
+        })
+        logger.info(f"Cleared {result.deleted_count} failed requests for bar_size={bar_size}")
+        return result.deleted_count
 
     def clear_all_pending(self) -> Dict:
         """
