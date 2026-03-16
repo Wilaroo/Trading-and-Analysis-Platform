@@ -26,6 +26,8 @@ import { toast } from 'sonner';
 import EnhancedTickerModal from './EnhancedTickerModal';
 import { useDataCache } from '../contexts';
 import { DynamicRiskBadge, DynamicRiskPanel } from './DynamicRiskPanel';
+import StreamOfConsciousness from './StreamOfConsciousness';
+import ConversationPanel from './ConversationPanel';
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL;
 
@@ -2798,16 +2800,14 @@ const SentCom = ({ compact = false, embedded = false }) => {
   } = useAIModules();
   
   const [selectedPosition, setSelectedPosition] = useState(null);
-  const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const [localMessages, setLocalMessages] = useState([]);
   const [quickActionLoading, setQuickActionLoading] = useState(null);
-  const [showTradeForm, setShowTradeForm] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState('mode'); // 'mode', 'risk', or 'ai'
   const [showAIInsights, setShowAIInsights] = useState(false);
   const [showRiskPanel, setShowRiskPanel] = useState(false);
-  const streamRef = useRef(null);
+  const conversationRef = useRef(null);
   
   // Initialize local messages with chat history when it loads
   useEffect(() => {
@@ -2816,10 +2816,10 @@ const SentCom = ({ compact = false, embedded = false }) => {
     }
   }, [chatHistory, localMessages.length]);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll handled by ConversationPanel component now
   useEffect(() => {
-    if (streamRef.current) {
-      streamRef.current.scrollTop = streamRef.current.scrollHeight;
+    if (conversationRef.current) {
+      conversationRef.current.scrollTop = conversationRef.current.scrollHeight;
     }
   }, [localMessages]);
 
@@ -2839,7 +2839,6 @@ const SentCom = ({ compact = false, embedded = false }) => {
       metadata: { role: 'user' }
     };
     setLocalMessages(prev => [...prev, userMsg]);
-    setChatInput('');
     
     try {
       const res = await fetch(`${API_BASE}/api/sentcom/chat`, {
@@ -3484,100 +3483,34 @@ const SentCom = ({ compact = false, embedded = false }) => {
             </div>
           </div>
 
-          {/* Right Column - Stream + Chat (wider now) */}
+          {/* Right Column - Neural Split: S.O.C. (Left) + Conversation (Right) */}
           <div className="col-span-9 flex flex-col">
-            {/* Stream Header */}
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <Activity className="w-4 h-4 text-cyan-400" />
-              <span className="text-sm font-medium text-white">Live Team Stream</span>
-              <span className="text-[10px] text-zinc-500">What we're thinking right now</span>
-            </div>
-            
-            {/* Stream Content - Glassy */}
-            <div className="flex-1 relative overflow-hidden rounded-xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] border border-white/10 p-4 mb-4">
-              <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 via-transparent to-violet-500/5 pointer-events-none" />
-              <div ref={streamRef} className="relative h-[320px] overflow-y-auto pr-2 custom-scrollbar" data-testid="live-team-stream">
-                {streamLoading && allMessages.length === 0 ? (
-                  <div className="flex items-center justify-center h-full">
-                    <Loader className="w-6 h-6 text-cyan-400 animate-spin" />
-                  </div>
-                ) : allMessages.length === 0 ? (
-                  <div className="flex items-center justify-center h-full">
-                    <div className="text-center">
-                      <Radio className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
-                      <p className="text-sm text-zinc-500">Waiting for activity...</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {allMessages.map((msg, i) => (
-                      <StreamMessage key={msg.id || `msg-${i}`} msg={msg} index={i} />
-                    ))}
-                    
-                    {/* Typing indicator when waiting for response */}
-                    <AnimatePresence>
-                      {chatLoading && (
-                        <TypingIndicator agentName="SENTCOM" />
-                      )}
-                    </AnimatePresence>
-                  </div>
-                )}
+            {/* Neural Split Container */}
+            <div className="flex-1 grid grid-cols-12 gap-0 rounded-2xl overflow-hidden border border-white/10" data-testid="neural-split-container">
+              {/* Left: SentCom S.O.C. (Stream of Consciousness) - 35% */}
+              <div className="col-span-5 h-[480px]">
+                <StreamOfConsciousness />
+              </div>
+              
+              {/* Right: Conversation Panel - 65% */}
+              <div className="col-span-7 h-[480px] border-l border-white/10">
+                <ConversationPanel
+                  messages={allMessages}
+                  onSendMessage={handleChat}
+                  onQuickAction={handleQuickAction}
+                  onCheckTrade={handleCheckTrade}
+                  loading={chatLoading}
+                  quickActionLoading={quickActionLoading}
+                />
               </div>
             </div>
             
-            {/* Stop Fix Panel - Shows when risky stops detected */}
-            <StopFixPanel 
-              thoughts={allMessages.filter(m => m.type === 'thought' || m.action_type === 'stop_warning')}
-              onRefresh={refreshStream}
-            />
-            
-            {/* Quick Actions - Always visible above chat */}
-            <div className="mb-3">
-              <QuickActionsInline
-                onAction={handleQuickAction}
-                onCheckTrade={handleCheckTrade}
-                loading={quickActionLoading}
-                showTradeForm={showTradeForm}
-                setShowTradeForm={setShowTradeForm}
+            {/* Stop Fix Panel - Shows when risky stops detected (below the split) */}
+            <div className="mt-3">
+              <StopFixPanel 
+                thoughts={allMessages.filter(m => m.type === 'thought' || m.action_type === 'stop_warning')}
+                onRefresh={refreshStream}
               />
-            </div>
-
-            {/* Check My Trade Form (shown when toggled) */}
-            <AnimatePresence>
-              {showTradeForm && (
-                <CheckMyTradeForm 
-                  onSubmit={handleCheckTrade}
-                  loading={quickActionLoading === 'checkTrade'}
-                  onClose={() => setShowTradeForm(false)}
-                />
-              )}
-            </AnimatePresence>
-            
-            {/* Chat Input - Enhanced */}
-            <div className="relative">
-              <form onSubmit={(e) => { e.preventDefault(); handleChat(chatInput); }} className="relative">
-                <input
-                  type="text"
-                  name="message"
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Talk to the team... Ask questions, give commands, or discuss strategy"
-                  disabled={chatLoading}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl pl-4 pr-20 py-4 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition-all disabled:opacity-50"
-                  data-testid="sentcom-chat-input"
-                />
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                  <button
-                    type="submit"
-                    disabled={!chatInput.trim() || chatLoading}
-                    className="p-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-600 text-white shadow-lg shadow-cyan-500/30 hover:shadow-cyan-500/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                    data-testid="sentcom-send-btn"
-                  >
-                    {chatLoading ? <Loader className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                  </button>
-                </div>
-              </form>
             </div>
           </div>
         </div>

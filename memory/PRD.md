@@ -7,6 +7,47 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (December 2025)
 
+### Neural Split Chat Interface ✅ (December 2025)
+**IMPLEMENTED: Dual-stream chat separating S.O.C. from Conversation**
+
+**Problem:**
+- UI flickering when bot status updates mixed with chat messages
+- Difficult to distinguish between bot's background thoughts and actual conversation
+- User wanted clearer separation of concerns
+
+**Solution Implemented:**
+
+**1. Neural Split Layout** - Side-by-side design with:
+- **Left Panel (35%): SentCom S.O.C.** (Stream of Consciousness)
+  - Terminal-style dark theme
+  - Shows bot's background activity, scans, alerts, monitoring
+  - Each entry has timestamp, type label, content, and contextual reasoning
+  - Auto-generated reasoning when none provided by backend
+  - Expandable entries for full details
+  - Auto-scroll with pause/resume functionality
+  
+- **Right Panel (65%): Conversation**
+  - Clean chat interface for user-AI dialogue
+  - Chat bubbles with distinct styling for user vs AI
+  - Quick action buttons (Performance, News, Brief, Rules, Summary)
+  - Check Trade form integration
+  - No flickering - only chat messages displayed here
+
+**Files Created:**
+- `/app/frontend/src/components/StreamOfConsciousness.jsx` - S.O.C. panel component
+- `/app/frontend/src/components/ConversationPanel.jsx` - Chat panel component
+
+**Files Modified:**
+- `/app/frontend/src/components/SentCom.jsx` - Integrated Neural Split layout
+
+**Key Features:**
+- Messages are properly separated by type (chat vs status/system)
+- S.O.C. entries show brief reasoning preview without needing to expand
+- Contextual reasoning auto-generated based on entry type
+- Clean visual hierarchy with terminal aesthetics for S.O.C.
+
+---
+
 ### Dynamic Risk Management System ✅ (December 2025)
 **IMPLEMENTED: Intelligent position sizing based on multiple factors**
 
