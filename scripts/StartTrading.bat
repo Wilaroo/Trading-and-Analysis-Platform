@@ -4,7 +4,7 @@ color 0A
 
 echo ============================================
 echo    TradeCommand Trading Platform Startup
-echo         (Updated March 12, 2026)
+echo         (Updated March 16, 2026)
 echo ============================================
 echo.
 
@@ -29,9 +29,33 @@ set IB_SYMBOLS=VIX SPY QQQ IWM DIA XOM CVX CF NTR NVDA AAPL MSFT TSLA AMD
 set OLLAMA_MODEL_OVERRIDE=
 
 :: =====================================================
-:: STEP 1: AUTO-UPDATE FROM GITHUB
+:: STEP 1: GIT PULL LATEST CODE
 :: =====================================================
-echo [1/9] Checking for updates from GitHub...
+echo [1/10] Pulling latest code from GitHub...
+
+:: Navigate to repo root (one level up from scripts folder)
+pushd "%SCRIPT_DIR%.."
+
+:: Check if this is a git repo
+if exist ".git" (
+    git pull origin main 2>nul
+    if %errorlevel%==0 (
+        echo       Code updated successfully!
+    ) else (
+        echo       [INFO] Git pull skipped (no changes or not connected)
+    )
+) else (
+    echo       [SKIP] Not a git repository
+)
+
+:: Return to original directory
+popd
+echo.
+
+:: =====================================================
+:: STEP 2: AUTO-UPDATE SCRIPTS FROM GITHUB
+:: =====================================================
+echo [2/10] Checking for script updates from GitHub...
 
 :: Update StartTrading.bat itself
 curl -s -f "%GITHUB_RAW%/StartTrading.bat" > "%TEMP%\StartTrading_new.bat" 2>nul
@@ -87,9 +111,9 @@ if %errorlevel%==0 (
 echo.
 
 :: =====================================================
-:: STEP 2: DETECT COMPUTER AND GPU
+:: STEP 3: DETECT COMPUTER AND GPU
 :: =====================================================
-echo [2/9] Detecting system...
+echo [3/10] Detecting system...
 
 :: Get computer name
 set COMPUTER_NAME=%COMPUTERNAME%
@@ -108,10 +132,10 @@ echo       GPU: %GPU_NAME%
 echo       VRAM: %GPU_VRAM% MB
 
 :: =====================================================
-:: STEP 3: SELECT OPTIMAL MODEL BASED ON GPU
+:: STEP 4: SELECT OPTIMAL MODEL BASED ON GPU
 :: =====================================================
 echo.
-echo [3/9] Selecting AI model for your GPU...
+echo [4/10] Selecting AI model for your GPU...
 
 if defined OLLAMA_MODEL_OVERRIDE (
     if not "%OLLAMA_MODEL_OVERRIDE%"=="" (
@@ -130,9 +154,9 @@ echo       Fallback: llama3:8b (local)
 echo.
 
 :: =====================================================
-:: STEP 4: INSTALL PYTHON DEPENDENCIES
+:: STEP 5: INSTALL PYTHON DEPENDENCIES
 :: =====================================================
-echo [4/9] Checking Python dependencies...
+echo [5/10] Checking Python dependencies...
 
 python -c "import ib_insync" >nul 2>&1
 if errorlevel 1 (
@@ -168,9 +192,9 @@ if errorlevel 1 (
 echo.
 
 :: =====================================================
-:: STEP 5: START OLLAMA
+:: STEP 6: START OLLAMA
 :: =====================================================
-echo [5/9] Starting Ollama...
+echo [6/10] Starting Ollama...
 
 curl -s http://localhost:11434/api/tags >nul 2>&1
 if %errorlevel%==0 (
@@ -197,9 +221,9 @@ if "%OLLAMA_MODEL%"=="gpt-oss:120b-cloud" (
 echo.
 
 :: =====================================================
-:: STEP 6: START IB GATEWAY AND WAIT FOR API PORT
+:: STEP 7: START IB GATEWAY AND WAIT FOR API PORT
 :: =====================================================
-echo [6/9] Starting IB Gateway...
+echo [7/10] Starting IB Gateway...
 
 if not exist "%IB_GATEWAY_PATH%" (
     echo       [SKIP] IB Gateway not found at:
@@ -322,9 +346,9 @@ echo       IB Gateway ready!
 echo.
 
 :: =====================================================
-:: STEP 7: START IB DATA PUSHER
+:: STEP 8: START IB DATA PUSHER
 :: =====================================================
-echo [7/9] Starting IB Data Pusher...
+echo [8/10] Starting IB Data Pusher...
 
 :: Kill existing pusher if running (to avoid duplicate connections)
 taskkill /F /FI "WINDOWTITLE eq IB Data Pusher*" >nul 2>&1
@@ -340,9 +364,9 @@ if exist "%SCRIPT_DIR%ib_data_pusher.py" (
 echo.
 
 :: =====================================================
-:: STEP 8: START OLLAMA HTTP PROXY
+:: STEP 9: START OLLAMA HTTP PROXY
 :: =====================================================
-echo [8/9] Starting Ollama HTTP Proxy...
+echo [9/10] Starting Ollama HTTP Proxy...
 
 :: Kill existing proxy if running
 taskkill /F /FI "WINDOWTITLE eq Ollama AI Proxy*" >nul 2>&1
@@ -357,9 +381,9 @@ if exist "%SCRIPT_DIR%ollama_http.py" (
 echo.
 
 :: =====================================================
-:: STEP 9: VERIFY AND LAUNCH
+:: STEP 10: VERIFY AND LAUNCH
 :: =====================================================
-echo [9/9] Verifying connections...
+echo [10/10] Verifying connections...
 timeout /t 8 /nobreak >nul
 
 :: Check IB Data Pusher connection
