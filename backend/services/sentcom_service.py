@@ -9,6 +9,7 @@ Combines:
 - Proactive alerts
 - Filter decisions
 - Market context
+- Dynamic Risk Management
 
 Phase 2: Backend Wiring for Team Brain → SentCom
 """
@@ -193,6 +194,15 @@ class SentComService:
         if learning_context_provider:
             self._services["learning_context_provider"] = learning_context_provider
             logger.info("SentCom: Learning context provider injected")
+    
+    def inject_dynamic_risk(self, dynamic_risk_engine):
+        """Inject dynamic risk engine for risk-aware responses"""
+        self._services["dynamic_risk_engine"] = dynamic_risk_engine
+        logger.info("SentCom: Dynamic risk engine injected")
+    
+    def _get_dynamic_risk_engine(self):
+        """Get dynamic risk engine"""
+        return self._services.get("dynamic_risk_engine")
     
     def _generate_message_id(self) -> str:
         """Generate unique message ID"""
@@ -636,13 +646,15 @@ class SentComService:
         """Get current market context for SentCom display"""
         regime_engine = self._get_regime_engine()
         ib_service = self._get_ib_service()
+        dynamic_risk = self._get_dynamic_risk_engine()
         
         context = {
             "regime": "UNKNOWN",
             "spy_trend": None,
             "vix": None,
             "sector_flow": None,
-            "market_open": False
+            "market_open": False,
+            "dynamic_risk": None
         }
         
         # Get regime
@@ -655,6 +667,20 @@ class SentComService:
             except Exception as e:
                 logger.error(f"Error getting regime: {e}")
         
+        # Get dynamic risk status
+        if dynamic_risk:
+            try:
+                risk_status = dynamic_risk.get_status()
+                context["dynamic_risk"] = {
+                    "enabled": risk_status.get("enabled", False),
+                    "multiplier": risk_status.get("current_multiplier", 1.0),
+                    "risk_level": risk_status.get("current_risk_level", "normal"),
+                    "position_size": risk_status.get("effective_position_size"),
+                    "override_active": risk_status.get("override", {}).get("active", False)
+                }
+            except Exception as e:
+                logger.error(f"Error getting dynamic risk status: {e}")
+        
         # Check if market is open
         now = datetime.now(timezone.utc)
         # Simple check - market hours are roughly 14:30 - 21:00 UTC (9:30 AM - 4:00 PM ET)
@@ -663,6 +689,33 @@ class SentComService:
                 context["market_open"] = True
         
         return context
+    
+    async def get_risk_assessment(self, symbol: str = None, setup_type: str = None) -> Dict[str, Any]:
+        """Get current risk assessment from Dynamic Risk Engine"""
+        dynamic_risk = self._get_dynamic_risk_engine()
+        
+        if not dynamic_risk:
+            return {
+                "success": False,
+                "error": "Dynamic risk engine not available",
+                "multiplier": 1.0,
+                "explanation": "Risk engine offline - using standard sizing"
+            }
+        
+        try:
+            assessment = await dynamic_risk.assess_risk(symbol=symbol, setup_type=setup_type)
+            return {
+                "success": True,
+                **assessment.to_dict()
+            }
+        except Exception as e:
+            logger.error(f"Error getting risk assessment: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "multiplier": 1.0,
+                "explanation": "Risk assessment failed - using standard sizing"
+            }
     
     async def get_our_positions(self) -> List[Dict[str, Any]]:
         """Get our current positions with P&L from both Trading Bot and IB"""

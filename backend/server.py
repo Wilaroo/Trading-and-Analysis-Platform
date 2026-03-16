@@ -79,6 +79,7 @@ from routers.regime_performance import router as regime_performance_router, init
 from routers.context_awareness import router as context_awareness_router, init_context_router
 from routers.smart_stops import router as smart_stops_router, init_smart_stop_router
 from routers.sentcom import router as sentcom_router
+from routers.dynamic_risk_router import router as dynamic_risk_router
 from routers.ai_modules import router as ai_modules_router, inject_services as inject_ai_module_services
 from routers.simulation_router import router as simulation_router, init_simulation_router
 from routers.learning_connectors_router import router as learning_connectors_router, init_learning_connectors_router
@@ -86,6 +87,7 @@ from routers.ib_collector_router import router as ib_collector_router
 from routers.data_storage_router import router as data_storage_router
 from routers.strategy_promotion_router import router as strategy_promotion_router, init_strategy_promotion_router
 from services.sentcom_service import get_sentcom_service, init_sentcom_service
+from services.dynamic_risk_engine import get_dynamic_risk_engine
 from services.ai_modules import (
     get_ai_module_config, init_ai_module_config,
     get_shadow_tracker, init_shadow_tracker,
@@ -334,6 +336,20 @@ sentcom_services = {
 init_sentcom_service(sentcom_services)
 print("[SERVER] SentCom service initialized")
 
+# Initialize Dynamic Risk Engine
+dynamic_risk_engine = get_dynamic_risk_engine()
+dynamic_risk_engine.inject_services({
+    "trading_bot": trading_bot,
+    "market_data": None,  # Will be set later if needed
+    "db": db
+})
+print("[SERVER] Dynamic Risk Engine initialized")
+
+# Wire Dynamic Risk into SentCom for risk-aware responses
+sentcom_svc = get_sentcom_service()
+sentcom_svc.inject_dynamic_risk(dynamic_risk_engine)
+print("[SERVER] Dynamic Risk wired into SentCom")
+
 # Include routers
 app.include_router(notifications_router)
 app.include_router(market_context_router)
@@ -386,6 +402,7 @@ app.include_router(context_awareness_router)  # Phase 2 AI context awareness
 app.include_router(smart_stops_router)  # Unified Smart Stop System
 init_smart_stop_router()  # Initialize smart stop service
 app.include_router(sentcom_router)  # SentCom - Unified AI Command Center
+app.include_router(dynamic_risk_router)  # Dynamic Risk Management Engine
 app.include_router(ai_modules_router)  # AI Modules - Shadow Mode, Debate, Risk Manager
 app.include_router(simulation_router)  # Historical Simulation Engine
 app.include_router(learning_connectors_router)  # Learning Connectors - Data flow orchestration

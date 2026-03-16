@@ -25,6 +25,7 @@ import {
 import { toast } from 'sonner';
 import EnhancedTickerModal from './EnhancedTickerModal';
 import { useDataCache } from '../contexts';
+import { DynamicRiskBadge, DynamicRiskPanel } from './DynamicRiskPanel';
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL;
 
@@ -2644,6 +2645,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState('mode'); // 'mode', 'risk', or 'ai'
   const [showAIInsights, setShowAIInsights] = useState(false);
+  const [showRiskPanel, setShowRiskPanel] = useState(false);
   const streamRef = useRef(null);
   
   // Initialize local messages with chat history when it loads
@@ -2959,6 +2961,9 @@ const SentCom = ({ compact = false, embedded = false }) => {
               <span className="text-[10px] font-bold uppercase">{mode}</span>
             </div>
             
+            {/* Dynamic Risk Badge */}
+            <DynamicRiskBadge onClick={() => setShowRiskPanel(!showRiskPanel)} />
+            
             {/* IB Connection */}
             <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${
               ibConnected 
@@ -3172,6 +3177,23 @@ const SentCom = ({ compact = false, embedded = false }) => {
                     actionLoading={aiActionLoading}
                   />
                 )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Dynamic Risk Panel - Slide-out */}
+        <AnimatePresence>
+          {showRiskPanel && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="border-b border-white/10 bg-black/40 backdrop-blur-xl overflow-hidden"
+            >
+              <div className="p-4 max-w-2xl mx-auto">
+                <DynamicRiskPanel expanded={true} onToggleExpand={() => setShowRiskPanel(false)} />
               </div>
             </motion.div>
           )}

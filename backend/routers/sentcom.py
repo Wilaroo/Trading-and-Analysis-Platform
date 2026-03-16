@@ -336,3 +336,80 @@ async def get_learning_insights(symbol: str = Query(None)):
             "error": str(e),
             "insights": {"available": False}
         }
+
+
+
+# ===================== Dynamic Risk Management =====================
+
+class RiskAssessmentRequest(BaseModel):
+    """Risk assessment request"""
+    symbol: Optional[str] = None
+    setup_type: Optional[str] = None
+
+
+@router.get("/risk")
+async def get_risk_status():
+    """
+    Get current dynamic risk status.
+    
+    Returns:
+    - enabled: Whether dynamic risk is enabled
+    - multiplier: Current position size multiplier (0.25x - 2.0x)
+    - risk_level: Current risk level (minimal, reduced, normal, elevated, maximum)
+    - position_size: Effective position size
+    - override_active: Whether a manual override is active
+    """
+    try:
+        service = _get_service()
+        context = await service.get_market_context()
+        risk_data = context.get("dynamic_risk")
+        
+        if risk_data:
+            return {
+                "success": True,
+                **risk_data
+            }
+        else:
+            return {
+                "success": True,
+                "enabled": False,
+                "multiplier": 1.0,
+                "risk_level": "normal",
+                "message": "Dynamic risk engine not available"
+            }
+    except Exception as e:
+        logger.error(f"Error getting risk status: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "multiplier": 1.0
+        }
+
+
+@router.post("/risk/assess")
+async def assess_risk(request: RiskAssessmentRequest):
+    """
+    Perform a risk assessment for a potential trade.
+    
+    Args:
+        symbol: Optional stock symbol for stock-specific scoring
+        setup_type: Optional setup type for learning layer scoring
+    
+    Returns:
+        Complete risk assessment with multiplier, factor breakdown, and explanation
+    """
+    try:
+        service = _get_service()
+        assessment = await service.get_risk_assessment(
+            symbol=request.symbol,
+            setup_type=request.setup_type
+        )
+        return assessment
+    except Exception as e:
+        logger.error(f"Error performing risk assessment: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "multiplier": 1.0,
+            "explanation": "Assessment failed"
+        }

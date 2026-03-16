@@ -7,6 +7,73 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (December 2025)
 
+### Dynamic Risk Management System ✅ (December 2025)
+**IMPLEMENTED: Intelligent position sizing based on multiple factors**
+
+**Architecture:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    DYNAMIC RISK ENGINE                       │
+├─────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │  Portfolio  │  │   Market    │  │   Stock     │         │
+│  │  Health     │  │  Regime     │  │  Specific   │         │
+│  │  (40%)      │  │  (30%)      │  │  (20%)      │         │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘         │
+│         │                │                │                 │
+│         └────────────────┼────────────────┘                 │
+│                          ▼                                  │
+│              ┌───────────────────────┐                      │
+│              │   LEARNING LAYER      │                      │
+│              │  (10% - Historical)   │                      │
+│              └───────────┬───────────┘                      │
+│                          ▼                                  │
+│              ┌───────────────────────┐                      │
+│              │  POSITION SIZE        │                      │
+│              │  MULTIPLIER           │                      │
+│              │  (0.25x - 2.0x)       │                      │
+│              └───────────────────────┘                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Factor Breakdown:**
+1. **Portfolio Health (40%)**: Daily P&L, drawdown, win rate, streak
+2. **Market Regime (30%)**: VIX level, SPY trend, market breadth
+3. **Stock-Specific (20%)**: ATR volatility, liquidity (ADV)
+4. **Learning Layer (10%)**: Historical setup performance, time-of-day patterns
+
+**Risk Levels:**
+- MINIMAL (0.25x) - Extreme caution
+- REDUCED (0.5x) - Defensive
+- NORMAL (1.0x) - Standard
+- ELEVATED (1.5x) - Confident
+- MAXIMUM (2.0x) - Ideal conditions
+
+**Features:**
+- Real-time risk assessment via API
+- Manual override capability (with expiry)
+- Factor breakdown visualization
+- Human-readable explanations
+- SentCom chat integration
+
+**API Endpoints:**
+- `GET /api/dynamic-risk/status` - Current multiplier and risk level
+- `GET /api/dynamic-risk/config` - Get/update configuration
+- `POST /api/dynamic-risk/assess` - Perform risk assessment for symbol
+- `POST /api/dynamic-risk/override` - Set manual override
+- `DELETE /api/dynamic-risk/override` - Clear override
+- `GET /api/dynamic-risk/explain` - Human-readable explanation
+- `GET /api/sentcom/risk` - SentCom-integrated risk status
+
+**Files Created/Modified:**
+- `/app/backend/services/dynamic_risk_engine.py` - Core engine
+- `/app/backend/routers/dynamic_risk_router.py` - API routes
+- `/app/backend/routers/sentcom.py` - Added risk endpoints
+- `/app/backend/services/sentcom_service.py` - Risk integration
+- `/app/backend/server.py` - Service initialization
+- `/app/frontend/src/components/DynamicRiskPanel.jsx` - UI component
+- `/app/frontend/src/components/SentCom.jsx` - Integrated panel
+
 ### Tab Switching Performance Optimization ✅ (December 2025)
 **FIXED: Data now persists across tab switches - instant display with background refresh**
 
