@@ -480,15 +480,18 @@ const DataCollectionPanel = ({ collectionData, loading }) => {
 
 const SimulationQuickPanel = ({ jobs, loading, onRefresh }) => {
   const [expanded, setExpanded] = useState(false);
-  const [starting, setStarting] = useState(false);
+  const [starting, setStarting] = useState(null); // null, 'quick', or 'market'
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [jobDetails, setJobDetails] = useState(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
 
   const handleQuickTest = async () => {
-    setStarting(true);
+    setStarting('quick');
     try {
       const res = await fetch(`${API_BASE}/api/simulation/quick-test`, { method: 'POST' });
       const data = await res.json();
       if (data.success) {
-        toast.success(`Simulation started: ${data.job_id}`);
+        toast.success(`Quick test started: ${data.job_id}`);
         if (onRefresh) onRefresh();
       } else {
         toast.error('Failed to start simulation');
@@ -496,106 +499,362 @@ const SimulationQuickPanel = ({ jobs, loading, onRefresh }) => {
     } catch (err) {
       toast.error('Error starting simulation');
     } finally {
-      setStarting(false);
+      setStarting(null);
     }
   };
 
-  const recentJobs = jobs?.slice(0, 3) || [];
+  const handleMarketWideBacktest = async () => {
+    setStarting('market');
+    try {
+      const res = await fetch(`${API_BASE}/api/backtest/market-wide`, { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          days_back: 30,
+          strategies: ['all'],
+          max_symbols: 1000 // Limit for reasonable runtime
+        })
+      });
+      const data = await res.json();
+      if (data.success || data.job_id) {
+        toast.success(`Market-wide backtest started: ${data.job_id || 'Processing...'}`);
+        if (onRefresh) onRefresh();
+      } else {
+        toast.error(data.error || 'Failed to start market-wide backtest');
+      }
+    } catch (err) {
+      toast.error('Error starting market-wide backtest');
+    } finally {
+      setStarting(null);
+    }
+  };
+
+  const handleJobClick = async (job) => {
+    setSelectedJob(job);
+    setLoadingDetails(true);
+    setJobDetails(null);
+    
+    try {
+      // Try to fetch job details
+      const res = await fetch(`${API_BASE}/api/backtest/job/${job.job_id}`);
+      const data = await res.json();
+      if (data.success || data.job) {
+        setJobDetails(data.job || data);
+      } else {
+        // Fallback to basic job info
+        setJobDetails(job);
+      }
+    } catch (err) {
+      // Use basic job info if details fetch fails
+      setJobDetails(job);
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
+
+  const recentJobs = jobs?.slice(0, 5) || [];
   const completedJobs = jobs?.filter(j => j.status === 'completed') || [];
+  const runningJobs = jobs?.filter(j => j.status === 'running') || [];
   const avgWinRate = completedJobs.length > 0
     ? completedJobs.reduce((sum, j) => sum + (j.win_rate || 0), 0) / completedJobs.length
     : 0;
 
   return (
-    <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
-      >
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-violet-500/20">
-            <History className="w-4 h-4 text-violet-400" />
-          </div>
-          <div className="text-left">
-            <h3 className="text-sm font-semibold text-white">Historical Simulations</h3>
-            <p className="text-xs text-zinc-400">{completedJobs.length} backtests completed</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={(e) => { e.stopPropagation(); handleQuickTest(); }}
-            disabled={starting}
-            className="text-xs px-3 py-1.5 rounded-lg bg-violet-500/20 text-violet-400 hover:bg-violet-500/30 transition-colors flex items-center gap-1.5"
-            data-testid="quick-simulation-btn"
-          >
-            {starting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-            Quick Test
-          </button>
-          <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-        </div>
-      </button>
-
-      <AnimatePresence>
-        {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="border-t border-white/10"
-          >
-            <div className="p-4">
-              {completedJobs.length > 0 && (
-                <div className="grid grid-cols-3 gap-2 mb-4">
-                  <div className="p-2 rounded bg-white/[0.02] text-center">
-                    <div className="text-lg font-bold text-white">{completedJobs.length}</div>
-                    <div className="text-[10px] text-zinc-500">Backtests</div>
-                  </div>
-                  <div className="p-2 rounded bg-white/[0.02] text-center">
-                    <div className={`text-lg font-bold ${avgWinRate >= 50 ? 'text-green-400' : 'text-yellow-400'}`}>
-                      {avgWinRate.toFixed(0)}%
-                    </div>
-                    <div className="text-[10px] text-zinc-500">Avg Win Rate</div>
-                  </div>
-                  <div className="p-2 rounded bg-white/[0.02] text-center">
-                    <div className="text-lg font-bold text-white">
-                      {completedJobs.reduce((sum, j) => sum + (j.total_trades || 0), 0)}
-                    </div>
-                    <div className="text-[10px] text-zinc-500">Total Trades</div>
-                  </div>
-                </div>
-              )}
-
-              {recentJobs.length > 0 ? (
-                <div className="space-y-2">
-                  <h4 className="text-xs text-zinc-500 uppercase">Recent Jobs</h4>
-                  {recentJobs.map((job) => (
-                    <div key={job.job_id} className="flex items-center justify-between p-2 rounded bg-white/[0.02]">
-                      <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${
-                          job.status === 'completed' ? 'bg-green-400' :
-                          job.status === 'running' ? 'bg-cyan-400 animate-pulse' :
-                          job.status === 'failed' ? 'bg-red-400' : 'bg-zinc-400'
-                        }`} />
-                        <span className="text-xs text-zinc-300">{job.job_id?.slice(0, 12)}</span>
-                      </div>
-                      <span className="text-xs text-zinc-500">
-                        {job.win_rate ? `${(job.win_rate * 100).toFixed(0)}% WR` : job.status}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-4">
-                  <FlaskConical className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
-                  <p className="text-sm text-zinc-400">No simulations yet</p>
-                  <p className="text-xs text-zinc-500">Click "Quick Test" to run a backtest</p>
-                </div>
-              )}
+    <>
+      <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }}>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-violet-500/20">
+              <History className="w-4 h-4 text-violet-400" />
             </div>
+            <div className="text-left">
+              <h3 className="text-sm font-semibold text-white">Historical Simulations</h3>
+              <p className="text-xs text-zinc-400">
+                {runningJobs.length > 0 
+                  ? `${runningJobs.length} running, ${completedJobs.length} completed`
+                  : `${completedJobs.length} backtests completed`
+                }
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+          </div>
+        </button>
+
+        <AnimatePresence>
+          {expanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="border-t border-white/10"
+            >
+              <div className="p-4">
+                {/* Action Buttons */}
+                <div className="grid grid-cols-2 gap-2 mb-4">
+                  <button
+                    onClick={handleQuickTest}
+                    disabled={starting !== null}
+                    className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-violet-500/20 text-violet-400 hover:bg-violet-500/30 transition-colors text-sm font-medium disabled:opacity-50"
+                    data-testid="quick-simulation-btn"
+                  >
+                    {starting === 'quick' ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Zap className="w-4 h-4" />
+                    )}
+                    Quick Test
+                    <span className="text-[10px] text-violet-400/60">(10 symbols)</span>
+                  </button>
+                  <button
+                    onClick={handleMarketWideBacktest}
+                    disabled={starting !== null}
+                    className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-gradient-to-r from-cyan-500/20 to-violet-500/20 text-cyan-400 hover:from-cyan-500/30 hover:to-violet-500/30 transition-colors text-sm font-medium disabled:opacity-50"
+                    data-testid="market-wide-backtest-btn"
+                  >
+                    {starting === 'market' ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <BarChart3 className="w-4 h-4" />
+                    )}
+                    Market-Wide
+                    <span className="text-[10px] text-cyan-400/60">(1000 symbols)</span>
+                  </button>
+                </div>
+
+                {/* Stats */}
+                {completedJobs.length > 0 && (
+                  <div className="grid grid-cols-3 gap-2 mb-4">
+                    <div className="p-2 rounded bg-white/[0.02] text-center">
+                      <div className="text-lg font-bold text-white">{completedJobs.length}</div>
+                      <div className="text-[10px] text-zinc-500">Backtests</div>
+                    </div>
+                    <div className="p-2 rounded bg-white/[0.02] text-center">
+                      <div className={`text-lg font-bold ${avgWinRate >= 50 ? 'text-green-400' : 'text-yellow-400'}`}>
+                        {avgWinRate.toFixed(0)}%
+                      </div>
+                      <div className="text-[10px] text-zinc-500">Avg Win Rate</div>
+                    </div>
+                    <div className="p-2 rounded bg-white/[0.02] text-center">
+                      <div className="text-lg font-bold text-white">
+                        {completedJobs.reduce((sum, j) => sum + (j.total_trades || 0), 0)}
+                      </div>
+                      <div className="text-[10px] text-zinc-500">Total Trades</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Recent Jobs - Clickable */}
+                {recentJobs.length > 0 ? (
+                  <div className="space-y-2">
+                    <h4 className="text-xs text-zinc-500 uppercase">Recent Jobs (click for details)</h4>
+                    {recentJobs.map((job) => (
+                      <button
+                        key={job.job_id}
+                        onClick={() => handleJobClick(job)}
+                        className="w-full flex items-center justify-between p-3 rounded-lg bg-white/[0.02] hover:bg-white/[0.05] border border-transparent hover:border-violet-500/30 transition-all cursor-pointer text-left"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                            job.status === 'completed' ? 'bg-green-400' :
+                            job.status === 'running' ? 'bg-cyan-400 animate-pulse' :
+                            job.status === 'failed' ? 'bg-red-400' : 'bg-zinc-400'
+                          }`} />
+                          <div>
+                            <div className="text-xs text-zinc-300 font-mono">{job.job_id}</div>
+                            <div className="text-[10px] text-zinc-500">
+                              {job.strategy || job.type || 'Backtest'} • {job.symbols_count || '?'} symbols
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          {job.status === 'completed' ? (
+                            <div>
+                              <div className={`text-sm font-bold ${(job.win_rate || 0) >= 0.5 ? 'text-green-400' : 'text-yellow-400'}`}>
+                                {job.win_rate ? `${(job.win_rate * 100).toFixed(0)}%` : '--'}
+                              </div>
+                              <div className="text-[10px] text-zinc-500">Win Rate</div>
+                            </div>
+                          ) : (
+                            <span className={`text-xs px-2 py-0.5 rounded ${
+                              job.status === 'running' ? 'bg-cyan-500/20 text-cyan-400' :
+                              job.status === 'failed' ? 'bg-red-500/20 text-red-400' : 
+                              'bg-zinc-500/20 text-zinc-400'
+                            }`}>
+                              {job.status}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-4">
+                    <FlaskConical className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                    <p className="text-sm text-zinc-400">No simulations yet</p>
+                    <p className="text-xs text-zinc-500">Click "Quick Test" or "Market-Wide" to run a backtest</p>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Job Details Modal */}
+      <AnimatePresence>
+        {selectedJob && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: 'rgba(0, 0, 0, 0.8)' }}
+            onClick={() => setSelectedJob(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-lg rounded-xl border border-white/10 overflow-hidden"
+              style={{ background: 'rgba(21, 28, 36, 0.98)' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="p-4 border-b border-white/10 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`w-3 h-3 rounded-full ${
+                    selectedJob.status === 'completed' ? 'bg-green-400' :
+                    selectedJob.status === 'running' ? 'bg-cyan-400 animate-pulse' :
+                    selectedJob.status === 'failed' ? 'bg-red-400' : 'bg-zinc-400'
+                  }`} />
+                  <div>
+                    <h3 className="text-sm font-bold text-white font-mono">{selectedJob.job_id}</h3>
+                    <p className="text-xs text-zinc-400">{selectedJob.status}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setSelectedJob(null)}
+                  className="text-zinc-400 hover:text-white transition-colors"
+                >
+                  <XCircle className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="p-4">
+                {loadingDetails ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-6 h-6 text-violet-400 animate-spin" />
+                  </div>
+                ) : jobDetails ? (
+                  <div className="space-y-4">
+                    {/* Summary Stats */}
+                    <div className="grid grid-cols-4 gap-2">
+                      <div className="p-3 rounded-lg bg-white/[0.02] text-center">
+                        <div className="text-xl font-bold text-white">
+                          {jobDetails.total_trades || jobDetails.trades_count || 0}
+                        </div>
+                        <div className="text-[10px] text-zinc-500">Trades</div>
+                      </div>
+                      <div className="p-3 rounded-lg bg-white/[0.02] text-center">
+                        <div className={`text-xl font-bold ${(jobDetails.win_rate || 0) >= 0.5 ? 'text-green-400' : 'text-yellow-400'}`}>
+                          {jobDetails.win_rate ? `${(jobDetails.win_rate * 100).toFixed(0)}%` : '--'}
+                        </div>
+                        <div className="text-[10px] text-zinc-500">Win Rate</div>
+                      </div>
+                      <div className="p-3 rounded-lg bg-white/[0.02] text-center">
+                        <div className={`text-xl font-bold ${(jobDetails.profit_factor || 0) >= 1 ? 'text-green-400' : 'text-red-400'}`}>
+                          {jobDetails.profit_factor?.toFixed(2) || '--'}
+                        </div>
+                        <div className="text-[10px] text-zinc-500">Profit Factor</div>
+                      </div>
+                      <div className="p-3 rounded-lg bg-white/[0.02] text-center">
+                        <div className="text-xl font-bold text-white">
+                          {jobDetails.symbols_count || jobDetails.symbols?.length || '?'}
+                        </div>
+                        <div className="text-[10px] text-zinc-500">Symbols</div>
+                      </div>
+                    </div>
+
+                    {/* Details */}
+                    <div className="space-y-2">
+                      <h4 className="text-xs text-zinc-500 uppercase">Details</h4>
+                      <div className="p-3 rounded-lg bg-white/[0.02] space-y-2 text-sm">
+                        {jobDetails.strategy && (
+                          <div className="flex justify-between">
+                            <span className="text-zinc-400">Strategy</span>
+                            <span className="text-white">{jobDetails.strategy}</span>
+                          </div>
+                        )}
+                        {jobDetails.type && (
+                          <div className="flex justify-between">
+                            <span className="text-zinc-400">Type</span>
+                            <span className="text-white">{jobDetails.type}</span>
+                          </div>
+                        )}
+                        {(jobDetails.start_date || jobDetails.date_range) && (
+                          <div className="flex justify-between">
+                            <span className="text-zinc-400">Date Range</span>
+                            <span className="text-white">
+                              {jobDetails.date_range || `${jobDetails.start_date} to ${jobDetails.end_date}`}
+                            </span>
+                          </div>
+                        )}
+                        {jobDetails.avg_r_multiple !== undefined && (
+                          <div className="flex justify-between">
+                            <span className="text-zinc-400">Avg R-Multiple</span>
+                            <span className={jobDetails.avg_r_multiple >= 0 ? 'text-green-400' : 'text-red-400'}>
+                              {jobDetails.avg_r_multiple?.toFixed(2)}R
+                            </span>
+                          </div>
+                        )}
+                        {jobDetails.max_drawdown !== undefined && (
+                          <div className="flex justify-between">
+                            <span className="text-zinc-400">Max Drawdown</span>
+                            <span className="text-red-400">-{(jobDetails.max_drawdown * 100).toFixed(1)}%</span>
+                          </div>
+                        )}
+                        {jobDetails.created_at && (
+                          <div className="flex justify-between">
+                            <span className="text-zinc-400">Created</span>
+                            <span className="text-zinc-300">
+                              {new Date(jobDetails.created_at).toLocaleString()}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Top Performing Symbols */}
+                    {jobDetails.top_symbols && jobDetails.top_symbols.length > 0 && (
+                      <div className="space-y-2">
+                        <h4 className="text-xs text-zinc-500 uppercase">Top Performing Symbols</h4>
+                        <div className="flex flex-wrap gap-2">
+                          {jobDetails.top_symbols.slice(0, 10).map((sym, idx) => (
+                            <span key={idx} className="px-2 py-1 rounded bg-green-500/10 text-green-400 text-xs">
+                              {typeof sym === 'string' ? sym : sym.symbol}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-zinc-400">
+                    No details available
+                  </div>
+                )}
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </>
   );
 };
 
