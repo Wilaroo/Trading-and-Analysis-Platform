@@ -291,7 +291,7 @@ async def get_simulation_summary(job_id: str):
 async def quick_test_simulation():
     """
     Run a quick test simulation on a few symbols to verify everything works.
-    Uses last 30 days and 10 liquid symbols.
+    Uses last 30 days and 10 liquid symbols from IB collected data.
     """
     if not _simulation_engine:
         raise HTTPException(status_code=503, detail="Simulation engine not initialized")
@@ -299,23 +299,52 @@ async def quick_test_simulation():
     try:
         from services.historical_simulation_engine import SimulationConfig
         
+        # Get symbols that we have IB data for
+        db = _simulation_engine._db
+        test_symbols = ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA", "AMD", "META", "AMZN", "JPM", "SPY"]
+        
+        if db is not None:
+            # Check which symbols we actually have data for
+            available_symbols = db["ib_historical_data"].distinct("symbol")
+            available_set = set(available_symbols)
+            
+            # Use our preferred test symbols if available, otherwise grab from what we have
+            valid_symbols = [s for s in test_symbols if s in available_set]
+            
+            if len(valid_symbols) < 5:
+                # Get high-volume symbols from our data
+                top_symbols = list(db["ib_historical_data"].aggregate([
+                    {"$match": {"bar_size": "1 day"}},
+                    {"$group": {
+                        "_id": "$symbol",
+                        "avg_vol": {"$avg": "$volume"},
+                        "count": {"$sum": 1}
+                    }},
+                    {"$match": {"count": {"$gte": 15}}},  # At least 15 days of data
+                    {"$sort": {"avg_vol": -1}},
+                    {"$limit": 20}
+                ]))
+                valid_symbols = [s["_id"] for s in top_symbols][:10]
+            
+            test_symbols = valid_symbols if valid_symbols else test_symbols
+        
         end_date = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
         start_date = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
         
         config = SimulationConfig(
             start_date=start_date,
             end_date=end_date,
-            min_adv=500_000,  # Higher threshold for quick test
-            min_price=10.0,
-            max_price=200.0,
-            min_rvol=0.5,
+            min_adv=100_000,  # Lower threshold to match more stocks
+            min_price=5.0,
+            max_price=500.0,
+            min_rvol=0.3,
             universe="custom",
-            custom_symbols=["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA", "AMD", "META", "AMZN", "JPM", "SPY"],
+            custom_symbols=test_symbols[:10],
             starting_capital=100_000.0,
             max_position_pct=20.0,
             max_open_positions=3,
             use_ai_agents=True,
-            data_source="alpaca"
+            data_source="ib"  # Use IB collected data
         )
         
         job_id = await _simulation_engine.start_simulation(config)
@@ -323,7 +352,7 @@ async def quick_test_simulation():
         return {
             "success": True,
             "job_id": job_id,
-            "message": f"Quick test started: {start_date} to {end_date} with 10 symbols",
+            "message": f"Quick test started: {start_date} to {end_date} with {len(test_symbols[:10])} symbols",
             "config": config.to_dict()
         }
         

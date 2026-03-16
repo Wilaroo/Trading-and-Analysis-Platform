@@ -139,9 +139,15 @@ class SimulationJob:
     errors: List[Dict] = field(default_factory=list)
     
     def to_dict(self) -> Dict:
+        import math
         d = asdict(self)
         d['config'] = self.config.to_dict()
         d['status'] = self.status.value
+        # Sanitize float values to be JSON-safe (no inf/nan)
+        for key, value in d.items():
+            if isinstance(value, float):
+                if math.isinf(value) or math.isnan(value):
+                    d[key] = 0.0
         return d
 
 
@@ -551,8 +557,33 @@ class HistoricalSimulationEngine:
     ) -> List[Dict]:
         """Get historical OHLCV bars for a symbol"""
         try:
-            # Try MongoDB first (cached data)
             if self._db is not None:
+                # Try IB collected data first (primary source after data collection)
+                ib_bars = list(self._db["ib_historical_data"].find(
+                    {
+                        "symbol": symbol,
+                        "bar_size": "1 day",
+                        "date": {
+                            "$gte": start.strftime("%Y-%m-%d"),
+                            "$lte": end.strftime("%Y-%m-%d")
+                        }
+                    },
+                    {"_id": 0}
+                ).sort("date", 1))
+                
+                if ib_bars and len(ib_bars) >= 5:
+                    # Convert IB format to simulation format
+                    return [{
+                        "timestamp": bar.get("date"),
+                        "open": bar.get("open"),
+                        "high": bar.get("high"),
+                        "low": bar.get("low"),
+                        "close": bar.get("close"),
+                        "volume": bar.get("volume"),
+                        "symbol": symbol
+                    } for bar in ib_bars]
+                
+                # Fallback: Try legacy historical_bars collection
                 bars = list(self._db["historical_bars"].find(
                     {
                         "symbol": symbol,
@@ -567,7 +598,7 @@ class HistoricalSimulationEngine:
                 if bars and len(bars) >= 10:
                     return bars
             
-            # Fetch from Alpaca if not cached
+            # Fetch from Alpaca if not in database
             if self._alpaca_service:
                 bars = await self._fetch_alpaca_bars(symbol, start, end)
                 
@@ -1000,8 +1031,8 @@ class HistoricalSimulationEngine:
         job.avg_loss = sum(losing) / len(losing) if losing else 0
         
         total_wins = sum(winning)
-        total_losses = sum(losing)
-        job.profit_factor = total_wins / total_losses if total_losses > 0 else float('inf')
+        total_losses = abs(sum(losing))  # abs since losses are negative
+        job.profit_factor = total_wins / total_losses if total_losses > 0 else 0.0  # Use 0 instead of inf for JSON
         
         # Max drawdown
         if equity_curve:
@@ -1102,11 +1133,28 @@ class HistoricalSimulationEngine:
     
     async def get_all_jobs(self, limit: int = 20) -> List[Dict]:
         """Get all simulation jobs"""
+        import math
+        
+        def sanitize_floats(d):
+            """Recursively sanitize float values to be JSON-safe"""
+            if isinstance(d, dict):
+                return {k: sanitize_floats(v) for k, v in d.items()}
+            elif isinstance(d, list):
+                return [sanitize_floats(item) for item in d]
+            elif isinstance(d, float):
+                if math.isinf(d) or math.isnan(d):
+                    return 0.0
+                return d
+            return d
+        
         if self._db is not None:
-            return list(self._db[self.JOBS_COLLECTION].find(
+            jobs = list(self._db[self.JOBS_COLLECTION].find(
                 {},
                 {"_id": 0}
             ).sort("started_at", -1).limit(limit))
+            
+            # Sanitize all float values
+            return [sanitize_floats(job) for job in jobs]
         return []
 
 
