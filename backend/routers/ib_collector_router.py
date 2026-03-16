@@ -441,6 +441,30 @@ async def get_resumable_collections():
         return {"success": False, "error": str(e)}
 
 
+
+@router.post("/clear-stuck")
+async def clear_stuck_items(bar_size: str = None, older_than_minutes: int = 10):
+    """
+    Clear items that have been stuck in 'claimed' status for too long.
+    
+    These are items that IB Gateway claimed but never completed - likely failed silently.
+    They will be marked as 'failed' so they can be retried on resume.
+    
+    - **bar_size**: Optional - only clear stuck items for this bar_size
+    - **older_than_minutes**: Clear items claimed longer than this (default 10 min)
+    """
+    try:
+        from services.historical_data_queue_service import get_historical_data_queue_service
+        queue_service = get_historical_data_queue_service()
+        
+        result = queue_service.clear_stuck_items(bar_size, older_than_minutes)
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error clearing stuck items: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/resume-collection")
 async def resume_barsize_collection(
     bar_size: str,

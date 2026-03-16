@@ -586,19 +586,67 @@ class HistoricalDataQueueService:
             "status": "completed"
         })
         
-        result = self.collection.delete_many({
+        # Cancel pending
+        pending_result = self.collection.delete_many({
             "bar_size": bar_size,
             "status": "pending"
         })
         
-        logger.info(f"Cancelled {result.deleted_count} pending requests for bar_size={bar_size}, {completed_count} already saved")
+        # Also clear any stuck "claimed" items (mark as failed or delete)
+        stuck_result = self.collection.delete_many({
+            "bar_size": bar_size,
+            "status": "claimed"
+        })
+        
+        total_cancelled = pending_result.deleted_count + stuck_result.deleted_count
+        
+        logger.info(f"Cancelled {pending_result.deleted_count} pending + {stuck_result.deleted_count} stuck for bar_size={bar_size}, {completed_count} already saved")
         
         return {
             "success": True,
             "bar_size": bar_size,
-            "cancelled": result.deleted_count,
+            "cancelled": total_cancelled,
+            "pending_cancelled": pending_result.deleted_count,
+            "stuck_cleared": stuck_result.deleted_count,
             "saved": completed_count,
-            "message": f"Cancelled {result.deleted_count} pending. {completed_count} symbols already collected and saved."
+            "message": f"Cancelled {total_cancelled} ({pending_result.deleted_count} pending + {stuck_result.deleted_count} stuck). {completed_count} symbols already collected and saved."
+        }
+
+    def clear_stuck_items(self, bar_size: str = None, older_than_minutes: int = 10) -> Dict:
+        """
+        Clear items that have been 'claimed' for too long (stuck).
+        
+        Args:
+            bar_size: Optional - only clear for specific bar_size
+            older_than_minutes: Clear items claimed longer than this (default 10 min)
+            
+        Returns:
+            Dict with count of cleared items
+        """
+        from datetime import datetime, timedelta, timezone
+        
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=older_than_minutes)
+        
+        query = {
+            "status": "claimed",
+            "claimed_at": {"$lt": cutoff.isoformat()}
+        }
+        
+        if bar_size:
+            query["bar_size"] = bar_size
+        
+        # Mark as failed instead of deleting (so we know they need retry)
+        result = self.collection.update_many(
+            query,
+            {"$set": {"status": "failed", "error": "Stuck - timed out after claim"}}
+        )
+        
+        logger.info(f"Cleared {result.modified_count} stuck items (claimed > {older_than_minutes} min)")
+        
+        return {
+            "success": True,
+            "cleared": result.modified_count,
+            "bar_size": bar_size or "all"
         }
 
     def get_resumable_collections(self) -> List[Dict]:
