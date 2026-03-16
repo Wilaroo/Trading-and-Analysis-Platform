@@ -1153,8 +1153,16 @@ class HistoricalSimulationEngine:
                 {"_id": 0}
             ).sort("started_at", -1).limit(limit))
             
-            # Sanitize all float values
-            return [sanitize_floats(job) for job in jobs]
+            # Sanitize all float values and fix legacy win_rate values
+            sanitized_jobs = []
+            for job in jobs:
+                job = sanitize_floats(job)
+                # Fix legacy win_rate stored as percentage (100) instead of decimal (1.0)
+                if job.get('win_rate', 0) > 1:
+                    job['win_rate'] = job['win_rate'] / 100
+                sanitized_jobs.append(job)
+            
+            return sanitized_jobs
         return []
 
 
