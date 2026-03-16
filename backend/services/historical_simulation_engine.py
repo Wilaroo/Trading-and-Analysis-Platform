@@ -937,7 +937,304 @@ class HistoricalSimulationEngine:
                     "strength": 65
                 })
         
+        # ============================================================
+        # ADDITIONAL STRATEGIES (From Your 77 Strategies)
+        # ============================================================
+        
+        # Calculate additional indicators
+        prev_close = bars[-2].get("close", 0) if len(bars) >= 2 else close
+        gap_pct = (open_price - prev_close) / prev_close * 100 if prev_close > 0 else 0
+        ema9 = self._calculate_ema(closes, 9)
+        ema20_val = self._calculate_ema(closes, 20)
+        ema50 = self._calculate_ema(closes, 50) if len(closes) >= 50 else sma20
+        
+        # Gap Pick and Roll
+        if len(bars) >= 2 and gap_pct > 2 and gap_pct < 5:
+            if close < open_price and close > prev_close:
+                signals.append({
+                    "type": "gap_pick_roll",
+                    "direction": "long",
+                    "entry_price": close,
+                    "stop_price": prev_close * 0.99,
+                    "target_price": close * 1.025,
+                    "strength": 68
+                })
+        
+        # Gap Fill Swing
+        if len(bars) >= 2 and gap_pct < -3 and close > open_price:
+            signals.append({
+                "type": "gap_fill_swing",
+                "direction": "long",
+                "entry_price": close,
+                "stop_price": low * 0.98,
+                "target_price": prev_close,
+                "strength": 65
+            })
+        
+        # Range-to-Trend Transition
+        if len(bars) >= 10:
+            recent_highs = [b.get("high", 0) for b in bars[-10:]]
+            if close > max(recent_highs[:-1]) and rvol > 1.2:
+                range_10 = max(recent_highs) - min(b.get("low", float('inf')) for b in bars[-10:])
+                signals.append({
+                    "type": "range_to_trend",
+                    "direction": "long",
+                    "entry_price": close,
+                    "stop_price": close - (range_10 * 0.5),
+                    "target_price": close + range_10,
+                    "strength": 72
+                })
+        
+        # Daily Trend Following
+        if close > ema20_val > ema50 and close > sma20 and rvol > 0.8:
+            signals.append({
+                "type": "daily_trend",
+                "direction": "long",
+                "entry_price": close,
+                "stop_price": ema20_val * 0.97,
+                "target_price": close * 1.05,
+                "strength": 65
+            })
+        
+        # ORB (adapted for daily)
+        if len(bars) >= 2 and gap_pct > 1 and close > open_price * 1.01 and rvol > 1.5:
+            signals.append({
+                "type": "orb",
+                "direction": "long",
+                "entry_price": close,
+                "stop_price": open_price * 0.99,
+                "target_price": close * 1.03,
+                "strength": 75
+            })
+        
+        # HOD Break
+        if close == high and rvol > 1.3:
+            signals.append({
+                "type": "hod_break",
+                "direction": "long",
+                "entry_price": close,
+                "stop_price": low * 0.98,
+                "target_price": close * 1.04,
+                "strength": 70
+            })
+        
+        # Base Breakout (Multi-Week)
+        if len(bars) >= 20:
+            high_20 = max(b.get("high", 0) for b in bars[-20:])
+            low_20 = min(b.get("low", float('inf')) for b in bars[-20:])
+            range_pct = (high_20 - low_20) / close * 100
+            if range_pct < 10 and close > high_20 and rvol > 1.5:
+                signals.append({
+                    "type": "base_breakout",
+                    "direction": "long",
+                    "entry_price": close,
+                    "stop_price": low_20,
+                    "target_price": close * 1.08,
+                    "strength": 80
+                })
+        
+        # Buy the Dip
+        if close > ema50 and low < ema20_val and close > ema20_val and close > open_price:
+            signals.append({
+                "type": "buy_the_dip",
+                "direction": "long",
+                "entry_price": close,
+                "stop_price": ema20_val * 0.97,
+                "target_price": close * 1.04,
+                "strength": 72
+            })
+        
+        # Breakout Retest
+        if len(bars) >= 5:
+            prev_high = max(b.get("high", 0) for b in bars[-6:-1])
+            if bars[-3].get("close", 0) > prev_high:
+                if low < prev_high * 1.01 and close > prev_high:
+                    signals.append({
+                        "type": "breakout_retest",
+                        "direction": "long",
+                        "entry_price": close,
+                        "stop_price": prev_high * 0.98,
+                        "target_price": close * 1.05,
+                        "strength": 75
+                    })
+        
+        # Exhaustion Reversal
+        if len(bars) >= 2:
+            prev_range = bars[-2].get("high", 0) - bars[-2].get("low", 0)
+            day_range = high - low
+            if day_range > prev_range * 2 and close < open_price and rsi > 70:
+                signals.append({
+                    "type": "exhaustion_reversal",
+                    "direction": "short",
+                    "entry_price": close,
+                    "stop_price": high * 1.01,
+                    "target_price": close * 0.96,
+                    "strength": 70
+                })
+        
+        # Stop Hunt Reversal
+        if len(bars) >= 20:
+            high_20 = max(b.get("high", 0) for b in bars[-21:-1])
+            if high > high_20 and close < high_20:
+                signals.append({
+                    "type": "stop_hunt_reversal",
+                    "direction": "short",
+                    "entry_price": close,
+                    "stop_price": high * 1.01,
+                    "target_price": close * 0.96,
+                    "strength": 72
+                })
+        
+        # Bear Flag
+        if len(bars) >= 5:
+            five_day_return = (close - bars[-5].get("close", close)) / bars[-5].get("close", close) * 100
+            recent_range = max(b.get("high", 0) for b in bars[-3:]) - min(b.get("low", float('inf')) for b in bars[-3:])
+            avg_range = sum(b.get("high", 0) - b.get("low", 0) for b in bars[-10:-3]) / 7 if len(bars) >= 10 else recent_range
+            if five_day_return < -5 and recent_range < avg_range * 0.6 and close < open_price:
+                signals.append({
+                    "type": "bear_flag",
+                    "direction": "short",
+                    "entry_price": close,
+                    "stop_price": max(b.get("high", close) for b in bars[-3:]) * 1.01,
+                    "target_price": close * 0.95,
+                    "strength": 78
+                })
+        
+        # Big Dog Consolidation
+        if len(bars) >= 5:
+            range_5 = max(b.get("high", 0) for b in bars[-5:]) - min(b.get("low", float('inf')) for b in bars[-5:])
+            range_5_pct = range_5 / close * 100 if close > 0 else 0
+            if 3 < range_5_pct < 8 and close > sma20 and close > open_price and rvol > 1.0:
+                signals.append({
+                    "type": "big_dog",
+                    "direction": "long",
+                    "entry_price": close,
+                    "stop_price": min(b.get("low", close) for b in bars[-5:]) * 0.99,
+                    "target_price": close * 1.04,
+                    "strength": 68
+                })
+        
+        # VCP (Volatility Contraction Pattern)
+        if len(bars) >= 20:
+            vol_10 = sum(b.get("high", 0) - b.get("low", 0) for b in bars[-10:]) / 10
+            vol_20 = sum(b.get("high", 0) - b.get("low", 0) for b in bars[-20:-10]) / 10
+            if vol_10 < vol_20 * 0.6 and close > sma20 and close > open_price:
+                signals.append({
+                    "type": "vcp",
+                    "direction": "long",
+                    "entry_price": close,
+                    "stop_price": close - (vol_10 * 2),
+                    "target_price": close * 1.06,
+                    "strength": 75
+                })
+        
+        # 9 EMA Cross
+        if len(bars) >= 2 and close > ema9 and bars[-2].get("close", 0) < ema9 and rvol > 1.0:
+            signals.append({
+                "type": "9_ema_cross",
+                "direction": "long",
+                "entry_price": close,
+                "stop_price": ema9 * 0.98,
+                "target_price": close * 1.03,
+                "strength": 65
+            })
+        
+        # MA Crossover
+        if len(bars) >= 3:
+            prev_ema9 = self._calculate_ema([b.get("close", 0) for b in bars[:-1]], 9)
+            prev_ema20 = self._calculate_ema([b.get("close", 0) for b in bars[:-1]], 20)
+            if ema9 > ema20_val and prev_ema9 <= prev_ema20:
+                signals.append({
+                    "type": "ma_crossover",
+                    "direction": "long",
+                    "entry_price": close,
+                    "stop_price": ema20_val * 0.97,
+                    "target_price": close * 1.05,
+                    "strength": 70
+                })
+            if ema9 < ema20_val and prev_ema9 >= prev_ema20:
+                signals.append({
+                    "type": "ma_crossover_short",
+                    "direction": "short",
+                    "entry_price": close,
+                    "stop_price": ema20_val * 1.03,
+                    "target_price": close * 0.95,
+                    "strength": 70
+                })
+        
+        # Range Break
+        if len(bars) >= 10:
+            range_high = max(b.get("high", 0) for b in bars[-10:])
+            range_low = min(b.get("low", float('inf')) for b in bars[-10:])
+            range_mid = (range_high + range_low) / 2
+            
+            if close > range_high and rvol > 1.2:
+                signals.append({
+                    "type": "range_break",
+                    "direction": "long",
+                    "entry_price": close,
+                    "stop_price": range_mid,
+                    "target_price": close + (range_high - range_low),
+                    "strength": 72
+                })
+            
+            # Range Fade at Top
+            if high >= range_high * 0.99 and close < open_price:
+                signals.append({
+                    "type": "range_fade_top",
+                    "direction": "short",
+                    "entry_price": close,
+                    "stop_price": range_high * 1.02,
+                    "target_price": range_mid,
+                    "strength": 65
+                })
+            
+            # Range Fade at Bottom
+            if low <= range_low * 1.01 and close > open_price:
+                signals.append({
+                    "type": "range_fade_bottom",
+                    "direction": "long",
+                    "entry_price": close,
+                    "stop_price": range_low * 0.98,
+                    "target_price": range_mid,
+                    "strength": 65
+                })
+        
+        # Volume Capitulation
+        if rvol > 3.0:
+            if close < open_price and (high - close) > (close - low) * 2:
+                signals.append({
+                    "type": "volume_capitulation_short",
+                    "direction": "short",
+                    "entry_price": close,
+                    "stop_price": high * 1.01,
+                    "target_price": close * 0.95,
+                    "strength": 70
+                })
+            if close > open_price and (close - low) > (high - close) * 2:
+                signals.append({
+                    "type": "volume_capitulation_long",
+                    "direction": "long",
+                    "entry_price": close,
+                    "stop_price": low * 0.99,
+                    "target_price": close * 1.05,
+                    "strength": 70
+                })
+        
         return signals
+    
+    def _calculate_ema(self, closes: List[float], period: int) -> float:
+        """Calculate EMA"""
+        if len(closes) < period:
+            return closes[-1] if closes else 0
+        
+        multiplier = 2 / (period + 1)
+        ema = sum(closes[:period]) / period
+        
+        for price in closes[period:]:
+            ema = (price * multiplier) + (ema * (1 - multiplier))
+        
+        return ema
     
     def _calculate_rsi(self, closes: List[float], period: int = 14) -> float:
         """Calculate RSI indicator"""
