@@ -352,11 +352,32 @@ class SentComService:
                                 metadata={"source": "trading_bot", "pnl_percent": pnl_pct}
                             ))
                     
-                    # Add scanning status
+                    # Add scanning status with more context
                     mode = bot_status.get("mode", "confirmation")
                     running = bot_status.get("running", False)
                     if running:
-                        scan_thought = f"We're actively scanning for opportunities in {mode} mode."
+                        # Check if we have real market data
+                        has_market_data = False
+                        scanner_status = ""
+                        try:
+                            from services.enhanced_scanner import get_enhanced_scanner
+                            scanner = get_enhanced_scanner()
+                            if scanner:
+                                active_alerts = scanner.get_live_alerts() if hasattr(scanner, 'get_live_alerts') else []
+                                scan_count = scanner._scan_count if hasattr(scanner, '_scan_count') else 0
+                                has_market_data = scan_count > 0 and len(active_alerts) > 0
+                                if has_market_data:
+                                    scanner_status = f"Found {len(active_alerts)} potential setups."
+                                elif scan_count > 0:
+                                    scanner_status = "No setups meeting our criteria right now."
+                        except Exception:
+                            pass
+                        
+                        if has_market_data:
+                            scan_thought = f"We're actively scanning for opportunities in {mode} mode. {scanner_status}"
+                        else:
+                            scan_thought = f"We're actively scanning for opportunities in {mode} mode."
+                        
                         messages.append(SentComMessage(
                             id=self._generate_message_id(),
                             type="thought",
@@ -364,7 +385,7 @@ class SentComService:
                             timestamp=datetime.now(timezone.utc).isoformat(),
                             confidence=50,
                             action_type="scanning",
-                            metadata={"source": "trading_bot", "mode": mode}
+                            metadata={"source": "trading_bot", "mode": mode, "has_live_data": has_market_data}
                         ))
                 
                 # Get filter thoughts (smart strategy filtering)
@@ -735,59 +756,221 @@ class SentComService:
         return positions
     
     async def get_setups_watching(self) -> List[Dict[str, Any]]:
-        """Get setups we're currently watching"""
-        trading_bot = self._get_trading_bot()
+        """
+        Get setups we're currently watching.
         
-        if not trading_bot:
-            return []
+        Sources:
+        1. Live scanner alerts (PRIMARY - real-time alerts)
+        2. Trading bot's watching_setups
+        3. AI-generated setups from positions (potential adds/scales)
+        """
+        setups = []
         
+        # Source 1: LIVE SCANNER ALERTS (Primary source)
         try:
-            bot_status = trading_bot.get_status()
-            watching = bot_status.get("watching_setups", [])
+            from services.enhanced_scanner import get_enhanced_scanner
+            scanner = get_enhanced_scanner()
+            if scanner:
+                live_alerts = scanner.get_live_alerts()
+                for alert in live_alerts[:6]:
+                    setups.append({
+                        "symbol": alert.symbol,
+                        "setup_type": alert.setup_type or alert.strategy_name,
+                        "trigger_price": alert.trigger_price,
+                        "current_price": alert.current_price,
+                        "stop_price": alert.stop_loss,
+                        "target_price": alert.target,
+                        "risk_reward": f"{alert.risk_reward:.1f}:1" if alert.risk_reward else "2:1",
+                        "confidence": int(alert.tqs_score) if alert.tqs_score else int(alert.trigger_probability * 100),
+                        "grade": alert.tqs_grade or alert.trade_grade,
+                        "priority": alert.priority.value if alert.priority else "medium",
+                        "headline": alert.headline,
+                        "timestamp": alert.created_at.isoformat() if alert.created_at else datetime.now(timezone.utc).isoformat(),
+                        "source": "live_scanner",
+                        "alert_id": alert.id
+                    })
+        except Exception as e:
+            logger.error(f"Error getting live scanner alerts: {e}")
+        
+        # Source 2: Trading bot watching list (if we don't have enough from scanner)
+        if len(setups) < 4:
+            trading_bot = self._get_trading_bot()
+            if trading_bot:
+                try:
+                    bot_status = trading_bot.get_status()
+                    watching = bot_status.get("watching_setups", [])
+                    for setup in watching:
+                        if setup.get("symbol") not in [s.get("symbol") for s in setups]:
+                            setups.append({
+                                "symbol": setup.get("symbol"),
+                                "setup_type": setup.get("setup_type"),
+                                "trigger_price": setup.get("trigger_price"),
+                                "current_price": setup.get("current_price"),
+                                "risk_reward": setup.get("risk_reward"),
+                                "confidence": setup.get("confidence"),
+                                "timestamp": setup.get("timestamp"),
+                                "source": "bot"
+                            })
+                except Exception as e:
+                    logger.error(f"Error getting bot setups: {e}")
+        
+        # Source 2: Generate setups from positions (scale opportunities)
+        positions = await self.get_our_positions()
+        for pos in positions:
+            symbol = pos.get("symbol", "")
+            pnl_pct = pos.get("pnl_percent", 0)
+            entry_price = pos.get("entry_price", 0)
+            current_price = pos.get("current_price", 0)
             
-            setups = []
-            for setup in watching:
+            if not symbol or not entry_price:
+                continue
+            
+            # If position is winning, look for pullback entry
+            if pnl_pct > 3 and current_price > 0:
+                pullback_target = entry_price * 1.01  # 1% above entry
                 setups.append({
-                    "symbol": setup.get("symbol"),
-                    "setup_type": setup.get("setup_type"),
-                    "trigger_price": setup.get("trigger_price"),
-                    "current_price": setup.get("current_price"),
-                    "risk_reward": setup.get("risk_reward"),
-                    "confidence": setup.get("confidence"),
-                    "timestamp": setup.get("timestamp")
+                    "symbol": symbol,
+                    "setup_type": "PULLBACK_ADD",
+                    "trigger_price": round(pullback_target, 2),
+                    "current_price": round(current_price, 2),
+                    "risk_reward": "2:1",
+                    "confidence": 65,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "source": "position_analysis",
+                    "note": f"Winner pulling back - scale opportunity"
                 })
             
-            return setups
-            
+            # If position is near breakeven after being down, momentum setup
+            elif -1 < pnl_pct < 1 and current_price > 0:
+                breakout_target = current_price * 1.02  # 2% above current
+                setups.append({
+                    "symbol": symbol,
+                    "setup_type": "BREAKOUT_ADD",
+                    "trigger_price": round(breakout_target, 2),
+                    "current_price": round(current_price, 2),
+                    "risk_reward": "2.5:1",
+                    "confidence": 55,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "source": "position_analysis",
+                    "note": f"Reclaiming - momentum add"
+                })
+        
+        # Source 3: Check scanner service for recent alerts
+        try:
+            from services.enhanced_scanner import get_enhanced_scanner
+            scanner = get_enhanced_scanner()
+            if scanner:
+                recent_alerts = scanner.get_recent_alerts(limit=5) if hasattr(scanner, 'get_recent_alerts') else []
+                for alert in recent_alerts:
+                    if alert.get("symbol") not in [s.get("symbol") for s in setups]:
+                        setups.append({
+                            "symbol": alert.get("symbol"),
+                            "setup_type": alert.get("setup_type", alert.get("alert_type", "SCANNER")),
+                            "trigger_price": alert.get("trigger_price", alert.get("price")),
+                            "current_price": alert.get("current_price", alert.get("price")),
+                            "risk_reward": alert.get("risk_reward", "2:1"),
+                            "confidence": alert.get("score", alert.get("confidence", 60)),
+                            "timestamp": alert.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                            "source": "scanner"
+                        })
         except Exception as e:
-            logger.error(f"Error getting setups: {e}")
-            return []
+            logger.debug(f"Scanner not available: {e}")
+        
+        # Limit to top 6 setups
+        return setups[:6]
     
     async def get_recent_alerts(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get recent alerts and notifications"""
-        # TODO: Wire to alert system
-        # For now, generate from positions and setups
+        """
+        Get recent alerts and notifications.
+        
+        Alert types:
+        - stop_warning: Position approaching stop
+        - runner: Position running strong
+        - target_near: Position near target
+        - new_setup: New scanner setup detected
+        - regime_change: Market regime shifted
+        """
         alerts = []
         
+        # Source 1: LIVE SCANNER ALERTS
+        try:
+            from services.enhanced_scanner import get_enhanced_scanner
+            scanner = get_enhanced_scanner()
+            if scanner:
+                live_alerts = scanner.get_live_alerts()
+                for alert in live_alerts[:5]:
+                    alerts.append({
+                        "id": alert.id,
+                        "type": "new_setup",
+                        "severity": alert.priority.value if alert.priority else "medium",
+                        "symbol": alert.symbol,
+                        "message": alert.headline or f"{alert.symbol} {alert.setup_type}",
+                        "current_price": alert.current_price,
+                        "trigger_price": alert.trigger_price,
+                        "setup_type": alert.setup_type,
+                        "grade": alert.tqs_grade or alert.trade_grade,
+                        "risk_reward": alert.risk_reward,
+                        "timestamp": alert.created_at.isoformat() if alert.created_at else datetime.now(timezone.utc).isoformat(),
+                        "action_suggestion": f"Entry: ${alert.trigger_price:.2f} | Stop: ${alert.stop_loss:.2f}" if alert.trigger_price and alert.stop_loss else "Review setup"
+                    })
+        except Exception as e:
+            logger.error(f"Error getting live scanner alerts: {e}")
+        
+        # Source 2: Generate alerts from positions
         positions = await self.get_our_positions()
-        for pos in positions[:3]:
+        for pos in positions:
             pnl_pct = pos.get("pnl_percent", 0)
-            symbol = pos.get("symbol")
+            symbol = pos.get("symbol", "")
+            current_price = pos.get("current_price", 0)
             
+            if not symbol:
+                continue
+            
+            # Stop warning: -2% or worse
             if pnl_pct <= -2:
                 alerts.append({
-                    "type": "warning",
+                    "id": f"alert_{symbol}_stop",
+                    "type": "stop_warning",
+                    "severity": "high" if pnl_pct <= -3 else "medium",
                     "symbol": symbol,
-                    "message": f"{symbol} approaching stop",
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+                    "message": f"{symbol} down {abs(pnl_pct):.1f}% - approaching stop",
+                    "current_price": current_price,
+                    "pnl_percent": pnl_pct,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "action_suggestion": "Review stop or cut"
                 })
+            
+            # Runner alert: +3% or better
             elif pnl_pct >= 3:
                 alerts.append({
-                    "type": "info",
+                    "id": f"alert_{symbol}_runner",
+                    "type": "runner",
+                    "severity": "info",
                     "symbol": symbol,
                     "message": f"{symbol} running +{pnl_pct:.1f}%",
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+                    "current_price": current_price,
+                    "pnl_percent": pnl_pct,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "action_suggestion": "Trail stop or take partials"
                 })
+            
+            # Target near: +2% to +3%
+            elif 2 <= pnl_pct < 3:
+                alerts.append({
+                    "id": f"alert_{symbol}_target",
+                    "type": "target_near",
+                    "severity": "info",
+                    "symbol": symbol,
+                    "message": f"{symbol} nearing target at +{pnl_pct:.1f}%",
+                    "current_price": current_price,
+                    "pnl_percent": pnl_pct,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "action_suggestion": "Prepare to take profits"
+                })
+        
+        # Sort by severity (high first) then timestamp
+        severity_order = {"critical": 0, "high": 1, "medium": 2, "info": 3}
+        alerts.sort(key=lambda x: (severity_order.get(x.get("severity", "info"), 3), x.get("timestamp", "")), reverse=True)
         
         return alerts[:limit]
     
