@@ -56,6 +56,12 @@ class SimulationConfigRequest(BaseModel):
     
     # Data source
     data_source: str = Field(default="alpaca", description="Data source: alpaca, ib, mongodb")
+    
+    # Multi-timeframe support
+    bar_size: str = Field(
+        default="1 day", 
+        description="Bar size for simulation: 1 min, 5 mins, 15 mins, 1 hour, 1 day"
+    )
 
 
 @router.post("/start")
@@ -97,7 +103,8 @@ async def start_simulation(config: SimulationConfigRequest):
             max_position_pct=config.max_position_pct,
             max_open_positions=config.max_open_positions,
             use_ai_agents=config.use_ai_agents,
-            data_source=config.data_source
+            data_source=config.data_source,
+            bar_size=config.bar_size
         )
         
         # Start simulation

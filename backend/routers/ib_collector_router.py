@@ -664,3 +664,297 @@ async def run_smart_collection(
     except Exception as e:
         logger.error(f"Error running smart collection: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# ==================== MULTI-TIMEFRAME COLLECTION ====================
+
+@router.post("/multi-timeframe-collection")
+async def multi_timeframe_collection(
+    bar_size: str = "1 min",
+    lookback: str = "30_days",
+    collection_type: str = "liquid",
+    skip_recent: bool = True,
+    recent_days_threshold: int = 7,
+    force_refresh: bool = False,
+    max_symbols: int = 5000
+):
+    """
+    Start a multi-timeframe data collection with flexible bar sizes and lookback periods.
+    
+    **Bar Sizes (prioritized for intraday strategies):**
+    - `1 min` - Best for scalping, 1-day lookback max efficient
+    - `5 mins` - Good for intraday momentum, up to 1-week lookback
+    - `15 mins` - Swing trading intraday, up to 1-month lookback  
+    - `1 hour` - Swing trading, up to 6-month lookback
+    - `1 day` - Position/investment, up to 5-year lookback
+    - `1 week` - Long-term investment, up to 5-year lookback
+    
+    **Lookback Periods:**
+    - `1_day` - Last trading day
+    - `1_week` - Last 7 days
+    - `30_days` - Last month (default)
+    - `6_months` - Last 6 months
+    - `1_year` - Last year
+    - `2_years` - Last 2 years
+    - `5_years` - Last 5 years
+    
+    **Collection Types:**
+    - `liquid` - Only liquid stocks (ADV >= 100K), faster
+    - `full_market` - All tradeable stocks, slower
+    - `smart` - ADV-matched to bar size (recommended)
+    
+    **IB Data Limitations:**
+    - 1 min bars: Max ~365 days history
+    - 5 min bars: Max ~730 days history  
+    - 1 day bars: Max ~7300 days (20 years) history
+    
+    ⚠️ LONG-RUNNING: Check /api/ib-collector/queue-progress for real-time progress
+    """
+    try:
+        collector = get_ib_collector()
+        
+        # Validate bar_size
+        valid_bar_sizes = ["1 min", "5 mins", "15 mins", "1 hour", "1 day", "1 week"]
+        if bar_size not in valid_bar_sizes:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid bar_size. Choose from: {valid_bar_sizes}"
+            )
+        
+        # Map lookback to IB duration string
+        lookback_map = {
+            "1_day": "1 D",
+            "1_week": "1 W",
+            "30_days": "1 M",
+            "6_months": "6 M",
+            "1_year": "1 Y",
+            "2_years": "2 Y",
+            "5_years": "5 Y"
+        }
+        
+        if lookback not in lookback_map:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid lookback. Choose from: {list(lookback_map.keys())}"
+            )
+        
+        duration = lookback_map[lookback]
+        
+        # Determine ADV threshold based on bar size (smart matching)
+        adv_thresholds = {
+            "1 min": 500_000,    # High liquidity for scalping
+            "5 mins": 500_000,   # High liquidity for intraday
+            "15 mins": 100_000,  # Medium for swing
+            "1 hour": 100_000,   # Medium for swing
+            "1 day": 50_000,     # Lower for investment
+            "1 week": 50_000     # Lower for investment
+        }
+        
+        # Get symbols based on collection type
+        if collection_type == "full_market":
+            symbols = await collector.get_all_us_symbols(min_price=1.0, max_price=1000.0)
+        elif collection_type == "smart":
+            # Use ADV matched to bar size
+            min_adv = adv_thresholds.get(bar_size, 100_000)
+            symbols = await collector.get_liquid_symbols(min_adv=min_adv)
+        else:  # liquid (default)
+            symbols = await collector.get_liquid_symbols(min_adv=100_000)
+        
+        # Limit symbols if specified
+        if max_symbols and len(symbols) > max_symbols:
+            symbols = symbols[:max_symbols]
+        
+        logger.info(f"Multi-timeframe collection: {len(symbols)} symbols, {bar_size} bars, {lookback} lookback")
+        
+        # Start collection
+        result = await collector.start_collection(
+            symbols=symbols,
+            bar_size=bar_size,
+            duration=duration,
+            use_defaults=False,
+            skip_recent=skip_recent,
+            recent_days_threshold=recent_days_threshold,
+            force_refresh=force_refresh
+        )
+        
+        # Add metadata to result
+        if result.get("success"):
+            result["collection_config"] = {
+                "bar_size": bar_size,
+                "lookback": lookback,
+                "duration": duration,
+                "collection_type": collection_type,
+                "symbols_requested": len(symbols)
+            }
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting multi-timeframe collection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/timeframe-stats")
+async def get_timeframe_stats():
+    """
+    Get statistics about collected data broken down by timeframe/bar_size.
+    
+    Returns counts and date ranges for each bar_size in the database.
+    """
+    try:
+        collector = get_ib_collector()
+        
+        if collector._db is None:
+            return {
+                "success": False,
+                "error": "Database not available"
+            }
+        
+        # Aggregate stats by bar_size
+        pipeline = [
+            {
+                "$group": {
+                    "_id": "$bar_size",
+                    "symbol_count": {"$addToSet": "$symbol"},
+                    "total_bars": {"$sum": 1},
+                    "min_date": {"$min": "$date"},
+                    "max_date": {"$max": "$date"},
+                    "latest_collection": {"$max": "$collected_at"}
+                }
+            },
+            {
+                "$project": {
+                    "bar_size": "$_id",
+                    "unique_symbols": {"$size": "$symbol_count"},
+                    "total_bars": 1,
+                    "date_range": {
+                        "start": "$min_date",
+                        "end": "$max_date"
+                    },
+                    "latest_collection": 1,
+                    "_id": 0
+                }
+            },
+            {"$sort": {"bar_size": 1}}
+        ]
+        
+        stats = list(collector._db["ib_historical_data"].aggregate(pipeline))
+        
+        # Calculate total
+        total_bars = sum(s.get("total_bars", 0) for s in stats)
+        
+        # Get overall unique symbol count
+        unique_symbols = collector._db["ib_historical_data"].distinct("symbol")
+        
+        return {
+            "success": True,
+            "by_timeframe": stats,
+            "total": {
+                "unique_symbols": len(unique_symbols),
+                "total_bars": total_bars,
+                "timeframes_collected": len(stats)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting timeframe stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/collection-presets")
+async def get_collection_presets():
+    """
+    Get recommended collection presets for different trading styles.
+    
+    Returns pre-configured settings optimized for:
+    - Scalping (1min, 1-day lookback)
+    - Day Trading (5min, 1-week lookback)
+    - Swing Trading (1day, 30-day lookback)
+    - Position Trading (1day, 1-year lookback)
+    - Long-term Analysis (1day, 5-year lookback)
+    """
+    presets = [
+        {
+            "name": "Scalping",
+            "description": "High-frequency intraday data for scalp trades",
+            "bar_size": "1 min",
+            "lookback": "1_day",
+            "collection_type": "smart",
+            "estimated_symbols": "~500 (ADV >= 500K)",
+            "estimated_time": "~25 mins",
+            "use_case": "Testing scalp entry/exit timing"
+        },
+        {
+            "name": "Day Trading",
+            "description": "Intraday momentum and pattern recognition",
+            "bar_size": "5 mins",
+            "lookback": "1_week",
+            "collection_type": "smart",
+            "estimated_symbols": "~500 (ADV >= 500K)",
+            "estimated_time": "~25 mins",
+            "use_case": "Gap and Go, VWAP strategies"
+        },
+        {
+            "name": "Swing (Intraday)",
+            "description": "15-minute bars for multi-day swing analysis",
+            "bar_size": "15 mins",
+            "lookback": "30_days",
+            "collection_type": "smart",
+            "estimated_symbols": "~1,500 (ADV >= 100K)",
+            "estimated_time": "~1.5 hours",
+            "use_case": "Swing entry optimization"
+        },
+        {
+            "name": "Swing (Daily)",
+            "description": "Daily bars for swing trade backtesting",
+            "bar_size": "1 day",
+            "lookback": "30_days",
+            "collection_type": "liquid",
+            "estimated_symbols": "~1,500",
+            "estimated_time": "~1.5 hours",
+            "use_case": "Standard swing trade testing"
+        },
+        {
+            "name": "Position Trading",
+            "description": "1-year daily history for position trades",
+            "bar_size": "1 day",
+            "lookback": "1_year",
+            "collection_type": "liquid",
+            "estimated_symbols": "~1,500",
+            "estimated_time": "~1.5 hours",
+            "use_case": "Longer-term trend following"
+        },
+        {
+            "name": "Long-term Analysis",
+            "description": "5-year daily history for comprehensive backtesting",
+            "bar_size": "1 day",
+            "lookback": "5_years",
+            "collection_type": "liquid",
+            "estimated_symbols": "~1,500",
+            "estimated_time": "~2 hours",
+            "use_case": "Full market cycle analysis"
+        },
+        {
+            "name": "Weekly Investment",
+            "description": "Weekly bars for investment-grade backtesting",
+            "bar_size": "1 week",
+            "lookback": "5_years",
+            "collection_type": "full_market",
+            "estimated_symbols": "~5,000",
+            "estimated_time": "~4 hours",
+            "use_case": "Buy-and-hold strategy testing"
+        }
+    ]
+    
+    return {
+        "success": True,
+        "presets": presets,
+        "notes": [
+            "Times are estimates based on IB Gateway rate limits (~3 sec/symbol)",
+            "Smart collection matches ADV to bar size (more liquid for intraday)",
+            "Larger lookbacks for intraday bars may hit IB data limits"
+        ]
+    }

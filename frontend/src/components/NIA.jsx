@@ -359,6 +359,349 @@ const LearningProgressPanel = ({ data, loading }) => {
   );
 };
 
+// ==================== MULTI-TIMEFRAME COLLECTION PANEL ====================
+
+const MultiTimeframeCollectionPanel = ({ collectionData, loading, onRefresh }) => {
+  const [expanded, setExpanded] = useState(true);
+  const [barSize, setBarSize] = useState('5 mins');
+  const [lookback, setLookback] = useState('1_week');
+  const [collectionType, setCollectionType] = useState('smart');
+  const [collecting, setCollecting] = useState(false);
+  const [showPresets, setShowPresets] = useState(false);
+  const [presets, setPresets] = useState([]);
+  const [timeframeStats, setTimeframeStats] = useState([]);
+  const [loadingPresets, setLoadingPresets] = useState(false);
+
+  // Bar size options (prioritized for user's preference: 1min, 5min)
+  const barSizeOptions = [
+    { value: '1 min', label: '1 Minute', icon: Zap, description: 'Scalping' },
+    { value: '5 mins', label: '5 Minutes', icon: Activity, description: 'Day Trading' },
+    { value: '15 mins', label: '15 Minutes', icon: Clock, description: 'Swing Entry' },
+    { value: '1 hour', label: '1 Hour', icon: TrendingUp, description: 'Swing' },
+    { value: '1 day', label: '1 Day', icon: BarChart3, description: 'Position' },
+    { value: '1 week', label: '1 Week', icon: Layers, description: 'Investment' }
+  ];
+
+  // Lookback options
+  const lookbackOptions = [
+    { value: '1_day', label: '1 Day', description: 'Latest data only' },
+    { value: '1_week', label: '1 Week', description: '~5 trading days' },
+    { value: '30_days', label: '30 Days', description: '~22 trading days' },
+    { value: '6_months', label: '6 Months', description: '~130 trading days' },
+    { value: '1_year', label: '1 Year', description: '~252 trading days' },
+    { value: '2_years', label: '2 Years', description: 'Extended history' },
+    { value: '5_years', label: '5 Years', description: 'Full cycle analysis' }
+  ];
+
+  // Collection type options
+  const collectionTypeOptions = [
+    { value: 'smart', label: 'Smart', description: 'ADV-matched to bar size (recommended)' },
+    { value: 'liquid', label: 'Liquid', description: 'ADV >= 100K stocks' },
+    { value: 'full_market', label: 'Full Market', description: 'All tradeable stocks (slow)' }
+  ];
+
+  // Fetch presets and timeframe stats
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoadingPresets(true);
+      try {
+        const [presetsRes, statsRes] = await Promise.allSettled([
+          fetch(`${API_BASE}/api/ib-collector/collection-presets`),
+          fetch(`${API_BASE}/api/ib-collector/timeframe-stats`)
+        ]);
+        
+        if (presetsRes.status === 'fulfilled') {
+          const data = await presetsRes.value.json();
+          if (data.success) setPresets(data.presets || []);
+        }
+        
+        if (statsRes.status === 'fulfilled') {
+          const data = await statsRes.value.json();
+          if (data.success) setTimeframeStats(data.by_timeframe || []);
+        }
+      } catch (err) {
+        console.error('Error fetching collection data:', err);
+      } finally {
+        setLoadingPresets(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  const handleStartCollection = async () => {
+    setCollecting(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/ib-collector/multi-timeframe-collection?bar_size=${encodeURIComponent(barSize)}&lookback=${lookback}&collection_type=${collectionType}`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        toast.success(`Collection started: ${barSize} bars, ${lookback.replace('_', ' ')} lookback`);
+        if (onRefresh) onRefresh();
+      } else {
+        toast.error(data.error || 'Failed to start collection');
+      }
+    } catch (err) {
+      toast.error('Error starting collection');
+    } finally {
+      setCollecting(false);
+    }
+  };
+
+  const handleApplyPreset = (preset) => {
+    setBarSize(preset.bar_size);
+    setLookback(preset.lookback);
+    setCollectionType(preset.collection_type);
+    setShowPresets(false);
+    toast.info(`Applied "${preset.name}" preset`);
+  };
+
+  const { queueProgress } = collectionData || {};
+  const isRunning = queueProgress && queueProgress.pending > 0;
+  const progress = queueProgress 
+    ? Math.round((queueProgress.completed / (queueProgress.total || 1)) * 100) 
+    : 0;
+
+  // Find stats for current bar_size
+  const currentBarStats = timeframeStats.find(s => s.bar_size === barSize);
+
+  return (
+    <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
+        data-testid="multi-timeframe-panel-toggle"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #f59e0b, #ef4444)' }}>
+            <Database className="w-4 h-4 text-white" />
+          </div>
+          <div className="text-left">
+            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+              Multi-Timeframe Data
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-normal">NEW</span>
+            </h3>
+            <p className="text-xs text-zinc-400">
+              {isRunning ? `Collecting ${barSize}... ${progress}%` : 'Collect intraday & long-term data'}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {timeframeStats.length > 0 && (
+            <span className="text-xs text-zinc-500">{timeframeStats.length} timeframes</span>
+          )}
+          <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        </div>
+      </button>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="border-t border-white/10"
+          >
+            <div className="p-4 space-y-4">
+              {/* Quick Presets Toggle */}
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => setShowPresets(!showPresets)}
+                  className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
+                  data-testid="show-presets-btn"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  {showPresets ? 'Hide Presets' : 'Quick Presets'}
+                </button>
+                {currentBarStats && (
+                  <span className="text-xs text-zinc-500">
+                    {currentBarStats.unique_symbols?.toLocaleString()} symbols, {currentBarStats.total_bars?.toLocaleString()} bars
+                  </span>
+                )}
+              </div>
+
+              {/* Presets Panel */}
+              <AnimatePresence>
+                {showPresets && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="grid grid-cols-2 gap-2 pb-3 border-b border-white/5"
+                  >
+                    {presets.slice(0, 6).map((preset) => (
+                      <button
+                        key={preset.name}
+                        onClick={() => handleApplyPreset(preset)}
+                        className="p-2 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 text-left transition-colors"
+                        data-testid={`preset-${preset.name.toLowerCase().replace(/\s+/g, '-')}`}
+                      >
+                        <div className="text-xs font-medium text-white">{preset.name}</div>
+                        <div className="text-[10px] text-zinc-500">{preset.bar_size} • {preset.lookback.replace('_', ' ')}</div>
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Bar Size Selector */}
+              <div>
+                <label className="block text-xs text-zinc-400 mb-2">Bar Size</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {barSizeOptions.map((opt) => {
+                    const Icon = opt.icon;
+                    const isSelected = barSize === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        onClick={() => setBarSize(opt.value)}
+                        className={`p-2 rounded-lg border text-left transition-all ${
+                          isSelected
+                            ? 'bg-amber-500/20 border-amber-500/50 text-amber-400'
+                            : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
+                        }`}
+                        data-testid={`bar-size-${opt.value.replace(/\s+/g, '-')}`}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <Icon className="w-3 h-3" />
+                          <span className="text-xs font-medium">{opt.label}</span>
+                        </div>
+                        <div className="text-[10px] text-zinc-500 mt-0.5">{opt.description}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Lookback Period Selector */}
+              <div>
+                <label className="block text-xs text-zinc-400 mb-2">Lookback Period</label>
+                <div className="flex flex-wrap gap-2">
+                  {lookbackOptions.map((opt) => {
+                    const isSelected = lookback === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        onClick={() => setLookback(opt.value)}
+                        className={`px-3 py-1.5 rounded-full text-xs border transition-all ${
+                          isSelected
+                            ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400'
+                            : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
+                        }`}
+                        data-testid={`lookback-${opt.value}`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Collection Type Selector */}
+              <div>
+                <label className="block text-xs text-zinc-400 mb-2">Collection Scope</label>
+                <div className="flex gap-2">
+                  {collectionTypeOptions.map((opt) => {
+                    const isSelected = collectionType === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        onClick={() => setCollectionType(opt.value)}
+                        className={`flex-1 p-2 rounded-lg border text-center transition-all ${
+                          isSelected
+                            ? 'bg-violet-500/20 border-violet-500/50 text-violet-400'
+                            : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
+                        }`}
+                        data-testid={`collection-type-${opt.value}`}
+                      >
+                        <div className="text-xs font-medium">{opt.label}</div>
+                        <div className="text-[10px] text-zinc-500">{opt.description}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Progress or Start Button */}
+              {isRunning ? (
+                <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5">
+                  <div className="flex justify-between text-xs text-zinc-400 mb-2">
+                    <span>Collection in progress...</span>
+                    <span>{progress}%</span>
+                  </div>
+                  <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-amber-500 to-orange-400 rounded-full transition-all"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 mt-2 text-center">
+                    <div>
+                      <div className="text-xs font-bold text-emerald-400">{queueProgress.completed?.toLocaleString()}</div>
+                      <div className="text-[10px] text-zinc-500">Done</div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-orange-400">{queueProgress.pending?.toLocaleString()}</div>
+                      <div className="text-[10px] text-zinc-500">Pending</div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-red-400">{queueProgress.failed || 0}</div>
+                      <div className="text-[10px] text-zinc-500">Failed</div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={handleStartCollection}
+                  disabled={collecting}
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-lg font-medium text-sm transition-all"
+                  style={{
+                    background: collecting ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg, #f59e0b, #ef4444)',
+                    color: collecting ? 'rgba(255,255,255,0.5)' : 'white'
+                  }}
+                  data-testid="start-collection-btn"
+                >
+                  {collecting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Starting Collection...
+                    </>
+                  ) : (
+                    <>
+                      <PlayCircle className="w-4 h-4" />
+                      Start {barSize} Collection ({lookback.replace('_', ' ')})
+                    </>
+                  )}
+                </button>
+              )}
+
+              {/* Timeframe Stats */}
+              {timeframeStats.length > 0 && (
+                <div className="pt-3 border-t border-white/5">
+                  <div className="text-xs text-zinc-400 mb-2">Data by Timeframe</div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {timeframeStats.slice(0, 6).map((stat) => (
+                      <div 
+                        key={stat.bar_size} 
+                        className="p-2 rounded bg-white/[0.02] text-center"
+                      >
+                        <div className="text-[10px] text-zinc-500">{stat.bar_size}</div>
+                        <div className="text-xs font-bold text-white">{stat.unique_symbols?.toLocaleString()}</div>
+                        <div className="text-[10px] text-zinc-500">{(stat.total_bars / 1000).toFixed(0)}K bars</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
 // ==================== DATA COLLECTION PANEL ====================
 
 const DataCollectionPanel = ({ collectionData, loading }) => {
@@ -387,7 +730,7 @@ const DataCollectionPanel = ({ collectionData, loading }) => {
             )}
           </div>
           <div className="text-left">
-            <h3 className="text-sm font-semibold text-white">Historical Data</h3>
+            <h3 className="text-sm font-semibold text-white">Historical Data (Legacy)</h3>
             <p className="text-xs text-zinc-400">
               {isRunning ? `Collecting... ${progress}%` : `${totalSymbols.toLocaleString()} symbols ready`}
             </p>
@@ -481,14 +824,23 @@ const DataCollectionPanel = ({ collectionData, loading }) => {
 const SimulationQuickPanel = ({ jobs, loading, onRefresh }) => {
   const [expanded, setExpanded] = useState(true);
   const [starting, setStarting] = useState(null); // null, 'quick', or 'market'
+  const [simBarSize, setSimBarSize] = useState('1 day');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Bar size options for simulation
+  const simBarSizes = [
+    { value: '1 min', label: '1 Min', description: 'Scalp' },
+    { value: '5 mins', label: '5 Min', description: 'Intraday' },
+    { value: '1 day', label: 'Daily', description: 'Swing' }
+  ];
 
   const handleQuickTest = async () => {
     setStarting('quick');
     try {
-      const res = await fetch(`${API_BASE}/api/simulation/quick-test`, { method: 'POST' });
+      const res = await fetch(`${API_BASE}/api/simulation/quick-test?bar_size=${encodeURIComponent(simBarSize)}`, { method: 'POST' });
       const data = await res.json();
       if (data.success) {
-        toast.success(`Quick test started: ${data.job_id || 'Processing...'}`);
+        toast.success(`Quick test started: ${simBarSize} bars`);
         if (onRefresh) onRefresh();
       } else {
         toast.error('Failed to start simulation');
@@ -509,12 +861,13 @@ const SimulationQuickPanel = ({ jobs, loading, onRefresh }) => {
         body: JSON.stringify({
           days_back: 30,
           strategies: ['all'],
-          max_symbols: 1000
+          max_symbols: 1000,
+          bar_size: simBarSize
         })
       });
       const data = await res.json();
       if (data.success || data.job_id) {
-        toast.success(`Market-wide backtest started`);
+        toast.success(`Market-wide backtest started (${simBarSize} bars)`);
         if (onRefresh) onRefresh();
       } else {
         toast.error(data.error || 'Failed to start market-wide backtest');
@@ -577,6 +930,54 @@ const SimulationQuickPanel = ({ jobs, loading, onRefresh }) => {
             className="border-t border-white/10"
           >
             <div className="p-4">
+              {/* Bar Size Selector for Simulations */}
+              <div className="mb-4">
+                <button
+                  onClick={() => setShowAdvanced(!showAdvanced)}
+                  className="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-1 mb-2"
+                  data-testid="toggle-sim-settings"
+                >
+                  <Settings className="w-3 h-3" />
+                  {showAdvanced ? 'Hide Settings' : 'Simulation Settings'}
+                </button>
+                
+                <AnimatePresence>
+                  {showAdvanced && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="mb-3"
+                    >
+                      <label className="block text-xs text-zinc-400 mb-1.5">Bar Size for Backtest</label>
+                      <div className="flex gap-2">
+                        {simBarSizes.map((opt) => {
+                          const isSelected = simBarSize === opt.value;
+                          return (
+                            <button
+                              key={opt.value}
+                              onClick={() => setSimBarSize(opt.value)}
+                              className={`flex-1 px-2 py-1.5 rounded-lg border text-xs transition-all ${
+                                isSelected
+                                  ? 'bg-violet-500/20 border-violet-500/50 text-violet-400'
+                                  : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
+                              }`}
+                              data-testid={`sim-bar-size-${opt.value.replace(/\s+/g, '-')}`}
+                            >
+                              <div className="font-medium">{opt.label}</div>
+                              <div className="text-[10px] text-zinc-500">{opt.description}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[10px] text-zinc-500 mt-1.5">
+                        Note: Intraday simulations require collected intraday data
+                      </p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
               {/* Action Buttons */}
               <div className="grid grid-cols-2 gap-2 mb-4">
                 <button
@@ -1982,7 +2383,17 @@ const NIA = () => {
       {/* Learning Progress - Clear view of system intelligence */}
       <LearningProgressPanel data={data} loading={loading} />
 
-      {/* Data Collection Status */}
+      {/* Multi-Timeframe Data Collection (NEW) */}
+      <MultiTimeframeCollectionPanel
+        collectionData={{
+          queueProgress: data.collectionQueue,
+          stats: data.collectionStats
+        }}
+        loading={loading}
+        onRefresh={() => fetchAllData()}
+      />
+
+      {/* Data Collection Status (Legacy - for daily bars) */}
       <DataCollectionPanel 
         collectionData={{
           queueProgress: data.collectionQueue,

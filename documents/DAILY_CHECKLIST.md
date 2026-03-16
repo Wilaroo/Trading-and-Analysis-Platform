@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://neural-strategy-hub.preview.emergentagent.com
+https://ai-trading-backtest.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://neural-strategy-hub.preview.emergentagent.com
+https://ai-trading-backtest.preview.emergentagent.com
 ```

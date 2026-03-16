@@ -64,6 +64,9 @@ class SimulationConfig:
     # Data source
     data_source: str = "alpaca"      # "alpaca", "ib", "mongodb"
     
+    # Multi-timeframe support
+    bar_size: str = "1 day"          # "1 min", "5 mins", "15 mins", "1 hour", "1 day"
+    
     def to_dict(self) -> Dict:
         return asdict(self)
 
@@ -381,7 +384,8 @@ class HistoricalSimulationEngine:
                         bars = await self._get_historical_bars(
                             symbol, 
                             current_date - timedelta(days=60),  # Need lookback
-                            current_date
+                            current_date,
+                            bar_size=config.bar_size
                         )
                         
                         if not bars or len(bars) < 20:
@@ -502,7 +506,7 @@ class HistoricalSimulationEngine:
             
             # Close any remaining positions at end
             for symbol, position in open_positions.items():
-                bars = await self._get_historical_bars(symbol, end_date - timedelta(days=5), end_date)
+                bars = await self._get_historical_bars(symbol, end_date - timedelta(days=5), end_date, bar_size=config.bar_size)
                 if bars:
                     position.exit_date = end_date.isoformat()
                     position.exit_price = bars[-1].get("close", position.entry_price)
@@ -553,19 +557,20 @@ class HistoricalSimulationEngine:
         self, 
         symbol: str, 
         start: datetime, 
-        end: datetime
+        end: datetime,
+        bar_size: str = "1 day"
     ) -> List[Dict]:
-        """Get historical OHLCV bars for a symbol"""
+        """Get historical OHLCV bars for a symbol with specified bar size"""
         try:
             if self._db is not None:
                 # Try IB collected data first (primary source after data collection)
                 ib_bars = list(self._db["ib_historical_data"].find(
                     {
                         "symbol": symbol,
-                        "bar_size": "1 day",
+                        "bar_size": bar_size,
                         "date": {
-                            "$gte": start.strftime("%Y-%m-%d"),
-                            "$lte": end.strftime("%Y-%m-%d")
+                            "$gte": start.strftime("%Y-%m-%d") if bar_size == "1 day" else start.isoformat(),
+                            "$lte": end.strftime("%Y-%m-%d") if bar_size == "1 day" else end.isoformat()
                         }
                     },
                     {"_id": 0}
@@ -580,26 +585,28 @@ class HistoricalSimulationEngine:
                         "low": bar.get("low"),
                         "close": bar.get("close"),
                         "volume": bar.get("volume"),
-                        "symbol": symbol
+                        "symbol": symbol,
+                        "bar_size": bar_size
                     } for bar in ib_bars]
                 
-                # Fallback: Try legacy historical_bars collection
-                bars = list(self._db["historical_bars"].find(
-                    {
-                        "symbol": symbol,
-                        "timestamp": {
-                            "$gte": start.isoformat(),
-                            "$lte": end.isoformat()
-                        }
-                    },
-                    {"_id": 0}
-                ).sort("timestamp", 1))
-                
-                if bars and len(bars) >= 10:
-                    return bars
+                # Fallback: Try legacy historical_bars collection (only for daily)
+                if bar_size == "1 day":
+                    bars = list(self._db["historical_bars"].find(
+                        {
+                            "symbol": symbol,
+                            "timestamp": {
+                                "$gte": start.isoformat(),
+                                "$lte": end.isoformat()
+                            }
+                        },
+                        {"_id": 0}
+                    ).sort("timestamp", 1))
+                    
+                    if bars and len(bars) >= 10:
+                        return bars
             
-            # Fetch from Alpaca if not in database
-            if self._alpaca_service:
+            # Fetch from Alpaca if not in database (only supports daily)
+            if self._alpaca_service and bar_size == "1 day":
                 bars = await self._fetch_alpaca_bars(symbol, start, end)
                 
                 # Cache the data

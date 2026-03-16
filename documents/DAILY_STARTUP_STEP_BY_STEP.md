@@ -74,7 +74,7 @@ Forwarding                    https://pseudoaccidentally-linty-addie.ngrok-free.
 2. Go to this address:
 
 ```
-https://neural-strategy-hub.preview.emergentagent.com
+https://ai-trading-backtest.preview.emergentagent.com
 ```
 
 ✅ **Done!** TradeCommand is now running with AI enabled.
@@ -141,5 +141,5 @@ ollama serve
 
 **App URL:**
 ```
-https://neural-strategy-hub.preview.emergentagent.com
+https://ai-trading-backtest.preview.emergentagent.com
 ```
