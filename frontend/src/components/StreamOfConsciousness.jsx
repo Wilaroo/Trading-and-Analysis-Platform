@@ -33,6 +33,8 @@ const formatTime = (timestamp) => {
 export const useSOCStream = (pollInterval = 3000) => {
   const [thoughts, setThoughts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isConnected, setIsConnected] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState(null);
   const lastDataRef = useRef('');
 
   const fetchThoughts = useCallback(async () => {
@@ -47,15 +49,22 @@ export const useSOCStream = (pollInterval = 3000) => {
           m.action_type !== 'user_message'
         );
         
+        // Only update state if data actually changed
         const newDataStr = JSON.stringify(socMessages.map(m => m.id || m.timestamp));
         if (newDataStr !== lastDataRef.current) {
           lastDataRef.current = newDataStr;
           setThoughts(socMessages);
         }
+        
+        // Always mark as connected and update timestamp on successful fetch
+        setIsConnected(true);
+        setLastUpdate(new Date());
       }
     } catch (err) {
       console.error('Error fetching S.O.C. stream:', err);
+      setIsConnected(false);
     } finally {
+      // Only set loading false on initial load, not on subsequent polls
       setLoading(false);
     }
   }, []);
@@ -66,7 +75,7 @@ export const useSOCStream = (pollInterval = 3000) => {
     return () => clearInterval(interval);
   }, [fetchThoughts, pollInterval]);
 
-  return { thoughts, loading, refresh: fetchThoughts };
+  return { thoughts, loading, isConnected, lastUpdate, refresh: fetchThoughts };
 };
 
 // Get styling config based on entry type
@@ -365,18 +374,15 @@ const buildDataChips = (entry) => {
   return chips;
 };
 
-// S.O.C. Entry Component
-const SOCEntry = React.memo(({ entry, index }) => {
+// S.O.C. Entry Component - Memoized to prevent re-renders
+const SOCEntry = React.memo(({ entry, index, isNew = false }) => {
   const [expanded, setExpanded] = useState(false);
   const style = getEntryStyle(entry);
   const chips = buildDataChips(entry);
   const reasoning = entry.metadata?.reasoning || entry.reasoning;
   
   return (
-    <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: Math.min(index * 0.03, 0.2), type: 'spring', stiffness: 300 }}
+    <div
       onClick={() => reasoning && setExpanded(!expanded)}
       className="group relative mb-3 cursor-pointer"
       data-testid={`soc-entry-${index}`}
@@ -517,7 +523,7 @@ const SOCEntry = React.memo(({ entry, index }) => {
           </AnimatePresence>
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 });
 
@@ -525,15 +531,18 @@ SOCEntry.displayName = 'SOCEntry';
 
 // Main S.O.C. Panel
 const StreamOfConsciousness = ({ className = '' }) => {
-  const { thoughts, loading, refresh } = useSOCStream();
+  const { thoughts, loading, isConnected, lastUpdate, refresh } = useSOCStream();
   const scrollRef = useRef(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const prevThoughtsLengthRef = useRef(thoughts.length);
   
+  // Only auto-scroll when NEW entries are added, not on every render
   useEffect(() => {
-    if (autoScroll && scrollRef.current) {
+    if (autoScroll && scrollRef.current && thoughts.length > prevThoughtsLengthRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [thoughts, autoScroll]);
+    prevThoughtsLengthRef.current = thoughts.length;
+  }, [thoughts.length, autoScroll]);
   
   const handleScroll = (e) => {
     const { scrollTop, scrollHeight, clientHeight } = e.target;
@@ -545,6 +554,14 @@ const StreamOfConsciousness = ({ className = '' }) => {
     ['trade_executed', 'trade_decision', 'setup_found', 'entry_zone', 'stop_warning'].includes(t.action_type) ||
     ['setup', 'alert', 'decision', 'trade'].includes(t.type)
   ).length;
+  
+  // Format last update time
+  const lastUpdateStr = lastUpdate ? lastUpdate.toLocaleTimeString('en-US', { 
+    hour: '2-digit', 
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false 
+  }) : '--:--:--';
   
   return (
     <div 
@@ -561,9 +578,12 @@ const StreamOfConsciousness = ({ className = '' }) => {
         style={{ background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(10px)' }}
       >
         <div className="flex items-center gap-3">
-          <div className="relative">
-            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-            <div className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping opacity-60" />
+          {/* Live indicator - subtle pulsing dot when connected */}
+          <div className="relative" title={isConnected ? `Live - Last: ${lastUpdateStr}` : 'Connecting...'}>
+            <div className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-emerald-400' : 'bg-zinc-500'}`} />
+            {isConnected && (
+              <div className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping opacity-40" />
+            )}
           </div>
           <div>
             <span className="text-sm font-bold text-emerald-400 tracking-wide">
@@ -572,30 +592,39 @@ const StreamOfConsciousness = ({ className = '' }) => {
             <p className="text-[9px] text-zinc-500 tracking-wider">STREAM OF CONSCIOUSNESS</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          {/* Connection status indicator */}
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-black/30" title={`Last update: ${lastUpdateStr}`}>
+            <Radio className={`w-3 h-3 ${isConnected ? 'text-emerald-400' : 'text-zinc-600'}`} />
+            <span className={`text-[9px] font-mono ${isConnected ? 'text-emerald-400' : 'text-zinc-500'}`}>
+              {isConnected ? 'LIVE' : 'SYNC'}
+            </span>
+          </div>
+          
           {highPriorityCount > 0 && (
             <span 
               className="text-[10px] px-2.5 py-1 rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 font-semibold"
             >
-              {highPriorityCount} alerts
+              {highPriorityCount}
             </span>
           )}
           <button
             onClick={refresh}
-            className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+            className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
             title="Refresh"
             data-testid="soc-refresh-btn"
           >
-            <RefreshCw className="w-4 h-4 text-zinc-500 hover:text-zinc-300" />
+            <RefreshCw className="w-3.5 h-3.5 text-zinc-500 hover:text-zinc-300" />
           </button>
         </div>
       </div>
       
-      {/* Content */}
+      {/* Content - No layout shift during updates */}
       <div 
         ref={scrollRef}
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto p-3 custom-scrollbar"
+        style={{ minHeight: 0 }} /* Prevents flex child from overflowing */
         data-testid="soc-content"
       >
         {loading && thoughts.length === 0 ? (
