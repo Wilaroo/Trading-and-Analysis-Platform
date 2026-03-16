@@ -167,33 +167,32 @@ const AICoachTab = ({
   // --- CLASSIC LAYOUT (Original) ---
   return (
     <div className="space-y-3" data-testid="ai-coach-tab-content">
-      {/* Top Row: Learning Insights + Market Regime */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        {/* Learning Insights Widget - Compact overview */}
-        <LearningInsightsWidget 
-          onNavigateToHub={handleNavigateToHub}
-        />
-        
-        {/* Market Regime Widget - Current market state */}
-        <MarketRegimeWidget 
-          className="h-full"
-          onStateChange={(newState, oldState) => {
-            console.log(`Market regime changed: ${oldState} -> ${newState}`);
-          }}
-        />
-      </div>
       
       {/* Main Content Grid */}
       <div className="grid lg:grid-cols-12 gap-4">
         {/* LEFT - SentCom (Unified AI Command Center) - Takes more space */}
-        <div className="lg:col-span-9">
+        <div className="lg:col-span-8">
           <div className="h-[calc(100vh-180px)] min-h-[800px]">
             <SentCom embedded={true} />
           </div>
         </div>
 
-        {/* RIGHT - Market Intel + Scanner - Slimmer sidebar */}
-        <div className="lg:col-span-3">
+        {/* RIGHT - Market Intel: Regime + Setups + Scanner Alerts */}
+        <div className="lg:col-span-4 space-y-3">
+          {/* Market Regime Widget - Current market state */}
+          <MarketRegimeWidget 
+            className="h-full"
+            onStateChange={(newState, oldState) => {
+              console.log(`Market regime changed: ${oldState} -> ${newState}`);
+            }}
+          />
+          
+          {/* Learning Insights Widget */}
+          <LearningInsightsWidget 
+            onNavigateToHub={handleNavigateToHub}
+          />
+          
+          {/* Scanner & Watchlist - Compact mode (skip redundant MarketIntel) */}
           <RightSidebar 
             onTickerSelect={handleTickerClick}
             onViewChart={(ticker) => setChartSymbol(ticker)}
@@ -201,6 +200,7 @@ const AICoachTab = ({
             wsScannerAlerts={wsScannerAlerts}
             wsScannerStatus={wsScannerStatus}
             wsSmartWatchlist={wsSmartWatchlist}
+            compact={true}
           />
         </div>
       </div>

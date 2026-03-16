@@ -831,12 +831,16 @@ const RightSidebar = ({
   // WebSocket-pushed data
   wsScannerAlerts = [],
   wsScannerStatus = null,
-  wsSmartWatchlist = []
+  wsSmartWatchlist = [],
+  // Layout options
+  compact = false  // When true, only show Scanner + Watchlist (skip MarketIntel and Earnings)
 }) => {
   return (
     <div className="space-y-3" data-testid="right-sidebar">
-      {/* Market Intelligence Panel */}
-      <MarketIntelPanel onTickerSelect={onTickerSelect} onViewChart={onViewChart} />
+      {/* Market Intelligence Panel - Hidden in compact mode */}
+      {!compact && (
+        <MarketIntelPanel onTickerSelect={onTickerSelect} onViewChart={onViewChart} />
+      )}
       
       {/* Scanner Results */}
       <ScannerResultsWidget 
@@ -846,8 +850,10 @@ const RightSidebar = ({
         wsStatus={wsScannerStatus}
       />
       
-      {/* Earnings Widget */}
-      <EarningsWidget onTickerSelect={onTickerSelect} onViewChart={onViewChart} />
+      {/* Earnings Widget - Hidden in compact mode */}
+      {!compact && (
+        <EarningsWidget onTickerSelect={onTickerSelect} onViewChart={onViewChart} />
+      )}
       
       {/* Watchlist Widget */}
       <WatchlistWidget 

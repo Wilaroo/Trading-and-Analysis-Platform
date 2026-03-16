@@ -2486,6 +2486,167 @@ const ContextPanel = ({ context, loading }) => {
   );
 };
 
+// Combined Market Intelligence Panel - Market Regime + Setups + Alerts
+const MarketIntelPanel = ({ context, setups, alerts, contextLoading, setupsLoading, alertsLoading }) => {
+  return (
+    <div className="space-y-4">
+      {/* Market Regime Section */}
+      <GlassCard className="p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-6 h-6 rounded-full bg-cyan-500/20 flex items-center justify-center">
+            <Activity className="w-3 h-3 text-cyan-400" />
+          </div>
+          <span className="text-sm font-medium text-zinc-300">Market Regime</span>
+        </div>
+        
+        {contextLoading ? (
+          <div className="flex items-center justify-center h-16">
+            <Loader className="w-5 h-5 text-cyan-400 animate-spin" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-2 rounded-lg bg-black/30">
+              <span className="text-[10px] text-zinc-500 block">Regime</span>
+              <span className={`text-sm font-bold ${
+                context?.regime === 'RISK_ON' ? 'text-emerald-400' :
+                context?.regime === 'RISK_OFF' ? 'text-rose-400' :
+                'text-zinc-400'
+              }`}>
+                {context?.regime || 'UNKNOWN'}
+              </span>
+            </div>
+            <div className="p-2 rounded-lg bg-black/30">
+              <span className="text-[10px] text-zinc-500 block">SPY</span>
+              <span className={`text-sm font-bold ${
+                context?.spy_trend === 'Bullish' ? 'text-emerald-400' :
+                context?.spy_trend === 'Bearish' ? 'text-rose-400' :
+                'text-zinc-400'
+              }`}>
+                {context?.spy_trend || '--'}
+              </span>
+            </div>
+            <div className="p-2 rounded-lg bg-black/30">
+              <span className="text-[10px] text-zinc-500 block">VIX</span>
+              <span className="text-sm font-bold text-zinc-300">{context?.vix || '--'}</span>
+            </div>
+            <div className="p-2 rounded-lg bg-black/30">
+              <span className="text-[10px] text-zinc-500 block">Market</span>
+              <span className={`text-sm font-bold ${context?.market_open ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                {context?.market_open ? 'OPEN' : 'CLOSED'}
+              </span>
+            </div>
+          </div>
+        )}
+      </GlassCard>
+
+      {/* Setups We're Watching */}
+      <GlassCard className="p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center">
+            <Eye className="w-3 h-3 text-violet-400" />
+          </div>
+          <span className="text-sm font-medium text-zinc-300">Setups We're Watching</span>
+          {setups.length > 0 && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-400">
+              {setups.length}
+            </span>
+          )}
+        </div>
+        
+        {setupsLoading && setups.length === 0 ? (
+          <div className="flex items-center justify-center h-16">
+            <Loader className="w-5 h-5 text-violet-400 animate-spin" />
+          </div>
+        ) : setups.length === 0 ? (
+          <div className="text-center py-3">
+            <Crosshair className="w-4 h-4 text-zinc-600 mx-auto mb-1" />
+            <p className="text-[10px] text-zinc-500">No setups currently</p>
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-[200px] overflow-y-auto">
+            {setups.slice(0, 5).map((setup, i) => (
+              <div 
+                key={i}
+                className="p-2 rounded-lg bg-black/30 hover:bg-black/50 cursor-pointer transition-all"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-white text-sm">{setup.symbol}</span>
+                    <span className="text-[9px] px-1.5 py-0.5 bg-violet-500/20 text-violet-400 rounded-full">
+                      {setup.setup_type || setup.type}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Star className="w-3 h-3 text-amber-400" />
+                    <span className="text-xs font-bold text-white">{setup.score || setup.confidence || '--'}</span>
+                  </div>
+                </div>
+                {setup.trigger_price && (
+                  <div className="text-[10px] text-zinc-500 mt-1">
+                    Entry: ${setup.trigger_price?.toFixed(2)}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </GlassCard>
+
+      {/* Live Scanner Alerts */}
+      <GlassCard className="p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-6 h-6 rounded-full bg-amber-500/20 flex items-center justify-center">
+            <Bell className="w-3 h-3 text-amber-400" />
+          </div>
+          <span className="text-sm font-medium text-zinc-300">Live Scanner Alerts</span>
+          {alerts.length > 0 && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400">
+              {alerts.length}
+            </span>
+          )}
+        </div>
+        
+        {alertsLoading && alerts.length === 0 ? (
+          <div className="flex items-center justify-center h-16">
+            <Loader className="w-5 h-5 text-amber-400 animate-spin" />
+          </div>
+        ) : alerts.length === 0 ? (
+          <div className="text-center py-3">
+            <Radio className="w-4 h-4 text-zinc-600 mx-auto mb-1" />
+            <p className="text-[10px] text-zinc-500">Scanning for opportunities...</p>
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-[200px] overflow-y-auto">
+            {alerts.slice(0, 5).map((alert, i) => (
+              <div 
+                key={i}
+                className="p-2 rounded-lg bg-black/30 hover:bg-black/50 cursor-pointer transition-all"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-white text-sm">{alert.symbol}</span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
+                      alert.direction === 'LONG' ? 'bg-emerald-500/20 text-emerald-400' :
+                      alert.direction === 'SHORT' ? 'bg-rose-500/20 text-rose-400' :
+                      'bg-zinc-500/20 text-zinc-400'
+                    }`}>
+                      {alert.direction || alert.setup_type}
+                    </span>
+                  </div>
+                  <span className="text-xs text-zinc-400">${alert.price?.toFixed(2) || '--'}</span>
+                </div>
+                <div className="text-[10px] text-zinc-500 mt-1">
+                  {alert.setup_type} • {alert.score ? `Score: ${alert.score}` : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </GlassCard>
+    </div>
+  );
+};
+
 const AlertsPanel = ({ alerts, loading }) => {
   if (loading && alerts.length === 0) {
     return (
@@ -3201,8 +3362,8 @@ const SentCom = ({ compact = false, embedded = false }) => {
 
         {/* Main Content Grid */}
         <div className="relative grid grid-cols-12 gap-4 p-4">
-          {/* Left Column - Positions + Setups */}
-          <div className="col-span-4 space-y-4">
+          {/* Left Column - Positions only (narrower now that setups moved to sidebar) */}
+          <div className="col-span-3 space-y-4">
             {/* Positions Panel - Glassy Style */}
             <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] border border-white/10 p-4">
               <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-transparent pointer-events-none" />
@@ -3321,77 +3482,10 @@ const SentCom = ({ compact = false, embedded = false }) => {
                 )}
               </div>
             </div>
-
-            {/* Setups Panel - Glassy Style */}
-            <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] border border-white/10 p-4">
-              <div className="absolute inset-0 bg-gradient-to-br from-violet-500/5 via-transparent to-transparent pointer-events-none" />
-              <div className="relative">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500/20 to-violet-600/10 flex items-center justify-center">
-                      <Eye className="w-3.5 h-3.5 text-violet-400" />
-                    </div>
-                    <span className="text-sm font-bold text-white">Setups We're Watching</span>
-                  </div>
-                </div>
-                
-                {setupsLoading && setups.length === 0 ? (
-                  <div className="flex items-center justify-center py-6">
-                    <Loader className="w-5 h-5 text-violet-400 animate-spin" />
-                  </div>
-                ) : setups.length === 0 ? (
-                  <div className="text-center py-4">
-                    <Crosshair className="w-5 h-5 text-zinc-600 mx-auto mb-1" />
-                    <p className="text-xs text-zinc-500">No setups currently</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {setups.slice(0, 4).map((setup, i) => (
-                      <div 
-                        key={i}
-                        className="p-3 rounded-xl bg-black/30 hover:bg-black/50 cursor-pointer transition-all border border-transparent hover:border-white/5"
-                      >
-                        <div className="flex items-center justify-between mb-1.5">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-white">{setup.symbol}</span>
-                            <span className="text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-400 rounded-full">
-                              {setup.setup_type}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <Star className="w-3 h-3 text-amber-400" />
-                            <span className="text-xs font-bold text-white">{setup.score || setup.confidence || '--'}</span>
-                          </div>
-                        </div>
-                        
-                        <div className="flex items-center justify-between text-[10px]">
-                          <span className="text-zinc-500">
-                            {setup.distance_to_entry || setup.trigger_price ? `Entry: $${setup.trigger_price?.toFixed(2)}` : 'Watching...'}
-                          </span>
-                          {setup.win_rate && (
-                            <span className={`flex items-center gap-1 ${setup.win_rate >= 60 ? 'text-emerald-400' : 'text-zinc-400'}`}>
-                              {setup.win_rate >= 60 && <Flame className="w-3 h-3" />}
-                              WR: {setup.win_rate}%
-                            </span>
-                          )}
-                        </div>
-                        
-                        {setup.near_entry && (
-                          <div className="mt-2 flex items-center gap-1 text-amber-400">
-                            <Zap className="w-3 h-3" />
-                            <span className="text-[10px] font-medium">Near Entry Zone</span>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
 
-          {/* Right Column - Stream + Chat */}
-          <div className="col-span-8 flex flex-col">
+          {/* Right Column - Stream + Chat (wider now) */}
+          <div className="col-span-9 flex flex-col">
             {/* Stream Header */}
             <div className="flex items-center gap-2 mb-3">
               <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -3601,7 +3695,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
 
         {/* Main Grid */}
         <div className="grid grid-cols-12 gap-6">
-          {/* Left Column - Positions & Setups */}
+          {/* Left Column - Positions only */}
           <div className="col-span-3 space-y-6">
             <PositionsPanel 
               positions={positions} 
@@ -3609,21 +3703,26 @@ const SentCom = ({ compact = false, embedded = false }) => {
               loading={positionsLoading}
               onSelectPosition={setSelectedPosition}
             />
-            <SetupsPanel setups={setups} loading={setupsLoading} />
           </div>
 
           {/* Center - Live Stream */}
-          <div className="col-span-6">
+          <div className="col-span-5">
             <div className="h-[600px] flex flex-col">
               <StreamPanel messages={messages} loading={streamLoading} />
               <ChatInput onSend={handleChat} disabled={!status?.connected} />
             </div>
           </div>
 
-          {/* Right Column - Context & Alerts */}
-          <div className="col-span-3 space-y-6">
-            <ContextPanel context={context} loading={contextLoading} />
-            <AlertsPanel alerts={alerts} loading={alertsLoading} />
+          {/* Right Column - Market Intel (Regime + Setups + Alerts) */}
+          <div className="col-span-4">
+            <MarketIntelPanel 
+              context={context}
+              setups={setups}
+              alerts={alerts}
+              contextLoading={contextLoading}
+              setupsLoading={setupsLoading}
+              alertsLoading={alertsLoading}
+            />
           </div>
         </div>
       </div>
