@@ -380,8 +380,13 @@ class HistoricalDataQueueService:
         Returns:
             Dict with progress for each bar_size type being collected,
             including estimated time remaining based on completion rate.
+            
+        Note: Automatically clears items stuck in 'claimed' status for > 10 minutes.
         """
         from datetime import datetime, timedelta, timezone
+        
+        # Auto-clear stuck items (claimed for more than 10 minutes)
+        self._auto_clear_stuck_items(older_than_minutes=10)
         
         pipeline = [
             {
@@ -455,6 +460,30 @@ class HistoricalDataQueueService:
             "by_bar_size": by_bar_size,
             "active_collections": [b for b in by_bar_size if b["is_active"]]
         }
+
+    def _auto_clear_stuck_items(self, older_than_minutes: int = 10):
+        """
+        Automatically clear items stuck in 'claimed' status for too long.
+        Called internally when checking progress.
+        """
+        from datetime import datetime, timedelta, timezone
+        
+        try:
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=older_than_minutes)
+            
+            # Find and update stuck items
+            result = self.collection.update_many(
+                {
+                    "status": "claimed",
+                    "claimed_at": {"$lt": cutoff.isoformat()}
+                },
+                {"$set": {"status": "failed", "error": f"Auto-cleared: stuck > {older_than_minutes} min"}}
+            )
+            
+            if result.modified_count > 0:
+                logger.info(f"Auto-cleared {result.modified_count} stuck items (claimed > {older_than_minutes} min)")
+        except Exception as e:
+            logger.warning(f"Error auto-clearing stuck items: {e}")
 
     def _calculate_eta_for_bar_size(self, bar_size: str, remaining: int) -> Dict:
         """
