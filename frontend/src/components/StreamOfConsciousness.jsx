@@ -1,17 +1,18 @@
 /**
  * StreamOfConsciousness.jsx - SentCom S.O.C. Panel
  * 
- * Terminal-style panel showing the bot's background activity, thoughts, 
- * status updates, and reasoning. This is separate from the user conversation.
- * 
- * Designed with the "Neural Split" layout in mind.
+ * Rich, terminal-style panel showing the bot's background activity with
+ * detailed information per entry including icons, data, and reasoning.
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Search, TrendingUp, TrendingDown, AlertTriangle, Activity, 
   Target, Eye, Zap, Brain, RefreshCw, Filter, CheckCircle,
-  XCircle, Clock, Gauge, Radio, ChevronDown, ChevronUp
+  XCircle, Clock, Gauge, Radio, ChevronDown, ChevronUp,
+  DollarSign, ArrowUpRight, ArrowDownRight, Shield, Crosshair,
+  BarChart2, PieChart, Percent, Hash, AlertCircle, Play, 
+  StopCircle, ShoppingCart, Ban, ThumbsUp, ThumbsDown
 } from 'lucide-react';
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL;
@@ -70,264 +71,319 @@ export const useSOCStream = (pollInterval = 3000) => {
   return { thoughts, loading, refresh: fetchThoughts };
 };
 
-// Individual S.O.C. entry component
+// Rich S.O.C. Entry Component with detailed data display
 const SOCEntry = React.memo(({ entry, index }) => {
   const [expanded, setExpanded] = useState(false);
   
-  // Determine entry type and styling
+  // Get entry configuration based on type
   const getEntryConfig = () => {
     const type = entry.type;
     const actionType = entry.action_type;
     
-    // Scanner / Scanning activity
-    if (actionType === 'scanning' || (type === 'thought' && !actionType)) {
+    // Trade executed
+    if (actionType === 'trade_executed' || actionType === 'order_filled') {
+      const side = entry.metadata?.side || entry.metadata?.action || '';
       return {
-        icon: <Search className="w-3.5 h-3.5" />,
-        color: 'text-violet-400',
-        bgColor: 'bg-violet-500/10',
-        borderColor: 'border-violet-500/20',
-        label: 'SCAN'
+        icon: side.toLowerCase() === 'sell' ? <ArrowDownRight className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />,
+        color: side.toLowerCase() === 'sell' ? 'text-rose-400' : 'text-emerald-400',
+        bgColor: side.toLowerCase() === 'sell' ? 'bg-rose-500/10' : 'bg-emerald-500/10',
+        borderColor: side.toLowerCase() === 'sell' ? 'border-rose-500/30' : 'border-emerald-500/30',
+        label: 'TRADE',
+        priority: 'high'
+      };
+    }
+    
+    // Trade decision / Smart filter
+    if (actionType === 'trade_decision' || type === 'decision') {
+      const decision = entry.metadata?.decision || '';
+      const isApproved = decision.toLowerCase().includes('approved') || decision.toLowerCase().includes('take');
+      return {
+        icon: isApproved ? <ThumbsUp className="w-4 h-4" /> : <ThumbsDown className="w-4 h-4" />,
+        color: isApproved ? 'text-emerald-400' : 'text-amber-400',
+        bgColor: isApproved ? 'bg-emerald-500/10' : 'bg-amber-500/10',
+        borderColor: isApproved ? 'border-emerald-500/30' : 'border-amber-500/30',
+        label: 'DECISION',
+        priority: 'high'
       };
     }
     
     // Setup found
-    if (actionType === 'setup_found' || type === 'setup') {
+    if (actionType === 'setup_found' || type === 'setup' || type === 'alert') {
       return {
-        icon: <Zap className="w-3.5 h-3.5" />,
-        color: 'text-emerald-400',
-        bgColor: 'bg-emerald-500/10',
-        borderColor: 'border-emerald-500/20',
-        label: 'SETUP'
+        icon: <Target className="w-4 h-4" />,
+        color: 'text-cyan-400',
+        bgColor: 'bg-cyan-500/10',
+        borderColor: 'border-cyan-500/30',
+        label: 'SETUP',
+        priority: 'high'
       };
     }
     
     // Risk updates
     if (actionType === 'risk_update' || type === 'risk') {
       return {
-        icon: <Gauge className="w-3.5 h-3.5" />,
+        icon: <Shield className="w-4 h-4" />,
         color: 'text-rose-400',
         bgColor: 'bg-rose-500/10',
-        borderColor: 'border-rose-500/20',
-        label: 'RISK'
+        borderColor: 'border-rose-500/30',
+        label: 'RISK',
+        priority: 'medium'
       };
     }
     
-    // Market regime / VIX updates
+    // Market regime / VIX
     if (actionType === 'regime_update' || actionType === 'breadth_update' || type === 'market') {
+      const isRiskOn = entry.content?.toLowerCase().includes('risk_on') || entry.content?.toLowerCase().includes('risk on');
       return {
-        icon: <TrendingUp className="w-3.5 h-3.5" />,
-        color: 'text-cyan-400',
-        bgColor: 'bg-cyan-500/10',
-        borderColor: 'border-cyan-500/20',
-        label: 'MKT'
+        icon: <BarChart2 className="w-4 h-4" />,
+        color: isRiskOn ? 'text-emerald-400' : 'text-amber-400',
+        bgColor: isRiskOn ? 'bg-emerald-500/10' : 'bg-amber-500/10',
+        borderColor: isRiskOn ? 'border-emerald-500/30' : 'border-amber-500/30',
+        label: 'MARKET',
+        priority: 'medium'
       };
     }
     
-    // Position monitoring / Stop watching
+    // Position monitoring
     if (actionType === 'monitoring' || type === 'monitor') {
       return {
-        icon: <Eye className="w-3.5 h-3.5" />,
+        icon: <Eye className="w-4 h-4" />,
         color: 'text-blue-400',
         bgColor: 'bg-blue-500/10',
-        borderColor: 'border-blue-500/20',
-        label: 'WATCH'
+        borderColor: 'border-blue-500/30',
+        label: 'WATCH',
+        priority: 'medium'
       };
     }
     
-    // Price updates for positions
+    // Price updates
     if (actionType === 'price_update' || type === 'position') {
+      const pnl = entry.metadata?.pnl_percent || 0;
       return {
-        icon: <Activity className="w-3.5 h-3.5" />,
-        color: 'text-cyan-400',
-        bgColor: 'bg-cyan-500/10',
-        borderColor: 'border-cyan-500/20',
-        label: 'POS'
+        icon: pnl >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />,
+        color: pnl >= 0 ? 'text-emerald-400' : 'text-rose-400',
+        bgColor: pnl >= 0 ? 'bg-emerald-500/10' : 'bg-rose-500/10',
+        borderColor: pnl >= 0 ? 'border-emerald-500/30' : 'border-rose-500/30',
+        label: 'POS',
+        priority: 'low'
       };
     }
     
-    // Entry zone cleared
+    // Entry zone
     if (actionType === 'entry_zone') {
       return {
-        icon: <CheckCircle className="w-3.5 h-3.5" />,
+        icon: <Crosshair className="w-4 h-4" />,
         color: 'text-emerald-400',
         bgColor: 'bg-emerald-500/10',
-        borderColor: 'border-emerald-500/20',
-        label: 'ENTRY'
+        borderColor: 'border-emerald-500/30',
+        label: 'ENTRY',
+        priority: 'high'
       };
     }
     
-    // Stop warnings / alerts
-    if (actionType === 'stop_warning' || type === 'alert') {
+    // Stop warnings
+    if (actionType === 'stop_warning') {
       return {
-        icon: <AlertTriangle className="w-3.5 h-3.5" />,
+        icon: <AlertTriangle className="w-4 h-4" />,
         color: 'text-amber-400',
         bgColor: 'bg-amber-500/10',
-        borderColor: 'border-amber-500/20',
-        label: 'ALERT'
+        borderColor: 'border-amber-500/30',
+        label: 'STOP',
+        priority: 'high'
       };
     }
     
     // Filter decisions
-    if (type === 'filter') {
+    if (type === 'filter' || actionType === 'filter') {
+      const decision = entry.metadata?.decision || entry.action_type || '';
+      const isPassed = decision.toLowerCase().includes('pass') || decision.toLowerCase().includes('approved');
       return {
-        icon: <Filter className="w-3.5 h-3.5" />,
-        color: 'text-pink-400',
-        bgColor: 'bg-pink-500/10',
-        borderColor: 'border-pink-500/20',
-        label: 'FILTER'
+        icon: isPassed ? <CheckCircle className="w-4 h-4" /> : <Ban className="w-4 h-4" />,
+        color: isPassed ? 'text-emerald-400' : 'text-zinc-400',
+        bgColor: isPassed ? 'bg-emerald-500/10' : 'bg-zinc-500/10',
+        borderColor: isPassed ? 'border-emerald-500/30' : 'border-zinc-500/30',
+        label: 'FILTER',
+        priority: 'low'
       };
     }
     
-    // Trade execution
-    if (actionType === 'trade_executed' || type === 'trade') {
+    // Scanning
+    if (actionType === 'scanning' || type === 'thought') {
       return {
-        icon: <Zap className="w-3.5 h-3.5" />,
-        color: 'text-yellow-400',
-        bgColor: 'bg-yellow-500/10',
-        borderColor: 'border-yellow-500/20',
-        label: 'TRADE'
+        icon: <Search className="w-4 h-4" />,
+        color: 'text-violet-400',
+        bgColor: 'bg-violet-500/10',
+        borderColor: 'border-violet-500/30',
+        label: 'SCAN',
+        priority: 'low'
       };
     }
     
-    // Default - system/info
+    // Default
     return {
-      icon: <Radio className="w-3.5 h-3.5" />,
+      icon: <Radio className="w-4 h-4" />,
       color: 'text-zinc-400',
       bgColor: 'bg-zinc-500/10',
-      borderColor: 'border-zinc-500/20',
-      label: 'SYS'
+      borderColor: 'border-zinc-500/30',
+      label: 'SYS',
+      priority: 'low'
     };
   };
   
   const config = getEntryConfig();
-  const hasReasoning = entry.reasoning || entry.metadata?.reasoning || entry.metadata?.details;
-  const reasoning = entry.reasoning || entry.metadata?.reasoning || entry.metadata?.details;
+  const metadata = entry.metadata || {};
+  const reasoning = metadata.reasoning || entry.reasoning;
   
-  // Generate contextual reasoning if none provided
-  const getContextualReasoning = () => {
-    if (reasoning) return reasoning;
+  // Extract key data points for display
+  const getDataPoints = () => {
+    const points = [];
     
-    // Generate reasoning based on entry type and content
-    const type = entry.type;
-    const actionType = entry.action_type;
-    const content = entry.content || '';
+    // Symbol
+    if (entry.symbol) {
+      points.push({ icon: <Hash className="w-3 h-3" />, label: entry.symbol, color: 'text-white font-bold' });
+    }
     
-    if (actionType === 'scanning' || type === 'thought') {
-      if (content.includes('potential setups')) {
-        return 'Analyzing price action, volume patterns, and technical indicators to identify high-probability trade opportunities.';
-      }
-      return 'Scanning market data for patterns matching our trading criteria.';
+    // Price
+    if (metadata.price || metadata.entry_price || metadata.current_price) {
+      const price = metadata.price || metadata.entry_price || metadata.current_price;
+      points.push({ icon: <DollarSign className="w-3 h-3" />, label: `$${parseFloat(price).toFixed(2)}`, color: 'text-cyan-400' });
     }
-    if (actionType === 'stop_warning' || type === 'alert') {
-      return 'Risk threshold triggered. Evaluating position safety and potential adjustments.';
+    
+    // Stop price
+    if (metadata.stop_price) {
+      points.push({ icon: <StopCircle className="w-3 h-3" />, label: `Stop $${parseFloat(metadata.stop_price).toFixed(2)}`, color: 'text-rose-400' });
     }
-    if (actionType === 'setup_found' || type === 'setup') {
-      return 'Pattern matches historical winning setups. Confluence of multiple technical factors detected.';
+    
+    // P&L
+    if (metadata.pnl_percent !== undefined) {
+      const pnl = parseFloat(metadata.pnl_percent);
+      points.push({ 
+        icon: pnl >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />, 
+        label: `${pnl >= 0 ? '+' : ''}${pnl.toFixed(1)}%`, 
+        color: pnl >= 0 ? 'text-emerald-400' : 'text-rose-400' 
+      });
     }
-    if (actionType === 'monitoring' || type === 'monitor') {
-      return 'Tracking price relative to key levels. Watching for entry/exit signals.';
+    
+    // VIX
+    if (metadata.vix !== undefined) {
+      points.push({ icon: <Activity className="w-3 h-3" />, label: `VIX ${parseFloat(metadata.vix).toFixed(1)}`, color: 'text-amber-400' });
     }
-    if (actionType === 'risk_update' || type === 'risk') {
-      return 'Adjusting risk parameters based on current market volatility and portfolio exposure.';
+    
+    // Risk multiplier
+    if (metadata.multiplier !== undefined) {
+      points.push({ icon: <Gauge className="w-3 h-3" />, label: `${parseFloat(metadata.multiplier).toFixed(1)}x`, color: 'text-rose-400' });
     }
-    return null;
+    
+    // Score
+    if (metadata.score !== undefined) {
+      points.push({ icon: <BarChart2 className="w-3 h-3" />, label: `Score ${parseFloat(metadata.score).toFixed(1)}`, color: 'text-cyan-400' });
+    }
+    
+    // Setup type
+    if (metadata.setup_type) {
+      points.push({ icon: <Target className="w-3 h-3" />, label: metadata.setup_type.replace(/_/g, ' '), color: 'text-violet-400' });
+    }
+    
+    // Regime
+    if (metadata.regime) {
+      const isRiskOn = metadata.regime.toLowerCase().includes('on');
+      points.push({ 
+        icon: <Shield className="w-3 h-3" />, 
+        label: metadata.regime.replace('_', ' '), 
+        color: isRiskOn ? 'text-emerald-400' : 'text-amber-400' 
+      });
+    }
+    
+    // Breadth
+    if (metadata.breadth !== undefined) {
+      points.push({ icon: <PieChart className="w-3 h-3" />, label: `${metadata.breadth}% breadth`, color: 'text-cyan-400' });
+    }
+    
+    return points;
   };
   
-  const contextualReasoning = getContextualReasoning();
-  const hasAnyReasoning = hasReasoning || contextualReasoning;
+  const dataPoints = getDataPoints();
+  const isPriority = config.priority === 'high';
   
   return (
     <motion.div
       initial={{ opacity: 0, x: -10 }}
       animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: Math.min(index * 0.03, 0.2) }}
-      className={`group border-b border-white/5 py-2.5 px-2 hover:${config.bgColor} transition-colors cursor-pointer`}
-      onClick={() => hasAnyReasoning && setExpanded(!expanded)}
+      transition={{ delay: Math.min(index * 0.02, 0.15) }}
+      className={`group border-b border-white/5 py-2.5 px-3 hover:bg-white/[0.02] transition-colors cursor-pointer ${isPriority ? 'bg-white/[0.01]' : ''}`}
+      onClick={() => reasoning && setExpanded(!expanded)}
       data-testid={`soc-entry-${index}`}
     >
-      <div className="flex items-start gap-2">
-        {/* Timestamp */}
-        <span className="text-[10px] font-mono text-zinc-600 w-[58px] flex-shrink-0 pt-0.5">
-          {formatTerminalTime(entry.timestamp)}
-        </span>
-        
-        {/* Icon & Label */}
-        <div className={`flex items-center gap-1.5 w-[52px] flex-shrink-0 ${config.color}`}>
-          {config.icon}
-          <span className="text-[9px] font-bold tracking-wider">{config.label}</span>
+      {/* Main Row */}
+      <div className="flex items-start gap-3">
+        {/* Timestamp + Icon Column */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="text-[10px] font-mono text-zinc-600 w-[52px]">
+            {formatTerminalTime(entry.timestamp)}
+          </span>
+          <div className={`w-7 h-7 rounded-lg ${config.bgColor} border ${config.borderColor} flex items-center justify-center`}>
+            <span className={config.color}>{config.icon}</span>
+          </div>
         </div>
         
-        {/* Content */}
+        {/* Content Column */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex-1">
-              <p className={`text-xs leading-relaxed ${config.color === 'text-zinc-400' ? 'text-zinc-300' : config.color}`}>
-                {/* Symbol badge if present */}
-                {entry.symbol && (
-                  <span className="inline-flex items-center mr-1.5 px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-bold text-white">
-                    {entry.symbol}
-                  </span>
-                )}
-                {entry.content}
-              </p>
-              
-              {/* Always show brief reasoning preview (not expanded) */}
-              {contextualReasoning && !expanded && (
-                <p className="text-[10px] text-zinc-500 mt-1 line-clamp-1 italic">
-                  {contextualReasoning.slice(0, 80)}{contextualReasoning.length > 80 ? '...' : ''}
-                </p>
-              )}
-            </div>
-            
-            {/* Expand indicator if has reasoning */}
-            {hasAnyReasoning && (
-              <motion.div
-                animate={{ rotate: expanded ? 180 : 0 }}
-                className="text-zinc-600 flex-shrink-0"
-              >
-                <ChevronDown className="w-3 h-3" />
+          {/* Label + Content */}
+          <div className="flex items-start gap-2">
+            <span className={`text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded ${config.bgColor} ${config.color} flex-shrink-0`}>
+              {config.label}
+            </span>
+            <p className="text-sm text-zinc-200 leading-relaxed flex-1">
+              {entry.content}
+            </p>
+            {reasoning && (
+              <motion.div animate={{ rotate: expanded ? 180 : 0 }} className="text-zinc-600 flex-shrink-0 mt-0.5">
+                <ChevronDown className="w-3.5 h-3.5" />
               </motion.div>
             )}
           </div>
           
-          {/* Confidence indicator if present */}
-          {entry.confidence && (
-            <div className="flex items-center gap-1 mt-1.5">
-              <div className="h-1 w-16 bg-zinc-800 rounded-full overflow-hidden">
-                <div 
-                  className={`h-full ${config.bgColor.replace('/10', '/60')}`}
-                  style={{ width: `${entry.confidence}%` }}
-                />
-              </div>
-              <span className="text-[9px] text-zinc-500">{entry.confidence}%</span>
+          {/* Data Points Row */}
+          {dataPoints.length > 0 && (
+            <div className="flex items-center gap-3 mt-2 flex-wrap">
+              {dataPoints.map((point, i) => (
+                <div key={i} className={`flex items-center gap-1 text-[10px] ${point.color}`}>
+                  {point.icon}
+                  <span>{point.label}</span>
+                </div>
+              ))}
             </div>
           )}
           
-          {/* Expanded full reasoning section */}
+          {/* Confidence Bar */}
+          {entry.confidence && (
+            <div className="flex items-center gap-2 mt-2">
+              <div className="h-1.5 w-24 bg-zinc-800 rounded-full overflow-hidden">
+                <motion.div 
+                  initial={{ width: 0 }}
+                  animate={{ width: `${entry.confidence}%` }}
+                  className={`h-full ${config.bgColor.replace('/10', '/60')}`}
+                />
+              </div>
+              <span className="text-[9px] text-zinc-500">{entry.confidence}% conf</span>
+            </div>
+          )}
+          
+          {/* Expanded Reasoning */}
           <AnimatePresence>
-            {expanded && hasAnyReasoning && (
+            {expanded && reasoning && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
-                className="mt-2 pt-2 border-t border-white/5"
+                className="mt-3 pt-2 border-t border-white/5"
               >
-                <div className="flex items-start gap-1.5">
-                  <Brain className="w-3 h-3 text-violet-400 mt-0.5 flex-shrink-0" />
-                  <p className="text-[11px] text-zinc-400 leading-relaxed">
-                    {typeof (reasoning || contextualReasoning) === 'string' 
-                      ? (reasoning || contextualReasoning) 
-                      : JSON.stringify(reasoning || contextualReasoning, null, 2)}
+                <div className="flex items-start gap-2">
+                  <Brain className="w-3.5 h-3.5 text-violet-400 mt-0.5 flex-shrink-0" />
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    {reasoning}
                   </p>
                 </div>
-                
-                {/* Additional metadata if present */}
-                {entry.metadata?.score && (
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="text-[9px] text-zinc-500">Score:</span>
-                    <span className="text-[10px] font-bold text-cyan-400">{entry.metadata.score}</span>
-                  </div>
-                )}
               </motion.div>
             )}
           </AnimatePresence>
@@ -335,9 +391,6 @@ const SOCEntry = React.memo(({ entry, index }) => {
       </div>
     </motion.div>
   );
-}, (prevProps, nextProps) => {
-  return prevProps.entry.id === nextProps.entry.id && 
-         prevProps.entry.content === nextProps.entry.content;
 });
 
 SOCEntry.displayName = 'SOCEntry';
@@ -362,25 +415,41 @@ const StreamOfConsciousness = ({ className = '' }) => {
     setAutoScroll(isAtBottom);
   };
   
+  // Count by priority
+  const highPriorityCount = thoughts.filter(t => 
+    ['trade_executed', 'trade_decision', 'setup_found', 'entry_zone', 'stop_warning'].includes(t.action_type) ||
+    ['setup', 'alert', 'decision'].includes(t.type)
+  ).length;
+  
   return (
     <div className={`flex flex-col h-full bg-[#050505] ${className}`} data-testid="soc-panel">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/10 bg-black/40">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-xs font-mono text-emerald-400 uppercase tracking-wider font-bold">
-            SentCom S.O.C.
-          </span>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-black/40">
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+            <div className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping opacity-50" />
+          </div>
+          <div>
+            <span className="text-sm font-bold text-emerald-400 uppercase tracking-wider">
+              SentCom S.O.C.
+            </span>
+            <p className="text-[9px] text-zinc-500">Stream of Consciousness</p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[9px] text-zinc-500 font-mono">Stream of Consciousness</span>
+        <div className="flex items-center gap-3">
+          {highPriorityCount > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+              {highPriorityCount} alerts
+            </span>
+          )}
           <button
             onClick={refresh}
-            className="p-1 hover:bg-white/10 rounded transition-colors"
+            className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
             title="Refresh"
             data-testid="soc-refresh-btn"
           >
-            <RefreshCw className="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
+            <RefreshCw className="w-3.5 h-3.5 text-zinc-500 hover:text-zinc-300" />
           </button>
         </div>
       </div>
@@ -395,20 +464,20 @@ const StreamOfConsciousness = ({ className = '' }) => {
         {loading && thoughts.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
-              <Activity className="w-6 h-6 text-zinc-600 mx-auto mb-2 animate-pulse" />
-              <p className="text-xs text-zinc-500">Initializing...</p>
+              <Activity className="w-8 h-8 text-zinc-600 mx-auto mb-3 animate-pulse" />
+              <p className="text-sm text-zinc-500">Initializing...</p>
             </div>
           </div>
         ) : thoughts.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
-              <Brain className="w-6 h-6 text-zinc-600 mx-auto mb-2" />
-              <p className="text-xs text-zinc-500">Waiting for activity...</p>
-              <p className="text-[10px] text-zinc-600 mt-1">Bot thoughts will appear here</p>
+              <Brain className="w-8 h-8 text-zinc-600 mx-auto mb-3" />
+              <p className="text-sm text-zinc-500">Waiting for activity...</p>
+              <p className="text-[10px] text-zinc-600 mt-1">Bot thoughts and trade decisions will appear here</p>
             </div>
           </div>
         ) : (
-          <div className="py-1">
+          <div>
             {thoughts.map((thought, i) => (
               <SOCEntry key={thought.id || `thought-${i}`} entry={thought} index={i} />
             ))}
@@ -417,9 +486,9 @@ const StreamOfConsciousness = ({ className = '' }) => {
       </div>
       
       {/* Footer status bar */}
-      <div className="px-3 py-1.5 border-t border-white/10 bg-black/60 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-[9px] text-zinc-600">{thoughts.length} entries</span>
+      <div className="px-4 py-2 border-t border-white/10 bg-black/60 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] text-zinc-600">{thoughts.length} entries</span>
           {!autoScroll && (
             <button
               onClick={() => {
@@ -428,16 +497,19 @@ const StreamOfConsciousness = ({ className = '' }) => {
                   scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
                 }
               }}
-              className="text-[9px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
+              className="text-[10px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
             >
               <ChevronDown className="w-3 h-3" />
-              Resume auto-scroll
+              Resume live
             </button>
           )}
         </div>
-        <span className="text-[9px] text-zinc-600 font-mono">
-          {autoScroll ? 'LIVE' : 'PAUSED'}
-        </span>
+        <div className="flex items-center gap-2">
+          <div className={`w-1.5 h-1.5 rounded-full ${autoScroll ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+          <span className="text-[10px] text-zinc-600 font-mono">
+            {autoScroll ? 'LIVE' : 'PAUSED'}
+          </span>
+        </div>
       </div>
     </div>
   );

@@ -589,6 +589,53 @@ class SentComService:
                             ))
                     except Exception:
                         pass
+                    
+                    # Get recent closed trades (trade decisions/executions)
+                    try:
+                        closed_trades = trading_bot.get_closed_trades(limit=5)
+                        for trade in closed_trades:
+                            symbol = trade.get("symbol", "")
+                            side = trade.get("side", trade.get("action", "BUY"))
+                            entry_price = trade.get("entry_price", 0)
+                            exit_price = trade.get("exit_price", 0)
+                            pnl = trade.get("pnl", 0)
+                            pnl_pct = trade.get("pnl_percent", 0)
+                            closed_at = trade.get("closed_at", trade.get("exit_time"))
+                            
+                            # Format trade execution message
+                            if side.upper() == "SELL" or side.upper() == "SHORT":
+                                action_text = "SHORTED"
+                                exit_text = "covered"
+                            else:
+                                action_text = "BOUGHT"
+                                exit_text = "sold"
+                            
+                            if exit_price and pnl:
+                                pnl_sign = "+" if pnl >= 0 else ""
+                                content = f"Trade closed: {exit_text} {symbol} @ ${exit_price:.2f} ({pnl_sign}${pnl:.2f}, {pnl_sign}{pnl_pct:.1f}%)"
+                            else:
+                                content = f"Trade executed: {action_text} {symbol} @ ${entry_price:.2f}"
+                            
+                            messages.append(SentComMessage(
+                                id=self._generate_message_id(),
+                                type="trade",
+                                content=content,
+                                timestamp=closed_at if closed_at else datetime.now(timezone.utc).isoformat(),
+                                confidence=90,
+                                symbol=symbol,
+                                action_type="trade_executed",
+                                metadata={
+                                    "source": "trading_bot",
+                                    "side": side,
+                                    "entry_price": entry_price,
+                                    "exit_price": exit_price,
+                                    "pnl": pnl,
+                                    "pnl_percent": pnl_pct,
+                                    "reasoning": f"{'Winner' if pnl > 0 else 'Loser'}: {'Hit target' if pnl > 0 else 'Stopped out'} on {symbol} trade."
+                                }
+                            ))
+                    except Exception as e:
+                        logger.debug(f"No closed trades for stream: {e}")
                         
             except Exception as e:
                 logger.error(f"Error getting bot thoughts: {e}")
@@ -806,6 +853,66 @@ class SentComService:
             metadata={
                 "source": "demo",
                 "reasoning": "Price action confirms favorable entry conditions."
+            }
+        ))
+        
+        # 8. Trade execution (winner or loser)
+        trade_symbol = random.choice(demo_symbols)
+        is_winner = random.random() > 0.35  # 65% win rate
+        entry_price = round(random.uniform(100, 400), 2)
+        if is_winner:
+            exit_price = round(entry_price * (1 + random.uniform(0.02, 0.08)), 2)
+        else:
+            exit_price = round(entry_price * (1 - random.uniform(0.01, 0.03)), 2)
+        pnl = round((exit_price - entry_price) * random.randint(50, 200), 2)
+        pnl_pct = round(((exit_price - entry_price) / entry_price) * 100, 1)
+        
+        messages.append(SentComMessage(
+            id=self._generate_message_id(),
+            type="trade",
+            content=f"Trade closed: sold {trade_symbol} @ ${exit_price:.2f} ({'+' if pnl >= 0 else ''}{pnl_pct:.1f}%)",
+            timestamp=(base_time - timedelta(seconds=random.randint(106, 120))).isoformat(),
+            confidence=90,
+            symbol=trade_symbol,
+            action_type="trade_executed",
+            metadata={
+                "source": "demo",
+                "side": "BUY",
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "pnl": pnl,
+                "pnl_percent": pnl_pct,
+                "reasoning": f"{'Winner' if pnl > 0 else 'Loser'}: {'Hit target' if pnl > 0 else 'Stopped out'} on {trade_symbol} momentum trade."
+            }
+        ))
+        
+        # 9. Trade decision (should we take this?)
+        decision_symbol = random.choice(demo_symbols)
+        decision_setup = random.choice(demo_setups)
+        take_trade = random.random() > 0.3  # 70% approve rate
+        decision_price = round(random.uniform(80, 300), 2)
+        
+        if take_trade:
+            content = f"TAKING TRADE: {decision_symbol} {decision_setup.replace('_', ' ')} @ ${decision_price:.2f}"
+            decision_type = "approved"
+        else:
+            content = f"PASSING: {decision_symbol} doesn't meet our criteria - waiting for better setup"
+            decision_type = "rejected"
+        
+        messages.append(SentComMessage(
+            id=self._generate_message_id(),
+            type="decision",
+            content=content,
+            timestamp=(base_time - timedelta(seconds=random.randint(121, 135))).isoformat(),
+            confidence=random.randint(70, 95),
+            symbol=decision_symbol,
+            action_type="trade_decision",
+            metadata={
+                "source": "demo",
+                "decision": decision_type,
+                "setup_type": decision_setup,
+                "price": decision_price,
+                "reasoning": f"{'Setup meets our criteria with good risk/reward' if take_trade else 'Risk/reward not favorable or setup quality below threshold'}."
             }
         ))
         

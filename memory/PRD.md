@@ -7,6 +7,33 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (December 2025)
 
+### Full-Width Neural Split + Enhanced S.O.C. ✅ (December 2025)
+**IMPLEMENTED: Expanded layout with rich trade data**
+
+**Changes Made:**
+1. **Full-Width Layout**: SentCom panel now spans entire screen width
+   - Positions moved to compact horizontal row above the Neural Split
+   - More room for S.O.C. and Conversation panels
+   
+2. **Enhanced S.O.C. Entries**: Each entry now shows:
+   - Rich icons for each message type (TRADE, SETUP, RISK, MARKET, WATCH, etc.)
+   - Symbol badges with prices
+   - Data points: stop levels, P&L %, VIX, risk multipliers, scores
+   - Confidence bars
+   - Expandable reasoning
+
+3. **Trade Decisions & Executions in S.O.C.**:
+   - Trade execution messages: "Trade closed: sold NVDA @ $450 (+2.3%)"
+   - Trade decision messages: "TAKING TRADE: AMD pullback @ $150" or "PASSING: doesn't meet criteria"
+   - Shows entry/exit prices, P&L, and reasoning
+
+**Files Modified:**
+- `/app/frontend/src/components/SentCom.jsx` - Full-width layout, compact positions row
+- `/app/frontend/src/components/StreamOfConsciousness.jsx` - Completely rewritten with rich data display
+- `/app/backend/services/sentcom_service.py` - Added trade executions and decisions to stream
+
+---
+
 ### Neural Split Chat Interface ✅ (December 2025)
 **IMPLEMENTED: Dual-stream chat separating S.O.C. from Conversation**
 
