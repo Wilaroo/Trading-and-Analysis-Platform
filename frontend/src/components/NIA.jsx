@@ -364,9 +364,9 @@ const LearningProgressPanel = ({ data, loading }) => {
   );
 };
 
-// ==================== MULTI-TIMEFRAME COLLECTION PANEL ====================
+// ==================== DATA COLLECTION PANEL (UNIFIED) ====================
 
-const MultiTimeframeCollectionPanel = ({ collectionData, loading, onRefresh }) => {
+const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
   const [expanded, setExpanded] = useState(true);
   const [barSize, setBarSize] = useState('5 mins');
   const [lookback, setLookback] = useState('1_week');
@@ -376,12 +376,13 @@ const MultiTimeframeCollectionPanel = ({ collectionData, loading, onRefresh }) =
   const [presets, setPresets] = useState([]);
   const [timeframeStats, setTimeframeStats] = useState([]);
   const [loadingPresets, setLoadingPresets] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview'); // 'overview' or 'collect'
 
   // Bar size options (prioritized for user's preference: 1min, 5min)
   const barSizeOptions = [
-    { value: '1 min', label: '1 Minute', icon: Zap, description: 'Scalping' },
-    { value: '5 mins', label: '5 Minutes', icon: Activity, description: 'Day Trading' },
-    { value: '15 mins', label: '15 Minutes', icon: Clock, description: 'Swing Entry' },
+    { value: '1 min', label: '1 Min', icon: Zap, description: 'Scalping' },
+    { value: '5 mins', label: '5 Min', icon: Activity, description: 'Day Trading' },
+    { value: '15 mins', label: '15 Min', icon: Clock, description: 'Swing Entry' },
     { value: '1 hour', label: '1 Hour', icon: TrendingUp, description: 'Swing' },
     { value: '1 day', label: '1 Day', icon: BarChart3, description: 'Position' },
     { value: '1 week', label: '1 Week', icon: Layers, description: 'Investment' }
@@ -389,20 +390,20 @@ const MultiTimeframeCollectionPanel = ({ collectionData, loading, onRefresh }) =
 
   // Lookback options
   const lookbackOptions = [
-    { value: '1_day', label: '1 Day', description: 'Latest data only' },
-    { value: '1_week', label: '1 Week', description: '~5 trading days' },
-    { value: '30_days', label: '30 Days', description: '~22 trading days' },
-    { value: '6_months', label: '6 Months', description: '~130 trading days' },
-    { value: '1_year', label: '1 Year', description: '~252 trading days' },
-    { value: '2_years', label: '2 Years', description: 'Extended history' },
-    { value: '5_years', label: '5 Years', description: 'Full cycle analysis' }
+    { value: '1_day', label: '1 Day' },
+    { value: '1_week', label: '1 Week' },
+    { value: '30_days', label: '30 Days' },
+    { value: '6_months', label: '6 Months' },
+    { value: '1_year', label: '1 Year' },
+    { value: '2_years', label: '2 Years' },
+    { value: '5_years', label: '5 Years' }
   ];
 
   // Collection type options
   const collectionTypeOptions = [
-    { value: 'smart', label: 'Smart', description: 'ADV-matched to bar size (recommended)' },
-    { value: 'liquid', label: 'Liquid', description: 'ADV >= 100K stocks' },
-    { value: 'full_market', label: 'Full Market', description: 'All tradeable stocks (slow)' }
+    { value: 'smart', label: 'Smart', description: 'ADV-matched (recommended)' },
+    { value: 'liquid', label: 'Liquid', description: 'ADV >= 100K' },
+    { value: 'full_market', label: 'Full', description: 'All stocks (slow)' }
   ];
 
   // Fetch presets and timeframe stats
@@ -459,42 +460,62 @@ const MultiTimeframeCollectionPanel = ({ collectionData, loading, onRefresh }) =
     setLookback(preset.lookback);
     setCollectionType(preset.collection_type);
     setShowPresets(false);
+    setActiveTab('collect');
     toast.info(`Applied "${preset.name}" preset`);
   };
 
-  const { queueProgress } = collectionData || {};
+  const { queueProgress, stats } = collectionData || {};
   const isRunning = queueProgress && queueProgress.pending > 0;
   const progress = queueProgress 
     ? Math.round((queueProgress.completed / (queueProgress.total || 1)) * 100) 
     : 0;
+  const totalSymbols = stats?.unique_symbols || 0;
+  const totalBars = stats?.total_bars || 0;
 
-  // Find stats for current bar_size
-  const currentBarStats = timeframeStats.find(s => s.bar_size === barSize);
+  // Calculate total from timeframe stats
+  const totalTimeframeSymbols = timeframeStats.reduce((sum, s) => sum + (s.unique_symbols || 0), 0);
+  const totalTimeframeBars = timeframeStats.reduce((sum, s) => sum + (s.total_bars || 0), 0);
+  const displaySymbols = totalSymbols || totalTimeframeSymbols;
+  const displayBars = totalBars || totalTimeframeBars;
 
   return (
     <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }}>
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
-        data-testid="multi-timeframe-panel-toggle"
+        data-testid="data-collection-panel-toggle"
       >
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #f59e0b, #ef4444)' }}>
-            <Database className="w-4 h-4 text-white" />
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isRunning ? 'bg-orange-500/20' : 'bg-emerald-500/20'}`}>
+            {isRunning ? (
+              <Download className="w-4 h-4 text-orange-400 animate-pulse" />
+            ) : (
+              <Database className="w-4 h-4 text-emerald-400" />
+            )}
           </div>
           <div className="text-left">
-            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-              Multi-Timeframe Data
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-normal">NEW</span>
-            </h3>
+            <h3 className="text-sm font-semibold text-white">Data Collection</h3>
             <p className="text-xs text-zinc-400">
-              {isRunning ? `Collecting ${barSize}... ${progress}%` : 'Collect intraday & long-term data'}
+              {isRunning 
+                ? `Collecting... ${progress}%` 
+                : displaySymbols > 0 
+                  ? `${displaySymbols.toLocaleString()} symbols • ${displayBars.toLocaleString()} bars`
+                  : 'No data collected yet'
+              }
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {timeframeStats.length > 0 && (
-            <span className="text-xs text-zinc-500">{timeframeStats.length} timeframes</span>
+          {isRunning && (
+            <div className="text-right mr-2">
+              <div className="text-sm font-bold text-orange-400">{queueProgress.pending.toLocaleString()}</div>
+              <div className="text-[10px] text-zinc-500">remaining</div>
+            </div>
+          )}
+          {timeframeStats.length > 0 && !isRunning && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">
+              {timeframeStats.length} timeframe{timeframeStats.length !== 1 ? 's' : ''}
+            </span>
           )}
           <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
         </div>
@@ -508,136 +529,17 @@ const MultiTimeframeCollectionPanel = ({ collectionData, loading, onRefresh }) =
             exit={{ height: 0, opacity: 0 }}
             className="border-t border-white/10"
           >
-            <div className="p-4 space-y-4">
-              {/* Quick Presets Toggle */}
-              <div className="flex items-center justify-between">
-                <button
-                  onClick={() => setShowPresets(!showPresets)}
-                  className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
-                  data-testid="show-presets-btn"
-                >
-                  <Sparkles className="w-3 h-3" />
-                  {showPresets ? 'Hide Presets' : 'Quick Presets'}
-                </button>
-                {currentBarStats && (
-                  <span className="text-xs text-zinc-500">
-                    {currentBarStats.unique_symbols?.toLocaleString()} symbols, {currentBarStats.total_bars?.toLocaleString()} bars
-                  </span>
-                )}
-              </div>
-
-              {/* Presets Panel */}
-              <AnimatePresence>
-                {showPresets && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    className="grid grid-cols-2 gap-2 pb-3 border-b border-white/5"
-                  >
-                    {presets.slice(0, 6).map((preset) => (
-                      <button
-                        key={preset.name}
-                        onClick={() => handleApplyPreset(preset)}
-                        className="p-2 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 text-left transition-colors"
-                        data-testid={`preset-${preset.name.toLowerCase().replace(/\s+/g, '-')}`}
-                      >
-                        <div className="text-xs font-medium text-white">{preset.name}</div>
-                        <div className="text-[10px] text-zinc-500">{preset.bar_size} • {preset.lookback.replace('_', ' ')}</div>
-                      </button>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Bar Size Selector */}
-              <div>
-                <label className="block text-xs text-zinc-400 mb-2">Bar Size</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {barSizeOptions.map((opt) => {
-                    const Icon = opt.icon;
-                    const isSelected = barSize === opt.value;
-                    return (
-                      <button
-                        key={opt.value}
-                        onClick={() => setBarSize(opt.value)}
-                        className={`p-2 rounded-lg border text-left transition-all ${
-                          isSelected
-                            ? 'bg-amber-500/20 border-amber-500/50 text-amber-400'
-                            : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
-                        }`}
-                        data-testid={`bar-size-${opt.value.replace(/\s+/g, '-')}`}
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <Icon className="w-3 h-3" />
-                          <span className="text-xs font-medium">{opt.label}</span>
-                        </div>
-                        <div className="text-[10px] text-zinc-500 mt-0.5">{opt.description}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Lookback Period Selector */}
-              <div>
-                <label className="block text-xs text-zinc-400 mb-2">Lookback Period</label>
-                <div className="flex flex-wrap gap-2">
-                  {lookbackOptions.map((opt) => {
-                    const isSelected = lookback === opt.value;
-                    return (
-                      <button
-                        key={opt.value}
-                        onClick={() => setLookback(opt.value)}
-                        className={`px-3 py-1.5 rounded-full text-xs border transition-all ${
-                          isSelected
-                            ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400'
-                            : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
-                        }`}
-                        data-testid={`lookback-${opt.value}`}
-                      >
-                        {opt.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Collection Type Selector */}
-              <div>
-                <label className="block text-xs text-zinc-400 mb-2">Collection Scope</label>
-                <div className="flex gap-2">
-                  {collectionTypeOptions.map((opt) => {
-                    const isSelected = collectionType === opt.value;
-                    return (
-                      <button
-                        key={opt.value}
-                        onClick={() => setCollectionType(opt.value)}
-                        className={`flex-1 p-2 rounded-lg border text-center transition-all ${
-                          isSelected
-                            ? 'bg-violet-500/20 border-violet-500/50 text-violet-400'
-                            : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
-                        }`}
-                        data-testid={`collection-type-${opt.value}`}
-                      >
-                        <div className="text-xs font-medium">{opt.label}</div>
-                        <div className="text-[10px] text-zinc-500">{opt.description}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Progress or Start Button */}
-              {isRunning ? (
-                <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5">
+            <div className="p-4">
+              {/* Collection Progress (when running) */}
+              {isRunning && (
+                <div className="mb-4 p-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
                   <div className="flex justify-between text-xs text-zinc-400 mb-2">
-                    <span>Collection in progress...</span>
+                    <span className="text-orange-400 font-medium">Collection in progress</span>
                     <span>{progress}%</span>
                   </div>
                   <div className="h-2 bg-white/5 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-gradient-to-r from-amber-500 to-orange-400 rounded-full transition-all"
+                      className="h-full bg-gradient-to-r from-orange-500 to-amber-400 rounded-full transition-all"
                       style={{ width: `${progress}%` }}
                     />
                   </div>
@@ -656,164 +558,225 @@ const MultiTimeframeCollectionPanel = ({ collectionData, loading, onRefresh }) =
                     </div>
                   </div>
                 </div>
-              ) : (
-                <button
-                  onClick={handleStartCollection}
-                  disabled={collecting}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-lg font-medium text-sm transition-all"
-                  style={{
-                    background: collecting ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg, #f59e0b, #ef4444)',
-                    color: collecting ? 'rgba(255,255,255,0.5)' : 'white'
-                  }}
-                  data-testid="start-collection-btn"
-                >
-                  {collecting ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Starting Collection...
-                    </>
-                  ) : (
-                    <>
-                      <PlayCircle className="w-4 h-4" />
-                      Start {barSize} Collection ({lookback.replace('_', ' ')})
-                    </>
-                  )}
-                </button>
               )}
 
-              {/* Timeframe Stats */}
-              {timeframeStats.length > 0 && (
-                <div className="pt-3 border-t border-white/5">
-                  <div className="text-xs text-zinc-400 mb-2">Data by Timeframe</div>
-                  <div className="grid grid-cols-3 gap-2">
-                    {timeframeStats.slice(0, 6).map((stat) => (
-                      <div 
-                        key={stat.bar_size} 
-                        className="p-2 rounded bg-white/[0.02] text-center"
-                      >
-                        <div className="text-[10px] text-zinc-500">{stat.bar_size}</div>
-                        <div className="text-xs font-bold text-white">{stat.unique_symbols?.toLocaleString()}</div>
-                        <div className="text-[10px] text-zinc-500">{(stat.total_bars / 1000).toFixed(0)}K bars</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-};
-
-// ==================== DATA COLLECTION PANEL ====================
-
-const DataCollectionPanel = ({ collectionData, loading }) => {
-  const [expanded, setExpanded] = useState(false);
-  
-  const { queueProgress, stats } = collectionData || {};
-  const isRunning = queueProgress && queueProgress.pending > 0;
-  const totalSymbols = stats?.unique_symbols || 0;
-  const totalBars = stats?.total_bars || 0;
-  const progress = queueProgress 
-    ? Math.round((queueProgress.completed / (queueProgress.total || 1)) * 100) 
-    : 0;
-
-  return (
-    <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
-      >
-        <div className="flex items-center gap-3">
-          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isRunning ? 'bg-orange-500/20' : 'bg-emerald-500/20'}`}>
-            {isRunning ? (
-              <Download className="w-4 h-4 text-orange-400 animate-pulse" />
-            ) : (
-              <HardDrive className="w-4 h-4 text-emerald-400" />
-            )}
-          </div>
-          <div className="text-left">
-            <h3 className="text-sm font-semibold text-white">Historical Data (Legacy)</h3>
-            <p className="text-xs text-zinc-400">
-              {isRunning ? `Collecting... ${progress}%` : `${totalSymbols.toLocaleString()} symbols ready`}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          {isRunning && (
-            <div className="text-right">
-              <div className="text-sm font-bold text-orange-400">{queueProgress.pending.toLocaleString()}</div>
-              <div className="text-[10px] text-zinc-500">remaining</div>
-            </div>
-          )}
-          {!isRunning && totalBars > 0 && (
-            <div className="text-right">
-              <div className="text-sm font-bold text-emerald-400">{totalBars.toLocaleString()}</div>
-              <div className="text-[10px] text-zinc-500">bars</div>
-            </div>
-          )}
-          <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-        </div>
-      </button>
-
-      <AnimatePresence>
-        {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="border-t border-white/10"
-          >
-            <div className="p-4">
-              {isRunning && (
-                <div className="mb-4">
-                  <div className="flex justify-between text-xs text-zinc-400 mb-1">
-                    <span>Progress</span>
-                    <span>{progress}%</span>
-                  </div>
-                  <div className="h-2 bg-white/5 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-orange-500 to-amber-400 rounded-full transition-all"
-                      style={{ width: `${progress}%` }}
-                    />
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 mt-3 text-center">
-                    <div className="p-2 rounded bg-white/[0.02]">
-                      <div className="text-sm font-bold text-emerald-400">{queueProgress.completed?.toLocaleString()}</div>
-                      <div className="text-[10px] text-zinc-500">Completed</div>
-                    </div>
-                    <div className="p-2 rounded bg-white/[0.02]">
-                      <div className="text-sm font-bold text-orange-400">{queueProgress.pending?.toLocaleString()}</div>
-                      <div className="text-[10px] text-zinc-500">Pending</div>
-                    </div>
-                    <div className="p-2 rounded bg-white/[0.02]">
-                      <div className="text-sm font-bold text-red-400">{queueProgress.failed || 0}</div>
-                      <div className="text-[10px] text-zinc-500">Failed</div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              
+              {/* Tab Switcher */}
               {!isRunning && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5">
-                    <div className="text-2xl font-bold text-white">{totalSymbols.toLocaleString()}</div>
-                    <div className="text-xs text-zinc-500">Unique Symbols</div>
-                  </div>
-                  <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5">
-                    <div className="text-2xl font-bold text-white">{totalBars.toLocaleString()}</div>
-                    <div className="text-xs text-zinc-500">Total Bars</div>
-                  </div>
+                <div className="flex gap-1 p-1 rounded-lg bg-white/5 mb-4">
+                  <button
+                    onClick={() => setActiveTab('overview')}
+                    className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                      activeTab === 'overview'
+                        ? 'bg-white/10 text-white'
+                        : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    Overview
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('collect')}
+                    className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                      activeTab === 'collect'
+                        ? 'bg-white/10 text-white'
+                        : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    + Collect New
+                  </button>
                 </div>
               )}
-              
-              {totalSymbols === 0 && !isRunning && (
-                <div className="text-center py-4">
-                  <HardDrive className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
-                  <p className="text-sm text-zinc-400">No data collected yet</p>
-                  <p className="text-xs text-zinc-500">Start collection from Training Center</p>
+
+              {/* Overview Tab */}
+              {activeTab === 'overview' && !isRunning && (
+                <div className="space-y-4">
+                  {/* Summary Stats */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5">
+                      <div className="text-2xl font-bold text-white">{displaySymbols.toLocaleString()}</div>
+                      <div className="text-xs text-zinc-500">Unique Symbols</div>
+                    </div>
+                    <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5">
+                      <div className="text-2xl font-bold text-white">{(displayBars / 1000).toFixed(0)}K</div>
+                      <div className="text-xs text-zinc-500">Total Bars</div>
+                    </div>
+                  </div>
+
+                  {/* Timeframe Breakdown */}
+                  {timeframeStats.length > 0 ? (
+                    <div>
+                      <div className="text-xs text-zinc-400 mb-2">Data by Timeframe</div>
+                      <div className="space-y-2">
+                        {timeframeStats.map((stat) => (
+                          <div 
+                            key={stat.bar_size} 
+                            className="flex items-center justify-between p-2 rounded-lg bg-white/[0.02] border border-white/5"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-medium text-white">{stat.bar_size}</span>
+                              <span className="text-[10px] text-zinc-500">
+                                {stat.date_range?.start && stat.date_range?.end 
+                                  ? `${stat.date_range.start.slice(5)} → ${stat.date_range.end.slice(5)}`
+                                  : ''
+                                }
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3 text-xs">
+                              <span className="text-emerald-400">{stat.unique_symbols?.toLocaleString()} sym</span>
+                              <span className="text-zinc-400">{(stat.total_bars / 1000).toFixed(0)}K bars</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-4">
+                      <HardDrive className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                      <p className="text-sm text-zinc-400">No data collected yet</p>
+                      <button
+                        onClick={() => setActiveTab('collect')}
+                        className="mt-2 text-xs text-cyan-400 hover:text-cyan-300"
+                      >
+                        Start collecting →
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Collect New Tab */}
+              {activeTab === 'collect' && !isRunning && (
+                <div className="space-y-4">
+                  {/* Quick Presets */}
+                  <div>
+                    <button
+                      onClick={() => setShowPresets(!showPresets)}
+                      className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 mb-2"
+                      data-testid="show-presets-btn"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      {showPresets ? 'Hide Presets' : 'Quick Presets'}
+                    </button>
+                    
+                    <AnimatePresence>
+                      {showPresets && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          className="grid grid-cols-2 gap-2 pb-3 border-b border-white/5"
+                        >
+                          {presets.slice(0, 6).map((preset) => (
+                            <button
+                              key={preset.name}
+                              onClick={() => handleApplyPreset(preset)}
+                              className="p-2 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 text-left transition-colors"
+                              data-testid={`preset-${preset.name.toLowerCase().replace(/\s+/g, '-')}`}
+                            >
+                              <div className="text-xs font-medium text-white">{preset.name}</div>
+                              <div className="text-[10px] text-zinc-500">{preset.bar_size} • {preset.lookback.replace('_', ' ')}</div>
+                            </button>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
+                  {/* Bar Size Selector */}
+                  <div>
+                    <label className="block text-xs text-zinc-400 mb-2">Bar Size</label>
+                    <div className="grid grid-cols-6 gap-1">
+                      {barSizeOptions.map((opt) => {
+                        const isSelected = barSize === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            onClick={() => setBarSize(opt.value)}
+                            className={`p-2 rounded-lg border text-center transition-all ${
+                              isSelected
+                                ? 'bg-amber-500/20 border-amber-500/50 text-amber-400'
+                                : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
+                            }`}
+                            data-testid={`bar-size-${opt.value.replace(/\s+/g, '-')}`}
+                          >
+                            <div className="text-[10px] font-medium">{opt.label}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Lookback Period */}
+                  <div>
+                    <label className="block text-xs text-zinc-400 mb-2">Lookback Period</label>
+                    <div className="flex flex-wrap gap-1">
+                      {lookbackOptions.map((opt) => {
+                        const isSelected = lookback === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            onClick={() => setLookback(opt.value)}
+                            className={`px-2 py-1 rounded text-[10px] border transition-all ${
+                              isSelected
+                                ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400'
+                                : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
+                            }`}
+                            data-testid={`lookback-${opt.value}`}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Collection Type */}
+                  <div>
+                    <label className="block text-xs text-zinc-400 mb-2">Collection Scope</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {collectionTypeOptions.map((opt) => {
+                        const isSelected = collectionType === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            onClick={() => setCollectionType(opt.value)}
+                            className={`p-2 rounded-lg border text-center transition-all ${
+                              isSelected
+                                ? 'bg-violet-500/20 border-violet-500/50 text-violet-400'
+                                : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
+                            }`}
+                            data-testid={`collection-type-${opt.value}`}
+                          >
+                            <div className="text-xs font-medium">{opt.label}</div>
+                            <div className="text-[10px] text-zinc-500">{opt.description}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Start Button */}
+                  <button
+                    onClick={handleStartCollection}
+                    disabled={collecting}
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-lg font-medium text-sm transition-all"
+                    style={{
+                      background: collecting ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg, #10b981, #06b6d4)',
+                      color: collecting ? 'rgba(255,255,255,0.5)' : 'white'
+                    }}
+                    data-testid="start-collection-btn"
+                  >
+                    {collecting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Starting...
+                      </>
+                    ) : (
+                      <>
+                        <PlayCircle className="w-4 h-4" />
+                        Start Collection
+                      </>
+                    )}
+                  </button>
                 </div>
               )}
             </div>
@@ -2393,23 +2356,14 @@ const NIA = () => {
       {/* Learning Progress - Clear view of system intelligence */}
       <LearningProgressPanel data={data} loading={loading} />
 
-      {/* Multi-Timeframe Data Collection (NEW) */}
-      <MultiTimeframeCollectionPanel
-        collectionData={{
-          queueProgress: data.collectionQueue,
-          stats: data.collectionStats
-        }}
-        loading={loading}
-        onRefresh={() => fetchAllData()}
-      />
-
-      {/* Data Collection Status (Legacy - for daily bars) */}
+      {/* Data Collection - Unified panel for all timeframes */}
       <DataCollectionPanel 
         collectionData={{
           queueProgress: data.collectionQueue,
           stats: data.collectionStats
         }}
         loading={loading}
+        onRefresh={() => fetchAllData()}
       />
 
       {/* Historical Simulations */}

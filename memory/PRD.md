@@ -7,6 +7,18 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 16, 2026)
 
+### UI Panel Consolidation ✅ (March 16, 2026)
+**MERGED: Multi-Timeframe Data + Historical Data (Legacy) → Data Collection**
+
+Reduced panel count from 3 to 2 for cleaner UX:
+- **Data Collection** (unified): Overview tab shows stats by timeframe, Collect New tab has bar size/lookback/scope selectors
+- **Historical Simulations**: Unchanged - for running and viewing backtests
+
+**Files Modified:**
+- `/app/frontend/src/components/NIA.jsx` - Merged MultiTimeframeCollectionPanel into DataCollectionPanel, removed legacy panel
+
+---
+
 ### Time-Series AI Learning Progress Fix ✅ (March 16, 2026)
 **FIXED: Model training status now correctly reflected in NIA dashboard**
 
