@@ -1,192 +1,200 @@
 {
-  "metadata": {
-    "app_name": "TradeCommand",
-    "version": "2.0",
-    "theme": "dark",
-    "persona": "E1 - The Anti-AI Designer",
-    "core_concept": "The Bot's Brain / Mission Control"
+  "identity": {
+    "persona": "E1",
+    "philosophy": "Fusion over Imitation. Emotion First. Zoom In. Negative Space. Contrast.",
+    "anti_patterns": [
+      "No purple/teal CTA defaults",
+      "No Inter font for headings",
+      "No center-everything layouts",
+      "No gradient overload (>20%)"
+    ]
+  },
+  "project": {
+    "name": "SentCom Trade Command",
+    "context": "Professional AI Trading Interface",
+    "theme_mode": "dark",
+    "emotional_archetype": "Electric & Neon (Future, Speed, Disruption)",
+    "core_problem": "Separating high-frequency system logs (Stream) from stable user dialogue (Chat) to prevent flickering and cognitive overload."
   },
   "design_system": {
-    "typography": {
-      "headings": {
-        "font_family": "Chivo, sans-serif",
-        "weight": "900",
-        "tracking": "tight",
-        "usage": "Page titles, major section headers. distinct from UI text."
+    "colors": {
+      "background": {
+        "default": "#0F1419",
+        "paper": "#151C24",
+        "deep": "#050505"
       },
-      "body": {
-        "font_family": "Manrope, sans-serif",
-        "weight": "400/500",
-        "usage": "General UI text, labels, descriptions."
+      "primary": {
+        "cyan": "#00D4FF",
+        "cyan_hover": "#33DDFF",
+        "cyan_glow": "rgba(0, 212, 255, 0.35)"
       },
-      "data": {
-        "font_family": "JetBrains Mono, monospace",
-        "usage": "Prices, P&L, code snippets, logs, coordinates."
+      "secondary": {
+        "magenta": "#FF2E93",
+        "magenta_glow": "rgba(255, 46, 147, 0.35)"
       },
       "accent": {
-        "font_family": "Playfair Display, serif",
-        "usage": "AI 'Thoughts', philosophical quotes, strategic insights (The 'Old Money Tech' twist)."
+        "purple": "#A855F7",
+        "purple_glow": "rgba(168, 85, 247, 0.35)"
+      },
+      "status": {
+        "success": "#10B981",
+        "warning": "#F59E0B",
+        "error": "#EF4444",
+        "info": "#3B82F6"
+      },
+      "forbidden": {
+        "ai_page": "#7351B7",
+        "dashboard_teal": "#1B93A4"
       }
     },
-    "colors": {
-      "palette_ref": "Existing Tailwind Config",
-      "primary": "Electric Cyan (#00D4FF) - Represents Active Execution & Live Data",
-      "secondary": "Hot Magenta (#FF2E93) - Represents AI Insights & Risk Warnings",
-      "accent": "Electric Purple (#A855F7) - Represents System Intelligence & Learning",
-      "background": {
-        "base": "#050505 (Obsidian)",
-        "surface": "#0A0A0A (Matte)",
-        "glass": "rgba(21, 28, 36, 0.85) (Crystal)"
+    "typography": {
+      "font_family": {
+        "headings": "Manrope",
+        "body": "Manrope",
+        "mono": "JetBrains Mono",
+        "editorial": "Playfair Display"
       },
-      "semantic": {
-        "profit": "#00FF94 (Neon Green)",
-        "loss": "#FF2E2E (Neon Red)",
-        "neutral": "#64748B (Slate)"
+      "rules": {
+        "headings": "Tight tracking (tracking-tight), high contrast",
+        "mono": "Use for all data, prices, and system logs",
+        "uppercase": "Use for labels, tabs, and tiny headers (text-[10px])"
       }
     },
-    "visual_enhancers": {
-      "tracing_beam": "Use .gradient-border for active trades. The border should feel like live data flowing.",
-      "glassmorphism": "Use .glass-card for static panels. High blur (24px+), saturated backdrop.",
-      "grid_lines": "Background must have a subtle coordinate grid (opacity 5%) to reinforce 'Precision'.",
-      "scanlines": "Overlay subtle scanlines on the 'Bot Vision' or 'Terminal' sections.",
-      "noise": "Add 3% noise to solid dark backgrounds to prevent banding and add texture."
+    "surfaces": {
+      "glass_crystal": "backdrop-blur-xl bg-black/60 border border-white/10 shadow-lg",
+      "glass_dark": "backdrop-blur-2xl bg-black/80 border border-white/5",
+      "terminal": "bg-[#050505] border-r border-white/10 pattern-grid-lg",
+      "neon_border": "border border-cyan-500/30 shadow-[0_0_15px_rgba(0,212,255,0.2)]"
     },
-    "layout_strategy": {
-      "spacing": "Generous. Use p-6 or p-8 for internal container padding. Gap-4 or Gap-6 for grids.",
-      "bento_grid": "Use CSS Grid. Avoid equal-width columns. Mix wide (hero), tall (feed), and square (stat) modules.",
-      "hierarchy": "Z-index 10 for AI Assistant. It floats above or commands the view."
+    "spacing": {
+      "philosophy": "Generous. Use 2-3x more spacing than typical SaaS.",
+      "scale": ["p-4", "p-6", "p-8", "p-12", "p-16"],
+      "grid_gap": "gap-4 md:gap-6"
     }
   },
-  "approaches": {
-    "approach_a": {
-      "name": "Mission Control",
-      "concept": "A high-density cockpit for the omniscient trader.",
+  "layout_options": [
+    {
+      "id": "option_1",
+      "name": "The Neural Split (Asymmetrical Side-by-Side)",
+      "concept": "Left Hemisphere (Chat) vs. Right Hemisphere (Pulse). Distinct visual languages for distinct speeds.",
       "layout_structure": {
-        "type": "Bento Grid (12 Columns)",
-        "areas": [
-          {
-            "name": "Global_Header",
-            "span": "col-span-12 h-16",
-            "content": "Minimal nav, clock, system status pulse."
-          },
-          {
-            "name": "The_Brain (Hero)",
-            "span": "col-span-12 lg:col-span-8 row-span-2",
-            "content": "Combined view of Chart + Bot Logic Overlay. Not just a chart, but a chart with 'vision cones' showing what the bot sees."
-          },
-          {
-            "name": "Active_Positions",
-            "span": "col-span-12 lg:col-span-4 row-span-1",
-            "content": "List of running trades with live P&L. Use 'Tracing Beam' borders on profitable trades."
-          },
-          {
-            "name": "AI_Copilot",
-            "span": "col-span-12 lg:col-span-4 row-span-2",
-            "content": "Chat interface + Quick Actions. Always visible. The 'Voice' of the system."
-          },
-          {
-            "name": "Market_Regime",
-            "span": "col-span-6 lg:col-span-2 row-span-1",
-            "content": "Gauge/Meter showing current market condition (Trending/Ranging)."
-          },
-          {
-            "name": "Scanner_Ticker",
-            "span": "col-span-6 lg:col-span-2 row-span-1",
-            "content": "Scrolling feed of opportunities."
-          }
-        ]
+        "container": "grid grid-cols-12 h-full gap-0 overflow-hidden",
+        "chat_area": {
+          "span": "col-span-12 md:col-span-8 lg:col-span-9",
+          "style": "bg-[#0F1419] relative flex flex-col h-full",
+          "features": "Glass message bubbles, large typography, smooth scroll, media-rich"
+        },
+        "stream_area": {
+          "span": "col-span-12 md:col-span-4 lg:col-span-3",
+          "style": "bg-[#050505] border-l border-white/10 font-mono text-xs h-full overflow-y-auto custom-scrollbar",
+          "features": "Terminal style, no bubbles, matrix-green/cyan text, rapid updates, 'scanline' overlay"
+        }
       },
-      "navigation": "Top bar with mega-menu for less used features (Settings, Glossary)."
+      "visual_details": "The separation is stark. The Chat feels like a modern messenger (iMessage/Slack but cyberpunk). The Stream feels like a Linux terminal. This prevents the 'flickering' of the chat because the rapid updates happen in a physically separate, darker container that recedes visually.",
+      "mockup_ref": "Split-screen: [ Chat (65%) | Stream (35%) ]"
     },
-    "approach_b": {
-      "name": "Trading Day Flow",
-      "concept": "A chronological workflow adapting to the market session.",
+    {
+      "id": "option_2",
+      "name": "The Peripheral HUD (Ambient Focus)",
+      "concept": "The Trader is the Pilot. The Chat is the windshield. The Stream is the dashboard instruments.",
       "layout_structure": {
-        "type": "Tabbed/Stepper Interface",
-        "tabs": [
-          {
-            "id": "pre_market",
-            "label": "08:00 PRE-MARKET",
-            "icon": "SunHorizon",
-            "modules": ["Gap Scanner", "News Feed", "Game Plan Builder"]
-          },
-          {
-            "id": "live_trading",
-            "label": "09:30 MARKET OPEN",
-            "icon": "Lightning",
-            "active": true,
-            "modules": ["Focus Chart", "Execution Terminal", "Bot Controls", "Risk Monitor"]
-          },
-          {
-            "id": "post_market",
-            "label": "16:00 DEBRIEF",
-            "icon": "Notebook",
-            "modules": ["Performance Review", "Journal Entry", "Backtest Engine"]
-          }
-        ]
+        "container": "relative flex flex-col h-full",
+        "chat_area": {
+          "style": "flex-1 z-10 p-6 overflow-y-auto",
+          "features": "Center stage. Clean. Distraction-free."
+        },
+        "stream_area": {
+          "type": "Distributed",
+          "components": [
+            {
+              "location": "bottom-bar",
+              "style": "h-8 bg-black/80 border-t border-white/10 flex items-center overflow-hidden whitespace-nowrap font-mono text-[10px] text-cyan-500/80",
+              "behavior": "Ticker tape scrolling of low-priority logs"
+            },
+            {
+              "location": "right-floating",
+              "style": "absolute right-4 bottom-20 w-72 flex flex-col gap-2 pointer-events-none",
+              "behavior": "High-priority alerts (Risk/Stops) slide in as 'Holographic Toasts', glow, and fade out. Stacking order: Newest bottom."
+            },
+            {
+              "location": "border-glow",
+              "style": "inset-0 border-2 pointer-events-none transition-colors duration-500",
+              "behavior": "Container border pulses color based on bot state (Green=Scanning, Red=Risk)"
+            }
+          ]
+        }
       },
-      "visual_cue": "The background gradient shifts subtly based on the selected phase (Dawn colors -> Electric Blue -> Sunset Purple)."
+      "visual_details": "Reduces cognitive load by moving 'noise' to the periphery. You only look at the stream when something flashes or the ticker catches your eye.",
+      "mockup_ref": "HUD Overlay: [ Chat Center ] + [ Ticker Bottom ] + [ Floating Alerts Right ]"
     },
-    "approach_c": {
-      "name": "Bot-Centric Command",
-      "concept": "Visualizing the machine's consciousness.",
+    {
+      "id": "option_3",
+      "name": "The Z-Axis Stack (Focus Toggle)",
+      "concept": "Depth over Width. The 'Matrix' is always running behind the reality.",
       "layout_structure": {
-        "type": "Radial / Node-Based",
-        "centerpiece": "The 'Core' - A pulsating orb or node graph representing the Bot's state.",
-        "orbitals": "Modules float around the center like satellites.",
-        "interactions": "Clicking a 'satellite' (e.g., Last Trade) expands it into a panel.",
-        "ai_integration": "The AI speaks from the Center Orb. Text bubbles emerge from the core."
+        "container": "relative h-full w-full bg-black",
+        "stream_layer": {
+          "z_index": "z-0",
+          "style": "absolute inset-0 p-8 font-mono text-xs text-zinc-700 overflow-hidden opacity-30 select-none pointer-events-none transition-opacity duration-300",
+          "content": "Full screen waterfall of logs. 'The Code'."
+        },
+        "chat_layer": {
+          "z_index": "z-10",
+          "style": "absolute inset-4 md:inset-12 bg-black/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden transition-all duration-300",
+          "behavior": "When user types/hovers, this layer is opaque. When user holds 'Alt' or toggles 'Monitor Mode', this layer becomes semi-transparent (opacity-50) and blur reduces, revealing the Stream behind it."
+        }
       },
-      "navigation": "Hidden until hovered sidebar."
+      "visual_details": "Gamified interaction. 'Ghost in the Machine' vibe. Perfect for single-screen setups where screen real estate is premium.",
+      "mockup_ref": "Layered: [ Background Stream ] < [ Foreground Glass Chat ]"
+    },
+    {
+      "id": "option_4",
+      "name": "The Timeline Merge (Chronological Axis)",
+      "concept": "A single source of truth, bifurcated by type.",
+      "layout_structure": {
+        "container": "relative flex h-full overflow-y-auto",
+        "axis_line": {
+          "style": "absolute left-1/2 top-0 bottom-0 w-px bg-gradient-to-b from-transparent via-cyan-500/20 to-transparent transform -translate-x-1/2"
+        },
+        "stream_items": {
+          "position": "w-[45%] pr-8 text-right self-start ml-auto mr-[50%]",
+          "style": "font-mono text-[10px] text-zinc-500 py-1",
+          "behavior": "Small, dense, unobtrusive."
+        },
+        "chat_items": {
+          "position": "w-[45%] pl-8 text-left self-start ml-[50%]",
+          "style": "py-2",
+          "features": "Standard chat bubbles, bright, interactive."
+        }
+      },
+      "visual_details": "Visualizes the 'Cause and Effect'. You see a stream log 'Stop Loss Triggered' on the left, immediately followed by the AI saying 'I adjusted your risk' on the right.",
+      "mockup_ref": "Tree: [ Stream Left ] | [ Chat Right ]"
     }
-  },
-  "component_specifications": {
-    "AI_Assistant_Panel": {
-      "style": "Glassmorphism with Neon Border.",
-      "features": [
-        "Chat stream with distinct bubbles for 'User' and 'Bot'.",
-        "Bot messages should use a monospaced font for data and serif for 'insights'.",
-        "Quick Action Chips (e.g., 'Analyze Trend', 'Check Risk') at the bottom."
-      ],
-      "path": "/app/frontend/src/components/dashboard/AIAssistant.js"
-    },
-    "Bot_Status_Widget": {
-      "style": "Cyberpunk HUD.",
-      "elements": [
-        "Pulse Indicator (Heartbeat)",
-        "State Text (e.g., 'HUNTING', 'MANAGING', 'IDLE')",
-        "Efficiency Metric (Circular Progress)"
-      ],
-      "path": "/app/frontend/src/components/dashboard/BotStatus.js"
-    },
-    "Trade_Card": {
-      "style": "Minimalist Row or Card.",
-      "interaction": "Hover expands details (entry, stop, target).",
-      "visuals": "Green glow for profit, Red glow for loss. Background opacity pulses with volatility.",
-      "path": "/app/frontend/src/components/dashboard/TradeCard.js"
-    }
-  },
-  "media": {
-    "icons": "Use 'lucide-react' for UI, 'phosphor-icons' for specific trading actions.",
-    "3d_library": "Use 'framer-motion' for 2D animations. Avoid heavy 3D unless necessary for Approach C (Core)."
-  },
-  "instructions_to_main_agent": [
-    "1. PRESERVE EXISTING FILES: Do not delete existing logic in components. Wrap them or refactor layout only.",
-    "2. USE MOCK DATA: If backend is not connected, use realistic mock data for charts and bot states.",
-    "3. IMPLEMENT APPROACH A: This is the most practical MVP. Build the 'Mission Control' layout first.",
-    "4. CONSOLIDATE: Move 'Market Scanner', 'Learning Intelligence', and 'Backtesting' into widget containers within the dashboard, rather than separate pages.",
-    "5. DATA-TESTID: Ensure every clickable element has a data-testid attribute."
   ],
-  "universal_guidelines": [
-    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
-    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
-    "Create depth through layered design elements with z-index hierarchy.",
-    "Use glass-morphism effects with backdrop filters (12-24px blur).",
-    "You MUST NOT apply universal transition. Eg: transition: all. This results in breaking transforms.",
-    "You MUST NOT center align the app container. This disrupts the human natural reading flow of text.",
-    "Always use modern button styles like pill-shaped, or sharp button with interaction animations.",
-    "NEVER use AI assistant Emoji characters like 🤖🧠 etc for icons. Use proper SVG icons.",
-    "Export components as named exports. Pages as default exports.",
-    "Use 'sonner' for toasts."
-  ]
+  "implementation_guidelines": {
+    "universal_rules": [
+      "Use 'JetBrains Mono' for all Stream/Log elements.",
+      "Use 'Manrope' for all Chat/Dialogue elements.",
+      "Stream containers must have 'scroll-behavior: smooth' but use a virtual list (react-window) if logs exceed 100 items to prevent DOM lag.",
+      "Chat input must always be anchored to the bottom.",
+      "All interactive elements must have `data-testid`."
+    ],
+    "components_to_use": {
+      "toast": "sonner",
+      "icons": "lucide-react",
+      "charts": "recharts",
+      "animations": "framer-motion"
+    },
+    "accessibility": {
+      "contrast": "Ensure stream text (zinc-500) passes AA contrast against black background.",
+      "motion": "Respect prefers-reduced-motion for the Z-Axis transitions."
+    }
+  },
+  "instructions_to_main_agent": {
+    "step_1": "Create the file structure for the chosen option (Recommend Option 1 or 2 for immediate MVP stability).",
+    "step_2": "Refactor SentCom.jsx to split 'messages' state into 'conversation_messages' and 'system_logs'.",
+    "step_3": "Implement the two scroll containers with independent overflow handling.",
+    "step_4": "Apply the 'Glass Crystal' surface style to the Chat and 'Terminal' style to the Stream.",
+    "step_5": "Ensure the 'flickering' is solved by memoizing the StreamItem component."
+  }
 }
