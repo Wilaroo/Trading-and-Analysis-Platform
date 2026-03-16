@@ -588,7 +588,7 @@ class EnhancedBackgroundScanner:
         self._min_adv_general = 100_000      # Min ADV for general/swing setups
         self._min_adv_intraday = 500_000     # Min ADV for intraday/scalp setups
         self._adv_cache: Dict[str, Tuple[int, datetime]] = {}  # Cache ADV values with timestamp
-        self._adv_cache_ttl = 3600  # 1 hour (ADV doesn't change much intraday)
+        self._adv_cache_ttl = 900  # 15 minutes (reduced from 1 hour for faster re-checks)
         
         # Symbol validation - known invalid/illiquid symbols that pass through due to data errors
         # These are symbols that should NEVER generate alerts
@@ -604,8 +604,60 @@ class EnhancedBackgroundScanner:
             "GEO", "MPW", "INN",
         }
         
-        # Minimum volume to allow even on API errors (fail closed)
-        self._adv_error_default = 0  # If ADV fetch fails, assume 0 volume (fail closed)
+        # KNOWN LIQUID SYMBOLS - These ALWAYS bypass ADV API checks
+        # Major stocks with guaranteed high liquidity - no need to verify via API
+        # These will still respect intraday vs swing thresholds based on historical knowledge
+        self._known_liquid_symbols: Set[str] = {
+            # Mega caps - always liquid (>10M ADV typically)
+            "AAPL", "MSFT", "AMZN", "GOOGL", "GOOG", "META", "NVDA", "TSLA", "BRK.B",
+            "JPM", "V", "JNJ", "WMT", "PG", "MA", "UNH", "HD", "DIS", "BAC",
+            # Large tech
+            "NFLX", "ADBE", "CRM", "ORCL", "CSCO", "INTC", "AMD", "QCOM", "TXN", "AVGO",
+            "IBM", "NOW", "SNOW", "PANW", "CRWD", "ZS", "DDOG", "NET", "MDB", "TEAM",
+            # Financials
+            "GS", "MS", "C", "WFC", "AXP", "BLK", "SCHW", "CME", "ICE", "SPGI",
+            "COF", "USB", "PNC", "TFC", "BK", "STT", "FITB", "KEY", "RF", "CFG",
+            # Healthcare/Pharma
+            "LLY", "PFE", "MRK", "ABBV", "TMO", "ABT", "DHR", "BMY", "AMGN", "GILD",
+            "ISRG", "VRTX", "REGN", "MRNA", "BIIB", "ZTS", "SYK", "BDX", "MDT", "EW",
+            # Consumer
+            "KO", "PEP", "COST", "MCD", "NKE", "SBUX", "TGT", "LOW", "TJX", "ROST",
+            "YUM", "CMG", "DPZ", "LULU", "DECK", "ULTA", "EL", "CL", "KMB", "GIS",
+            # Energy
+            "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "VLO", "PSX", "OXY", "PXD",
+            "DVN", "FANG", "HAL", "BKR", "KMI", "WMB", "OKE", "TRGP", "LNG", "ET",
+            # Industrials
+            "CAT", "DE", "UNP", "UPS", "FDX", "HON", "GE", "MMM", "LMT", "RTX",
+            "BA", "GD", "NOC", "TDG", "ITW", "EMR", "ROK", "ETN", "PH", "IR",
+            # ETFs - highest liquidity
+            "SPY", "QQQ", "IWM", "DIA", "VTI", "VOO", "EEM", "XLF", "XLE", "XLK",
+            "XLV", "XLI", "XLY", "XLP", "XLU", "XLB", "XLRE", "VXX", "UVXY", "SQQQ",
+            "TQQQ", "SPXU", "SPXS", "TNA", "TZA", "SOXL", "SOXS", "ARKK", "GLD", "SLV",
+            # High volume momentum favorites
+            "PLTR", "SOFI", "RIVN", "LCID", "NIO", "XPEV", "LI", "COIN", "HOOD", "RBLX",
+            "SNAP", "PINS", "TWLO", "SQ", "PYPL", "SHOP", "ROKU", "ZM", "DOCU", "OKTA",
+            "U", "UNITY", "ABNB", "DASH", "UBER", "LYFT", "GRAB", "SE", "MELI", "NU",
+            # Biotech movers
+            "MRNA", "BNTX", "NVAX", "SGEN", "EXAS", "DXCM", "ALGN", "HOLX", "ILMN", "BMRN",
+            # Semiconductors
+            "MU", "MRVL", "LRCX", "KLAC", "AMAT", "ASML", "TSM", "ON", "SWKS", "QRVO",
+            # Recent IPO / high interest
+            "ARM", "CART", "BIRK", "VRT", "SMCI", "CELH", "DUOL", "TOST", "BROS", "CAVA",
+        }
+        
+        # Estimated ADV for known liquid symbols (used when API fails)
+        # These are conservative estimates - actual ADV is typically higher
+        self._known_liquid_adv: Dict[str, int] = {
+            # ETFs - extremely high volume
+            "SPY": 80_000_000, "QQQ": 50_000_000, "IWM": 25_000_000,
+            "TQQQ": 30_000_000, "SQQQ": 20_000_000, "UVXY": 15_000_000,
+            # Mega caps
+            "AAPL": 60_000_000, "MSFT": 25_000_000, "AMZN": 30_000_000,
+            "NVDA": 40_000_000, "TSLA": 80_000_000, "META": 15_000_000,
+            "GOOGL": 20_000_000, "AMD": 40_000_000,
+        }
+        # Default for known liquid symbols not in the dict above
+        self._known_liquid_default_adv = 2_000_000  # 2M shares/day minimum assumption
         
         # Intraday/scalp setups requiring higher volume
         self._intraday_setups = {
@@ -843,7 +895,8 @@ class EnhancedBackgroundScanner:
             "intraday_setups": list(self._intraday_setups),
             "symbols_skipped_adv_last_scan": getattr(self, '_symbols_skipped_adv', 0),
             "blacklisted_symbols_count": len(self._blacklisted_symbols),
-            "fail_closed_enabled": self._adv_error_default == 0,
+            "known_liquid_symbols_count": len(self._known_liquid_symbols),
+            "adv_cache_ttl_seconds": self._adv_cache_ttl,
         }
     
     def add_to_blacklist(self, symbols: List[str]) -> Dict:
@@ -1705,6 +1758,7 @@ class EnhancedBackgroundScanner:
         qualified_symbols = []
         symbols_needing_adv = []
         symbols_blacklisted = 0
+        symbols_known_liquid = 0
         
         # Check cache first for quick filtering
         for symbol in symbols:
@@ -1714,6 +1768,16 @@ class EnhancedBackgroundScanner:
                 self._symbols_skipped_adv += 1
                 continue
             
+            # SECOND: Check known liquid whitelist - skip API check entirely
+            if symbol in self._known_liquid_symbols:
+                # Use known ADV or default high value
+                known_adv = self._known_liquid_adv.get(symbol, self._known_liquid_default_adv)
+                self._adv_cache[symbol] = (known_adv, now)
+                qualified_symbols.append(symbol)
+                symbols_known_liquid += 1
+                continue
+            
+            # THIRD: Check cache
             if symbol in self._adv_cache:
                 cached_adv, cached_time = self._adv_cache[symbol]
                 if (now - cached_time).total_seconds() < self._adv_cache_ttl:
@@ -1727,14 +1791,14 @@ class EnhancedBackgroundScanner:
             # Need to fetch ADV for this symbol
             symbols_needing_adv.append(symbol)
         
-        # Batch fetch ADV for unknown symbols
+        # Batch fetch ADV for unknown symbols using IB data first, then Alpaca
         if symbols_needing_adv:
             try:
-                # Get ADV data in batch via Alpaca bars
-                adv_data = await self._batch_fetch_adv(symbols_needing_adv)
+                # Get ADV data - try IB historical first, then Alpaca
+                adv_data = await self._batch_fetch_adv_smart(symbols_needing_adv)
                 
                 for symbol in symbols_needing_adv:
-                    adv = adv_data.get(symbol, self._adv_error_default)  # Default to 0 (fail closed)
+                    adv = adv_data.get(symbol, 0)
                     self._adv_cache[symbol] = (adv, now)
                     
                     if adv >= self._min_adv_general:
@@ -1742,20 +1806,168 @@ class EnhancedBackgroundScanner:
                     else:
                         self._symbols_skipped_adv += 1
                         if adv == 0:
-                            logger.debug(f"ADV filter blocked {symbol}: volume data unavailable (fail closed)")
+                            logger.debug(f"ADV filter blocked {symbol}: volume data unavailable")
                         
             except Exception as e:
-                # FAIL CLOSED: On error, do NOT allow symbols through
-                logger.warning(f"ADV batch fetch failed, blocking all {len(symbols_needing_adv)} symbols (fail closed): {e}")
-                self._symbols_skipped_adv += len(symbols_needing_adv)
-                # Cache as 0 to prevent repeated fetches
+                # On batch error, try to salvage what we can
+                logger.warning(f"ADV batch fetch error: {e}")
+                # For symbols we couldn't check, mark as needing recheck soon
                 for symbol in symbols_needing_adv:
-                    self._adv_cache[symbol] = (0, now)
+                    if symbol not in self._adv_cache:
+                        # Cache with short TTL so we retry soon
+                        self._adv_cache[symbol] = (0, now - timedelta(seconds=self._adv_cache_ttl - 120))
+                        self._symbols_skipped_adv += 1
         
+        if symbols_known_liquid > 0:
+            logger.debug(f"Known liquid whitelist: {symbols_known_liquid} symbols auto-qualified")
         if symbols_blacklisted > 0:
             logger.debug(f"Blacklist filter blocked {symbols_blacklisted} known illiquid symbols")
         
         return qualified_symbols
+    
+    async def _batch_fetch_adv_smart(self, symbols: List[str]) -> Dict[str, int]:
+        """
+        Fetch ADV using multiple data sources in priority order:
+        1. IB historical data (from our collected data)
+        2. IB real-time (if pusher connected, use recent volume)
+        3. Alpaca historical bars (fallback)
+        
+        Returns dict of {symbol: avg_daily_volume}
+        """
+        adv_data = {}
+        symbols_remaining = list(symbols)
+        
+        # === SOURCE 1: IB Historical Data (from MongoDB) ===
+        try:
+            adv_from_db = await self._get_adv_from_ib_historical(symbols_remaining)
+            for symbol, adv in adv_from_db.items():
+                if adv > 0:
+                    adv_data[symbol] = adv
+                    symbols_remaining.remove(symbol)
+            if adv_from_db:
+                logger.debug(f"ADV from IB historical DB: {len(adv_from_db)} symbols")
+        except Exception as e:
+            logger.debug(f"IB historical ADV lookup failed: {e}")
+        
+        # === SOURCE 2: IB Real-time Pushed Data ===
+        if symbols_remaining:
+            try:
+                adv_from_ib_rt = self._get_adv_from_ib_realtime(symbols_remaining)
+                for symbol, adv in adv_from_ib_rt.items():
+                    if adv > 0:
+                        adv_data[symbol] = adv
+                        if symbol in symbols_remaining:
+                            symbols_remaining.remove(symbol)
+                if adv_from_ib_rt:
+                    logger.debug(f"ADV from IB real-time: {len(adv_from_ib_rt)} symbols")
+            except Exception as e:
+                logger.debug(f"IB real-time ADV lookup failed: {e}")
+        
+        # === SOURCE 3: Alpaca Historical Bars (fallback) ===
+        if symbols_remaining:
+            try:
+                adv_from_alpaca = await self._batch_fetch_adv(symbols_remaining)
+                adv_data.update(adv_from_alpaca)
+                logger.debug(f"ADV from Alpaca: {len(symbols_remaining)} symbols")
+            except Exception as e:
+                logger.debug(f"Alpaca ADV fetch failed: {e}")
+                # Mark remaining as 0
+                for symbol in symbols_remaining:
+                    if symbol not in adv_data:
+                        adv_data[symbol] = 0
+        
+        return adv_data
+    
+    async def _get_adv_from_ib_historical(self, symbols: List[str]) -> Dict[str, int]:
+        """
+        Get ADV from our collected IB historical data in MongoDB.
+        This uses data we've already collected from IB Gateway.
+        """
+        adv_data = {}
+        
+        try:
+            from database import get_database
+            db = get_database()
+            if db is None:
+                return adv_data
+            
+            # Check historical_bars collection for recent daily data
+            bars_col = db.get('historical_bars') or db.get('ib_historical_bars')
+            if bars_col is None:
+                return adv_data
+            
+            # Look for daily bars from last 30 days
+            cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+            
+            for symbol in symbols:
+                try:
+                    # Find daily bars for this symbol
+                    bars = list(bars_col.find(
+                        {
+                            "symbol": symbol,
+                            "timeframe": {"$in": ["1D", "1day", "day", "daily"]},
+                            "timestamp": {"$gte": cutoff}
+                        },
+                        {"volume": 1}
+                    ).limit(20))
+                    
+                    if bars and len(bars) >= 5:
+                        volumes = [b.get("volume", 0) for b in bars if b.get("volume", 0) > 0]
+                        if volumes:
+                            adv_data[symbol] = int(sum(volumes) / len(volumes))
+                except Exception:
+                    continue
+                    
+        except Exception as e:
+            logger.debug(f"Error accessing IB historical data: {e}")
+        
+        return adv_data
+    
+    def _get_adv_from_ib_realtime(self, symbols: List[str]) -> Dict[str, int]:
+        """
+        Estimate ADV from IB real-time pushed data.
+        Uses today's volume extrapolated to full day.
+        """
+        adv_data = {}
+        
+        try:
+            from routers.ib import get_pushed_quotes, is_pusher_connected
+            if not is_pusher_connected():
+                return adv_data
+            
+            quotes = get_pushed_quotes()
+            now = datetime.now(timezone.utc)
+            
+            # Calculate how far through the trading day we are (9:30 AM - 4:00 PM ET = 6.5 hours)
+            # Rough estimate - adjust based on current time
+            market_open_hour = 14  # 9:30 AM ET = 14:30 UTC
+            market_close_hour = 21  # 4:00 PM ET = 21:00 UTC
+            
+            current_hour = now.hour + now.minute / 60.0
+            if current_hour < market_open_hour:
+                day_progress = 0.1  # Pre-market
+            elif current_hour > market_close_hour:
+                day_progress = 1.0  # After hours
+            else:
+                day_progress = (current_hour - market_open_hour) / (market_close_hour - market_open_hour)
+                day_progress = max(0.1, min(1.0, day_progress))  # Clamp between 10% and 100%
+            
+            for symbol in symbols:
+                if symbol in quotes:
+                    quote = quotes[symbol]
+                    today_volume = quote.get('volume', 0)
+                    
+                    if today_volume > 0 and day_progress > 0:
+                        # Extrapolate to full day
+                        estimated_adv = int(today_volume / day_progress)
+                        # Only use if it seems reasonable (at least 50K)
+                        if estimated_adv >= 50000:
+                            adv_data[symbol] = estimated_adv
+                            
+        except Exception as e:
+            logger.debug(f"Error getting IB real-time ADV: {e}")
+        
+        return adv_data
     
     async def _batch_fetch_adv(self, symbols: List[str]) -> Dict[str, int]:
         """
@@ -3764,10 +3976,11 @@ class EnhancedBackgroundScanner:
             "min_adv_general": self._min_adv_general,
             "min_adv_intraday": self._min_adv_intraday,
             "adv_cache_size": len(self._adv_cache),
+            "adv_cache_ttl_seconds": self._adv_cache_ttl,
             "wave_scanner": wave_info,
-            # New: Blacklist and fail-closed status
+            # Whitelist and blacklist stats
+            "known_liquid_symbols_count": len(self._known_liquid_symbols),
             "blacklisted_symbols_count": len(self._blacklisted_symbols),
-            "fail_closed_enabled": self._adv_error_default == 0,
         }
 
 
