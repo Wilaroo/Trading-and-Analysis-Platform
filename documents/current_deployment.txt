@@ -1,1 +1,1 @@
-https://dual-stream-chat-1.preview.emergentagent.com
+https://chat-input-debug.preview.emergentagent.com

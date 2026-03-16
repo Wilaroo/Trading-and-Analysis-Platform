@@ -3039,7 +3039,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
     const connected = status?.connected || false;
     
     return (
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-white/[0.08] to-white/[0.02] border border-white/10 backdrop-blur-xl" data-testid="sentcom-embedded">
+      <div className="relative overflow-auto rounded-2xl bg-gradient-to-br from-white/[0.08] to-white/[0.02] border border-white/10 backdrop-blur-xl" style={{ maxHeight: 'calc(100vh - 120px)' }} data-testid="sentcom-embedded">
         {/* Ambient Background Effects */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           <div className="absolute -top-32 -right-32 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl" />
@@ -3047,32 +3047,32 @@ const SentCom = ({ compact = false, embedded = false }) => {
         </div>
         
         {/* Unified Header - Bot Controls + Status + Order Pipeline */}
-        <div className="relative flex items-center justify-between px-4 py-3 border-b border-white/10 bg-black/40 backdrop-blur-xl">
-          <div className="flex items-center gap-4">
+        <div className="relative flex items-center justify-between px-3 py-2 border-b border-white/10 bg-black/40 backdrop-blur-xl">
+          <div className="flex items-center gap-3">
             {/* Logo & Status */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <div className="relative">
                 <div className="absolute inset-0 bg-gradient-to-br from-cyan-400 to-violet-500 blur-lg opacity-40" />
-                <div className="relative w-11 h-11 rounded-xl bg-gradient-to-br from-cyan-500/20 to-violet-500/20 flex items-center justify-center border border-white/20 shadow-lg shadow-cyan-500/20">
-                  <Brain className="w-5 h-5 text-cyan-400" />
+                <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500/20 to-violet-500/20 flex items-center justify-center border border-white/20 shadow-lg shadow-cyan-500/20">
+                  <Brain className="w-4 h-4 text-cyan-400" />
                 </div>
               </div>
               <div>
-                <h2 className="text-lg font-bold text-white tracking-tight">SENTCOM</h2>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <div className="flex items-center gap-1.5">
+                <h2 className="text-base font-bold text-white tracking-tight">SENTCOM</h2>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <div className="flex items-center gap-1">
                     {connected ? (
                       <PulsingDot color="emerald" />
                     ) : (
                       <Circle className="w-2 h-2 text-zinc-500" />
                     )}
-                    <span className={`text-[10px] font-medium ${connected ? 'text-emerald-400' : 'text-zinc-500'}`}>
-                      {connected ? 'CONNECTED' : 'OFFLINE'}
+                    <span className={`text-[9px] font-medium ${connected ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                      {connected ? 'LIVE' : 'OFFLINE'}
                     </span>
                   </div>
                   <span className="text-zinc-600">•</span>
                   {/* Market Session Badge */}
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${
                     marketSession.is_open 
                       ? marketSession.name === 'MARKET OPEN' 
                         ? 'bg-emerald-500/20 text-emerald-400'
@@ -3084,7 +3084,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
                   {regime !== 'UNKNOWN' && (
                     <>
                       <span className="text-zinc-600">•</span>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${
                         regime === 'RISK_ON' ? 'bg-emerald-500/20 text-emerald-400' :
                         regime === 'RISK_OFF' ? 'bg-rose-500/20 text-rose-400' :
                         'bg-zinc-500/20 text-zinc-400'
@@ -3098,91 +3098,82 @@ const SentCom = ({ compact = false, embedded = false }) => {
             </div>
             
             {/* Bot Status Badge */}
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${
+            <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border ${
               isRunning 
                 ? 'bg-emerald-500/10 border-emerald-500/30' 
                 : 'bg-zinc-500/10 border-zinc-500/30'
             }`}>
-              <Bot className={`w-4 h-4 ${isRunning ? 'text-emerald-400' : 'text-zinc-500'}`} />
-              <span className={`text-xs font-bold ${isRunning ? 'text-emerald-400' : 'text-zinc-500'}`}>
+              <Bot className={`w-3.5 h-3.5 ${isRunning ? 'text-emerald-400' : 'text-zinc-500'}`} />
+              <span className={`text-[10px] font-bold ${isRunning ? 'text-emerald-400' : 'text-zinc-500'}`}>
                 {isRunning ? 'ACTIVE' : 'STOPPED'}
               </span>
             </div>
             
             {/* Mode Indicator */}
-            <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${
+            <div className={`flex items-center gap-1 px-2 py-1 rounded-lg border ${
               mode === 'autonomous' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
               mode === 'confirmation' ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' :
               'bg-amber-500/10 border-amber-500/30 text-amber-400'
             }`}>
-              {mode === 'autonomous' ? <Zap className="w-3.5 h-3.5" /> :
-               mode === 'confirmation' ? <Eye className="w-3.5 h-3.5" /> :
-               <Pause className="w-3.5 h-3.5" />}
-              <span className="text-[10px] font-bold uppercase">{mode}</span>
+              {mode === 'autonomous' ? <Zap className="w-3 h-3" /> :
+               mode === 'confirmation' ? <Eye className="w-3 h-3" /> :
+               <Pause className="w-3 h-3" />}
+              <span className="text-[9px] font-bold uppercase">{mode}</span>
             </div>
             
             {/* Dynamic Risk Badge */}
             <DynamicRiskBadge onClick={() => setShowRiskPanel(!showRiskPanel)} />
             
             {/* IB Connection */}
-            <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${
+            <div className={`flex items-center gap-1 px-2 py-1 rounded-lg border ${
               ibConnected 
                 ? 'bg-cyan-500/10 border-cyan-500/30' 
                 : 'bg-zinc-700/30 border-zinc-600/30'
             }`}>
               {ibConnected ? (
-                <Wifi className="w-3.5 h-3.5 text-cyan-400" />
+                <Wifi className="w-3 h-3 text-cyan-400" />
               ) : (
-                <WifiOff className="w-3.5 h-3.5 text-zinc-500" />
+                <WifiOff className="w-3 h-3 text-zinc-500" />
               )}
-              <span className={`text-[10px] font-bold ${ibConnected ? 'text-cyan-400' : 'text-zinc-500'}`}>
-                {ibConnected ? 'IB LIVE' : 'OFFLINE'}
+              <span className={`text-[9px] font-bold ${ibConnected ? 'text-cyan-400' : 'text-zinc-500'}`}>
+                {ibConnected ? 'IB' : 'IB OFF'}
               </span>
             </div>
           </div>
           
-          <div className="flex items-center gap-3">
-            {/* Order Pipeline */}
-            <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-black/40 border border-white/5">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-amber-500/20 flex items-center justify-center">
-                  <Clock className="w-3.5 h-3.5 text-amber-400" />
+          <div className="flex items-center gap-2">
+            {/* Order Pipeline - Compact */}
+            <div className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-black/40 border border-white/5">
+              <div className="flex items-center gap-1.5">
+                <div className="w-5 h-5 rounded bg-amber-500/20 flex items-center justify-center">
+                  <Clock className="w-2.5 h-2.5 text-amber-400" />
                 </div>
-                <div>
-                  <p className="text-base font-bold text-amber-400">{status?.order_pipeline?.pending || 0}</p>
-                  <p className="text-[8px] text-zinc-500 uppercase">Pending</p>
-                </div>
+                <p className="text-sm font-bold text-amber-400">{status?.order_pipeline?.pending || 0}</p>
               </div>
               
-              <ArrowRight className="w-3 h-3 text-zinc-600" />
+              <ArrowRight className="w-2.5 h-2.5 text-zinc-600" />
               
-              <div className="flex items-center gap-2">
-                <div className={`w-7 h-7 rounded-lg bg-cyan-500/20 flex items-center justify-center ${(status?.order_pipeline?.executing || 0) > 0 ? 'animate-pulse' : ''}`}>
-                  <Zap className="w-3.5 h-3.5 text-cyan-400" />
+              <div className="flex items-center gap-1.5">
+                <div className={`w-5 h-5 rounded bg-cyan-500/20 flex items-center justify-center ${(status?.order_pipeline?.executing || 0) > 0 ? 'animate-pulse' : ''}`}>
+                  <Zap className="w-2.5 h-2.5 text-cyan-400" />
                 </div>
-                <div>
-                  <p className="text-base font-bold text-cyan-400">{status?.order_pipeline?.executing || 0}</p>
-                  <p className="text-[8px] text-zinc-500 uppercase">Executing</p>
-                </div>
+                <p className="text-sm font-bold text-cyan-400">{status?.order_pipeline?.executing || 0}</p>
               </div>
               
-              <ArrowRight className="w-3 h-3 text-zinc-600" />
+              <ArrowRight className="w-2.5 h-2.5 text-zinc-600" />
               
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                  <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+              <div className="flex items-center gap-1.5">
+                <div className="w-5 h-5 rounded bg-emerald-500/20 flex items-center justify-center">
+                  <CheckCircle className="w-2.5 h-2.5 text-emerald-400" />
                 </div>
-                <div>
-                  <p className="text-base font-bold text-emerald-400">{status?.order_pipeline?.filled || 0}</p>
-                  <p className="text-[8px] text-zinc-500 uppercase">Filled</p>
-                </div>
+                <p className="text-sm font-bold text-emerald-400">{status?.order_pipeline?.filled || 0}</p>
               </div>
             </div>
             
             {/* Bot Controls */}
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className={`p-2.5 rounded-xl transition-all border ${
+              className={`p-2 rounded-xl transition-all border ${
                 showSettings 
                   ? 'bg-cyan-500/20 border-cyan-500/30 text-cyan-400' 
                   : 'bg-white/5 border-white/5 text-zinc-400 hover:text-white hover:bg-white/10'
@@ -3195,7 +3186,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
             <button
               onClick={toggleBot}
               disabled={actionLoading === 'toggle'}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all shadow-lg ${
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-medium text-xs transition-all shadow-lg ${
                 isRunning 
                   ? 'bg-gradient-to-r from-rose-500/20 to-rose-600/10 border border-rose-500/30 text-rose-400 hover:from-rose-500/30 shadow-rose-500/10' 
                   : 'bg-gradient-to-r from-emerald-500/20 to-emerald-600/10 border border-emerald-500/30 text-emerald-400 hover:from-emerald-500/30 shadow-emerald-500/10'
@@ -3203,11 +3194,11 @@ const SentCom = ({ compact = false, embedded = false }) => {
               data-testid="sentcom-toggle-bot"
             >
               {actionLoading === 'toggle' ? (
-                <Loader className="w-4 h-4 animate-spin" />
+                <Loader className="w-3.5 h-3.5 animate-spin" />
               ) : isRunning ? (
-                <Pause className="w-4 h-4" />
+                <Pause className="w-3.5 h-3.5" />
               ) : (
-                <Play className="w-4 h-4" />
+                <Play className="w-3.5 h-3.5" />
               )}
               {isRunning ? 'Stop' : 'Start'}
             </button>
@@ -3360,63 +3351,58 @@ const SentCom = ({ compact = false, embedded = false }) => {
         </AnimatePresence>
 
         {/* Main Content - Full Width Neural Split */}
-        <div className="relative p-4 space-y-4">
+        <div className="relative p-3 space-y-3">
           {/* Top Row - Positions Summary (Compact Horizontal) */}
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] border border-white/10 p-3">
+          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] border border-white/10 p-2">
             <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-transparent pointer-events-none" />
             <div className="relative">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 flex items-center justify-center">
-                    <Target className="w-3 h-3 text-emerald-400" />
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-5 h-5 rounded-lg bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 flex items-center justify-center">
+                    <Target className="w-2.5 h-2.5 text-emerald-400" />
                   </div>
-                  <span className="text-sm font-bold text-white">Our Positions</span>
-                  <span className="text-xs text-zinc-500">({positions.length} open)</span>
+                  <span className="text-xs font-bold text-white">Positions</span>
+                  <span className="text-[10px] text-zinc-500">({positions.length})</span>
                 </div>
-                <span className={`text-base font-bold ${totalPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                <span className={`text-sm font-bold ${totalPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {totalPnl >= 0 ? '+' : ''}{totalPnl.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                 </span>
               </div>
               
               {positionsLoading && positions.length === 0 ? (
-                <div className="flex items-center justify-center py-4">
-                  <Loader className="w-5 h-5 text-cyan-400 animate-spin" />
+                <div className="flex items-center justify-center py-2">
+                  <Loader className="w-4 h-4 text-cyan-400 animate-spin" />
                 </div>
               ) : positions.length === 0 ? (
-                <div className="flex items-center justify-center py-3 gap-2">
-                  <Eye className="w-4 h-4 text-zinc-600" />
-                  <p className="text-xs text-zinc-500">No open positions - scanning for setups...</p>
+                <div className="flex items-center justify-center py-2 gap-1.5">
+                  <Eye className="w-3.5 h-3.5 text-zinc-600" />
+                  <p className="text-[10px] text-zinc-500">No open positions - scanning...</p>
                 </div>
               ) : (
-                <div className="flex items-center gap-2 overflow-x-auto pb-1 custom-scrollbar">
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
                   {positions.slice(0, 8).map((pos, i) => (
                     <div 
                       key={pos.symbol || i}
                       onClick={() => setSelectedPosition(pos)}
-                      className="flex-shrink-0 p-2.5 rounded-xl bg-black/40 border border-white/5 hover:border-white/20 cursor-pointer transition-all min-w-[140px]"
+                      className="flex-shrink-0 p-2 rounded-lg bg-black/40 border border-white/5 hover:border-white/20 cursor-pointer transition-all min-w-[120px]"
                     >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-bold text-white text-sm">{pos.symbol}</span>
-                        <span className={`text-xs font-bold ${pos.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className="font-bold text-white text-xs">{pos.symbol}</span>
+                        <span className={`text-[10px] font-bold ${pos.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                           {pos.pnl >= 0 ? '+' : ''}{pos.pnl_percent?.toFixed(1) || '0'}%
                         </span>
                       </div>
-                      <div className="flex items-center justify-between text-[10px]">
+                      <div className="flex items-center justify-between text-[9px]">
                         <span className="text-zinc-400">${pos.current_price?.toFixed(2) || '—'}</span>
                         <span className={`font-medium ${pos.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                           {pos.pnl >= 0 ? '+' : ''}{pos.pnl?.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) || '$0'}
                         </span>
                       </div>
-                      {pos.stop_price && (
-                        <div className="text-[9px] text-zinc-500 mt-1">
-                          Stop: <span className="text-rose-400">${pos.stop_price?.toFixed(2)}</span>
-                        </div>
-                      )}
                     </div>
                   ))}
                   {positions.length > 8 && (
-                    <div className="flex-shrink-0 p-2.5 rounded-xl bg-black/20 border border-white/5 min-w-[80px] flex items-center justify-center">
-                      <span className="text-xs text-zinc-500">+{positions.length - 8} more</span>
+                    <div className="flex-shrink-0 p-2 rounded-lg bg-black/20 border border-white/5 min-w-[60px] flex items-center justify-center">
+                      <span className="text-[10px] text-zinc-500">+{positions.length - 8}</span>
                     </div>
                   )}
                 </div>
@@ -3425,14 +3411,14 @@ const SentCom = ({ compact = false, embedded = false }) => {
           </div>
 
           {/* Full Width Neural Split: S.O.C. + Conversation */}
-          <div className="grid grid-cols-12 gap-0 rounded-2xl overflow-hidden border border-white/10 h-[520px]" data-testid="neural-split-container">
+          <div className="grid grid-cols-12 gap-0 rounded-2xl border border-white/10" style={{ height: '500px' }} data-testid="neural-split-container">
             {/* Left: SentCom S.O.C. (Stream of Consciousness) - 40% */}
-            <div className="col-span-5 h-full">
+            <div className="col-span-5 h-full overflow-hidden">
               <StreamOfConsciousness />
             </div>
             
             {/* Right: Conversation Panel - 60% */}
-            <div className="col-span-7 h-full border-l border-white/10">
+            <div className="col-span-7 border-l border-white/10 h-full overflow-hidden">
               <ConversationPanel
                 messages={allMessages}
                 onSendMessage={handleChat}

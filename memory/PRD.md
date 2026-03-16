@@ -5,7 +5,44 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ---
 
-## LATEST UPDATE (December 2025)
+## LATEST UPDATE (March 2026)
+
+### Chat Input Visibility Bug Fix ✅ (March 2026)
+**FIXED: Chat input and scrollbar now visible in Conversation panel**
+
+**Problem:**
+- The chat input field in the ConversationPanel was being cut off at the bottom of the viewport
+- Users could not see or interact with the chat input
+- The root cause was the overall page layout taking up too much vertical space
+
+**Solution Implemented:**
+
+**1. Layout Reorganization**
+- Moved BotPerformanceChart below the main SentCom panel (instead of above it)
+- This freed up significant vertical space for the Neural Split panel
+
+**2. Compact Header Bar**
+- Removed redundant "Command Center" branding from NewDashboard header
+- Made all status badges and metrics more compact
+- Reduced padding and font sizes in the header
+
+**3. Compact Positions Bar**
+- Made the positions summary row more compact
+- Smaller position cards with tighter spacing
+
+**4. Improved Neural Split Panel**
+- Increased panel height from 400px to 500px
+- Changed parent container from `overflow-hidden` to `overflow-auto`
+- Removed awkward spacer div hack
+- Added proper `maxHeight` constraint with viewport calculation
+
+**Files Modified:**
+- `/app/frontend/src/components/SentCom.jsx` - Neural Split panel fixes, compact positions
+- `/app/frontend/src/components/NewDashboard.jsx` - Layout reorganization, moved chart below
+
+---
+
+## PREVIOUS UPDATE (December 2025)
 
 ### Full-Width Neural Split + Enhanced S.O.C. ✅ (December 2025)
 **IMPLEMENTED: Expanded layout with rich trade data**

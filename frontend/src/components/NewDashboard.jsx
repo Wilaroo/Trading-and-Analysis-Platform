@@ -67,48 +67,32 @@ const DashboardHeader = ({
   const exposurePct = (positionCount / maxPositions) * 100;
   
   return (
-    <div className="bg-gradient-to-r from-zinc-900/80 to-zinc-900/60 backdrop-blur-xl border border-white/10 rounded-xl p-3 mb-4">
-      {/* Single Row: Branding | Session/Regime/Brief Me | Account Data | P&L */}
+    <div className="bg-gradient-to-r from-zinc-900/80 to-zinc-900/60 backdrop-blur-xl border border-white/10 rounded-xl p-2 mb-3">
+      {/* Single Row: Session Info | Account Data | P&L - Removed redundant Command Center branding */}
       <div className="flex justify-between items-center">
-        <div className="flex items-center gap-4">
-          {/* Command Center Branding - Simplified */}
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/30 to-violet-500/30 flex items-center justify-center border border-white/10">
-                <Brain className="w-5 h-5 text-cyan-400" />
-              </div>
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-lg text-white tracking-tight">Command</span>
-                <span className="font-light text-lg text-cyan-400">Center</span>
-              </div>
-              <p className="text-[10px] text-zinc-500">Real-time trading intelligence hub</p>
-            </div>
-          </div>
-          
-          {/* Compact Info Row: AI Credits | Session | Regime | Brief Me */}
-          <div className="flex items-center gap-2 ml-4">
+        <div className="flex items-center gap-3">
+          {/* Compact Info Row: AI Credits | Session */}
+          <div className="flex items-center gap-2">
             {/* AI Credits indicator */}
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-violet-500/10 border border-violet-500/20">
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-violet-500/10 border border-violet-500/20">
               <Sparkles className="w-3 h-3 text-violet-400" />
-              <span className="text-[10px] text-zinc-400">AI Credits</span>
-              <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+              <span className="text-[9px] text-zinc-400">AI</span>
+              <div className="w-12 h-1 bg-zinc-800 rounded-full overflow-hidden">
                 <div className="h-full bg-gradient-to-r from-violet-500 to-cyan-500 rounded-full" style={{ width: '70%' }} />
               </div>
-              <span className="text-xs text-violet-400 font-mono">281</span>
+              <span className="text-[10px] text-violet-400 font-mono">281</span>
             </div>
             
-            <div className="w-px h-6 bg-white/10" />
+            <div className="w-px h-5 bg-white/10" />
             
-            <div className={`px-2.5 py-1 rounded-lg border ${
+            <div className={`px-2 py-0.5 rounded-lg border ${
               marketSession.is_open 
                 ? marketSession.name === 'MARKET OPEN'
                   ? 'bg-emerald-500/10 border-emerald-500/20'
                   : 'bg-amber-500/10 border-amber-500/20'
                 : 'bg-white/5 border-white/5'
             }`}>
-              <span className={`text-xs font-medium ${
+              <span className={`text-[10px] font-medium ${
                 marketSession.is_open 
                   ? marketSession.name === 'MARKET OPEN'
                     ? 'text-emerald-400'
@@ -119,52 +103,52 @@ const DashboardHeader = ({
           </div>
         </div>
         
-        {/* Right Side: Account + P&L */}
-        <div className="flex items-center gap-4">
+        {/* Right Side: Account + P&L - More compact */}
+        <div className="flex items-center gap-3">
           {/* Partial/Live Mode Toggle */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/5">
-            <span className="text-xs text-zinc-500">Partial</span>
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
+            <span className="text-[9px] text-zinc-500">Partial</span>
             <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-xs text-emerald-400 font-medium">LIVE</span>
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-[10px] text-emerald-400 font-medium">LIVE</span>
             </div>
           </div>
           
           {/* Account Value */}
           <div className="text-right">
-            <div className="text-[10px] text-zinc-500 uppercase">Account</div>
-            <div className="font-mono text-lg text-white">
+            <div className="text-[9px] text-zinc-500 uppercase">Account</div>
+            <div className="font-mono text-sm text-white">
               ${accountData?.net_liquidation?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || '0'}
             </div>
           </div>
           
           {/* Buying Power */}
           <div className="text-right">
-            <div className="text-[10px] text-zinc-500 uppercase">Buying Power</div>
-            <div className="font-mono text-white">
+            <div className="text-[9px] text-zinc-500 uppercase">BP</div>
+            <div className="font-mono text-sm text-white">
               ${accountData?.buying_power?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || '0'}
             </div>
           </div>
           
           {/* Today P&L */}
           <div className="text-right">
-            <div className="text-[10px] text-zinc-500 uppercase">Today P&L</div>
-            <div className={`font-mono text-lg ${todayPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {todayPnl >= 0 ? '+' : ''}${todayPnl?.toLocaleString(undefined, { maximumFractionDigits: 2 }) || '0.00'}
+            <div className="text-[9px] text-zinc-500 uppercase">Today</div>
+            <div className={`font-mono text-sm ${todayPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {todayPnl >= 0 ? '+' : ''}${todayPnl?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || '0'}
             </div>
           </div>
           
           {/* Open P&L */}
           <div className="text-right">
-            <div className="text-[10px] text-zinc-500 uppercase">Open P&L</div>
-            <div className={`font-mono ${openPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {openPnl >= 0 ? '+' : ''}${openPnl?.toLocaleString(undefined, { maximumFractionDigits: 2 }) || '0.00'}
+            <div className="text-[9px] text-zinc-500 uppercase">Open</div>
+            <div className={`font-mono text-sm ${openPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {openPnl >= 0 ? '+' : ''}${openPnl?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || '0'}
             </div>
           </div>
           
           {/* Time */}
           <div className="text-right pl-2 border-l border-white/10">
-            <div className="font-mono text-lg text-zinc-300">
+            <div className="font-mono text-sm text-zinc-300">
               {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
             </div>
           </div>
@@ -585,8 +569,8 @@ const NewDashboard = ({
   };
   
   return (
-    <div className="space-y-4">
-      {/* Header */}
+    <div className="space-y-3">
+      {/* Header - Compact */}
       <DashboardHeader
         botStatus={effectiveBotStatus}
         marketSession={marketSession}
@@ -598,16 +582,8 @@ const NewDashboard = ({
         onBriefMe={onBriefMe}
       />
       
-      {/* Bot Performance Chart - Always Visible */}
-      <BotPerformanceChart
-        trades={closedTrades}
-        todayPnl={effectiveTodayPnl}
-        onViewFullAnalytics={onViewAnalytics}
-        autoRefresh={true}
-      />
-      
-      {/* Main Grid */}
-      <div className="grid grid-cols-12 gap-4">
+      {/* Main Grid - SentCom is Primary */}
+      <div className="grid grid-cols-12 gap-3">
         {/* Left Column (8 cols) - SentCom takes full width */}
         <div className="col-span-8">
           {/* SentCom Embedded (Unified AI Command Center) */}
@@ -616,10 +592,18 @@ const NewDashboard = ({
         </div>
         
         {/* Right Column (4 cols) - Learning Insights + Market Regime */}
-        <div className="col-span-4 space-y-4">
+        <div className="col-span-4 space-y-3">
           {children}
         </div>
       </div>
+      
+      {/* Bot Performance Chart - Moved below main grid */}
+      <BotPerformanceChart
+        trades={closedTrades}
+        todayPnl={effectiveTodayPnl}
+        onViewFullAnalytics={onViewAnalytics}
+        autoRefresh={true}
+      />
       
       {/* Scanner Alerts Strip */}
       <ScannerAlertsStrip 
