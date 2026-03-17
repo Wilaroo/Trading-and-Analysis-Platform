@@ -59,7 +59,7 @@ async def get_data_status(
 @router.get("/data-coverage")
 async def get_data_coverage():
     """
-    Get comprehensive data coverage summary.
+    Get comprehensive data coverage summary (cached for performance).
     
     Returns:
     - Per-tier coverage (Intraday, Swing, Investment)
@@ -68,7 +68,21 @@ async def get_data_coverage():
     - ADV cache status
     
     Use this to understand your data coverage and identify gaps.
+    Note: Results are cached for 30 seconds to improve performance.
     """
+    import time
+    
+    # Simple in-memory cache
+    cache_key = "_data_coverage_cache"
+    cache_time_key = "_data_coverage_cache_time"
+    cache_ttl = 30  # 30 seconds cache
+    
+    # Check cache
+    if hasattr(get_data_coverage, cache_key):
+        cached_time = getattr(get_data_coverage, cache_time_key, 0)
+        if time.time() - cached_time < cache_ttl:
+            return getattr(get_data_coverage, cache_key)
+    
     try:
         collector = get_ib_collector()
         db = collector._db
@@ -76,10 +90,10 @@ async def get_data_coverage():
         if db is None:
             return {"success": False, "error": "Database not initialized"}
         
-        data_col = db["ib_historical_data"]  # Fixed: matches COLLECTION_NAME in ib_historical_collector.py
-        adv_col = db["symbol_adv_cache"]  # Fixed: was "adv_cache", should match get_adv_cache_stats()
+        data_col = db["ib_historical_data"]
+        adv_col = db["symbol_adv_cache"]
         
-        # Get ADV cache stats
+        # Get ADV cache stats (fast - just count)
         total_adv_symbols = adv_col.count_documents({})
         
         # Define tiers and their timeframes
@@ -103,78 +117,67 @@ async def get_data_coverage():
             }
         }
         
-        # All timeframes we track
         all_timeframes = ["1 min", "5 mins", "15 mins", "30 mins", "1 hour", "1 day", "1 week"]
         
-        # Get per-timeframe stats - Fixed aggregation to match actual data structure
-        # Data is stored as individual documents with symbol, bar_size, date fields
+        # OPTIMIZED: Single aggregation for all timeframes
+        pipeline = [
+            {"$group": {
+                "_id": {"symbol": "$symbol", "bar_size": "$bar_size"},
+                "bar_count": {"$sum": 1}
+            }},
+            {"$group": {
+                "_id": "$_id.bar_size",
+                "symbol_count": {"$sum": 1},
+                "total_bars": {"$sum": "$bar_count"}
+            }}
+        ]
+        
+        tf_results = {r["_id"]: r for r in data_col.aggregate(pipeline, allowDiskUse=True)}
+        
         timeframe_stats = []
         for tf in all_timeframes:
-            pipeline = [
-                {"$match": {"bar_size": tf}},
-                {"$group": {
-                    "_id": "$symbol",
-                    "bar_count": {"$sum": 1}  # Each document is one bar
-                }},
-                {"$group": {
-                    "_id": None,
-                    "symbol_count": {"$sum": 1},
-                    "total_bars": {"$sum": "$bar_count"}
-                }}
-            ]
-            
-            result = list(data_col.aggregate(pipeline))
-            if result:
-                timeframe_stats.append({
-                    "timeframe": tf,
-                    "symbols": result[0].get("symbol_count", 0),
-                    "total_bars": result[0].get("total_bars", 0)
-                })
-            else:
-                timeframe_stats.append({
-                    "timeframe": tf,
-                    "symbols": 0,
-                    "total_bars": 0
-                })
+            r = tf_results.get(tf, {})
+            timeframe_stats.append({
+                "timeframe": tf,
+                "symbols": r.get("symbol_count", 0),
+                "total_bars": r.get("total_bars", 0)
+            })
         
-        # Get per-tier stats
+        # OPTIMIZED: Get tier counts in single query each
         tier_stats = []
+        total_gaps = 0
+        
         for tier_name, tier_config in tiers.items():
-            # Count symbols in this ADV tier
             adv_query = {"avg_volume": {"$gte": tier_config["min_adv"]}}
             if "max_adv" in tier_config:
                 adv_query["avg_volume"]["$lt"] = tier_config["max_adv"]
             
             tier_symbol_count = adv_col.count_documents(adv_query)
             
-            # Get symbols in this tier
-            tier_symbols = [doc["symbol"] for doc in adv_col.find(adv_query, {"symbol": 1})]
+            # Get symbols in tier (limit to avoid huge queries)
+            tier_symbols = [doc["symbol"] for doc in adv_col.find(adv_query, {"symbol": 1}).limit(5000)]
             
-            # Count how many have each timeframe
             timeframe_coverage = []
             for tf in tier_config["timeframes"]:
-                symbols_with_data = data_col.distinct("symbol", {
+                # Count distinct symbols with data for this timeframe
+                symbols_with_data_count = len(data_col.distinct("symbol", {
                     "symbol": {"$in": tier_symbols},
                     "bar_size": tf
-                })
+                }))
                 
-                # Count total bars for this tier/timeframe - Fixed to count individual documents
-                bar_pipeline = [
-                    {"$match": {"symbol": {"$in": tier_symbols}, "bar_size": tf}},
-                    {"$count": "total_bars"}
-                ]
-                bar_result = list(data_col.aggregate(bar_pipeline))
-                total_bars = bar_result[0]["total_bars"] if bar_result else 0
+                coverage_pct = (symbols_with_data_count / tier_symbol_count * 100) if tier_symbol_count > 0 else 0
+                missing = tier_symbol_count - symbols_with_data_count
                 
-                coverage_pct = (len(symbols_with_data) / tier_symbol_count * 100) if tier_symbol_count > 0 else 0
+                if missing > 0:
+                    total_gaps += 1
                 
                 timeframe_coverage.append({
                     "timeframe": tf,
-                    "symbols_with_data": len(symbols_with_data),
+                    "symbols_with_data": symbols_with_data_count,
                     "symbols_needed": tier_symbol_count,
-                    "missing": tier_symbol_count - len(symbols_with_data),
                     "coverage_pct": round(coverage_pct, 1),
-                    "total_bars": total_bars
+                    "missing": missing,
+                    "needs_fill": missing > 0
                 })
             
             tier_stats.append({
@@ -184,35 +187,27 @@ async def get_data_coverage():
                 "timeframes": timeframe_coverage
             })
         
-        # Calculate what's missing overall
-        missing_summary = []
-        for tier in tier_stats:
-            for tf in tier["timeframes"]:
-                if tf["missing"] > 0:
-                    missing_summary.append({
-                        "tier": tier["tier"],
-                        "timeframe": tf["timeframe"],
-                        "missing_symbols": tf["missing"],
-                        "coverage_pct": tf["coverage_pct"]
-                    })
-        
-        # Sort missing by priority (most missing first)
-        missing_summary.sort(key=lambda x: x["missing_symbols"], reverse=True)
-        
-        return {
+        result = {
             "success": True,
             "adv_cache": {
                 "total_symbols": total_adv_symbols,
-                "status": "ready" if total_adv_symbols > 0 else "needs_refresh"
+                "status": "ready" if total_adv_symbols > 0 else "empty"
             },
             "by_timeframe": timeframe_stats,
             "by_tier": tier_stats,
-            "missing": missing_summary[:10],  # Top 10 gaps
-            "total_gaps": len(missing_summary)
+            "total_gaps": total_gaps
         }
+        
+        # Cache the result
+        setattr(get_data_coverage, cache_key, result)
+        setattr(get_data_coverage, cache_time_key, time.time())
+        
+        return result
         
     except Exception as e:
         logger.error(f"Error getting data coverage: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
