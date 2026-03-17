@@ -1,56 +1,855 @@
-<analysis>**original_problem_statement**: The user wants to evolve their AI trading bot, SentCom, into a self-improving system. This involves hardening the data pipeline, creating weekend/nightly automation, documenting the application, and fixing UI bugs. The most recent requests have focused on completely overhauling the data collection system to be more robust and efficient, fixing critical UI layout and flickering bugs, adding a new dashboard to visualize the coverage of the collected historical data, and integrating AI predictions into the live scanner.
+<analysis>**original_problem_statement**: The user wants to evolve their AI trading bot, SentCom, into a self-improving system. This involves hardening the data pipeline, creating weekend/nightly automation, documenting the application, and fixing UI bugs. The most recent requests have focused on migrating the database to a persistent solution (MongoDB Atlas), ensuring the data collection is robust and complete, and fixing critical UI/connection status bugs.
 
 **PRODUCT REQUIREMENTS**:
 1.  **Robust Data Pipeline**: Collect historical data for multiple timeframes and lookback periods, respecting API rate limits. The collection logic should be per-stock to ensure data integrity.
 2.  **Autonomous Learning Loop**: Implement nightly and weekend automation for data collection and, eventually, model training and simulation.
-3.  **Comprehensive UI**: Consolidate all AI, learning, and data management features into a single, intuitive dashboard. Fix all layout and performance (flickering) bugs.
-4.  **Data Coverage Dashboard**: Provide a UI to show what historical data has been collected, what is missing, and statistics per timeframe and tier.
+3.  **Comprehensive UI**: Consolidate all AI, learning, and data management features into a single, intuitive dashboard. Fix all layout and performance (flickering, connection status) bugs.
+4.  **Data Coverage Dashboard**: Provide a UI to show what historical data has been collected, what is missing, and statistics per timeframe and tier. This UI must provide reliable, real-time feedback.
 5.  **High-Quality Live Scanner**: The scanner must generate actionable, high-quality alerts on liquid tickers, enriched with AI predictions.
+6.  **Persistent Data Storage**: All collected data must be stored in a persistent, cloud-hosted database (now MongoDB Atlas) to survive pod restarts and support continuous learning.
 
 **User's preferred language**: English
 
 **what currently exists?**
-The application is a full-stack AI trading bot (React/FastAPI/MongoDB) with a highly automated and optimized data collection system. The backend processes a large queue of historical data requests, and the process is designed to be self-healing and resilient to nightly service restarts.
-
-Key optimizations and features implemented:
--   **Accurate Data Universe**: The Average Daily Volume (ADV) cache was rebuilt using accurate Interactive Brokers (IB) data, correctly identifying ~2,500 high-volume stocks for intraday data collection (up from an inaccurate 281).
--   **Optimized Collection Engine**: Data requests are processed at a faster rate (1-second delay) and fetch the maximum allowed historical lookback from IB for each timeframe, maximizing efficiency.
--   **Full Automation**: A set of local  scripts, managed by Windows Task Scheduler, provides a complete, hands-off data management lifecycle. This includes automatically resuming collection after IB's nightly restart, performing fast incremental updates on weeknights, and running comprehensive gap-fill and retry-failed jobs on weekends.
--   **Intelligent Logging**: The data collection system now categorizes request outcomes (, , , ), providing clearer logs and enabling smarter retries.
--   **Performant UI**: The slow Data Coverage dashboard API was optimized with a 30-second cache, ensuring the frontend UI remains responsive and provides smooth, regular updates on collection progress.
+The application is a full-stack AI trading bot (React/FastAPI) whose database has been successfully migrated from an ephemeral pod-local instance to a persistent MongoDB Atlas M10 cluster. The backend has been reconfigured to use the Atlas connection string. The data collection pipeline has been audited and hardened, with ~21,000 corrected data fetch requests queued up. The user's local scripts (, ) have been updated to handle network latency and rate-limiting issues by increasing timeouts and implementing exponential backoff. An error-logging system with API endpoints for investigation has also been added.
 
 **Last working item**:
--   **Last item agent was working**: The user reported that the Data Coverage dashboard UI was not refreshing as expected. The agent identified that the backing API endpoint () was too slow (6-20 seconds). A 30-second server-side cache was implemented to fix this, making subsequent API calls respond in under a second.
--   **Status**: USER VERIFICATION PENDING
--   **Agent Testing Done**: Y (Backend endpoint was tested with  to confirm the cache makes responses significantly faster.)
--   **Which testing method agent to use?**: Manual user verification. The user needs to observe the application's Coverage tab to confirm the data visuals are now updating smoothly.
--   **User Testing Done**: N
+-   **Last item agent was working**: Diagnosing and fixing a fluctuating system status where the app UI reports All Systems Offline or Partial Connection. This started after the user restarted their local  script. The agent identified that the connection status relies on heartbeats from local scripts, which appear to be unstable.
+-   **Status**: IN PROGRESS
+-   **Agent Testing Done**: N
+-   **Which testing method agent to use?**: Backend testing. The agent should first use ==> /var/log/supervisor/backend.err.log <==
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.venv/lib/python3.11/site-packages/httpx/_transports/default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+  File "/usr/local/lib/python3.11/contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "/root/.venv/lib/python3.11/site-packages/httpx/_transports/default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectTimeout
+
+Historical data request hist_ff1cde050b22: timeout - will retry
+Historical data request hist_69a8184abec1: timeout - will retry
+⚠️ Ollama Cloud failed: Failed
+Historical data request hist_47ded8d56595: timeout - will retry
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Error capturing sector context for MVST: 'SectorAnalysisService' object has no attribute 'get_sector_context'
+Error capturing fundamental context for MVST: 'IBService' object has no attribute 'get_ib_data'
+Error capturing sentiment context for MVST: 'SentimentAnalysisService' object has no attribute 'analyze_symbol'
+⚠️ Ollama Cloud failed: Failed
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     connection closed
+Historical data request hist_a13e89c482d5: timeout - will retry
+INFO:     ('10.64.128.136', 34692) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+INFO:     ('10.64.128.136', 34914) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Historical data request hist_a95c84a82c28: timeout - will retry
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert CLOV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert RDDT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert XPEV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Historical data request hist_b547e28e6d37: timeout - will retry
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     ('10.64.128.80', 48916) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection closed
+Historical data request hist_019b26625296: timeout - will retry
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Historical data request hist_99f0269d4ff2: timeout - will retry
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert CLOV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert RDDT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert XPEV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Insufficient data for SGEN
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Historical data request hist_12bfa72bfe2d: timeout - will retry
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     ('10.64.128.136', 50722) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert CLOV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert RDDT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert XPEV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     ('10.64.128.136', 58334) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     ('10.64.128.136', 47870) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection closed
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert CLOV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert RDDT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert XPEV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert AMC: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Error capturing sector context for AMC: 'SectorAnalysisService' object has no attribute 'get_sector_context'
+Error capturing fundamental context for AMC: 'IBService' object has no attribute 'get_ib_data'
+Error capturing sentiment context for AMC: 'SentimentAnalysisService' object has no attribute 'analyze_symbol'
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     ('10.64.128.80', 51358) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection closed
+INFO:     ('10.64.128.80', 57798) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert CLOV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert RDDT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert XPEV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert AMC: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+INFO:     ('10.64.128.80', 54108) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection closed
+Insufficient data for SGEN
+INFO:     ('10.64.128.80', 53054) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     ('10.64.128.80', 43470) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     ('10.64.128.136', 51080) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert CLOV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert RDDT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert XPEV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     ('10.64.128.136', 36200) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert CLOV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert RDDT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert XPEV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+INFO:     connection closed
+INFO:     ('10.64.128.80', 47944) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+Historical data request hist_1aeb9263d62e: timeout - will retry
+INFO:     ('10.64.128.136', 59526) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     connection closed
+INFO:     ('10.64.128.136', 40434) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+Historical data request hist_9f4baba941f6: timeout - will retry
+INFO:     ('10.64.128.136', 37644) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert CLOV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert RDDT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert XPEV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert AMC: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     ('10.64.128.136', 39628) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+Insufficient data for SGEN
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     connection closed
+INFO:     ('10.64.128.80', 36314) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('10.64.128.136', 34768) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+INFO:     Will watch for changes in these directories: ['/app/backend']
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+INFO:     Started reloader process [48] using WatchFiles
+
+==> /var/log/supervisor/backend.out.log <==
+INFO:     10.64.128.136:59352 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36486 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36310 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59522 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36498 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36522 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59538 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59544 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59560 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36534 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59514 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59592 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36550 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59600 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36560 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36564 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36576 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36578 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59606 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36586 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36602 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59612 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36614 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36616 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59628 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36630 - "GET /api/ib/orders/queue/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/ib/account/positions HTTP/1.1" 503 Service Unavailable
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36486 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36470 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36658 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36666 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59642 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59646 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36678 - "GET /api/ollama-proxy/poll?session_id=proxy_1773768111_7449766 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55744 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55760 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55772 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55780 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34598 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34600 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34614 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55782 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55794 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34628 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55810 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34628 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34640 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34648 - "GET /api/trading-bot/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55824 - "GET /api/ib/account/summary HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55832 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34662 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34678 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34662 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55832 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34686 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55836 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55840 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55856 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55866 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55878 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55880 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34688 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55884 - "GET /api/trading-bot/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34704 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55900 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55914 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55928 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34720 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34724 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34740 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34744 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55936 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55942 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34758 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55956 - "GET /api/market-regime/summary HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55958 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+WebSocket connected. Total connections: 2
+INFO:     10.64.128.80:55962 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34770 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34778 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34784 - "GET /api/ib/pushed-data HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34798 - "GET /api/sentcom/stream?limit=30 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34808 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55972 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55980 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55984 - "GET /api/ib/pushed-data HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55988 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55998 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56002 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56004 - "GET /api/ib/pushed-data HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34814 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34826 - "GET /api/trading-bot/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56014 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56022 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56026 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34840 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56036 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34856 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34862 - "GET /api/ib/account/summary HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56040 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56044 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56052 - "GET /api/trading-bot/dashboard-data HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34870 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34878 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56064 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34894 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34908 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34920 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34936 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34948 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34956 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+Sent 4 initial quotes
+INFO:     10.64.128.136:59576 - "GET /api/trading-bot/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36630 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/trading-bot/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/trading-bot/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/trading-bot/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36630 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36630 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36630 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36630 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36630 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36630 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36630 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/ib/orders/pending HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/ib/historical-data/pending HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/ib/pushed-data HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/ib/orders/queue/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:43666 - "GET /api/sentcom/stream?limit=30 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:43666 - "POST /api/ib/historical-data/claim/hist_b2fdaf67f9d8 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/stream?limit=30 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:43666 - "GET /api/ib/pushed-data HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/ai-modules/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:43666 - "GET /api/learning/strategy-stats HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/trading-bot/trades/open HTTP/1.1" 200 OK
+INFO:     10.64.128.80:42166 - "GET /api/trading-bot/dashboard-data HTTP/1.1" 200 OK
+INFO:     10.64.128.80:42174 - "GET /api/market-context/session/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:42178 - "GET /api/system/monitor HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/ib/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:43666 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:43668 - "GET /api/medium-learning/edge-decay/alerts HTTP/1.1" 200 OK to check for errors, then repeatedly query the status endpoint () to observe the status changes in real-time.
+-   **User Testing Done**: Y (The user confirmed the connection instability).
 
 **All Pending/In progress Issue list**:
--   **Issue 1: Verify smooth UI refresh for Data Coverage Dashboard (P0)**
-    -   **Description**: The user needs to confirm that the UI for the Data Coverage dashboard now updates smoothly every 10-30 seconds after a server-side cache was added to the slow API endpoint.
-    -   **Attempted fixes**: The agent implemented a 30-second in-memory cache for the  function in .
+-   **Issue 1: Fluctuating Connection Status (All Systems Offline) (P0)**
+    -   **Description**: After restarting, the user sees the app's status change from Partial Connection to All Systems Connected and then All Systems Offline. This indicates an unstable heartbeat or connection between the user's local scripts (, ) and the backend on the Emergent pod.
+    -   **Attempted fixes**:
+        -   Increased HTTP timeouts in  to 30-60 seconds to prevent read timeouts due to Atlas network latency.
+        -   Added exponential backoff and increased polling intervals in  to handle 429 rate-limiting errors.
     -   **Next debug checklist**:
-        1.  Ask the user to hard-refresh their browser ().
-        2.  Confirm they are on the NIA page and have the Historical Data Collection panel's Coverage tab visible.
-        3.  Ask them to observe if the percentage numbers and bar counts update periodically.
-        4.  If not, check the browser's developer console for any new errors.
-    -   **Why fix this issue and what will be achieved with the fix?**: Provides the user with essential real-time feedback and confidence that the long-running background data collection is making progress.
-    -   **Status**: USER VERIFICATION PENDING
-    -   **Is recurring issue?**: N
-    -   **Should Test frontend/backend/both after fix?**: Frontend (visual confirmation by user).
+        1.  Check backend logs for errors related to heartbeats or pusher status updates: ==> /var/log/supervisor/backend.err.log <==
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.venv/lib/python3.11/site-packages/httpx/_transports/default.py", line 393, in handle_async_request
+    with map_httpcore_exceptions():
+  File "/usr/local/lib/python3.11/contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "/root/.venv/lib/python3.11/site-packages/httpx/_transports/default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectTimeout
+
+Historical data request hist_ff1cde050b22: timeout - will retry
+Historical data request hist_69a8184abec1: timeout - will retry
+⚠️ Ollama Cloud failed: Failed
+Historical data request hist_47ded8d56595: timeout - will retry
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Error capturing sector context for MVST: 'SectorAnalysisService' object has no attribute 'get_sector_context'
+Error capturing fundamental context for MVST: 'IBService' object has no attribute 'get_ib_data'
+Error capturing sentiment context for MVST: 'SentimentAnalysisService' object has no attribute 'analyze_symbol'
+⚠️ Ollama Cloud failed: Failed
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     connection closed
+Historical data request hist_a13e89c482d5: timeout - will retry
+INFO:     ('10.64.128.136', 34692) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+INFO:     ('10.64.128.136', 34914) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Historical data request hist_a95c84a82c28: timeout - will retry
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert CLOV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert RDDT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert XPEV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Historical data request hist_b547e28e6d37: timeout - will retry
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     ('10.64.128.80', 48916) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection closed
+Historical data request hist_019b26625296: timeout - will retry
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Historical data request hist_99f0269d4ff2: timeout - will retry
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert CLOV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert RDDT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert XPEV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Insufficient data for SGEN
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Historical data request hist_12bfa72bfe2d: timeout - will retry
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     ('10.64.128.136', 50722) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert CLOV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert RDDT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert XPEV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     ('10.64.128.136', 58334) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     ('10.64.128.136', 47870) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection closed
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert CLOV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert RDDT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert XPEV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert AMC: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Error capturing sector context for AMC: 'SectorAnalysisService' object has no attribute 'get_sector_context'
+Error capturing fundamental context for AMC: 'IBService' object has no attribute 'get_ib_data'
+Error capturing sentiment context for AMC: 'SentimentAnalysisService' object has no attribute 'analyze_symbol'
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     ('10.64.128.80', 51358) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection closed
+INFO:     ('10.64.128.80', 57798) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert CLOV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert RDDT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert XPEV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert AMC: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+INFO:     ('10.64.128.80', 54108) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection closed
+Insufficient data for SGEN
+INFO:     ('10.64.128.80', 53054) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     ('10.64.128.80', 43470) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     ('10.64.128.136', 51080) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert CLOV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert RDDT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert XPEV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     ('10.64.128.136', 36200) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert CLOV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert RDDT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert XPEV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+INFO:     connection closed
+INFO:     ('10.64.128.80', 47944) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+Historical data request hist_1aeb9263d62e: timeout - will retry
+INFO:     ('10.64.128.136', 59526) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     connection closed
+INFO:     ('10.64.128.136', 40434) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+Historical data request hist_9f4baba941f6: timeout - will retry
+INFO:     ('10.64.128.136', 37644) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert MVST: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert CLOV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert RDDT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert XPEV: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert YEXT: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+Could not get AI prediction for alert AMC: cannot import name 'get_timeseries_service' from 'services.ai_modules.timeseries_service' (/app/backend/services/ai_modules/timeseries_service.py)
+INFO:     connection closed
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     ('10.64.128.136', 39628) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+Insufficient data for SGEN
+Error updating position 738d2bac: 'NoneType' object has no attribute 'get'
+Error updating position a6aedb25: 'NoneType' object has no attribute 'get'
+INFO:     connection closed
+INFO:     ('10.64.128.80', 36314) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('10.64.128.136', 34768) - "WebSocket /api/ws/quotes" [accepted]
+INFO:     connection open
+INFO:     Will watch for changes in these directories: ['/app/backend']
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+INFO:     Started reloader process [48] using WatchFiles
+
+==> /var/log/supervisor/backend.out.log <==
+INFO:     10.64.128.136:59352 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36486 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36310 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59522 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36498 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36522 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59538 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59544 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59560 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36534 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59514 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59592 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36550 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59600 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36560 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36564 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36576 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36578 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59606 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36586 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36602 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59612 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36614 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36616 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59628 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36630 - "GET /api/ib/orders/queue/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/ib/account/positions HTTP/1.1" 503 Service Unavailable
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36486 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36470 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36658 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36666 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59642 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59646 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36678 - "GET /api/ollama-proxy/poll?session_id=proxy_1773768111_7449766 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55744 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55760 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55772 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55780 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34598 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34600 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34614 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55782 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55794 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34628 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55810 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34628 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34640 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34648 - "GET /api/trading-bot/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55824 - "GET /api/ib/account/summary HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55832 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34662 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34678 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34662 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55832 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34686 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55836 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55840 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55856 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55866 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55878 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55880 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34688 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55884 - "GET /api/trading-bot/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34704 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55900 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55914 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55928 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34720 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34724 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34740 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34744 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55936 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55942 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34758 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55956 - "GET /api/market-regime/summary HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55958 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+WebSocket connected. Total connections: 2
+INFO:     10.64.128.80:55962 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34770 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34778 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34784 - "GET /api/ib/pushed-data HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34798 - "GET /api/sentcom/stream?limit=30 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34808 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55972 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55980 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55984 - "GET /api/ib/pushed-data HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55988 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:55998 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56002 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56004 - "GET /api/ib/pushed-data HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34814 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34826 - "GET /api/trading-bot/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56014 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56022 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56026 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34840 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56036 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34856 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34862 - "GET /api/ib/account/summary HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56040 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56044 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56052 - "GET /api/trading-bot/dashboard-data HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34870 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34878 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:56064 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34894 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34908 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34920 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34936 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34948 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:34956 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+Sent 4 initial quotes
+INFO:     10.64.128.136:59576 - "GET /api/trading-bot/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36630 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/trading-bot/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/trading-bot/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/trading-bot/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59576 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36630 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36630 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36630 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36630 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36630 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36630 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36630 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/positions HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/dynamic-risk/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/setups HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/sentcom/context HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/stream?limit=20 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/ib/orders/pending HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/ib/historical-data/pending HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/ib/pushed-data HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/ib/orders/queue/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:43666 - "GET /api/sentcom/stream?limit=30 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:43666 - "POST /api/ib/historical-data/claim/hist_b2fdaf67f9d8 HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/sentcom/stream?limit=30 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:43666 - "GET /api/ib/pushed-data HTTP/1.1" 200 OK
+INFO:     10.64.128.80:36646 - "GET /api/ai-modules/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:43666 - "GET /api/learning/strategy-stats HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/trading-bot/trades/open HTTP/1.1" 200 OK
+INFO:     10.64.128.80:42166 - "GET /api/trading-bot/dashboard-data HTTP/1.1" 200 OK
+INFO:     10.64.128.80:42174 - "GET /api/market-context/session/status HTTP/1.1" 200 OK
+INFO:     10.64.128.80:42178 - "GET /api/system/monitor HTTP/1.1" 200 OK
+INFO:     10.64.128.136:59110 - "GET /api/ib/status HTTP/1.1" 200 OK
+INFO:     10.64.128.136:43666 - "GET /api/sentcom/alerts?limit=5 HTTP/1.1" 200 OK
+INFO:     10.64.128.136:43668 - "GET /api/medium-learning/edge-decay/alerts HTTP/1.1" 200 OK.
+        2.  Examine the logic in  that determines pusher connectivity. The current 30-second window for the  might be too aggressive over a public network.
+        3.  Repeatedly call the  endpoint to see which specific service status (, , ) is flapping.
+        4.  Verify that the  and  endpoints are not being excessively rate-limited by the platform's ingress.
+    -   **Why fix this issue and what will be achieved with the fix?**: A stable and accurate system status indicator is crucial for the user to trust that the background data collection and AI processes are functioning correctly.
+    -   **Status**: IN PROGRESS
+    -   **Is recurring issue?**: Y
+    -   **Should Test frontend/backend/both after fix?**: Both. Backend to confirm stable API status responses, and frontend (screenshot) to confirm the UI indicator remains green and stable.
+    -   **Blocked on other issue**: None. This is the primary blocker.
 
 **In progress Task List**:
 -   **Task 1: Large-scale historical data collection (P0)**
-    -   **Where to resume**: This is an ongoing background task. The backend is processing a queue of ~18,000 requests to populate the database with historical data for all identified symbols. The last status check showed it was ~54% complete.
-    -   **What will be achieved with this?**: This will create the foundational dataset required for all future model training, backtesting, and AI-driven analysis.
-    -   **Status**: IN PROGRESS
-    -   **Should Test frontend/backend/both after fix?**: N/A (It's a background process).
-    -   **Blocked on something**: The process depends on the user's local machine remaining on and running the IB Gateway and  script. The automation scripts are designed to handle restarts.
+    -   **Where to resume**: The data collection queue in MongoDB Atlas contains ~21,000 audited and corrected requests. The user needs to run their local  script to begin processing this queue.
+    -   **What will be achieved with this?**: This will populate the persistent database with the complete historical dataset required for all model training and backtesting.
+    -   **Status**: BLOCKED
+    -   **Should Test frontend/backend/both after fix?**: N/A (background process).
+    -   **Blocked on something**: Issue 1: Fluctuating Connection Status. The data pusher cannot run reliably until the connection to the backend is stable.
 
 **Upcoming and Future Tasks**
 -   **Upcoming Tasks**:
-    -   **(P0) Monitor and Verify Data Collection**: Confirm the successful completion of the ongoing large-scale data fetch.
+    -   **(P0) Monitor and Verify Data Collection**: Confirm the successful completion of the ongoing large-scale data fetch once the connection is stable.
     -   **(P1) Trigger Auto-Training**: Once data collection is complete, verify that the automated model training process kicks off successfully.
     -   **(P2) Run AI-Enhanced Scanner**: Use the scanner with the newly trained model to generate high-confidence trading signals.
     -   **(P3) Monitor SentCom Bot**: Ensure the trading bot correctly processes alerts generated by the new model.
@@ -61,85 +860,84 @@ Key optimizations and features implemented:
     -   **(P3) Trade Journal & Alerts**: Implement a trade journal and a notification system for high-priority scanner alerts.
 
 **Completed work in this session**
--   **Fixed and Optimized Quick Fill**: Resolved multiple bugs in the data collection logic, including correcting MongoDB collection names and ensuring specific symbol gaps were passed correctly.
--   **Optimized Collection Speed and Scope**: Increased the data request rate, implemented logic to use the maximum historical lookback per request, and removed the artificial 100-symbol collection limit.
--   **Rebuilt ADV Cache with Accurate Data**: Replaced an inaccurate ADV cache (built from a limited data feed) with one built from comprehensive IB data, correctly identifying ~2,500 high-volume stocks (up from 281).
--   **Implemented Full Automation**: Created and configured a set of local batch scripts (, , etc.) and Windows Scheduled Tasks to create a fully hands-off, self-healing data collection system.
--   **Made Collection Self-Healing**: The automation now automatically retries failed requests (due to timeouts, errors) on subsequent runs.
--   **Improved Logging and Error Handling**: Enhanced the local  script to categorize failures, silence harmless errors (L2 limits, unsubscribed news), and gracefully handle API rate limiting.
--   **Fixed UI Refresh Performance**: Diagnosed and resolved a slow API endpoint by implementing a server-side cache, allowing the UI to update smoothly.
+-   **Database Migration to MongoDB Atlas**: Successfully migrated ~1.15 GB of data (4.7M documents) to a new, persistent M10 MongoDB Atlas cluster, ensuring data survives pod restarts. Updated all backend configurations to use the new Atlas connection string.
+-   **Data Collection Queue Overhaul**: Performed a full audit of the data collection queue, removing duplicates, fixing incorrect lookback durations for ~14,000 requests, and adding ~7,000 new requests to fill coverage gaps. The queue is now primed with ~21,000 requests.
+-   **Network and Rate-Limit Hardening**:
+    -   Increased request timeouts in the local  script to prevent errors caused by network latency to Atlas.
+    -   Implemented exponential backoff and longer polling intervals in  to resolve 429 Too Many Requests errors.
+-   **UI Refresh and Flickering Fix**: Resolved issues with the Data Coverage dashboard by replacing a flickering timestamp with a CSS-based pulsing dot and aligning frontend/backend caching intervals for smoother updates.
+-   **Error Investigation Tools**: Created a new  collection in MongoDB and backend API endpoints (, ) to provide visibility into application errors.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **Background Task Management**: Managing a long-running, multi-hour data collection process that is independent of the UI session.
--   **System Automation**: Using local batch scripts () and Windows Task Scheduler, coordinated with backend API endpoints, to create a fully automated system.
--   **Self-Healing Systems**: Designing the process so that transient failures (network timeouts) are automatically retried on subsequent scheduled runs.
--   **API Performance Optimization**: Using server-side caching to fix a slow endpoint and improve UI responsiveness.
--   **Data Integrity & Reconciliation**: Tracing data discrepancies (inaccurate ADV) to their source and implementing a process to rebuild the dataset with accurate information.
+-   **Database Migration**: Executed a full data migration from a pod-local, ephemeral MongoDB to a persistent, cloud-hosted MongoDB Atlas cluster.
+-   **Network Latency Resilience**: Adapted client-side scripts to handle higher network latency by increasing HTTP request timeouts, preventing premature failures.
+-   **Rate Limiting & Exponential Backoff**: Implemented a robust retry strategy in a client-side polling script to gracefully handle 429 Too Many Requests errors from server infrastructure.
+-   **Data Integrity & Auditing**: Programmatically analyzed a large queue of over 18,000 items to identify and repair inconsistencies, duplicates, and missing entries.
 
 **key DB schema**
--   : Stores requests for data collection. Modified to include a detailed  field for better failure analysis.
--   : Stores average daily volume. Was completely rebuilt with accurate IB data.
--   : Stores the raw time-series bar data.
+-   : **(New)** Stores structured error logs including traceback, context, and timestamps.
+-   : Stores pending requests for data collection. Now contains ~21,000 audited items.
+-   : Stores all raw time-series bar data, now residing on MongoDB Atlas.
+-   : Stores average daily volume data used for tiering symbols.
+
+**changes in tech stack**
+-   **Database**: Migrated from a pod-local MongoDB instance to a dedicated **MongoDB Atlas M10 cluster** for data persistence and scalability.
 
 **All files of reference**
--   : Core service for all data collection, reporting, and automation.
--   : API endpoints controlling data collection.
--   : The user's local script that connects to IB Gateway and processes the queue.
--   : The user's local script for creating the Windows scheduled tasks.
+-   : Contains the core logic for determining the connection status (), which is likely the source of the current bug.
+-   : Contains the  for the new MongoDB Atlas cluster.
+-   : Contains the UI logic for displaying system status and data coverage.
+-   : User's local script, updated with longer timeouts.
+-   : User's local proxy, updated with backoff logic.
+-   : New router providing access to the error investigation logs.
 
 **key api endpoints**
--   : (FIXED/OPTIMIZED) Triggers collection for missing historical data.
--   : (OPTIMIZED) Now cached for fast UI polling.
--   : (NEW) Rebuilds the ADV cache with IB data.
--   : (NEW) Collects only new bars since the last run.
--   : (NEW) Re-queues all previously failed requests.
+-   : Returns the connection status for IB Gateway, the IB Pusher, and the Ollama Proxy. This is the key endpoint for debugging the offline UI issue.
+-   : (NEW) Retrieves detailed error logs from the  collection.
+-   : Endpoint to queue up requests for missing data.
+-   : Endpoint for the local Ollama proxy; was experiencing rate-limiting.
 
 **Critical Info for New Agent**
--   Your first priority is to **verify the UI refresh fix**. The user was experiencing a non-responsive dashboard; you need to confirm with them that it's now updating smoothly after the caching fix.
--   A very large data collection task is running in the background. **Do not disrupt it.** This process is foundational to the user's goal. Any work you do should be on separate components (e.g., new UI dashboards, scanner improvements).
--   The user's entire data collection workflow is **fully automated** via local scripts () and Windows Task Scheduler. Be aware of how , , and  orchestrate the process. The system is designed to be self-healing and hands-off for the user.
--   The underlying data universe is now accurate. The ADV cache was rebuilt using real IB data, so the system is correctly targeting ~2,500 high-volume stocks for intraday data collection.
+-   Your primary task is to **solve the All Systems Offline issue**. The application's status indicator is fluctuating, which is preventing the user from confidently running the data collection. The root cause is an unstable heartbeat between the user's local scripts and the backend. Focus your investigation on the status logic in  and the corresponding client heartbeat implementations.
+-   The database is now on **MongoDB Atlas**. The connection string is in . All data is persistent. Do not attempt to use or look for a local MongoDB instance on the pod.
+-   The data collection queue is primed and ready. Once the connection issue is resolved, the user can start  to begin a large-scale data fetch of ~21,000 requests. Do not modify the queue unless you find new inconsistencies.
+-   The user's local scripts ( and ) have been updated in  and copied to . The user must run  which performs a  to get these latest changes.
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User**: I'm not seeing the data collection numbers refresh in the app.
-    -   **Status**: In Progress. Led to the agent diagnosing and fixing a slow API with caching. The fix is pending user verification.
-2.  **User**: Does the coverage cache apply to the tier numbers too?
-    -   **Status**: Answered. Agent confirmed the entire endpoint response is cached.
-3.  **User**: Thanks.
-    -   **Status**: Acknowledged.
-4.  **User**: We have no 30min data yet, is that correct?
-    -   **Status**: Answered. Agent explained this is expected because of the collection order (high-volume intraday symbols first).
-5.  **User**: Do gap fills automatically include timeouts and errors?
-    -   **Status**: COMPLETED. The agent investigated, found they did not, and implemented a new  step into the automated nightly/weekend scripts.
-6.  **User**: Why are there so many failed requests?
-    -   **Status**: COMPLETED. The agent improved logging to categorize failures, showing most were retry-able network timeouts, not true data issues.
-7.  **User**: What can we work on that won't disrupt the data fetch?
-    -   **Status**: Answered. Agent provided a list of safe frontend and backend tasks.
-8.  **User**: I'm getting errors in my local logs. [Log provided]
-    -   **Status**: COMPLETED. Agent diagnosed and fixed issues in the local  script related to L2 data limits and news subscriptions.
-9.  **User**: Does my  already do a git pull?
-    -   **Status**: Answered. Agent confirmed that it does.
-10. **User**: How long will the full data collection take?
-    -   **Status**: Answered. Agent provided an estimate of ~4-5 hours of continuous runtime.
+1.  **User**:  - User reported the current P0 issue of fluctuating connection status. (Status: IN PROGRESS)
+2.  **User**:  - User reported pusher timeouts. (Status: ADDRESSED, timeouts were increased in the script).
+3.  **User**:  - User requested better error analysis tools. (Status: COMPLETED, agent created an error logging system and API).
+4.  **User**:  - User asked for confirmation on logging. (Status: COMPLETED, agent audited logging).
+5.  **User**:  - User requested a full audit of recent changes. (Status: COMPLETED, agent performed an audit and fixed data gaps).
+6.  **User**:  - User acknowledged a clarification.
+7.  **User**:  - User asked if AI systems were limited to test symbols. (Status: ANSWERED, agent confirmed access to the entire 8,520+ symbol dataset).
+8.  **User**:  - User asked for verification that all systems can access the migrated data. (Status: COMPLETED, agent verified data access).
+9.  **User**:  - User requested verification of lookback periods. (Status: COMPLETED, agent audited and corrected all pending requests).
+10. **User**:  - User reported Ollama proxy rate-limiting errors. (Status: ADDRESSED, agent added exponential backoff).
 
 **Project Health Check:**
--   **Working**: The core application, including the UI, backend services, and a large-scale background data collection process.
--   **Broken**: None.
+-   **Broken**: The system status reporting mechanism is unstable, causing the UI to incorrectly display an All Systems Offline message. This is the main blocker.
 -   **Mocked**: None.
 
 **3rd Party Integrations**
 -   Interactive Brokers (IB Gateway)
--   Ollama Pro
+-   Ollama Pro (using  model)
+-   MongoDB Atlas (M10 tier)
 -   Alpaca
 -   Tavily
 -   Windows Task Scheduler
--   Google Fonts (Space Grotesk & JetBrains Mono)
 
 **Testing status**
--   **Testing agent used after significant changes**: YES (to verify an early UI fix in this session).
+-   **Testing agent used after significant changes**: NO
 -   **Troubleshoot agent used after agent stuck in loop**: NO
 -   **Test files created**: None.
--   **Known regressions**: None.</analysis>
+-   **Known regressions**: The system status indicator in the UI is currently unreliable and frequently shows an offline state, which is a regression from a previously stable state.
+
+**Credentials to test flow:**
+The connection string for the MongoDB Atlas database is stored as the  environment variable in .
+
+**What agent forgot to execute**
+The agent implemented fixes for connection timeouts and rate limiting, but did not fully diagnose or resolve the root cause of the fluctuating All Systems Offline status reported by the user. The heartbeat logic itself needs a more thorough review.</analysis>

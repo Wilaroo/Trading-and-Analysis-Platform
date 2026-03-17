@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://sentcom-dash.preview.emergentagent.com
+https://ai-data-pipeline-3.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://sentcom-dash.preview.emergentagent.com
+https://ai-data-pipeline-3.preview.emergentagent.com
 ```

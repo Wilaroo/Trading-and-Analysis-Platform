@@ -8,7 +8,7 @@ Receives Ollama requests, calls local Ollama, returns responses.
 No ngrok needed - this initiates the connection outbound.
 
 Usage:
-    python ollama_proxy.py --cloud-url https://sentcom-dash.preview.emergentagent.com
+    python ollama_proxy.py --cloud-url https://ai-data-pipeline-3.preview.emergentagent.com
 """
 
 import asyncio

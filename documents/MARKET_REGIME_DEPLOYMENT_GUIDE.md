@@ -101,7 +101,7 @@ from routers.market_regime import router as market_regime_router
 app.include_router(market_regime_router)
 
 # Test with curl:
-# curl https://sentcom-dash.preview.emergentagent.com/api/market-regime/summary
+# curl https://ai-data-pipeline-3.preview.emergentagent.com/api/market-regime/summary
 ```
 
 ## Integration with Other Systems

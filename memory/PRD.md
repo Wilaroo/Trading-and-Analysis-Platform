@@ -67,17 +67,28 @@ Build a self-improving AI trading bot system "SentCom" with:
 - `app_settings` - Application settings
 
 ## Current Status (March 17, 2026)
+- ✅ Database migrated to MongoDB Atlas (persistent storage)
+- ✅ ~21,000 data fetch requests audited and queued
 - ✅ Data Coverage Dashboard verified working
 - ✅ Backend returns correct data (12,198 symbols in ADV cache)
-- ✅ UI displays coverage percentages correctly
-- ✅ Data gaps identified (12 total)
+- ✅ **FIX: Heartbeat tolerance increased from 30s to 90s** (fixes fluctuating "All Systems Offline" status)
+
+## Recent Changes
+### March 17, 2026 - Connection Status Fix
+- **Issue**: System status indicator was fluctuating between "Online" and "Offline" due to tight 30-second heartbeat window
+- **Root cause**: Network latency to MongoDB Atlas + rate limiting + concurrent operations caused heartbeat delays
+- **Fix**: Increased heartbeat tolerance from 30 seconds to 90 seconds in `/app/backend/routers/ib.py`
+- **Files modified**: `backend/routers/ib.py` (functions: `is_pusher_connected`, `get_connection_status`, `get_pushed_ib_data`)
 
 ## Next Tasks
-1. Run "Quick Fill" to collect missing data
-2. Verify auto-training triggers
-3. Test AI-enhanced scanner
-4. Monitor SentCom bot
+1. ⏳ User: Restart `StartTrading.bat` and verify stable connection status
+2. Monitor large-scale data collection (~21,000 requests)
+3. Verify auto-training triggers after data collection
+4. Test AI-enhanced scanner
+5. Monitor SentCom bot
 
 ## Backlog
-- (P1) Deep Scanner Overhaul
+- (P1) Deep Scanner Overhaul - alternative data sources
 - (P2) Advanced Model Training Dashboard
+- (P2) Portfolio Analytics Dashboard
+- (P3) Trade Journal & Alerts

@@ -88,13 +88,13 @@ Test the automation before relying on it:
 
 ```batch
 :: Test detection (won't actually run anything)
-python weekend_batch.py --cloud-url https://sentcom-dash.preview.emergentagent.com --mode manual
+python weekend_batch.py --cloud-url https://ai-data-pipeline-3.preview.emergentagent.com --mode manual
 
 :: Force weekend mode
-python weekend_batch.py --cloud-url https://sentcom-dash.preview.emergentagent.com --mode weekend
+python weekend_batch.py --cloud-url https://ai-data-pipeline-3.preview.emergentagent.com --mode weekend
 
 :: Force nightly mode  
-python weekend_batch.py --cloud-url https://sentcom-dash.preview.emergentagent.com --mode nightly
+python weekend_batch.py --cloud-url https://ai-data-pipeline-3.preview.emergentagent.com --mode nightly
 ```
 
 ## Logs

@@ -302,7 +302,8 @@ async def get_connection_status():
         try:
             last_dt = datetime.fromisoformat(pusher_last_update.replace('Z', '+00:00'))
             age_seconds = (datetime.now(timezone.utc) - last_dt).total_seconds()
-            pusher_connected = age_seconds <= 30
+            # 90 seconds tolerance for network latency and concurrent operations
+            pusher_connected = age_seconds <= 90
         except:
             pass
     
@@ -333,7 +334,7 @@ async def get_pusher_setup_info():
     cloud_url = os.environ.get("REACT_APP_BACKEND_URL", "")
     if not cloud_url:
         # Try to infer from request or env
-        cloud_url = os.environ.get("APP_URL", "https://sentcom-dash.preview.emergentagent.com")
+        cloud_url = os.environ.get("APP_URL", "https://ai-data-pipeline-3.preview.emergentagent.com")
     
     pusher_connected = False
     last_update = _pushed_ib_data.get("last_update")
@@ -341,7 +342,8 @@ async def get_pusher_setup_info():
         try:
             last_dt = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
             age_seconds = (datetime.now(timezone.utc) - last_dt).total_seconds()
-            pusher_connected = age_seconds <= 30
+            # 90 seconds tolerance for network latency and concurrent operations
+            pusher_connected = age_seconds <= 90
         except:
             pass
     
@@ -468,7 +470,8 @@ async def get_pushed_ib_data():
     """
     global _pushed_ib_data
     
-    # Check if data is stale (more than 30 seconds old)
+    # Check if data is stale (more than 90 seconds old)
+    # Increased from 30s to handle network latency and concurrent operations
     is_connected = _pushed_ib_data.get("connected", False)
     last_update = _pushed_ib_data.get("last_update")
     
@@ -477,7 +480,7 @@ async def get_pushed_ib_data():
             from datetime import datetime
             last_dt = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
             age_seconds = (datetime.now(timezone.utc) - last_dt).total_seconds()
-            if age_seconds > 30:
+            if age_seconds > 90:
                 is_connected = False
         except:
             pass
@@ -866,8 +869,11 @@ def is_pusher_connected() -> bool:
         now = datetime.now(timezone.utc)
         age_seconds = (now - last_dt).total_seconds()
         
-        # Allow up to 30 seconds staleness
-        return age_seconds <= 30
+        # Allow up to 90 seconds staleness (increased from 30s)
+        # This accounts for network latency to MongoDB Atlas, rate limiting,
+        # and the pusher handling multiple concurrent operations (data fetch,
+        # Ollama requests, TradeCommand, etc.)
+        return age_seconds <= 90
     except Exception:
         return False
 
