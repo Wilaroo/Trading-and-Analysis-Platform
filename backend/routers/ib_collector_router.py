@@ -219,6 +219,229 @@ async def get_data_coverage():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/fill-gaps")
+async def fill_gaps(
+    tier_filter: Optional[str] = None,
+    lookback_days: int = 30,
+    max_symbols: int = 100
+):
+    """
+    Smart Gap Filler - Automatically collects ONLY missing data.
+    
+    Analyzes the current data coverage and starts a collection job
+    targeting only the symbols/timeframes that have gaps.
+    
+    - **tier_filter**: Limit to specific tier ("intraday", "swing", "investment", or None for all)
+    - **lookback_days**: How many days of history to collect for gaps (default 30)
+    - **max_symbols**: Maximum symbols to process in this run (default 100)
+    
+    Returns:
+    - Summary of gaps found
+    - Collection job info for each tier/timeframe combination
+    """
+    try:
+        collector = get_ib_collector()
+        db = collector._db
+        
+        if db is None:
+            return {"success": False, "error": "Database not initialized"}
+        
+        adv_col = db["adv_cache"]
+        data_col = db["historical_data"]
+        
+        # Define tiers and their timeframes (same as coverage endpoint)
+        tiers = {
+            "intraday": {
+                "min_adv": 500_000,
+                "timeframes": ["1 min", "5 mins", "15 mins", "1 hour", "1 day"],
+                "description": "500K+ shares/day"
+            },
+            "swing": {
+                "min_adv": 100_000,
+                "max_adv": 500_000,
+                "timeframes": ["5 mins", "30 mins", "1 hour", "1 day"],
+                "description": "100K-500K shares/day"
+            },
+            "investment": {
+                "min_adv": 50_000,
+                "max_adv": 100_000,
+                "timeframes": ["1 hour", "1 day", "1 week"],
+                "description": "50K-100K shares/day"
+            }
+        }
+        
+        # Filter tiers if specified
+        if tier_filter and tier_filter in tiers:
+            tiers = {tier_filter: tiers[tier_filter]}
+        
+        gaps_found = []
+        symbols_to_collect = {}  # {tier: {timeframe: [symbols]}}
+        
+        for tier_name, tier_config in tiers.items():
+            # Get symbols in this ADV tier
+            adv_query = {"avg_volume": {"$gte": tier_config["min_adv"]}}
+            if "max_adv" in tier_config:
+                adv_query["avg_volume"]["$lt"] = tier_config["max_adv"]
+            
+            tier_symbols = [doc["symbol"] for doc in adv_col.find(adv_query, {"symbol": 1}).limit(max_symbols)]
+            
+            if not tier_symbols:
+                continue
+            
+            symbols_to_collect[tier_name] = {}
+            
+            for tf in tier_config["timeframes"]:
+                # Find symbols that DON'T have data for this timeframe
+                symbols_with_data = set(data_col.distinct("symbol", {
+                    "symbol": {"$in": tier_symbols},
+                    "bar_size": tf
+                }))
+                
+                missing_symbols = [s for s in tier_symbols if s not in symbols_with_data]
+                
+                if missing_symbols:
+                    symbols_to_collect[tier_name][tf] = missing_symbols[:max_symbols]
+                    gaps_found.append({
+                        "tier": tier_name,
+                        "timeframe": tf,
+                        "missing_count": len(missing_symbols),
+                        "will_collect": len(symbols_to_collect[tier_name][tf])
+                    })
+        
+        if not gaps_found:
+            return {
+                "success": True,
+                "message": "No gaps found! Your data coverage is complete.",
+                "gaps_found": 0,
+                "jobs_started": 0
+            }
+        
+        # Start collection for each gap
+        # We'll use the per-stock collection approach for efficiency
+        total_symbols = set()
+        for tier_name, timeframes in symbols_to_collect.items():
+            for tf, symbols in timeframes.items():
+                total_symbols.update(symbols)
+        
+        # Start a per-stock collection with the missing symbols
+        job_result = await collector.run_per_stock_collection(
+            lookback_days=lookback_days,
+            skip_recent=False,  # We already filtered to missing only
+            max_symbols=len(total_symbols)
+        )
+        
+        return {
+            "success": True,
+            "message": f"Started filling {len(gaps_found)} gaps across {len(total_symbols)} symbols",
+            "gaps_found": len(gaps_found),
+            "gap_details": gaps_found,
+            "total_unique_symbols": len(total_symbols),
+            "collection_job": job_result
+        }
+        
+    except Exception as e:
+        logger.error(f"Error filling gaps: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/gap-analysis")
+async def get_gap_analysis(tier_filter: Optional[str] = None):
+    """
+    Preview what gaps exist without starting a collection.
+    
+    Use this to see what the fill-gaps endpoint would collect.
+    
+    - **tier_filter**: Limit to specific tier ("intraday", "swing", "investment", or None for all)
+    """
+    try:
+        collector = get_ib_collector()
+        db = collector._db
+        
+        if db is None:
+            return {"success": False, "error": "Database not initialized"}
+        
+        adv_col = db["adv_cache"]
+        data_col = db["historical_data"]
+        
+        # Define tiers
+        tiers = {
+            "intraday": {
+                "min_adv": 500_000,
+                "timeframes": ["1 min", "5 mins", "15 mins", "1 hour", "1 day"],
+                "description": "500K+ shares/day"
+            },
+            "swing": {
+                "min_adv": 100_000,
+                "max_adv": 500_000,
+                "timeframes": ["5 mins", "30 mins", "1 hour", "1 day"],
+                "description": "100K-500K shares/day"
+            },
+            "investment": {
+                "min_adv": 50_000,
+                "max_adv": 100_000,
+                "timeframes": ["1 hour", "1 day", "1 week"],
+                "description": "50K-100K shares/day"
+            }
+        }
+        
+        if tier_filter and tier_filter in tiers:
+            tiers = {tier_filter: tiers[tier_filter]}
+        
+        gap_analysis = []
+        total_missing = 0
+        
+        for tier_name, tier_config in tiers.items():
+            adv_query = {"avg_volume": {"$gte": tier_config["min_adv"]}}
+            if "max_adv" in tier_config:
+                adv_query["avg_volume"]["$lt"] = tier_config["max_adv"]
+            
+            tier_symbols = [doc["symbol"] for doc in adv_col.find(adv_query, {"symbol": 1})]
+            tier_total = len(tier_symbols)
+            
+            if tier_total == 0:
+                continue
+            
+            tier_gaps = {
+                "tier": tier_name,
+                "description": tier_config["description"],
+                "total_symbols": tier_total,
+                "timeframes": []
+            }
+            
+            for tf in tier_config["timeframes"]:
+                symbols_with_data = set(data_col.distinct("symbol", {
+                    "symbol": {"$in": tier_symbols},
+                    "bar_size": tf
+                }))
+                
+                missing_count = tier_total - len(symbols_with_data)
+                coverage_pct = (len(symbols_with_data) / tier_total * 100) if tier_total > 0 else 0
+                
+                tier_gaps["timeframes"].append({
+                    "timeframe": tf,
+                    "has_data": len(symbols_with_data),
+                    "missing": missing_count,
+                    "coverage_pct": round(coverage_pct, 1),
+                    "needs_fill": missing_count > 0
+                })
+                
+                total_missing += missing_count
+            
+            gap_analysis.append(tier_gaps)
+        
+        return {
+            "success": True,
+            "total_gaps": total_missing,
+            "needs_fill": total_missing > 0,
+            "estimated_time_minutes": total_missing * 2,  # ~2 seconds per request
+            "analysis": gap_analysis
+        }
+        
+    except Exception as e:
+        logger.error(f"Error analyzing gaps: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/start")
 async def start_collection(
     symbols: Optional[List[str]] = None,

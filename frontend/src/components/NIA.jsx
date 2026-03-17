@@ -397,6 +397,9 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
   // Data coverage state
   const [dataCoverage, setDataCoverage] = useState(null);
   const [loadingCoverage, setLoadingCoverage] = useState(true);
+  
+  // Fill gaps state
+  const [fillingGaps, setFillingGaps] = useState(false);
 
   // ADV Tier options - determines which symbols AND which timeframes
   const tierOptions = [
@@ -528,6 +531,45 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
       toast.error('Error cancelling');
     } finally {
       setCancelling(false);
+    }
+  };
+
+  // Fill gaps - automatically collect only missing data
+  const handleFillGaps = async () => {
+    setFillingGaps(true);
+    try {
+      const params = new URLSearchParams({
+        lookback_days: lookbackDays.toString(),
+        max_symbols: '100' // Start with reasonable batch
+      });
+      
+      // Add tier filter if not 'all'
+      if (tier !== 'all') {
+        params.append('tier_filter', tier);
+      }
+      
+      const res = await fetch(`${API_BASE}/api/ib-collector/fill-gaps?${params}`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        if (data.gaps_found === 0) {
+          toast.success('No gaps found! Your data coverage is complete.');
+        } else {
+          toast.success(`Started filling ${data.gaps_found} gaps across ${data.total_unique_symbols} symbols`);
+          // Switch to Progress tab to show status
+          setActiveTab('progress');
+        }
+        if (onRefresh) onRefresh();
+      } else {
+        toast.error(data.error || 'Failed to start gap fill');
+      }
+    } catch (err) {
+      toast.error('Error starting gap fill');
+      console.error(err);
+    } finally {
+      setFillingGaps(false);
     }
   };
 
@@ -721,14 +763,57 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
                         </div>
                       )}
                       
-                      {/* Refresh Button */}
-                      <button
-                        onClick={onRefresh}
-                        className="w-full py-2 rounded-lg bg-white/5 border border-white/10 text-zinc-400 text-xs font-medium hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                        Refresh Coverage Data
-                      </button>
+                      {/* Action Buttons */}
+                      <div className="flex gap-2">
+                        {/* Fill Gaps Button - Primary action when gaps exist */}
+                        {dataCoverage.total_gaps > 0 && (
+                          <button
+                            onClick={handleFillGaps}
+                            disabled={fillingGaps || hasActiveCollections}
+                            className="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 border border-emerald-500/30 text-emerald-400 text-xs font-medium hover:from-emerald-500/30 hover:to-cyan-500/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                            data-testid="fill-gaps-btn"
+                          >
+                            {fillingGaps ? (
+                              <>
+                                <Loader className="w-3 h-3 animate-spin" />
+                                Starting...
+                              </>
+                            ) : (
+                              <>
+                                <Zap className="w-3 h-3" />
+                                Fill Gaps ({dataCoverage.total_gaps})
+                              </>
+                            )}
+                          </button>
+                        )}
+                        
+                        {/* Refresh Button */}
+                        <button
+                          onClick={onRefresh}
+                          className={`${dataCoverage.total_gaps > 0 ? 'flex-1' : 'w-full'} py-2 rounded-lg bg-white/5 border border-white/10 text-zinc-400 text-xs font-medium hover:bg-white/10 transition-colors flex items-center justify-center gap-2`}
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          Refresh
+                        </button>
+                      </div>
+                      
+                      {/* Status Messages */}
+                      {dataCoverage.total_gaps === 0 && dataCoverage.adv_cache?.total_symbols > 0 && (
+                        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-center">
+                          <CheckCircle className="w-6 h-6 text-emerald-400 mx-auto mb-2" />
+                          <p className="text-xs text-emerald-400 font-medium">Data coverage complete!</p>
+                          <p className="text-[10px] text-zinc-500 mt-1">All tiers and timeframes have data</p>
+                        </div>
+                      )}
+                      
+                      {/* No ADV Cache - Need initial collection */}
+                      {dataCoverage.adv_cache?.total_symbols === 0 && (
+                        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-center">
+                          <Database className="w-6 h-6 text-amber-400 mx-auto mb-2" />
+                          <p className="text-xs text-amber-400 font-medium">No symbols in ADV cache</p>
+                          <p className="text-[10px] text-zinc-500 mt-1">Run a data collection from the "Collect" tab to populate the cache</p>
+                        </div>
+                      )}
                     </>
                   ) : (
                     <div className="text-center py-8">
