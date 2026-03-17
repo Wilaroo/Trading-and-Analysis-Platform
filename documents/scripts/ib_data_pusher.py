@@ -1263,24 +1263,25 @@ class IBDataPusher:
     def _collection_mode_tick(self) -> Optional[dict]:
         """Execute one tick of collection mode. Returns completed/failed counts."""
         try:
-            # Get pending requests from cloud
-            result = self.api.get_safe("/api/ib/historical-data/pending?limit=3", timeout=20)
+            # Get pending requests from cloud (with longer timeout for slow connections)
+            result = self.api.get_safe("/api/ib/historical-data/pending?limit=6", timeout=60)
             
             if not result:
-                time.sleep(5)  # Wait before checking again
+                logger.warning("[Collection] Cloud API unavailable, waiting 30s...")
+                time.sleep(30)  # Longer wait on cloud failure
                 return None
             
             requests_list = result.get("requests", [])
             
             if not requests_list:
-                logger.info("[Collection] No pending requests. Waiting...")
-                time.sleep(10)
+                logger.info("[Collection] No pending requests. Waiting 30s...")
+                time.sleep(30)
                 return None
             
             completed = 0
             failed = 0
             
-            logger.info(f"[Collection] Processing {len(requests_list)} requests...")
+            logger.info(f"[Collection] Processing {len(requests_list)} requests for {requests_list[0].get('symbol', 'unknown')}...")
             
             for req in requests_list:
                 try:
@@ -1300,6 +1301,7 @@ class IBDataPusher:
             
         except Exception as e:
             logger.error(f"[Collection] Tick error: {e}")
+            time.sleep(10)  # Wait before retry on error
             return {"completed": 0, "failed": 0}
 
     # ==================== COLLECTION MODE ====================
@@ -1922,6 +1924,9 @@ class IBDataPusher:
         - timeout: Network or IB timeout (should retry)
         - rate_limited: Hit IB rate limit (should retry later)
         - error: Actual error that needs investigation
+        
+        Note: Cloud reporting failures don't affect data collection.
+        Data is still saved to MongoDB - cloud just tracks status.
         """
         try:
             # Determine final status
@@ -1939,7 +1944,8 @@ class IBDataPusher:
                 "fetched_at": datetime.now().isoformat()
             }
             
-            result = self.api.post_safe("/api/ib/historical-data/result", payload, timeout=30)
+            # Use longer timeout and don't block on failure
+            result = self.api.post_safe("/api/ib/historical-data/result", payload, timeout=60)
             
             if result:
                 # Log based on status type
@@ -1954,10 +1960,12 @@ class IBDataPusher:
                 else:
                     logger.error(f"[HistoricalData] {symbol}: Failed - {error}")
             else:
-                logger.warning(f"[HistoricalData] Failed to report result for {symbol}")
+                # Cloud report failed but data is still collected locally
+                logger.warning(f"[HistoricalData] Cloud report failed for {symbol} - data still saved locally")
                 
         except Exception as e:
-            logger.error(f"[HistoricalData] Error reporting result: {e}")
+            # Don't let cloud errors stop collection
+            logger.warning(f"[HistoricalData] Cloud report error for {symbol}: {e} - continuing")
 
 
 def main():
