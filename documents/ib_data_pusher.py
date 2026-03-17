@@ -49,7 +49,7 @@ class IBDataPusher:
         self.subscribed_contracts: Dict[str, Contract] = {}
         self.depth_subscriptions: Dict[str, object] = {}  # symbol -> ticker object for L2
         self.last_push_time = 0
-        self.push_interval = 2.0  # Push every 2 seconds (reduced from 1 to lower load)
+        self.push_interval = 5.0  # Push every 5 seconds (increased from 2 to reduce rate limiting)
         self.level2_enabled = True  # Level 2 uses polling approach, always available
         
         # Data buffers
@@ -698,8 +698,14 @@ class IBDataPusher:
                 result = response.json()
                 if result.get("success"):
                     logger.info(f"Push OK! Cloud received: {result.get('received', {})}")
+                    # Reset push interval on success
+                    self.push_interval = 2.0
                 else:
                     logger.warning(f"Push returned error: {result}")
+            elif response.status_code == 429:
+                # Rate limited - increase push interval temporarily
+                self.push_interval = min(self.push_interval * 1.5, 10.0)  # Max 10 seconds
+                logger.warning(f"Rate limited (429) - slowing down to {self.push_interval:.1f}s interval")
             else:
                 logger.warning(f"Push failed: HTTP {response.status_code} - {response.text[:200]}")
                         
