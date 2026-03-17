@@ -502,6 +502,9 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
   const [loadingCoverage, setLoadingCoverage] = useState(true);
   const [lastDataChange, setLastDataChange] = useState(null); // Track when data actually changed
   
+  // Collection mode state (dedicated collector running)
+  const [collectionMode, setCollectionMode] = useState(null);
+  
   // Fill gaps state
   const [fillingGaps, setFillingGaps] = useState(false);
   
@@ -563,9 +566,10 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
       if (!isMounted) return;
       
       try {
-        const [progressRes, coverageRes] = await Promise.allSettled([
+        const [progressRes, coverageRes, collectionModeRes] = await Promise.allSettled([
           fetch(`${API_BASE}/api/ib-collector/queue-progress-detailed`),
-          fetch(`${API_BASE}/api/ib-collector/data-coverage`)
+          fetch(`${API_BASE}/api/ib-collector/data-coverage`),
+          fetch(`${API_BASE}/api/ib/collection-mode/status`)
         ]);
         
         if (!isMounted) return;
@@ -602,6 +606,12 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
               setLastDataChange(new Date()); // Mark when data actually changed
             }
           }
+        }
+        
+        // Fetch collection mode status
+        if (collectionModeRes.status === 'fulfilled' && collectionModeRes.value.ok) {
+          const data = await collectionModeRes.value.json();
+          setCollectionMode(data);
         }
       } catch (err) {
         console.error('Error fetching collection data:', err);
@@ -756,6 +766,48 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
           >
+            {/* Collection Mode Banner */}
+            {collectionMode?.collection_mode?.active && (
+              <div className="mx-3 mt-3 p-3 rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-amber-500/30 flex items-center justify-center animate-pulse">
+                    <Download className="w-4 h-4 text-amber-400" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-amber-400">DATA COLLECTION MODE ACTIVE</span>
+                      <span className="px-1.5 py-0.5 rounded bg-amber-500/30 text-[9px] text-amber-300 font-medium">
+                        LIVE TRADING PAUSED
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-4 mt-1 text-[10px] text-zinc-400">
+                      <span>Completed: <span className="text-emerald-400 font-medium">{collectionMode.collection_mode.completed?.toLocaleString() || 0}</span></span>
+                      <span>Rate: <span className="text-cyan-400 font-medium">{Math.round(collectionMode.collection_mode.rate_per_hour || 0)}/hr</span></span>
+                      <span>Running: <span className="text-zinc-300">{Math.round(collectionMode.collection_mode.elapsed_minutes || 0)} min</span></span>
+                    </div>
+                    {collectionMode.queue && (
+                      <div className="mt-2">
+                        <div className="flex items-center justify-between text-[10px] mb-1">
+                          <span className="text-zinc-500">Progress</span>
+                          <span className="text-zinc-400">{collectionMode.queue.progress_pct}%</span>
+                        </div>
+                        <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-gradient-to-r from-amber-500 to-orange-500 transition-all duration-500"
+                            style={{ width: `${collectionMode.queue.progress_pct || 0}%` }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between text-[9px] text-zinc-500 mt-1">
+                          <span>{collectionMode.queue.completed?.toLocaleString()} / {collectionMode.queue.total?.toLocaleString()}</span>
+                          <span>{collectionMode.queue.pending?.toLocaleString()} remaining</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            
             {/* Tab Navigation */}
             <div className="flex border-b border-white/10">
               <button
