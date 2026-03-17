@@ -76,7 +76,7 @@ class OllamaProxyHTTP:
                 result = await self.call_ollama(req.get("request", {}))
                 logger.info(f"<<< Done: {rid} {'OK' if result.get('success') else 'FAILED'}")
                 await self.respond(rid, result)
-            await asyncio.sleep(1)
+            await asyncio.sleep(3)  # Increased from 1s to 3s to avoid rate limiting
 async def main():
     print("=" * 50)
     print("  OLLAMA PROXY (Stable HTTP)")
