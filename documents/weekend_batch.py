@@ -100,39 +100,78 @@ class WeekendBatchRunner:
         logger.warning(f"Pusher not connected after {timeout}s")
         return False
     
-    def trigger_smart_collection(self) -> dict:
-        """Start Smart Collection - now uses per-stock multi-timeframe approach."""
-        logger.info("=" * 50)
-        logger.info("STARTING PER-STOCK MULTI-TIMEFRAME COLLECTION")
+    def trigger_smart_collection(self, mode: str = "nightly") -> dict:
+        """
+        Start Smart Collection based on mode.
+        
+        - nightly: Uses incremental-update (only fetch new bars since last collection)
+        - weekend: Uses fill-gaps with max lookback (fill any missing historical data)
+        """
         logger.info("=" * 50)
         
-        try:
-            # Use the new per-stock collection endpoint
-            resp = requests.post(
-                f"{self.api_base}/ib-collector/per-stock-collection",
-                params={
-                    "lookback_days": 30,
-                    "skip_recent": True,
-                    "recent_days_threshold": 7
-                },
-                timeout=30
-            )
+        if mode == "nightly":
+            # NIGHTLY: Only fetch new data since last collection (incremental)
+            logger.info("STARTING INCREMENTAL UPDATE (Nightly Mode)")
+            logger.info("Only fetching NEW bars since last collection")
+            logger.info("=" * 50)
             
-            if resp.ok:
-                result = resp.json()
-                logger.info(f"Per-stock collection started:")
-                logger.info(f"  Symbols: {result.get('symbols', 'N/A')}")
-                logger.info(f"  Total Requests: {result.get('total_requests', 'N/A')}")
-                logger.info(f"  Estimated Hours: {result.get('estimated_hours', 'N/A')}")
-                logger.info(f"  Tier counts: {result.get('tier_counts', {})}")
-                return result
-            else:
-                logger.error(f"Failed to start: {resp.status_code} - {resp.text}")
-                return {"success": False, "error": resp.text}
+            try:
+                resp = requests.post(
+                    f"{self.api_base}/ib-collector/incremental-update",
+                    params={
+                        "max_days_lookback": 7  # Cap at 7 days for nightly
+                    },
+                    timeout=30
+                )
                 
-        except Exception as e:
-            logger.error(f"Error starting per-stock collection: {e}")
-            return {"success": False, "error": str(e)}
+                if resp.ok:
+                    result = resp.json()
+                    logger.info(f"Incremental update started:")
+                    logger.info(f"  Symbols: {result.get('symbols_updated', 'N/A')}")
+                    logger.info(f"  Total Requests: {result.get('total_requests', 'N/A')}")
+                    logger.info(f"  Estimated Minutes: {result.get('estimated_minutes', 'N/A')}")
+                    logger.info(f"  Note: {result.get('note', '')}")
+                    return result
+                else:
+                    logger.error(f"Failed to start: {resp.status_code} - {resp.text}")
+                    return {"success": False, "error": resp.text}
+                    
+            except Exception as e:
+                logger.error(f"Error starting incremental update: {e}")
+                return {"success": False, "error": str(e)}
+        
+        else:
+            # WEEKEND: Fill any gaps with maximum lookback
+            logger.info("STARTING FULL GAP FILL (Weekend Mode)")
+            logger.info("Filling any missing historical data with max lookback")
+            logger.info("=" * 50)
+            
+            try:
+                resp = requests.post(
+                    f"{self.api_base}/ib-collector/fill-gaps",
+                    params={
+                        "use_max_lookback": True  # Get maximum history per timeframe
+                    },
+                    timeout=30
+                )
+                
+                if resp.ok:
+                    result = resp.json()
+                    logger.info(f"Gap fill started:")
+                    logger.info(f"  Gaps: {len(result.get('gap_details', []))}")
+                    logger.info(f"  Symbols: {result.get('total_unique_symbols', 'N/A')}")
+                    if result.get('collection_job'):
+                        job = result['collection_job']
+                        logger.info(f"  Total Requests: {job.get('total_requests', 'N/A')}")
+                        logger.info(f"  Estimated Time: {job.get('estimated_time', 'N/A')}")
+                    return result
+                else:
+                    logger.error(f"Failed to start: {resp.status_code} - {resp.text}")
+                    return {"success": False, "error": resp.text}
+                    
+            except Exception as e:
+                logger.error(f"Error starting gap fill: {e}")
+                return {"success": False, "error": str(e)}
     
     def trigger_full_market_collection(self) -> dict:
         """Start Full Market Collection (all stocks)."""
@@ -352,7 +391,7 @@ class WeekendBatchRunner:
         """Full weekend batch: Collection + Training + Simulations."""
         logger.info("=" * 60)
         logger.info("   WEEKEND BATCH MODE")
-        logger.info("   Full data refresh + training + simulations")
+        logger.info("   Fill any missing historical data + training + simulations")
         logger.info("=" * 60)
         
         # Wait for pusher
@@ -360,16 +399,20 @@ class WeekendBatchRunner:
             logger.error("Cannot proceed without IB Data Pusher")
             return False
         
-        # Start Smart Collection
-        result = self.trigger_smart_collection()
+        # Start Gap Fill Collection (weekend mode = fill missing data with max lookback)
+        result = self.trigger_smart_collection(mode="weekend")
         if not result.get("success"):
-            logger.error("Failed to start collection")
-            return False
-        
-        # Monitor until complete
-        if not self.monitor_collection():
-            logger.error("Collection did not complete")
-            return False
+            # Check if it's just "no gaps to fill"
+            if "up to date" in result.get("message", "").lower() or "nothing to" in result.get("message", "").lower():
+                logger.info("All data is up to date - skipping collection")
+            else:
+                logger.error("Failed to start collection")
+                return False
+        else:
+            # Monitor until complete
+            if not self.monitor_collection():
+                logger.error("Collection did not complete")
+                return False
         
         # Retrain model with new data
         self.trigger_model_training()
@@ -387,10 +430,10 @@ class WeekendBatchRunner:
         return True
     
     def run_nightly_batch(self):
-        """Nightly batch: Quick Smart Collection refresh."""
+        """Nightly batch: Incremental update - only fetch NEW data since last collection."""
         logger.info("=" * 60)
         logger.info("   NIGHTLY BATCH MODE")
-        logger.info("   Quick Smart Collection refresh")
+        logger.info("   Incremental update - only fetching NEW bars")
         logger.info("=" * 60)
         
         # Wait for pusher
@@ -398,14 +441,22 @@ class WeekendBatchRunner:
             logger.error("Cannot proceed without IB Data Pusher")
             return False
         
-        # Start Smart Collection
-        result = self.trigger_smart_collection()
+        # Start Incremental Update (nightly mode = only new bars)
+        result = self.trigger_smart_collection(mode="nightly")
         if not result.get("success"):
-            logger.error("Failed to start collection")
-            return False
+            # Check if it's just "all up to date"
+            if "up to date" in result.get("message", "").lower() or "nothing to" in result.get("message", "").lower():
+                logger.info("All data is up to date - nothing to fetch!")
+                logger.info("=" * 60)
+                logger.info("   NIGHTLY BATCH COMPLETE (no new data needed)")
+                logger.info("=" * 60)
+                return True
+            else:
+                logger.error("Failed to start collection")
+                return False
         
-        # Monitor until complete
-        if not self.monitor_collection(timeout_hours=6):
+        # Monitor until complete (shorter timeout for incremental)
+        if not self.monitor_collection(timeout_hours=2):
             logger.error("Collection did not complete in time")
             return False
         

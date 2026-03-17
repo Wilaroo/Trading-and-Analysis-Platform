@@ -357,6 +357,128 @@ async def fill_gaps(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/incremental-update")
+async def incremental_update(
+    max_symbols: int = None,
+    max_days_lookback: int = 7
+):
+    """
+    Smart Incremental Update - Only fetch NEW bars since last collection.
+    
+    This is the preferred endpoint for nightly/routine updates after initial
+    data collection is complete. It:
+    
+    1. Checks the latest bar date for each symbol/timeframe in the database
+    2. Calculates how many days of new data are needed
+    3. Only fetches the missing days (not the full historical lookback)
+    
+    Example: If you have daily data for AAPL through March 15, and today is March 17,
+    it will only fetch 2 days of data (March 16-17), not 30 days.
+    
+    - **max_symbols**: Limit update to this many symbols (None = all)
+    - **max_days_lookback**: Maximum days to look back for any symbol (default 7, prevents huge fetches)
+    
+    Returns:
+    - Analysis of what needs updating
+    - Collection job for incremental data
+    """
+    try:
+        collector = get_ib_collector()
+        db = collector._db
+        
+        if db is None:
+            return {"success": False, "error": "Database not initialized"}
+        
+        from services.historical_data_queue_service import get_historical_data_queue_service
+        queue_service = get_historical_data_queue_service(db)
+        
+        # Analyze what incremental data is needed
+        analysis = collector.calculate_incremental_needs()
+        if not analysis.get("success"):
+            return analysis
+        
+        needs_update = analysis.get("needs_update", {})
+        
+        if not needs_update:
+            return {
+                "success": True,
+                "message": "All data is up to date! Nothing to fetch.",
+                "summary": analysis.get("summary", {}),
+                "total_symbols_in_db": analysis.get("total_symbols_in_db", 0)
+            }
+        
+        # Limit symbols if requested
+        symbols_to_update = list(needs_update.keys())
+        if max_symbols and len(symbols_to_update) > max_symbols:
+            symbols_to_update = symbols_to_update[:max_symbols]
+        
+        # Queue incremental requests
+        total_queued = 0
+        timeframe_counts = {}
+        
+        for symbol in symbols_to_update:
+            symbol_needs = needs_update[symbol]
+            for bar_size, days_needed in symbol_needs.items():
+                # Cap at max_days_lookback
+                actual_days = min(days_needed, max_days_lookback)
+                
+                # Get appropriate duration string
+                duration = collector.get_safe_duration(bar_size, actual_days)
+                
+                # Queue the request
+                queue_service.create_request(
+                    symbol=symbol,
+                    bar_size=bar_size,
+                    duration=duration
+                )
+                total_queued += 1
+                
+                # Track counts
+                if bar_size not in timeframe_counts:
+                    timeframe_counts[bar_size] = 0
+                timeframe_counts[bar_size] += 1
+        
+        # Start monitoring if we have items
+        if total_queued > 0:
+            await collector.resume_monitoring()
+        
+        # Calculate estimated time
+        estimated_seconds = total_queued * collector.REQUEST_DELAY_SECONDS
+        estimated_minutes = round(estimated_seconds / 60, 1)
+        
+        return {
+            "success": True,
+            "message": f"Incremental update started: {total_queued} requests for {len(symbols_to_update)} symbols",
+            "analysis_summary": analysis.get("summary", {}),
+            "symbols_updated": len(symbols_to_update),
+            "total_requests": total_queued,
+            "timeframe_breakdown": timeframe_counts,
+            "max_days_lookback": max_days_lookback,
+            "estimated_minutes": estimated_minutes,
+            "note": "Only fetching NEW data since last collection - not re-fetching historical data"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in incremental update: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/incremental-analysis")
+async def get_incremental_analysis():
+    """
+    Preview what incremental data would be fetched.
+    
+    Use this to see what the incremental-update endpoint would collect
+    without actually starting a collection.
+    """
+    try:
+        collector = get_ib_collector()
+        return collector.calculate_incremental_needs()
+    except Exception as e:
+        logger.error(f"Error in incremental analysis: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/gap-analysis")
 async def get_gap_analysis(tier_filter: Optional[str] = None):
     """

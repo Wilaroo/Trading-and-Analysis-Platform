@@ -1995,6 +1995,136 @@ class IBHistoricalCollector:
                 
         except Exception as e:
             logger.error(f"Error triggering auto-training: {e}")
+    
+    def get_latest_bar_dates(self, bar_size: str = None) -> Dict[str, Any]:
+        """
+        Get the latest bar date for each symbol/timeframe combination.
+        Used to determine what incremental data to fetch.
+        
+        Returns:
+            Dict with symbol -> {timeframe: latest_date}
+        """
+        if self._data_col is None:
+            return {"success": False, "error": "Database not connected"}
+        
+        try:
+            # Build match stage
+            match_stage = {}
+            if bar_size:
+                match_stage["bar_size"] = bar_size
+            
+            pipeline = [
+                {"$match": match_stage} if match_stage else {"$match": {}},
+                {"$group": {
+                    "_id": {"symbol": "$symbol", "bar_size": "$bar_size"},
+                    "latest_date": {"$max": "$date"},
+                    "bar_count": {"$sum": 1}
+                }},
+                {"$sort": {"_id.symbol": 1}}
+            ]
+            
+            results = list(self._data_col.aggregate(pipeline))
+            
+            # Organize by symbol
+            by_symbol = {}
+            for r in results:
+                symbol = r["_id"]["symbol"]
+                tf = r["_id"]["bar_size"]
+                if symbol not in by_symbol:
+                    by_symbol[symbol] = {}
+                by_symbol[symbol][tf] = {
+                    "latest_date": r["latest_date"],
+                    "bar_count": r["bar_count"]
+                }
+            
+            return {
+                "success": True,
+                "total_symbols": len(by_symbol),
+                "by_symbol": by_symbol
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting latest bar dates: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def calculate_incremental_needs(self) -> Dict[str, Any]:
+        """
+        Analyze what incremental data needs to be fetched.
+        
+        Compares latest bar dates against today to determine how many
+        days of new data to fetch per symbol/timeframe.
+        
+        Returns:
+            Dict with symbols needing updates and recommended lookback per timeframe
+        """
+        if self._data_col is None:
+            return {"success": False, "error": "Database not connected"}
+        
+        try:
+            from datetime import datetime, timezone, timedelta
+            
+            today = datetime.now(timezone.utc).date()
+            
+            # Get latest dates for all data
+            latest_data = self.get_latest_bar_dates()
+            if not latest_data.get("success"):
+                return latest_data
+            
+            by_symbol = latest_data.get("by_symbol", {})
+            
+            # Calculate days since last bar for each symbol/timeframe
+            needs_update = {}
+            summary = {
+                "up_to_date": 0,
+                "needs_1_day": 0,
+                "needs_2_7_days": 0,
+                "needs_8_30_days": 0,
+                "needs_30_plus_days": 0
+            }
+            
+            for symbol, timeframes in by_symbol.items():
+                symbol_needs = {}
+                for tf, data in timeframes.items():
+                    latest_str = data.get("latest_date", "")
+                    if latest_str:
+                        try:
+                            # Parse the date string
+                            if "T" in latest_str:
+                                latest_date = datetime.fromisoformat(latest_str.replace("Z", "+00:00")).date()
+                            else:
+                                latest_date = datetime.strptime(latest_str[:10], "%Y-%m-%d").date()
+                            
+                            days_behind = (today - latest_date).days
+                            
+                            if days_behind <= 1:
+                                summary["up_to_date"] += 1
+                            elif days_behind <= 7:
+                                summary["needs_2_7_days"] += 1
+                                symbol_needs[tf] = days_behind + 1  # Add 1 day buffer
+                            elif days_behind <= 30:
+                                summary["needs_8_30_days"] += 1
+                                symbol_needs[tf] = days_behind + 1
+                            else:
+                                summary["needs_30_plus_days"] += 1
+                                symbol_needs[tf] = min(days_behind + 1, 365)  # Cap at 1 year
+                        except Exception as e:
+                            logger.warning(f"Could not parse date {latest_str}: {e}")
+                            symbol_needs[tf] = 30  # Default to 30 days
+                
+                if symbol_needs:
+                    needs_update[symbol] = symbol_needs
+            
+            return {
+                "success": True,
+                "total_symbols_in_db": len(by_symbol),
+                "symbols_needing_update": len(needs_update),
+                "summary": summary,
+                "needs_update": needs_update
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculating incremental needs: {e}")
+            return {"success": False, "error": str(e)}
 
 
 # ============================================================================

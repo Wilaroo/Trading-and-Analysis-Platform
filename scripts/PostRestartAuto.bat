@@ -109,22 +109,53 @@ goto check_ib_loop
 echo.
 
 :: =====================================================
-:: STEP 4: RESUME COLLECTION
+:: STEP 4: RESUME COLLECTION (Incremental only)
 :: =====================================================
-echo [4/4] Resuming data collection...
-echo [4/4] Resuming data collection... >> "%LOG_FILE%"
+echo [4/4] Checking for incremental updates needed...
+echo [4/4] Checking for incremental updates... >> "%LOG_FILE%"
 
-curl -s -X POST "%CLOUD_URL%/api/ib-collector/resume" > "%TEMP%\resume_result.tmp" 2>nul
+:: First check if there's pending work in the queue (from fill-gaps)
+curl -s -f -m 10 "%CLOUD_URL%/api/ib-collector/queue-progress-detailed" > "%TEMP%\queue_check2.tmp" 2>nul
 if %errorlevel%==0 (
-    echo       Resume triggered!
-    type "%TEMP%\resume_result.tmp"
-    type "%TEMP%\resume_result.tmp" >> "%LOG_FILE%"
-) else (
-    echo       Resume request failed
-    echo       Resume request failed >> "%LOG_FILE%"
+    for /f %%a in ('powershell -command "(Get-Content '%TEMP%\queue_check2.tmp' | ConvertFrom-Json).overall.pending"') do set PENDING_NOW=%%a
+    
+    if not "%PENDING_NOW%"=="0" (
+        echo       Found %PENDING_NOW% pending queue items - resuming...
+        curl -s -X POST "%CLOUD_URL%/api/ib-collector/resume" > "%TEMP%\resume_result.tmp" 2>nul
+        echo       Resume triggered for existing queue
+        echo       Resume triggered for %PENDING_NOW% pending items >> "%LOG_FILE%"
+        del "%TEMP%\queue_check2.tmp" 2>nul
+        del "%TEMP%\resume_result.tmp" 2>nul
+        goto done_success
+    )
 )
-del "%TEMP%\resume_result.tmp" 2>nul
+del "%TEMP%\queue_check2.tmp" 2>nul
+
+:: No pending queue items - run incremental update for new bars
+echo       No pending queue - checking for new data to fetch...
+curl -s -X POST "%CLOUD_URL%/api/ib-collector/incremental-update?max_days_lookback=3" > "%TEMP%\incremental_result.tmp" 2>nul
+if %errorlevel%==0 (
+    echo       Incremental update result:
+    type "%TEMP%\incremental_result.tmp"
+    type "%TEMP%\incremental_result.tmp" >> "%LOG_FILE%"
+    
+    :: Check if any updates were needed
+    findstr /C:"up to date" "%TEMP%\incremental_result.tmp" >nul 2>&1
+    if %errorlevel%==0 (
+        echo.
+        echo       All data is up to date!
+    ) else (
+        echo.
+        echo       Incremental update started
+    )
+) else (
+    echo       Incremental update request failed
+    echo       Incremental update request failed >> "%LOG_FILE%"
+)
+del "%TEMP%\incremental_result.tmp" 2>nul
 echo.
+
+:done_success
 
 :: =====================================================
 :: DONE
