@@ -654,6 +654,107 @@ async def rebuild_adv_from_ib():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/failure-analysis")
+async def get_failure_analysis():
+    """
+    Analyze failures in the historical data queue.
+    
+    Breaks down failures by:
+    - Status type (timeout, rate_limited, no_data, error)
+    - Timeframe
+    - Common error messages
+    
+    Helps distinguish between:
+    - True failures (errors that need fixing)
+    - No data (symbol/timeframe has no data - expected for some cases)
+    - Timeouts (network issues - retry later)
+    - Rate limits (IB pacing - retry later)
+    """
+    try:
+        collector = get_ib_collector()
+        db = collector._db
+        
+        if db is None:
+            return {"success": False, "error": "Database not initialized"}
+        
+        from services.historical_data_queue_service import get_historical_data_queue_service
+        service = get_historical_data_queue_service()
+        
+        # Aggregate by result_status
+        pipeline = [
+            {"$match": {"status": {"$in": ["completed", "failed"]}}},
+            {"$group": {
+                "_id": {
+                    "status": "$status",
+                    "result_status": {"$ifNull": ["$result_status", "$status"]}
+                },
+                "count": {"$sum": 1}
+            }}
+        ]
+        
+        status_counts = list(service.collection.aggregate(pipeline))
+        
+        # Organize results
+        breakdown = {
+            "success": 0,
+            "no_data": 0,
+            "timeout": 0,
+            "rate_limited": 0,
+            "error": 0,
+            "unknown": 0
+        }
+        
+        for item in status_counts:
+            result_status = item["_id"].get("result_status", "unknown")
+            internal_status = item["_id"].get("status", "unknown")
+            count = item["count"]
+            
+            if result_status in breakdown:
+                breakdown[result_status] += count
+            elif internal_status == "completed":
+                breakdown["success"] += count
+            elif internal_status == "failed":
+                breakdown["error"] += count
+            else:
+                breakdown["unknown"] += count
+        
+        # Get sample of actual errors (not timeouts or no_data)
+        error_samples = list(service.collection.find(
+            {"status": "failed", "result_status": {"$nin": ["timeout", "rate_limited", "no_data"]}},
+            {"symbol": 1, "bar_size": 1, "error": 1, "_id": 0}
+        ).limit(10))
+        
+        # Get symbols with no data (for reference)
+        no_data_samples = list(service.collection.find(
+            {"result_status": "no_data"},
+            {"symbol": 1, "bar_size": 1, "_id": 0}
+        ).limit(10))
+        
+        return {
+            "success": True,
+            "breakdown": breakdown,
+            "summary": {
+                "true_failures": breakdown["error"],
+                "retry_needed": breakdown["timeout"] + breakdown["rate_limited"],
+                "no_data_available": breakdown["no_data"],
+                "successful": breakdown["success"]
+            },
+            "explanation": {
+                "success": "Data fetched and stored successfully",
+                "no_data": "Symbol/timeframe has no data available (not a failure)",
+                "timeout": "Network timeout - should be retried",
+                "rate_limited": "IB rate limit hit - will retry automatically",
+                "error": "Actual errors that may need investigation"
+            },
+            "error_samples": error_samples,
+            "no_data_samples": no_data_samples
+        }
+        
+    except Exception as e:
+        logger.error(f"Error analyzing failures: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/start")
 async def start_collection(
     symbols: Optional[List[str]] = None,

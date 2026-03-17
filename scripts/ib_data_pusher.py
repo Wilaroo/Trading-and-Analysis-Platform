@@ -1122,12 +1122,27 @@ class IBDataPusher:
             )
             
             if claim_response.status_code != 200:
-                logger.warning(f"[HistoricalData] Could not claim request {request_id}")
+                # Already claimed by another worker - not a failure, just skip
+                logger.debug(f"[HistoricalData] Request {request_id} already claimed (skipped)")
                 return
             
             # Create IB contract
             contract = Stock(symbol, "SMART", "USD")
-            self.ib.qualifyContracts(contract)
+            
+            try:
+                self.ib.qualifyContracts(contract)
+            except Exception as e:
+                # Invalid symbol or not tradeable - mark as "no_data" not "failed"
+                logger.warning(f"[HistoricalData] {symbol}: Invalid symbol or not available")
+                self._report_historical_data_result(
+                    request_id=request_id,
+                    symbol=symbol,
+                    success=True,  # Mark success with no_data flag to avoid retry
+                    data=[],
+                    status="no_data",
+                    error=f"Symbol not available: {e}"
+                )
+                return
             
             # Request historical data from IB Gateway
             bars = self.ib.reqHistoricalData(
@@ -1151,34 +1166,109 @@ class IBDataPusher:
                     "volume": bar.volume
                 })
             
-            logger.info(f"[HistoricalData] Got {len(bar_data)} bars for {symbol}")
+            # Categorize the result
+            if len(bar_data) > 0:
+                logger.info(f"[HistoricalData] {symbol}: Got {len(bar_data)} bars")
+                status = "success"
+            else:
+                # No data returned - could be:
+                # - Symbol doesn't have data for this timeframe (e.g., newly listed)
+                # - Timeframe not available (e.g., 1-min for low-volume stock)
+                # - Weekend/holiday with no trading
+                logger.info(f"[HistoricalData] {symbol}: No data for {bar_size} ({duration})")
+                status = "no_data"
             
             # Send result back to cloud
             self._report_historical_data_result(
                 request_id=request_id,
                 symbol=symbol,
-                success=True,
-                data=bar_data
+                success=True,  # Not a failure - we got a response from IB
+                data=bar_data,
+                status=status
             )
             
-        except Exception as e:
-            logger.error(f"[HistoricalData] Error fetching {symbol}: {e}")
+        except requests.Timeout:
+            # Network timeout to cloud - this IS a retry-able failure
+            logger.error(f"[HistoricalData] {symbol}: Cloud timeout (will retry)")
             self._report_historical_data_result(
                 request_id=request_id,
                 symbol=symbol,
                 success=False,
-                error=str(e)
+                error="Cloud connection timeout",
+                status="timeout"
             )
+            
+        except Exception as e:
+            error_str = str(e)
+            
+            # Categorize the error
+            if "No market data" in error_str or "No data" in error_str:
+                # IB says no data available - not a failure, just no data
+                logger.info(f"[HistoricalData] {symbol}: No market data available for {bar_size}")
+                self._report_historical_data_result(
+                    request_id=request_id,
+                    symbol=symbol,
+                    success=True,
+                    data=[],
+                    status="no_data",
+                    error="No market data available"
+                )
+            elif "pacing" in error_str.lower() or "limit" in error_str.lower():
+                # Rate limited - should retry
+                logger.warning(f"[HistoricalData] {symbol}: Rate limited (will retry)")
+                self._report_historical_data_result(
+                    request_id=request_id,
+                    symbol=symbol,
+                    success=False,
+                    error="IB rate limit - retry later",
+                    status="rate_limited"
+                )
+            elif "timeout" in error_str.lower():
+                # IB timeout - should retry
+                logger.warning(f"[HistoricalData] {symbol}: IB timeout (will retry)")
+                self._report_historical_data_result(
+                    request_id=request_id,
+                    symbol=symbol,
+                    success=False,
+                    error="IB request timeout",
+                    status="timeout"
+                )
+            else:
+                # Unknown error - log as actual failure
+                logger.error(f"[HistoricalData] {symbol}: ERROR - {e}")
+                self._report_historical_data_result(
+                    request_id=request_id,
+                    symbol=symbol,
+                    success=False,
+                    error=str(e),
+                    status="error"
+                )
     
     def _report_historical_data_result(self, request_id: str, symbol: str, success: bool, 
-                                        data: List[dict] = None, error: str = None):
-        """Report historical data result back to cloud"""
+                                        data: List[dict] = None, error: str = None,
+                                        status: str = None):
+        """
+        Report historical data result back to cloud.
+        
+        Status types:
+        - success: Got bars successfully
+        - no_data: Symbol/timeframe has no data (not a failure)
+        - timeout: Network or IB timeout (should retry)
+        - rate_limited: Hit IB rate limit (should retry later)
+        - error: Actual error that needs investigation
+        """
         try:
+            # Determine final status
+            if status is None:
+                status = "success" if success else "error"
+            
             payload = {
                 "request_id": request_id,
                 "symbol": symbol,
                 "success": success,
+                "status": status,
                 "data": data or [],
+                "bar_count": len(data) if data else 0,
                 "error": error,
                 "fetched_at": datetime.now().isoformat()
             }
@@ -1191,7 +1281,17 @@ class IBDataPusher:
             )
             
             if response.status_code == 200:
-                logger.info(f"[HistoricalData] Result reported: {symbol} -> {'success' if success else 'failed'}")
+                # Log based on status type
+                if status == "success":
+                    logger.info(f"[HistoricalData] {symbol}: {len(data or [])} bars saved")
+                elif status == "no_data":
+                    logger.info(f"[HistoricalData] {symbol}: No data (completed)")
+                elif status == "timeout":
+                    logger.warning(f"[HistoricalData] {symbol}: Timeout (will retry)")
+                elif status == "rate_limited":
+                    logger.warning(f"[HistoricalData] {symbol}: Rate limited (will retry)")
+                else:
+                    logger.error(f"[HistoricalData] {symbol}: Failed - {error}")
             else:
                 logger.warning(f"[HistoricalData] Failed to report result: {response.text}")
                 

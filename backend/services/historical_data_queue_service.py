@@ -110,7 +110,8 @@ class HistoricalDataQueueService:
         return result.modified_count > 0
     
     def complete_request(self, request_id: str, success: bool, 
-                         data: List[Dict] = None, error: str = None) -> bool:
+                         data: List[Dict] = None, error: str = None,
+                         status: str = None, bar_count: int = None) -> bool:
         """
         Mark a request as completed with results.
         
@@ -119,21 +120,37 @@ class HistoricalDataQueueService:
             success: Whether the fetch was successful
             data: List of bar data if successful
             error: Error message if failed
+            status: Detailed status (success, no_data, timeout, rate_limited, error)
+            bar_count: Number of bars received
         """
-        status = "completed" if success else "failed"
+        # Map status to internal state
+        # "no_data" is considered completed (not failed) - there's just no data available
+        if status in ["success", "no_data"]:
+            internal_status = "completed"
+        elif status in ["timeout", "rate_limited"]:
+            internal_status = "failed"  # Should be retried
+        else:
+            internal_status = "completed" if success else "failed"
         
         result = self.collection.update_one(
             {"request_id": request_id},
             {"$set": {
-                "status": status,
+                "status": internal_status,
+                "result_status": status,  # Store the detailed status
                 "data": data,
+                "bar_count": bar_count or (len(data) if data else 0),
                 "error": error,
                 "completed_at": datetime.now(timezone.utc).isoformat()
             }}
         )
         
         if result.modified_count > 0:
-            logger.info(f"Completed historical data request: {request_id} -> {status}")
+            if status == "no_data":
+                logger.debug(f"Historical data request {request_id}: no data available")
+            elif status in ["timeout", "rate_limited"]:
+                logger.warning(f"Historical data request {request_id}: {status} - will retry")
+            else:
+                logger.info(f"Completed historical data request: {request_id} -> {internal_status}")
         
         return result.modified_count > 0
     

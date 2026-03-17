@@ -1323,6 +1323,8 @@ async def report_historical_data_result(request: Request):
         data = body.get("data")
         error = body.get("error")
         bar_size = body.get("bar_size")
+        status = body.get("status")  # New: detailed status (success, no_data, timeout, etc.)
+        bar_count = body.get("bar_count", 0)
         
         if not request_id:
             raise HTTPException(status_code=400, detail="request_id is required")
@@ -1345,7 +1347,9 @@ async def report_historical_data_result(request: Request):
             request_id=request_id,
             success=success,
             data=data,
-            error=error
+            error=error,
+            status=status,
+            bar_count=bar_count
         )
         
         # IMMEDIATELY store to main collection (resilient to monitoring failures)
