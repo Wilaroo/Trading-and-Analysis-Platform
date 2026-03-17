@@ -1014,7 +1014,7 @@ class IBDataPusher:
         last_l2_update = 0
         order_poll_interval = 10  # Check for orders every 10 seconds (was 2)
         last_order_poll = 0
-        historical_data_interval = 15  # Process historical data every 15 seconds
+        historical_data_interval = 10  # Process historical data every 10 seconds
         last_historical_poll = 0
         current_time = time.time()
         
@@ -1249,7 +1249,7 @@ class IBDataPusher:
         """
         Poll cloud for pending historical data requests and fulfill them via IB Gateway.
         This enables the cloud to request historical bars through the local IB connection.
-        OPTIMIZED: Only process 1 request per poll cycle to avoid rate limiting.
+        OPTIMIZED: Process 3 requests per poll cycle with delays between them.
         """
         try:
             # Poll for pending historical data requests using CloudAPIClient
@@ -1263,17 +1263,17 @@ class IBDataPusher:
             if not requests_list:
                 return
             
-            # Only process 1 request per cycle to avoid hammering the server
-            # The backend returns up to 10, but we'll be conservative
-            req = requests_list[0]
-            remaining = len(requests_list) - 1
+            # Process up to 3 requests per cycle (balanced speed vs rate limiting)
+            batch_size = min(3, len(requests_list))
+            remaining = len(requests_list) - batch_size
             
-            logger.info(f"[HistoricalData] Processing 1 of {len(requests_list)} pending requests ({remaining} remaining)")
+            logger.info(f"[HistoricalData] Processing {batch_size} of {len(requests_list)} pending ({remaining} remaining)")
             
-            self._fetch_and_return_historical_data(req)
-            
-            # Add a delay after processing to be gentle on the server
-            time.sleep(3)
+            for i, req in enumerate(requests_list[:batch_size]):
+                self._fetch_and_return_historical_data(req)
+                # Small delay between requests in the same batch
+                if i < batch_size - 1:
+                    time.sleep(2)
                 
         except Exception as e:
             if "404" not in str(e) and "Not Found" not in str(e):
