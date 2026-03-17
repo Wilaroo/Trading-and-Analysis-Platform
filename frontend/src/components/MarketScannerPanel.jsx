@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Search, Filter, Play, Square, Clock, TrendingUp, BarChart3, Zap, RefreshCw, ChevronRight, Target, AlertTriangle } from 'lucide-react';
+import { Search, Filter, Play, Square, Clock, TrendingUp, BarChart3, Zap, RefreshCw, ChevronRight, Target, AlertTriangle, Brain, CheckCircle } from 'lucide-react';
 import { Tip, CustomTip } from './shared/Tooltip';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -63,7 +63,10 @@ export default function MarketScannerPanel() {
     minPrice: 5,
     maxPrice: 500,
     excludeOTC: true,
-    excludePenny: true
+    excludePenny: true,
+    aiAgreesOnly: false,      // NEW: Only show AI-confirmed signals
+    minAiConfidence: 0,       // NEW: Minimum AI confidence (0-100)
+    sortByAi: false           // NEW: Sort by AI confidence
   });
 
   // Fetch symbol count on mount
@@ -459,7 +462,35 @@ export default function MarketScannerPanel() {
       {/* Full Signals List */}
       {scanSignals.length > 0 && (
         <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-          <h3 className="text-sm font-medium text-gray-300 mb-3">All Signals ({scanSignals.length})</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-gray-300">All Signals ({scanSignals.length})</h3>
+            
+            {/* AI Filters */}
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filters.aiAgreesOnly}
+                  onChange={(e) => setFilters({...filters, aiAgreesOnly: e.target.checked})}
+                  className="w-3 h-3 rounded border-gray-600 bg-gray-800 text-cyan-500"
+                />
+                <span className="text-xs text-gray-400 flex items-center gap-1">
+                  <Brain className="w-3 h-3" />
+                  AI Agrees Only
+                </span>
+              </label>
+              
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filters.sortByAi}
+                  onChange={(e) => setFilters({...filters, sortByAi: e.target.checked})}
+                  className="w-3 h-3 rounded border-gray-600 bg-gray-800 text-cyan-500"
+                />
+                <span className="text-xs text-gray-400">Sort by AI</span>
+              </label>
+            </div>
+          </div>
           
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -472,10 +503,18 @@ export default function MarketScannerPanel() {
                   <th className="pb-2">Target</th>
                   <th className="pb-2">Exp R</th>
                   <th className="pb-2">Strength</th>
+                  <th className="pb-2">
+                    <span className="flex items-center gap-1">
+                      <Brain className="w-3 h-3" /> AI
+                    </span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {scanSignals.map((signal, idx) => (
+                {scanSignals
+                  .filter(signal => !filters.aiAgreesOnly || signal.ai_agrees_with_direction)
+                  .sort((a, b) => filters.sortByAi ? (b.ai_confidence || 0) - (a.ai_confidence || 0) : 0)
+                  .map((signal, idx) => (
                   <tr key={idx} className="border-b border-gray-700/50 hover:bg-gray-700/20">
                     <td className="py-2 font-mono text-cyan-400">{signal.symbol}</td>
                     <td className="py-2 text-gray-300">{signal.strategy_name}</td>
@@ -490,6 +529,26 @@ export default function MarketScannerPanel() {
                           style={{ width: `${signal.signal_strength || 0}%` }}
                         />
                       </div>
+                    </td>
+                    <td className="py-2">
+                      {signal.ai_confidence > 0 ? (
+                        <div className="flex items-center gap-1">
+                          {signal.ai_agrees_with_direction ? (
+                            <CheckCircle className="w-3 h-3 text-green-400" />
+                          ) : (
+                            <AlertTriangle className="w-3 h-3 text-amber-400" />
+                          )}
+                          <span className={`text-xs font-mono ${
+                            signal.ai_confidence >= 70 ? 'text-green-400' :
+                            signal.ai_confidence >= 50 ? 'text-yellow-400' :
+                            'text-gray-400'
+                          }`}>
+                            {signal.ai_confidence?.toFixed(0)}%
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-500">--</span>
+                      )}
                     </td>
                   </tr>
                 ))}

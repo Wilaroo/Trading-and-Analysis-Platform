@@ -424,6 +424,13 @@ class LiveAlert:
     tqs_concerns: List[str] = field(default_factory=list)
     tqs_is_high_quality: bool = False     # TQS >= 70 (highlighted in UI)
     
+    # NEW: AI Integration fields
+    ai_confidence: float = 0.0            # 0-100 AI confidence in trade direction
+    ai_prediction: str = ""               # "bullish", "bearish", "neutral"
+    ai_predicted_move_pct: float = 0.0    # Predicted % move in next 30 mins
+    ai_agrees_with_direction: bool = False  # True if AI prediction matches alert direction
+    ai_model_version: str = ""            # Version of AI model used
+    
     def calculate_r_multiple(self) -> float:
         """Calculate the R-multiple for this alert (target/risk ratio)"""
         risk_per_share = abs(self.current_price - self.stop_loss)
@@ -2107,10 +2114,13 @@ class EnhancedBackgroundScanner:
                     
                     alerts.append(alert)
             
-            # Process all alerts for this symbol - ADD TQS SCORING
+            # Process all alerts for this symbol - ADD TQS SCORING and AI ENRICHMENT
             for alert in alerts:
                 # Calculate TQS for this alert (async)
                 await self._enrich_alert_with_tqs(alert)
+                
+                # Add AI predictions to the alert
+                await self._enrich_alert_with_ai(alert)
                 
                 await self._process_new_alert(alert)
                 
@@ -3946,6 +3956,52 @@ class EnhancedBackgroundScanner:
         except Exception as e:
             logger.warning(f"Could not calculate TQS for alert {alert.symbol}: {e}")
             # Leave TQS fields at defaults (0, empty)
+    
+    async def _enrich_alert_with_ai(self, alert: LiveAlert) -> None:
+        """
+        Add AI predictions to the alert.
+        Uses Time-Series AI to predict direction and confidence.
+        """
+        try:
+            from services.ai_modules.timeseries_service import get_timeseries_service
+            ts_service = get_timeseries_service()
+            
+            if not ts_service:
+                return
+            
+            # Get AI prediction for this symbol
+            prediction = await ts_service.predict(alert.symbol)
+            
+            if prediction and prediction.get("success"):
+                # Extract prediction details
+                direction = prediction.get("direction", "neutral")
+                confidence = prediction.get("confidence", 0.0) * 100  # Convert to 0-100
+                predicted_move = prediction.get("predicted_return", 0.0) * 100  # Convert to percentage
+                
+                # Populate alert with AI data
+                alert.ai_confidence = round(confidence, 1)
+                alert.ai_prediction = direction
+                alert.ai_predicted_move_pct = round(predicted_move, 2)
+                alert.ai_model_version = prediction.get("model_version", "v1.0")
+                
+                # Check if AI agrees with alert direction
+                alert_is_long = alert.direction.lower() in ["long", "buy", "bullish"]
+                ai_is_bullish = direction.lower() in ["up", "bullish", "long"]
+                
+                if alert_is_long:
+                    alert.ai_agrees_with_direction = ai_is_bullish
+                else:
+                    alert.ai_agrees_with_direction = not ai_is_bullish
+                
+                logger.debug(
+                    f"AI for {alert.symbol}: {direction} ({confidence:.0f}% confidence), "
+                    f"predicted move: {predicted_move:+.2f}%, "
+                    f"agrees with {alert.direction}: {alert.ai_agrees_with_direction}"
+                )
+                
+        except Exception as e:
+            logger.warning(f"Could not get AI prediction for alert {alert.symbol}: {e}")
+            # Leave AI fields at defaults
     
     def get_stats(self) -> Dict:
         # Get wave scanner info if available

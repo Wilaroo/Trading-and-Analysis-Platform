@@ -7,6 +7,34 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 17, 2026)
 
+### Phase 3: Scanner + AI Integration ✅ COMPLETE
+**Status**: IMPLEMENTED AND WORKING
+
+Added AI predictions to scanner alerts for smarter signal filtering:
+
+**Backend Changes:**
+- Added AI fields to `LiveAlert` dataclass:
+  - `ai_confidence` (0-100%)
+  - `ai_prediction` ("bullish"/"bearish"/"neutral")
+  - `ai_predicted_move_pct` (predicted % move)
+  - `ai_agrees_with_direction` (boolean)
+  - `ai_model_version`
+
+- New `_enrich_alert_with_ai()` method in EnhancedScanner calls TimeSeriesAI for predictions
+
+- Updated `/api/live-scanner/alerts` endpoint with AI filters:
+  - `ai_agrees_only` - Only return alerts where AI agrees with direction
+  - `min_ai_confidence` - Minimum AI confidence threshold
+  - `sort_by_ai` - Sort by AI confidence (highest first)
+
+**Frontend Changes:**
+- Added AI column to signals table with confidence % and agree/disagree icon
+- Added "AI Agrees Only" checkbox filter
+- Added "Sort by AI" checkbox filter
+- Color-coded confidence: green (70%+), yellow (50-70%), gray (<50%)
+
+---
+
 ### Phase 2: Training Automation ✅ COMPLETE
 **Status**: IMPLEMENTED AND WORKING
 
