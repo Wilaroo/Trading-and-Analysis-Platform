@@ -1312,7 +1312,13 @@ class IBDataPusher:
         - NO live quote pushing
         - NO order polling
         - NO L2 data
-        - FULL SPEED historical data collection
+        - OPTIMIZED SPEED historical data collection
+        
+        OPTIMIZED PACING STRATEGY:
+        - IB allows 60 requests per 10 minutes (6/min average)
+        - Can burst 6 requests quickly, then need ~10s cooldown
+        - Target: ~1800 requests/hour (vs previous ~120/hour)
+        - Adaptive backoff if pacing violations detected
         
         Use this during off-hours to quickly build up your historical database.
         """
@@ -1325,17 +1331,23 @@ class IBDataPusher:
         collection_start_time = time.time()
         requests_completed = 0
         requests_failed = 0
+        pacing_violations = 0
         last_status_update = 0
         status_update_interval = 30  # Show status every 30 seconds
         
+        # Adaptive rate limiting
+        base_batch_delay = 10  # seconds between batches
+        current_batch_delay = base_batch_delay
+        
         logger.info("")
-        logger.info("=" * 50)
-        logger.info("  DATA COLLECTION MODE ACTIVE")
-        logger.info("=" * 50)
+        logger.info("=" * 60)
+        logger.info("  DATA COLLECTION MODE ACTIVE (OPTIMIZED)")
+        logger.info("=" * 60)
         logger.info("  Live trading: PAUSED")
         logger.info("  Order execution: DISABLED")
-        logger.info("  All bandwidth dedicated to historical data")
-        logger.info("=" * 50)
+        logger.info("  Target rate: ~1800 requests/hour")
+        logger.info("  Strategy: 6-request bursts with adaptive pacing")
+        logger.info("=" * 60)
         logger.info("")
         
         # Send initial heartbeat to let cloud know we're in collection mode
@@ -1355,16 +1367,28 @@ class IBDataPusher:
                     
                     current_time = time.time()
                     
-                    # Fetch and process historical data requests - FULL SPEED
+                    # Fetch and process historical data requests - OPTIMIZED SPEED
                     result = self._collection_fetch_batch()
                     
                     if result:
-                        requests_completed += result.get("completed", 0)
-                        requests_failed += result.get("failed", 0)
+                        batch_completed = result.get("completed", 0)
+                        batch_failed = result.get("failed", 0)
+                        batch_pacing = result.get("pacing_violations", 0)
                         
-                        # Small delay between batches to avoid IB rate limits
-                        # IB allows ~6 requests per 2 seconds for historical data
-                        time.sleep(2)
+                        requests_completed += batch_completed
+                        requests_failed += batch_failed
+                        pacing_violations += batch_pacing
+                        
+                        # ADAPTIVE PACING: If we hit pacing violations, back off
+                        if batch_pacing > 0:
+                            current_batch_delay = min(current_batch_delay * 1.5, 30)  # Max 30s
+                            logger.warning(f"[Pacing] Violation detected. Increasing delay to {current_batch_delay:.1f}s")
+                        elif batch_completed == 6 and current_batch_delay > base_batch_delay:
+                            # Successful full batch - gradually reduce delay
+                            current_batch_delay = max(current_batch_delay * 0.9, base_batch_delay)
+                        
+                        # Wait between batches
+                        time.sleep(current_batch_delay)
                     else:
                         # No pending requests - wait a bit before checking again
                         logger.info("[Collection] No pending requests. Waiting 10s...")
@@ -1376,13 +1400,15 @@ class IBDataPusher:
                         rate = requests_completed / (elapsed / 3600) if elapsed > 0 else 0
                         
                         logger.info("")
-                        logger.info("=" * 40)
-                        logger.info(f"  COLLECTION STATUS")
+                        logger.info("=" * 50)
+                        logger.info(f"  COLLECTION STATUS (Optimized)")
                         logger.info(f"  Completed: {requests_completed}")
                         logger.info(f"  Failed: {requests_failed}")
+                        logger.info(f"  Pacing violations: {pacing_violations}")
                         logger.info(f"  Rate: {rate:.0f} requests/hour")
+                        logger.info(f"  Current batch delay: {current_batch_delay:.1f}s")
                         logger.info(f"  Running: {elapsed/60:.1f} minutes")
-                        logger.info("=" * 40)
+                        logger.info("=" * 50)
                         logger.info("")
                         
                         last_status_update = current_time
@@ -1392,8 +1418,10 @@ class IBDataPusher:
                             self.api.post_safe("/api/ib/collection-mode/progress", {
                                 "completed": requests_completed,
                                 "failed": requests_failed,
+                                "pacing_violations": pacing_violations,
                                 "rate_per_hour": rate,
                                 "elapsed_minutes": elapsed / 60,
+                                "current_batch_delay": current_batch_delay,
                                 "timestamp": datetime.now().isoformat()
                             }, timeout=10)
                         except:
@@ -1436,12 +1464,23 @@ class IBDataPusher:
     
     def _collection_fetch_batch(self) -> dict:
         """
-        Fetch a batch of historical data requests at full speed.
+        Fetch a batch of historical data requests at MAXIMUM SAFE speed.
+        
+        IB Historical Data Pacing Rules:
+        - Max 60 requests per 10 minutes (6 per minute average)
+        - Can burst up to 6 requests quickly
+        - After burst, need ~10 second cooldown
+        - Identical requests within 15s = pacing violation
+        
+        Our strategy: Fetch 6 requests in quick succession (0.3s apart),
+        then wait 10 seconds. This gives us ~36 requests/minute = 2160/hour
+        vs the old rate of ~120/hour.
+        
         Returns dict with completed/failed counts, or None if no requests.
         """
         try:
-            # Get pending requests from cloud
-            result = self.api.get_safe("/api/ib/historical-data/pending?limit=5", timeout=20)
+            # Get a larger batch since we'll process them quickly
+            result = self.api.get_safe("/api/ib/historical-data/pending?limit=6", timeout=20)
             
             if not result:
                 return None
@@ -1453,24 +1492,30 @@ class IBDataPusher:
             
             completed = 0
             failed = 0
+            pacing_violations = 0
             
             logger.info(f"[Collection] Processing batch of {len(requests_list)} requests...")
             
             for req in requests_list:
                 try:
-                    success = self._collection_fetch_single(req)
-                    if success:
+                    result = self._collection_fetch_single(req)
+                    if result == True:
                         completed += 1
+                    elif result == "pacing":
+                        pacing_violations += 1
+                        # Stop the batch on pacing violation
+                        logger.warning("[Collection] Pacing violation - stopping batch early")
+                        break
                     else:
                         failed += 1
                 except Exception as e:
                     logger.error(f"[Collection] Request error: {e}")
                     failed += 1
                 
-                # Small delay between requests (IB pacing)
-                time.sleep(0.5)
+                # Minimal delay between requests in burst (IB can handle 6 rapid requests)
+                time.sleep(0.3)
             
-            return {"completed": completed, "failed": failed}
+            return {"completed": completed, "failed": failed, "pacing_violations": pacing_violations}
             
         except Exception as e:
             logger.error(f"[Collection] Batch error: {e}")
@@ -1547,9 +1592,9 @@ class IBDataPusher:
             
             if "pacing" in error_str.lower() or "limit" in error_str.lower():
                 # IB rate limit - wait and retry later
-                logger.warning(f"[Collection] {symbol}: IB rate limit, will retry")
-                time.sleep(5)  # Extra delay for IB pacing
-                return False
+                logger.warning(f"[Collection] {symbol}: IB PACING VIOLATION - backing off")
+                time.sleep(15)  # Longer delay for pacing violation
+                return "pacing"  # Signal pacing violation
             else:
                 # Other error
                 self._report_historical_data_result(
