@@ -596,8 +596,8 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
       }
     };
     fetchData();
-    // Increase interval to 30 seconds to reduce flickering
-    const interval = setInterval(fetchData, 30000);
+    // Poll every 10 seconds during active collection for real-time feedback
+    const interval = setInterval(fetchData, 10000);
     return () => clearInterval(interval);
   }, []);
 
