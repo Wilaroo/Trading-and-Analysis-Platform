@@ -4455,3 +4455,103 @@ async def get_script(script_name: str):
     except Exception as e:
         logger.error(f"Error reading script {script_name}: {e}")
         raise HTTPException(status_code=500, detail=f"Error reading script: {e}")
+
+
+
+# ===================== COLLECTION MODE TRACKING =====================
+
+# In-memory storage for collection mode status
+_collection_mode_status = {
+    "active": False,
+    "started_at": None,
+    "completed": 0,
+    "failed": 0,
+    "rate_per_hour": 0,
+    "elapsed_minutes": 0,
+    "last_update": None
+}
+
+
+@router.post("/collection-mode/start")
+async def start_collection_mode(data: dict):
+    """Called when collection mode starts"""
+    global _collection_mode_status
+    _collection_mode_status = {
+        "active": True,
+        "started_at": data.get("started_at"),
+        "completed": 0,
+        "failed": 0,
+        "rate_per_hour": 0,
+        "elapsed_minutes": 0,
+        "last_update": datetime.now(timezone.utc).isoformat()
+    }
+    logger.info("Collection mode STARTED")
+    return {"success": True, "message": "Collection mode started"}
+
+
+@router.post("/collection-mode/progress")
+async def update_collection_progress(data: dict):
+    """Called periodically with collection progress"""
+    global _collection_mode_status
+    _collection_mode_status.update({
+        "active": True,
+        "completed": data.get("completed", 0),
+        "failed": data.get("failed", 0),
+        "rate_per_hour": data.get("rate_per_hour", 0),
+        "elapsed_minutes": data.get("elapsed_minutes", 0),
+        "last_update": datetime.now(timezone.utc).isoformat()
+    })
+    return {"success": True}
+
+
+@router.post("/collection-mode/stop")
+async def stop_collection_mode(data: dict):
+    """Called when collection mode stops"""
+    global _collection_mode_status
+    _collection_mode_status.update({
+        "active": False,
+        "completed": data.get("completed", 0),
+        "failed": data.get("failed", 0),
+        "elapsed_minutes": data.get("elapsed_minutes", 0),
+        "stopped_at": data.get("stopped_at"),
+        "last_update": datetime.now(timezone.utc).isoformat()
+    })
+    logger.info(f"Collection mode STOPPED - Completed: {data.get('completed')}, Failed: {data.get('failed')}")
+    return {"success": True, "message": "Collection mode stopped"}
+
+
+@router.get("/collection-mode/status")
+async def get_collection_mode_status():
+    """Get current collection mode status for UI"""
+    # Also get queue stats
+    try:
+        queue_stats = await get_historical_data_queue_stats()
+    except:
+        queue_stats = {"pending": 0, "completed": 0, "failed": 0, "total": 0}
+    
+    return {
+        "collection_mode": _collection_mode_status,
+        "queue": queue_stats
+    }
+
+
+async def get_historical_data_queue_stats():
+    """Get historical data queue statistics"""
+    try:
+        from server import db
+        # db is synchronous pymongo, not async motor
+        pending = db.historical_data_requests.count_documents({"status": "pending"})
+        completed = db.historical_data_requests.count_documents({"status": "completed"})
+        failed = db.historical_data_requests.count_documents({"status": "failed"})
+        total = db.historical_data_requests.count_documents({})
+        
+        return {
+            "pending": pending,
+            "completed": completed,
+            "failed": failed,
+            "total": total,
+            "progress_pct": round((completed / total) * 100, 1) if total > 0 else 0
+        }
+    except Exception as e:
+        logger.error(f"Error getting queue stats: {e}")
+        return {"pending": 0, "completed": 0, "failed": 0, "total": 0, "progress_pct": 0}

@@ -1012,10 +1012,8 @@ class IBDataPusher:
         push_count = 0
         l2_update_interval = 60  # Update L2 subscriptions every 60 seconds (was 30)
         last_l2_update = 0
-        order_poll_interval = 10  # Check for orders every 10 seconds (was 2)
+        order_poll_interval = 10  # Check for orders every 10 seconds
         last_order_poll = 0
-        historical_data_interval = 10  # Process historical data every 10 seconds
-        last_historical_poll = 0
         current_time = time.time()
         
         # Fetch news providers on startup
@@ -1076,10 +1074,8 @@ class IBDataPusher:
                         self.poll_and_execute_orders()
                         last_order_poll = current_time
                     
-                    # Poll for historical data requests (separate interval, even less frequently)
-                    if current_time - last_historical_poll >= historical_data_interval:
-                        self.poll_and_execute_historical_data_requests()
-                        last_historical_poll = current_time
+                    # NOTE: Historical data polling REMOVED from trading mode
+                    # Use --mode=collection for dedicated data collection
                         
                 except Exception as e:
                     logger.error(f"Loop error: {e}")
@@ -1100,6 +1096,265 @@ class IBDataPusher:
         """Stop the pusher"""
         self.running = False
     
+    # ==================== COLLECTION MODE ====================
+    
+    def run_collection_mode(self):
+        """
+        Dedicated data collection mode - ALL bandwidth to historical data fetching.
+        
+        In this mode:
+        - NO live quote pushing
+        - NO order polling
+        - NO L2 data
+        - FULL SPEED historical data collection
+        
+        Use this during off-hours to quickly build up your historical database.
+        """
+        if not self.connect():
+            return
+        
+        self.running = True
+        
+        # Collection stats
+        collection_start_time = time.time()
+        requests_completed = 0
+        requests_failed = 0
+        last_status_update = 0
+        status_update_interval = 30  # Show status every 30 seconds
+        
+        logger.info("")
+        logger.info("=" * 50)
+        logger.info("  DATA COLLECTION MODE ACTIVE")
+        logger.info("=" * 50)
+        logger.info("  Live trading: PAUSED")
+        logger.info("  Order execution: DISABLED")
+        logger.info("  All bandwidth dedicated to historical data")
+        logger.info("=" * 50)
+        logger.info("")
+        
+        # Send initial heartbeat to let cloud know we're in collection mode
+        try:
+            self.api.post_safe("/api/ib/collection-mode/start", {
+                "started_at": datetime.now().isoformat(),
+                "mode": "collection"
+            }, timeout=10)
+        except:
+            pass  # Non-critical
+        
+        try:
+            while self.running:
+                try:
+                    # Keep IB connection alive
+                    self.ib.sleep(0.1)
+                    
+                    current_time = time.time()
+                    
+                    # Fetch and process historical data requests - FULL SPEED
+                    result = self._collection_fetch_batch()
+                    
+                    if result:
+                        requests_completed += result.get("completed", 0)
+                        requests_failed += result.get("failed", 0)
+                        
+                        # Small delay between batches to avoid IB rate limits
+                        # IB allows ~6 requests per 2 seconds for historical data
+                        time.sleep(2)
+                    else:
+                        # No pending requests - wait a bit before checking again
+                        logger.info("[Collection] No pending requests. Waiting 10s...")
+                        time.sleep(10)
+                    
+                    # Status update
+                    if current_time - last_status_update >= status_update_interval:
+                        elapsed = current_time - collection_start_time
+                        rate = requests_completed / (elapsed / 3600) if elapsed > 0 else 0
+                        
+                        logger.info("")
+                        logger.info("=" * 40)
+                        logger.info(f"  COLLECTION STATUS")
+                        logger.info(f"  Completed: {requests_completed}")
+                        logger.info(f"  Failed: {requests_failed}")
+                        logger.info(f"  Rate: {rate:.0f} requests/hour")
+                        logger.info(f"  Running: {elapsed/60:.1f} minutes")
+                        logger.info("=" * 40)
+                        logger.info("")
+                        
+                        last_status_update = current_time
+                        
+                        # Update cloud with progress
+                        try:
+                            self.api.post_safe("/api/ib/collection-mode/progress", {
+                                "completed": requests_completed,
+                                "failed": requests_failed,
+                                "rate_per_hour": rate,
+                                "elapsed_minutes": elapsed / 60,
+                                "timestamp": datetime.now().isoformat()
+                            }, timeout=10)
+                        except:
+                            pass  # Non-critical
+                    
+                except Exception as e:
+                    logger.error(f"Collection loop error: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    time.sleep(5)  # Wait before retrying
+                    
+        except KeyboardInterrupt:
+            logger.info("Collection stopped by user")
+        finally:
+            self.running = False
+            
+            # Final stats
+            elapsed = time.time() - collection_start_time
+            logger.info("")
+            logger.info("=" * 50)
+            logger.info("  COLLECTION COMPLETE")
+            logger.info(f"  Total completed: {requests_completed}")
+            logger.info(f"  Total failed: {requests_failed}")
+            logger.info(f"  Total time: {elapsed/60:.1f} minutes")
+            logger.info("=" * 50)
+            
+            # Notify cloud
+            try:
+                self.api.post_safe("/api/ib/collection-mode/stop", {
+                    "completed": requests_completed,
+                    "failed": requests_failed,
+                    "elapsed_minutes": elapsed / 60,
+                    "stopped_at": datetime.now().isoformat()
+                }, timeout=10)
+            except:
+                pass
+            
+            self.ib.disconnect()
+            logger.info("Disconnected from IB Gateway")
+    
+    def _collection_fetch_batch(self) -> dict:
+        """
+        Fetch a batch of historical data requests at full speed.
+        Returns dict with completed/failed counts, or None if no requests.
+        """
+        try:
+            # Get pending requests from cloud
+            result = self.api.get_safe("/api/ib/historical-data/pending?limit=5", timeout=20)
+            
+            if not result:
+                return None
+            
+            requests_list = result.get("requests", [])
+            
+            if not requests_list:
+                return None
+            
+            completed = 0
+            failed = 0
+            
+            logger.info(f"[Collection] Processing batch of {len(requests_list)} requests...")
+            
+            for req in requests_list:
+                try:
+                    success = self._collection_fetch_single(req)
+                    if success:
+                        completed += 1
+                    else:
+                        failed += 1
+                except Exception as e:
+                    logger.error(f"[Collection] Request error: {e}")
+                    failed += 1
+                
+                # Small delay between requests (IB pacing)
+                time.sleep(0.5)
+            
+            return {"completed": completed, "failed": failed}
+            
+        except Exception as e:
+            logger.error(f"[Collection] Batch error: {e}")
+            return {"completed": 0, "failed": 0}
+    
+    def _collection_fetch_single(self, req: dict) -> bool:
+        """Fetch a single historical data request. Returns True if successful."""
+        request_id = req.get("request_id")
+        symbol = req.get("symbol")
+        duration = req.get("duration", "1 M")
+        bar_size = req.get("bar_size", "1 day")
+        
+        try:
+            # Claim the request
+            claim_result = self.api.post_safe(f"/api/ib/historical-data/claim/{request_id}", timeout=15)
+            
+            if not claim_result:
+                return False  # Already claimed
+            
+            # Create contract
+            contract = Stock(symbol, "SMART", "USD")
+            
+            try:
+                self.ib.qualifyContracts(contract)
+            except Exception as e:
+                # Invalid symbol
+                self._report_historical_data_result(
+                    request_id=request_id,
+                    symbol=symbol,
+                    success=True,
+                    data=[],
+                    status="no_data",
+                    error=f"Symbol not available: {e}"
+                )
+                return True  # Not a failure, just no data
+            
+            # Fetch from IB
+            bars = self.ib.reqHistoricalData(
+                contract,
+                endDateTime="",
+                durationStr=duration,
+                barSizeSetting=bar_size,
+                whatToShow="TRADES",
+                useRTH=True
+            )
+            
+            # Format bars
+            bar_data = []
+            for bar in bars:
+                bar_data.append({
+                    "date": bar.date.isoformat() if hasattr(bar.date, 'isoformat') else str(bar.date),
+                    "open": bar.open,
+                    "high": bar.high,
+                    "low": bar.low,
+                    "close": bar.close,
+                    "volume": bar.volume
+                })
+            
+            # Report result
+            status = "success" if bar_data else "no_data"
+            self._report_historical_data_result(
+                request_id=request_id,
+                symbol=symbol,
+                success=True,
+                data=bar_data,
+                status=status
+            )
+            
+            logger.info(f"[Collection] {symbol} ({bar_size}): {len(bar_data)} bars")
+            return True
+            
+        except Exception as e:
+            error_str = str(e)
+            
+            if "pacing" in error_str.lower() or "limit" in error_str.lower():
+                # IB rate limit - wait and retry later
+                logger.warning(f"[Collection] {symbol}: IB rate limit, will retry")
+                time.sleep(5)  # Extra delay for IB pacing
+                return False
+            else:
+                # Other error
+                self._report_historical_data_result(
+                    request_id=request_id,
+                    symbol=symbol,
+                    success=False,
+                    error=str(e),
+                    status="error"
+                )
+                return False
+
     # ==================== ORDER EXECUTION ====================
     
     def poll_and_execute_orders(self):
@@ -1462,17 +1717,31 @@ def main():
     parser.add_argument("--client-id", type=int, default=10, help="IB client ID")
     parser.add_argument("--symbols", nargs="+", default=["VIX", "SPY", "QQQ", "IWM"], help="Symbols to subscribe")
     parser.add_argument("--no-level2", action="store_true", help="Disable Level 2 / DOM data")
+    parser.add_argument("--mode", choices=["trading", "collection"], default="trading",
+                        help="Operating mode: 'trading' (live quotes+orders) or 'collection' (historical data only)")
     
     args = parser.parse_args()
     
+    is_collection_mode = args.mode == "collection"
+    
     print("=" * 50)
-    print("  IB Data Pusher")
-    print("  CLOUDFLARE EVASION: ENABLED")
+    if is_collection_mode:
+        print("  IB Data Pusher - DATA COLLECTION MODE")
+        print("  " + "=" * 46)
+        print("  Live trading PAUSED - All bandwidth to data")
+    else:
+        print("  IB Data Pusher - TRADING MODE")
+        print("  CLOUDFLARE EVASION: ENABLED")
     print("=" * 50)
     print(f"  Cloud URL: {args.cloud_url}")
     print(f"  IB Gateway: {args.ib_host}:{args.ib_port}")
-    print(f"  Symbols: {args.symbols}")
-    print(f"  Level 2: {'Disabled' if args.no_level2 else 'Enabled'}")
+    if not is_collection_mode:
+        print(f"  Symbols: {args.symbols}")
+        print(f"  Level 2: {'Disabled' if args.no_level2 else 'Enabled'}")
+    else:
+        print(f"  Mode: COLLECTION (historical data priority)")
+        print(f"  Live Quotes: DISABLED")
+        print(f"  Order Execution: DISABLED")
     print("=" * 50)
     
     pusher = IBDataPusher(
@@ -1482,7 +1751,10 @@ def main():
         client_id=args.client_id
     )
     
-    pusher.run(symbols=args.symbols, enable_level2=not args.no_level2)
+    if is_collection_mode:
+        pusher.run_collection_mode()
+    else:
+        pusher.run(symbols=args.symbols, enable_level2=not args.no_level2)
 
 
 if __name__ == "__main__":
