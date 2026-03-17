@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://ai-data-pipeline-3.preview.emergentagent.com
+https://trading-heartbeat.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://ai-data-pipeline-3.preview.emergentagent.com
+https://trading-heartbeat.preview.emergentagent.com
 ```
