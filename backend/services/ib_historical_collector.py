@@ -84,42 +84,42 @@ class IBHistoricalCollector:
     MAX_BARS_PER_REQUEST = 2000  # IB limit
     
     # Bar size configurations with IB Gateway limits
-    # max_duration: Maximum duration string for a single request
+    # max_duration: Maximum duration string for a single request (based on 2000 bar limit)
     # max_history_days: How far back IB allows for this bar size
-    # bars_per_day: Approximate bars generated per trading day (for estimation)
+    # bars_per_day: Approximate bars generated per trading day (6.5 hours = 390 mins)
     BAR_CONFIGS = {
         "1 min": {
-            "max_duration": "1 D",      # IB limit: 1 day per request for 1-min bars
+            "max_duration": "1 W",       # 2000 bars ÷ 390/day = ~5 trading days = ~1 week
             "max_history_days": 365,     # IB limit: ~1 year max history
             "bars_per_day": 390,         # 6.5 hours * 60 mins
         },
         "5 mins": {
-            "max_duration": "1 W",       # ~5 trading days
+            "max_duration": "1 M",       # 2000 bars ÷ 78/day = ~25 trading days = ~1 month
             "max_history_days": 730,     # IB limit: ~2 years max history
             "bars_per_day": 78,          # 6.5 hours * 12 bars/hour
         },
         "15 mins": {
-            "max_duration": "2 W",       # ~10 trading days
+            "max_duration": "3 M",       # 2000 bars ÷ 26/day = ~77 trading days = ~3 months
             "max_history_days": 730,     # IB limit: ~2 years
             "bars_per_day": 26,          # 6.5 hours * 4 bars/hour
         },
         "30 mins": {
-            "max_duration": "1 M",       # ~22 trading days
+            "max_duration": "6 M",       # 2000 bars ÷ 13/day = ~154 trading days = ~6 months
             "max_history_days": 730,     # IB limit: ~2 years
             "bars_per_day": 13,          # 6.5 hours * 2 bars/hour
         },
         "1 hour": {
-            "max_duration": "3 M",       # ~66 trading days
+            "max_duration": "1 Y",       # 2000 bars ÷ 7/day = ~285 trading days = ~1 year
             "max_history_days": 1825,    # IB limit: ~5 years
             "bars_per_day": 7,           # ~7 bars per trading day
         },
         "1 day": {
-            "max_duration": "1 Y",       # 252 trading days
+            "max_duration": "8 Y",       # 2000 bars = 2000 days = ~8 years
             "max_history_days": 7300,    # IB limit: ~20 years
             "bars_per_day": 1,
         },
         "1 week": {
-            "max_duration": "5 Y",       # ~260 weeks
+            "max_duration": "20 Y",      # 2000 bars = 2000 weeks = ~38 years (but IB caps at ~20)
             "max_history_days": 7300,    # IB limit: ~20 years
             "bars_per_day": 0.2,         # 1 bar per week
         },
@@ -1057,16 +1057,18 @@ class IBHistoricalCollector:
     
     def get_safe_duration(self, bar_size: str, lookback_days: int) -> str:
         """
-        Calculate a safe IB duration string that won't exceed limits.
+        Calculate a safe IB duration string based on 2000 bar limit.
         
-        IB Limits (approximate):
-        - 1 min: 1 day per request, max ~1 year history
-        - 5 mins: 1 week per request, max ~2 years history
-        - 15 mins: 2 weeks per request, max ~2 years history
-        - 30 mins: 1 month per request, max ~2 years history
-        - 1 hour: 3 months per request, max ~5 years history
-        - 1 day: 1 year per request, max ~20 years history
-        - 1 week: 5 years per request, max ~20 years history
+        IB Max Bars Per Request: 2000
+        
+        Calculated limits (bars ÷ bars_per_day):
+        - 1 min:   2000 ÷ 390 = ~5 days   → max "1 W"
+        - 5 mins:  2000 ÷ 78  = ~25 days  → max "1 M"
+        - 15 mins: 2000 ÷ 26  = ~77 days  → max "3 M"
+        - 30 mins: 2000 ÷ 13  = ~154 days → max "6 M"
+        - 1 hour:  2000 ÷ 7   = ~285 days → max "1 Y"
+        - 1 day:   2000 bars  = ~8 years  → max "8 Y"
+        - 1 week:  2000 bars  = ~38 years → max "20 Y" (IB cap)
         
         Args:
             bar_size: The bar size string (e.g., "1 min", "5 mins")
@@ -1080,21 +1082,66 @@ class IBHistoricalCollector:
         effective_lookback = min(lookback_days, max_history)
         
         if bar_size == "1 min":
-            return "1 D"  # Always 1 day for 1-min bars
+            # Max ~5 trading days per request (2000 bars ÷ 390 bars/day)
+            if effective_lookback >= 5:
+                return "1 W"
+            elif effective_lookback >= 2:
+                return f"{effective_lookback + 2} D"  # Add buffer for weekends
+            return "1 D"
+            
         elif bar_size == "5 mins":
-            return "1 W" if effective_lookback >= 5 else f"{effective_lookback} D"
+            # Max ~25 trading days per request
+            if effective_lookback >= 20:
+                return "1 M"
+            elif effective_lookback >= 10:
+                return "2 W"
+            elif effective_lookback >= 5:
+                return "1 W"
+            return f"{effective_lookback + 2} D"
+            
         elif bar_size == "15 mins":
-            return "2 W" if effective_lookback >= 10 else "1 W"
-        elif bar_size == "30 mins":
-            return "1 M" if effective_lookback >= 20 else "2 W"
-        elif bar_size == "1 hour":
+            # Max ~77 trading days per request
             if effective_lookback >= 60:
+                return "3 M"
+            elif effective_lookback >= 40:
+                return "2 M"
+            elif effective_lookback >= 20:
+                return "1 M"
+            elif effective_lookback >= 10:
+                return "2 W"
+            return "1 W"
+            
+        elif bar_size == "30 mins":
+            # Max ~154 trading days per request
+            if effective_lookback >= 120:
+                return "6 M"
+            elif effective_lookback >= 60:
+                return "3 M"
+            elif effective_lookback >= 40:
+                return "2 M"
+            elif effective_lookback >= 20:
+                return "1 M"
+            return "2 W"
+            
+        elif bar_size == "1 hour":
+            # Max ~285 trading days per request
+            if effective_lookback >= 200:
+                return "1 Y"
+            elif effective_lookback >= 120:
+                return "6 M"
+            elif effective_lookback >= 60:
                 return "3 M"
             elif effective_lookback >= 20:
                 return "1 M"
             return "2 W"
+            
         elif bar_size == "1 day":
-            if effective_lookback >= 252:
+            # Max ~2000 trading days per request (~8 years)
+            if effective_lookback >= 1260:
+                return "5 Y"
+            elif effective_lookback >= 504:
+                return "2 Y"
+            elif effective_lookback >= 252:
                 return "1 Y"
             elif effective_lookback >= 126:
                 return "6 M"
@@ -1103,14 +1150,19 @@ class IBHistoricalCollector:
             elif effective_lookback >= 22:
                 return "1 M"
             return f"{effective_lookback} D"
+            
         elif bar_size == "1 week":
-            if effective_lookback >= 1260:
+            # Max 2000 weeks (~38 years), but IB caps history at ~20 years
+            if effective_lookback >= 2520:
+                return "10 Y"
+            elif effective_lookback >= 1260:
                 return "5 Y"
             elif effective_lookback >= 504:
                 return "2 Y"
             elif effective_lookback >= 252:
                 return "1 Y"
             return "6 M"
+            
         else:
             return bar_config.get("max_duration", "1 D")
     
@@ -1200,59 +1252,8 @@ class IBHistoricalCollector:
             
             # Queue each timeframe for this symbol
             for bar_size in timeframes:
-                bar_config = self.BAR_CONFIGS.get(bar_size, {})
-                max_duration = bar_config.get("max_duration", "1 D")
-                max_history_days = bar_config.get("max_history_days", 30)
-                
-                # Cap lookback to IB's max history for this bar size
-                effective_lookback = min(lookback_days, max_history_days)
-                
-                # Calculate duration string based on lookback and IB limits
-                # Use the smaller of: requested lookback OR max_duration for this bar size
-                if bar_size == "1 min":
-                    # 1-min bars: max 1 day per request, so just use "1 D"
-                    duration = "1 D"
-                elif bar_size == "5 mins":
-                    # 5-min bars: use 1 week or less
-                    duration = "1 W" if effective_lookback >= 5 else f"{effective_lookback} D"
-                elif bar_size == "15 mins":
-                    # 15-min bars: use 2 weeks or less
-                    duration = "2 W" if effective_lookback >= 10 else "1 W"
-                elif bar_size == "30 mins":
-                    # 30-min bars: use 1 month or less
-                    duration = "1 M" if effective_lookback >= 20 else "2 W"
-                elif bar_size == "1 hour":
-                    # 1-hour bars: use 3 months or less
-                    if effective_lookback >= 60:
-                        duration = "3 M"
-                    elif effective_lookback >= 20:
-                        duration = "1 M"
-                    else:
-                        duration = "2 W"
-                elif bar_size == "1 day":
-                    # 1-day bars: flexible, up to 1 year per request
-                    if effective_lookback >= 252:
-                        duration = "1 Y"
-                    elif effective_lookback >= 126:
-                        duration = "6 M"
-                    elif effective_lookback >= 63:
-                        duration = "3 M"
-                    elif effective_lookback >= 22:
-                        duration = "1 M"
-                    else:
-                        duration = f"{effective_lookback} D"
-                elif bar_size == "1 week":
-                    # 1-week bars: use years
-                    if effective_lookback >= 1260:  # 5 years in trading days
-                        duration = "5 Y"
-                    elif effective_lookback >= 504:  # 2 years
-                        duration = "2 Y"
-                    elif effective_lookback >= 252:  # 1 year
-                        duration = "1 Y"
-                    else:
-                        duration = "6 M"
-                else:
-                    duration = max_duration
+                # Use the safe duration calculator
+                duration = self.get_safe_duration(bar_size, lookback_days)
                 
                 # Check if we should skip (already have recent data)
                 if skip_recent:
