@@ -320,11 +320,12 @@ async def fill_gaps(
             for tf, symbols in timeframes.items():
                 total_symbols.update(symbols)
         
-        # Start a per-stock collection with the missing symbols
+        # Start a per-stock collection with ONLY the missing symbols
         job_result = await collector.run_per_stock_collection(
             lookback_days=lookback_days,
             skip_recent=False,  # We already filtered to missing only
-            max_symbols=len(total_symbols)
+            max_symbols=len(total_symbols),
+            specific_symbols=list(total_symbols)  # Pass specific symbols to collect
         )
         
         return {

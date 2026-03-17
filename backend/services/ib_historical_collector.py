@@ -1181,7 +1181,8 @@ class IBHistoricalCollector:
         lookback_days: int = 30,
         skip_recent: bool = True,
         recent_days_threshold: int = 7,
-        max_symbols: int = None
+        max_symbols: int = None,
+        specific_symbols: List[str] = None
     ) -> Dict[str, Any]:
         """
         Collect ALL applicable timeframes for each stock before moving to the next.
@@ -1199,6 +1200,7 @@ class IBHistoricalCollector:
             skip_recent: Skip symbols that were collected within recent_days_threshold
             recent_days_threshold: Days threshold for "recent" data
             max_symbols: Limit number of symbols (None = all)
+            specific_symbols: Optional list of specific symbols to collect (overrides ADV query)
             
         Returns:
             Collection job info
@@ -1212,12 +1214,21 @@ class IBHistoricalCollector:
         if self._db is None:
             return {"success": False, "error": "Database not initialized. Call init_ib_collector first."}
         
-        # Get ADV data for all symbols
-        adv_col = self._db["adv_cache"]
-        symbols_with_adv = list(adv_col.find(
-            {"avg_volume": {"$gte": self.ADV_THRESHOLDS["investment"]}},
-            {"symbol": 1, "avg_volume": 1}
-        ).sort("avg_volume", -1))
+        # Get ADV data for symbols
+        adv_col = self._db["symbol_adv_cache"]  # Fixed: was "adv_cache"
+        
+        # If specific_symbols provided, only get those; otherwise get all with sufficient ADV
+        if specific_symbols:
+            symbols_with_adv = list(adv_col.find(
+                {"symbol": {"$in": list(specific_symbols)}, "avg_volume": {"$gte": self.ADV_THRESHOLDS["investment"]}},
+                {"symbol": 1, "avg_volume": 1}
+            ).sort("avg_volume", -1))
+            logger.info(f"Using specific symbols list: {len(specific_symbols)} provided, {len(symbols_with_adv)} found with ADV data")
+        else:
+            symbols_with_adv = list(adv_col.find(
+                {"avg_volume": {"$gte": self.ADV_THRESHOLDS["investment"]}},
+                {"symbol": 1, "avg_volume": 1}
+            ).sort("avg_volume", -1))
         
         if not symbols_with_adv:
             return {"success": False, "error": "No symbols found with sufficient ADV. Run ADV cache refresh first."}
@@ -1267,7 +1278,7 @@ class IBHistoricalCollector:
                         continue
                 
                 # Queue this request
-                queue_service.add_to_queue(
+                queue_service.create_request(
                     symbol=symbol,
                     bar_size=bar_size,
                     duration=duration
