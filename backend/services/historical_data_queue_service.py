@@ -87,13 +87,55 @@ class HistoricalDataQueueService:
         return request_id
     
     def get_pending_requests(self, limit: int = 10) -> List[Dict]:
-        """Get pending requests for the IB Data Pusher to fulfill"""
-        cursor = self.collection.find(
-            {"status": "pending"},
-            {"_id": 0}
-        ).sort("created_at", 1).limit(limit)
+        """
+        Get pending requests for the IB Data Pusher to fulfill.
         
-        return list(cursor)
+        IMPORTANT: Returns ALL pending timeframes for a SINGLE symbol first,
+        then moves to the next symbol. This ensures complete per-stock coverage
+        even if collection is interrupted.
+        
+        Strategy: Pick the symbol with the most pending requests, return all its
+        pending timeframes (up to limit).
+        """
+        # First, find a symbol that has pending requests
+        # We want to complete all timeframes for one symbol before moving on
+        pipeline = [
+            {"$match": {"status": "pending"}},
+            {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},  # Start with symbols that have most pending
+            {"$limit": 1}
+        ]
+        
+        result = list(self.collection.aggregate(pipeline))
+        
+        if not result:
+            return []
+        
+        target_symbol = result[0]["_id"]
+        
+        # Get all pending requests for this symbol (ordered by timeframe priority)
+        # Priority: 1 day first (most useful), then 1 hour, 5 mins, etc.
+        timeframe_priority = {
+            "1 day": 0,
+            "1 week": 1,
+            "1 hour": 2,
+            "30 mins": 3,
+            "15 mins": 4,
+            "5 mins": 5,
+            "1 min": 6
+        }
+        
+        cursor = self.collection.find(
+            {"status": "pending", "symbol": target_symbol},
+            {"_id": 0}
+        ).limit(limit)
+        
+        requests = list(cursor)
+        
+        # Sort by timeframe priority
+        requests.sort(key=lambda x: timeframe_priority.get(x.get("bar_size", ""), 99))
+        
+        return requests
     
     def claim_request(self, request_id: str) -> bool:
         """
