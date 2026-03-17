@@ -935,6 +935,10 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
                                     const isMedium = tf.coverage_pct >= 50 && tf.coverage_pct < 90;
                                     const isLow = tf.coverage_pct < 50;
                                     
+                                    // Find pending count for this timeframe from queue progress
+                                    const queueData = detailedProgress.by_bar_size?.find(bs => bs.bar_size === tf.timeframe);
+                                    const pendingCount = queueData?.pending || 0;
+                                    
                                     return (
                                       <div 
                                         key={j} 
@@ -942,9 +946,16 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
                                           isHigh ? 'border-emerald-500/30' : 
                                           isMedium ? 'border-amber-500/30' : 'border-rose-500/30'
                                         }`}
-                                        title={`${tf.symbols_with_data}/${tf.symbols_needed} symbols, ${tf.total_bars?.toLocaleString()} bars`}
+                                        title={`${tf.symbols_with_data}/${tf.symbols_needed} symbols, ${tf.total_bars?.toLocaleString()} bars${pendingCount > 0 ? `, ${pendingCount} pending` : ''}`}
                                       >
-                                        <p className="text-[9px] text-zinc-500 truncate">{tf.timeframe}</p>
+                                        <div className="flex items-center justify-between">
+                                          <p className="text-[9px] text-zinc-500 truncate">{tf.timeframe}</p>
+                                          {pendingCount > 0 && (
+                                            <span className="px-1 py-0.5 rounded bg-amber-500/20 text-[7px] text-amber-400 font-medium">
+                                              {pendingCount > 999 ? `${(pendingCount/1000).toFixed(1)}K` : pendingCount}
+                                            </span>
+                                          )}
+                                        </div>
                                         <p className={`text-xs font-bold ${
                                           isHigh ? 'text-emerald-400' : 
                                           isMedium ? 'text-amber-400' : 'text-rose-400'
@@ -961,20 +972,6 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
                               </div>
                             );
                           })}
-                        </div>
-                      </div>
-                      
-                      {/* Per-Timeframe Summary */}
-                      <div>
-                        <p className="text-xs font-medium text-zinc-400 mb-2">All Timeframes</p>
-                        <div className="grid grid-cols-7 gap-2">
-                          {dataCoverage.by_timeframe?.map((tf, i) => (
-                            <div key={i} className="p-2 rounded-lg bg-black/30 border border-white/10 text-center">
-                              <p className="text-[9px] text-zinc-500 mb-1">{tf.timeframe}</p>
-                              <p className="text-sm font-bold text-white">{tf.symbols}</p>
-                              <p className="text-[8px] text-zinc-600">{(tf.total_bars / 1000).toFixed(0)}K bars</p>
-                            </div>
-                          ))}
                         </div>
                       </div>
                       
@@ -1164,46 +1161,23 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
                     </div>
                   )}
                   
-                  {/* Active Collection Details */}
+                  {/* Cancel button for web-initiated collections */}
                   {hasActiveCollections && (
-                    <>
-                      <div>
-                        <p className="text-xs font-medium text-zinc-400 mb-2">Active Collections</p>
-                        {detailedProgress.active_collections.map((col, i) => (
-                          <div key={i} className="p-3 rounded-xl bg-black/40 border border-cyan-500/20 mb-2">
-                            <div className="flex items-center justify-between mb-2">
-                              <span className="text-sm font-bold text-white">{col.bar_size}</span>
-                              <span className="text-xs text-cyan-400">{col.progress}%</span>
-                            </div>
-                            <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden mb-2">
-                              <div 
-                                className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all"
-                                style={{ width: `${col.progress}%` }}
-                              />
-                            </div>
-                            <div className="flex justify-between text-[10px] text-zinc-500">
-                              <span>{col.completed}/{col.total} symbols</span>
-                              <span>ETA: {col.eta || 'Calculating...'}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <button
-                        onClick={handleCancelAll}
-                        disabled={cancelling}
-                        className="w-full py-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium hover:bg-rose-500/20 transition-colors disabled:opacity-50"
-                      >
-                        {cancelling ? 'Cancelling...' : 'Cancel All Collections'}
-                      </button>
-                    </>
+                    <button
+                      onClick={handleCancelAll}
+                      disabled={cancelling}
+                      className="w-full py-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium hover:bg-rose-500/20 transition-colors disabled:opacity-50"
+                    >
+                      {cancelling ? 'Cancelling...' : 'Cancel Web Collections'}
+                    </button>
                   )}
                   
-                  {/* No Active Collections */}
-                  {!hasActiveCollections && !collectionMode?.collection_mode?.active && (
+                  {/* Empty state - only show if no queue data */}
+                  {!collectionMode?.queue?.total && !detailedProgress.by_bar_size?.length && (
                     <div className="text-center py-6">
                       <CheckCircle className="w-8 h-8 text-emerald-500/50 mx-auto mb-2" />
-                      <p className="text-zinc-500 text-sm">No active collections</p>
-                      <p className="text-zinc-600 text-xs mt-1">Start a collection from the "Collect" tab</p>
+                      <p className="text-zinc-500 text-sm">No data collection queued</p>
+                      <p className="text-zinc-600 text-xs mt-1">Queue data from the "Collect" tab</p>
                       <p className="text-zinc-600 text-xs">or run <code className="bg-black/40 px-1 rounded">StartCollection.bat</code> for full-speed mode</p>
                     </div>
                   )}
