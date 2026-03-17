@@ -719,7 +719,7 @@ class IBDataPusher:
                 f"{self.cloud_url}/api/ib/push-data",
                 json=payload,
                 headers={"Content-Type": "application/json"},
-                timeout=10  # Increased timeout for slower connections
+                timeout=20  # Increased timeout for MongoDB Atlas latency
             )
             if response.status_code == 200:
                 result = response.json()
@@ -758,7 +758,7 @@ class IBDataPusher:
         try:
             response = requests.get(
                 f"{self.cloud_url}/api/ib/inplay-stocks",
-                timeout=5
+                timeout=10
             )
             if response.status_code == 200:
                 result = response.json()
@@ -923,7 +923,7 @@ class IBDataPusher:
             # Poll for pending orders
             response = requests.get(
                 f"{self.cloud_url}/api/ib/orders/pending",
-                timeout=5
+                timeout=10
             )
             
             if response.status_code != 200:
@@ -961,7 +961,7 @@ class IBDataPusher:
             # Claim the order first (prevents duplicate execution)
             claim_response = requests.post(
                 f"{self.cloud_url}/api/ib/orders/claim/{order_id}",
-                timeout=5
+                timeout=10
             )
             
             if claim_response.status_code != 200:
@@ -1058,7 +1058,7 @@ class IBDataPusher:
                 f"{self.cloud_url}/api/ib/orders/result",
                 json=payload,
                 headers={"Content-Type": "application/json"},
-                timeout=5
+                timeout=10
             )
             
             if response.status_code == 200:
@@ -1080,7 +1080,7 @@ class IBDataPusher:
             # Poll for pending historical data requests
             response = requests.get(
                 f"{self.cloud_url}/api/ib/historical-data/pending",
-                timeout=5
+                timeout=15  # Increased for Atlas latency
             )
             
             if response.status_code != 200:
@@ -1118,7 +1118,7 @@ class IBDataPusher:
             # Claim the request first (prevents duplicate fetching)
             claim_response = requests.post(
                 f"{self.cloud_url}/api/ib/historical-data/claim/{request_id}",
-                timeout=5
+                timeout=15  # Increased for Atlas latency
             )
             
             if claim_response.status_code != 200:
@@ -1277,7 +1277,7 @@ class IBDataPusher:
                 f"{self.cloud_url}/api/ib/historical-data/result",
                 json=payload,
                 headers={"Content-Type": "application/json"},
-                timeout=10
+                timeout=30  # Increased for MongoDB Atlas latency
             )
             
             if response.status_code == 200:
