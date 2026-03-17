@@ -96,9 +96,9 @@ class IBHistoricalCollector:
     
     # Timeframes to collect based on stock's ADV tier
     TIER_TIMEFRAMES = {
-        "intraday": ["1 min", "3 mins", "5 mins", "15 mins", "30 mins", "1 hour", "1 day"],  # 500K+ shares/day
-        "swing": ["15 mins", "30 mins", "1 hour", "1 day"],  # 100K+ shares/day
-        "investment": ["1 day", "1 week"],  # 50K+ shares/day
+        "intraday": ["1 min", "5 mins", "15 mins", "1 hour", "1 day"],      # 500K+ shares/day
+        "swing": ["5 mins", "30 mins", "1 hour", "1 day"],                   # 100K+ shares/day
+        "investment": ["1 hour", "1 day", "1 week"],                         # 50K+ shares/day
     }
     
     # ADV thresholds (in shares, not dollars)
@@ -1015,48 +1015,14 @@ class IBHistoricalCollector:
             recent_days_threshold: Days threshold for considering data "recent"
             force_refresh: If True, collect all symbols regardless of existing data
         """
-        if self._running_job and self._running_job.status == CollectionStatus.RUNNING:
-            return {
-                "success": False,
-                "error": "Another collection job is already running",
-                "current_job": self._running_job.to_dict()
-            }
-        
-        # ADV thresholds (for reference/future tiers)
-        _ADV_INTRADAY = 500_000  # noqa: F841
-        _ADV_SWING = 100_000  # noqa: F841
-        ADV_INVESTMENT = 50_000
-        
-        results = []
-        
-        # 1. Investment tier (1 day bars) - broadest coverage
-        if include_investment:
-            logger.info("Starting investment tier collection (1 day bars)...")
-            symbols = await self.get_liquid_symbols(min_adv=ADV_INVESTMENT)
-            if symbols:
-                result = await self.start_collection(
-                    symbols=symbols,
-                    bar_size="1 day",
-                    duration=duration,
-                    use_defaults=False,
-                    skip_recent=skip_recent,
-                    recent_days_threshold=recent_days_threshold,
-                    force_refresh=force_refresh
-                )
-                results.append({"tier": "investment", "bar_size": "1 day", "result": result})
-                
-                # Wait for completion (this is a long-running job)
-                # In practice, each tier runs as a separate job
-        
-        return {
-            "success": True,
-            "message": "Smart collection started with investment tier (1 day bars)",
-            "tiers_queued": ["investment", "swing", "intraday"] if include_intraday else ["investment", "swing"],
-            "note": "Each tier runs as a separate job. Skipping symbols with recent data." if skip_recent else "Each tier runs as a separate job.",
-            "skip_recent": skip_recent,
-            "recent_days_threshold": recent_days_threshold,
-            "results": results
-        }
+        # Redirect to per-stock collection (the new standard approach)
+        logger.info("Smart collection now uses per-stock multi-timeframe approach")
+        return await self.run_per_stock_collection(
+            lookback_days=30,
+            skip_recent=skip_recent,
+            recent_days_threshold=recent_days_threshold,
+            max_symbols=None
+        )
     
     def get_symbol_tier(self, avg_volume: float) -> str:
         """Determine which tier a symbol belongs to based on ADV."""
@@ -1100,7 +1066,9 @@ class IBHistoricalCollector:
         logger.info(f"Lookback: {lookback_days} days | Skip recent: {skip_recent}")
         logger.info("=" * 60)
         
-        await self._ensure_initialized()
+        # Ensure DB is connected
+        if self._db is None:
+            return {"success": False, "error": "Database not initialized. Call init_ib_collector first."}
         
         # Get ADV data for all symbols
         adv_col = self._db["adv_cache"]

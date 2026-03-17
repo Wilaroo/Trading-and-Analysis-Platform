@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from typing import Optional, List
 import logging
 
-from services.ib_historical_collector import get_ib_collector
+from services.ib_historical_collector import get_ib_collector, IBHistoricalCollector
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ib-collector", tags=["ib-collector"])
@@ -910,9 +910,14 @@ async def per_stock_collection(
     Start per-stock multi-timeframe collection.
     
     Collects ALL applicable timeframes for each stock before moving to the next:
-    - TSLA (500K+ ADV): Gets 1min, 3min, 5min, 15min, 30min, 1hr, 1day
-    - Then AAPL: Gets 1min, 3min, 5min, 15min, 30min, 1hr, 1day
+    - TSLA (500K+ ADV): Gets 1min, 5min, 15min, 1hr, 1day
+    - Then AAPL: Gets 1min, 5min, 15min, 1hr, 1day
     - Lower volume stocks get fewer timeframes based on their tier
+    
+    **Timeframes by ADV Tier:**
+    - **Intraday (500K+ shares/day)**: 1 min, 5 min, 15 min, 1 hr, 1 day
+    - **Swing (100K+ shares/day)**: 5 min, 30 min, 1 hr, 1 day
+    - **Investment (50K+ shares/day)**: 1 hr, 1 day, 1 week
     
     Args:
         lookback_days: How many days of history to fetch (default 30)
@@ -927,7 +932,7 @@ async def per_stock_collection(
         POST /api/ib-collector/per-stock-collection?lookback_days=30&max_symbols=100
     """
     try:
-        collector = IBHistoricalCollector()
+        collector = get_ib_collector()  # Use initialized singleton
         result = await collector.run_per_stock_collection(
             lookback_days=lookback_days,
             skip_recent=skip_recent,
@@ -944,127 +949,46 @@ async def per_stock_collection(
 
 @router.post("/multi-timeframe-collection")
 async def multi_timeframe_collection(
-    bar_size: str = "1 min",
-    lookback: str = "30_days",
-    collection_type: str = "liquid",
+    lookback_days: int = 30,
     skip_recent: bool = True,
     recent_days_threshold: int = 7,
-    force_refresh: bool = False,
-    max_symbols: int = 5000
+    max_symbols: int = None
 ):
     """
-    Start a multi-timeframe data collection with flexible bar sizes and lookback periods.
+    Start multi-timeframe data collection using per-stock approach.
     
-    **Bar Sizes (prioritized for intraday strategies):**
-    - `1 min` - Best for scalping, 1-day lookback max efficient
-    - `5 mins` - Good for intraday momentum, up to 1-week lookback
-    - `15 mins` - Swing trading intraday, up to 1-month lookback  
-    - `1 hour` - Swing trading, up to 6-month lookback
-    - `1 day` - Position/investment, up to 5-year lookback
-    - `1 week` - Long-term investment, up to 5-year lookback
+    **NEW: Per-Stock Collection**
+    Each stock gets ALL its applicable timeframes collected before moving to the next:
+    - TSLA (500K+ ADV): 1min → 5min → 15min → 1hr → 1day ✓ then next stock
+    - AAPL (500K+ ADV): 1min → 5min → 15min → 1hr → 1day ✓ then next stock
+    - XYZ (100K ADV): 5min → 30min → 1hr → 1day ✓ then next stock
     
-    **Lookback Periods:**
-    - `1_day` - Last trading day
-    - `1_week` - Last 7 days
-    - `30_days` - Last month (default)
-    - `6_months` - Last 6 months
-    - `1_year` - Last year
-    - `2_years` - Last 2 years
-    - `5_years` - Last 5 years
+    **Timeframes by ADV Tier:**
+    - **Intraday (500K+ shares/day)**: 1 min, 5 min, 15 min, 1 hr, 1 day
+    - **Swing (100K+ shares/day)**: 5 min, 30 min, 1 hr, 1 day
+    - **Investment (50K+ shares/day)**: 1 hr, 1 day, 1 week
     
-    **Collection Types:**
-    - `liquid` - Only liquid stocks (ADV >= 100K), faster
-    - `full_market` - All tradeable stocks, slower
-    - `smart` - ADV-matched to bar size (recommended)
-    
-    **IB Data Limitations:**
-    - 1 min bars: Max ~365 days history
-    - 5 min bars: Max ~730 days history  
-    - 1 day bars: Max ~7300 days (20 years) history
+    **Args:**
+    - `lookback_days`: How many days of history to fetch (default 30)
+    - `skip_recent`: Skip symbols collected within recent_days_threshold (default True)
+    - `recent_days_threshold`: Days threshold for "recent" data (default 7)
+    - `max_symbols`: Limit number of symbols (default None = all)
     
     ⚠️ LONG-RUNNING: Check /api/ib-collector/queue-progress for real-time progress
     """
     try:
         collector = get_ib_collector()
         
-        # Validate bar_size
-        valid_bar_sizes = ["1 min", "5 mins", "15 mins", "1 hour", "1 day", "1 week"]
-        if bar_size not in valid_bar_sizes:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Invalid bar_size. Choose from: {valid_bar_sizes}"
-            )
-        
-        # Map lookback to IB duration string
-        lookback_map = {
-            "1_day": "1 D",
-            "1_week": "1 W",
-            "30_days": "1 M",
-            "6_months": "6 M",
-            "1_year": "1 Y",
-            "2_years": "2 Y",
-            "5_years": "5 Y"
-        }
-        
-        if lookback not in lookback_map:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid lookback. Choose from: {list(lookback_map.keys())}"
-            )
-        
-        duration = lookback_map[lookback]
-        
-        # Determine ADV threshold based on bar size (smart matching)
-        adv_thresholds = {
-            "1 min": 500_000,    # High liquidity for scalping
-            "5 mins": 500_000,   # High liquidity for intraday
-            "15 mins": 100_000,  # Medium for swing
-            "1 hour": 100_000,   # Medium for swing
-            "1 day": 50_000,     # Lower for investment
-            "1 week": 50_000     # Lower for investment
-        }
-        
-        # Get symbols based on collection type
-        if collection_type == "full_market":
-            symbols = await collector.get_all_us_symbols(min_price=1.0, max_price=1000.0)
-        elif collection_type == "smart":
-            # Use ADV matched to bar size
-            min_adv = adv_thresholds.get(bar_size, 100_000)
-            symbols = await collector.get_liquid_symbols(min_adv=min_adv)
-        else:  # liquid (default)
-            symbols = await collector.get_liquid_symbols(min_adv=100_000)
-        
-        # Limit symbols if specified
-        if max_symbols and len(symbols) > max_symbols:
-            symbols = symbols[:max_symbols]
-        
-        logger.info(f"Multi-timeframe collection: {len(symbols)} symbols, {bar_size} bars, {lookback} lookback")
-        
-        # Start collection
-        result = await collector.start_collection(
-            symbols=symbols,
-            bar_size=bar_size,
-            duration=duration,
-            use_defaults=False,
+        # Use the new per-stock collection approach
+        result = await collector.run_per_stock_collection(
+            lookback_days=lookback_days,
             skip_recent=skip_recent,
             recent_days_threshold=recent_days_threshold,
-            force_refresh=force_refresh
+            max_symbols=max_symbols
         )
-        
-        # Add metadata to result
-        if result.get("success"):
-            result["collection_config"] = {
-                "bar_size": bar_size,
-                "lookback": lookback,
-                "duration": duration,
-                "collection_type": collection_type,
-                "symbols_requested": len(symbols)
-            }
         
         return result
         
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error starting multi-timeframe collection: {e}")
         raise HTTPException(status_code=500, detail=str(e))
