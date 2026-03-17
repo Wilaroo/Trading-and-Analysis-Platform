@@ -26,6 +26,7 @@ class ScheduledTaskType(str, Enum):
     SHADOW_UPDATE = "shadow_update"
     EDGE_DECAY_CHECK = "edge_decay_check"
     LEARNING_SYNC = "learning_sync"
+    IB_COLLECTION_RESUME = "ib_collection_resume"
 
 
 @dataclass
@@ -185,6 +186,19 @@ class TradingScheduler:
                 replace_existing=True
             )
             
+            # 6. IB Collection Auto-Resume - Daily at 2:15 AM ET (after IB Gateway restarts ~2:00 AM)
+            self._scheduler.add_job(
+                self._run_ib_collection_resume,
+                CronTrigger(
+                    hour=2,
+                    minute=15,
+                    timezone='US/Eastern'
+                ),
+                id='ib_collection_resume',
+                name='IB Collection Auto-Resume',
+                replace_existing=True
+            )
+            
             self._scheduler.start()
             self._is_running = True
             logger.info("Trading scheduler started")
@@ -193,6 +207,7 @@ class TradingScheduler:
             logger.info("  - Shadow Updates: Every 5 min")
             logger.info("  - Edge Decay Check: 4:15 PM ET (Mon-Fri)")
             logger.info("  - Learning Sync: 5:00 PM ET (Mon-Fri)")
+            logger.info("  - IB Collection Resume: 2:15 AM ET (Daily)")
             
         except ImportError:
             logger.warning("APScheduler not installed. Scheduler disabled.")
@@ -444,6 +459,86 @@ class TradingScheduler:
             result.duration_seconds = (end_time - start_time).total_seconds()
             self._log_task_result(result)
             logger.info(f"Learning sync completed in {result.duration_seconds:.1f}s: {result.result_summary}")
+    
+    async def _run_ib_collection_resume(self):
+        """
+        Auto-resume IB historical data collection after IB Gateway restarts.
+        
+        IB Gateway typically restarts around 2:00 AM ET daily. This task runs at 2:15 AM ET
+        to check if there are pending queue items and resume collection if:
+        1. IB Gateway is connected
+        2. There are pending items in the collection queue
+        """
+        start_time = datetime.now(timezone.utc)
+        result = ScheduledTaskResult(
+            task_type=ScheduledTaskType.IB_COLLECTION_RESUME.value,
+            success=False,
+            started_at=start_time.isoformat(),
+            completed_at="",
+            duration_seconds=0,
+            result_summary=""
+        )
+        
+        try:
+            logger.info("Running scheduled IB collection auto-resume check...")
+            
+            # Import services
+            from services.ib_service import get_ib_service
+            from services.ib_historical_collector import get_historical_collector
+            from services.historical_data_queue_service import get_historical_data_queue_service
+            
+            ib_service = get_ib_service()
+            collector = get_historical_collector()
+            
+            # Check IB connection
+            ib_connected = ib_service.is_connected if ib_service else False
+            
+            if not ib_connected:
+                result.result_summary = "IB Gateway not connected - skipping resume"
+                logger.info(result.result_summary)
+                result.success = True  # Not a failure, just nothing to do
+                return
+            
+            # Check for pending items in queue
+            if self._db is None:
+                result.result_summary = "Database not initialized"
+                return
+                
+            queue_service = get_historical_data_queue_service(self._db)
+            stats = queue_service.get_overall_queue_stats()
+            pending_count = stats.get("pending", 0)
+            
+            if pending_count == 0:
+                result.result_summary = "No pending items in queue - nothing to resume"
+                logger.info(result.result_summary)
+                result.success = True
+                return
+            
+            # Resume collection
+            logger.info(f"Found {pending_count} pending items - resuming collection...")
+            resume_result = await collector.resume_monitoring()
+            
+            if resume_result.get("success"):
+                result.success = True
+                result.result_summary = f"Resumed collection: {pending_count} pending, {stats.get('completed', 0)} completed"
+                logger.info(f"IB collection auto-resumed: {result.result_summary}")
+            else:
+                result.result_summary = f"Resume failed: {resume_result.get('error', 'Unknown error')}"
+                logger.error(result.result_summary)
+                
+        except Exception as e:
+            result.error = str(e)
+            result.result_summary = f"Auto-resume failed: {e}"
+            logger.error(f"IB collection auto-resume failed: {e}")
+            import traceback
+            traceback.print_exc()
+            
+        finally:
+            end_time = datetime.now(timezone.utc)
+            result.completed_at = end_time.isoformat()
+            result.duration_seconds = (end_time - start_time).total_seconds()
+            self._log_task_result(result)
+            logger.info(f"IB collection resume check completed in {result.duration_seconds:.1f}s: {result.result_summary}")
             
     def _log_task_result(self, result: ScheduledTaskResult):
         """Log task result to database"""
@@ -465,6 +560,8 @@ class TradingScheduler:
             await self._run_shadow_update()
         elif task_type == ScheduledTaskType.LEARNING_SYNC.value:
             await self._run_learning_sync()
+        elif task_type == ScheduledTaskType.IB_COLLECTION_RESUME.value:
+            await self._run_ib_collection_resume()
         else:
             return {"success": False, "error": f"Unknown task type: {task_type}"}
             
