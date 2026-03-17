@@ -78,8 +78,10 @@ class IBHistoricalCollector:
     COLLECTION_NAME = "ib_historical_data"
     JOBS_COLLECTION = "ib_collection_jobs"
     
-    # IB rate limiting - be conservative to avoid disconnects
-    REQUEST_DELAY_SECONDS = 2.0  # Wait between requests (IB pacing: 60 req/10 min)
+    # IB rate limiting - optimized while staying within IB limits
+    # IB Pacing: ~60 requests per 10 minutes = 6/min minimum spacing
+    # 1 second = 60/min, well within limits but faster than ultra-conservative 2s
+    REQUEST_DELAY_SECONDS = 1.0  # Optimized: was 2.0, now 1.0 (still safe)
     MAX_RETRIES = 3
     MAX_BARS_PER_REQUEST = 2000  # IB limit
     
@@ -1165,6 +1167,26 @@ class IBHistoricalCollector:
             
         else:
             return bar_config.get("max_duration", "1 D")
+
+    def get_max_duration_for_bar_size(self, bar_size: str) -> str:
+        """
+        Get the maximum IB duration string for a given bar size.
+        This maximizes data per request while respecting IB's 2000 bar limit.
+        
+        Returns the max_duration from BAR_CONFIGS which is calculated as:
+        - 2000 bars ÷ bars_per_day = max trading days per request
+        """
+        bar_config = self.BAR_CONFIGS.get(bar_size, {})
+        return bar_config.get("max_duration", "1 M")
+    
+    def get_max_lookback_days(self, bar_size: str) -> int:
+        """
+        Get the maximum lookback days IB allows for a given bar size.
+        Use this to request the maximum history available.
+        """
+        bar_config = self.BAR_CONFIGS.get(bar_size, {})
+        return bar_config.get("max_history_days", 365)
+
     
     def get_symbol_tier(self, avg_volume: float) -> str:
         """Determine which tier a symbol belongs to based on ADV."""
@@ -1182,7 +1204,8 @@ class IBHistoricalCollector:
         skip_recent: bool = True,
         recent_days_threshold: int = 7,
         max_symbols: int = None,
-        specific_symbols: List[str] = None
+        specific_symbols: List[str] = None,
+        use_max_lookback: bool = False
     ) -> Dict[str, Any]:
         """
         Collect ALL applicable timeframes for each stock before moving to the next.
@@ -1196,11 +1219,12 @@ class IBHistoricalCollector:
         A stock with 50K ADV would only get: 1day, 1week
         
         Args:
-            lookback_days: How many days of history to fetch
+            lookback_days: How many days of history to fetch (ignored if use_max_lookback=True)
             skip_recent: Skip symbols that were collected within recent_days_threshold
             recent_days_threshold: Days threshold for "recent" data
             max_symbols: Limit number of symbols (None = all)
             specific_symbols: Optional list of specific symbols to collect (overrides ADV query)
+            use_max_lookback: If True, use maximum IB lookback per timeframe (maximizes data per request)
             
         Returns:
             Collection job info
@@ -1264,8 +1288,11 @@ class IBHistoricalCollector:
             
             # Queue each timeframe for this symbol
             for bar_size in timeframes:
-                # Use the safe duration calculator
-                duration = self.get_safe_duration(bar_size, lookback_days)
+                # Use maximum IB lookback if requested, otherwise use specified lookback
+                if use_max_lookback:
+                    duration = self.get_max_duration_for_bar_size(bar_size)
+                else:
+                    duration = self.get_safe_duration(bar_size, lookback_days)
                 
                 # Check if we should skip (already have recent data)
                 if skip_recent:
@@ -1287,6 +1314,11 @@ class IBHistoricalCollector:
         
         logger.info(f"Queued {total_queued} requests across {len(symbols_with_adv)} symbols")
         
+        # Calculate estimated time at optimized 1 second per request
+        estimated_seconds = total_queued * self.REQUEST_DELAY_SECONDS
+        estimated_hours = round(estimated_seconds / 3600, 1)
+        estimated_display = f"{estimated_hours} hours" if estimated_hours >= 1 else f"{int(estimated_seconds / 60)} minutes"
+        
         return {
             "success": True,
             "message": f"Per-stock collection queued: {total_queued} requests for {len(symbols_with_adv)} symbols",
@@ -1294,7 +1326,10 @@ class IBHistoricalCollector:
             "tier_counts": tier_counts,
             "total_requests": total_queued,
             "timeframes_by_tier": self.TIER_TIMEFRAMES,
-            "estimated_hours": round(total_queued * 3 / 3600, 1),
+            "estimated_time": estimated_display,
+            "estimated_hours": estimated_hours,
+            "rate_per_minute": int(60 / self.REQUEST_DELAY_SECONDS),
+            "use_max_lookback": use_max_lookback,
             "note": "Collection processes queue in order - each stock gets all its timeframes before moving to next"
         }
     

@@ -652,13 +652,12 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
     }
   };
 
-  // Fill gaps - automatically collect only missing data
+  // Fill gaps - automatically collect only missing data with MAX lookback
   const handleFillGaps = async () => {
     setFillingGaps(true);
     try {
       const params = new URLSearchParams({
-        lookback_days: lookbackDays.toString(),
-        max_symbols: '100' // Start with reasonable batch
+        use_max_lookback: 'true'  // Get maximum history per timeframe
       });
       
       // Add tier filter if not 'all'

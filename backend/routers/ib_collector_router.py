@@ -219,18 +219,27 @@ async def get_data_coverage():
 @router.post("/fill-gaps")
 async def fill_gaps(
     tier_filter: Optional[str] = None,
-    lookback_days: int = 30,
-    max_symbols: int = 100
+    max_symbols: int = None,
+    use_max_lookback: bool = True
 ):
     """
-    Smart Gap Filler - Automatically collects ONLY missing data.
+    Smart Gap Filler - Automatically collects ONLY missing data with MAXIMUM lookback.
     
     Analyzes the current data coverage and starts a collection job
     targeting only the symbols/timeframes that have gaps.
     
+    By default, uses maximum IB lookback per timeframe to get the most data possible:
+    - 1 min: 1 week (~5 trading days of minute bars)
+    - 5 mins: 1 month (~25 trading days)
+    - 15 mins: 3 months
+    - 30 mins: 6 months
+    - 1 hour: 1 year
+    - 1 day: 8 years
+    - 1 week: 20 years
+    
     - **tier_filter**: Limit to specific tier ("intraday", "swing", "investment", or None for all)
-    - **lookback_days**: How many days of history to collect for gaps (default 30)
-    - **max_symbols**: Maximum symbols to process in this run (default 100)
+    - **max_symbols**: Maximum symbols to process (None = all symbols with gaps)
+    - **use_max_lookback**: Use maximum IB lookback per timeframe (default True)
     
     Returns:
     - Summary of gaps found
@@ -280,7 +289,11 @@ async def fill_gaps(
             if "max_adv" in tier_config:
                 adv_query["avg_volume"]["$lt"] = tier_config["max_adv"]
             
-            tier_symbols = [doc["symbol"] for doc in adv_col.find(adv_query, {"symbol": 1}).limit(max_symbols)]
+            # Get all symbols in tier, or limit if specified
+            cursor = adv_col.find(adv_query, {"symbol": 1})
+            if max_symbols:
+                cursor = cursor.limit(max_symbols)
+            tier_symbols = [doc["symbol"] for doc in cursor]
             
             if not tier_symbols:
                 continue
@@ -297,12 +310,14 @@ async def fill_gaps(
                 missing_symbols = [s for s in tier_symbols if s not in symbols_with_data]
                 
                 if missing_symbols:
-                    symbols_to_collect[tier_name][tf] = missing_symbols[:max_symbols]
+                    # If max_symbols set, limit per timeframe; otherwise collect all
+                    symbols_to_queue = missing_symbols[:max_symbols] if max_symbols else missing_symbols
+                    symbols_to_collect[tier_name][tf] = symbols_to_queue
                     gaps_found.append({
                         "tier": tier_name,
                         "timeframe": tf,
                         "missing_count": len(missing_symbols),
-                        "will_collect": len(symbols_to_collect[tier_name][tf])
+                        "will_collect": len(symbols_to_queue)
                     })
         
         if not gaps_found:
@@ -320,12 +335,12 @@ async def fill_gaps(
             for tf, symbols in timeframes.items():
                 total_symbols.update(symbols)
         
-        # Start a per-stock collection with ONLY the missing symbols
+        # Start a per-stock collection with ONLY the missing symbols and MAX lookback
         job_result = await collector.run_per_stock_collection(
-            lookback_days=lookback_days,
             skip_recent=False,  # We already filtered to missing only
-            max_symbols=len(total_symbols),
-            specific_symbols=list(total_symbols)  # Pass specific symbols to collect
+            max_symbols=len(total_symbols) if max_symbols else None,
+            specific_symbols=list(total_symbols),
+            use_max_lookback=use_max_lookback  # Use maximum IB lookback per timeframe
         )
         
         return {
