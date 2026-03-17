@@ -12,7 +12,7 @@ echo.
 :: CONFIGURATION - EDIT THESE AS NEEDED
 :: =====================================================
 :: Cloud platform URL
-set CLOUD_URL=https://trading-heartbeat.preview.emergentagent.com
+set CLOUD_URL=https://pipeline-control.preview.emergentagent.com
 
 :: GitHub repo for auto-updates
 set GITHUB_RAW=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents
@@ -364,7 +364,7 @@ taskkill /F /FI "WINDOWTITLE eq IB Data Pusher*" >nul 2>&1
 
 if exist "%SCRIPT_DIR%ib_data_pusher.py" (
     timeout /t 3 /nobreak >nul
-    start "IB Data Pusher" cmd /k "title IB Data Pusher && color 0B && echo ============================== && echo   IB Data Pusher Running && echo   Cloud: %CLOUD_URL% && echo   Symbols: %IB_SYMBOLS% && echo ============================== && python "%SCRIPT_DIR%ib_data_pusher.py" --cloud-url %CLOUD_URL% --symbols %IB_SYMBOLS%"
+    start "IB Data Pusher" cmd /k "title IB Data Pusher && color 0B && echo ============================== && echo   IB Data Pusher Running && echo   Cloud: %CLOUD_URL% && echo   Symbols: %IB_SYMBOLS% && echo   Mode: AUTO (UI-controlled) && echo ============================== && python "%SCRIPT_DIR%ib_data_pusher.py" --cloud-url %CLOUD_URL% --symbols %IB_SYMBOLS% --mode auto"
     echo       IB Data Pusher started!
 ) else (
     echo       [ERROR] ib_data_pusher.py not found

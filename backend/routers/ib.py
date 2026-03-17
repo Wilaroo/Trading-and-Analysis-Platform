@@ -334,7 +334,7 @@ async def get_pusher_setup_info():
     cloud_url = os.environ.get("REACT_APP_BACKEND_URL", "")
     if not cloud_url:
         # Try to infer from request or env
-        cloud_url = os.environ.get("APP_URL", "https://trading-heartbeat.preview.emergentagent.com")
+        cloud_url = os.environ.get("APP_URL", "https://pipeline-control.preview.emergentagent.com")
     
     pusher_connected = False
     last_update = _pushed_ib_data.get("last_update")
@@ -4555,3 +4555,80 @@ async def get_historical_data_queue_stats():
     except Exception as e:
         logger.error(f"Error getting queue stats: {e}")
         return {"pending": 0, "completed": 0, "failed": 0, "total": 0, "progress_pct": 0}
+
+
+
+# ===================== MODE TOGGLE (UI-CONTROLLED) =====================
+
+# Desired mode set by UI - the local script will poll this
+_desired_mode = {
+    "mode": "trading",  # "trading" or "collection"
+    "set_by": "default",
+    "set_at": None
+}
+
+
+@router.get("/mode")
+async def get_current_mode():
+    """
+    Get the desired operating mode.
+    The local ib_data_pusher.py script polls this endpoint to know which mode to run in.
+    """
+    return {
+        "mode": _desired_mode["mode"],
+        "set_by": _desired_mode["set_by"],
+        "set_at": _desired_mode["set_at"],
+        "collection_active": _collection_mode_status.get("active", False)
+    }
+
+
+@router.post("/mode/set")
+async def set_operating_mode(data: dict):
+    """
+    Set the desired operating mode from the UI.
+    The local script will pick this up on its next poll.
+    """
+    global _desired_mode
+    
+    new_mode = data.get("mode", "trading")
+    if new_mode not in ["trading", "collection"]:
+        raise HTTPException(status_code=400, detail="Mode must be 'trading' or 'collection'")
+    
+    _desired_mode = {
+        "mode": new_mode,
+        "set_by": "ui",
+        "set_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    logger.info(f"Operating mode set to: {new_mode} (via UI)")
+    
+    return {
+        "success": True,
+        "mode": new_mode,
+        "message": f"Mode set to {new_mode}. Local script will switch on next poll (~30s)."
+    }
+
+
+@router.get("/mode/status")
+async def get_mode_status():
+    """
+    Get full mode status including desired mode and actual running state.
+    Used by the UI to show current state.
+    """
+    try:
+        queue_stats = await get_historical_data_queue_stats()
+    except:
+        queue_stats = {"pending": 0, "completed": 0, "failed": 0, "total": 0}
+    
+    return {
+        "desired_mode": _desired_mode["mode"],
+        "set_by": _desired_mode["set_by"],
+        "set_at": _desired_mode["set_at"],
+        "actual_state": {
+            "collection_active": _collection_mode_status.get("active", False),
+            "last_update": _collection_mode_status.get("last_update"),
+            "completed": _collection_mode_status.get("completed", 0),
+            "rate_per_hour": _collection_mode_status.get("rate_per_hour", 0)
+        },
+        "queue": queue_stats
+    }

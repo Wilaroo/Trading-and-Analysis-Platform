@@ -1,1 +1,1 @@
-https://trading-heartbeat.preview.emergentagent.com
+https://pipeline-control.preview.emergentagent.com

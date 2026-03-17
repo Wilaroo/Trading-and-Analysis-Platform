@@ -3,7 +3,7 @@ IB Data Pusher - Runs on your local machine
 Connects to IB Gateway locally and pushes data to the cloud backend.
 
 Usage:
-    python ib_data_pusher.py --cloud-url https://trading-heartbeat.preview.emergentagent.com
+    python ib_data_pusher.py --cloud-url https://pipeline-control.preview.emergentagent.com
 
 This script should be run on your trading laptop alongside IB Gateway.
 
@@ -1096,6 +1096,212 @@ class IBDataPusher:
         """Stop the pusher"""
         self.running = False
     
+    # ==================== AUTO MODE (CLOUD-CONTROLLED) ====================
+    
+    def run_auto_mode(self, symbols: List[str] = None, enable_level2: bool = True):
+        """
+        Auto mode - polls cloud for mode setting and switches dynamically.
+        
+        This allows the UI to control whether the script runs in trading or collection mode.
+        The script polls /api/ib/mode every 30 seconds and switches accordingly.
+        """
+        if symbols is None:
+            symbols = ["VIX", "SPY", "QQQ", "IWM"]
+        
+        if not self.connect():
+            return
+        
+        self.running = True
+        current_mode = "trading"  # Start in trading mode
+        mode_check_interval = 30  # Check cloud for mode changes every 30 seconds
+        last_mode_check = 0
+        
+        # Subscribe to market data initially (for trading mode)
+        logger.info("Subscribing to market data...")
+        self.subscribe_market_data(symbols)
+        if enable_level2:
+            core_l2 = [s for s in symbols if s != "VIX"]
+            self.subscribe_level2(core_l2)
+        
+        # Request account updates
+        logger.info("Requesting account updates...")
+        try:
+            self.request_account_updates()
+        except Exception as e:
+            logger.error(f"Account updates failed: {e}")
+        
+        logger.info("Fetching news providers...")
+        self.fetch_news_providers()
+        
+        logger.info("")
+        logger.info("=" * 50)
+        logger.info("  AUTO MODE - Cloud-controlled")
+        logger.info("  Mode can be changed from the UI")
+        logger.info("=" * 50)
+        logger.info("")
+        
+        # Collection mode stats (when in collection mode)
+        collection_start_time = None
+        collection_completed = 0
+        collection_failed = 0
+        
+        try:
+            while self.running:
+                try:
+                    # Keep IB connection alive
+                    self.ib.sleep(0.1)
+                    
+                    current_time = time.time()
+                    
+                    # Check cloud for mode changes
+                    if current_time - last_mode_check >= mode_check_interval:
+                        new_mode = self._check_cloud_mode()
+                        if new_mode and new_mode != current_mode:
+                            logger.info("")
+                            logger.info("=" * 50)
+                            logger.info(f"  MODE CHANGE: {current_mode.upper()} -> {new_mode.upper()}")
+                            logger.info("=" * 50)
+                            logger.info("")
+                            
+                            if new_mode == "collection":
+                                collection_start_time = time.time()
+                                collection_completed = 0
+                                collection_failed = 0
+                                # Notify cloud we're starting collection
+                                try:
+                                    self.api.post_safe("/api/ib/collection-mode/start", {
+                                        "started_at": datetime.now().isoformat(),
+                                        "mode": "collection"
+                                    }, timeout=10)
+                                except:
+                                    pass
+                            elif current_mode == "collection":
+                                # Notify cloud we're stopping collection
+                                elapsed = time.time() - collection_start_time if collection_start_time else 0
+                                try:
+                                    self.api.post_safe("/api/ib/collection-mode/stop", {
+                                        "completed": collection_completed,
+                                        "failed": collection_failed,
+                                        "elapsed_minutes": elapsed / 60,
+                                        "stopped_at": datetime.now().isoformat()
+                                    }, timeout=10)
+                                except:
+                                    pass
+                            
+                            current_mode = new_mode
+                        
+                        last_mode_check = current_time
+                    
+                    # Execute based on current mode
+                    if current_mode == "trading":
+                        # Trading mode - push data, poll orders
+                        self._trading_mode_tick(current_time)
+                    else:
+                        # Collection mode - fetch historical data
+                        result = self._collection_mode_tick()
+                        if result:
+                            collection_completed += result.get("completed", 0)
+                            collection_failed += result.get("failed", 0)
+                            
+                            # Report progress
+                            if collection_start_time:
+                                elapsed = time.time() - collection_start_time
+                                rate = collection_completed / (elapsed / 3600) if elapsed > 0 else 0
+                                try:
+                                    self.api.post_safe("/api/ib/collection-mode/progress", {
+                                        "completed": collection_completed,
+                                        "failed": collection_failed,
+                                        "rate_per_hour": rate,
+                                        "elapsed_minutes": elapsed / 60,
+                                        "timestamp": datetime.now().isoformat()
+                                    }, timeout=10)
+                                except:
+                                    pass
+                    
+                except Exception as e:
+                    logger.error(f"Auto mode loop error: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    time.sleep(1)
+                    
+        except KeyboardInterrupt:
+            logger.info("Shutting down...")
+        finally:
+            self.running = False
+            self.ib.disconnect()
+            logger.info("Disconnected from IB Gateway")
+    
+    def _check_cloud_mode(self) -> Optional[str]:
+        """Check cloud for desired operating mode"""
+        try:
+            result = self.api.get_safe("/api/ib/mode", timeout=10)
+            if result:
+                mode = result.get("mode", "trading")
+                return mode
+        except Exception as e:
+            logger.debug(f"Could not check cloud mode: {e}")
+        return None
+    
+    def _trading_mode_tick(self, current_time: float):
+        """Execute one tick of trading mode"""
+        # Push data at regular intervals
+        if current_time - self.last_push_time >= self.push_interval:
+            self.push_data_to_cloud()
+            self.last_push_time = current_time
+        
+        # Poll for orders
+        if not hasattr(self, '_last_order_poll'):
+            self._last_order_poll = 0
+        if current_time - self._last_order_poll >= 10:
+            self.poll_and_execute_orders()
+            self._last_order_poll = current_time
+        
+        # Poll L2 data
+        if self.level2_enabled:
+            self.poll_level2_data()
+    
+    def _collection_mode_tick(self) -> Optional[dict]:
+        """Execute one tick of collection mode. Returns completed/failed counts."""
+        try:
+            # Get pending requests from cloud
+            result = self.api.get_safe("/api/ib/historical-data/pending?limit=3", timeout=20)
+            
+            if not result:
+                time.sleep(5)  # Wait before checking again
+                return None
+            
+            requests_list = result.get("requests", [])
+            
+            if not requests_list:
+                logger.info("[Collection] No pending requests. Waiting...")
+                time.sleep(10)
+                return None
+            
+            completed = 0
+            failed = 0
+            
+            logger.info(f"[Collection] Processing {len(requests_list)} requests...")
+            
+            for req in requests_list:
+                try:
+                    success = self._collection_fetch_single(req)
+                    if success:
+                        completed += 1
+                    else:
+                        failed += 1
+                except Exception as e:
+                    logger.error(f"[Collection] Request error: {e}")
+                    failed += 1
+                
+                # Small delay between requests (IB pacing)
+                time.sleep(1)
+            
+            return {"completed": completed, "failed": failed}
+            
+        except Exception as e:
+            logger.error(f"[Collection] Tick error: {e}")
+            return {"completed": 0, "failed": 0}
+
     # ==================== COLLECTION MODE ====================
     
     def run_collection_mode(self):
@@ -1717,31 +1923,22 @@ def main():
     parser.add_argument("--client-id", type=int, default=10, help="IB client ID")
     parser.add_argument("--symbols", nargs="+", default=["VIX", "SPY", "QQQ", "IWM"], help="Symbols to subscribe")
     parser.add_argument("--no-level2", action="store_true", help="Disable Level 2 / DOM data")
-    parser.add_argument("--mode", choices=["trading", "collection"], default="trading",
-                        help="Operating mode: 'trading' (live quotes+orders) or 'collection' (historical data only)")
+    parser.add_argument("--mode", choices=["trading", "collection", "auto"], default="auto",
+                        help="Operating mode: 'trading', 'collection', or 'auto' (polls cloud for mode)")
     
     args = parser.parse_args()
     
-    is_collection_mode = args.mode == "collection"
-    
     print("=" * 50)
-    if is_collection_mode:
-        print("  IB Data Pusher - DATA COLLECTION MODE")
-        print("  " + "=" * 46)
-        print("  Live trading PAUSED - All bandwidth to data")
-    else:
-        print("  IB Data Pusher - TRADING MODE")
-        print("  CLOUDFLARE EVASION: ENABLED")
+    print("  IB Data Pusher - DYNAMIC MODE")
+    print("  CLOUDFLARE EVASION: ENABLED")
     print("=" * 50)
     print(f"  Cloud URL: {args.cloud_url}")
     print(f"  IB Gateway: {args.ib_host}:{args.ib_port}")
-    if not is_collection_mode:
-        print(f"  Symbols: {args.symbols}")
-        print(f"  Level 2: {'Disabled' if args.no_level2 else 'Enabled'}")
-    else:
-        print(f"  Mode: COLLECTION (historical data priority)")
-        print(f"  Live Quotes: DISABLED")
-        print(f"  Order Execution: DISABLED")
+    print(f"  Symbols: {args.symbols}")
+    print(f"  Level 2: {'Disabled' if args.no_level2 else 'Enabled'}")
+    print(f"  Mode: {args.mode.upper()}")
+    if args.mode == "auto":
+        print(f"  (Will poll cloud for mode changes)")
     print("=" * 50)
     
     pusher = IBDataPusher(
@@ -1751,10 +1948,15 @@ def main():
         client_id=args.client_id
     )
     
-    if is_collection_mode:
+    if args.mode == "collection":
+        # Forced collection mode
         pusher.run_collection_mode()
-    else:
+    elif args.mode == "trading":
+        # Forced trading mode
         pusher.run(symbols=args.symbols, enable_level2=not args.no_level2)
+    else:
+        # Auto mode - polls cloud and switches dynamically
+        pusher.run_auto_mode(symbols=args.symbols, enable_level2=not args.no_level2)
 
 
 if __name__ == "__main__":

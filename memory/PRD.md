@@ -68,12 +68,27 @@ Build a self-improving AI trading bot system "SentCom" with:
 
 ## Current Status (March 17, 2026)
 - ✅ Database migrated to MongoDB Atlas (persistent storage)
-- ✅ ~21,000 data fetch requests audited and queued
+- ✅ ~29,000 data fetch requests queued (10,473 completed = 36%)
 - ✅ Data Coverage Dashboard verified working
 - ✅ Backend returns correct data (12,198 symbols in ADV cache)
 - ✅ **FIX: Heartbeat tolerance increased from 30s to 90s** (fixes fluctuating "All Systems Offline" status)
+- ✅ **UI Mode Toggle VERIFIED WORKING** (March 17, 2026)
+
+### Phase 5: UI Mode Toggle ✅ (NEW)
+- **Backend endpoints**:
+  - `GET /api/ib/mode` - Returns current desired mode (trading/collection)
+  - `POST /api/ib/mode/set` - Sets desired mode from UI
+  - `GET /api/ib/mode/status` - Returns full status with queue stats
+- **Frontend toggle** in NIA dashboard under "Historical Data Collection"
+- **Local script** (`ib_data_pusher.py`) defaults to auto mode, polls cloud every 30 seconds
 
 ## Recent Changes
+### March 17, 2026 - UI Mode Toggle Verification
+- **Verified**: Backend endpoints working (`/api/ib/mode`, `/api/ib/mode/set`, `/api/ib/mode/status`)
+- **Verified**: Frontend toggle visible and functional in NIA dashboard
+- **Verified**: `ib_data_pusher.py` defaults to auto mode (polls cloud for mode changes)
+- **Files**: `backend/routers/ib.py`, `frontend/src/components/NIA.jsx`, `documents/scripts/ib_data_pusher.py`
+
 ### March 17, 2026 - Connection Status Fix
 - **Issue**: System status indicator was fluctuating between "Online" and "Offline" due to tight 30-second heartbeat window
 - **Root cause**: Network latency to MongoDB Atlas + rate limiting + concurrent operations caused heartbeat delays
@@ -81,11 +96,11 @@ Build a self-improving AI trading bot system "SentCom" with:
 - **Files modified**: `backend/routers/ib.py` (functions: `is_pusher_connected`, `get_connection_status`, `get_pushed_ib_data`)
 
 ## Next Tasks
-1. ⏳ User: Restart `StartTrading.bat` and verify stable connection status
-2. Monitor large-scale data collection (~21,000 requests)
-3. Verify auto-training triggers after data collection
-4. Test AI-enhanced scanner
-5. Monitor SentCom bot
+1. ⏳ **User Action**: Run `StartTrading.bat` to test end-to-end mode switching
+2. ⏳ **User Action**: Click "Collection" mode in NIA dashboard, verify local script switches
+3. Monitor large-scale data collection (~18,608 pending requests)
+4. Verify auto-training triggers after data collection
+5. Test AI-enhanced scanner
 
 ## Backlog
 - (P1) Deep Scanner Overhaul - alternative data sources

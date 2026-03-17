@@ -505,6 +505,10 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
   // Collection mode state (dedicated collector running)
   const [collectionMode, setCollectionMode] = useState(null);
   
+  // System mode toggle state
+  const [systemMode, setSystemMode] = useState('trading');
+  const [switchingMode, setSwitchingMode] = useState(false);
+  
   // Fill gaps state
   const [fillingGaps, setFillingGaps] = useState(false);
   
@@ -612,6 +616,21 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
         if (collectionModeRes.status === 'fulfilled' && collectionModeRes.value.ok) {
           const data = await collectionModeRes.value.json();
           setCollectionMode(data);
+          // Also update the system mode from the cloud's desired mode
+          if (data.collection_mode?.active) {
+            setSystemMode('collection');
+          }
+        }
+        
+        // Fetch system mode status
+        try {
+          const modeRes = await fetch(`${API_BASE}/api/ib/mode/status`);
+          if (modeRes.ok) {
+            const modeData = await modeRes.json();
+            setSystemMode(modeData.desired_mode || 'trading');
+          }
+        } catch (err) {
+          console.debug('Could not fetch mode status:', err);
         }
       } catch (err) {
         console.error('Error fetching collection data:', err);
@@ -719,6 +738,37 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
       setFillingGaps(false);
     }
   };
+  
+  // Handle mode toggle
+  const handleModeSwitch = async (newMode) => {
+    if (newMode === systemMode) return;
+    
+    setSwitchingMode(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/ib/mode/set`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: newMode })
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        setSystemMode(newMode);
+        toast.success(
+          newMode === 'collection' 
+            ? 'Switching to Collection Mode... Live trading will pause in ~30s'
+            : 'Switching to Trading Mode... Collection will pause in ~30s'
+        );
+      } else {
+        toast.error(data.error || 'Failed to switch mode');
+      }
+    } catch (err) {
+      toast.error('Error switching mode');
+      console.error(err);
+    } finally {
+      setSwitchingMode(false);
+    }
+  };
 
   // Calculate estimated time
   const estimatedTime = () => {
@@ -807,6 +857,59 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
                 </div>
               </div>
             )}
+            
+            {/* System Mode Toggle */}
+            <div className="mx-3 mt-3 p-3 rounded-xl bg-gradient-to-r from-zinc-900/80 to-black/80 border border-white/10">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-medium text-zinc-400">System Mode</span>
+                {switchingMode && (
+                  <span className="text-[10px] text-amber-400 animate-pulse">Switching...</span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleModeSwitch('trading')}
+                  disabled={switchingMode}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border transition-all ${
+                    systemMode === 'trading'
+                      ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'
+                      : 'bg-black/30 border-white/10 text-zinc-500 hover:border-white/20 hover:text-zinc-400'
+                  }`}
+                >
+                  <Zap className={`w-4 h-4 ${systemMode === 'trading' ? 'text-emerald-400' : ''}`} />
+                  <div className="text-left">
+                    <p className="text-xs font-medium">Trading</p>
+                    <p className="text-[9px] opacity-70">Live quotes & orders</p>
+                  </div>
+                  {systemMode === 'trading' && (
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  )}
+                </button>
+                <button
+                  onClick={() => handleModeSwitch('collection')}
+                  disabled={switchingMode}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border transition-all ${
+                    systemMode === 'collection'
+                      ? 'bg-amber-500/20 border-amber-500/50 text-amber-400'
+                      : 'bg-black/30 border-white/10 text-zinc-500 hover:border-white/20 hover:text-zinc-400'
+                  }`}
+                >
+                  <Download className={`w-4 h-4 ${systemMode === 'collection' ? 'text-amber-400' : ''}`} />
+                  <div className="text-left">
+                    <p className="text-xs font-medium">Collection</p>
+                    <p className="text-[9px] opacity-70">Historical data fetch</p>
+                  </div>
+                  {systemMode === 'collection' && (
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                  )}
+                </button>
+              </div>
+              <p className="text-[9px] text-zinc-600 mt-2 text-center">
+                {systemMode === 'trading' 
+                  ? 'Live trading active. Switch to Collection to prioritize data fetching.'
+                  : 'Data collection active. Live trading is paused.'}
+              </p>
+            </div>
             
             {/* Tab Navigation */}
             <div className="flex border-b border-white/10">
