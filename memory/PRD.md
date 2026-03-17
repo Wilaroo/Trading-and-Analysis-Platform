@@ -7,6 +7,40 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 17, 2026)
 
+### Analytics Tab Deprecation & Smart Merge ✅ COMPLETE
+**Status**: COMPLETE AND WORKING
+
+Successfully deprecated the Analytics tab from Command Center and merged features into NIA:
+
+**Changes Made:**
+1. **Command Center** - Now has only 2 tabs: Command & Charts (Analytics removed)
+2. **Market Scanner** - Moved to NIA as a collapsible panel
+3. **Advanced Testing** - Moved to NIA with Multi-Strategy, Walk-Forward, Monte Carlo tabs
+4. **Shadow Mode Panel** - Deleted (redundant - Shadow Mode toggle exists in SentCom settings)
+5. **BacktestPanel** - Deleted (replaced by AdvancedBacktestPanel in NIA)
+
+**Deleted Files:**
+- `/app/frontend/src/components/tabs/AnalyticsTab.jsx`
+- `/app/frontend/src/components/ShadowModePanel.jsx`
+- `/app/frontend/src/components/BacktestPanel.jsx`
+
+**NIA Structure After Merge:**
+```
+NIA (Neural Intelligence Agency)
+├── Train Everything
+├── Learning Progress (75% overall)
+├── Historical Data Collection (Coverage/Collect/Progress tabs)
+├── Historical Simulations (Smart Test, Full Test)
+├── Market Scanner (NEW - Intraday/Swing/Investment/All Strategies)
+├── Advanced Testing (NEW - Quick Test/Market-Wide/Multi-Strategy/Walk-Forward/Monte Carlo/Results)
+├── AI Performance
+├── Strategy Lifecycle
+├── Promotion Wizard
+└── Trading Report Card
+```
+
+---
+
 ### Data Coverage Dashboard ✅ VERIFIED
 **Status**: COMPLETE AND WORKING
 

@@ -3,10 +3,9 @@ import TickerDetailModal from '../components/TickerDetailModal';
 import QuickTradeModal from '../components/QuickTradeModal';
 import HeaderBar from '../components/layout/HeaderBar';
 import AICoachTab from '../components/tabs/AICoachTab';
-import AnalyticsTab from '../components/tabs/AnalyticsTab';
 import ChartsTab from '../components/tabs/ChartsTab';
 import { useCommandCenterData } from '../hooks/useCommandCenterData';
-import { LineChart, Target, BarChart3 } from 'lucide-react';
+import { LineChart, Target } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -81,8 +80,7 @@ const CommandCenterPage = ({
 
   const tabs = [
     { id: 'coach', label: 'Command', icon: Target },
-    { id: 'charts', label: 'Charts', icon: LineChart },
-    { id: 'analytics', label: 'Analytics', icon: BarChart3 }
+    { id: 'charts', label: 'Charts', icon: LineChart }
   ];
 
   return (
@@ -164,10 +162,6 @@ const CommandCenterPage = ({
           recentCharts={data.recentCharts}
           onAddToRecent={data.addToRecentCharts}
         />
-      )}
-
-      {data.activeMainTab === 'analytics' && (
-        <AnalyticsTab />
       )}
 
       {/* Ticker Detail Modal */}

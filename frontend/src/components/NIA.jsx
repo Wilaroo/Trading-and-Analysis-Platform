@@ -57,11 +57,15 @@ import {
   Settings,
   Info,
   StopCircle,
-  Globe
+  Globe,
+  Search,
+  Shuffle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '../utils/api';
 import { useDataCache } from '../contexts';
+import MarketScannerPanel from './MarketScannerPanel';
+import AdvancedBacktestPanel from './AdvancedBacktestPanel';
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL;
 
@@ -1487,6 +1491,92 @@ const IntelOverview = ({ data, loading }) => {
   );
 };
 
+// ==================== MARKET SCANNER WRAPPER ====================
+const MarketScannerWrapper = () => {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
+        data-testid="market-scanner-toggle"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-emerald-500/20">
+            <Search className="w-4 h-4 text-emerald-400" />
+          </div>
+          <div className="text-left">
+            <h3 className="text-sm font-semibold text-white">Market Scanner</h3>
+            <p className="text-xs text-zinc-400">Find trading opportunities across the market</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        </div>
+      </button>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="border-t border-white/10"
+          >
+            <div className="p-4">
+              <MarketScannerPanel />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+// ==================== ADVANCED TESTING WRAPPER ====================
+const AdvancedTestingWrapper = () => {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
+        data-testid="advanced-testing-toggle"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-amber-500/20">
+            <Shuffle className="w-4 h-4 text-amber-400" />
+          </div>
+          <div className="text-left">
+            <h3 className="text-sm font-semibold text-white">Advanced Testing</h3>
+            <p className="text-xs text-zinc-400">Multi-Strategy, Walk-Forward, Monte Carlo</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        </div>
+      </button>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="border-t border-white/10"
+          >
+            <div className="p-4">
+              <AdvancedBacktestPanel />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
 const AIPerformancePanel = ({ data, loading, onRefresh }) => {
   const [expanded, setExpanded] = useState(true);
   
@@ -2651,6 +2741,12 @@ const NIA = () => {
         loading={loading}
         onRefresh={() => fetchAllData()}
       />
+
+      {/* Market Scanner Panel */}
+      <MarketScannerWrapper />
+
+      {/* Advanced Testing Panel */}
+      <AdvancedTestingWrapper />
 
       {/* AI Performance Panel */}
       <AIPerformancePanel 
