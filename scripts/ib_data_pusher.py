@@ -374,6 +374,8 @@ class IBDataPusher:
         - NASDAQ stocks -> ISLAND (NASDAQ's ECN)
         - NYSE stocks -> NYSE
         
+        IB LIMIT: Maximum 5 market depth subscriptions at a time!
+        
         Args:
             symbols: List of stock symbols
             num_rows: Number of price levels to track (default 5)
@@ -381,7 +383,23 @@ class IBDataPusher:
         # Known ETFs that trade on ARCA
         arca_symbols = {"SPY", "QQQ", "IWM", "DIA", "GLD", "SLV", "USO", "XLF", "XLE", "XLK", "VXX", "TQQQ", "SQQQ"}
         
-        for symbol in symbols:
+        # IB limits to 5 market depth subscriptions - prioritize major ETFs
+        MAX_L2_SUBSCRIPTIONS = 5
+        current_count = len(self.depth_subscriptions)
+        
+        # Prioritize these symbols for L2 (most liquid ETFs)
+        priority_symbols = ["SPY", "QQQ", "IWM", "DIA"]
+        
+        # Reorder symbols to prioritize major ETFs
+        ordered_symbols = [s for s in priority_symbols if s in symbols]
+        ordered_symbols.extend([s for s in symbols if s not in priority_symbols])
+        
+        for symbol in ordered_symbols:
+            # Check if we've hit the limit
+            if current_count >= MAX_L2_SUBSCRIPTIONS:
+                logger.debug(f"  L2 limit reached ({MAX_L2_SUBSCRIPTIONS}), skipping {symbol}")
+                continue
+                
             try:
                 if symbol in self.depth_subscriptions:
                     logger.debug(f"  Already subscribed to L2: {symbol}")
@@ -417,7 +435,8 @@ class IBDataPusher:
                 if ticker:
                     # Store the ticker object itself so we can poll domBids/domAsks
                     self.depth_subscriptions[symbol] = ticker
-                    logger.info(f"  L2 Subscribed: {symbol} @ {exchange} ({num_rows} levels)")
+                    current_count += 1
+                    logger.info(f"  L2 Subscribed: {symbol} @ {exchange} ({num_rows} levels) [{current_count}/{MAX_L2_SUBSCRIPTIONS}]")
                     
             except Exception as e:
                 logger.error(f"  Failed to subscribe L2 {symbol}: {e}")
@@ -591,7 +610,15 @@ class IBDataPusher:
         """
         Fetch historical news for symbols using IB's reqHistoricalNews.
         This provides real professional financial news from Benzinga, Dow Jones, etc.
+        
+        Note: Requires paid news subscription from IB. Skip if not subscribed.
         """
+        # Skip news fetching to avoid error spam if not subscribed
+        # Most users don't have paid news subscriptions
+        if not hasattr(self, '_news_enabled') or not self._news_enabled:
+            logger.debug("News fetching disabled (requires IB subscription)")
+            return
+            
         if not self.news_providers:
             self.fetch_news_providers()
         
