@@ -813,7 +813,7 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
                             }`} />
                             <span className="text-xs font-medium text-white">ADV Cache</span>
                             {/* Subtle polling indicator - green dot pulses to show active polling */}
-                            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" title="Auto-refreshing every 10s" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" title="Auto-refreshing every 15s" />
                           </div>
                           <div className="flex items-center gap-3">
                             {lastDataChange && (
