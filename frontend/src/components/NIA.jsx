@@ -557,12 +557,18 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
 
   // Fetch progress data - with smart comparison to avoid unnecessary re-renders
   useEffect(() => {
+    let isMounted = true;
+    
     const fetchData = async () => {
+      if (!isMounted) return;
+      
       try {
         const [progressRes, coverageRes] = await Promise.allSettled([
           fetch(`${API_BASE}/api/ib-collector/queue-progress-detailed`),
           fetch(`${API_BASE}/api/ib-collector/data-coverage`)
         ]);
+        
+        if (!isMounted) return;
         
         if (progressRes.status === 'fulfilled' && progressRes.value.ok) {
           const data = await progressRes.value.json();
@@ -590,6 +596,7 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
             // Only update coverage state if data actually changed
             const newCoverageStr = JSON.stringify(data);
             if (lastDataRef.current?.coverage !== newCoverageStr) {
+              console.log('[Coverage] Data changed, updating UI');
               lastDataRef.current = { ...lastDataRef.current, coverage: newCoverageStr };
               setDataCoverage(data);
               setLastDataChange(new Date()); // Mark when data actually changed
@@ -599,13 +606,19 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
       } catch (err) {
         console.error('Error fetching collection data:', err);
       } finally {
-        setLoadingCoverage(false);
+        if (isMounted) {
+          setLoadingCoverage(false);
+        }
       }
     };
+    
     fetchData();
-    // Poll every 10 seconds during active collection for real-time feedback
-    const interval = setInterval(fetchData, 10000);
-    return () => clearInterval(interval);
+    // Poll every 15 seconds to better align with 30-second backend cache
+    const interval = setInterval(fetchData, 15000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, []);
 
   const hasActiveCollections = detailedProgress.active_collections?.length > 0;
@@ -805,7 +818,7 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
                           <div className="flex items-center gap-3">
                             {lastDataChange && (
                               <span className="text-[9px] text-zinc-500" title="When coverage data last changed">
-                                Changed: {lastDataChange.toLocaleTimeString()}
+                                Updated: {lastDataChange.toLocaleTimeString()}
                               </span>
                             )}
                             <span className={`text-sm font-bold ${
@@ -814,6 +827,12 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
                               {dataCoverage.adv_cache?.total_symbols?.toLocaleString() || 0} symbols
                             </span>
                           </div>
+                        </div>
+                        {/* Show total bars collected for quick reference */}
+                        <div className="flex items-center gap-4 mt-2 text-[10px] text-zinc-500">
+                          <span>Total bars: {dataCoverage.by_timeframe?.reduce((sum, tf) => sum + (tf.total_bars || 0), 0).toLocaleString()}</span>
+                          <span>•</span>
+                          <span>Gaps: {dataCoverage.total_gaps || 0}</span>
                         </div>
                       </div>
                       

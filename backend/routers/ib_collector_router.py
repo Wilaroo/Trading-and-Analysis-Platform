@@ -75,7 +75,7 @@ async def get_data_coverage():
     # Simple in-memory cache
     cache_key = "_data_coverage_cache"
     cache_time_key = "_data_coverage_cache_time"
-    cache_ttl = 30  # 30 seconds cache
+    cache_ttl = 15  # 15 seconds cache - fast enough for real-time feedback
     
     # Check cache
     if hasattr(get_data_coverage, cache_key):
