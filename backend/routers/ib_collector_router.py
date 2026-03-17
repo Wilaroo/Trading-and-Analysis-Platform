@@ -76,8 +76,8 @@ async def get_data_coverage():
         if db is None:
             return {"success": False, "error": "Database not initialized"}
         
-        data_col = db["historical_data"]
-        adv_col = db["adv_cache"]
+        data_col = db["ib_historical_data"]  # Fixed: matches COLLECTION_NAME in ib_historical_collector.py
+        adv_col = db["symbol_adv_cache"]  # Fixed: was "adv_cache", should match get_adv_cache_stats()
         
         # Get ADV cache stats
         total_adv_symbols = adv_col.count_documents({})
@@ -106,15 +106,15 @@ async def get_data_coverage():
         # All timeframes we track
         all_timeframes = ["1 min", "5 mins", "15 mins", "30 mins", "1 hour", "1 day", "1 week"]
         
-        # Get per-timeframe stats
+        # Get per-timeframe stats - Fixed aggregation to match actual data structure
+        # Data is stored as individual documents with symbol, bar_size, date fields
         timeframe_stats = []
         for tf in all_timeframes:
             pipeline = [
                 {"$match": {"bar_size": tf}},
                 {"$group": {
                     "_id": "$symbol",
-                    "bar_count": {"$sum": {"$size": {"$ifNull": ["$bars", []]}}},
-                    "last_collected": {"$max": "$collected_at"}
+                    "bar_count": {"$sum": 1}  # Each document is one bar
                 }},
                 {"$group": {
                     "_id": None,
@@ -158,13 +158,10 @@ async def get_data_coverage():
                     "bar_size": tf
                 })
                 
-                # Count total bars for this tier/timeframe
+                # Count total bars for this tier/timeframe - Fixed to count individual documents
                 bar_pipeline = [
                     {"$match": {"symbol": {"$in": tier_symbols}, "bar_size": tf}},
-                    {"$group": {
-                        "_id": None,
-                        "total_bars": {"$sum": {"$size": {"$ifNull": ["$bars", []]}}}
-                    }}
+                    {"$count": "total_bars"}
                 ]
                 bar_result = list(data_col.aggregate(bar_pipeline))
                 total_bars = bar_result[0]["total_bars"] if bar_result else 0
@@ -246,8 +243,8 @@ async def fill_gaps(
         if db is None:
             return {"success": False, "error": "Database not initialized"}
         
-        adv_col = db["adv_cache"]
-        data_col = db["historical_data"]
+        adv_col = db["symbol_adv_cache"]  # Fixed: match get_adv_cache_stats()
+        data_col = db["ib_historical_data"]  # Fixed: matches COLLECTION_NAME
         
         # Define tiers and their timeframes (same as coverage endpoint)
         tiers = {
@@ -360,8 +357,8 @@ async def get_gap_analysis(tier_filter: Optional[str] = None):
         if db is None:
             return {"success": False, "error": "Database not initialized"}
         
-        adv_col = db["adv_cache"]
-        data_col = db["historical_data"]
+        adv_col = db["symbol_adv_cache"]  # Fixed: match get_adv_cache_stats()
+        data_col = db["ib_historical_data"]  # Fixed: matches COLLECTION_NAME
         
         # Define tiers
         tiers = {

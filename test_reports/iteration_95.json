@@ -1,0 +1,90 @@
+{
+  "summary": "NIA Data Coverage Dashboard UI verification completed successfully. The backend endpoint /api/ib-collector/data-coverage returns valid data with 12,198 symbols, and the frontend correctly displays this data in the Coverage tab within the Historical Data Collection panel.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "features_verified": {
+    "nia_page_navigation": {
+      "status": "PASS",
+      "details": [
+        "NIA page loads successfully via localStorage navigation (data-testid='nav-nia' available in sidebar)",
+        "Page header shows 'NIA - Neural Intelligence Agency'",
+        "Train Everything panel visible with last trained status"
+      ]
+    },
+    "historical_data_collection_panel": {
+      "status": "PASS",
+      "details": [
+        "Panel header visible: 'Historical Data Collection'",
+        "Subtitle shows: 'Per-stock multi-timeframe • Smart ADV filtering'",
+        "Panel has data-testid='data-collection-panel'",
+        "Panel toggle has data-testid='data-collection-panel-toggle'"
+      ]
+    },
+    "coverage_tab": {
+      "status": "PASS",
+      "details": [
+        "Coverage tab is visible and selected by default",
+        "ADV Cache shows '12,198 symbols' in green (matches backend API)",
+        "Coverage by Tier section displays correctly"
+      ]
+    },
+    "coverage_by_tier_data": {
+      "status": "PASS",
+      "details": [
+        "Intraday tier (500K+ shares/day): 281 symbols shown",
+        "  - 1 min: 0%, 5 mins: 40.2%, 15 mins: 0%, 1 hour: 0%, 1 day: 99.6%",
+        "Swing tier (100K-500K shares/day): 1212 symbols shown",
+        "  - 5 mins: 0%, 30 mins: 0%, 1 hour: 0%, 1 day: 99.8%",
+        "Investment tier (50K-100K shares/day): 869 symbols shown",
+        "  - 1 hour: 0%, 1 day: 99.7%, 1 week: 0%"
+      ]
+    },
+    "all_timeframes_summary": {
+      "status": "PASS",
+      "details": [
+        "1 min: 0 symbols",
+        "5 mins: 114 symbols",
+        "15 mins: 0 symbols",
+        "30 mins: 0 symbols",
+        "1 hour: 0 symbols",
+        "1 day: 8451 symbols",
+        "1 week: 0 symbols"
+      ]
+    },
+    "data_gaps_indicator": {
+      "status": "PASS",
+      "details": [
+        "Data Gaps (12 total) section visible at bottom of Coverage tab"
+      ]
+    }
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (API endpoint /api/ib-collector/data-coverage returns valid data)",
+    "frontend": "100% (All coverage data displays correctly in NIA page)"
+  },
+  "test_credentials": "N/A",
+  "seed_data_creation": "N/A",
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "mocked_apis_list": []
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "NIA Data Coverage Dashboard verified working. Navigation: set localStorage 'tradecommand_activeTab' to 'nia' or click data-testid='nav-nia'. Key data-testids: data-collection-panel, data-collection-panel-toggle. The Coverage tab shows ADV cache with 12,198 symbols and per-tier/per-timeframe coverage percentages. Backend API /api/ib-collector/data-coverage confirmed working.",
+  "screenshots": [
+    ".screenshots/05_nia_direct.png - NIA page header and Train Everything panel",
+    ".screenshots/06_nia_coverage.png - Same view after data load",
+    ".screenshots/10_coverage_area.png - Historical Data Collection panel with Coverage tab showing 12,198 symbols"
+  ]
+}

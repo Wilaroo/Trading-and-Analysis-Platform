@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://trading-coverage.preview.emergentagent.com
+https://data-pipeline-test-6.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://trading-coverage.preview.emergentagent.com
+https://data-pipeline-test-6.preview.emergentagent.com
 ```
