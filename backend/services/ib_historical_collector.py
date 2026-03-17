@@ -398,6 +398,163 @@ class IBHistoricalCollector:
         
         logger.info(f"Building ADV cache for {len(all_symbols)} symbols...")
         
+    async def rebuild_adv_from_ib_data(self) -> Dict[str, Any]:
+        """
+        Rebuild the ADV cache using ACTUAL volume data from IB historical bars.
+        
+        This uses the daily bar data already collected from IB Gateway,
+        which has accurate consolidated volume (not just IEX).
+        
+        Process:
+        1. Query all daily bar data from ib_historical_data collection
+        2. Calculate average volume per symbol (last 20 trading days)
+        3. Update symbol_adv_cache with accurate ADV values
+        
+        Returns:
+            Summary of rebuild operation with new tier counts
+        """
+        if self._db is None:
+            return {"success": False, "error": "Database not available"}
+        
+        if self._data_col is None:
+            return {"success": False, "error": "Historical data collection not initialized"}
+        
+        logger.info("=" * 60)
+        logger.info("REBUILDING ADV CACHE FROM IB HISTORICAL DATA")
+        logger.info("=" * 60)
+        
+        try:
+            # Aggregate to calculate average volume per symbol from daily bars
+            pipeline = [
+                # Only use daily bars
+                {"$match": {"bar_size": "1 day"}},
+                # Sort by date descending to get most recent first
+                {"$sort": {"date": -1}},
+                # Group by symbol
+                {"$group": {
+                    "_id": "$symbol",
+                    "volumes": {"$push": "$volume"},
+                    "bar_count": {"$sum": 1},
+                    "latest_date": {"$first": "$date"},
+                    "oldest_date": {"$last": "$date"}
+                }},
+                # Calculate average of last 20 bars
+                {"$project": {
+                    "symbol": "$_id",
+                    "bar_count": 1,
+                    "latest_date": 1,
+                    "oldest_date": 1,
+                    # Take first 20 volumes (most recent due to sort)
+                    "recent_volumes": {"$slice": ["$volumes", 20]},
+                    "_id": 0
+                }},
+                {"$project": {
+                    "symbol": 1,
+                    "bar_count": 1,
+                    "latest_date": 1,
+                    "oldest_date": 1,
+                    "avg_volume": {"$avg": "$recent_volumes"},
+                    "days_used": {"$size": "$recent_volumes"}
+                }}
+            ]
+            
+            logger.info("Calculating ADV from IB daily bars...")
+            results = list(self._data_col.aggregate(pipeline, allowDiskUse=True))
+            logger.info(f"Calculated ADV for {len(results)} symbols")
+            
+            if not results:
+                return {"success": False, "error": "No daily bar data found"}
+            
+            # Update the ADV cache
+            adv_cache_col = self._db["symbol_adv_cache"]
+            
+            # Track statistics
+            updated = 0
+            tier_counts = {
+                "1M+": 0,
+                "500K-1M": 0,
+                "250K-500K": 0,
+                "100K-250K": 0,
+                "50K-100K": 0,
+                "10K-50K": 0,
+                "<10K": 0
+            }
+            
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc).isoformat()
+            
+            for r in results:
+                symbol = r.get("symbol")
+                avg_vol = r.get("avg_volume", 0)
+                
+                if not symbol or avg_vol is None:
+                    continue
+                
+                # Upsert into ADV cache
+                adv_cache_col.update_one(
+                    {"symbol": symbol},
+                    {"$set": {
+                        "symbol": symbol,
+                        "avg_volume": avg_vol,
+                        "source": "ib_historical",
+                        "days_used": r.get("days_used", 0),
+                        "bar_count": r.get("bar_count", 0),
+                        "latest_date": r.get("latest_date"),
+                        "updated_at": now
+                    }},
+                    upsert=True
+                )
+                updated += 1
+                
+                # Count tiers
+                if avg_vol >= 1_000_000:
+                    tier_counts["1M+"] += 1
+                elif avg_vol >= 500_000:
+                    tier_counts["500K-1M"] += 1
+                elif avg_vol >= 250_000:
+                    tier_counts["250K-500K"] += 1
+                elif avg_vol >= 100_000:
+                    tier_counts["100K-250K"] += 1
+                elif avg_vol >= 50_000:
+                    tier_counts["50K-100K"] += 1
+                elif avg_vol >= 10_000:
+                    tier_counts["10K-50K"] += 1
+                else:
+                    tier_counts["<10K"] += 1
+            
+            # Calculate new tier totals
+            intraday_total = tier_counts["1M+"] + tier_counts["500K-1M"]
+            swing_total = tier_counts["250K-500K"] + tier_counts["100K-250K"]
+            investment_total = tier_counts["50K-100K"]
+            
+            logger.info("=" * 60)
+            logger.info("ADV CACHE REBUILD COMPLETE")
+            logger.info(f"  Total symbols updated: {updated}")
+            logger.info(f"  Intraday tier (500K+): {intraday_total}")
+            logger.info(f"  Swing tier (100K-500K): {swing_total}")
+            logger.info(f"  Investment tier (50K-100K): {investment_total}")
+            logger.info("=" * 60)
+            
+            return {
+                "success": True,
+                "message": f"Rebuilt ADV cache from IB data for {updated} symbols",
+                "symbols_updated": updated,
+                "distribution": tier_counts,
+                "tier_summary": {
+                    "intraday_500k_plus": intraday_total,
+                    "swing_100k_500k": swing_total,
+                    "investment_50k_100k": investment_total
+                },
+                "source": "ib_historical_data",
+                "note": "ADV calculated from actual IB daily bars (consolidated volume)"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error rebuilding ADV cache: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"success": False, "error": str(e)}
+        
         # Process in batches
         adv_cache_col = self._db["symbol_adv_cache"]
         processed = 0

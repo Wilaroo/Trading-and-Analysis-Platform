@@ -631,6 +631,29 @@ async def get_adv_distribution():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/rebuild-adv-from-ib")
+async def rebuild_adv_from_ib():
+    """
+    Rebuild the ADV cache using ACTUAL IB historical data.
+    
+    This recalculates average daily volume for all symbols using the
+    daily bar data from IB Gateway (consolidated tape volume, not IEX).
+    
+    This fixes the issue where Alpaca IEX data underreports volume by ~95%.
+    
+    Returns:
+    - New tier counts with accurate ADV data
+    - Distribution breakdown
+    """
+    try:
+        collector = get_ib_collector()
+        result = await collector.rebuild_adv_from_ib_data()
+        return result
+    except Exception as e:
+        logger.error(f"Error rebuilding ADV: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/start")
 async def start_collection(
     symbols: Optional[List[str]] = None,
