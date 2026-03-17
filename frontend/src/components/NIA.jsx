@@ -13,9 +13,10 @@
  * Performance Optimization:
  * - Uses DataCacheContext for persistent data across tab switches
  * - Stale-while-revalidate pattern for instant display
+ * - Memoized child components to prevent unnecessary re-renders
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Brain,
@@ -71,7 +72,7 @@ const API_BASE = process.env.REACT_APP_BACKEND_URL;
 
 // ==================== TRAIN ALL PANEL ====================
 
-const TrainAllPanel = ({ onTrainComplete }) => {
+const TrainAllPanel = memo(({ onTrainComplete }) => {
   const [isTraining, setIsTraining] = useState(false);
   const [currentStep, setCurrentStep] = useState(null);
   const [progress, setProgress] = useState({
@@ -255,11 +256,11 @@ const TrainAllPanel = ({ onTrainComplete }) => {
       </div>
     </div>
   );
-};
+});
 
 // ==================== LEARNING PROGRESS PANEL ====================
 
-const LearningProgressPanel = ({ data, loading }) => {
+const LearningProgressPanel = memo(({ data, loading }) => {
   const [expanded, setExpanded] = useState(true);
 
   // Calculate progress percentages
@@ -376,11 +377,11 @@ const LearningProgressPanel = ({ data, loading }) => {
       </AnimatePresence>
     </div>
   );
-};
+});
 
 // ==================== DATA COLLECTION PANEL (UNIFIED) ====================
 
-const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
+const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
   const [expanded, setExpanded] = useState(true);
   const [lookbackDays, setLookbackDays] = useState(30);
   const [tier, setTier] = useState('all'); // 'all', 'intraday', 'swing', 'investment'
@@ -400,6 +401,9 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
   
   // Fill gaps state
   const [fillingGaps, setFillingGaps] = useState(false);
+  
+  // Use ref to track if data changed to prevent unnecessary re-renders
+  const lastDataRef = useRef(null);
 
   // ADV Tier options - determines which symbols AND which timeframes
   const tierOptions = [
@@ -446,7 +450,7 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
     { value: 365, label: '1 Year', description: 'Full year' }
   ];
 
-  // Fetch progress data
+  // Fetch progress data - with smart comparison to avoid unnecessary re-renders
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -458,18 +462,29 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
         if (progressRes.status === 'fulfilled' && progressRes.value.ok) {
           const data = await progressRes.value.json();
           if (data.success) {
-            setDetailedProgress({
+            const newProgress = {
               by_bar_size: data.by_bar_size || [],
               active_collections: data.active_collections || [],
               overall: data.overall || {}
-            });
+            };
+            // Only update if data actually changed
+            const newProgressStr = JSON.stringify(newProgress);
+            if (lastDataRef.current?.progress !== newProgressStr) {
+              lastDataRef.current = { ...lastDataRef.current, progress: newProgressStr };
+              setDetailedProgress(newProgress);
+            }
           }
         }
         
         if (coverageRes.status === 'fulfilled' && coverageRes.value.ok) {
           const data = await coverageRes.value.json();
           if (data.success) {
-            setDataCoverage(data);
+            // Only update if data actually changed
+            const newCoverageStr = JSON.stringify(data);
+            if (lastDataRef.current?.coverage !== newCoverageStr) {
+              lastDataRef.current = { ...lastDataRef.current, coverage: newCoverageStr };
+              setDataCoverage(data);
+            }
           }
         }
       } catch (err) {
@@ -479,7 +494,8 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
       }
     };
     fetchData();
-    const interval = setInterval(fetchData, 10000); // Refresh every 10 seconds
+    // Increase interval to 30 seconds to reduce flickering
+    const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -1033,11 +1049,11 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
       </AnimatePresence>
     </div>
   );
-};
+});
 
 // ==================== SIMULATION PANEL (NEW) ====================
 
-const SimulationQuickPanel = ({ jobs, loading, onRefresh }) => {
+const SimulationQuickPanel = memo(({ jobs, loading, onRefresh }) => {
   const [expanded, setExpanded] = useState(true);
   const [starting, setStarting] = useState(null); // null, 'quick', or 'market'
   const [simBarSize, setSimBarSize] = useState('1 day');
@@ -1497,7 +1513,7 @@ const SimulationQuickPanel = ({ jobs, loading, onRefresh }) => {
       </AnimatePresence>
     </div>
   );
-};
+});
 
 // ==================== SECTION COMPONENTS ====================
 
@@ -1577,7 +1593,7 @@ const IntelOverview = ({ data, loading }) => {
 };
 
 // ==================== MARKET SCANNER WRAPPER ====================
-const MarketScannerWrapper = () => {
+const MarketScannerWrapper = memo(() => {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -1617,10 +1633,10 @@ const MarketScannerWrapper = () => {
       </AnimatePresence>
     </div>
   );
-};
+});
 
 // ==================== ADVANCED TESTING WRAPPER ====================
-const AdvancedTestingWrapper = () => {
+const AdvancedTestingWrapper = memo(() => {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -1660,9 +1676,9 @@ const AdvancedTestingWrapper = () => {
       </AnimatePresence>
     </div>
   );
-};
+});
 
-const AIPerformancePanel = ({ data, loading, onRefresh }) => {
+const AIPerformancePanel = memo(({ data, loading, onRefresh }) => {
   const [expanded, setExpanded] = useState(true);
   
   const modules = [
@@ -1773,9 +1789,9 @@ const AIPerformancePanel = ({ data, loading, onRefresh }) => {
       </AnimatePresence>
     </div>
   );
-};
+});
 
-const StrategyLifecyclePanel = ({ phases, candidates, loading, onPromote, onDemote }) => {
+const StrategyLifecyclePanel = memo(({ phases, candidates, loading, onPromote, onDemote }) => {
   const [expanded, setExpanded] = useState(true);
   
   const phaseColors = {
@@ -1931,9 +1947,9 @@ const StrategyLifecyclePanel = ({ phases, candidates, loading, onPromote, onDemo
       </AnimatePresence>
     </div>
   );
-};
+});
 
-const PromotionWizardPanel = ({ candidates, loading, onPromote, onDemote }) => {
+const PromotionWizardPanel = memo(({ candidates, loading, onPromote, onDemote }) => {
   const [expanded, setExpanded] = useState(true);
   const [promotingStrategy, setPromotingStrategy] = useState(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -2251,9 +2267,9 @@ const PromotionWizardPanel = ({ candidates, loading, onPromote, onDemote }) => {
       </AnimatePresence>
     </>
   );
-};
+});
 
-const LearningConnectorsPanel = ({ connectors, thresholds, loading, onRunCalibrations }) => {
+const LearningConnectorsPanel = memo(({ connectors, thresholds, loading, onRunCalibrations }) => {
   const [expanded, setExpanded] = useState(false);
   
   const connectionStatus = connectors?.connections || {};
@@ -2350,9 +2366,9 @@ const LearningConnectorsPanel = ({ connectors, thresholds, loading, onRunCalibra
       </AnimatePresence>
     </div>
   );
-};
+});
 
-const ReportCardPanel = ({ reportCard, loading }) => {
+const ReportCardPanel = memo(({ reportCard, loading }) => {
   const [expanded, setExpanded] = useState(true);
   
   const getWinRateColor = (wr) => {
@@ -2523,7 +2539,7 @@ const ReportCardPanel = ({ reportCard, loading }) => {
       </AnimatePresence>
     </div>
   );
-};
+});
 
 // ==================== MAIN COMPONENT ====================
 
@@ -2696,7 +2712,15 @@ const NIA = () => {
       newData.predictionsTracked = newData.timeseriesPredictions || 0;
       newData.alertsAnalyzed = newData.calibrationsApplied * 5; // Estimate
 
-      setData(newData);
+      // Only update state if data actually changed to prevent flickering
+      setData(prevData => {
+        const prevStr = JSON.stringify(prevData);
+        const newStr = JSON.stringify(newData);
+        if (prevStr === newStr) {
+          return prevData; // Return same reference if unchanged
+        }
+        return newData;
+      });
       
       // Save to cache for instant display on tab switches (60 second TTL)
       setCached('niaData', newData, 60000);
