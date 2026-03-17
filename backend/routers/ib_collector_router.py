@@ -755,6 +755,77 @@ async def get_failure_analysis():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/retry-failed")
+async def retry_failed_requests(
+    max_retries: int = 100,
+    status_filter: Optional[str] = None
+):
+    """
+    Re-queue failed requests for retry.
+    
+    This resets failed requests back to 'pending' status so they can be
+    processed again by the IB Data Pusher.
+    
+    - **max_retries**: Maximum number of failed requests to retry (default 100)
+    - **status_filter**: Only retry specific failure types (timeout, rate_limited, error)
+    
+    Returns:
+    - Count of requests reset for retry
+    """
+    try:
+        from services.historical_data_queue_service import get_historical_data_queue_service
+        service = get_historical_data_queue_service()
+        
+        # Build query for failed requests
+        query = {"status": "failed"}
+        
+        if status_filter:
+            query["result_status"] = status_filter
+        
+        # Find failed requests
+        failed_requests = list(service.collection.find(
+            query,
+            {"request_id": 1, "symbol": 1, "bar_size": 1, "result_status": 1}
+        ).limit(max_retries))
+        
+        if not failed_requests:
+            return {
+                "success": True,
+                "message": "No failed requests to retry",
+                "retried": 0
+            }
+        
+        # Reset them to pending
+        request_ids = [r["request_id"] for r in failed_requests]
+        
+        from datetime import datetime, timezone
+        result = service.collection.update_many(
+            {"request_id": {"$in": request_ids}},
+            {"$set": {
+                "status": "pending",
+                "error": None,
+                "result_status": None,
+                "retry_at": datetime.now(timezone.utc).isoformat(),
+                "retried_from": "manual_retry"
+            }}
+        )
+        
+        # Resume monitoring to process them
+        collector = get_ib_collector()
+        await collector.resume_monitoring()
+        
+        return {
+            "success": True,
+            "message": f"Reset {result.modified_count} failed requests for retry",
+            "retried": result.modified_count,
+            "sample": [{"symbol": r["symbol"], "bar_size": r.get("bar_size")} for r in failed_requests[:5]]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error retrying failed requests: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/start")
 async def start_collection(
     symbols: Optional[List[str]] = None,

@@ -100,14 +100,45 @@ class WeekendBatchRunner:
         logger.warning(f"Pusher not connected after {timeout}s")
         return False
     
+    def _retry_failed_requests(self) -> dict:
+        """Retry any previously failed requests before starting new collection."""
+        logger.info("Checking for failed requests to retry...")
+        try:
+            resp = requests.post(
+                f"{self.api_base}/ib-collector/retry-failed",
+                params={"max_retries": 500},  # Retry up to 500 failed requests
+                timeout=30
+            )
+            
+            if resp.ok:
+                result = resp.json()
+                retried = result.get("retried", 0)
+                if retried > 0:
+                    logger.info(f"  Retrying {retried} previously failed requests")
+                else:
+                    logger.info("  No failed requests to retry")
+                return result
+            else:
+                logger.warning(f"Could not check failed requests: {resp.text}")
+                return {"success": False}
+                
+        except Exception as e:
+            logger.warning(f"Error checking failed requests: {e}")
+            return {"success": False, "error": str(e)}
+    
     def trigger_smart_collection(self, mode: str = "nightly") -> dict:
         """
         Start Smart Collection based on mode.
         
         - nightly: Uses incremental-update (only fetch new bars since last collection)
         - weekend: Uses fill-gaps with max lookback (fill any missing historical data)
+        
+        Both modes now also retry any previously failed requests first.
         """
         logger.info("=" * 50)
+        
+        # First, retry any failed requests from previous runs
+        self._retry_failed_requests()
         
         if mode == "nightly":
             # NIGHTLY: Only fetch new data since last collection (incremental)
