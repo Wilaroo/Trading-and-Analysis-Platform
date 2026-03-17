@@ -505,9 +505,9 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
   // Collection mode state (dedicated collector running)
   const [collectionMode, setCollectionMode] = useState(null);
   
-  // System mode toggle state
-  const [systemMode, setSystemMode] = useState('trading');
-  const [switchingMode, setSwitchingMode] = useState(false);
+  // Priority collection state (simplified system - replaces mode toggle)
+  const [priorityCollection, setPriorityCollection] = useState(false);
+  const [pendingRequests, setPendingRequests] = useState(0);
   
   // Fill gaps state
   const [fillingGaps, setFillingGaps] = useState(false);
@@ -626,21 +626,18 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
         if (collectionModeRes.status === 'fulfilled' && collectionModeRes.value.ok) {
           const data = await collectionModeRes.value.json();
           setCollectionMode(data);
-          // Also update the system mode from the cloud's desired mode
-          if (data.collection_mode?.active) {
-            setSystemMode('collection');
-          }
         }
         
-        // Fetch system mode status
+        // Fetch priority collection status (new simplified system)
         try {
-          const modeRes = await fetch(`${API_BASE}/api/ib/mode/status`);
-          if (modeRes.ok) {
-            const modeData = await modeRes.json();
-            setSystemMode(modeData.desired_mode || 'trading');
+          const priorityRes = await fetch(`${API_BASE}/api/ib/priority-collection/status`);
+          if (priorityRes.ok) {
+            const priorityData = await priorityRes.json();
+            setPriorityCollection(priorityData.priority_collection || false);
+            setPendingRequests(priorityData.queue?.pending || 0);
           }
         } catch (err) {
-          console.debug('Could not fetch mode status:', err);
+          console.debug('Could not fetch priority status:', err);
         }
       } catch (err) {
         console.error('Error fetching collection data:', err);
@@ -712,11 +709,13 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
   };
 
   // Fill gaps - automatically collect only missing data with MAX lookback
+  // Now also enables priority collection for faster fetching
   const handleFillGaps = async () => {
     setFillingGaps(true);
     try {
       const params = new URLSearchParams({
-        use_max_lookback: 'true'  // Get maximum history per timeframe
+        use_max_lookback: 'true',  // Get maximum history per timeframe
+        enable_priority: 'true'    // Enable priority collection for faster fetching
       });
       
       // Add tier filter if not 'all'
@@ -733,7 +732,17 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
         if (data.gaps_found === 0) {
           toast.success('No gaps found! Your data coverage is complete.');
         } else {
-          toast.success(`Started filling ${data.gaps_found} gaps across ${data.total_unique_symbols} symbols`);
+          // Show success with priority collection info
+          const priorityMsg = data.priority_collection 
+            ? ' Priority mode enabled for faster collection.'
+            : '';
+          toast.success(`Started filling ${data.gaps_found} gaps across ${data.total_unique_symbols} symbols.${priorityMsg}`);
+          
+          // Update local state
+          if (data.priority_collection) {
+            setPriorityCollection(true);
+          }
+          
           // Switch to Progress tab to show status
           setActiveTab('progress');
         }
@@ -749,34 +758,25 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
     }
   };
   
-  // Handle mode toggle
-  const handleModeSwitch = async (newMode) => {
-    if (newMode === systemMode) return;
-    
-    setSwitchingMode(true);
+  // Toggle priority collection manually
+  const handleTogglePriority = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/ib/mode/set`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: newMode })
-      });
+      const endpoint = priorityCollection 
+        ? `${API_BASE}/api/ib/priority-collection/disable`
+        : `${API_BASE}/api/ib/priority-collection/enable`;
+      
+      const res = await fetch(endpoint, { method: 'POST' });
       const data = await res.json();
       
       if (data.success) {
-        setSystemMode(newMode);
-        toast.success(
-          newMode === 'collection' 
-            ? 'Switching to Collection Mode... Live trading will pause in ~30s'
-            : 'Switching to Trading Mode... Collection will pause in ~30s'
-        );
+        setPriorityCollection(data.priority_collection);
+        toast.success(data.message);
       } else {
-        toast.error(data.error || 'Failed to switch mode');
+        toast.error('Failed to toggle priority collection');
       }
     } catch (err) {
-      toast.error('Error switching mode');
+      toast.error('Error toggling priority');
       console.error(err);
-    } finally {
-      setSwitchingMode(false);
     }
   };
 
@@ -835,9 +835,9 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-amber-400">DATA COLLECTION MODE ACTIVE</span>
-                      <span className="px-1.5 py-0.5 rounded bg-amber-500/30 text-[9px] text-amber-300 font-medium">
-                        LIVE TRADING PAUSED
+                      <span className="text-xs font-bold text-amber-400">DATA COLLECTION ACTIVE</span>
+                      <span className="px-1.5 py-0.5 rounded bg-emerald-500/30 text-[9px] text-emerald-300 font-medium">
+                        TRADING CONTINUES
                       </span>
                     </div>
                     <div className="flex items-center gap-4 mt-1 text-[10px] text-zinc-400">
@@ -868,57 +868,53 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
               </div>
             )}
             
-            {/* System Mode Toggle */}
+            {/* Priority Collection Status - Simple indicator (replaces mode toggle) */}
             <div className="mx-3 mt-3 p-3 rounded-xl bg-gradient-to-r from-zinc-900/80 to-black/80 border border-white/10">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-zinc-400">System Mode</span>
-                {switchingMode && (
-                  <span className="text-[10px] text-amber-400 animate-pulse">Switching...</span>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                    priorityCollection 
+                      ? 'bg-amber-500/20 border border-amber-500/30' 
+                      : 'bg-emerald-500/20 border border-emerald-500/30'
+                  }`}>
+                    {priorityCollection ? (
+                      <Download className="w-4 h-4 text-amber-400" />
+                    ) : (
+                      <Zap className="w-4 h-4 text-emerald-400" />
+                    )}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-white">
+                        {priorityCollection ? 'Priority Collection' : 'Normal Trading'}
+                      </span>
+                      {priorityCollection && (
+                        <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-[9px] text-amber-400 font-medium animate-pulse">
+                          FAST MODE
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-zinc-500">
+                      {priorityCollection 
+                        ? `Prioritizing historical data • ${pendingRequests.toLocaleString()} pending • Auto-disables when done`
+                        : 'Live quotes active • Background collection at low priority'
+                      }
+                    </p>
+                  </div>
+                </div>
+                {pendingRequests > 0 && (
+                  <button
+                    onClick={handleTogglePriority}
+                    className={`px-3 py-1.5 rounded-lg text-[10px] font-medium transition-all ${
+                      priorityCollection
+                        ? 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 border border-zinc-700'
+                        : 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 border border-amber-500/30'
+                    }`}
+                  >
+                    {priorityCollection ? 'Slow Down' : 'Speed Up'}
+                  </button>
                 )}
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => handleModeSwitch('trading')}
-                  disabled={switchingMode}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border transition-all ${
-                    systemMode === 'trading'
-                      ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'
-                      : 'bg-black/30 border-white/10 text-zinc-500 hover:border-white/20 hover:text-zinc-400'
-                  }`}
-                >
-                  <Zap className={`w-4 h-4 ${systemMode === 'trading' ? 'text-emerald-400' : ''}`} />
-                  <div className="text-left">
-                    <p className="text-xs font-medium">Trading</p>
-                    <p className="text-[9px] opacity-70">Live quotes & orders</p>
-                  </div>
-                  {systemMode === 'trading' && (
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  )}
-                </button>
-                <button
-                  onClick={() => handleModeSwitch('collection')}
-                  disabled={switchingMode}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border transition-all ${
-                    systemMode === 'collection'
-                      ? 'bg-amber-500/20 border-amber-500/50 text-amber-400'
-                      : 'bg-black/30 border-white/10 text-zinc-500 hover:border-white/20 hover:text-zinc-400'
-                  }`}
-                >
-                  <Download className={`w-4 h-4 ${systemMode === 'collection' ? 'text-amber-400' : ''}`} />
-                  <div className="text-left">
-                    <p className="text-xs font-medium">Collection</p>
-                    <p className="text-[9px] opacity-70">Historical data fetch</p>
-                  </div>
-                  {systemMode === 'collection' && (
-                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                  )}
-                </button>
-              </div>
-              <p className="text-[9px] text-zinc-600 mt-2 text-center">
-                {systemMode === 'trading' 
-                  ? 'Live trading active. Switch to Collection to prioritize data fetching.'
-                  : 'Data collection active. Live trading is paused.'}
-              </p>
             </div>
             
             {/* Tab Navigation */}

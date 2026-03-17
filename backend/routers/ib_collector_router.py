@@ -222,10 +222,16 @@ async def get_data_coverage():
 async def fill_gaps(
     tier_filter: Optional[str] = None,
     max_symbols: int = None,
-    use_max_lookback: bool = True
+    use_max_lookback: bool = True,
+    enable_priority: bool = True
 ):
     """
     Smart Gap Filler - Automatically collects ONLY missing data with MAXIMUM lookback.
+    
+    **NOW WITH PRIORITY COLLECTION:**
+    When gaps are found, automatically enables priority collection mode so the
+    local script fetches historical data more aggressively. Priority mode
+    auto-disables when the queue is empty.
     
     Analyzes the current data coverage and starts a collection job
     targeting only the symbols/timeframes that have gaps.
@@ -242,10 +248,12 @@ async def fill_gaps(
     - **tier_filter**: Limit to specific tier ("intraday", "swing", "investment", or None for all)
     - **max_symbols**: Maximum symbols to process (None = all symbols with gaps)
     - **use_max_lookback**: Use maximum IB lookback per timeframe (default True)
+    - **enable_priority**: Enable priority collection for faster fetching (default True)
     
     Returns:
     - Summary of gaps found
     - Collection job info for each tier/timeframe combination
+    - Priority collection status
     """
     try:
         collector = get_ib_collector()
@@ -327,7 +335,8 @@ async def fill_gaps(
                 "success": True,
                 "message": "No gaps found! Your data coverage is complete.",
                 "gaps_found": 0,
-                "jobs_started": 0
+                "jobs_started": 0,
+                "priority_collection": False
             }
         
         # Start collection for each gap
@@ -345,13 +354,33 @@ async def fill_gaps(
             use_max_lookback=use_max_lookback  # Use maximum IB lookback per timeframe
         )
         
+        # Enable priority collection if requested (default True)
+        priority_enabled = False
+        if enable_priority and len(total_symbols) > 0:
+            try:
+                # Import the priority collection flag from ib router
+                from routers.ib import _priority_collection
+                from datetime import datetime, timezone
+                
+                _priority_collection["enabled"] = True
+                _priority_collection["set_by"] = "fill_gaps"
+                _priority_collection["set_at"] = datetime.now(timezone.utc).isoformat()
+                _priority_collection["auto_disable_when_empty"] = True
+                
+                priority_enabled = True
+                logger.info(f"Priority collection ENABLED by fill-gaps ({len(total_symbols)} symbols queued)")
+            except Exception as e:
+                logger.warning(f"Could not enable priority collection: {e}")
+        
         return {
             "success": True,
             "message": f"Started filling {len(gaps_found)} gaps across {len(total_symbols)} symbols",
             "gaps_found": len(gaps_found),
             "gap_details": gaps_found,
             "total_unique_symbols": len(total_symbols),
-            "collection_job": job_result
+            "collection_job": job_result,
+            "priority_collection": priority_enabled,
+            "note": "Priority collection enabled - script will fetch data faster. Auto-disables when queue is empty." if priority_enabled else None
         }
         
     except Exception as e:

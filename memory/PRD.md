@@ -72,22 +72,50 @@ Build a self-improving AI trading bot system "SentCom" with:
 - ✅ Data Coverage Dashboard verified working
 - ✅ Backend returns correct data (12,198 symbols in ADV cache)
 - ✅ **FIX: Heartbeat tolerance increased from 30s to 90s** (fixes fluctuating "All Systems Offline" status)
-- ✅ **UI Mode Toggle VERIFIED WORKING** (March 17, 2026)
+- ✅ **SIMPLIFIED PRIORITY COLLECTION SYSTEM** (March 17, 2026) - Replaces confusing mode toggle
 
-### Phase 5: UI Mode Toggle ✅ (NEW)
-- **Backend endpoints**:
-  - `GET /api/ib/mode` - Returns current desired mode (trading/collection)
-  - `POST /api/ib/mode/set` - Sets desired mode from UI
-  - `GET /api/ib/mode/status` - Returns full status with queue stats
-- **Frontend toggle** in NIA dashboard under "Historical Data Collection"
-- **Local script** (`ib_data_pusher.py`) defaults to auto mode, polls cloud every 30 seconds
+### Phase 5: Priority-Based Data Collection ✅ (SIMPLIFIED)
+Per user feedback, the explicit "Trading vs Collection Mode" toggle was replaced with a simpler priority-based system:
+
+**How It Works:**
+1. Script always runs in "trading" mode (live quotes + orders always active)
+2. Historical data collection happens passively in background at low priority
+3. When user clicks "Fill Gaps" button, `priority_collection` flag is set automatically
+4. Priority mode speeds up historical data fetching (more requests, faster polling)
+5. Priority mode auto-disables when the queue is empty
+
+**Backend Endpoints:**
+- `GET /api/ib/mode` - Returns current mode (always "trading"), priority_collection flag, pending count
+- `POST /api/ib/priority-collection/enable` - Enable priority collection
+- `POST /api/ib/priority-collection/disable` - Disable priority collection
+- `GET /api/ib/priority-collection/status` - Full status with queue stats
+
+**Frontend Changes (NIA.jsx):**
+- Removed confusing "Trading/Collection Mode" toggle
+- Added simple "Priority Collection" status indicator
+- Shows "Normal Trading" (green) or "Priority Collection" (amber)
+- "Speed Up" / "Slow Down" button to manually toggle priority
+- Fill Gaps button auto-enables priority collection
+
+**Local Script Changes (ib_data_pusher.py):**
+- Default mode changed from "auto" to "trading"
+- Main `run()` method now includes integrated historical data polling
+- Checks for `priority_collection` flag every 30 seconds
+- Priority mode: polls every 10s, fetches 10 requests per batch, quote push slowed to 30s
+- Normal mode: polls every 60s, fetches 2 requests per batch, quote push at 5s
+- Live trading (orders) always works regardless of priority mode
 
 ## Recent Changes
-### March 17, 2026 - UI Mode Toggle Verification
-- **Verified**: Backend endpoints working (`/api/ib/mode`, `/api/ib/mode/set`, `/api/ib/mode/status`)
-- **Verified**: Frontend toggle visible and functional in NIA dashboard
-- **Verified**: `ib_data_pusher.py` defaults to auto mode (polls cloud for mode changes)
-- **Files**: `backend/routers/ib.py`, `frontend/src/components/NIA.jsx`, `documents/scripts/ib_data_pusher.py`
+### March 17, 2026 - Simplified Priority Collection System (MAJOR)
+- **User Feedback**: "Trading vs Collection Mode" toggle was confusing and slow
+- **Solution**: Replaced explicit mode toggle with priority-based background collection
+- **Key Change**: Script always in trading mode, priority flag speeds up historical data fetch
+- **User Experience**: Click "Fill Gaps" → collection speeds up automatically → auto-returns to normal when done
+- **Files Modified**:
+  - `backend/routers/ib.py` - New priority collection endpoints
+  - `backend/routers/ib_collector_router.py` - Fill Gaps now auto-enables priority
+  - `frontend/src/components/NIA.jsx` - Removed mode toggle, added priority status
+  - `documents/scripts/ib_data_pusher.py` - Integrated historical data polling with priority support
 
 ### March 17, 2026 - Connection Status Fix
 - **Issue**: System status indicator was fluctuating between "Online" and "Offline" due to tight 30-second heartbeat window
@@ -96,14 +124,15 @@ Build a self-improving AI trading bot system "SentCom" with:
 - **Files modified**: `backend/routers/ib.py` (functions: `is_pusher_connected`, `get_connection_status`, `get_pushed_ib_data`)
 
 ## Next Tasks
-1. ⏳ **User Action**: Run `StartTrading.bat` to test end-to-end mode switching
-2. ⏳ **User Action**: Click "Collection" mode in NIA dashboard, verify local script switches
-3. Monitor large-scale data collection (~18,608 pending requests)
-4. Verify auto-training triggers after data collection
-5. Test AI-enhanced scanner
+1. ⏳ **User Action**: Download updated `ib_data_pusher.py` to your local machine
+2. ⏳ **User Action**: Run `StartTrading.bat` (or `python ib_data_pusher.py --cloud-url=... --mode=trading`)
+3. ⏳ **User Action**: Click "Fill Gaps" in NIA dashboard to start prioritized collection
+4. Monitor collection progress in "Progress" tab - watch pending count decrease
+5. After collection completes (~18,611 pending requests), verify auto-training triggers
 
 ## Backlog
 - (P1) Deep Scanner Overhaul - alternative data sources
 - (P2) Advanced Model Training Dashboard
 - (P2) Portfolio Analytics Dashboard
 - (P3) Trade Journal & Alerts
+- (P2) Cloud API Stability - investigate timeouts (server-side root cause)

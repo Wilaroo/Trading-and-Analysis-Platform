@@ -4649,26 +4649,51 @@ async def get_historical_data_queue_stats():
 
 
 
-# ===================== MODE TOGGLE (UI-CONTROLLED) =====================
+# ===================== PRIORITY COLLECTION (SIMPLIFIED SYSTEM) =====================
 
-# Desired mode set by UI - the local script will poll this
-_desired_mode = {
-    "mode": "trading",  # "trading" or "collection"
+# Priority collection flag - when True, script prioritizes historical data over live quotes
+# This replaces the old "mode toggle" system with a simpler priority-based approach
+_priority_collection = {
+    "enabled": False,
     "set_by": "default",
-    "set_at": None
+    "set_at": None,
+    "auto_disable_when_empty": True  # Automatically disable when queue is empty
 }
 
 
 @router.get("/mode")
 async def get_current_mode():
     """
-    Get the desired operating mode.
-    The local ib_data_pusher.py script polls this endpoint to know which mode to run in.
+    Get the current operating settings for the local script.
+    
+    SIMPLIFIED SYSTEM:
+    - Script always runs in "trading" mode (live quotes + orders work)
+    - When priority_collection=True, script prioritizes historical data fetches
+    - Script still pushes quotes, just less frequently during priority collection
+    
+    The local ib_data_pusher.py polls this endpoint to adjust its behavior.
     """
+    # Check if we should auto-disable priority (queue empty)
+    try:
+        queue_stats = await get_historical_data_queue_stats()
+        pending = queue_stats.get("pending", 0)
+        
+        # Auto-disable priority when queue is empty
+        if _priority_collection["enabled"] and _priority_collection["auto_disable_when_empty"]:
+            if pending == 0:
+                _priority_collection["enabled"] = False
+                _priority_collection["set_by"] = "auto_completed"
+                _priority_collection["set_at"] = datetime.now(timezone.utc).isoformat()
+                logger.info("Priority collection auto-disabled: queue empty")
+    except:
+        pending = 0
+    
     return {
-        "mode": _desired_mode["mode"],
-        "set_by": _desired_mode["set_by"],
-        "set_at": _desired_mode["set_at"],
+        "mode": "trading",  # Always trading mode now
+        "priority_collection": _priority_collection["enabled"],
+        "pending_requests": pending,
+        "set_by": _priority_collection["set_by"],
+        "set_at": _priority_collection["set_at"],
         "collection_active": _collection_mode_status.get("active", False)
     }
 
@@ -4676,34 +4701,116 @@ async def get_current_mode():
 @router.post("/mode/set")
 async def set_operating_mode(data: dict):
     """
-    Set the desired operating mode from the UI.
-    The local script will pick this up on its next poll.
+    LEGACY ENDPOINT - Now redirects to priority collection.
+    Kept for backwards compatibility with existing scripts.
     """
-    global _desired_mode
+    global _priority_collection
     
     new_mode = data.get("mode", "trading")
-    if new_mode not in ["trading", "collection"]:
-        raise HTTPException(status_code=400, detail="Mode must be 'trading' or 'collection'")
     
-    _desired_mode = {
-        "mode": new_mode,
-        "set_by": "ui",
-        "set_at": datetime.now(timezone.utc).isoformat()
-    }
+    # Map old mode values to new priority system
+    if new_mode == "collection":
+        _priority_collection["enabled"] = True
+    else:
+        _priority_collection["enabled"] = False
     
-    logger.info(f"Operating mode set to: {new_mode} (via UI)")
+    _priority_collection["set_by"] = "ui_legacy"
+    _priority_collection["set_at"] = datetime.now(timezone.utc).isoformat()
+    
+    logger.info(f"Priority collection set to: {_priority_collection['enabled']} (via legacy mode/set)")
     
     return {
         "success": True,
-        "mode": new_mode,
-        "message": f"Mode set to {new_mode}. Local script will switch on next poll (~30s)."
+        "mode": "trading",
+        "priority_collection": _priority_collection["enabled"],
+        "message": f"Priority collection {'enabled' if _priority_collection['enabled'] else 'disabled'}."
+    }
+
+
+@router.post("/priority-collection/enable")
+async def enable_priority_collection():
+    """
+    Enable priority collection mode.
+    
+    When enabled:
+    - Script fetches historical data more aggressively
+    - Live quote push frequency is reduced (but still works)
+    - Orders still execute immediately
+    - Auto-disables when queue is empty
+    """
+    global _priority_collection
+    
+    _priority_collection = {
+        "enabled": True,
+        "set_by": "ui",
+        "set_at": datetime.now(timezone.utc).isoformat(),
+        "auto_disable_when_empty": True
+    }
+    
+    logger.info("Priority collection ENABLED via UI")
+    
+    # Get queue stats for feedback
+    try:
+        queue_stats = await get_historical_data_queue_stats()
+        pending = queue_stats.get("pending", 0)
+    except:
+        pending = 0
+    
+    return {
+        "success": True,
+        "priority_collection": True,
+        "pending_requests": pending,
+        "message": f"Priority collection enabled. {pending} requests in queue."
+    }
+
+
+@router.post("/priority-collection/disable")
+async def disable_priority_collection():
+    """
+    Disable priority collection, return to normal trading mode.
+    """
+    global _priority_collection
+    
+    _priority_collection = {
+        "enabled": False,
+        "set_by": "ui",
+        "set_at": datetime.now(timezone.utc).isoformat(),
+        "auto_disable_when_empty": True
+    }
+    
+    logger.info("Priority collection DISABLED via UI")
+    
+    return {
+        "success": True,
+        "priority_collection": False,
+        "message": "Priority collection disabled. Normal trading mode active."
+    }
+
+
+@router.get("/priority-collection/status")
+async def get_priority_collection_status():
+    """
+    Get current priority collection status with queue info.
+    """
+    try:
+        queue_stats = await get_historical_data_queue_stats()
+    except:
+        queue_stats = {"pending": 0, "completed": 0, "failed": 0, "total": 0}
+    
+    return {
+        "priority_collection": _priority_collection["enabled"],
+        "set_by": _priority_collection["set_by"],
+        "set_at": _priority_collection["set_at"],
+        "auto_disable_when_empty": _priority_collection["auto_disable_when_empty"],
+        "queue": queue_stats,
+        "collection_progress": _collection_mode_status
     }
 
 
 @router.get("/mode/status")
 async def get_mode_status():
     """
-    Get full mode status including desired mode and actual running state.
+    Get full status including priority collection state.
     Used by the UI to show current state.
     """
     try:
@@ -4712,9 +4819,10 @@ async def get_mode_status():
         queue_stats = {"pending": 0, "completed": 0, "failed": 0, "total": 0}
     
     return {
-        "desired_mode": _desired_mode["mode"],
-        "set_by": _desired_mode["set_by"],
-        "set_at": _desired_mode["set_at"],
+        "mode": "trading",  # Always trading now
+        "priority_collection": _priority_collection["enabled"],
+        "set_by": _priority_collection["set_by"],
+        "set_at": _priority_collection["set_at"],
         "actual_state": {
             "collection_active": _collection_mode_status.get("active", False),
             "last_update": _collection_mode_status.get("last_update"),
