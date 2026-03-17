@@ -570,11 +570,17 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
       if (!isMounted) return;
       
       try {
+        // Add timeout to prevent infinite loading on slow endpoints
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+        
         const [progressRes, coverageRes, collectionModeRes] = await Promise.allSettled([
-          fetch(`${API_BASE}/api/ib-collector/queue-progress-detailed`),
-          fetch(`${API_BASE}/api/ib-collector/data-coverage`),
-          fetch(`${API_BASE}/api/ib/collection-mode/status`)
+          fetch(`${API_BASE}/api/ib-collector/queue-progress-detailed`, { signal: controller.signal }),
+          fetch(`${API_BASE}/api/ib-collector/data-coverage`, { signal: controller.signal }),
+          fetch(`${API_BASE}/api/ib/collection-mode/status`, { signal: controller.signal })
         ]);
+        
+        clearTimeout(timeoutId);
         
         if (!isMounted) return;
         
@@ -593,6 +599,8 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
               setDetailedProgress(newProgress);
             }
           }
+        } else {
+          console.warn('[NIA] Progress fetch failed:', progressRes.status === 'rejected' ? progressRes.reason : progressRes.value?.status);
         }
         
         if (coverageRes.status === 'fulfilled' && coverageRes.value.ok) {
@@ -610,6 +618,8 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
               setLastDataChange(new Date()); // Mark when data actually changed
             }
           }
+        } else {
+          console.warn('[NIA] Coverage fetch failed:', coverageRes.status === 'rejected' ? coverageRes.reason : coverageRes.value?.status);
         }
         
         // Fetch collection mode status

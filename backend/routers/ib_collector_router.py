@@ -68,14 +68,14 @@ async def get_data_coverage():
     - ADV cache status
     
     Use this to understand your data coverage and identify gaps.
-    Note: Results are cached for 30 seconds to improve performance.
+    Note: Results are cached for 120 seconds to improve performance with large datasets.
     """
     import time
     
-    # Simple in-memory cache
+    # Simple in-memory cache - extended to 120s for large datasets
     cache_key = "_data_coverage_cache"
     cache_time_key = "_data_coverage_cache_time"
-    cache_ttl = 30  # 30 seconds cache - balance between freshness and performance with Atlas
+    cache_ttl = 120  # 2 minutes cache for Atlas performance
     
     # Check cache
     if hasattr(get_data_coverage, cache_key):
@@ -155,15 +155,22 @@ async def get_data_coverage():
             tier_symbol_count = adv_col.count_documents(adv_query)
             
             # Get symbols in tier (limit to avoid huge queries)
-            tier_symbols = [doc["symbol"] for doc in adv_col.find(adv_query, {"symbol": 1}).limit(5000)]
+            tier_symbols_set = set(doc["symbol"] for doc in adv_col.find(adv_query, {"symbol": 1}).limit(5000))
             
             timeframe_coverage = []
             for tf in tier_config["timeframes"]:
-                # Count distinct symbols with data for this timeframe
-                symbols_with_data_count = len(data_col.distinct("symbol", {
-                    "symbol": {"$in": tier_symbols},
-                    "bar_size": tf
-                }))
+                # OPTIMIZED: Use aggregation count instead of distinct
+                # This is faster for large datasets
+                pipeline = [
+                    {"$match": {
+                        "symbol": {"$in": list(tier_symbols_set)},
+                        "bar_size": tf
+                    }},
+                    {"$group": {"_id": "$symbol"}},
+                    {"$count": "total"}
+                ]
+                result = list(data_col.aggregate(pipeline, allowDiskUse=True))
+                symbols_with_data_count = result[0]["total"] if result else 0
                 
                 coverage_pct = (symbols_with_data_count / tier_symbol_count * 100) if tier_symbol_count > 0 else 0
                 missing = tier_symbol_count - symbols_with_data_count
