@@ -4414,3 +4414,44 @@ async def generate_enhanced_alert_for_symbol(symbol: str):
             detail={"error": str(e), "symbol": symbol}
         )
 
+
+
+# ===================== SCRIPTS DOWNLOAD =====================
+
+@router.get("/scripts/{script_name}")
+async def get_script(script_name: str):
+    """
+    Serve local scripts for auto-update functionality.
+    This allows StartTrading.bat to download the latest scripts from the cloud.
+    """
+    import os
+    from fastapi.responses import PlainTextResponse
+    
+    # Only allow specific scripts
+    allowed_scripts = {
+        "ib_data_pusher.py": "/app/scripts/ib_data_pusher.py",
+        "ollama_http.py": "/app/scripts/ollama_http.py",
+    }
+    
+    if script_name not in allowed_scripts:
+        raise HTTPException(status_code=404, detail=f"Script not found: {script_name}")
+    
+    script_path = allowed_scripts[script_name]
+    
+    # Also check documents folder as fallback
+    alt_path = f"/app/documents/scripts/{script_name}"
+    
+    # Prefer documents/scripts if it exists (user-facing location)
+    if os.path.exists(alt_path):
+        script_path = alt_path
+    
+    if not os.path.exists(script_path):
+        raise HTTPException(status_code=404, detail=f"Script file not found: {script_name}")
+    
+    try:
+        with open(script_path, "r") as f:
+            content = f.read()
+        return PlainTextResponse(content, media_type="text/plain")
+    except Exception as e:
+        logger.error(f"Error reading script {script_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error reading script: {e}")
