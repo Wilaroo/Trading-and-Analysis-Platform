@@ -500,13 +500,15 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
   // Data coverage state
   const [dataCoverage, setDataCoverage] = useState(null);
   const [loadingCoverage, setLoadingCoverage] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState(null);
+  const [lastDataChange, setLastDataChange] = useState(null); // Track when data actually changed
   
   // Fill gaps state
   const [fillingGaps, setFillingGaps] = useState(false);
   
-  // Use ref to track if data changed to prevent unnecessary re-renders
+  // Use refs to track data changes without causing re-renders
   const lastDataRef = useRef(null);
+  const lastFetchTimeRef = useRef(null);
+  const pollingActiveRef = useRef(true);
 
   // ADV Tier options - determines which symbols AND which timeframes
   const tierOptions = [
@@ -582,14 +584,15 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
         if (coverageRes.status === 'fulfilled' && coverageRes.value.ok) {
           const data = await coverageRes.value.json();
           if (data.success) {
-            // Always update the timestamp to show polling is working
-            setLastUpdated(new Date());
+            // Track fetch time via ref (no re-render)
+            lastFetchTimeRef.current = new Date();
             
             // Only update coverage state if data actually changed
             const newCoverageStr = JSON.stringify(data);
             if (lastDataRef.current?.coverage !== newCoverageStr) {
               lastDataRef.current = { ...lastDataRef.current, coverage: newCoverageStr };
               setDataCoverage(data);
+              setLastDataChange(new Date()); // Mark when data actually changed
             }
           }
         }
@@ -784,19 +787,6 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
                     </div>
                   ) : dataCoverage ? (
                     <>
-                      {/* Last Updated Indicator */}
-                      {lastUpdated && (
-                        <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-white/5 border border-white/10">
-                          <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                            <span className="text-[10px] text-zinc-400">Auto-refreshing every 10s</span>
-                          </div>
-                          <span className="text-[10px] text-zinc-500">
-                            Updated: {lastUpdated.toLocaleTimeString()}
-                          </span>
-                        </div>
-                      )}
-                      
                       {/* ADV Cache Status */}
                       <div className={`p-3 rounded-xl border ${
                         dataCoverage.adv_cache?.status === 'ready' 
@@ -809,12 +799,21 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
                               dataCoverage.adv_cache?.status === 'ready' ? 'text-emerald-400' : 'text-amber-400'
                             }`} />
                             <span className="text-xs font-medium text-white">ADV Cache</span>
+                            {/* Subtle polling indicator - green dot pulses to show active polling */}
+                            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" title="Auto-refreshing every 10s" />
                           </div>
-                          <span className={`text-sm font-bold ${
-                            dataCoverage.adv_cache?.status === 'ready' ? 'text-emerald-400' : 'text-amber-400'
-                          }`}>
-                            {dataCoverage.adv_cache?.total_symbols?.toLocaleString() || 0} symbols
-                          </span>
+                          <div className="flex items-center gap-3">
+                            {lastDataChange && (
+                              <span className="text-[9px] text-zinc-500" title="When coverage data last changed">
+                                Changed: {lastDataChange.toLocaleTimeString()}
+                              </span>
+                            )}
+                            <span className={`text-sm font-bold ${
+                              dataCoverage.adv_cache?.status === 'ready' ? 'text-emerald-400' : 'text-amber-400'
+                            }`}>
+                              {dataCoverage.adv_cache?.total_symbols?.toLocaleString() || 0} symbols
+                            </span>
+                          </div>
                         </div>
                       </div>
                       
