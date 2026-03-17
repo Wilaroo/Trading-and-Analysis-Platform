@@ -260,7 +260,7 @@ const TrainAllPanel = memo(({ onTrainComplete }) => {
 
 // ==================== LEARNING PROGRESS PANEL ====================
 
-const LearningProgressPanel = memo(({ data, loading }) => {
+const LearningProgressPanel = memo(({ data }) => {
   const [expanded, setExpanded] = useState(true);
 
   // Memoize calculated values to prevent recalculation on each render
@@ -1522,7 +1522,7 @@ const SimulationQuickPanel = memo(({ jobs, loading, onRefresh }) => {
 
 // ==================== SECTION COMPONENTS ====================
 
-const IntelOverview = memo(({ data, loading }) => {
+const IntelOverview = memo(({ data }) => {
   // Memoize metrics to prevent re-creating array on each render
   const metrics = useMemo(() => [
     {
@@ -1582,7 +1582,7 @@ const IntelOverview = memo(({ data, loading }) => {
               )}
             </div>
             <div className="text-2xl font-bold text-white mb-0.5">
-              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : metric.value}
+              {metric.value}
             </div>
             <div className="text-xs text-zinc-400">{metric.label}</div>
             {metric.subtext && (
@@ -1681,7 +1681,7 @@ const AdvancedTestingWrapper = memo(() => {
   );
 });
 
-const AIPerformancePanel = memo(({ data, loading, onRefresh }) => {
+const AIPerformancePanel = memo(({ data, onRefresh }) => {
   const [expanded, setExpanded] = useState(true);
   
   // Memoize modules to prevent recreation on each render
@@ -1733,7 +1733,7 @@ const AIPerformancePanel = memo(({ data, loading, onRefresh }) => {
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-zinc-400">Accuracy</span>
                       <span className={`font-mono ${module.accuracy >= 0.55 ? 'text-green-400' : module.accuracy >= 0.5 ? 'text-yellow-400' : 'text-red-400'}`}>
-                        {loading ? '--' : `${(module.accuracy * 100).toFixed(1)}%`}
+                        {module.accuracy !== null ? `${(module.accuracy * 100).toFixed(1)}%` : '--'}
                       </span>
                     </div>
                   )}
@@ -1742,7 +1742,7 @@ const AIPerformancePanel = memo(({ data, loading, onRefresh }) => {
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-zinc-400">Win Rate</span>
                       <span className={`font-mono ${module.winRate >= 0.55 ? 'text-green-400' : 'text-yellow-400'}`}>
-                        {loading ? '--' : `${(module.winRate * 100).toFixed(1)}%`}
+                        {module.winRate !== null ? `${(module.winRate * 100).toFixed(1)}%` : '--'}
                       </span>
                     </div>
                   )}
@@ -1750,21 +1750,21 @@ const AIPerformancePanel = memo(({ data, loading, onRefresh }) => {
                   {module.predictions !== undefined && (
                     <div className="flex items-center justify-between text-xs mt-1">
                       <span className="text-zinc-400">Predictions</span>
-                      <span className="text-zinc-300 font-mono">{loading ? '--' : module.predictions.toLocaleString()}</span>
+                      <span className="text-zinc-300 font-mono">{module.predictions?.toLocaleString() || '--'}</span>
                     </div>
                   )}
                   
                   {module.debates !== undefined && (
                     <div className="flex items-center justify-between text-xs mt-1">
                       <span className="text-zinc-400">Debates</span>
-                      <span className="text-zinc-300 font-mono">{loading ? '--' : module.debates}</span>
+                      <span className="text-zinc-300 font-mono">{module.debates ?? '--'}</span>
                     </div>
                   )}
                   
                   {module.interventions !== undefined && (
                     <div className="flex items-center justify-between text-xs mt-1">
                       <span className="text-zinc-400">Interventions</span>
-                      <span className="text-zinc-300 font-mono">{loading ? '--' : module.interventions}</span>
+                      <span className="text-zinc-300 font-mono">{module.interventions ?? '--'}</span>
                     </div>
                   )}
                 </div>
@@ -1861,7 +1861,7 @@ const StrategyLifecyclePanel = memo(({ phases, candidates, loading, onPromote, o
                           <Icon className="w-5 h-5" />
                         </div>
                         <span className="text-xs text-zinc-400 mt-1 capitalize">{phase}</span>
-                        <span className="text-lg font-bold text-white">{loading ? '-' : count}</span>
+                        <span className="text-lg font-bold text-white">{count ?? '-'}</span>
                       </div>
                       {idx < 2 && (
                         <div className="flex-1 h-0.5 bg-gradient-to-r from-white/20 to-white/20 mx-2 relative">
@@ -2556,6 +2556,13 @@ const NIA = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   
+  // Track if initial load has completed - after this, hide loading spinners
+  // to prevent flickering on background refreshes
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
+  
+  // Only show loading on first load, not on background refreshes
+  const stableLoading = loading && !initialLoadDone;
+  
   // Initialize data from cache if available
   const cachedData = getCached('niaData');
   const [data, setData] = useState(() => {
@@ -2741,6 +2748,7 @@ const NIA = () => {
     } finally {
       setLoading(false);
       setRefreshing(false);
+      setInitialLoadDone(true); // Mark initial load complete - hide spinners from now on
     }
   }, [setCached]);
 
@@ -2809,6 +2817,44 @@ const NIA = () => {
     stats: data.collectionStats
   }), [data.collectionQueue, data.collectionStats]);
 
+  // Memoized data slices for each component to prevent re-renders
+  const intelOverviewData = useMemo(() => ({
+    aiAccuracy: data.aiAccuracy,
+    aiAccuracyTrend: data.aiAccuracyTrend,
+    liveStrategies: data.liveStrategies,
+    paperStrategies: data.paperStrategies,
+    learningHealth: data.learningHealth,
+    calibrationsToday: data.calibrationsToday
+  }), [data.aiAccuracy, data.aiAccuracyTrend, data.liveStrategies, data.paperStrategies, data.learningHealth, data.calibrationsToday]);
+
+  const learningProgressData = useMemo(() => ({
+    modelTrained: data.modelTrained,
+    historicalBars: data.historicalBars,
+    calibrationsApplied: data.calibrationsApplied,
+    predictionsTracked: data.predictionsTracked,
+    simulationsRun: data.simulationsRun,
+    alertsAnalyzed: data.alertsAnalyzed,
+    timeseriesAccuracy: data.timeseriesAccuracy
+  }), [data.modelTrained, data.historicalBars, data.calibrationsApplied, data.predictionsTracked, data.simulationsRun, data.alertsAnalyzed, data.timeseriesAccuracy]);
+
+  const aiPerformanceData = useMemo(() => ({
+    timeseriesAccuracy: data.timeseriesAccuracy,
+    timeseriesPredictions: data.timeseriesPredictions,
+    bullWinRate: data.bullWinRate,
+    bullDebates: data.bullDebates,
+    bearWinRate: data.bearWinRate,
+    bearDebates: data.bearDebates,
+    riskInterventions: data.riskInterventions,
+    riskSaved: data.riskSaved,
+    aiAdvisorWeight: data.aiAdvisorWeight
+  }), [data.timeseriesAccuracy, data.timeseriesPredictions, data.bullWinRate, data.bullDebates, data.bearWinRate, data.bearDebates, data.riskInterventions, data.riskSaved, data.aiAdvisorWeight]);
+
+  // Memoize phases and candidates to prevent Strategy panels from flickering
+  const memoizedPhases = useMemo(() => data.phases, [data.phases]);
+  const memoizedCandidates = useMemo(() => data.candidates, [data.candidates]);
+  const memoizedSimulationJobs = useMemo(() => data.simulationJobs, [data.simulationJobs]);
+  const memoizedReportCard = useMemo(() => data.reportCard, [data.reportCard]);
+
   return (
     <div className="h-full overflow-auto p-4" style={{ background: 'var(--bg-primary)' }}>
       {/* Header */}
@@ -2845,23 +2891,23 @@ const NIA = () => {
       {/* TRAIN ALL - Top Priority Action */}
       <TrainAllPanel onTrainComplete={handleTrainComplete} />
 
-      {/* Intel Overview */}
-      <IntelOverview data={data} loading={loading} />
+      {/* Intel Overview - doesn't need loading prop, will show data or placeholder */}
+      <IntelOverview data={intelOverviewData} />
 
       {/* Learning Progress - Clear view of system intelligence */}
-      <LearningProgressPanel data={data} loading={loading} />
+      <LearningProgressPanel data={learningProgressData} />
 
       {/* Data Collection - Unified panel for all timeframes */}
       <DataCollectionPanel 
         collectionData={collectionData}
-        loading={loading}
+        loading={stableLoading}
         onRefresh={handleRefresh}
       />
 
       {/* Historical Simulations */}
       <SimulationQuickPanel
-        jobs={data.simulationJobs}
-        loading={loading}
+        jobs={memoizedSimulationJobs}
+        loading={stableLoading}
         onRefresh={handleRefresh}
       />
 
@@ -2873,32 +2919,31 @@ const NIA = () => {
 
       {/* AI Performance Panel */}
       <AIPerformancePanel 
-        data={data} 
-        loading={loading}
+        data={aiPerformanceData} 
         onRefresh={handleRefreshWithToast}
       />
 
       {/* Strategy Lifecycle Panel */}
       <StrategyLifecyclePanel
-        phases={data.phases}
-        candidates={data.candidates}
-        loading={loading}
+        phases={memoizedPhases}
+        candidates={memoizedCandidates}
+        loading={stableLoading}
         onPromote={handlePromote}
         onDemote={noopCallback}
       />
 
       {/* Strategy Promotion Wizard */}
       <PromotionWizardPanel
-        candidates={data.candidates}
-        loading={loading}
+        candidates={memoizedCandidates}
+        loading={stableLoading}
         onPromote={handlePromote}
         onDemote={noopCallback}
       />
 
       {/* Trading Report Card Panel */}
       <ReportCardPanel
-        reportCard={data.reportCard}
-        loading={loading}
+        reportCard={memoizedReportCard}
+        loading={stableLoading}
       />
 
       {/* Footer */}
