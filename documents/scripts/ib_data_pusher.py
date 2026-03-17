@@ -125,14 +125,26 @@ class CloudAPIClient:
         self.session = create_session()
         self.request_count = 0
         self.last_request_time = 0
-        self.min_request_interval = 0.5  # Minimum 500ms between requests
+        self.min_request_interval = 2.0  # Minimum 2 seconds between requests (was 0.5)
+        self.rate_limit_backoff = 1.0  # Additional backoff multiplier when rate limited
+        self.last_429_time = 0  # Track when we last got rate limited
         
     def _throttle(self):
         """Ensure minimum interval between requests to avoid triggering rate limits"""
         now = time.time()
+        
+        # If we got rate limited recently, use longer intervals
+        time_since_429 = now - self.last_429_time
+        if time_since_429 < 60:  # Within last minute
+            effective_interval = self.min_request_interval * 3  # Triple the delay
+        elif time_since_429 < 300:  # Within last 5 minutes
+            effective_interval = self.min_request_interval * 2  # Double the delay
+        else:
+            effective_interval = self.min_request_interval
+        
         elapsed = now - self.last_request_time
-        if elapsed < self.min_request_interval:
-            time.sleep(self.min_request_interval - elapsed)
+        if elapsed < effective_interval:
+            time.sleep(effective_interval - elapsed)
         self.last_request_time = time.time()
         self.request_count += 1
     
@@ -145,13 +157,16 @@ class CloudAPIClient:
                 return True
         return False
     
-    @retry_with_backoff(max_retries=5, base_delay=2.0)
-    def get(self, endpoint: str, timeout: int = 15) -> Optional[dict]:
+    @retry_with_backoff(max_retries=3, base_delay=5.0)
+    def get(self, endpoint: str, timeout: int = 20) -> Optional[dict]:
         """Make a GET request with retry logic"""
         self._throttle()
         url = f"{self.base_url}{endpoint}"
         
         response = self.session.get(url, timeout=timeout)
+        
+        if response.status_code == 429:
+            self.last_429_time = time.time()
         
         if self._check_cloudflare_response(response):
             # Raise a 403 to trigger retry with backoff
@@ -160,8 +175,8 @@ class CloudAPIClient:
         response.raise_for_status()
         return response.json()
     
-    @retry_with_backoff(max_retries=5, base_delay=2.0)
-    def post(self, endpoint: str, json_data: dict = None, timeout: int = 30) -> Optional[dict]:
+    @retry_with_backoff(max_retries=3, base_delay=5.0)
+    def post(self, endpoint: str, json_data: dict = None, timeout: int = 45) -> Optional[dict]:
         """Make a POST request with retry logic"""
         self._throttle()
         url = f"{self.base_url}{endpoint}"
@@ -171,6 +186,9 @@ class CloudAPIClient:
             json=json_data,
             timeout=timeout
         )
+        
+        if response.status_code == 429:
+            self.last_429_time = time.time()
         
         if self._check_cloudflare_response(response):
             response.raise_for_status()
@@ -213,7 +231,7 @@ class IBDataPusher:
         self.subscribed_contracts: Dict[str, Contract] = {}
         self.depth_subscriptions: Dict[str, object] = {}  # symbol -> ticker object for L2
         self.last_push_time = 0
-        self.push_interval = 5.0  # Push every 5 seconds (increased from 2 to reduce rate limiting)
+        self.push_interval = 15.0  # Push every 15 seconds (was 5) to reduce rate limiting
         self.level2_enabled = True  # Level 2 uses polling approach, always available
         
         # Initialize the cloud API client with Cloudflare evasion
@@ -992,10 +1010,12 @@ class IBDataPusher:
         logger.info("Skipping fundamental data to avoid blocking")
         
         push_count = 0
-        l2_update_interval = 30
+        l2_update_interval = 60  # Update L2 subscriptions every 60 seconds (was 30)
         last_l2_update = 0
-        order_poll_interval = 2  # Check for orders every 2 seconds
+        order_poll_interval = 10  # Check for orders every 10 seconds (was 2)
         last_order_poll = 0
+        historical_data_interval = 15  # Process historical data every 15 seconds
+        last_historical_poll = 0
         current_time = time.time()
         
         # Fetch news providers on startup
@@ -1051,11 +1071,15 @@ class IBDataPusher:
                         self.fetch_news_for_symbols(symbols)
                         self.last_news_refresh = current_time
                     
-                    # Poll for pending orders from cloud trading bot
+                    # Poll for pending orders from cloud trading bot (less frequently)
                     if current_time - last_order_poll >= order_poll_interval:
                         self.poll_and_execute_orders()
-                        self.poll_and_execute_historical_data_requests()
                         last_order_poll = current_time
+                    
+                    # Poll for historical data requests (separate interval, even less frequently)
+                    if current_time - last_historical_poll >= historical_data_interval:
+                        self.poll_and_execute_historical_data_requests()
+                        last_historical_poll = current_time
                         
                 except Exception as e:
                     logger.error(f"Loop error: {e}")
@@ -1225,10 +1249,11 @@ class IBDataPusher:
         """
         Poll cloud for pending historical data requests and fulfill them via IB Gateway.
         This enables the cloud to request historical bars through the local IB connection.
+        OPTIMIZED: Only process 1 request per poll cycle to avoid rate limiting.
         """
         try:
             # Poll for pending historical data requests using CloudAPIClient
-            result = self.api.get_safe("/api/ib/historical-data/pending", timeout=15)
+            result = self.api.get_safe("/api/ib/historical-data/pending", timeout=20)
             
             if not result:
                 return
@@ -1238,10 +1263,17 @@ class IBDataPusher:
             if not requests_list:
                 return
             
-            logger.info(f"[HistoricalData] Found {len(requests_list)} pending requests")
+            # Only process 1 request per cycle to avoid hammering the server
+            # The backend returns up to 10, but we'll be conservative
+            req = requests_list[0]
+            remaining = len(requests_list) - 1
             
-            for req in requests_list:
-                self._fetch_and_return_historical_data(req)
+            logger.info(f"[HistoricalData] Processing 1 of {len(requests_list)} pending requests ({remaining} remaining)")
+            
+            self._fetch_and_return_historical_data(req)
+            
+            # Add a delay after processing to be gentle on the server
+            time.sleep(3)
                 
         except Exception as e:
             if "404" not in str(e) and "Not Found" not in str(e):
