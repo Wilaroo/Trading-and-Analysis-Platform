@@ -1920,3 +1920,293 @@ async def get_collection_presets():
             "Larger lookbacks for intraday bars may hit IB data limits"
         ]
     }
+
+
+
+@router.get("/error-investigation")
+async def investigate_errors(
+    limit: int = 50,
+    status_filter: Optional[str] = None,
+    symbol_filter: Optional[str] = None,
+    timeframe_filter: Optional[str] = None
+):
+    """
+    Deep investigation of errors and failures in the data collection queue.
+    
+    Parameters:
+    - limit: Max errors to return (default 50)
+    - status_filter: Filter by status (failed, error, timeout, rate_limited, no_data)
+    - symbol_filter: Filter by symbol (partial match)
+    - timeframe_filter: Filter by bar_size (e.g., "1 day", "1 hour")
+    
+    Returns detailed error breakdown with:
+    - Error counts by category
+    - Error timeline (when errors occurred)
+    - Most problematic symbols
+    - Actionable recommendations
+    """
+    try:
+        from services.historical_data_queue_service import get_historical_data_queue_service
+        service = get_historical_data_queue_service()
+        
+        # Build query
+        query = {"status": {"$in": ["failed", "error"]}}
+        
+        if status_filter:
+            if status_filter in ["timeout", "rate_limited", "error", "no_data"]:
+                query["$or"] = [
+                    {"result_status": status_filter},
+                    {"error": {"$regex": status_filter, "$options": "i"}}
+                ]
+        
+        if symbol_filter:
+            query["symbol"] = {"$regex": symbol_filter, "$options": "i"}
+            
+        if timeframe_filter:
+            query["bar_size"] = timeframe_filter
+        
+        # Get error distribution by type
+        error_pipeline = [
+            {"$match": {"status": {"$in": ["failed", "error"]}}},
+            {"$group": {
+                "_id": {
+                    "status": "$status",
+                    "result_status": "$result_status",
+                    "bar_size": "$bar_size"
+                },
+                "count": {"$sum": 1},
+                "symbols": {"$addToSet": "$symbol"},
+                "sample_errors": {"$push": {"$substr": [{"$ifNull": ["$error", "unknown"]}, 0, 100]}}
+            }},
+            {"$sort": {"count": -1}},
+            {"$limit": 20}
+        ]
+        error_distribution = list(service.collection.aggregate(error_pipeline))
+        
+        # Get most problematic symbols
+        symbol_pipeline = [
+            {"$match": {"status": {"$in": ["failed", "error"]}}},
+            {"$group": {
+                "_id": "$symbol",
+                "failure_count": {"$sum": 1},
+                "timeframes_failed": {"$addToSet": "$bar_size"},
+                "errors": {"$push": "$error"}
+            }},
+            {"$sort": {"failure_count": -1}},
+            {"$limit": 20}
+        ]
+        problematic_symbols = list(service.collection.aggregate(symbol_pipeline))
+        
+        # Get recent errors (timeline)
+        recent_errors = list(service.collection.find(
+            query,
+            {"symbol": 1, "bar_size": 1, "status": 1, "result_status": 1, 
+             "error": 1, "updated_at": 1, "created_at": 1}
+        ).sort("updated_at", -1).limit(limit))
+        
+        # Format recent errors
+        formatted_errors = []
+        for e in recent_errors:
+            formatted_errors.append({
+                "symbol": e.get("symbol"),
+                "bar_size": e.get("bar_size"),
+                "status": e.get("status"),
+                "result_status": e.get("result_status"),
+                "error": e.get("error", "Unknown error")[:200],
+                "timestamp": e.get("updated_at") or e.get("created_at")
+            })
+        
+        # Count totals
+        total_failed = service.collection.count_documents({"status": "failed"})
+        total_timeout = service.collection.count_documents({"result_status": "timeout"})
+        total_rate_limited = service.collection.count_documents({"result_status": "rate_limited"})
+        total_no_data = service.collection.count_documents({"result_status": "no_data"})
+        total_errors = service.collection.count_documents({"result_status": "error"})
+        
+        # Generate recommendations
+        recommendations = []
+        if total_timeout > 10:
+            recommendations.append({
+                "issue": "High timeout count",
+                "count": total_timeout,
+                "action": "Check network connectivity or IB Gateway status"
+            })
+        if total_rate_limited > 50:
+            recommendations.append({
+                "issue": "Many rate-limited requests",
+                "count": total_rate_limited,
+                "action": "Reduce data fetch frequency or wait for limits to reset"
+            })
+        if total_errors > 20:
+            recommendations.append({
+                "issue": "Actual errors occurring",
+                "count": total_errors,
+                "action": "Review error messages for patterns - may need code fix"
+            })
+        
+        # Find common error patterns
+        error_patterns = {}
+        for e in formatted_errors:
+            error_text = e.get("error", "")[:50]
+            if error_text:
+                error_patterns[error_text] = error_patterns.get(error_text, 0) + 1
+        
+        top_patterns = sorted(error_patterns.items(), key=lambda x: -x[1])[:5]
+        
+        return {
+            "success": True,
+            "summary": {
+                "total_failed": total_failed,
+                "by_category": {
+                    "timeout": total_timeout,
+                    "rate_limited": total_rate_limited,
+                    "no_data": total_no_data,
+                    "error": total_errors
+                }
+            },
+            "error_distribution": [
+                {
+                    "status": d["_id"].get("status"),
+                    "result_status": d["_id"].get("result_status"),
+                    "bar_size": d["_id"].get("bar_size"),
+                    "count": d["count"],
+                    "affected_symbols": len(d["symbols"]),
+                    "sample_error": d["sample_errors"][0] if d["sample_errors"] else None
+                }
+                for d in error_distribution
+            ],
+            "problematic_symbols": [
+                {
+                    "symbol": s["_id"],
+                    "failure_count": s["failure_count"],
+                    "timeframes": s["timeframes_failed"],
+                    "sample_error": s["errors"][0] if s["errors"] else None
+                }
+                for s in problematic_symbols[:10]
+            ],
+            "top_error_patterns": [
+                {"pattern": p[0], "count": p[1]}
+                for p in top_patterns
+            ],
+            "recent_errors": formatted_errors,
+            "recommendations": recommendations,
+            "actions": {
+                "retry_all_failed": "POST /api/ib-collector/retry-failed",
+                "retry_timeouts": "POST /api/ib-collector/retry-failed?status_filter=timeout",
+                "clear_stuck": "POST /api/ib-collector/clear-stuck"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in error investigation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/system-health")
+async def get_system_health():
+    """
+    Overall system health check for data collection infrastructure.
+    
+    Returns:
+    - Queue health
+    - Data freshness
+    - Error rates
+    - Recommendations
+    """
+    try:
+        from services.historical_data_queue_service import get_historical_data_queue_service
+        service = get_historical_data_queue_service()
+        db = service.collection.database
+        
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        
+        # Queue stats
+        pending = service.collection.count_documents({"status": {"$in": [None, "pending"]}})
+        completed = service.collection.count_documents({"status": "completed"})
+        failed = service.collection.count_documents({"status": "failed"})
+        claimed = service.collection.count_documents({"status": "claimed"})
+        total = service.collection.count_documents({})
+        
+        # Calculate completion rate
+        completion_rate = (completed / total * 100) if total > 0 else 0
+        error_rate = (failed / total * 100) if total > 0 else 0
+        
+        # Check data freshness
+        latest_bar = db.ib_historical_data.find_one(
+            {}, {"collected_at": 1}, sort=[("collected_at", -1)]
+        )
+        data_age_minutes = None
+        if latest_bar and latest_bar.get("collected_at"):
+            try:
+                collected_at = latest_bar["collected_at"]
+                if isinstance(collected_at, str):
+                    collected_at = datetime.fromisoformat(collected_at.replace("Z", "+00:00"))
+                data_age_minutes = (now - collected_at).total_seconds() / 60
+            except:
+                pass
+        
+        # Count bars added recently
+        try:
+            one_hour_ago = (now - timedelta(hours=1)).isoformat()
+            bars_last_hour = db.ib_historical_data.count_documents({
+                "collected_at": {"$gte": one_hour_ago}
+            })
+        except:
+            bars_last_hour = 0
+        
+        # Check for stuck requests (claimed > 10 min)
+        ten_min_ago = (now - timedelta(minutes=10)).isoformat()
+        stuck_count = service.collection.count_documents({
+            "status": "claimed",
+            "claimed_at": {"$lt": ten_min_ago}
+        })
+        
+        # Determine health status
+        health_issues = []
+        health_status = "healthy"
+        
+        if error_rate > 5:
+            health_issues.append(f"High error rate: {error_rate:.1f}%")
+            health_status = "degraded"
+        if stuck_count > 5:
+            health_issues.append(f"{stuck_count} stuck requests (claimed > 10 min)")
+            health_status = "degraded"
+        if data_age_minutes and data_age_minutes > 60:
+            health_issues.append(f"No new data in {data_age_minutes:.0f} minutes")
+            health_status = "degraded"
+        if pending > 0 and bars_last_hour == 0:
+            health_issues.append("Pending requests but no data flowing")
+            health_status = "warning"
+        
+        if error_rate > 20 or stuck_count > 20:
+            health_status = "unhealthy"
+        
+        return {
+            "success": True,
+            "health_status": health_status,
+            "queue": {
+                "pending": pending,
+                "completed": completed,
+                "failed": failed,
+                "claimed": claimed,
+                "total": total,
+                "completion_rate": f"{completion_rate:.1f}%",
+                "error_rate": f"{error_rate:.1f}%"
+            },
+            "data_freshness": {
+                "latest_data_age_minutes": round(data_age_minutes, 1) if data_age_minutes else None,
+                "bars_added_last_hour": bars_last_hour
+            },
+            "issues": health_issues,
+            "stuck_requests": stuck_count,
+            "recommendations": [
+                "Run /api/ib-collector/clear-stuck to reset stuck requests" if stuck_count > 0 else None,
+                "Run /api/ib-collector/retry-failed to retry failed requests" if failed > 0 else None,
+                "Check IB Data Pusher is running" if bars_last_hour == 0 and pending > 0 else None
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in system health check: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
