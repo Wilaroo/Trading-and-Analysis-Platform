@@ -273,7 +273,7 @@ class TestRegimePerformanceAPI:
         import httpx
         
         # Get the API URL from env
-        api_url = "https://data-pipeline-test-6.preview.emergentagent.com"
+        api_url = "https://sentcom-dash.preview.emergentagent.com"
         
         endpoints = [
             "/api/regime-performance/summary",

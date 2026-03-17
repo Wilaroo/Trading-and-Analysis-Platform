@@ -17,7 +17,7 @@ import requests
 import os
 
 # Base URL from environment (using the public-facing URL)
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://data-pipeline-test-6.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://sentcom-dash.preview.emergentagent.com').rstrip('/')
 
 
 class TestIntelligentStopSetupRules:

@@ -500,6 +500,7 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
   // Data coverage state
   const [dataCoverage, setDataCoverage] = useState(null);
   const [loadingCoverage, setLoadingCoverage] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(null);
   
   // Fill gaps state
   const [fillingGaps, setFillingGaps] = useState(false);
@@ -581,7 +582,10 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
         if (coverageRes.status === 'fulfilled' && coverageRes.value.ok) {
           const data = await coverageRes.value.json();
           if (data.success) {
-            // Only update if data actually changed
+            // Always update the timestamp to show polling is working
+            setLastUpdated(new Date());
+            
+            // Only update coverage state if data actually changed
             const newCoverageStr = JSON.stringify(data);
             if (lastDataRef.current?.coverage !== newCoverageStr) {
               lastDataRef.current = { ...lastDataRef.current, coverage: newCoverageStr };
@@ -780,6 +784,19 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
                     </div>
                   ) : dataCoverage ? (
                     <>
+                      {/* Last Updated Indicator */}
+                      {lastUpdated && (
+                        <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-white/5 border border-white/10">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                            <span className="text-[10px] text-zinc-400">Auto-refreshing every 10s</span>
+                          </div>
+                          <span className="text-[10px] text-zinc-500">
+                            Updated: {lastUpdated.toLocaleTimeString()}
+                          </span>
+                        </div>
+                      )}
+                      
                       {/* ADV Cache Status */}
                       <div className={`p-3 rounded-xl border ${
                         dataCoverage.adv_cache?.status === 'ready' 
@@ -821,16 +838,25 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
                               {/* Timeframe breakdown for this tier */}
                               <div className="grid grid-cols-5 gap-1.5 mt-2">
                                 {tierData.timeframes?.map((tf, j) => {
-                                  const coverageColor = tf.coverage_pct >= 90 ? 'emerald' : 
-                                                       tf.coverage_pct >= 50 ? 'amber' : 'rose';
+                                  // Use static classes to ensure Tailwind JIT compiles them
+                                  const isHigh = tf.coverage_pct >= 90;
+                                  const isMedium = tf.coverage_pct >= 50 && tf.coverage_pct < 90;
+                                  const isLow = tf.coverage_pct < 50;
+                                  
                                   return (
                                     <div 
                                       key={j} 
-                                      className={`p-2 rounded-lg bg-black/30 border border-${coverageColor}-500/20`}
+                                      className={`p-2 rounded-lg bg-black/30 border transition-all ${
+                                        isHigh ? 'border-emerald-500/30' : 
+                                        isMedium ? 'border-amber-500/30' : 'border-rose-500/30'
+                                      }`}
                                       title={`${tf.symbols_with_data}/${tf.symbols_needed} symbols, ${tf.total_bars?.toLocaleString()} bars`}
                                     >
                                       <p className="text-[9px] text-zinc-500 truncate">{tf.timeframe}</p>
-                                      <p className={`text-xs font-bold text-${coverageColor}-400`}>
+                                      <p className={`text-xs font-bold ${
+                                        isHigh ? 'text-emerald-400' : 
+                                        isMedium ? 'text-amber-400' : 'text-rose-400'
+                                      }`}>
                                         {tf.coverage_pct}%
                                       </p>
                                       <p className="text-[8px] text-zinc-600">

@@ -40,7 +40,7 @@ Forwarding                    https://pseudoaccidentally-linty-addie.ngrok-free.
 ### Step 3: Open Trading Platform
 Open your browser and go to:
 ```
-https://data-pipeline-test-6.preview.emergentagent.com
+https://sentcom-dash.preview.emergentagent.com
 ```
 
 ### Step 4: Verify Connection
@@ -96,7 +96,7 @@ echo [3/4] Opening Trading Platform...
 timeout /t 2 /nobreak >nul
 
 :: Open browser to trading platform
-start "" "https://data-pipeline-test-6.preview.emergentagent.com"
+start "" "https://sentcom-dash.preview.emergentagent.com"
 
 echo.
 echo [4/4] Startup Complete!
@@ -190,7 +190,7 @@ When you're done trading:
 
 | Component | URL/Location |
 |-----------|-------------|
-| Trading Platform | https://data-pipeline-test-6.preview.emergentagent.com |
+| Trading Platform | https://sentcom-dash.preview.emergentagent.com |
 | ngrok Tunnel | https://pseudoaccidentally-linty-addie.ngrok-free.dev |
 | Local Ollama | http://localhost:11434 |
 | Default AI Model | deepseek-r1:8b |
