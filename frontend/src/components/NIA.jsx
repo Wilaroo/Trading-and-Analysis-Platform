@@ -840,52 +840,75 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
                       <div>
                         <p className="text-xs font-medium text-zinc-400 mb-2">Coverage by Tier</p>
                         <div className="space-y-3">
-                          {dataCoverage.by_tier?.map((tierData, i) => (
-                            <div key={i} className="p-3 rounded-xl bg-black/40 border border-white/10">
-                              <div className="flex items-center justify-between mb-2">
-                                <div className="flex items-center gap-2">
-                                  {tierData.tier === 'intraday' && <Zap className="w-4 h-4 text-yellow-400" />}
-                                  {tierData.tier === 'swing' && <TrendingUp className="w-4 h-4 text-cyan-400" />}
-                                  {tierData.tier === 'investment' && <Layers className="w-4 h-4 text-violet-400" />}
-                                  <span className="text-sm font-bold text-white capitalize">{tierData.tier}</span>
-                                  <span className="text-[10px] text-zinc-500">({tierData.description})</span>
+                          {dataCoverage.by_tier?.map((tierData, i) => {
+                            // Calculate overall tier completion
+                            const totalPossible = tierData.timeframes?.reduce((sum, tf) => sum + (tf.symbols_needed || 0), 0) || 1;
+                            const totalCovered = tierData.timeframes?.reduce((sum, tf) => sum + (tf.symbols_with_data || 0), 0) || 0;
+                            const overallPct = Math.round((totalCovered / totalPossible) * 100);
+                            
+                            return (
+                              <div key={i} className="p-3 rounded-xl bg-black/40 border border-white/10">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center gap-2">
+                                    {tierData.tier === 'intraday' && <Zap className="w-4 h-4 text-yellow-400" />}
+                                    {tierData.tier === 'swing' && <TrendingUp className="w-4 h-4 text-cyan-400" />}
+                                    {tierData.tier === 'investment' && <Layers className="w-4 h-4 text-violet-400" />}
+                                    <span className="text-sm font-bold text-white capitalize">{tierData.tier}</span>
+                                    <span className="text-[10px] text-zinc-500">({tierData.description})</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs text-zinc-400">{tierData.total_symbols?.toLocaleString()} symbols</span>
+                                    <span className={`text-xs font-bold ${overallPct >= 90 ? 'text-emerald-400' : overallPct >= 50 ? 'text-amber-400' : 'text-rose-400'}`}>
+                                      {overallPct}%
+                                    </span>
+                                  </div>
                                 </div>
-                                <span className="text-xs text-zinc-400">{tierData.total_symbols} symbols</span>
+                                
+                                {/* Overall progress bar */}
+                                <div className="h-1.5 bg-black/50 rounded-full mb-3 overflow-hidden">
+                                  <div 
+                                    className={`h-full rounded-full transition-all duration-500 ${
+                                      overallPct >= 90 ? 'bg-emerald-500' : 
+                                      overallPct >= 50 ? 'bg-amber-500' : 'bg-rose-500'
+                                    }`}
+                                    style={{ width: `${overallPct}%` }}
+                                  />
+                                </div>
+                                
+                                {/* Timeframe breakdown for this tier */}
+                                <div className="grid grid-cols-5 gap-1.5">
+                                  {tierData.timeframes?.map((tf, j) => {
+                                    // Use static classes to ensure Tailwind JIT compiles them
+                                    const isHigh = tf.coverage_pct >= 90;
+                                    const isMedium = tf.coverage_pct >= 50 && tf.coverage_pct < 90;
+                                    const isLow = tf.coverage_pct < 50;
+                                    
+                                    return (
+                                      <div 
+                                        key={j} 
+                                        className={`p-2 rounded-lg bg-black/30 border transition-all ${
+                                          isHigh ? 'border-emerald-500/30' : 
+                                          isMedium ? 'border-amber-500/30' : 'border-rose-500/30'
+                                        }`}
+                                        title={`${tf.symbols_with_data}/${tf.symbols_needed} symbols, ${tf.total_bars?.toLocaleString()} bars`}
+                                      >
+                                        <p className="text-[9px] text-zinc-500 truncate">{tf.timeframe}</p>
+                                        <p className={`text-xs font-bold ${
+                                          isHigh ? 'text-emerald-400' : 
+                                          isMedium ? 'text-amber-400' : 'text-rose-400'
+                                        }`}>
+                                          {tf.coverage_pct}%
+                                        </p>
+                                        <p className="text-[8px] text-zinc-600">
+                                          {tf.symbols_with_data}/{tf.symbols_needed}
+                                        </p>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
                               </div>
-                              
-                              {/* Timeframe breakdown for this tier */}
-                              <div className="grid grid-cols-5 gap-1.5 mt-2">
-                                {tierData.timeframes?.map((tf, j) => {
-                                  // Use static classes to ensure Tailwind JIT compiles them
-                                  const isHigh = tf.coverage_pct >= 90;
-                                  const isMedium = tf.coverage_pct >= 50 && tf.coverage_pct < 90;
-                                  const isLow = tf.coverage_pct < 50;
-                                  
-                                  return (
-                                    <div 
-                                      key={j} 
-                                      className={`p-2 rounded-lg bg-black/30 border transition-all ${
-                                        isHigh ? 'border-emerald-500/30' : 
-                                        isMedium ? 'border-amber-500/30' : 'border-rose-500/30'
-                                      }`}
-                                      title={`${tf.symbols_with_data}/${tf.symbols_needed} symbols, ${tf.total_bars?.toLocaleString()} bars`}
-                                    >
-                                      <p className="text-[9px] text-zinc-500 truncate">{tf.timeframe}</p>
-                                      <p className={`text-xs font-bold ${
-                                        isHigh ? 'text-emerald-400' : 
-                                        isMedium ? 'text-amber-400' : 'text-rose-400'
-                                      }`}>
-                                        {tf.coverage_pct}%
-                                      </p>
-                                      <p className="text-[8px] text-zinc-600">
-                                        {tf.symbols_with_data}/{tf.symbols_needed}
-                                      </p>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                       
