@@ -101,7 +101,7 @@ from routers.market_regime import router as market_regime_router
 app.include_router(market_regime_router)
 
 # Test with curl:
-# curl https://pipeline-control.preview.emergentagent.com/api/market-regime/summary
+# curl https://sentcom-queue-mgmt.preview.emergentagent.com/api/market-regime/summary
 ```
 
 ## Integration with Other Systems

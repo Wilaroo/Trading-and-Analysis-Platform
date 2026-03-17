@@ -1,1 +1,1 @@
-https://pipeline-control.preview.emergentagent.com
+https://sentcom-queue-mgmt.preview.emergentagent.com
