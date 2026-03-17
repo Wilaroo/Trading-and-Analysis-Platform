@@ -263,51 +263,56 @@ const TrainAllPanel = memo(({ onTrainComplete }) => {
 const LearningProgressPanel = memo(({ data, loading }) => {
   const [expanded, setExpanded] = useState(true);
 
-  // Calculate progress percentages
-  const aiTrainingProgress = data.modelTrained ? 100 : (data.historicalBars > 0 ? 50 : 0);
-  const scannerCalibrationProgress = data.calibrationsApplied > 0 ? Math.min(100, data.calibrationsApplied * 20) : 0;
-  const predictionTrackingProgress = data.predictionsTracked > 0 ? Math.min(100, (data.predictionsTracked / 1000) * 100) : 0;
-  const strategySimProgress = data.simulationsRun > 0 ? Math.min(100, data.simulationsRun * 25) : 0;
+  // Memoize calculated values to prevent recalculation on each render
+  const progressData = useMemo(() => {
+    const aiTrainingProgress = data.modelTrained ? 100 : (data.historicalBars > 0 ? 50 : 0);
+    const scannerCalibrationProgress = data.calibrationsApplied > 0 ? Math.min(100, data.calibrationsApplied * 20) : 0;
+    const predictionTrackingProgress = data.predictionsTracked > 0 ? Math.min(100, (data.predictionsTracked / 1000) * 100) : 0;
+    const strategySimProgress = data.simulationsRun > 0 ? Math.min(100, data.simulationsRun * 25) : 0;
 
-  // Build AI training detail message
-  const aiTrainingDetail = data.modelTrained 
-    ? `Model trained${data.timeseriesAccuracy ? ` (${(data.timeseriesAccuracy * 100).toFixed(1)}% accuracy)` : ''}`
-    : `${data.historicalBars?.toLocaleString() || 0} bars available`;
+    const aiTrainingDetail = data.modelTrained 
+      ? `Model trained${data.timeseriesAccuracy ? ` (${(data.timeseriesAccuracy * 100).toFixed(1)}% accuracy)` : ''}`
+      : `${data.historicalBars?.toLocaleString() || 0} bars available`;
 
-  const progressItems = [
-    {
-      label: 'AI Model Training',
-      progress: aiTrainingProgress,
-      detail: aiTrainingDetail,
-      color: 'cyan',
-      ready: data.modelTrained || data.historicalBars > 1000
-    },
-    {
-      label: 'Scanner Calibration',
-      progress: scannerCalibrationProgress,
-      detail: `${data.calibrationsApplied || 0} thresholds optimized`,
-      color: 'violet',
-      ready: data.alertsAnalyzed > 10
-    },
-    {
-      label: 'Prediction Tracking',
-      progress: predictionTrackingProgress,
-      detail: `${data.predictionsTracked || 0} predictions verified`,
-      color: 'amber',
-      ready: data.predictionsTracked > 0
-    },
-    {
-      label: 'Strategy Simulations',
-      progress: strategySimProgress,
-      detail: `${data.simulationsRun || 0} backtests completed`,
-      color: 'emerald',
-      ready: data.simulationsRun > 0
-    }
-  ];
+    const progressItems = [
+      {
+        label: 'AI Model Training',
+        progress: aiTrainingProgress,
+        detail: aiTrainingDetail,
+        color: 'cyan',
+        ready: data.modelTrained || data.historicalBars > 1000
+      },
+      {
+        label: 'Scanner Calibration',
+        progress: scannerCalibrationProgress,
+        detail: `${data.calibrationsApplied || 0} thresholds optimized`,
+        color: 'violet',
+        ready: data.alertsAnalyzed > 10
+      },
+      {
+        label: 'Prediction Tracking',
+        progress: predictionTrackingProgress,
+        detail: `${data.predictionsTracked || 0} predictions verified`,
+        color: 'amber',
+        ready: data.predictionsTracked > 0
+      },
+      {
+        label: 'Strategy Simulations',
+        progress: strategySimProgress,
+        detail: `${data.simulationsRun || 0} backtests completed`,
+        color: 'emerald',
+        ready: data.simulationsRun > 0
+      }
+    ];
 
-  const overallProgress = Math.round(
-    (aiTrainingProgress + scannerCalibrationProgress + predictionTrackingProgress + strategySimProgress) / 4
-  );
+    const overallProgress = Math.round(
+      (aiTrainingProgress + scannerCalibrationProgress + predictionTrackingProgress + strategySimProgress) / 4
+    );
+
+    return { progressItems, overallProgress };
+  }, [data.modelTrained, data.historicalBars, data.calibrationsApplied, data.predictionsTracked, data.simulationsRun, data.alertsAnalyzed, data.timeseriesAccuracy]);
+
+  const { progressItems, overallProgress } = progressData;
 
   return (
     <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }}>
@@ -1517,8 +1522,9 @@ const SimulationQuickPanel = memo(({ jobs, loading, onRefresh }) => {
 
 // ==================== SECTION COMPONENTS ====================
 
-const IntelOverview = ({ data, loading }) => {
-  const metrics = [
+const IntelOverview = memo(({ data, loading }) => {
+  // Memoize metrics to prevent re-creating array on each render
+  const metrics = useMemo(() => [
     {
       label: 'AI Accuracy',
       value: data.aiAccuracy ? `${(data.aiAccuracy * 100).toFixed(1)}%` : '--',
@@ -1545,16 +1551,13 @@ const IntelOverview = ({ data, loading }) => {
       icon: Zap,
       color: 'violet'
     }
-  ];
+  ], [data.aiAccuracy, data.aiAccuracyTrend, data.liveStrategies, data.paperStrategies, data.learningHealth, data.calibrationsToday]);
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
       {metrics.map((metric, idx) => (
-        <motion.div
+        <div
           key={metric.label}
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: idx * 0.1 }}
           className="relative p-4 rounded-xl border border-white/10 overflow-hidden"
           style={{
             background: 'linear-gradient(135deg, rgba(21, 28, 36, 0.9), rgba(30, 41, 59, 0.8))'
@@ -1586,11 +1589,11 @@ const IntelOverview = ({ data, loading }) => {
               <div className="text-[10px] text-zinc-500 mt-1">{metric.subtext}</div>
             )}
           </div>
-        </motion.div>
+        </div>
       ))}
     </div>
   );
-};
+});
 
 // ==================== MARKET SCANNER WRAPPER ====================
 const MarketScannerWrapper = memo(() => {
@@ -1681,12 +1684,13 @@ const AdvancedTestingWrapper = memo(() => {
 const AIPerformancePanel = memo(({ data, loading, onRefresh }) => {
   const [expanded, setExpanded] = useState(true);
   
-  const modules = [
+  // Memoize modules to prevent recreation on each render
+  const modules = useMemo(() => [
     { name: 'Time-Series AI', accuracy: data.timeseriesAccuracy, predictions: data.timeseriesPredictions, icon: Brain },
     { name: 'Bull Agent', winRate: data.bullWinRate, debates: data.bullDebates, icon: TrendingUp },
     { name: 'Bear Agent', winRate: data.bearWinRate, debates: data.bearDebates, icon: TrendingDown },
     { name: 'Risk Manager', interventions: data.riskInterventions, saved: data.riskSaved, icon: Shield }
-  ];
+  ], [data.timeseriesAccuracy, data.timeseriesPredictions, data.bullWinRate, data.bullDebates, data.bearWinRate, data.bearDebates, data.riskInterventions, data.riskSaved]);
 
   return (
     <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }}>
@@ -1794,21 +1798,22 @@ const AIPerformancePanel = memo(({ data, loading, onRefresh }) => {
 const StrategyLifecyclePanel = memo(({ phases, candidates, loading, onPromote, onDemote }) => {
   const [expanded, setExpanded] = useState(true);
   
-  const phaseColors = {
+  // Memoize static objects to prevent recreation
+  const phaseColors = useMemo(() => ({
     simulation: 'text-blue-400 bg-blue-500/20',
     paper: 'text-yellow-400 bg-yellow-500/20',
     live: 'text-green-400 bg-green-500/20',
     demoted: 'text-red-400 bg-red-500/20',
     disabled: 'text-zinc-400 bg-zinc-500/20'
-  };
+  }), []);
   
-  const phaseIcons = {
+  const phaseIcons = useMemo(() => ({
     simulation: FlaskConical,
     paper: Eye,
     live: Rocket,
     demoted: TrendingDown,
     disabled: Pause
-  };
+  }), []);
 
   return (
     <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }}>
@@ -2777,7 +2782,7 @@ const NIA = () => {
     }
   };
 
-  const handleRunCalibrations = async () => {
+  const handleRunCalibrations = useCallback(async () => {
     try {
       toast.info('Running all calibrations...');
       const res = await api.post('/api/learning-connectors/sync/run-all-calibrations');
@@ -2790,7 +2795,19 @@ const NIA = () => {
     } catch (err) {
       toast.error('Failed to run calibrations');
     }
-  };
+  }, [fetchAllData]);
+
+  // Memoized callbacks to prevent child re-renders
+  const handleRefresh = useCallback(() => fetchAllData(), [fetchAllData]);
+  const handleRefreshWithToast = useCallback(() => fetchAllData(true), [fetchAllData]);
+  const noopCallback = useCallback(() => {}, []);
+  const handleTrainComplete = useCallback(() => fetchAllData(true), [fetchAllData]);
+  
+  // Memoized data objects to prevent unnecessary re-renders
+  const collectionData = useMemo(() => ({
+    queueProgress: data.collectionQueue,
+    stats: data.collectionStats
+  }), [data.collectionQueue, data.collectionStats]);
 
   return (
     <div className="h-full overflow-auto p-4" style={{ background: 'var(--bg-primary)' }}>
@@ -2826,7 +2843,7 @@ const NIA = () => {
       </div>
 
       {/* TRAIN ALL - Top Priority Action */}
-      <TrainAllPanel onTrainComplete={() => fetchAllData(true)} />
+      <TrainAllPanel onTrainComplete={handleTrainComplete} />
 
       {/* Intel Overview */}
       <IntelOverview data={data} loading={loading} />
@@ -2836,19 +2853,16 @@ const NIA = () => {
 
       {/* Data Collection - Unified panel for all timeframes */}
       <DataCollectionPanel 
-        collectionData={{
-          queueProgress: data.collectionQueue,
-          stats: data.collectionStats
-        }}
+        collectionData={collectionData}
         loading={loading}
-        onRefresh={() => fetchAllData()}
+        onRefresh={handleRefresh}
       />
 
       {/* Historical Simulations */}
       <SimulationQuickPanel
         jobs={data.simulationJobs}
         loading={loading}
-        onRefresh={() => fetchAllData()}
+        onRefresh={handleRefresh}
       />
 
       {/* Market Scanner Panel */}
@@ -2861,7 +2875,7 @@ const NIA = () => {
       <AIPerformancePanel 
         data={data} 
         loading={loading}
-        onRefresh={() => fetchAllData(true)}
+        onRefresh={handleRefreshWithToast}
       />
 
       {/* Strategy Lifecycle Panel */}
@@ -2870,7 +2884,7 @@ const NIA = () => {
         candidates={data.candidates}
         loading={loading}
         onPromote={handlePromote}
-        onDemote={() => {}}
+        onDemote={noopCallback}
       />
 
       {/* Strategy Promotion Wizard */}
@@ -2878,7 +2892,7 @@ const NIA = () => {
         candidates={data.candidates}
         loading={loading}
         onPromote={handlePromote}
-        onDemote={() => {}}
+        onDemote={noopCallback}
       />
 
       {/* Trading Report Card Panel */}
