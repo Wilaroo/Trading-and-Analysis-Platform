@@ -1263,12 +1263,12 @@ class IBDataPusher:
     def _collection_mode_tick(self) -> Optional[dict]:
         """Execute one tick of collection mode. Returns completed/failed counts."""
         try:
-            # Get pending requests from cloud (with longer timeout for slow connections)
-            result = self.api.get_safe("/api/ib/historical-data/pending?limit=6", timeout=60)
+            # Get a LARGE batch of pending requests (50 at once to minimize cloud calls)
+            result = self.api.get_safe("/api/ib/historical-data/pending?limit=50", timeout=90)
             
             if not result:
-                logger.warning("[Collection] Cloud API unavailable, waiting 30s...")
-                time.sleep(30)  # Longer wait on cloud failure
+                logger.warning("[Collection] Cloud API unavailable, waiting 10s...")
+                time.sleep(10)
                 return None
             
             requests_list = result.get("requests", [])
@@ -1280,29 +1280,132 @@ class IBDataPusher:
             
             completed = 0
             failed = 0
+            results_to_report = []  # Buffer results for batch reporting
             
-            logger.info(f"[Collection] Processing {len(requests_list)} requests for {requests_list[0].get('symbol', 'unknown')}...")
+            # Group by symbol for logging
+            symbols = set(r.get('symbol', 'unknown') for r in requests_list)
+            logger.info(f"[Collection] Processing {len(requests_list)} requests for {len(symbols)} symbols: {', '.join(list(symbols)[:5])}...")
             
             for req in requests_list:
                 try:
-                    success = self._collection_fetch_single(req)
-                    if success:
+                    # Fetch from IB WITHOUT waiting for cloud confirmation
+                    result_data = self._collection_fetch_single_fast(req)
+                    if result_data:
+                        results_to_report.append(result_data)
                         completed += 1
+                        logger.info(f"[Collection] {result_data['symbol']} ({result_data['bar_size']}): {result_data['bar_count']} bars")
                     else:
                         failed += 1
                 except Exception as e:
                     logger.error(f"[Collection] Request error: {e}")
                     failed += 1
                 
-                # Small delay between requests (IB pacing)
-                time.sleep(1)
+                # Minimal delay between IB requests (just enough to avoid pacing)
+                time.sleep(0.5)
+            
+            # Batch report results to cloud (non-blocking, fire and forget)
+            if results_to_report:
+                self._batch_report_results(results_to_report)
             
             return {"completed": completed, "failed": failed}
             
         except Exception as e:
             logger.error(f"[Collection] Tick error: {e}")
-            time.sleep(10)  # Wait before retry on error
+            time.sleep(5)
             return {"completed": 0, "failed": 0}
+    
+    def _collection_fetch_single_fast(self, request: dict) -> Optional[dict]:
+        """
+        Fetch historical data from IB - FAST version.
+        Returns result dict instead of reporting to cloud immediately.
+        """
+        request_id = request.get("request_id")
+        symbol = request.get("symbol")
+        bar_size = request.get("bar_size", "1 day")
+        duration = request.get("duration", "1 Y")
+        
+        try:
+            from ib_insync import Stock
+            contract = Stock(symbol, "SMART", "USD")
+            
+            try:
+                self.ib.qualifyContracts(contract)
+            except Exception as e:
+                return {
+                    "request_id": request_id,
+                    "symbol": symbol,
+                    "bar_size": bar_size,
+                    "success": True,
+                    "status": "no_data",
+                    "data": [],
+                    "bar_count": 0,
+                    "error": f"Symbol not available: {e}"
+                }
+            
+            # Fetch from IB
+            bars = self.ib.reqHistoricalData(
+                contract,
+                endDateTime="",
+                durationStr=duration,
+                barSizeSetting=bar_size,
+                whatToShow="TRADES",
+                useRTH=True
+            )
+            
+            # Format bars
+            bar_data = []
+            for bar in bars:
+                bar_data.append({
+                    "date": bar.date.isoformat() if hasattr(bar.date, 'isoformat') else str(bar.date),
+                    "open": bar.open,
+                    "high": bar.high,
+                    "low": bar.low,
+                    "close": bar.close,
+                    "volume": bar.volume
+                })
+            
+            return {
+                "request_id": request_id,
+                "symbol": symbol,
+                "bar_size": bar_size,
+                "success": True,
+                "status": "success" if bar_data else "no_data",
+                "data": bar_data,
+                "bar_count": len(bar_data),
+                "error": None
+            }
+            
+        except Exception as e:
+            error_str = str(e)
+            if "pacing" in error_str.lower():
+                logger.warning(f"[Collection] {symbol}: IB PACING - waiting 10s")
+                time.sleep(10)
+                return None  # Will retry
+            return {
+                "request_id": request_id,
+                "symbol": symbol,
+                "bar_size": bar_size,
+                "success": False,
+                "status": "error",
+                "data": [],
+                "bar_count": 0,
+                "error": error_str
+            }
+    
+    def _batch_report_results(self, results: list):
+        """Report multiple results to cloud in one call (fire and forget)."""
+        try:
+            # Try batch endpoint first
+            payload = {"results": results}
+            result = self.api.post_safe("/api/ib/historical-data/batch-result", payload, timeout=30)
+            
+            if result:
+                logger.info(f"[Collection] Batch reported {len(results)} results to cloud")
+            else:
+                # Fall back to individual reports (in background, don't wait)
+                logger.warning(f"[Collection] Batch report failed, results saved locally only")
+        except Exception as e:
+            logger.warning(f"[Collection] Batch report error: {e} - data saved locally")
 
     # ==================== COLLECTION MODE ====================
     

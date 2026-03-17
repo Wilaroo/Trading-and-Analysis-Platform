@@ -1413,6 +1413,97 @@ async def report_historical_data_result(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+@router.post("/historical-data/batch-result")
+async def report_historical_data_batch_result(request: Request):
+    """
+    Report multiple historical data results in one call.
+    Much faster than individual reports - reduces cloud API overhead.
+    """
+    service = _get_historical_data_service()
+    if not service:
+        raise HTTPException(status_code=503, detail="Historical data service not available")
+    
+    try:
+        body = await request.json()
+        results = body.get("results", [])
+        
+        if not results:
+            return {"success": True, "processed": 0}
+        
+        from services.ib_historical_collector import get_ib_collector
+        collector = get_ib_collector()
+        
+        processed = 0
+        bars_stored = 0
+        
+        for result in results:
+            try:
+                request_id = result.get("request_id")
+                symbol = result.get("symbol")
+                bar_size = result.get("bar_size", "1 day")
+                success = result.get("success", False)
+                data = result.get("data", [])
+                error = result.get("error")
+                status = result.get("status", "success" if success else "error")
+                bar_count = result.get("bar_count", 0)
+                
+                # Update queue status
+                service.complete_request(
+                    request_id=request_id,
+                    success=success,
+                    data=data,
+                    error=error,
+                    status=status,
+                    bar_count=bar_count
+                )
+                
+                # Store bars to main collection
+                if success and data and collector._data_col is not None:
+                    from datetime import datetime, timezone
+                    for bar in data:
+                        try:
+                            collector._data_col.update_one(
+                                {
+                                    "symbol": symbol,
+                                    "bar_size": bar_size,
+                                    "date": bar.get("date") or bar.get("time")
+                                },
+                                {
+                                    "$set": {
+                                        "open": bar.get("open"),
+                                        "high": bar.get("high"),
+                                        "low": bar.get("low"),
+                                        "close": bar.get("close"),
+                                        "volume": bar.get("volume"),
+                                        "symbol": symbol,
+                                        "bar_size": bar_size,
+                                        "updated_at": datetime.now(timezone.utc).isoformat()
+                                    }
+                                },
+                                upsert=True
+                            )
+                            bars_stored += 1
+                        except Exception as e:
+                            pass  # Continue on individual bar errors
+                
+                processed += 1
+                
+            except Exception as e:
+                logger.warning(f"Error processing batch result: {e}")
+                continue
+        
+        return {
+            "success": True,
+            "processed": processed,
+            "bars_stored": bars_stored
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in batch result: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/historical-data/status/{request_id}")
 async def get_historical_data_request_status(request_id: str):
     """Get the status of a historical data request"""
