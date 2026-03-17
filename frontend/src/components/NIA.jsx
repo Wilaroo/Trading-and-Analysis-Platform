@@ -25,6 +25,7 @@ import {
   Target,
   Shield,
   Zap,
+  CheckCircle,
   CheckCircle2,
   XCircle,
   AlertTriangle,
@@ -32,6 +33,8 @@ import {
   RefreshCw,
   ChevronRight,
   ChevronDown,
+  ChevronUp,
+  Loader,
   Loader2,
   BarChart3,
   Layers,
@@ -53,7 +56,8 @@ import {
   Sparkles,
   Settings,
   Info,
-  StopCircle
+  StopCircle,
+  Globe
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '../utils/api';
@@ -374,73 +378,71 @@ const LearningProgressPanel = ({ data, loading }) => {
 
 const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
   const [expanded, setExpanded] = useState(true);
-  const [barSize, setBarSize] = useState('5 mins');
-  const [lookback, setLookback] = useState('1_week');
-  const [collectionType, setCollectionType] = useState('smart');
+  const [lookbackDays, setLookbackDays] = useState(30);
+  const [tier, setTier] = useState('all'); // 'all', 'intraday', 'swing', 'investment'
+  const [skipRecent, setSkipRecent] = useState(true);
+  const [recentThreshold, setRecentThreshold] = useState(7);
+  const [maxSymbols, setMaxSymbols] = useState(null);
   const [collecting, setCollecting] = useState(false);
-  const [showPresets, setShowPresets] = useState(false);
-  const [presets, setPresets] = useState([]);
-  const [timeframeStats, setTimeframeStats] = useState([]);
-  const [loadingPresets, setLoadingPresets] = useState(false);
   const [activeTab, setActiveTab] = useState('overview'); // 'overview' or 'collect'
   
-  // New state for detailed progress and modal
+  // Progress state
   const [detailedProgress, setDetailedProgress] = useState({ by_bar_size: [], active_collections: [] });
   const [showCollectionModal, setShowCollectionModal] = useState(false);
-  const [pendingCollection, setPendingCollection] = useState(null);
   const [cancelling, setCancelling] = useState(false);
 
-  // Bar size options (prioritized for user's preference: 1min, 5min)
-  const barSizeOptions = [
-    { value: '1 min', label: '1 Min', icon: Zap, description: 'Scalping' },
-    { value: '5 mins', label: '5 Min', icon: Activity, description: 'Day Trading' },
-    { value: '15 mins', label: '15 Min', icon: Clock, description: 'Swing Entry' },
-    { value: '1 hour', label: '1 Hour', icon: TrendingUp, description: 'Swing' },
-    { value: '1 day', label: '1 Day', icon: BarChart3, description: 'Position' },
-    { value: '1 week', label: '1 Week', icon: Layers, description: 'Investment' }
+  // ADV Tier options - determines which symbols AND which timeframes
+  const tierOptions = [
+    { 
+      value: 'all', 
+      label: 'All Tiers', 
+      description: 'Intraday + Swing + Investment stocks',
+      icon: Globe,
+      adv: '50K+ shares/day',
+      timeframes: 'All applicable per stock'
+    },
+    { 
+      value: 'intraday', 
+      label: 'Intraday', 
+      description: 'High volume day trading stocks',
+      icon: Zap,
+      adv: '500K+ shares/day',
+      timeframes: '1min, 5min, 15min, 1hr, 1day'
+    },
+    { 
+      value: 'swing', 
+      label: 'Swing', 
+      description: 'Medium volume swing stocks',
+      icon: TrendingUp,
+      adv: '100K+ shares/day',
+      timeframes: '5min, 30min, 1hr, 1day'
+    },
+    { 
+      value: 'investment', 
+      label: 'Investment', 
+      description: 'Lower volume position stocks',
+      icon: Layers,
+      adv: '50K+ shares/day',
+      timeframes: '1hr, 1day, 1week'
+    }
   ];
 
-  // Lookback options
-  const lookbackOptions = [
-    { value: '1_day', label: '1 Day' },
-    { value: '1_week', label: '1 Week' },
-    { value: '30_days', label: '30 Days' },
-    { value: '6_months', label: '6 Months' },
-    { value: '1_year', label: '1 Year' },
-    { value: '2_years', label: '2 Years' },
-    { value: '5_years', label: '5 Years' }
+  // Lookback presets
+  const lookbackPresets = [
+    { value: 5, label: '5 Days', description: 'Quick refresh' },
+    { value: 30, label: '30 Days', description: 'Standard (recommended)' },
+    { value: 90, label: '90 Days', description: '3 months' },
+    { value: 180, label: '6 Months', description: 'Extended history' },
+    { value: 365, label: '1 Year', description: 'Full year' }
   ];
 
-  // Collection type options
-  const collectionTypeOptions = [
-    { value: 'smart', label: 'Smart', description: 'ADV-matched (recommended)' },
-    { value: 'liquid', label: 'Liquid', description: 'ADV >= 100K' },
-    { value: 'full_market', label: 'Full', description: 'All stocks (slow)' }
-  ];
-
-  // Fetch presets, timeframe stats, and detailed progress
+  // Fetch progress data
   useEffect(() => {
     const fetchData = async () => {
-      setLoadingPresets(true);
       try {
-        const [presetsRes, statsRes, progressRes] = await Promise.allSettled([
-          fetch(`${API_BASE}/api/ib-collector/collection-presets`),
-          fetch(`${API_BASE}/api/ib-collector/timeframe-stats`),
-          fetch(`${API_BASE}/api/ib-collector/queue-progress-detailed`)
-        ]);
-        
-        if (presetsRes.status === 'fulfilled') {
-          const data = await presetsRes.value.json();
-          if (data.success) setPresets(data.presets || []);
-        }
-        
-        if (statsRes.status === 'fulfilled') {
-          const data = await statsRes.value.json();
-          if (data.success) setTimeframeStats(data.by_timeframe || []);
-        }
-        
-        if (progressRes.status === 'fulfilled') {
-          const data = await progressRes.value.json();
+        const progressRes = await fetch(`${API_BASE}/api/ib-collector/queue-progress-detailed`);
+        if (progressRes.ok) {
+          const data = await progressRes.json();
           if (data.success) {
             setDetailedProgress({
               by_bar_size: data.by_bar_size || [],
@@ -450,43 +452,38 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
           }
         }
       } catch (err) {
-        console.error('Error fetching collection data:', err);
-      } finally {
-        setLoadingPresets(false);
+        console.error('Error fetching collection progress:', err);
       }
     };
     fetchData();
-    
-    // Poll for progress updates every 5 seconds
     const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
   }, []);
 
-  // Check if there are active collections
   const hasActiveCollections = detailedProgress.active_collections?.length > 0;
 
-  const handleStartCollectionClick = () => {
-    if (hasActiveCollections) {
-      // Show modal to ask user what to do
-      setPendingCollection({ barSize, lookback, collectionType });
-      setShowCollectionModal(true);
-    } else {
-      // No active collections, start directly
-      startCollection(barSize, lookback, collectionType);
-    }
-  };
-
-  const startCollection = async (bs, lb, ct) => {
+  const startCollection = async () => {
     setCollecting(true);
-    setShowCollectionModal(false);
     try {
-      const res = await fetch(`${API_BASE}/api/ib-collector/multi-timeframe-collection?bar_size=${encodeURIComponent(bs)}&lookback=${lb}&collection_type=${ct}`, {
+      // Build query params
+      const params = new URLSearchParams({
+        lookback_days: lookbackDays.toString(),
+        skip_recent: skipRecent.toString(),
+        recent_days_threshold: recentThreshold.toString()
+      });
+      
+      if (maxSymbols) {
+        params.append('max_symbols', maxSymbols.toString());
+      }
+      
+      // Use per-stock collection endpoint
+      const res = await fetch(`${API_BASE}/api/ib-collector/per-stock-collection?${params}`, {
         method: 'POST'
       });
       const data = await res.json();
       
       if (data.success) {
-        toast.success(`Collection started: ${bs} bars, ${lb.replace('_', ' ')} lookback`);
+        toast.success(`Collection started: ${data.symbols} symbols, ${data.total_requests} requests queued`);
         if (onRefresh) onRefresh();
       } else {
         toast.error(data.error || 'Failed to start collection');
@@ -495,51 +492,17 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
       toast.error('Error starting collection');
     } finally {
       setCollecting(false);
-      setPendingCollection(null);
     }
   };
 
-  const handleCancelAndStart = async () => {
+  const handleCancelAll = async () => {
     setCancelling(true);
     try {
-      // Cancel all pending collections
       const res = await fetch(`${API_BASE}/api/ib-collector/cancel-all-pending`, { method: 'POST' });
       const data = await res.json();
-      
       if (data.success) {
         toast.info(`Cancelled ${data.cancelled} pending requests`);
-        // Now start the new collection
-        if (pendingCollection) {
-          await startCollection(pendingCollection.barSize, pendingCollection.lookback, pendingCollection.collectionType);
-        }
-      } else {
-        toast.error('Failed to cancel current collections');
-      }
-    } catch (err) {
-      toast.error('Error cancelling collections');
-    } finally {
-      setCancelling(false);
-    }
-  };
-
-  const handleQueueNewCollection = () => {
-    // Just start the new collection (it will queue behind existing)
-    if (pendingCollection) {
-      startCollection(pendingCollection.barSize, pendingCollection.lookback, pendingCollection.collectionType);
-    }
-  };
-
-  const handleCancelBarSize = async (barSizeToCancel) => {
-    setCancelling(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/ib-collector/cancel-by-barsize?bar_size=${encodeURIComponent(barSizeToCancel)}`, { method: 'POST' });
-      const data = await res.json();
-      
-      if (data.success) {
-        toast.success(data.message || `Cancelled. ${data.saved || 0} symbols saved.`);
         if (onRefresh) onRefresh();
-      } else {
-        toast.error('Failed to cancel');
       }
     } catch (err) {
       toast.error('Error cancelling');
@@ -548,511 +511,286 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
     }
   };
 
-  const handleResumeCollection = async (barSizeToResume) => {
-    setCollecting(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/ib-collector/resume-collection?bar_size=${encodeURIComponent(barSizeToResume)}&retry_failed=true&collection_type=smart`, { 
-        method: 'POST' 
-      });
-      const data = await res.json();
-      
-      if (data.success) {
-        if (data.new_to_collect === 0) {
-          toast.info(data.message || 'All symbols already collected');
-        } else {
-          toast.success(`Resumed: ${data.new_to_collect} symbols to collect (${data.already_completed} already done)`);
-        }
-        if (onRefresh) onRefresh();
-      } else {
-        toast.error(data.error || 'Failed to resume');
-      }
-    } catch (err) {
-      toast.error('Error resuming collection');
-    } finally {
-      setCollecting(false);
-    }
+  // Calculate estimated time
+  const estimatedTime = () => {
+    // Rough estimate: 3 seconds per request
+    const requestsPerSymbol = tier === 'intraday' ? 5 : tier === 'swing' ? 4 : tier === 'investment' ? 3 : 4;
+    const symbolCount = maxSymbols || 500; // Assume 500 if not limited
+    const totalRequests = symbolCount * requestsPerSymbol;
+    const hours = (totalRequests * 3) / 3600;
+    return hours < 1 ? `~${Math.round(hours * 60)} mins` : `~${hours.toFixed(1)} hours`;
   };
-
-  const handleApplyPreset = (preset) => {
-    setBarSize(preset.bar_size);
-    setLookback(preset.lookback);
-    setCollectionType(preset.collection_type);
-    setShowPresets(false);
-    setActiveTab('collect');
-    toast.info(`Applied "${preset.name}" preset`);
-  };
-
-  const { queueProgress, stats } = collectionData || {};
-  const totalSymbols = stats?.unique_symbols || 0;
-  const totalBars = stats?.total_bars || 0;
-
-  // Calculate total from timeframe stats
-  const totalTimeframeSymbols = timeframeStats.reduce((sum, s) => sum + (s.unique_symbols || 0), 0);
-  const totalTimeframeBars = timeframeStats.reduce((sum, s) => sum + (s.total_bars || 0), 0);
-  const displaySymbols = totalSymbols || totalTimeframeSymbols;
-  const displayBars = totalBars || totalTimeframeBars;
 
   return (
-    <>
-      {/* Collection Conflict Modal */}
-      <AnimatePresence>
-        {showCollectionModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={() => setShowCollectionModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-zinc-900 border border-white/10 rounded-xl p-6 max-w-md w-full shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center">
-                  <AlertCircle className="w-5 h-5 text-amber-400" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-white">Collection In Progress</h3>
-                  <p className="text-sm text-zinc-400">
-                    {detailedProgress.active_collections?.length} active collection(s) running
-                  </p>
-                </div>
-              </div>
+    <div className="bg-gradient-to-br from-zinc-900/80 to-black/60 rounded-2xl border border-white/10 overflow-hidden" data-testid="data-collection-panel">
+      {/* Header */}
+      <div 
+        className="flex items-center justify-between px-4 py-3 border-b border-white/10 cursor-pointer hover:bg-white/5 transition-colors"
+        onClick={() => setExpanded(!expanded)}
+        data-testid="data-collection-panel-toggle"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500/20 to-cyan-500/20 flex items-center justify-center border border-blue-500/30">
+            <Database className="w-4 h-4 text-blue-400" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-white">Historical Data Collection</h3>
+            <p className="text-[10px] text-zinc-500">Per-stock multi-timeframe • Smart ADV filtering</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {hasActiveCollections && (
+            <span className="px-2 py-1 rounded-full bg-amber-500/20 text-amber-400 text-[10px] font-medium animate-pulse">
+              COLLECTING
+            </span>
+          )}
+          {expanded ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
+        </div>
+      </div>
 
-              {/* Show active collections */}
-              <div className="mb-4 p-3 rounded-lg bg-white/5 border border-white/10">
-                <div className="text-xs text-zinc-400 mb-2">Currently collecting:</div>
-                <div className="space-y-2">
-                  {detailedProgress.active_collections?.map((col) => (
-                    <div key={col.bar_size} className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-white">{col.bar_size}</span>
-                      <div className="flex items-center gap-2">
-                        <div className="w-24 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-cyan-500 rounded-full" 
-                            style={{ width: `${col.progress_pct}%` }}
-                          />
+      {/* Content */}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            {/* Tab Navigation */}
+            <div className="flex border-b border-white/10">
+              <button
+                onClick={() => setActiveTab('overview')}
+                className={`flex-1 px-4 py-2 text-xs font-medium transition-colors ${
+                  activeTab === 'overview' 
+                    ? 'text-cyan-400 border-b-2 border-cyan-400 bg-cyan-500/5' 
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                Progress
+              </button>
+              <button
+                onClick={() => setActiveTab('collect')}
+                className={`flex-1 px-4 py-2 text-xs font-medium transition-colors ${
+                  activeTab === 'collect' 
+                    ? 'text-cyan-400 border-b-2 border-cyan-400 bg-cyan-500/5' 
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                Start Collection
+              </button>
+            </div>
+
+            <div className="p-4">
+              {activeTab === 'overview' ? (
+                /* Progress Overview */
+                <div className="space-y-4">
+                  {hasActiveCollections ? (
+                    <>
+                      {detailedProgress.active_collections.map((col, i) => (
+                        <div key={i} className="p-3 rounded-xl bg-black/40 border border-white/10">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-bold text-white">{col.bar_size} bars</span>
+                            <span className="text-xs text-cyan-400">{col.progress}%</span>
+                          </div>
+                          <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden mb-2">
+                            <div 
+                              className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all"
+                              style={{ width: `${col.progress}%` }}
+                            />
+                          </div>
+                          <div className="flex justify-between text-[10px] text-zinc-500">
+                            <span>{col.completed}/{col.total} symbols</span>
+                            <span>ETA: {col.eta || 'Calculating...'}</span>
+                          </div>
                         </div>
-                        <span className="text-xs text-zinc-400">{col.progress_pct}%</span>
+                      ))}
+                      <button
+                        onClick={handleCancelAll}
+                        disabled={cancelling}
+                        className="w-full py-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium hover:bg-rose-500/20 transition-colors disabled:opacity-50"
+                      >
+                        {cancelling ? 'Cancelling...' : 'Cancel All Collections'}
+                      </button>
+                    </>
+                  ) : (
+                    <div className="text-center py-8">
+                      <Database className="w-10 h-10 text-zinc-600 mx-auto mb-3" />
+                      <p className="text-zinc-500 text-sm">No active collections</p>
+                      <p className="text-zinc-600 text-xs mt-1">Start a new collection from the "Start Collection" tab</p>
+                    </div>
+                  )}
+                  
+                  {/* Data Coverage Summary */}
+                  {detailedProgress.by_bar_size?.length > 0 && (
+                    <div className="mt-4 p-3 rounded-xl bg-black/20 border border-white/5">
+                      <p className="text-xs font-medium text-zinc-400 mb-2">Data Coverage</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {detailedProgress.by_bar_size.slice(0, 6).map((bs, i) => (
+                          <div key={i} className="text-center p-2 rounded-lg bg-black/30">
+                            <p className="text-[10px] text-zinc-500">{bs.bar_size}</p>
+                            <p className="text-sm font-bold text-white">{bs.symbols || 0}</p>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-
-              <p className="text-sm text-zinc-300 mb-4">
-                You're about to start a new <span className="text-cyan-400 font-medium">{pendingCollection?.barSize}</span> collection. 
-                What would you like to do?
-              </p>
-
-              <div className="space-y-2">
-                <button
-                  onClick={handleCancelAndStart}
-                  disabled={cancelling}
-                  className="w-full py-2.5 px-4 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-400 text-sm font-medium transition-colors flex items-center justify-center gap-2"
-                >
-                  {cancelling ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <XCircle className="w-4 h-4" />
                   )}
-                  Cancel Current & Start New
-                </button>
-                
-                <button
-                  onClick={handleQueueNewCollection}
-                  disabled={collecting}
-                  className="w-full py-2.5 px-4 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 text-cyan-400 text-sm font-medium transition-colors flex items-center justify-center gap-2"
-                >
-                  <PlayCircle className="w-4 h-4" />
-                  Add to Queue (Run After Current)
-                </button>
-                
-                <button
-                  onClick={() => setShowCollectionModal(false)}
-                  className="w-full py-2.5 px-4 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 text-sm font-medium transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </motion.div>
+                </div>
+              ) : (
+                /* Collection Settings */
+                <div className="space-y-4">
+                  {/* Lookback Selection */}
+                  <div>
+                    <label className="text-xs font-medium text-zinc-400 mb-2 block">Lookback Period</label>
+                    <div className="grid grid-cols-5 gap-2">
+                      {lookbackPresets.map(preset => (
+                        <button
+                          key={preset.value}
+                          onClick={() => setLookbackDays(preset.value)}
+                          className={`p-2 rounded-lg border text-center transition-all ${
+                            lookbackDays === preset.value
+                              ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400'
+                              : 'bg-black/30 border-white/10 text-zinc-400 hover:border-white/20'
+                          }`}
+                        >
+                          <p className="text-xs font-bold">{preset.label}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Tier Selection */}
+                  <div>
+                    <label className="text-xs font-medium text-zinc-400 mb-2 block">Symbol Filter (ADV Tier)</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {tierOptions.map(opt => (
+                        <button
+                          key={opt.value}
+                          onClick={() => setTier(opt.value)}
+                          className={`p-3 rounded-xl border text-left transition-all ${
+                            tier === opt.value
+                              ? 'bg-cyan-500/10 border-cyan-500/50'
+                              : 'bg-black/30 border-white/10 hover:border-white/20'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <opt.icon className={`w-4 h-4 ${tier === opt.value ? 'text-cyan-400' : 'text-zinc-500'}`} />
+                            <span className={`text-sm font-bold ${tier === opt.value ? 'text-cyan-400' : 'text-white'}`}>
+                              {opt.label}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-zinc-500">{opt.adv}</p>
+                          <p className="text-[9px] text-zinc-600 mt-1">{opt.timeframes}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Smart Options */}
+                  <div className="p-3 rounded-xl bg-black/20 border border-white/5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-medium text-white">Skip Recent Data</p>
+                        <p className="text-[10px] text-zinc-500">Don't re-fetch symbols collected within threshold</p>
+                      </div>
+                      <button
+                        onClick={() => setSkipRecent(!skipRecent)}
+                        className={`w-10 h-5 rounded-full transition-colors ${
+                          skipRecent ? 'bg-cyan-500' : 'bg-zinc-700'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                          skipRecent ? 'translate-x-5' : 'translate-x-0.5'
+                        }`} />
+                      </button>
+                    </div>
+                    
+                    {skipRecent && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-zinc-500">Threshold:</span>
+                        <select
+                          value={recentThreshold}
+                          onChange={(e) => setRecentThreshold(parseInt(e.target.value))}
+                          className="bg-black/40 border border-white/10 rounded px-2 py-1 text-xs text-white"
+                        >
+                          <option value={1}>1 day</option>
+                          <option value={3}>3 days</option>
+                          <option value={7}>7 days</option>
+                          <option value={14}>14 days</option>
+                          <option value={30}>30 days</option>
+                        </select>
+                      </div>
+                    )}
+                    
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-zinc-500">Max symbols:</span>
+                      <select
+                        value={maxSymbols || 'all'}
+                        onChange={(e) => setMaxSymbols(e.target.value === 'all' ? null : parseInt(e.target.value))}
+                        className="bg-black/40 border border-white/10 rounded px-2 py-1 text-xs text-white"
+                      >
+                        <option value="all">All</option>
+                        <option value={50}>50</option>
+                        <option value={100}>100</option>
+                        <option value={250}>250</option>
+                        <option value={500}>500</option>
+                        <option value={1000}>1000</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Estimated Time */}
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-blue-500/5 border border-blue-500/20">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-blue-400" />
+                      <span className="text-xs text-blue-400">Estimated time:</span>
+                    </div>
+                    <span className="text-sm font-bold text-blue-400">{estimatedTime()}</span>
+                  </div>
+
+                  {/* Start Button */}
+                  <button
+                    onClick={startCollection}
+                    disabled={collecting || hasActiveCollections}
+                    className={`w-full py-3 rounded-xl font-medium text-sm transition-all ${
+                      collecting || hasActiveCollections
+                        ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white hover:from-cyan-400 hover:to-blue-400 shadow-lg shadow-cyan-500/20'
+                    }`}
+                    data-testid="start-collection-btn"
+                  >
+                    {collecting ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <Loader className="w-4 h-4 animate-spin" />
+                        Starting...
+                      </span>
+                    ) : hasActiveCollections ? (
+                      'Collection in progress...'
+                    ) : (
+                      <span className="flex items-center justify-center gap-2">
+                        <Play className="w-4 h-4" />
+                        Start Per-Stock Collection
+                      </span>
+                    )}
+                  </button>
+
+                  {/* Info Box */}
+                  <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+                    <div className="flex items-start gap-2">
+                      <CheckCircle className="w-4 h-4 text-emerald-400 mt-0.5" />
+                      <div className="text-[10px] text-emerald-400/80">
+                        <p className="font-medium mb-1">Per-Stock Collection</p>
+                        <p>Each stock gets ALL its applicable timeframes collected before moving to the next. This ensures complete data for each symbol.</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Main Panel */}
-      <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }}>
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
-          data-testid="data-collection-panel-toggle"
-        >
-          <div className="flex items-center gap-3">
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${hasActiveCollections ? 'bg-orange-500/20' : 'bg-emerald-500/20'}`}>
-              {hasActiveCollections ? (
-                <Download className="w-4 h-4 text-orange-400 animate-pulse" />
-              ) : (
-                <Database className="w-4 h-4 text-emerald-400" />
-              )}
-            </div>
-            <div className="text-left">
-              <h3 className="text-sm font-semibold text-white">Data Collection</h3>
-              <p className="text-xs text-zinc-400">
-                {hasActiveCollections 
-                  ? `${detailedProgress.active_collections?.length} collection(s) running` 
-                  : displaySymbols > 0 
-                    ? `${displaySymbols.toLocaleString()} symbols • ${displayBars.toLocaleString()} bars`
-                    : 'No data collected yet'
-                }
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {hasActiveCollections && (
-              <span className="text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 animate-pulse">
-                Active
-              </span>
-            )}
-            {timeframeStats.length > 0 && !hasActiveCollections && (
-              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">
-                {timeframeStats.length} timeframe{timeframeStats.length !== 1 ? 's' : ''}
-              </span>
-            )}
-            <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-          </div>
-        </button>
-
-        <AnimatePresence>
-          {expanded && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="border-t border-white/10"
-            >
-              <div className="p-4">
-                {/* Active Collections Progress (when running) */}
-                {hasActiveCollections && (
-                  <div className="mb-4 p-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs font-medium text-orange-400">Active Collections</span>
-                    </div>
-                    <div className="space-y-3">
-                      {detailedProgress.active_collections?.map((col) => (
-                        <div key={col.bar_size} className="pb-3 border-b border-white/5 last:border-0 last:pb-0">
-                          <div className="flex justify-between items-center text-xs mb-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-white font-medium">{col.bar_size}</span>
-                              {col.eta_display && (
-                                <span className="text-[10px] text-cyan-400 flex items-center gap-1">
-                                  <Clock className="w-3 h-3" />
-                                  ~{col.eta_display} left
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-zinc-400">
-                                {col.completed}/{col.total} ({col.progress_pct}%)
-                              </span>
-                              <button
-                                onClick={() => handleCancelBarSize(col.bar_size)}
-                                disabled={cancelling}
-                                className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/10 hover:bg-amber-500/20 transition-colors"
-                                title="Cancel and save already collected data"
-                              >
-                                {cancelling ? (
-                                  <Loader2 className="w-3 h-3 animate-spin" />
-                                ) : (
-                                  <StopCircle className="w-3 h-3" />
-                                )}
-                                Cancel & Save
-                              </button>
-                            </div>
-                          </div>
-                          <div className="h-2 bg-white/5 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-gradient-to-r from-orange-500 to-amber-400 rounded-full transition-all"
-                              style={{ width: `${col.progress_pct}%` }}
-                            />
-                          </div>
-                          <div className="flex justify-between mt-1 text-[10px] text-zinc-500">
-                            <span className="text-emerald-400">{col.completed} saved</span>
-                            <span className="text-orange-400">{col.pending} pending</span>
-                            {col.failed > 0 && <span className="text-red-400">{col.failed} failed</span>}
-                            {col.symbols_per_minute && (
-                              <span className="text-zinc-400">{col.symbols_per_minute} sym/min</span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Resumable Collections (paused/cancelled that can be continued) */}
-                {!hasActiveCollections && detailedProgress.by_bar_size?.some(col => 
-                  col.completed > 0 && col.progress_pct < 100 && !col.is_active
-                ) && (
-                  <div className="mb-4 p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs font-medium text-cyan-400">Resumable Collections</span>
-                    </div>
-                    <div className="space-y-2">
-                      {detailedProgress.by_bar_size?.filter(col => 
-                        col.completed > 0 && col.progress_pct < 100 && !col.is_active
-                      ).map((col) => (
-                        <div key={col.bar_size} className="flex items-center justify-between p-2 rounded bg-white/[0.02]">
-                          <div>
-                            <span className="text-xs font-medium text-white">{col.bar_size}</span>
-                            <span className="text-[10px] text-zinc-500 ml-2">
-                              {col.completed}/{col.total} ({col.progress_pct}%)
-                            </span>
-                          </div>
-                          <button
-                            onClick={() => handleResumeCollection(col.bar_size)}
-                            disabled={collecting}
-                            className="text-[10px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 px-2 py-1 rounded bg-cyan-500/10 hover:bg-cyan-500/20 transition-colors"
-                          >
-                            {collecting ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                            ) : (
-                              <PlayCircle className="w-3 h-3" />
-                            )}
-                            Resume
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Tab Switcher */}
-                <div className="flex gap-1 p-1 rounded-lg bg-white/5 mb-4">
-                  <button
-                    onClick={() => setActiveTab('overview')}
-                    className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                      activeTab === 'overview'
-                        ? 'bg-white/10 text-white'
-                        : 'text-zinc-400 hover:text-white'
-                    }`}
-                  >
-                    Overview
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('collect')}
-                    className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                      activeTab === 'collect'
-                        ? 'bg-white/10 text-white'
-                        : 'text-zinc-400 hover:text-white'
-                    }`}
-                  >
-                    + Collect New
-                  </button>
-                </div>
-
-                {/* Overview Tab */}
-                {activeTab === 'overview' && (
-                  <div className="space-y-4">
-                    {/* Summary Stats */}
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5">
-                        <div className="text-2xl font-bold text-white">{displaySymbols.toLocaleString()}</div>
-                        <div className="text-xs text-zinc-500">Unique Symbols</div>
-                      </div>
-                      <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5">
-                        <div className="text-2xl font-bold text-white">{(displayBars / 1000).toFixed(0)}K</div>
-                        <div className="text-xs text-zinc-500">Total Bars</div>
-                      </div>
-                    </div>
-
-                    {/* Timeframe Breakdown */}
-                    {timeframeStats.length > 0 ? (
-                      <div>
-                        <div className="text-xs text-zinc-400 mb-2">Data by Timeframe</div>
-                        <div className="space-y-2">
-                          {timeframeStats.map((stat) => (
-                            <div 
-                              key={stat.bar_size} 
-                              className="flex items-center justify-between p-2 rounded-lg bg-white/[0.02] border border-white/5"
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-medium text-white">{stat.bar_size}</span>
-                                <span className="text-[10px] text-zinc-500">
-                                  {stat.date_range?.start && stat.date_range?.end 
-                                    ? `${stat.date_range.start.slice(5)} → ${stat.date_range.end.slice(5)}`
-                                    : ''
-                                  }
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-3 text-xs">
-                                <span className="text-emerald-400">{stat.unique_symbols?.toLocaleString()} sym</span>
-                                <span className="text-zinc-400">{(stat.total_bars / 1000).toFixed(0)}K bars</span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-center py-4">
-                        <HardDrive className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
-                        <p className="text-sm text-zinc-400">No data collected yet</p>
-                        <button
-                          onClick={() => setActiveTab('collect')}
-                          className="mt-2 text-xs text-cyan-400 hover:text-cyan-300"
-                        >
-                          Start collecting →
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Collect New Tab */}
-                {activeTab === 'collect' && (
-                  <div className="space-y-4">
-                    {/* Quick Presets */}
-                    <div>
-                      <button
-                        onClick={() => setShowPresets(!showPresets)}
-                        className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 mb-2"
-                        data-testid="show-presets-btn"
-                      >
-                        <Sparkles className="w-3 h-3" />
-                        {showPresets ? 'Hide Presets' : 'Quick Presets'}
-                      </button>
-                      
-                      <AnimatePresence>
-                        {showPresets && (
-                          <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            className="grid grid-cols-2 gap-2 pb-3 border-b border-white/5"
-                          >
-                            {presets.slice(0, 6).map((preset) => (
-                              <button
-                                key={preset.name}
-                                onClick={() => handleApplyPreset(preset)}
-                                className="p-2 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 text-left transition-colors"
-                                data-testid={`preset-${preset.name.toLowerCase().replace(/\s+/g, '-')}`}
-                              >
-                                <div className="text-xs font-medium text-white">{preset.name}</div>
-                                <div className="text-[10px] text-zinc-500">{preset.bar_size} • {preset.lookback.replace('_', ' ')}</div>
-                              </button>
-                            ))}
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-
-                    {/* Bar Size Selector */}
-                    <div>
-                      <label className="block text-xs text-zinc-400 mb-2">Bar Size</label>
-                      <div className="grid grid-cols-6 gap-1">
-                        {barSizeOptions.map((opt) => {
-                          const isSelected = barSize === opt.value;
-                          return (
-                            <button
-                              key={opt.value}
-                              onClick={() => setBarSize(opt.value)}
-                              className={`p-2 rounded-lg border text-center transition-all ${
-                                isSelected
-                                  ? 'bg-amber-500/20 border-amber-500/50 text-amber-400'
-                                  : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
-                              }`}
-                              data-testid={`bar-size-${opt.value.replace(/\s+/g, '-')}`}
-                            >
-                              <div className="text-[10px] font-medium">{opt.label}</div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Lookback Period */}
-                    <div>
-                      <label className="block text-xs text-zinc-400 mb-2">Lookback Period</label>
-                      <div className="flex flex-wrap gap-1">
-                        {lookbackOptions.map((opt) => {
-                          const isSelected = lookback === opt.value;
-                          return (
-                            <button
-                              key={opt.value}
-                              onClick={() => setLookback(opt.value)}
-                              className={`px-2 py-1 rounded text-[10px] border transition-all ${
-                                isSelected
-                                  ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400'
-                                  : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
-                              }`}
-                              data-testid={`lookback-${opt.value}`}
-                            >
-                              {opt.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Collection Type */}
-                    <div>
-                      <label className="block text-xs text-zinc-400 mb-2">Collection Scope</label>
-                      <div className="grid grid-cols-3 gap-2">
-                        {collectionTypeOptions.map((opt) => {
-                          const isSelected = collectionType === opt.value;
-                          return (
-                            <button
-                              key={opt.value}
-                              onClick={() => setCollectionType(opt.value)}
-                              className={`p-2 rounded-lg border text-center transition-all ${
-                                isSelected
-                                  ? 'bg-violet-500/20 border-violet-500/50 text-violet-400'
-                                  : 'bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5'
-                              }`}
-                              data-testid={`collection-type-${opt.value}`}
-                            >
-                              <div className="text-xs font-medium">{opt.label}</div>
-                              <div className="text-[10px] text-zinc-500">{opt.description}</div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Start Button */}
-                    <button
-                      onClick={handleStartCollectionClick}
-                      disabled={collecting}
-                      className="w-full flex items-center justify-center gap-2 py-3 rounded-lg font-medium text-sm transition-all"
-                      style={{
-                        background: collecting ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg, #10b981, #06b6d4)',
-                        color: collecting ? 'rgba(255,255,255,0.5)' : 'white'
-                      }}
-                      data-testid="start-collection-btn"
-                    >
-                      {collecting ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          Starting...
-                        </>
-                      ) : (
-                        <>
-                          <PlayCircle className="w-4 h-4" />
-                          Start Collection
-                        </>
-                      )}
-                    </button>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-    </>
+    </div>
   );
 };
 

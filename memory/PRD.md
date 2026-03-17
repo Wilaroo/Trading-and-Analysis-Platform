@@ -7,46 +7,79 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ## LATEST UPDATE (March 2026)
 
-### Header Consolidation + Layout Optimization ✅ (March 2026)
-**FIXED: Removed redundant headers, moved Bot Performance to sidebar**
+### Historical Data Collection Overhaul ✅ (March 2026)
+**IMPLEMENTED: Per-stock multi-timeframe collection with IB limits**
 
-**Problem:**
-- Multiple redundant header bars showing duplicate information
-- Bot Performance chart taking up full-width space below SentCom
-- Chat input was cut off due to vertical space issues
+**Changes Made:**
 
-**Solution Implemented:**
+**1. Per-Stock Collection Approach**
+- Each stock gets ALL its applicable timeframes collected before moving to the next
+- Ensures complete data for each symbol (no more partial data if collection stops)
+- Timeframes determined by ADV tier
 
-**1. Removed Redundant DashboardHeader**
-- Deleted the secondary header from `NewDashboard.jsx` that showed AI Credits, Market Status, Account info
-- These are already displayed in the main `HeaderBar.jsx` at the top
-- Reduces vertical clutter and frees space for SentCom
+**2. ADV-Based Timeframe Tiers (Share Volume)**
+| Tier | ADV Threshold | Timeframes |
+|------|---------------|------------|
+| Intraday | 500K+ shares/day | 1 min, 5 min, 15 min, 1 hr, 1 day |
+| Swing | 100K+ shares/day | 5 min, 30 min, 1 hr, 1 day |
+| Investment | 50K+ shares/day | 1 hr, 1 day, 1 week |
 
-**2. Moved Bot Performance to Right Sidebar**
-- Added `compact` prop to `BotPerformanceChart` component
-- Compact mode shows:
-  - Mini equity curve chart (80px height)
-  - 2x2 grid of key stats (Trades, Win Rate, Open, Unrealized)
-  - Simplified time range selector (Today/Week/Month)
-- Now renders below Market Regime in the right column
+**3. IB Historical Data Limits (2000 bars/request)**
+| Bar Size | Max Per Request | Max History |
+|----------|-----------------|-------------|
+| 1 min | 1 W (~5 trading days) | ~1 year |
+| 5 mins | 1 M (~25 trading days) | ~2 years |
+| 15 mins | 3 M (~77 trading days) | ~2 years |
+| 30 mins | 6 M (~154 trading days) | ~2 years |
+| 1 hour | 1 Y (~285 trading days) | ~5 years |
+| 1 day | 8 Y (~2000 days) | ~20 years |
+| 1 week | 20 Y | ~20 years |
 
-**3. Layout Structure (Clean)**
-- Top: CommandCenter header (AI Credits, Ollama, System Status)
-- Tabs: Command | Charts | Analytics
-- Main Grid:
-  - Left 8 cols: SENTCOM (positions + S.O.C. + Conversation)
-  - Right 4 cols: Learning Insights → Market Regime → Performance (compact)
-- Bottom: Scanner Alerts strip
+**4. Smart Skip Logic**
+- Skip symbols that already have data collected within threshold (default 7 days)
+- Configurable recent_days_threshold
+
+**5. New API Endpoints**
+- `POST /api/ib-collector/per-stock-collection` - Start per-stock collection
+- `POST /api/ib-collector/multi-timeframe-collection` - Now uses per-stock approach
+
+**6. Updated UI (NIA Data Collection Panel)**
+- Simplified to show: Lookback Period + ADV Tier Filter
+- Shows estimated collection time
+- Smart options: Skip Recent, Recent Threshold, Max Symbols
+- Progress tracking with active collection status
+
+**7. Automated Batch Scripts**
+- `NightlyAuto.bat` - Runs weekdays at 9 PM
+- `WeekendAuto.bat` - Runs Saturdays at 8 AM
+- `SetupScheduledTasks.bat` - Creates Windows Task Scheduler tasks
 
 **Files Modified:**
-- `/app/frontend/src/components/NewDashboard.jsx` - Removed DashboardHeader, moved BotPerformanceChart to sidebar
-- `/app/frontend/src/components/BotPerformanceChart.jsx` - Added compact mode with mini chart and stats grid
-- `/app/frontend/src/components/SentCom.jsx` - Layout fixes from previous update
+- `/app/backend/services/ib_historical_collector.py` - Per-stock collection, IB limits
+- `/app/backend/routers/ib_collector_router.py` - New endpoints
+- `/app/frontend/src/components/NIA.jsx` - Simplified Data Collection UI
+- `/app/documents/weekend_batch.py` - Uses per-stock collection
+- `/app/documents/NightlyAuto.bat` - NEW
+- `/app/documents/SetupScheduledTasks.bat` - NEW
 
 ---
 
-### Chat Input Visibility Bug Fix ✅ (March 2026)
-**FIXED: Chat input and scrollbar now visible in Conversation panel**
+### UI Improvements ✅ (March 2026)
+
+**1. Chat Flickering Fix**
+- Separated S.O.C. stream from Conversation panel
+- Memoized components to prevent re-renders
+- S.O.C. now has LIVE indicator showing connection status
+
+**2. Layout Optimization**
+- Removed redundant DashboardHeader
+- Moved Bot Performance to right sidebar (compact mode)
+- Made positions bar more compact
+
+**3. StartTrading.bat Speed Up**
+- Faster credential typing
+- Proper authentication wait timing
+- ~20-25 second startup time savings
 
 **Problem:**
 - The chat input field in the ConversationPanel was being cut off at the bottom of the viewport
