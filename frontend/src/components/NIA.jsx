@@ -75,12 +75,54 @@ const API_BASE = process.env.REACT_APP_BACKEND_URL;
 const TrainAllPanel = memo(({ onTrainComplete }) => {
   const [isTraining, setIsTraining] = useState(false);
   const [currentStep, setCurrentStep] = useState(null);
+  const [trainingStatus, setTrainingStatus] = useState(null);
+  const [autoTrainEnabled, setAutoTrainEnabled] = useState(false);
+  const [autoTrainAfterCollection, setAutoTrainAfterCollection] = useState(false);
   const [progress, setProgress] = useState({
     timeseries: { status: 'pending', message: '' },
     connectors: { status: 'pending', message: '' },
     calibration: { status: 'pending', message: '' },
     simulations: { status: 'pending', message: '' }
   });
+
+  // Fetch training status on mount
+  useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const res = await api.get('/api/ai-modules/training-status');
+        if (res.data?.success) {
+          setTrainingStatus(res.data);
+          setAutoTrainEnabled(res.data.auto_training?.enabled || false);
+          setAutoTrainAfterCollection(res.data.auto_training?.after_collection || false);
+        }
+      } catch (e) {
+        console.log('Training status fetch error:', e);
+      }
+    };
+    fetchStatus();
+  }, []);
+
+  // Update auto-training settings
+  const handleAutoTrainToggle = async (setting, value) => {
+    try {
+      const params = new URLSearchParams({
+        auto_train_enabled: setting === 'enabled' ? value : autoTrainEnabled,
+        train_after_collection: setting === 'after_collection' ? value : autoTrainAfterCollection
+      });
+      
+      await api.post(`/api/ai-modules/training-settings?${params}`);
+      
+      if (setting === 'enabled') {
+        setAutoTrainEnabled(value);
+        toast.success(value ? 'Auto-training enabled' : 'Auto-training disabled');
+      } else {
+        setAutoTrainAfterCollection(value);
+        toast.success(value ? 'Will train after data collection' : 'Training after collection disabled');
+      }
+    } catch (e) {
+      toast.error('Failed to update settings');
+    }
+  };
 
   const trainingSteps = [
     { key: 'timeseries', label: 'Train Time-Series AI', icon: Brain, description: 'Learning price patterns from historical data' },
@@ -174,6 +216,21 @@ const TrainAllPanel = memo(({ onTrainComplete }) => {
   };
 
   const completedCount = Object.values(progress).filter(p => p.status === 'completed').length;
+  
+  // Format last trained time
+  const formatLastTrained = (isoDate) => {
+    if (!isoDate) return 'Never';
+    const date = new Date(isoDate);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+    
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return `${diffDays}d ago`;
+  };
 
   return (
     <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'linear-gradient(135deg, rgba(21, 28, 36, 0.9), rgba(30, 40, 55, 0.9))' }}>
@@ -185,7 +242,11 @@ const TrainAllPanel = memo(({ onTrainComplete }) => {
             </div>
             <div>
               <h3 className="text-sm font-bold text-white">Train Everything</h3>
-              <p className="text-xs text-zinc-400">One-click system improvement</p>
+              <p className="text-xs text-zinc-400">
+                {trainingStatus?.model?.is_trained 
+                  ? `Last trained: ${formatLastTrained(trainingStatus.model.last_trained)}`
+                  : 'Model not yet trained'}
+              </p>
             </div>
           </div>
           
@@ -213,6 +274,42 @@ const TrainAllPanel = memo(({ onTrainComplete }) => {
               </>
             )}
           </button>
+        </div>
+
+        {/* Model Status Bar */}
+        {trainingStatus?.model && (
+          <div className="flex items-center gap-4 mb-4 p-2 rounded-lg bg-white/5 border border-white/10">
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${trainingStatus.model.is_trained ? 'bg-green-400' : 'bg-amber-400'}`} />
+              <span className="text-xs text-zinc-400">
+                {trainingStatus.model.is_trained ? `${trainingStatus.model.version}` : 'Untrained'}
+              </span>
+            </div>
+            {trainingStatus.model.accuracy && (
+              <div className="text-xs text-zinc-400">
+                Accuracy: <span className="text-cyan-400">{(trainingStatus.model.accuracy * 100).toFixed(1)}%</span>
+              </div>
+            )}
+            {trainingStatus.model.samples_trained > 0 && (
+              <div className="text-xs text-zinc-400">
+                Samples: <span className="text-zinc-300">{trainingStatus.model.samples_trained.toLocaleString()}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Auto-Training Settings */}
+        <div className="flex items-center gap-4 mb-4 p-2 rounded-lg bg-white/5 border border-white/10">
+          <Settings className="w-4 h-4 text-zinc-500" />
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoTrainAfterCollection}
+              onChange={(e) => handleAutoTrainToggle('after_collection', e.target.checked)}
+              className="w-3 h-3 rounded border-zinc-600 bg-zinc-800 text-cyan-500 focus:ring-cyan-500/50"
+            />
+            <span className="text-xs text-zinc-400">Auto-train after data collection</span>
+          </label>
         </div>
 
         {/* Training Steps */}

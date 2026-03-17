@@ -587,6 +587,19 @@ class TimeSeriesGBM:
     def get_metrics(self) -> ModelMetrics:
         """Get current model metrics"""
         return self._metrics
+    
+    def get_model_info(self) -> Dict[str, Any]:
+        """Get comprehensive model info for training status dashboard"""
+        return {
+            "is_trained": self._model is not None,
+            "version": self._version,
+            "last_trained": self._metrics.last_trained if self._metrics else None,
+            "accuracy": self._metrics.accuracy if self._metrics else None,
+            "samples_trained": self._metrics.training_samples if self._metrics else 0,
+            "model_name": self.model_name,
+            "forecast_horizon": self.forecast_horizon,
+            "feature_count": len(self._feature_names)
+        }
         
     def get_status(self) -> Dict[str, Any]:
         """Get model status"""

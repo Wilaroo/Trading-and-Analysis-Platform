@@ -1237,7 +1237,8 @@ class IBHistoricalCollector:
         logger.info(f"Tier breakdown: {tier_counts}")
         
         # Queue all requests per-stock
-        queue_service = IBCollectionQueue()
+        from services.historical_data_queue_service import get_historical_data_queue_service
+        queue_service = get_historical_data_queue_service()
         total_queued = 0
         
         for sym_data in symbols_with_adv:
@@ -1458,9 +1459,13 @@ class IBHistoricalCollector:
                 if job.symbols_failed == 0:
                     job.status = CollectionStatus.COMPLETED
                     logger.info(f"Job {job.id} completed successfully: {job.symbols_completed} symbols")
+                    # Check if auto-training is enabled
+                    await self._trigger_auto_training_if_enabled()
                 else:
                     job.status = CollectionStatus.COMPLETED  # Still "completed" but with errors
                     logger.info(f"Job {job.id} completed with {job.symbols_failed} failures")
+                    # Still trigger training even with some failures
+                    await self._trigger_auto_training_if_enabled()
                 break
             
             # Check for stalls (no progress)
@@ -1903,6 +1908,47 @@ class IBHistoricalCollector:
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    async def _trigger_auto_training_if_enabled(self):
+        """Check if auto-training is enabled and trigger training after data collection"""
+        try:
+            if self._db is None:
+                return
+            
+            # Check auto-training settings
+            settings_col = self._db["system_settings"]
+            settings = settings_col.find_one({"key": "auto_training"})
+            
+            if not settings or not settings.get("value", {}).get("after_collection"):
+                logger.info("Auto-training after collection is disabled")
+                return
+            
+            logger.info("Auto-training triggered after data collection...")
+            
+            # Import and trigger training
+            from services.ai_modules.timeseries_service import get_timeseries_service
+            ts_service = get_timeseries_service()
+            
+            if ts_service:
+                result = await ts_service.train_model()
+                if result.get("success"):
+                    logger.info(f"Auto-training completed: {result.get('message', 'Success')}")
+                    
+                    # Log to training history
+                    history_col = self._db["training_history"]
+                    history_col.insert_one({
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "trigger": "after_collection",
+                        "success": True,
+                        "result": result
+                    })
+                else:
+                    logger.warning(f"Auto-training failed: {result.get('error', 'Unknown')}")
+            else:
+                logger.warning("TimeSeriesService not available for auto-training")
+                
+        except Exception as e:
+            logger.error(f"Error triggering auto-training: {e}")
 
 
 # ============================================================================

@@ -1046,3 +1046,117 @@ async def get_recent_predictions(limit: int = 20, verified_only: bool = False):
     except Exception as e:
         logger.error(f"Predictions query error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =====================
+# Training Status & Automation Endpoints
+# =====================
+
+@router.get("/training-status")
+async def get_training_status():
+    """
+    Get comprehensive training status including:
+    - Last training time
+    - Model version
+    - Training history
+    - Auto-training settings
+    """
+    try:
+        from services.ai_modules.timeseries_gbm import get_timeseries_model
+        model = get_timeseries_model()
+        
+        # Get model status
+        model_info = model.get_model_info() if hasattr(model, 'get_model_info') else {}
+        
+        # Get training history from database
+        training_history = []
+        db = model._db
+        if db is not None:
+            try:
+                history_col = db["training_history"]
+                history = list(history_col.find({}, {"_id": 0}).sort("timestamp", -1).limit(10))
+                training_history = history
+            except Exception:
+                pass  # Collection might not exist yet
+        
+        # Get auto-training settings
+        auto_settings = {"enabled": False, "after_collection": False, "schedule": None}
+        if db is not None:
+            try:
+                settings_col = db["system_settings"]
+                settings = settings_col.find_one({"key": "auto_training"}, {"_id": 0})
+                if settings:
+                    auto_settings = settings.get("value", auto_settings)
+            except Exception:
+                pass  # Collection might not exist yet
+        
+        return {
+            "success": True,
+            "model": {
+                "is_trained": model_info.get("is_trained", False),
+                "version": model_info.get("version", "v1.0"),
+                "last_trained": model_info.get("last_trained"),
+                "accuracy": model_info.get("accuracy"),
+                "samples_trained": model_info.get("samples_trained", 0)
+            },
+            "auto_training": auto_settings,
+            "history": training_history,
+            "next_scheduled": None  # Will be populated if scheduler is configured
+        }
+    except Exception as e:
+        logger.error(f"Error getting training status: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "model": {"is_trained": False, "version": "unknown"},
+            "auto_training": {"enabled": False},
+            "history": []
+        }
+
+
+@router.post("/training-settings")
+async def update_training_settings(
+    auto_train_enabled: bool = False,
+    train_after_collection: bool = False,
+    schedule_time: Optional[str] = None
+):
+    """
+    Update auto-training settings.
+    
+    - auto_train_enabled: Enable/disable all auto-training
+    - train_after_collection: Trigger training after data collection completes
+    - schedule_time: Time for nightly training (e.g., "23:00")
+    """
+    try:
+        from services.ai_modules.timeseries_gbm import get_timeseries_model
+        model = get_timeseries_model()
+        
+        if model._db is None:
+            raise HTTPException(status_code=503, detail="Database not connected")
+        
+        settings_col = model._db["system_settings"]
+        
+        settings = {
+            "enabled": auto_train_enabled,
+            "after_collection": train_after_collection,
+            "schedule": schedule_time
+        }
+        
+        settings_col.update_one(
+            {"key": "auto_training"},
+            {"$set": {"key": "auto_training", "value": settings, "updated_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True
+        )
+        
+        return {
+            "success": True,
+            "settings": settings,
+            "message": "Training settings updated"
+        }
+    except Exception as e:
+        logger.error(f"Error updating training settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+from datetime import datetime, timezone
+
