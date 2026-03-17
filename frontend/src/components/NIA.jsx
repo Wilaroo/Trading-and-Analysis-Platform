@@ -384,12 +384,15 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
   const [recentThreshold, setRecentThreshold] = useState(7);
   const [maxSymbols, setMaxSymbols] = useState(null);
   const [collecting, setCollecting] = useState(false);
-  const [activeTab, setActiveTab] = useState('overview'); // 'overview' or 'collect'
+  const [activeTab, setActiveTab] = useState('coverage'); // 'coverage', 'collect', or 'progress'
   
   // Progress state
   const [detailedProgress, setDetailedProgress] = useState({ by_bar_size: [], active_collections: [] });
-  const [showCollectionModal, setShowCollectionModal] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  
+  // Data coverage state
+  const [dataCoverage, setDataCoverage] = useState(null);
+  const [loadingCoverage, setLoadingCoverage] = useState(true);
 
   // ADV Tier options - determines which symbols AND which timeframes
   const tierOptions = [
@@ -440,9 +443,13 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const progressRes = await fetch(`${API_BASE}/api/ib-collector/queue-progress-detailed`);
-        if (progressRes.ok) {
-          const data = await progressRes.json();
+        const [progressRes, coverageRes] = await Promise.allSettled([
+          fetch(`${API_BASE}/api/ib-collector/queue-progress-detailed`),
+          fetch(`${API_BASE}/api/ib-collector/data-coverage`)
+        ]);
+        
+        if (progressRes.status === 'fulfilled' && progressRes.value.ok) {
+          const data = await progressRes.value.json();
           if (data.success) {
             setDetailedProgress({
               by_bar_size: data.by_bar_size || [],
@@ -451,12 +458,21 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
             });
           }
         }
+        
+        if (coverageRes.status === 'fulfilled' && coverageRes.value.ok) {
+          const data = await coverageRes.value.json();
+          if (data.success) {
+            setDataCoverage(data);
+          }
+        }
       } catch (err) {
-        console.error('Error fetching collection progress:', err);
+        console.error('Error fetching collection data:', err);
+      } finally {
+        setLoadingCoverage(false);
       }
     };
     fetchData();
-    const interval = setInterval(fetchData, 5000);
+    const interval = setInterval(fetchData, 10000); // Refresh every 10 seconds
     return () => clearInterval(interval);
   }, []);
 
@@ -560,14 +576,14 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
             {/* Tab Navigation */}
             <div className="flex border-b border-white/10">
               <button
-                onClick={() => setActiveTab('overview')}
+                onClick={() => setActiveTab('coverage')}
                 className={`flex-1 px-4 py-2 text-xs font-medium transition-colors ${
-                  activeTab === 'overview' 
+                  activeTab === 'coverage' 
                     ? 'text-cyan-400 border-b-2 border-cyan-400 bg-cyan-500/5' 
                     : 'text-zinc-500 hover:text-zinc-300'
                 }`}
               >
-                Progress
+                Coverage
               </button>
               <button
                 onClick={() => setActiveTab('collect')}
@@ -577,12 +593,148 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
                     : 'text-zinc-500 hover:text-zinc-300'
                 }`}
               >
-                Start Collection
+                Collect
+              </button>
+              <button
+                onClick={() => setActiveTab('progress')}
+                className={`flex-1 px-4 py-2 text-xs font-medium transition-colors ${
+                  activeTab === 'progress' 
+                    ? 'text-cyan-400 border-b-2 border-cyan-400 bg-cyan-500/5' 
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                Progress {hasActiveCollections && <span className="ml-1 w-2 h-2 bg-amber-400 rounded-full inline-block animate-pulse" />}
               </button>
             </div>
 
             <div className="p-4">
-              {activeTab === 'overview' ? (
+              {activeTab === 'coverage' ? (
+                /* Data Coverage View */
+                <div className="space-y-4">
+                  {loadingCoverage ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader className="w-6 h-6 text-cyan-400 animate-spin" />
+                    </div>
+                  ) : dataCoverage ? (
+                    <>
+                      {/* ADV Cache Status */}
+                      <div className={`p-3 rounded-xl border ${
+                        dataCoverage.adv_cache?.status === 'ready' 
+                          ? 'bg-emerald-500/5 border-emerald-500/20' 
+                          : 'bg-amber-500/5 border-amber-500/20'
+                      }`}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Database className={`w-4 h-4 ${
+                              dataCoverage.adv_cache?.status === 'ready' ? 'text-emerald-400' : 'text-amber-400'
+                            }`} />
+                            <span className="text-xs font-medium text-white">ADV Cache</span>
+                          </div>
+                          <span className={`text-sm font-bold ${
+                            dataCoverage.adv_cache?.status === 'ready' ? 'text-emerald-400' : 'text-amber-400'
+                          }`}>
+                            {dataCoverage.adv_cache?.total_symbols?.toLocaleString() || 0} symbols
+                          </span>
+                        </div>
+                      </div>
+                      
+                      {/* Per-Tier Coverage */}
+                      <div>
+                        <p className="text-xs font-medium text-zinc-400 mb-2">Coverage by Tier</p>
+                        <div className="space-y-3">
+                          {dataCoverage.by_tier?.map((tierData, i) => (
+                            <div key={i} className="p-3 rounded-xl bg-black/40 border border-white/10">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  {tierData.tier === 'intraday' && <Zap className="w-4 h-4 text-yellow-400" />}
+                                  {tierData.tier === 'swing' && <TrendingUp className="w-4 h-4 text-cyan-400" />}
+                                  {tierData.tier === 'investment' && <Layers className="w-4 h-4 text-violet-400" />}
+                                  <span className="text-sm font-bold text-white capitalize">{tierData.tier}</span>
+                                  <span className="text-[10px] text-zinc-500">({tierData.description})</span>
+                                </div>
+                                <span className="text-xs text-zinc-400">{tierData.total_symbols} symbols</span>
+                              </div>
+                              
+                              {/* Timeframe breakdown for this tier */}
+                              <div className="grid grid-cols-5 gap-1.5 mt-2">
+                                {tierData.timeframes?.map((tf, j) => {
+                                  const coverageColor = tf.coverage_pct >= 90 ? 'emerald' : 
+                                                       tf.coverage_pct >= 50 ? 'amber' : 'rose';
+                                  return (
+                                    <div 
+                                      key={j} 
+                                      className={`p-2 rounded-lg bg-black/30 border border-${coverageColor}-500/20`}
+                                      title={`${tf.symbols_with_data}/${tf.symbols_needed} symbols, ${tf.total_bars?.toLocaleString()} bars`}
+                                    >
+                                      <p className="text-[9px] text-zinc-500 truncate">{tf.timeframe}</p>
+                                      <p className={`text-xs font-bold text-${coverageColor}-400`}>
+                                        {tf.coverage_pct}%
+                                      </p>
+                                      <p className="text-[8px] text-zinc-600">
+                                        {tf.symbols_with_data}/{tf.symbols_needed}
+                                      </p>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      
+                      {/* Per-Timeframe Summary */}
+                      <div>
+                        <p className="text-xs font-medium text-zinc-400 mb-2">All Timeframes</p>
+                        <div className="grid grid-cols-7 gap-2">
+                          {dataCoverage.by_timeframe?.map((tf, i) => (
+                            <div key={i} className="p-2 rounded-lg bg-black/30 border border-white/10 text-center">
+                              <p className="text-[9px] text-zinc-500 mb-1">{tf.timeframe}</p>
+                              <p className="text-sm font-bold text-white">{tf.symbols}</p>
+                              <p className="text-[8px] text-zinc-600">{(tf.total_bars / 1000).toFixed(0)}K bars</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      
+                      {/* Missing Data */}
+                      {dataCoverage.missing?.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-zinc-400 mb-2">
+                            Data Gaps ({dataCoverage.total_gaps} total)
+                          </p>
+                          <div className="space-y-1">
+                            {dataCoverage.missing.slice(0, 5).map((gap, i) => (
+                              <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-rose-500/5 border border-rose-500/20">
+                                <div className="flex items-center gap-2">
+                                  <AlertTriangle className="w-3 h-3 text-rose-400" />
+                                  <span className="text-xs text-white capitalize">{gap.tier}</span>
+                                  <span className="text-[10px] text-zinc-500">{gap.timeframe}</span>
+                                </div>
+                                <span className="text-xs text-rose-400">{gap.missing_symbols} missing</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Refresh Button */}
+                      <button
+                        onClick={onRefresh}
+                        className="w-full py-2 rounded-lg bg-white/5 border border-white/10 text-zinc-400 text-xs font-medium hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        Refresh Coverage Data
+                      </button>
+                    </>
+                  ) : (
+                    <div className="text-center py-8">
+                      <AlertCircle className="w-10 h-10 text-zinc-600 mx-auto mb-3" />
+                      <p className="text-zinc-500 text-sm">Could not load coverage data</p>
+                      <p className="text-zinc-600 text-xs mt-1">Make sure the backend is running</p>
+                    </div>
+                  )}
+                </div>
+              ) : activeTab === 'progress' ? (
                 /* Progress Overview */
                 <div className="space-y-4">
                   {hasActiveCollections ? (
@@ -602,6 +754,24 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
                           <div className="flex justify-between text-[10px] text-zinc-500">
                             <span>{col.completed}/{col.total} symbols</span>
                             <span>ETA: {col.eta || 'Calculating...'}</span>
+                          </div>
+                        </div>
+                      ))}
+                      <button
+                        onClick={handleCancelAll}
+                        disabled={cancelling}
+                        className="w-full py-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium hover:bg-rose-500/20 transition-colors disabled:opacity-50"
+                      >
+                        {cancelling ? 'Cancelling...' : 'Cancel All Collections'}
+                      </button>
+                    </>
+                  ) : (
+                    <div className="text-center py-8">
+                      <CheckCircle className="w-10 h-10 text-emerald-500/50 mx-auto mb-3" />
+                      <p className="text-zinc-500 text-sm">No active collections</p>
+                      <p className="text-zinc-600 text-xs mt-1">Start a collection from the "Collect" tab</p>
+                    </div>
+                  )}
                           </div>
                         </div>
                       ))}
