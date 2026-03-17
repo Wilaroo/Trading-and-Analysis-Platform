@@ -577,6 +577,60 @@ async def get_gap_analysis(tier_filter: Optional[str] = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/adv-distribution")
+async def get_adv_distribution():
+    """
+    Get the distribution of symbols by ADV (Average Daily Volume).
+    
+    Useful for understanding how many symbols fall into each liquidity tier.
+    """
+    try:
+        collector = get_ib_collector()
+        db = collector._db
+        
+        if db is None:
+            return {"success": False, "error": "Database not initialized"}
+        
+        adv_col = db["symbol_adv_cache"]
+        
+        # Count by ADV ranges
+        distribution = {
+            "1M+": adv_col.count_documents({"avg_volume": {"$gte": 1_000_000}}),
+            "500K-1M": adv_col.count_documents({"avg_volume": {"$gte": 500_000, "$lt": 1_000_000}}),
+            "250K-500K": adv_col.count_documents({"avg_volume": {"$gte": 250_000, "$lt": 500_000}}),
+            "100K-250K": adv_col.count_documents({"avg_volume": {"$gte": 100_000, "$lt": 250_000}}),
+            "50K-100K": adv_col.count_documents({"avg_volume": {"$gte": 50_000, "$lt": 100_000}}),
+            "10K-50K": adv_col.count_documents({"avg_volume": {"$gte": 10_000, "$lt": 50_000}}),
+            "<10K": adv_col.count_documents({"avg_volume": {"$lt": 10_000}}),
+        }
+        
+        # Get total
+        total = adv_col.count_documents({})
+        
+        # Get top 20 by ADV
+        top_symbols = list(adv_col.find({}, {"symbol": 1, "avg_volume": 1, "_id": 0}).sort("avg_volume", -1).limit(20))
+        
+        # Get sample of 500K+ symbols
+        high_volume = list(adv_col.find({"avg_volume": {"$gte": 500_000}}, {"symbol": 1, "avg_volume": 1, "_id": 0}).sort("avg_volume", -1).limit(50))
+        
+        return {
+            "success": True,
+            "total_symbols": total,
+            "distribution": distribution,
+            "tier_summary": {
+                "intraday_500k_plus": distribution["1M+"] + distribution["500K-1M"],
+                "swing_100k_500k": distribution["250K-500K"] + distribution["100K-250K"],
+                "investment_50k_100k": distribution["50K-100K"]
+            },
+            "top_20_by_adv": top_symbols,
+            "sample_500k_plus": high_volume
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting ADV distribution: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/start")
 async def start_collection(
     symbols: Optional[List[str]] = None,
