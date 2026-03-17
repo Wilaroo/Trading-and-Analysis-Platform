@@ -5,7 +5,28 @@ Build "TradeCommand," an advanced Trading and Analysis Platform with AI trading 
 
 ---
 
-## LATEST UPDATE (March 2026)
+## LATEST UPDATE (March 17, 2026)
+
+### Data Coverage Dashboard ✅ VERIFIED
+**Status**: COMPLETE AND WORKING
+
+The Data Coverage Dashboard in NIA has been verified working:
+- **Backend Endpoint**: `GET /api/ib-collector/data-coverage` returns proper JSON with tier breakdowns
+- **Frontend UI**: Renders correctly in the Historical Data Collection panel
+- **Fixed Syntax Error**: Removed duplicate JSX code block in NIA.jsx (lines 775-792) that was causing "Adjacent JSX elements must be wrapped" error
+
+**Features Working:**
+1. Tab navigation (Coverage | Collect | Progress)
+2. ADV Cache status display
+3. Coverage by Tier (Intraday, Swing, Investment) with per-timeframe breakdown
+4. All Timeframes summary row
+5. Refresh Coverage Data button
+
+**Note**: Currently shows 0% coverage/0 symbols since no historical data has been collected - this is expected behavior.
+
+---
+
+## PREVIOUS UPDATE (March 2026)
 
 ### Historical Data Collection Overhaul ✅ (March 2026)
 **IMPLEMENTED: Per-stock multi-timeframe collection with IB limits**

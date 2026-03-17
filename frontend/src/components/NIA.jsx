@@ -772,24 +772,6 @@ const DataCollectionPanel = ({ collectionData, loading, onRefresh }) => {
                       <p className="text-zinc-600 text-xs mt-1">Start a collection from the "Collect" tab</p>
                     </div>
                   )}
-                          </div>
-                        </div>
-                      ))}
-                      <button
-                        onClick={handleCancelAll}
-                        disabled={cancelling}
-                        className="w-full py-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium hover:bg-rose-500/20 transition-colors disabled:opacity-50"
-                      >
-                        {cancelling ? 'Cancelling...' : 'Cancel All Collections'}
-                      </button>
-                    </>
-                  ) : (
-                    <div className="text-center py-8">
-                      <Database className="w-10 h-10 text-zinc-600 mx-auto mb-3" />
-                      <p className="text-zinc-500 text-sm">No active collections</p>
-                      <p className="text-zinc-600 text-xs mt-1">Start a new collection from the "Start Collection" tab</p>
-                    </div>
-                  )}
                   
                   {/* Data Coverage Summary */}
                   {detailedProgress.by_bar_size?.length > 0 && (
