@@ -1060,28 +1060,134 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
                   )}
                 </div>
               ) : activeTab === 'progress' ? (
-                /* Progress Overview */
+                /* Progress Overview - CONSOLIDATED VIEW */
                 <div className="space-y-4">
-                  {hasActiveCollections ? (
-                    <>
-                      {detailedProgress.active_collections.map((col, i) => (
-                        <div key={i} className="p-3 rounded-xl bg-black/40 border border-white/10">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm font-bold text-white">{col.bar_size} bars</span>
-                            <span className="text-xs text-cyan-400">{col.progress}%</span>
+                  {/* Queue Status Summary */}
+                  <div className="p-3 rounded-xl bg-gradient-to-r from-zinc-900 to-black border border-white/10">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs font-medium text-zinc-400">Collection Queue Status</span>
+                      {collectionMode?.collection_mode?.active && (
+                        <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 text-[10px] font-medium animate-pulse">
+                          COLLECTING
+                        </span>
+                      )}
+                    </div>
+                    
+                    {collectionMode?.queue && (
+                      <>
+                        <div className="grid grid-cols-4 gap-2 mb-3">
+                          <div className="text-center p-2 rounded-lg bg-black/40">
+                            <p className="text-lg font-bold text-emerald-400">{collectionMode.queue.completed?.toLocaleString()}</p>
+                            <p className="text-[9px] text-zinc-500">Completed</p>
                           </div>
-                          <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden mb-2">
-                            <div 
-                              className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all"
-                              style={{ width: `${col.progress}%` }}
-                            />
+                          <div className="text-center p-2 rounded-lg bg-black/40">
+                            <p className="text-lg font-bold text-amber-400">{collectionMode.queue.pending?.toLocaleString()}</p>
+                            <p className="text-[9px] text-zinc-500">Pending</p>
                           </div>
-                          <div className="flex justify-between text-[10px] text-zinc-500">
-                            <span>{col.completed}/{col.total} symbols</span>
-                            <span>ETA: {col.eta || 'Calculating...'}</span>
+                          <div className="text-center p-2 rounded-lg bg-black/40">
+                            <p className="text-lg font-bold text-rose-400">{collectionMode.queue.failed || 0}</p>
+                            <p className="text-[9px] text-zinc-500">Failed</p>
+                          </div>
+                          <div className="text-center p-2 rounded-lg bg-black/40">
+                            <p className="text-lg font-bold text-cyan-400">{collectionMode.queue.progress_pct}%</p>
+                            <p className="text-[9px] text-zinc-500">Complete</p>
                           </div>
                         </div>
-                      ))}
+                        
+                        {/* Overall Progress Bar */}
+                        <div className="h-2 bg-black/50 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-gradient-to-r from-emerald-500 to-cyan-500 transition-all duration-500"
+                            style={{ width: `${collectionMode.queue.progress_pct || 0}%` }}
+                          />
+                        </div>
+                        
+                        {/* ETA if collecting */}
+                        {collectionMode?.collection_mode?.active && collectionMode.collection_mode.rate_per_hour > 0 && (
+                          <div className="flex items-center justify-between mt-2 text-[10px] text-zinc-500">
+                            <span>Rate: {Math.round(collectionMode.collection_mode.rate_per_hour)}/hour</span>
+                            <span>ETA: ~{Math.round(collectionMode.queue.pending / collectionMode.collection_mode.rate_per_hour)} hours</span>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  
+                  {/* Progress by Bar Size / Timeframe */}
+                  {detailedProgress.by_bar_size?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-zinc-400 mb-2">Progress by Timeframe</p>
+                      <div className="space-y-2">
+                        {detailedProgress.by_bar_size.map((bs, i) => {
+                          const pct = bs.progress_pct || 0;
+                          const isActive = bs.is_active;
+                          
+                          return (
+                            <div key={i} className={`p-2 rounded-lg border ${
+                              isActive ? 'bg-black/40 border-cyan-500/20' : 'bg-black/20 border-white/5'
+                            }`}>
+                              <div className="flex items-center justify-between mb-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-medium text-white">{bs.bar_size}</span>
+                                  {isActive && (
+                                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-3 text-[10px]">
+                                  <span className="text-emerald-400">{bs.completed?.toLocaleString()} done</span>
+                                  {bs.pending > 0 && <span className="text-amber-400">{bs.pending?.toLocaleString()} pending</span>}
+                                  {bs.failed > 0 && <span className="text-rose-400">{bs.failed} failed</span>}
+                                  <span className={`font-medium ${pct >= 90 ? 'text-emerald-400' : pct >= 50 ? 'text-cyan-400' : 'text-amber-400'}`}>
+                                    {pct}%
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="h-1.5 bg-black/50 rounded-full overflow-hidden">
+                                <div 
+                                  className={`h-full transition-all duration-300 ${
+                                    pct >= 90 ? 'bg-emerald-500' : 
+                                    pct >= 50 ? 'bg-cyan-500' : 'bg-amber-500'
+                                  }`}
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                              {isActive && bs.eta_display && (
+                                <div className="flex items-center justify-between mt-1 text-[9px] text-zinc-500">
+                                  <span>{bs.symbols_per_minute?.toFixed(1)} symbols/min</span>
+                                  <span>ETA: {bs.eta_display}</span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Active Collection Details */}
+                  {hasActiveCollections && (
+                    <>
+                      <div>
+                        <p className="text-xs font-medium text-zinc-400 mb-2">Active Collections</p>
+                        {detailedProgress.active_collections.map((col, i) => (
+                          <div key={i} className="p-3 rounded-xl bg-black/40 border border-cyan-500/20 mb-2">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-sm font-bold text-white">{col.bar_size}</span>
+                              <span className="text-xs text-cyan-400">{col.progress}%</span>
+                            </div>
+                            <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden mb-2">
+                              <div 
+                                className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all"
+                                style={{ width: `${col.progress}%` }}
+                              />
+                            </div>
+                            <div className="flex justify-between text-[10px] text-zinc-500">
+                              <span>{col.completed}/{col.total} symbols</span>
+                              <span>ETA: {col.eta || 'Calculating...'}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                       <button
                         onClick={handleCancelAll}
                         disabled={cancelling}
@@ -1090,26 +1196,15 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
                         {cancelling ? 'Cancelling...' : 'Cancel All Collections'}
                       </button>
                     </>
-                  ) : (
-                    <div className="text-center py-8">
-                      <CheckCircle className="w-10 h-10 text-emerald-500/50 mx-auto mb-3" />
-                      <p className="text-zinc-500 text-sm">No active collections</p>
-                      <p className="text-zinc-600 text-xs mt-1">Start a collection from the "Collect" tab</p>
-                    </div>
                   )}
                   
-                  {/* Data Coverage Summary */}
-                  {detailedProgress.by_bar_size?.length > 0 && (
-                    <div className="mt-4 p-3 rounded-xl bg-black/20 border border-white/5">
-                      <p className="text-xs font-medium text-zinc-400 mb-2">Data Coverage</p>
-                      <div className="grid grid-cols-3 gap-2">
-                        {detailedProgress.by_bar_size.slice(0, 6).map((bs, i) => (
-                          <div key={i} className="text-center p-2 rounded-lg bg-black/30">
-                            <p className="text-[10px] text-zinc-500">{bs.bar_size}</p>
-                            <p className="text-sm font-bold text-white">{bs.symbols || 0}</p>
-                          </div>
-                        ))}
-                      </div>
+                  {/* No Active Collections */}
+                  {!hasActiveCollections && !collectionMode?.collection_mode?.active && (
+                    <div className="text-center py-6">
+                      <CheckCircle className="w-8 h-8 text-emerald-500/50 mx-auto mb-2" />
+                      <p className="text-zinc-500 text-sm">No active collections</p>
+                      <p className="text-zinc-600 text-xs mt-1">Start a collection from the "Collect" tab</p>
+                      <p className="text-zinc-600 text-xs">or run <code className="bg-black/40 px-1 rounded">StartCollection.bat</code> for full-speed mode</p>
                     </div>
                   )}
                 </div>
