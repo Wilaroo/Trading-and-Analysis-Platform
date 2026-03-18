@@ -9,6 +9,8 @@ Key Features:
 - Probability-based confidence
 - Auto-training from historical data
 - Performance tracking
+
+Note: Requires lightgbm to be installed. Will gracefully degrade if not available.
 """
 
 import logging
@@ -16,14 +18,32 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone, timedelta
 import asyncio
 
-from .timeseries_gbm import (
-    TimeSeriesGBM,
-    Prediction,
-    ModelMetrics,
-    get_timeseries_model,
-    init_timeseries_model
-)
-from .timeseries_features import get_feature_engineer
+logger = logging.getLogger(__name__)
+
+# Try to import ML dependencies
+ML_AVAILABLE = False
+try:
+    from .timeseries_gbm import (
+        TimeSeriesGBM,
+        Prediction,
+        ModelMetrics,
+        get_timeseries_model,
+        init_timeseries_model
+    )
+    from .timeseries_features import get_feature_engineer
+    ML_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"ML dependencies not available for timeseries_service: {e}")
+    # Create placeholders
+    TimeSeriesGBM = None
+    Prediction = None
+    ModelMetrics = None
+    def get_timeseries_model():
+        return None
+    def init_timeseries_model(*args, **kwargs):
+        return None
+    def get_feature_engineer():
+        return None
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +53,7 @@ class TimeSeriesAIService:
     High-level service for time-series AI predictions.
     
     Used by AI Trade Consultation to get directional forecasts.
+    Note: Gracefully degrades if lightgbm is not installed.
     """
     
     # Minimum confidence to include in consultation
@@ -43,15 +64,17 @@ class TimeSeriesAIService:
     MIN_BARS_FOR_TRAINING = 100
     
     def __init__(self):
-        self._model = get_timeseries_model()
+        self._model = get_timeseries_model() if ML_AVAILABLE else None
         self._db = None
         self._historical_service = None
         self._last_train_time = None
+        self._ml_available = ML_AVAILABLE
         
     def set_db(self, db):
         """Set database connection"""
         self._db = db
-        self._model.set_db(db)
+        if self._model:
+            self._model.set_db(db)
         
     def set_historical_service(self, historical_service):
         """Set historical data service for training"""
@@ -80,6 +103,10 @@ class TimeSeriesAIService:
                 "usable": bool  # True if confidence > threshold
             }
         """
+        # Check if ML is available
+        if not self._ml_available or self._model is None:
+            return self._empty_forecast(symbol, "ML not available - lightgbm not installed")
+            
         # If no bars provided, fetch from MongoDB
         if not bars:
             bars = await self._get_bars_from_db_for_prediction(symbol)
@@ -164,6 +191,10 @@ class TimeSeriesAIService:
         Returns:
             Training result with metrics
         """
+        # Check if ML is available
+        if not self._ml_available or self._model is None:
+            return {"success": False, "error": "ML not available - lightgbm not installed"}
+            
         if self._db is None:
             return {"success": False, "error": "Database not connected"}
         
