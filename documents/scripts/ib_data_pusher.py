@@ -231,7 +231,7 @@ class IBDataPusher:
         self.subscribed_contracts: Dict[str, Contract] = {}
         self.depth_subscriptions: Dict[str, object] = {}  # symbol -> ticker object for L2
         self.last_push_time = 0
-        self.push_interval = 15.0  # Push every 15 seconds (was 5) to reduce rate limiting
+        self.push_interval = 10.0  # Push every 10 seconds to reduce Cloudflare rate limiting
         self.level2_enabled = True  # Level 2 uses polling approach, always available
         
         # Initialize the cloud API client with Cloudflare evasion
@@ -910,8 +910,8 @@ class IBDataPusher:
             if result and result.get("success"):
                 logger.info(f"Push OK! Cloud received: {result.get('received', {})}")
                 self.consecutive_push_failures = 0
-                # Reset push interval on success
-                self.push_interval = 5.0
+                # Keep push interval at 10s to reduce Cloudflare rate limiting
+                self.push_interval = 10.0
             else:
                 logger.warning(f"Push returned error: {result}")
                 self.consecutive_push_failures += 1

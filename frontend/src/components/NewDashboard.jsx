@@ -25,7 +25,7 @@ import { useTickerModal } from '../hooks/useTickerModal';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 const DASHBOARD_REFRESH_INTERVAL = 15000; // 15 seconds for dashboard data
-const ACCOUNT_REFRESH_INTERVAL = 5000; // 5 seconds for account data
+const ACCOUNT_REFRESH_INTERVAL = 15000; // 15 seconds for account data
 
 // Header component with compact info, account data, and P&L
 // Bot status and controls are now in the unified SentCom header below
@@ -534,7 +534,7 @@ const NewDashboard = ({
     
     const dashboardInterval = setInterval(fetchDashboardData, DASHBOARD_REFRESH_INTERVAL);
     const accountInterval = setInterval(fetchAccountData, ACCOUNT_REFRESH_INTERVAL);
-    const orderQueueInterval = setInterval(fetchOrderQueue, 3000); // 3 seconds for order queue
+    const orderQueueInterval = setInterval(fetchOrderQueue, 15000); // 15 seconds for order queue
     
     return () => {
       clearInterval(dashboardInterval);

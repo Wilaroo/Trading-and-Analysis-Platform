@@ -1648,7 +1648,7 @@ const useMarketSession = (pollInterval = 30000) => {
   return { session, loading, refresh: fetchSession };
 };
 
-const useSentComStatus = (pollInterval = 5000) => {
+const useSentComStatus = (pollInterval = 15000) => {
   const { getCached, setCached } = useDataCache();
   const isFirstMount = useRef(true);
   
@@ -1695,7 +1695,7 @@ const useSentComStatus = (pollInterval = 5000) => {
   return { status, loading, error, refresh: fetchStatus };
 };
 
-const useSentComStream = (pollInterval = 8000) => {
+const useSentComStream = (pollInterval = 15000) => {
   const { getCached, setCached } = useDataCache();
   const isFirstMount = useRef(true);
   
@@ -1760,7 +1760,7 @@ const useSentComStream = (pollInterval = 8000) => {
   return { messages, loading, refresh: fetchStream };
 };
 
-const useSentComPositions = (pollInterval = 5000) => {
+const useSentComPositions = (pollInterval = 15000) => {
   const { getCached, setCached } = useDataCache();
   const isFirstMount = useRef(true);
   
@@ -1808,7 +1808,7 @@ const useSentComPositions = (pollInterval = 5000) => {
   return { positions, totalPnl, loading, refresh: fetchPositions };
 };
 
-const useSentComSetups = (pollInterval = 10000) => {
+const useSentComSetups = (pollInterval = 30000) => {
   const { getCached, setCached } = useDataCache();
   const isFirstMount = useRef(true);
   

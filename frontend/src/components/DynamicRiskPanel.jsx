@@ -34,7 +34,7 @@ const RISK_LABELS = {
 };
 
 // Hook for dynamic risk data
-const useDynamicRisk = (pollInterval = 10000) => {
+const useDynamicRisk = (pollInterval = 30000) => {
   const { getCached, setCached } = useDataCache();
   const isFirstMount = useRef(true);
   
