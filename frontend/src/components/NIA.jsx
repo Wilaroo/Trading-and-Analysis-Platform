@@ -144,7 +144,26 @@ const TrainAllPanel = memo(({ onTrainComplete }) => {
       try {
         // Use long-running API client for training (5 min timeout)
         const tsRes = await apiLongRunning.post('/api/ai-modules/timeseries/train', { max_symbols: 100 });
-        if (tsRes.data?.success && tsRes.data?.result?.success) {
+        
+        // Check if ML is not available
+        if (tsRes.data?.ml_not_available) {
+          newProgress.timeseries = { 
+            status: 'warning', 
+            message: 'ML not installed',
+            mlNotAvailable: true,
+            installInstructions: tsRes.data.instructions,
+            installCommand: tsRes.data.install_command
+          };
+          toast.info(
+            <div className="space-y-2">
+              <div className="font-semibold">ML Libraries Not Installed</div>
+              <div className="text-sm">To enable AI training on your local machine:</div>
+              <code className="block bg-black/30 p-2 rounded text-xs font-mono">pip install lightgbm</code>
+              <div className="text-xs text-zinc-400">Then restart the backend and try again.</div>
+            </div>,
+            { duration: 15000 }
+          );
+        } else if (tsRes.data?.success && tsRes.data?.result?.success) {
           const metrics = tsRes.data.result.metrics;
           const accuracy = metrics?.accuracy ? (metrics.accuracy * 100).toFixed(1) : '?';
           const samples = tsRes.data.result.samples || metrics?.training_samples || 0;

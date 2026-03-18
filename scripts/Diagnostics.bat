@@ -7,7 +7,7 @@ echo    TradeCommand Diagnostics
 echo ============================================
 echo.
 
-set CLOUD_URL=https://ai-data-hub-10.preview.emergentagent.com
+set CLOUD_URL=https://sentcom-evolve.preview.emergentagent.com
 
 echo [1] Checking Local Ollama...
 curl -s http://localhost:11434/api/tags > "%TEMP%\ollama_check.tmp" 2>&1

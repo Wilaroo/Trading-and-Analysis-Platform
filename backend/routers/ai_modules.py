@@ -951,6 +951,24 @@ async def train_timeseries_model(request: Optional[TrainRequest] = None):
         symbols: Optional list of specific symbols to train on
         max_symbols: Maximum number of symbols (default: 100, max: 500)
     """
+    # Check if ML is available
+    from services.ai_modules import ML_AVAILABLE
+    if not ML_AVAILABLE:
+        return {
+            "success": False,
+            "ml_not_available": True,
+            "error": "ML libraries not installed",
+            "message": "To enable AI training, install lightgbm on your local machine:",
+            "install_command": "pip install lightgbm",
+            "instructions": [
+                "1. Open PowerShell or Command Prompt",
+                "2. Run: pip install lightgbm",
+                "3. Restart the backend (close and reopen StartLocal.bat)",
+                "4. Try Train All again"
+            ],
+            "note": "ML training only works locally - production servers don't have enough memory for ML libraries."
+        }
+    
     if not _timeseries_ai:
         raise HTTPException(status_code=503, detail="Time-series AI not initialized")
     
@@ -1069,10 +1087,47 @@ async def get_training_status():
     - Model version
     - Training history
     - Auto-training settings
+    - ML availability status
     """
+    # Check if ML is available
+    from services.ai_modules import ML_AVAILABLE
+    
+    if not ML_AVAILABLE:
+        return {
+            "success": True,
+            "ml_available": False,
+            "model": {
+                "is_trained": False,
+                "version": "N/A",
+                "last_trained": None,
+                "accuracy": None,
+                "samples_trained": 0
+            },
+            "auto_training": {"enabled": False, "after_collection": False, "schedule": None},
+            "history": [],
+            "next_scheduled": None,
+            "ml_message": "ML libraries not installed. Run 'pip install lightgbm' locally to enable AI training."
+        }
+    
     try:
         from services.ai_modules.timeseries_gbm import get_timeseries_model
         model = get_timeseries_model()
+        
+        if model is None:
+            return {
+                "success": True,
+                "ml_available": True,
+                "model": {
+                    "is_trained": False,
+                    "version": "v1.0",
+                    "last_trained": None,
+                    "accuracy": None,
+                    "samples_trained": 0
+                },
+                "auto_training": {"enabled": False, "after_collection": False, "schedule": None},
+                "history": [],
+                "next_scheduled": None
+            }
         
         # Get model status
         model_info = model.get_model_info() if hasattr(model, 'get_model_info') else {}
@@ -1101,6 +1156,7 @@ async def get_training_status():
         
         return {
             "success": True,
+            "ml_available": True,
             "model": {
                 "is_trained": model_info.get("is_trained", False),
                 "version": model_info.get("version", "v1.0"),

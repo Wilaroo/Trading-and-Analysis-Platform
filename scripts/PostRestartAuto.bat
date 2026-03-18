@@ -17,7 +17,7 @@ echo.
 :: CONFIGURATION
 :: =====================================================
 set SCRIPT_DIR=%~dp0
-set CLOUD_URL=https://ai-data-hub-10.preview.emergentagent.com
+set CLOUD_URL=https://sentcom-evolve.preview.emergentagent.com
 set LOG_FILE=%SCRIPT_DIR%post_restart.log
 
 :: Log start time
