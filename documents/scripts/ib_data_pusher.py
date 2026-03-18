@@ -968,6 +968,8 @@ class IBDataPusher:
         Poll for and process pending historical data requests.
         Called periodically from the main trading loop.
         
+        NON-BLOCKING: Uses short timeouts to avoid blocking the main loop.
+        
         Args:
             batch_size: Number of requests to fetch at once
             
@@ -975,8 +977,9 @@ class IBDataPusher:
             Number of requests completed
         """
         try:
-            # Get pending requests from cloud
-            result = self.api.get_safe(f"/api/ib/historical-data/pending?limit={batch_size}", timeout=30)
+            # Use SHORT timeout to avoid blocking the main loop
+            # If cloud is slow, we'll just skip this cycle
+            result = self.api.get_safe(f"/api/ib/historical-data/pending?limit={batch_size}", timeout=10)
             
             if not result:
                 return 0
@@ -993,12 +996,14 @@ class IBDataPusher:
                     # Fetch from IB
                     result_data = self._fetch_historical_single(req)
                     if result_data:
-                        # Report result to cloud
+                        # Report result to cloud - use short timeout, don't block on failure
                         self._report_historical_result(result_data)
                         completed += 1
                         logger.info(f"[Historical] {result_data['symbol']} ({result_data['bar_size']}): {result_data.get('bar_count', 0)} bars")
                 except Exception as e:
                     logger.error(f"[Historical] Request error: {e}")
+                    # Don't let one error block the whole batch
+                    continue
                 
                 # Small delay between IB requests to avoid pacing violations
                 time.sleep(1.0)
@@ -1006,7 +1011,8 @@ class IBDataPusher:
             return completed
             
         except Exception as e:
-            logger.debug(f"Historical data poll error: {e}")
+            # Log but don't crash - historical data is lower priority than live trading
+            logger.debug(f"Historical data poll skipped: {e}")
             return 0
     
     def _fetch_historical_single(self, request: dict) -> Optional[dict]:
@@ -1085,11 +1091,14 @@ class IBDataPusher:
             }
     
     def _report_historical_result(self, result: dict):
-        """Report a historical data result to the cloud."""
+        """Report a historical data result to the cloud. Non-blocking with short timeout."""
         try:
-            self.api.post_safe("/api/ib/historical-data/result", result, timeout=30)
+            # Short timeout - if cloud is slow, just log and move on
+            # The data is collected, we can report later
+            self.api.post_safe("/api/ib/historical-data/result", result, timeout=10)
         except Exception as e:
-            logger.warning(f"Could not report historical result: {e}")
+            # Don't block on reporting failures
+            logger.debug(f"Could not report historical result (will retry): {e}")
     
     def update_level2_subscriptions(self):
         """Dynamically update L2 subscriptions based on in-play stocks"""
