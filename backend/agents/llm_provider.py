@@ -134,29 +134,55 @@ class OllamaProvider(BaseLLMProvider):
                 )
                 
                 if result.get("success"):
-                    content = result.get("response", {}).get("message", {}).get("content", "")
-                    return LLMResponse(
-                        content=content,
-                        model=model,
-                        provider="ollama",
-                        latency_ms=(time.time() - start) * 1000,
-                        success=True
-                    )
-                else:
-                    error = result.get("error", "HTTP proxy call failed")
-                    logger.warning(f"HTTP proxy failed: {error}")
+                    # Handle nested response structure from proxy
+                    response_data = result.get("response", {})
+                    if isinstance(response_data, dict) and "response" in response_data:
+                        # Nested structure: {response: {response: {message: {content: ...}}}}
+                        inner_response = response_data.get("response", {})
+                        content = inner_response.get("message", {}).get("content", "")
+                    else:
+                        # Flat structure: {response: {message: {content: ...}}}
+                        content = response_data.get("message", {}).get("content", "")
                     
-                    # Try fallback model if primary failed
-                    if model != self.fallback_model and ("cloud" in model.lower() or "120b" in model.lower()):
-                        logger.info(f"🔄 Trying fallback model: {self.fallback_model}")
-                        fallback_result = await call_ollama_via_http_proxy(
-                            model=self.fallback_model,
-                            messages=messages,
-                            options={"temperature": temperature, "num_predict": max_tokens},
-                            timeout=60.0
+                    if content:
+                        return LLMResponse(
+                            content=content,
+                            model=model,
+                            provider="ollama",
+                            latency_ms=(time.time() - start) * 1000,
+                            success=True
                         )
-                        if fallback_result.get("success"):
-                            content = fallback_result.get("response", {}).get("message", {}).get("content", "")
+                    else:
+                        # Check for error in response (403 from cloud model)
+                        error = response_data.get("error") or response_data.get("response", {}).get("error", "")
+                        if error:
+                            logger.warning(f"Model returned error: {error}")
+                
+                # Get error message
+                error = result.get("error", "HTTP proxy call failed")
+                if not error and result.get("response", {}).get("error"):
+                    error = result.get("response", {}).get("error")
+                logger.warning(f"HTTP proxy failed: {error}")
+                
+                # Try fallback model if primary failed (cloud models or any failure)
+                if model != self.fallback_model:
+                    logger.info(f"🔄 Trying fallback model: {self.fallback_model}")
+                    fallback_result = await call_ollama_via_http_proxy(
+                        model=self.fallback_model,
+                        messages=messages,
+                        options={"temperature": temperature, "num_predict": max_tokens},
+                        timeout=60.0
+                    )
+                    if fallback_result.get("success"):
+                        # Handle nested response for fallback too
+                        fb_response = fallback_result.get("response", {})
+                        if isinstance(fb_response, dict) and "response" in fb_response:
+                            inner = fb_response.get("response", {})
+                            content = inner.get("message", {}).get("content", "")
+                        else:
+                            content = fb_response.get("message", {}).get("content", "")
+                        
+                        if content:
                             return LLMResponse(
                                 content=content,
                                 model=f"{self.fallback_model} (fallback)",
