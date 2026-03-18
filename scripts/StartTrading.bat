@@ -12,7 +12,7 @@ echo.
 :: CONFIGURATION - EDIT THESE AS NEEDED
 :: =====================================================
 :: Cloud platform URL
-set CLOUD_URL=https://sentcom-queue-mgmt.preview.emergentagent.com
+set CLOUD_URL=https://sentcom-data-sync.preview.emergentagent.com
 
 :: GitHub repo for auto-updates
 set GITHUB_RAW=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents

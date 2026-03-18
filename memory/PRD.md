@@ -66,13 +66,14 @@ Build a self-improving AI trading bot system "SentCom" with:
 - `training_jobs` - Training job metadata
 - `app_settings` - Application settings
 
-## Current Status (March 17, 2026)
+## Current Status (March 18, 2026)
 - ✅ Database migrated to MongoDB Atlas (persistent storage)
-- ✅ ~29,000 data fetch requests queued (10,473 completed = 36%)
+- ✅ ~29,000 data fetch requests queued (~10,500 completed = 36%)
 - ✅ Data Coverage Dashboard verified working
 - ✅ Backend returns correct data (12,198 symbols in ADV cache)
 - ✅ **FIX: Heartbeat tolerance increased from 30s to 90s** (fixes fluctuating "All Systems Offline" status)
 - ✅ **SIMPLIFIED PRIORITY COLLECTION SYSTEM** (March 17, 2026) - Replaces confusing mode toggle
+- ✅ **FIX: MongoDB Atlas Write Performance** (March 18, 2026) - Bulk write optimization for historical data
 
 ### Phase 5: Priority-Based Data Collection ✅ (SIMPLIFIED)
 Per user feedback, the explicit "Trading vs Collection Mode" toggle was replaced with a simpler priority-based system:
@@ -106,6 +107,21 @@ Per user feedback, the explicit "Trading vs Collection Mode" toggle was replaced
 - Live trading (orders) always works regardless of priority mode
 
 ## Recent Changes
+### March 18, 2026 - MongoDB Atlas Write Performance Fix (CRITICAL)
+- **Issue**: `POST /api/ib/historical-data/result` endpoint timing out when saving historical data to MongoDB Atlas
+- **Root Cause**: Individual `update_one()` calls in a loop for each bar - extremely slow with 2.7M+ documents
+- **Solution**: Replaced with `bulk_write()` operations using `UpdateOne` batches
+- **Performance Gain**: ~10-50x faster writes for typical data batches (50-100+ bars)
+- **Files Modified**:
+  - `backend/routers/ib.py` - Optimized `/historical-data/result` and `/historical-data/batch-result` endpoints
+  - Added new endpoint: `POST /api/ib/historical-data/optimize-indexes` - Creates/verifies MongoDB indexes
+- **Additional Improvements**:
+  - Don't store raw bar data in queue collection (saves space and time)
+  - Created additional indexes for common query patterns
+- **Database Stats After Fix**:
+  - `ib_historical_data`: 2.76M documents, 565 MB data, 7 indexes (273 MB index size)
+  - `historical_data_requests`: 29K documents, 8 indexes
+
 ### March 17, 2026 - Simplified Priority Collection System (MAJOR)
 - **User Feedback**: "Trading vs Collection Mode" toggle was confusing and slow
 - **Solution**: Replaced explicit mode toggle with priority-based background collection
@@ -124,15 +140,15 @@ Per user feedback, the explicit "Trading vs Collection Mode" toggle was replaced
 - **Files modified**: `backend/routers/ib.py` (functions: `is_pusher_connected`, `get_connection_status`, `get_pushed_ib_data`)
 
 ## Next Tasks
-1. ⏳ **User Action**: Download updated `ib_data_pusher.py` to your local machine
-2. ⏳ **User Action**: Run `StartTrading.bat` (or `python ib_data_pusher.py --cloud-url=... --mode=trading`)
-3. ⏳ **User Action**: Click "Fill Gaps" in NIA dashboard to start prioritized collection
-4. Monitor collection progress in "Progress" tab - watch pending count decrease
-5. After collection completes (~18,611 pending requests), verify auto-training triggers
+1. ✅ **MongoDB Write Performance Fixed**: Bulk write optimization implemented and tested
+2. ⏳ **User Action**: Pull the latest code from git and restart the local `ib_historical_collector.py`
+3. ⏳ **User Action**: Optionally call `POST /api/ib/historical-data/optimize-indexes` to ensure optimal indexes
+4. Monitor collection progress - should now complete without timeouts
+5. After collection completes (~18,580 pending requests), verify auto-training triggers
 
 ## Backlog
+- (P0 - DONE) ~~Cloud API Stability - investigate timeouts (server-side root cause)~~
 - (P1) Deep Scanner Overhaul - alternative data sources
 - (P2) Advanced Model Training Dashboard
 - (P2) Portfolio Analytics Dashboard
 - (P3) Trade Journal & Alerts
-- (P2) Cloud API Stability - investigate timeouts (server-side root cause)

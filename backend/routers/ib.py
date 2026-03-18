@@ -334,7 +334,7 @@ async def get_pusher_setup_info():
     cloud_url = os.environ.get("REACT_APP_BACKEND_URL", "")
     if not cloud_url:
         # Try to infer from request or env
-        cloud_url = os.environ.get("APP_URL", "https://sentcom-queue-mgmt.preview.emergentagent.com")
+        cloud_url = os.environ.get("APP_URL", "https://sentcom-data-sync.preview.emergentagent.com")
     
     pusher_connected = False
     last_update = _pushed_ib_data.get("last_update")
@@ -1313,8 +1313,8 @@ async def report_historical_data_result(request: Request):
     Called by IB Data Pusher after fetching data from IB Gateway.
     Accepts JSON body with: request_id, symbol, success, data, error, fetched_at
     
-    This endpoint now IMMEDIATELY stores data to the main collection,
-    making it resilient to monitoring loop failures.
+    This endpoint now IMMEDIATELY stores data to the main collection using
+    bulk_write for optimal performance with large datasets.
     """
     service = _get_historical_data_service()
     if not service:
@@ -1348,64 +1348,73 @@ async def report_historical_data_result(request: Request):
                 logger.warning(f"Could not look up bar_size for {request_id}: {e}")
                 bar_size = "1 day"
         
-        # Store in queue (for tracking)
+        # Store in queue (for tracking) - don't store data in queue to save space
         service.complete_request(
             request_id=request_id,
             success=success,
-            data=data,
+            data=None,  # Don't store raw data in queue - saves space and time
             error=error,
             status=status,
             bar_count=bar_count
         )
         
-        # IMMEDIATELY store to main collection (resilient to monitoring failures)
+        # IMMEDIATELY store to main collection using BULK WRITE for performance
         bars_stored = 0
         if success and data:
             try:
                 from services.ib_historical_collector import get_ib_collector
+                from pymongo import UpdateOne
                 collector = get_ib_collector()
                 
                 if collector._data_col is not None:
                     from datetime import datetime, timezone
+                    now = datetime.now(timezone.utc).isoformat()
+                    
+                    # Build bulk operations list
+                    bulk_operations = []
                     for bar in data:
-                        try:
-                            collector._data_col.update_one(
+                        date_val = bar.get("date") or bar.get("time")
+                        if not date_val:
+                            continue
+                        
+                        bulk_operations.append(
+                            UpdateOne(
                                 {
                                     "symbol": symbol,
                                     "bar_size": bar_size,
-                                    "date": bar.get("date") or bar.get("time")
+                                    "date": date_val
                                 },
                                 {
                                     "$set": {
+                                        "symbol": symbol,
+                                        "bar_size": bar_size,
+                                        "date": date_val,
                                         "open": bar.get("open"),
                                         "high": bar.get("high"),
                                         "low": bar.get("low"),
                                         "close": bar.get("close"),
                                         "volume": bar.get("volume"),
-                                        "collected_at": datetime.now(timezone.utc).isoformat()
+                                        "collected_at": now
                                     }
                                 },
                                 upsert=True
                             )
-                            bars_stored += 1
-                        except Exception as e:
-                            if "duplicate" not in str(e).lower():
-                                logger.warning(f"Error storing bar for {symbol}: {e}")
+                        )
                     
-                    logger.info(f"Stored {bars_stored} bars for {symbol} directly from pusher report")
+                    # Execute bulk write in single operation
+                    if bulk_operations:
+                        result = collector._data_col.bulk_write(bulk_operations, ordered=False)
+                        bars_stored = result.upserted_count + result.modified_count
+                        logger.info(f"Bulk stored {bars_stored} bars for {symbol} (upserted: {result.upserted_count}, modified: {result.modified_count})")
+                        
             except Exception as e:
-                logger.warning(f"Could not store data directly: {e}")
+                logger.warning(f"Bulk write error for {symbol}: {e}")
         
         return {
             "success": True, 
             "message": f"Result recorded for {request_id}",
             "bars_stored": bars_stored
         }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error reporting historical data result: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
@@ -1418,7 +1427,7 @@ async def report_historical_data_result(request: Request):
 async def report_historical_data_batch_result(request: Request):
     """
     Report multiple historical data results in one call.
-    Much faster than individual reports - reduces cloud API overhead.
+    Uses bulk_write for optimal MongoDB Atlas performance with large datasets.
     """
     service = _get_historical_data_service()
     if not service:
@@ -1432,10 +1441,16 @@ async def report_historical_data_batch_result(request: Request):
             return {"success": True, "processed": 0}
         
         from services.ib_historical_collector import get_ib_collector
+        from pymongo import UpdateOne
         collector = get_ib_collector()
         
         processed = 0
         bars_stored = 0
+        
+        # Collect all bulk operations across all results
+        all_bulk_operations = []
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
         
         for result in results:
             try:
@@ -1448,50 +1463,61 @@ async def report_historical_data_batch_result(request: Request):
                 status = result.get("status", "success" if success else "error")
                 bar_count = result.get("bar_count", 0)
                 
-                # Update queue status
+                # Update queue status - don't store raw data to save space
                 service.complete_request(
                     request_id=request_id,
                     success=success,
-                    data=data,
+                    data=None,  # Don't store raw data in queue
                     error=error,
                     status=status,
                     bar_count=bar_count
                 )
                 
-                # Store bars to main collection
+                # Build bulk operations for bars
                 if success and data and collector._data_col is not None:
-                    from datetime import datetime, timezone
                     for bar in data:
-                        try:
-                            collector._data_col.update_one(
+                        date_val = bar.get("date") or bar.get("time")
+                        if not date_val:
+                            continue
+                        
+                        all_bulk_operations.append(
+                            UpdateOne(
                                 {
                                     "symbol": symbol,
                                     "bar_size": bar_size,
-                                    "date": bar.get("date") or bar.get("time")
+                                    "date": date_val
                                 },
                                 {
                                     "$set": {
+                                        "symbol": symbol,
+                                        "bar_size": bar_size,
+                                        "date": date_val,
                                         "open": bar.get("open"),
                                         "high": bar.get("high"),
                                         "low": bar.get("low"),
                                         "close": bar.get("close"),
                                         "volume": bar.get("volume"),
-                                        "symbol": symbol,
-                                        "bar_size": bar_size,
-                                        "updated_at": datetime.now(timezone.utc).isoformat()
+                                        "collected_at": now
                                     }
                                 },
                                 upsert=True
                             )
-                            bars_stored += 1
-                        except Exception as e:
-                            pass  # Continue on individual bar errors
+                        )
                 
                 processed += 1
                 
             except Exception as e:
                 logger.warning(f"Error processing batch result: {e}")
                 continue
+        
+        # Execute all bulk operations in one call
+        if all_bulk_operations and collector._data_col is not None:
+            try:
+                result = collector._data_col.bulk_write(all_bulk_operations, ordered=False)
+                bars_stored = result.upserted_count + result.modified_count
+                logger.info(f"Batch bulk stored {bars_stored} bars (upserted: {result.upserted_count}, modified: {result.modified_count})")
+            except Exception as e:
+                logger.warning(f"Batch bulk write error: {e}")
         
         return {
             "success": True,
@@ -1501,6 +1527,153 @@ async def report_historical_data_batch_result(request: Request):
         
     except Exception as e:
         logger.error(f"Error in batch result: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/historical-data/optimize-indexes")
+async def optimize_historical_data_indexes():
+    """
+    Create/verify optimal indexes for historical data collections.
+    
+    This endpoint ensures the MongoDB collections have the right indexes
+    for efficient writes and queries. Should be run once before large-scale
+    data collection to ensure optimal performance.
+    
+    Indexes created:
+    - ib_historical_data: compound index on (symbol, bar_size, date) for fast upserts
+    - historical_data_requests: indexes for queue operations
+    """
+    try:
+        from services.ib_historical_collector import get_ib_collector
+        collector = get_ib_collector()
+        
+        if collector._db is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        
+        results = {
+            "indexes_created": [],
+            "indexes_verified": [],
+            "errors": []
+        }
+        
+        # Optimize ib_historical_data collection
+        data_col = collector._db["ib_historical_data"]
+        try:
+            # Primary compound index for fast upserts - this is the most critical index
+            data_col.create_index(
+                [("symbol", 1), ("bar_size", 1), ("date", 1)], 
+                unique=True,
+                name="symbol_barsize_date_unique",
+                background=True  # Don't block other operations
+            )
+            results["indexes_created"].append("ib_historical_data: symbol_barsize_date_unique")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                results["indexes_verified"].append("ib_historical_data: symbol_barsize_date_unique")
+            else:
+                results["errors"].append(f"ib_historical_data compound index: {str(e)}")
+        
+        try:
+            # Secondary index for queries by symbol only
+            data_col.create_index(
+                [("symbol", 1)],
+                name="symbol_only",
+                background=True
+            )
+            results["indexes_created"].append("ib_historical_data: symbol_only")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                results["indexes_verified"].append("ib_historical_data: symbol_only")
+            else:
+                results["errors"].append(f"ib_historical_data symbol index: {str(e)}")
+        
+        try:
+            # Index for queries by bar_size
+            data_col.create_index(
+                [("bar_size", 1)],
+                name="bar_size_only",
+                background=True
+            )
+            results["indexes_created"].append("ib_historical_data: bar_size_only")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                results["indexes_verified"].append("ib_historical_data: bar_size_only")
+            else:
+                results["errors"].append(f"ib_historical_data bar_size index: {str(e)}")
+        
+        try:
+            # Index for time-based queries
+            data_col.create_index(
+                [("collected_at", -1)],
+                name="collected_at_desc",
+                background=True
+            )
+            results["indexes_created"].append("ib_historical_data: collected_at_desc")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                results["indexes_verified"].append("ib_historical_data: collected_at_desc")
+            else:
+                results["errors"].append(f"ib_historical_data collected_at index: {str(e)}")
+        
+        # Optimize historical_data_requests queue collection
+        queue_col = collector._db["historical_data_requests"]
+        try:
+            queue_col.create_index(
+                [("status", 1), ("created_at", 1)],
+                name="status_created",
+                background=True
+            )
+            results["indexes_created"].append("historical_data_requests: status_created")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                results["indexes_verified"].append("historical_data_requests: status_created")
+            else:
+                results["errors"].append(f"queue status_created index: {str(e)}")
+        
+        try:
+            queue_col.create_index(
+                [("symbol", 1), ("bar_size", 1), ("status", 1)],
+                name="symbol_barsize_status",
+                background=True
+            )
+            results["indexes_created"].append("historical_data_requests: symbol_barsize_status")
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                results["indexes_verified"].append("historical_data_requests: symbol_barsize_status")
+            else:
+                results["errors"].append(f"queue symbol_barsize_status index: {str(e)}")
+        
+        # Get collection stats
+        try:
+            data_stats = collector._db.command("collStats", "ib_historical_data")
+            queue_stats = collector._db.command("collStats", "historical_data_requests")
+            
+            results["collection_stats"] = {
+                "ib_historical_data": {
+                    "count": data_stats.get("count", 0),
+                    "size_mb": round(data_stats.get("size", 0) / (1024 * 1024), 2),
+                    "index_count": data_stats.get("nindexes", 0),
+                    "index_size_mb": round(data_stats.get("totalIndexSize", 0) / (1024 * 1024), 2)
+                },
+                "historical_data_requests": {
+                    "count": queue_stats.get("count", 0),
+                    "size_mb": round(queue_stats.get("size", 0) / (1024 * 1024), 2),
+                    "index_count": queue_stats.get("nindexes", 0)
+                }
+            }
+        except Exception as e:
+            results["collection_stats"] = {"error": str(e)}
+        
+        return {
+            "success": True,
+            "message": "Index optimization complete",
+            **results
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error optimizing indexes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
