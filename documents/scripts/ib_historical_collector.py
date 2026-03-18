@@ -195,22 +195,40 @@ class IBHistoricalCollector:
             "pacing_waits": 0
         }
     
-    def connect(self) -> bool:
-        """Connect to IB Gateway."""
-        try:
-            from ib_insync import IB
-            self.ib = IB()
-            
-            logger.info(f"Connecting to IB Gateway at {self.ib_host}:{self.ib_port} (client_id={self.client_id})...")
-            self.ib.connect(self.ib_host, self.ib_port, clientId=self.client_id)
-            
-            logger.info("Connected to IB Gateway!")
-            logger.info(f"  Accounts: {self.ib.managedAccounts()}")
+    def connect(self, max_retries: int = 5) -> bool:
+        """Connect to IB Gateway with retry logic for overnight resilience."""
+        from ib_insync import IB
+        
+        for attempt in range(max_retries):
+            try:
+                if self.ib and self.ib.isConnected():
+                    return True
+                    
+                self.ib = IB()
+                
+                logger.info(f"Connecting to IB Gateway at {self.ib_host}:{self.ib_port} (client_id={self.client_id})...")
+                self.ib.connect(self.ib_host, self.ib_port, clientId=self.client_id)
+                
+                logger.info("Connected to IB Gateway!")
+                logger.info(f"  Accounts: {self.ib.managedAccounts()}")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Failed to connect to IB Gateway (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    wait_time = min(30 * (attempt + 1), 120)  # 30s, 60s, 90s, 120s
+                    logger.info(f"Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+        
+        return False
+    
+    def ensure_connected(self) -> bool:
+        """Ensure IB Gateway connection is active, reconnect if needed."""
+        if self.ib and self.ib.isConnected():
             return True
-            
-        except Exception as e:
-            logger.error(f"Failed to connect to IB Gateway: {e}")
-            return False
+        
+        logger.warning("IB Gateway connection lost - attempting to reconnect...")
+        return self.connect(max_retries=10)
     
     def disconnect(self):
         """Disconnect from IB Gateway."""
@@ -416,6 +434,12 @@ class IBHistoricalCollector:
                 for req in requests:
                     if not self.running:
                         break
+                    
+                    # Ensure IB connection is active before each request
+                    if not self.ensure_connected():
+                        logger.error("Cannot reconnect to IB Gateway - pausing for 5 minutes...")
+                        time.sleep(300)  # 5 minute pause before retry
+                        break  # Break inner loop to refetch requests
                     
                     request_id = req.get("request_id")
                     symbol = req.get("symbol")
