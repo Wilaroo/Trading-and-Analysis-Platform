@@ -194,32 +194,32 @@ if "%ERRORLEVEL%"=="0" (
 :start_ib_fresh
 echo        Starting IB Gateway fresh...
 start "" "%IB_GATEWAY_PATH%"
-echo        Waiting for IB Gateway window - 10 seconds...
-timeout /t 10 /nobreak >nul
+echo        Waiting for IB Gateway to load - 20 seconds...
+timeout /t 20 /nobreak >nul
 
 :: Auto-login with PAPER TRADING account
 echo        Auto-login to PAPER account...
 (
     echo Set WshShell = CreateObject^("WScript.Shell"^)
-    echo WScript.Sleep 800
+    echo WScript.Sleep 1500
     echo WshShell.AppActivate "IB Gateway"
-    echo WScript.Sleep 400
+    echo WScript.Sleep 800
     echo If Not WshShell.AppActivate^("IB Gateway"^) Then WshShell.AppActivate "IBKR Gateway"
-    echo WScript.Sleep 300
+    echo WScript.Sleep 500
     echo WshShell.SendKeys "%IB_USERNAME%"
-    echo WScript.Sleep 200
+    echo WScript.Sleep 300
     echo WshShell.SendKeys "{TAB}"
-    echo WScript.Sleep 150
-    echo WshShell.SendKeys "%IB_PASSWORD%"
     echo WScript.Sleep 200
+    echo WshShell.SendKeys "%IB_PASSWORD%"
+    echo WScript.Sleep 300
     echo WshShell.SendKeys "{ENTER}"
 ) > "%TEMP%\ib_login.vbs"
 cscript //nologo "%TEMP%\ib_login.vbs"
 del "%TEMP%\ib_login.vbs" 2>nul
 
 :: Wait for IB to process login
-echo        Waiting for authentication - 10 seconds...
-timeout /t 10 /nobreak >nul
+echo        Waiting for authentication - 15 seconds...
+timeout /t 15 /nobreak >nul
 
 :: Dismiss any warning popups
 echo        Dismissing any popups...
