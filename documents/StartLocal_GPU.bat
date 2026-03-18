@@ -19,9 +19,27 @@ set FRONTEND_DIR=%REPO_DIR%\frontend
 set DOCUMENTS_DIR=%REPO_DIR%\documents
 
 :: =====================================================
+:: STEP 0: PULL LATEST FROM GITHUB
+:: =====================================================
+echo [0/6] Pulling latest code from GitHub...
+pushd "%REPO_DIR%"
+if exist ".git" (
+    git pull origin main 2>nul
+    if %errorlevel%==0 (
+        echo       Code updated!
+    ) else (
+        echo       [INFO] Using existing code (no changes or offline)
+    )
+) else (
+    echo       [SKIP] Not a git repository
+)
+popd
+echo.
+
+:: =====================================================
 :: STEP 1: CHECK PREREQUISITES
 :: =====================================================
-echo [1/5] Checking prerequisites...
+echo [1/6] Checking prerequisites...
 
 where python >nul 2>&1
 if %errorlevel% neq 0 (
@@ -50,7 +68,7 @@ echo.
 :: =====================================================
 :: STEP 2: START BACKEND
 :: =====================================================
-echo [2/5] Starting Backend...
+echo [2/6] Starting Backend...
 
 :: Kill existing backend if running
 taskkill /F /FI "WINDOWTITLE eq TradeCommand Backend*" >nul 2>&1
@@ -73,7 +91,7 @@ timeout /t 8 /nobreak >nul
 :: =====================================================
 :: STEP 3: CONFIGURE FRONTEND FOR LOCAL
 :: =====================================================
-echo [3/5] Configuring Frontend for local...
+echo [3/6] Configuring Frontend for local...
 
 :: Create local .env
 echo REACT_APP_BACKEND_URL=http://localhost:8001> "%FRONTEND_DIR%\.env"
@@ -85,7 +103,7 @@ echo.
 :: =====================================================
 :: STEP 4: START FRONTEND
 :: =====================================================
-echo [4/5] Starting Frontend...
+echo [4/6] Starting Frontend...
 
 :: Kill existing frontend if running
 taskkill /F /FI "WINDOWTITLE eq TradeCommand Frontend*" >nul 2>&1
@@ -106,7 +124,7 @@ echo.
 :: =====================================================
 :: STEP 5: WAIT AND OPEN BROWSER
 :: =====================================================
-echo [5/5] Waiting for services to start...
+echo [5/6] Waiting for services to start...
 echo.
 echo ============================================
 echo    Services Starting...
