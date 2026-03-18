@@ -43,7 +43,7 @@ if exist ".git" (
     if %errorlevel%==0 (
         echo        Code updated!
     ) else (
-        echo        [INFO] Using existing code (no changes or offline)
+        echo        [INFO] Using existing code - no changes or offline
     )
 ) else (
     echo        [SKIP] Not a git repository
@@ -85,7 +85,7 @@ if %errorlevel%==0 (
     for /f "delims=" %%a in ('python -c "import torch; print(torch.cuda.get_device_name(0))" 2^>nul') do set GPU_NAME=%%a
     echo        GPU: %GPU_NAME%
 ) else (
-    echo        GPU: Not configured (run InstallML_GPU.bat first)
+    echo        GPU: Not configured - run InstallML_GPU.bat first
     set GPU_NAME=None
 )
 echo.
@@ -138,10 +138,10 @@ echo REACT_APP_BACKEND_URL=http://localhost:8001> "%FRONTEND_DIR%\.env"
 echo DANGEROUSLY_DISABLE_HOST_CHECK=true>> "%FRONTEND_DIR%\.env"
 echo FAST_REFRESH=false>> "%FRONTEND_DIR%\.env"
 
-:: Check if node_modules exists
+:: Check if node_modules exists and install if needed
 pushd "%FRONTEND_DIR%"
 if not exist "node_modules" (
-    echo        Installing frontend packages (first time, please wait)...
+    echo        Installing frontend packages - first time, please wait...
     yarn install
 )
 popd
@@ -194,7 +194,7 @@ if "%ERRORLEVEL%"=="0" (
 :start_ib_fresh
 echo        Starting IB Gateway fresh...
 start "" "%IB_GATEWAY_PATH%"
-echo        Waiting for IB Gateway window (10 seconds)...
+echo        Waiting for IB Gateway window - 10 seconds...
 timeout /t 10 /nobreak >nul
 
 :: Auto-login with PAPER TRADING account
@@ -218,7 +218,7 @@ cscript //nologo "%TEMP%\ib_login.vbs"
 del "%TEMP%\ib_login.vbs" 2>nul
 
 :: Wait for IB to process login
-echo        Waiting for authentication (10 seconds)...
+echo        Waiting for authentication - 10 seconds...
 timeout /t 10 /nobreak >nul
 
 :: Dismiss any warning popups
@@ -260,7 +260,7 @@ if %errorlevel%==0 (
 
 set /a MOD=%PORT_ATTEMPTS% %% 5
 if %MOD%==0 (
-    echo        Still waiting... (attempt %PORT_ATTEMPTS%/30)
+    echo        Still waiting... attempt %PORT_ATTEMPTS% of 30
 )
 
 timeout /t 2 /nobreak >nul
@@ -283,10 +283,10 @@ timeout /t 2 /nobreak >nul
 
 if exist "%SCRIPTS_DIR%\ib_data_pusher.py" (
     start "IB Data Pusher (Local)" cmd /k "title IB Data Pusher (LOCAL) && color 0C && cd /d %SCRIPTS_DIR% && echo ============================== && echo   IB Data Pusher - LOCAL MODE && echo   Backend: %LOCAL_BACKEND% && echo ============================== && python ib_data_pusher.py --cloud-url %LOCAL_BACKEND% --symbols %IB_SYMBOLS%"
-    echo        IB Data Pusher started (LOCAL mode)
+    echo        IB Data Pusher started - LOCAL mode
 ) else if exist "%DOCUMENTS_DIR%\ib_data_pusher.py" (
     start "IB Data Pusher (Local)" cmd /k "title IB Data Pusher (LOCAL) && color 0C && cd /d %DOCUMENTS_DIR% && echo ============================== && echo   IB Data Pusher - LOCAL MODE && echo   Backend: %LOCAL_BACKEND% && echo ============================== && python ib_data_pusher.py --cloud-url %LOCAL_BACKEND% --symbols %IB_SYMBOLS%"
-    echo        IB Data Pusher started (LOCAL mode)
+    echo        IB Data Pusher started - LOCAL mode
 ) else (
     echo        [WARN] ib_data_pusher.py not found
 )
@@ -307,7 +307,7 @@ if exist "%SCRIPTS_DIR%\ollama_http.py" (
     start "Ollama AI Proxy" cmd /k "title Ollama AI Proxy && color 0D && cd /d %DOCUMENTS_DIR% && echo ============================================ && echo   Ollama HTTP Proxy (Local Mode) && echo   Backend: %LOCAL_BACKEND% && echo ============================================ && python ollama_http.py --backend-url %LOCAL_BACKEND%"
     echo        Ollama Proxy started!
 ) else (
-    echo        [INFO] ollama_http.py not found (AI still works directly)
+    echo        [INFO] ollama_http.py not found - AI still works directly
 )
 echo.
 
@@ -326,7 +326,7 @@ echo    Ollama:   http://localhost:11434
 echo    IB Data:  Connected to local backend
 echo    GPU:      %GPU_NAME%
 echo.
-echo    ML Training: Available (GPU accelerated)
+echo    ML Training: Available - GPU accelerated
 echo.
 echo    Waiting 20 seconds...
 timeout /t 20 /nobreak >nul
@@ -347,11 +347,11 @@ echo    Backend:  %LOCAL_BACKEND%
 echo    GPU:      %GPU_NAME%
 echo.
 echo    Running Services:
-echo    * Backend (FastAPI + ML)
-echo    * Frontend (React)
-echo    * Ollama Server (local AI)
-echo    * IB Data Pusher (market data + stops)
-echo    * IB Gateway (broker connection)
+echo    * Backend - FastAPI + ML
+echo    * Frontend - React
+echo    * Ollama Server - local AI
+echo    * IB Data Pusher - market data + stops
+echo    * IB Gateway - broker connection
 echo.
 echo    Benefits of Local Mode:
 echo    * No Cloudflare rate limits
