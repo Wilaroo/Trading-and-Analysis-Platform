@@ -947,159 +947,6 @@ class IBDataPusher:
             logger.debug(f"Could not fetch in-play stocks: {e}")
         return []
     
-    def check_priority_collection(self) -> dict:
-        """
-        Check if priority collection is enabled and get pending request count.
-        Returns: {"priority": bool, "pending": int}
-        """
-        try:
-            result = self.api.get_safe("/api/ib/mode", timeout=10)
-            if result:
-                return {
-                    "priority": result.get("priority_collection", False),
-                    "pending": result.get("pending_requests", 0)
-                }
-        except Exception as e:
-            logger.debug(f"Could not check priority collection: {e}")
-        return {"priority": False, "pending": 0}
-    
-    def poll_historical_data_requests(self, batch_size: int = 5) -> int:
-        """
-        Poll for and process pending historical data requests.
-        Called periodically from the main trading loop.
-        
-        NON-BLOCKING: Uses short timeouts to avoid blocking the main loop.
-        
-        Args:
-            batch_size: Number of requests to fetch at once
-            
-        Returns:
-            Number of requests completed
-        """
-        try:
-            # Use SHORT timeout to avoid blocking the main loop
-            # If cloud is slow, we'll just skip this cycle
-            result = self.api.get_safe(f"/api/ib/historical-data/pending?limit={batch_size}", timeout=10)
-            
-            if not result:
-                return 0
-            
-            requests_list = result.get("requests", [])
-            
-            if not requests_list:
-                return 0
-            
-            completed = 0
-            
-            for req in requests_list:
-                try:
-                    # Fetch from IB
-                    result_data = self._fetch_historical_single(req)
-                    if result_data:
-                        # Report result to cloud - use short timeout, don't block on failure
-                        self._report_historical_result(result_data)
-                        completed += 1
-                        logger.info(f"[Historical] {result_data['symbol']} ({result_data['bar_size']}): {result_data.get('bar_count', 0)} bars")
-                except Exception as e:
-                    logger.error(f"[Historical] Request error: {e}")
-                    # Don't let one error block the whole batch
-                    continue
-                
-                # Small delay between IB requests to avoid pacing violations
-                time.sleep(1.0)
-            
-            return completed
-            
-        except Exception as e:
-            # Log but don't crash - historical data is lower priority than live trading
-            logger.debug(f"Historical data poll skipped: {e}")
-            return 0
-    
-    def _fetch_historical_single(self, request: dict) -> Optional[dict]:
-        """Fetch a single historical data request from IB."""
-        request_id = request.get("request_id")
-        symbol = request.get("symbol")
-        bar_size = request.get("bar_size", "1 day")
-        duration = request.get("duration", "1 Y")
-        
-        try:
-            from ib_insync import Stock
-            contract = Stock(symbol, "SMART", "USD")
-            
-            try:
-                self.ib.qualifyContracts(contract)
-            except Exception as e:
-                return {
-                    "request_id": request_id,
-                    "symbol": symbol,
-                    "bar_size": bar_size,
-                    "success": True,
-                    "status": "no_data",
-                    "data": [],
-                    "bar_count": 0,
-                    "error": f"Symbol not available: {e}"
-                }
-            
-            # Fetch from IB
-            bars = self.ib.reqHistoricalData(
-                contract,
-                endDateTime="",
-                durationStr=duration,
-                barSizeSetting=bar_size,
-                whatToShow="TRADES",
-                useRTH=True
-            )
-            
-            # Format bars
-            bar_data = []
-            for bar in bars:
-                bar_data.append({
-                    "date": bar.date.isoformat() if hasattr(bar.date, 'isoformat') else str(bar.date),
-                    "open": bar.open,
-                    "high": bar.high,
-                    "low": bar.low,
-                    "close": bar.close,
-                    "volume": bar.volume
-                })
-            
-            return {
-                "request_id": request_id,
-                "symbol": symbol,
-                "bar_size": bar_size,
-                "success": True,
-                "status": "success" if bar_data else "no_data",
-                "data": bar_data,
-                "bar_count": len(bar_data),
-                "error": None
-            }
-            
-        except Exception as e:
-            error_str = str(e)
-            if "pacing" in error_str.lower():
-                logger.warning(f"[Historical] {symbol}: IB PACING - waiting 10s")
-                time.sleep(10)
-                return None  # Will retry later
-            return {
-                "request_id": request_id,
-                "symbol": symbol,
-                "bar_size": bar_size,
-                "success": False,
-                "status": "error",
-                "data": [],
-                "bar_count": 0,
-                "error": error_str
-            }
-    
-    def _report_historical_result(self, result: dict):
-        """Report a historical data result to the cloud. Non-blocking with short timeout."""
-        try:
-            # Short timeout - if cloud is slow, just log and move on
-            # The data is collected, we can report later
-            self.api.post_safe("/api/ib/historical-data/result", result, timeout=10)
-        except Exception as e:
-            # Don't block on reporting failures
-            logger.debug(f"Could not report historical result (will retry): {e}")
-    
     def update_level2_subscriptions(self):
         """Dynamically update L2 subscriptions based on in-play stocks"""
         # Paper trading has a limit of 3 market depth subscriptions
@@ -1129,14 +976,17 @@ class IBDataPusher:
     
     def run(self, symbols: List[str] = None, enable_level2: bool = True):
         """
-        Main run loop (fully synchronous) with integrated historical data collection.
+        Main run loop (fully synchronous) - PURE TRADING MODE.
         
-        SIMPLIFIED SYSTEM:
-        - Always runs in "trading" mode (live quotes, orders, L2)
-        - Checks for priority_collection flag from cloud
-        - When priority=True: Fetches historical data more aggressively
-        - When priority=False: Fetches historical data at low priority (background)
-        - Live trading is NEVER paused
+        Handles:
+        - Live quotes and market data
+        - Order execution
+        - Position tracking
+        - Level 2 data
+        - News
+        
+        Historical data collection is handled by the separate
+        ib_historical_collector.py script.
         """
         if symbols is None:
             symbols = ["VIX", "SPY", "QQQ", "IWM"]
@@ -1150,7 +1000,6 @@ class IBDataPusher:
         logger.info(f"  Symbols: {symbols}")
         logger.info(f"  Level 2: {'Enabled' if enable_level2 and self.level2_enabled else 'Disabled'}")
         logger.info(f"  Cloudflare Evasion: ENABLED (browser headers + retry logic)")
-        logger.info(f"  Historical Data: INTEGRATED (priority-based)")
         
         # Subscribe to market data
         logger.info("Subscribing to market data...")
@@ -1178,16 +1027,6 @@ class IBDataPusher:
         order_poll_interval = 10  # Check for orders every 10 seconds
         last_order_poll = 0
         
-        # Historical data collection settings
-        historical_poll_interval_normal = 60     # Poll every 60s in normal mode
-        historical_poll_interval_priority = 10   # Poll every 10s in priority mode
-        historical_batch_size_normal = 2         # 2 requests per poll in normal mode
-        historical_batch_size_priority = 10      # 10 requests per poll in priority mode
-        last_historical_poll = 0
-        last_priority_check = 0
-        priority_check_interval = 30             # Check priority flag every 30 seconds
-        is_priority_mode = False
-        
         current_time = time.time()
         
         # Fetch news providers on startup
@@ -1197,14 +1036,16 @@ class IBDataPusher:
         # Force initial push immediately
         logger.info(f"")
         logger.info(f"========================================")
-        logger.info(f"==> STARTING PUSH LOOP")
+        logger.info(f"==> STARTING PUSH LOOP (TRADING ONLY)")
         logger.info(f"    Positions: {len(self.positions_data)}")
         logger.info(f"    Quotes: {len(self.quotes_buffer)}")
         logger.info(f"    Level 2 Subscriptions: {len(self.depth_subscriptions)}")
         logger.info(f"    News Providers: {[p['code'] for p in self.news_providers]}")
         logger.info(f"    Order Execution: ENABLED")
-        logger.info(f"    Historical Data: ENABLED (background)")
         logger.info(f"    Cloudflare Evasion: ENABLED")
+        logger.info(f"")
+        logger.info(f"    NOTE: Historical data collection is handled by")
+        logger.info(f"          ib_historical_collector.py (separate process)")
         logger.info(f"========================================")
         logger.info(f"")
         
@@ -1224,32 +1065,6 @@ class IBDataPusher:
                     
                     current_time = time.time()
                     
-                    # Check for priority collection flag periodically
-                    if current_time - last_priority_check >= priority_check_interval:
-                        priority_status = self.check_priority_collection()
-                        new_priority_mode = priority_status.get("priority", False)
-                        pending_count = priority_status.get("pending", 0)
-                        
-                        if new_priority_mode != is_priority_mode:
-                            is_priority_mode = new_priority_mode
-                            if is_priority_mode:
-                                logger.info(f"")
-                                logger.info(f"==> PRIORITY COLLECTION ENABLED ({pending_count} pending)")
-                                logger.info(f"    Historical data fetching accelerated")
-                                logger.info(f"    Live quotes still active (slower push rate)")
-                                logger.info(f"")
-                                # Slow down quote pushing during priority collection
-                                self.push_interval = 30.0
-                            else:
-                                logger.info(f"")
-                                logger.info(f"==> PRIORITY COLLECTION DISABLED")
-                                logger.info(f"    Normal trading mode resumed")
-                                logger.info(f"")
-                                # Restore normal quote push rate
-                                self.push_interval = 5.0
-                        
-                        last_priority_check = current_time
-                    
                     # Push data at regular intervals
                     if current_time - self.last_push_time >= self.push_interval:
                         self.push_data_to_cloud()
@@ -1259,8 +1074,7 @@ class IBDataPusher:
                         if push_count % 30 == 0:
                             l2_count = len(self.level2_buffer)
                             fund_count = len([f for f in self.fundamentals_buffer.values() if f.get("pe_ratio") or f.get("short_interest")])
-                            mode_str = "PRIORITY" if is_priority_mode else "normal"
-                            logger.info(f"Running [{mode_str}]... {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions, {l2_count} L2, {fund_count} fundamentals")
+                            logger.info(f"Running... {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions, {l2_count} L2, {fund_count} fundamentals")
                     
                     # Update L2 subscriptions based on in-play stocks (only if enabled and supported)
                     if enable_level2 and self.level2_enabled and (current_time - last_l2_update >= l2_update_interval):
@@ -1276,17 +1090,6 @@ class IBDataPusher:
                     if current_time - last_order_poll >= order_poll_interval:
                         self.poll_and_execute_orders()
                         last_order_poll = current_time
-                    
-                    # Historical data collection - adaptive based on priority mode
-                    poll_interval = historical_poll_interval_priority if is_priority_mode else historical_poll_interval_normal
-                    batch_size = historical_batch_size_priority if is_priority_mode else historical_batch_size_normal
-                    
-                    if current_time - last_historical_poll >= poll_interval:
-                        completed = self.poll_historical_data_requests(batch_size)
-                        if completed > 0:
-                            mode_str = "priority" if is_priority_mode else "background"
-                            logger.info(f"[Historical] Completed {completed} requests ({mode_str} mode)")
-                        last_historical_poll = current_time
                         
                 except Exception as e:
                     logger.error(f"Loop error: {e}")
@@ -2291,32 +2094,28 @@ def main():
     parser.add_argument("--symbols", nargs="+", default=["VIX", "SPY", "QQQ", "IWM"], help="Symbols to subscribe")
     parser.add_argument("--no-level2", action="store_true", help="Disable Level 2 / DOM data")
     parser.add_argument("--mode", choices=["trading", "collection", "auto"], default="trading",
-                        help="Operating mode: 'trading' (recommended - includes background historical data), "
-                             "'collection' (dedicated bulk collection), 'auto' (legacy - polls cloud for mode)")
+                        help="Operating mode: 'trading' (live quotes/orders only), "
+                             "'collection' (dedicated bulk collection), 'auto' (legacy)")
     
     args = parser.parse_args()
     
     print("=" * 60)
-    print("  IB Data Pusher - UNIFIED TRADING MODE")
+    print("  IB Data Pusher - LIVE TRADING MODE")
     print("  CLOUDFLARE EVASION: ENABLED")
-    print("  HISTORICAL DATA: INTEGRATED (priority-based)")
     print("=" * 60)
     print(f"  Cloud URL: {args.cloud_url}")
     print(f"  IB Gateway: {args.ib_host}:{args.ib_port}")
     print(f"  Symbols: {args.symbols}")
     print(f"  Level 2: {'Disabled' if args.no_level2 else 'Enabled'}")
     print(f"  Mode: {args.mode.upper()}")
-    if args.mode == "trading":
-        print(f"")
-        print(f"  How it works:")
-        print(f"  - Live quotes & orders always active")
-        print(f"  - Historical data collected in background")
-        print(f"  - Click 'Fill Gaps' in UI to prioritize collection")
-        print(f"  - Priority auto-disables when queue is empty")
-    elif args.mode == "collection":
-        print(f"  (Dedicated bulk collection mode)")
-    elif args.mode == "auto":
-        print(f"  (Legacy: Will poll cloud for mode changes)")
+    print("")
+    print("  This script handles:")
+    print("  - Live quotes & market data")
+    print("  - Order execution")
+    print("  - Position tracking")
+    print("")
+    print("  For historical data collection, run separately:")
+    print("  python ib_historical_collector.py --cloud-url ...")
     print("=" * 60)
     
     pusher = IBDataPusher(
@@ -2333,8 +2132,7 @@ def main():
         # Legacy auto mode - polls cloud and switches dynamically
         pusher.run_auto_mode(symbols=args.symbols, enable_level2=not args.no_level2)
     else:
-        # Default: Unified trading mode with integrated historical data collection
-        # This is the RECOMMENDED mode
+        # Default: Pure trading mode (live quotes, orders, positions)
         pusher.run(symbols=args.symbols, enable_level2=not args.no_level2)
 
 
