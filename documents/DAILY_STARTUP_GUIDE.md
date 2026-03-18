@@ -40,7 +40,7 @@ Forwarding                    https://pseudoaccidentally-linty-addie.ngrok-free.
 ### Step 3: Open Trading Platform
 Open your browser and go to:
 ```
-https://ai-data-hub-10.preview.emergentagent.com
+https://tradecommand.trade
 ```
 
 ### Step 4: Verify Connection
@@ -96,7 +96,7 @@ echo [3/4] Opening Trading Platform...
 timeout /t 2 /nobreak >nul
 
 :: Open browser to trading platform
-start "" "https://ai-data-hub-10.preview.emergentagent.com"
+start "" "https://tradecommand.trade"
 
 echo.
 echo [4/4] Startup Complete!
@@ -190,7 +190,7 @@ When you're done trading:
 
 | Component | URL/Location |
 |-----------|-------------|
-| Trading Platform | https://ai-data-hub-10.preview.emergentagent.com |
+| Trading Platform | https://tradecommand.trade |
 | ngrok Tunnel | https://pseudoaccidentally-linty-addie.ngrok-free.dev |
 | Local Ollama | http://localhost:11434 |
 | Default AI Model | deepseek-r1:8b |

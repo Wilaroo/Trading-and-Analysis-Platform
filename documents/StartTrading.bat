@@ -4,15 +4,15 @@ color 0A
 
 echo ============================================
 echo    TradeCommand Trading Platform Startup
-echo         (Updated March 16, 2026)
+echo         (Updated March 18, 2026)
 echo ============================================
 echo.
 
 :: =====================================================
 :: CONFIGURATION - EDIT THESE AS NEEDED
 :: =====================================================
-:: Cloud platform URL
-set CLOUD_URL=https://ai-data-hub-10.preview.emergentagent.com
+:: Production platform URL (custom domain)
+set CLOUD_URL=https://tradecommand.trade
 
 :: GitHub repo for auto-updates
 set GITHUB_RAW=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents

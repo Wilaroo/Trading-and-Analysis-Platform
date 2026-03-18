@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://ai-data-hub-10.preview.emergentagent.com
+https://tradecommand.trade
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://ai-data-hub-10.preview.emergentagent.com
+https://tradecommand.trade
 ```

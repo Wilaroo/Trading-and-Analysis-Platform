@@ -74,7 +74,7 @@ Forwarding                    https://pseudoaccidentally-linty-addie.ngrok-free.
 2. Go to this address:
 
 ```
-https://ai-data-hub-10.preview.emergentagent.com
+https://tradecommand.trade
 ```
 
 ✅ **Done!** TradeCommand is now running with AI enabled.
@@ -141,5 +141,5 @@ ollama serve
 
 **App URL:**
 ```
-https://ai-data-hub-10.preview.emergentagent.com
+https://tradecommand.trade
 ```

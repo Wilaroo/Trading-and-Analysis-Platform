@@ -8,10 +8,10 @@ echo ============================================
 echo.
 echo Choose your mode:
 echo.
-echo   1. CLOUD MODE (Current: Emergent Preview/Production)
-echo      - Uses cloud backend
+echo   1. CLOUD MODE (Production: tradecommand.trade)
+echo      - Uses production cloud backend
 echo      - Accessible from anywhere
-echo      - May have rate limits on preview
+echo      - Stable, deployed version
 echo.
 echo   2. LOCAL MODE  
 echo      - Runs backend on your PC

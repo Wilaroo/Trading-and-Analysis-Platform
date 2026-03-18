@@ -20,7 +20,7 @@ echo.
 :: CONFIGURATION
 :: =====================================================
 set SCRIPT_DIR=%~dp0
-set CLOUD_URL=https://ai-data-hub-10.preview.emergentagent.com
+set CLOUD_URL=https://tradecommand.trade
 
 :: =====================================================
 :: STEP 1: RUN STARTTRADING.BAT (but don't wait for health loop)
