@@ -115,12 +115,22 @@ Per user feedback, the explicit "Trading vs Collection Mode" toggle was replaced
 - **Files Modified**:
   - `backend/routers/ib.py` - Optimized `/historical-data/result` and `/historical-data/batch-result` endpoints
   - Added new endpoint: `POST /api/ib/historical-data/optimize-indexes` - Creates/verifies MongoDB indexes
+  - Added new endpoint: `GET /api/ib/mongodb/diagnostics` - Full MongoDB Atlas analysis with recommendations
 - **Additional Improvements**:
   - Don't store raw bar data in queue collection (saves space and time)
   - Created additional indexes for common query patterns
 - **Database Stats After Fix**:
-  - `ib_historical_data`: 2.76M documents, 565 MB data, 7 indexes (273 MB index size)
-  - `historical_data_requests`: 29K documents, 8 indexes
+  - `ib_historical_data`: 2.77M documents, 565 MB data, 7 indexes (274 MB index size)
+  - `historical_data_requests`: 29K documents, 9 indexes
+
+### March 18, 2026 - Atlas Performance Advisor Fixes
+- **Created indexes recommended by Atlas Performance Advisor**:
+  - `historical_data_requests`: `{bar_size: 1, status: 1, completed_at: -1}` - Fixes 927:1 scan ratio
+  - `live_alerts`: `{id: 1}` - Fixes full collection scan (12,370 docs)
+- **Updated `ib_historical_collector.py` script**:
+  - Auto-calls `/api/ib/historical-data/optimize-indexes` on startup
+  - Uses batch reporting via `/api/ib/historical-data/batch-result` for faster writes
+  - Reports all results in single API call instead of one-by-one
 
 ### March 17, 2026 - Simplified Priority Collection System (MAJOR)
 - **User Feedback**: "Trading vs Collection Mode" toggle was confusing and slow

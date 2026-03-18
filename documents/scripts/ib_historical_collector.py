@@ -86,6 +86,25 @@ class CloudAPIClient:
                 logger.error(f"Error on POST {endpoint}: {e}")
                 time.sleep(1)
         return None
+    
+    def optimize_indexes(self) -> bool:
+        """Call the index optimization endpoint on startup."""
+        logger.info("Optimizing MongoDB indexes for best performance...")
+        result = self.post("/api/ib/historical-data/optimize-indexes", {}, timeout=60)
+        if result and result.get("success"):
+            created = result.get("indexes_created", [])
+            verified = result.get("indexes_verified", [])
+            logger.info(f"  Indexes created: {len(created)}, verified: {len(verified)}")
+            
+            # Log collection stats if available
+            stats = result.get("collection_stats", {})
+            if stats.get("ib_historical_data"):
+                hd = stats["ib_historical_data"]
+                logger.info(f"  ib_historical_data: {hd.get('count', 0):,} docs, {hd.get('index_count', 0)} indexes")
+            return True
+        else:
+            logger.warning("  Could not optimize indexes (non-critical)")
+            return False
 
 
 class IBPacingManager:
@@ -212,9 +231,28 @@ class IBHistoricalCollector:
         return result is not None
     
     def report_result(self, result: dict) -> bool:
-        """Report collection result to cloud."""
+        """Report collection result to cloud (single result)."""
         resp = self.api.post("/api/ib/historical-data/result", result, timeout=30)
         return resp is not None
+    
+    def report_batch_results(self, results: List[dict]) -> dict:
+        """
+        Report multiple collection results to cloud in a single call.
+        Uses bulk_write on server side for optimal MongoDB performance.
+        
+        Returns:
+            dict with 'processed' count and 'bars_stored' count
+        """
+        if not results:
+            return {"processed": 0, "bars_stored": 0}
+        
+        resp = self.api.post("/api/ib/historical-data/batch-result", {"results": results}, timeout=60)
+        if resp:
+            return {
+                "processed": resp.get("processed", len(results)),
+                "bars_stored": resp.get("bars_stored", 0)
+            }
+        return {"processed": 0, "bars_stored": 0}
     
     def fetch_historical_data(self, request: dict) -> dict:
         """
@@ -341,6 +379,10 @@ class IBHistoricalCollector:
         logger.info("=" * 60)
         logger.info("")
         
+        # Optimize MongoDB indexes on startup for best performance
+        self.api.optimize_indexes()
+        logger.info("")
+        
         cycle = 0
         empty_cycles = 0
         
@@ -368,6 +410,9 @@ class IBHistoricalCollector:
                 empty_cycles = 0
                 logger.info(f"[Cycle {cycle}] Processing {len(requests)} requests...")
                 
+                # Collect results for batch reporting
+                batch_results = []
+                
                 for req in requests:
                     if not self.running:
                         break
@@ -383,23 +428,26 @@ class IBHistoricalCollector:
                     
                     # Fetch the data
                     result = self.fetch_historical_data(req)
+                    batch_results.append(result)
                     
-                    # Report result
-                    if self.report_result(result):
-                        if result["status"] == "success":
-                            self.stats["requests_completed"] += 1
-                            logger.info(f"  {symbol} ({bar_size}): {result['bar_count']} bars")
-                        elif result["status"] == "no_data":
-                            self.stats["requests_completed"] += 1
-                            logger.info(f"  {symbol} ({bar_size}): No data available")
-                        else:
-                            self.stats["requests_failed"] += 1
-                            logger.warning(f"  {symbol} ({bar_size}): {result['status']} - {result.get('error', 'Unknown error')}")
+                    # Log individual result
+                    if result["status"] == "success":
+                        self.stats["requests_completed"] += 1
+                        logger.info(f"  {symbol} ({bar_size}): {result['bar_count']} bars")
+                    elif result["status"] == "no_data":
+                        self.stats["requests_completed"] += 1
+                        logger.info(f"  {symbol} ({bar_size}): No data available")
                     else:
-                        logger.warning(f"  {symbol}: Failed to report result to cloud")
+                        self.stats["requests_failed"] += 1
+                        logger.warning(f"  {symbol} ({bar_size}): {result['status']} - {result.get('error', 'Unknown error')}")
                     
                     # Small delay between requests
                     time.sleep(1)
+                
+                # Report all results in a single batch call (uses bulk_write on server)
+                if batch_results:
+                    report_result = self.report_batch_results(batch_results)
+                    logger.info(f"  Batch reported: {report_result['processed']} results, {report_result['bars_stored']} bars stored to DB")
                 
                 # Progress report
                 elapsed = (datetime.now(timezone.utc) - self.stats["started_at"]).total_seconds() / 60
