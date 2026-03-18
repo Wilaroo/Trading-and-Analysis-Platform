@@ -1,0 +1,26 @@
+# TradeCommand Local ML Requirements
+# Install with: pip install -r requirements_local_ml.txt
+#
+# Note: Install PyTorch separately with CUDA support:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+# ML Libraries
+lightgbm>=4.0.0
+scikit-learn>=1.3.0
+scipy>=1.11.0
+
+# Deep Learning (install PyTorch with CUDA separately)
+# torch - install via: pip install torch --index-url https://download.pytorch.org/whl/cu121
+transformers>=4.30.0
+sentence-transformers>=2.2.0
+
+# Vector Database
+chromadb>=0.4.0
+
+# Data Processing
+numpy>=1.24.0
+pandas>=2.0.0
+
+# For embeddings
+tokenizers>=0.13.0
+safetensors>=0.3.0

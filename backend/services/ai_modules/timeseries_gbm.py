@@ -85,7 +85,19 @@ class TimeSeriesGBM:
     MODEL_COLLECTION = "timeseries_models"
     PREDICTIONS_COLLECTION = "timeseries_predictions"
     
+    # Check for GPU availability (for future PyTorch integration)
+    GPU_AVAILABLE = False
+    try:
+        import torch
+        GPU_AVAILABLE = torch.cuda.is_available()
+        if GPU_AVAILABLE:
+            GPU_NAME = torch.cuda.get_device_name(0)
+            logger.info(f"GPU detected: {GPU_NAME} - Will use for applicable operations")
+    except ImportError:
+        pass
+    
     # Default model parameters - optimized for imbalanced classification
+    # LightGBM uses CPU by default (very efficient), GPU mode available for large datasets
     DEFAULT_PARAMS = {
         "objective": "binary",
         "metric": "auc",
@@ -99,8 +111,12 @@ class TimeSeriesGBM:
         "max_depth": 8,  # Limit tree depth
         "is_unbalance": True,  # Handle class imbalance automatically
         "verbose": -1,
-        "n_jobs": -1,
-        "seed": 42
+        "n_jobs": -1,  # Use all CPU cores
+        "seed": 42,
+        # GPU acceleration (uncomment if you have LightGBM compiled with GPU support)
+        # "device": "gpu",
+        # "gpu_platform_id": 0,
+        # "gpu_device_id": 0,
     }
     
     # Prediction threshold for "up" classification
