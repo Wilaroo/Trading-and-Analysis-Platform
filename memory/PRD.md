@@ -79,6 +79,29 @@ Build a self-improving AI trading bot system "SentCom" with:
 - ✅ **SIMPLIFIED PRIORITY COLLECTION SYSTEM** (March 17, 2026) - Replaces confusing mode toggle
 - ✅ **FIX: MongoDB Atlas Write Performance** (March 18, 2026) - Bulk write optimization for historical data
 - ✅ **UNIFIED DATA COLLECTION** (March 18, 2026) - Consolidated historical_bars into ib_historical_data
+- ✅ **HYBRID DATA ARCHITECTURE** (March 18, 2026) - IB real-time + MongoDB historical + Alpaca fallback
+
+## Data Architecture (March 18, 2026)
+
+### Real-Time Data Priority
+| Data Type | Primary | Fallback |
+|-----------|---------|----------|
+| Current Price | IB Pushed | Alpaca |
+| Current Volume | IB Pushed | Alpaca |
+
+### Historical Data Priority  
+| Data Type | Primary | Fallback |
+|-----------|---------|----------|
+| Daily Bars (ATR, RVOL) | ib_historical_data (MongoDB) | Alpaca API |
+| Previous Close | ib_historical_data (MongoDB) | Alpaca API |
+| Intraday Bars | Alpaca API | - |
+
+### Services Using Hybrid Approach
+- RealTimeTechnicalService: IB quotes + MongoDB daily bars
+- Brief Me Agent: IB quotes + MongoDB prev close
+- Smart Stop Service: MongoDB for ATR/volume
+- Scanner: IB quotes + MongoDB historical
+- AI Training: MongoDB only (ib_historical_data)
 
 ### Phase 5: Priority-Based Data Collection ✅ (SIMPLIFIED)
 Per user feedback, the explicit "Trading vs Collection Mode" toggle was replaced with a simpler priority-based system:
