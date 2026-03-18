@@ -1038,7 +1038,7 @@ const AIModulesPanel = ({ aiStatus, onToggleModule, onSetShadowMode, actionLoadi
 // ============================================================================
 
 // Hook for AI Insights data
-const useAIInsights = (pollInterval = 15000) => {
+const useAIInsights = (pollInterval = 60000) => {  // Increased to 60s to avoid 429s
   const [shadowDecisions, setShadowDecisions] = useState([]);
   const [shadowPerformance, setShadowPerformance] = useState(null);
   const [timeseriesStatus, setTimeseriesStatus] = useState(null);
@@ -1056,12 +1056,19 @@ const useAIInsights = (pollInterval = 15000) => {
         fetch(`${API_BASE}/api/ai-modules/timeseries/predictions?limit=10`)
       ]);
 
+      // Handle rate limiting gracefully - skip parsing if any request was rate limited
+      const responses = [decisionsRes, performanceRes, timeseriesRes, accuracyRes, predictionsRes];
+      if (responses.some(r => r.status === 429)) {
+        console.warn('AI insights rate limited, will retry later');
+        return;
+      }
+
       const [decisionsData, performanceData, timeseriesData, accuracyData, predictionsData] = await Promise.all([
-        decisionsRes.json(),
-        performanceRes.json(),
-        timeseriesRes.json(),
-        accuracyRes.json(),
-        predictionsRes.json()
+        decisionsRes.ok ? decisionsRes.json().catch(() => ({})) : {},
+        performanceRes.ok ? performanceRes.json().catch(() => ({})) : {},
+        timeseriesRes.ok ? timeseriesRes.json().catch(() => ({})) : {},
+        accuracyRes.ok ? accuracyRes.json().catch(() => ({})) : {},
+        predictionsRes.ok ? predictionsRes.json().catch(() => ({})) : {}
       ]);
 
       if (decisionsData.success) setShadowDecisions(decisionsData.decisions || []);
@@ -1648,7 +1655,7 @@ const useMarketSession = (pollInterval = 30000) => {
   return { session, loading, refresh: fetchSession };
 };
 
-const useSentComStatus = (pollInterval = 15000) => {
+const useSentComStatus = (pollInterval = 60000) => {  // Increased to 60s to avoid 429s
   const { getCached, setCached } = useDataCache();
   const isFirstMount = useRef(true);
   
@@ -1695,7 +1702,7 @@ const useSentComStatus = (pollInterval = 15000) => {
   return { status, loading, error, refresh: fetchStatus };
 };
 
-const useSentComStream = (pollInterval = 15000) => {
+const useSentComStream = (pollInterval = 45000) => {  // Increased to 45s to avoid 429s
   const { getCached, setCached } = useDataCache();
   const isFirstMount = useRef(true);
   
@@ -1708,7 +1715,15 @@ const useSentComStream = (pollInterval = 15000) => {
   const fetchStream = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/sentcom/stream?limit=20`);
-      const data = await res.json();
+      
+      // Handle rate limiting gracefully
+      if (res.status === 429) {
+        console.warn('Stream rate limited, will retry later');
+        return;
+      }
+      if (!res.ok) return;
+      
+      const data = await res.json().catch(() => ({}));
       if (data.success && data.messages) {
         // Separate chat messages from status/system messages
         const chatMessages = data.messages.filter(m => 
@@ -1760,7 +1775,7 @@ const useSentComStream = (pollInterval = 15000) => {
   return { messages, loading, refresh: fetchStream };
 };
 
-const useSentComPositions = (pollInterval = 15000) => {
+const useSentComPositions = (pollInterval = 30000) => {  // Increased to 30s to avoid 429s
   const { getCached, setCached } = useDataCache();
   const isFirstMount = useRef(true);
   
@@ -2847,6 +2862,37 @@ const SentCom = ({ compact = false, embedded = false }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message })
       });
+      
+      // Handle rate limiting (429) gracefully
+      if (res.status === 429) {
+        const errorMsg = {
+          id: `error_${Date.now()}`,
+          type: 'chat',
+          content: "Too many requests - please wait a moment and try again.",
+          timestamp: new Date().toISOString(),
+          action_type: 'chat_response',
+          metadata: { role: 'assistant', error: true }
+        };
+        setLocalMessages(prev => [...prev, errorMsg]);
+        return { success: false, error: 'Rate limited' };
+      }
+      
+      // Check if response is JSON before parsing
+      const contentType = res.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        console.error('Non-JSON response:', await res.text());
+        const errorMsg = {
+          id: `error_${Date.now()}`,
+          type: 'chat',
+          content: "Server is busy - please try again in a few seconds.",
+          timestamp: new Date().toISOString(),
+          action_type: 'chat_response',
+          metadata: { role: 'assistant', error: true }
+        };
+        setLocalMessages(prev => [...prev, errorMsg]);
+        return { success: false, error: 'Non-JSON response' };
+      }
+      
       const data = await res.json();
       
       // Add assistant response AFTER user message (slightly later timestamp)
