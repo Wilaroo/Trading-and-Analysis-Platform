@@ -149,6 +149,8 @@ popd
 :: Start frontend
 start "TradeCommand Frontend" cmd /k "title TradeCommand Frontend - localhost:3000 && color 0B && cd /d %FRONTEND_DIR% && yarn start"
 echo        Frontend starting on port 3000...
+echo        Waiting for frontend to compile - 15 seconds...
+timeout /t 15 /nobreak >nul
 echo.
 
 :: =====================================================
