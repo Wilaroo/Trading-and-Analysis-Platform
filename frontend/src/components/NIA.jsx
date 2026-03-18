@@ -63,7 +63,7 @@ import {
   Shuffle
 } from 'lucide-react';
 import { toast } from 'sonner';
-import api from '../utils/api';
+import api, { apiLongRunning } from '../utils/api';
 import { useDataCache } from '../contexts';
 import MarketScannerPanel from './MarketScannerPanel';
 import AdvancedBacktestPanel from './AdvancedBacktestPanel';
@@ -138,18 +138,28 @@ const TrainAllPanel = memo(({ onTrainComplete }) => {
     try {
       // Step 1: Train Time-Series AI
       setCurrentStep('timeseries');
-      newProgress.timeseries = { status: 'running', message: 'Training model...' };
+      newProgress.timeseries = { status: 'running', message: 'Training model (this may take 1-2 min)...' };
       setProgress({ ...newProgress });
       
       try {
-        const tsRes = await api.post('/api/ai-modules/timeseries/train');
-        if (tsRes.data?.success) {
-          newProgress.timeseries = { status: 'completed', message: 'Model trained successfully' };
+        // Use long-running API client for training (5 min timeout)
+        const tsRes = await apiLongRunning.post('/api/ai-modules/timeseries/train', { max_symbols: 100 });
+        if (tsRes.data?.success && tsRes.data?.result?.success) {
+          const metrics = tsRes.data.result.metrics;
+          const accuracy = metrics?.accuracy ? (metrics.accuracy * 100).toFixed(1) : '?';
+          const samples = tsRes.data.result.samples || metrics?.training_samples || 0;
+          newProgress.timeseries = { 
+            status: 'completed', 
+            message: `Model trained (${accuracy}% accuracy, ${samples.toLocaleString()} samples)` 
+          };
         } else {
-          newProgress.timeseries = { status: 'warning', message: 'Training skipped - check data' };
+          const errorMsg = tsRes.data?.result?.error || 'Training incomplete - check data';
+          newProgress.timeseries = { status: 'warning', message: errorMsg };
         }
       } catch (e) {
-        newProgress.timeseries = { status: 'warning', message: 'No training data yet' };
+        console.error('Time-Series training error:', e);
+        const errorMsg = e.response?.data?.detail || e.message || 'Training failed';
+        newProgress.timeseries = { status: 'warning', message: `Error: ${errorMsg}` };
       }
       setProgress({ ...newProgress });
 
@@ -159,9 +169,14 @@ const TrainAllPanel = memo(({ onTrainComplete }) => {
       setProgress({ ...newProgress });
       
       try {
-        await api.post('/api/learning-connectors/sync/all');
-        newProgress.connectors = { status: 'completed', message: 'All connectors synced' };
+        const connRes = await apiLongRunning.post('/api/learning-connectors/sync/all');
+        if (connRes.data?.synced_count > 0) {
+          newProgress.connectors = { status: 'completed', message: `${connRes.data.synced_count} connectors synced` };
+        } else {
+          newProgress.connectors = { status: 'completed', message: 'All connectors synced' };
+        }
       } catch (e) {
+        console.error('Learning connectors error:', e);
         newProgress.connectors = { status: 'warning', message: 'Some connectors skipped' };
       }
       setProgress({ ...newProgress });
@@ -172,10 +187,15 @@ const TrainAllPanel = memo(({ onTrainComplete }) => {
       setProgress({ ...newProgress });
       
       try {
-        await api.post('/api/learning-connectors/sync/run-all-calibrations');
-        newProgress.calibration = { status: 'completed', message: 'Scanner optimized' };
+        const calRes = await apiLongRunning.post('/api/learning-connectors/sync/run-all-calibrations');
+        if (calRes.data?.calibrations_run > 0) {
+          newProgress.calibration = { status: 'completed', message: `${calRes.data.calibrations_run} thresholds optimized` };
+        } else {
+          newProgress.calibration = { status: 'warning', message: 'No calibration data yet (needs trade outcomes)' };
+        }
       } catch (e) {
-        newProgress.calibration = { status: 'warning', message: 'Calibration needs more data' };
+        console.error('Calibration error:', e);
+        newProgress.calibration = { status: 'warning', message: 'Calibration needs trade outcomes' };
       }
       setProgress({ ...newProgress });
 
