@@ -108,16 +108,25 @@ class TechnicalSnapshot:
 class RealTimeTechnicalService:
     """
     Service for calculating real-time technical indicators
-    using actual market data. Prefers IB pushed data for quotes
-    when available, falls back to Alpaca for historical bars.
+    using actual market data. 
+    
+    Data source priority:
+    - Current quotes: IB pushed data (primary) -> Alpaca (fallback)
+    - Daily bars (for RVOL, ATR): ib_historical_data (MongoDB) -> Alpaca (fallback)
+    - Intraday bars (for VWAP, EMA): Alpaca (real-time needed)
     """
     
     def __init__(self):
         self._alpaca_service = None
+        self._db = None
         self._cache: Dict[str, TechnicalSnapshot] = {}
         self._cache_ttl = 120  # 2 minute cache for technical data
         self._spy_change_pct: float = 0.0  # Cached SPY daily % change
         self._spy_cache_time: Optional[datetime] = None
+    
+    def set_db(self, db):
+        """Set MongoDB connection for historical data access"""
+        self._db = db
         
     @property
     def alpaca(self):
@@ -125,6 +134,27 @@ class RealTimeTechnicalService:
             from services.alpaca_service import get_alpaca_service
             self._alpaca_service = get_alpaca_service()
         return self._alpaca_service
+    
+    def _get_daily_bars_from_db(self, symbol: str, limit: int = 50) -> Optional[List[Dict]]:
+        """Get daily bars from ib_historical_data (fast, no API call)"""
+        if self._db is None:
+            return None
+        try:
+            bars = list(self._db["ib_historical_data"].find(
+                {"symbol": symbol.upper(), "bar_size": "1 day"},
+                {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+            ).sort("date", -1).limit(limit))
+            
+            if bars and len(bars) >= 10:
+                # Reverse to chronological order (oldest first)
+                bars.reverse()
+                # Rename 'date' to 'timestamp' for compatibility
+                for bar in bars:
+                    bar['timestamp'] = bar.pop('date', None)
+                return bars
+        except Exception as e:
+            logger.debug(f"Error fetching daily bars for {symbol}: {e}")
+        return None
     
     def _get_ib_quote(self, symbol: str) -> Optional[Dict]:
         """Try to get quote from IB pushed data (non-async)"""
@@ -177,7 +207,9 @@ class RealTimeTechnicalService:
     async def get_technical_snapshot(self, symbol: str, force_refresh: bool = False) -> Optional[TechnicalSnapshot]:
         """
         Get comprehensive technical snapshot for a symbol.
-        Uses IB pushed data for real-time quotes, Alpaca for historical bars.
+        Uses IB pushed data for real-time quotes.
+        Uses ib_historical_data (MongoDB) for daily bars (RVOL, ATR).
+        Falls back to Alpaca when data not available.
         """
         symbol = symbol.upper()
         
@@ -194,11 +226,15 @@ class RealTimeTechnicalService:
                 return cached
         
         try:
-            # Get intraday bars (5-min) for VWAP, EMA, intraday levels (from Alpaca)
+            # Get intraday bars (5-min) for VWAP, EMA, intraday levels (from Alpaca - real-time needed)
             intraday_bars = await self.alpaca.get_bars(symbol, "5Min", 78)  # ~6.5 hours of data
             
-            # Get daily bars for ATR, average volume, daily levels (from Alpaca)
-            daily_bars = await self.alpaca.get_bars(symbol, "1Day", 50)
+            # Get daily bars for ATR, average volume, daily levels
+            # Priority: ib_historical_data (MongoDB) -> Alpaca API
+            daily_bars = self._get_daily_bars_from_db(symbol, limit=50)
+            if not daily_bars or len(daily_bars) < 10:
+                # Fallback to Alpaca
+                daily_bars = await self.alpaca.get_bars(symbol, "1Day", 50)
             
             # Get current quote - prefer IB pushed data, fallback to Alpaca
             ib_quote = self._get_ib_quote(symbol)
@@ -713,4 +749,12 @@ def get_technical_service() -> RealTimeTechnicalService:
     global _technical_service
     if _technical_service is None:
         _technical_service = RealTimeTechnicalService()
+        # Inject MongoDB for historical data access
+        try:
+            from database import get_database
+            db = get_database()
+            _technical_service.set_db(db)
+            logger.info("RealTimeTechnicalService initialized with ib_historical_data")
+        except Exception as e:
+            logger.warning(f"Could not inject database into technical service: {e}")
     return _technical_service
