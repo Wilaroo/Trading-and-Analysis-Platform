@@ -370,14 +370,17 @@ class IBHistoricalCollector:
         
         return result
     
-    def run(self, batch_size: int = 5, continuous: bool = True):
+    def run(self, batch_size: int = 5, continuous: bool = True, min_delay: float = 1.0):
         """
         Main collection loop.
         
         Args:
             batch_size: Number of requests to fetch per cycle
             continuous: If True, keep running until stopped. If False, run once.
+            min_delay: Minimum delay between requests (seconds)
         """
+        self.min_delay = min_delay  # Store for use in loop
+        
         if not self.connect():
             return
         
@@ -393,6 +396,7 @@ class IBHistoricalCollector:
         logger.info(f"  Client ID: {self.client_id}")
         logger.info(f"  Batch Size: {batch_size}")
         logger.info(f"  Mode: {'Continuous' if continuous else 'Single Run'}")
+        logger.info(f"  Min Delay: {min_delay}s between requests")
         logger.info(f"  Pacing: Max {self.pacing.max_requests} requests per 10 min")
         logger.info("=" * 60)
         logger.info("")
@@ -465,8 +469,8 @@ class IBHistoricalCollector:
                         self.stats["requests_failed"] += 1
                         logger.warning(f"  {symbol} ({bar_size}): {result['status']} - {result.get('error', 'Unknown error')}")
                     
-                    # Small delay between requests
-                    time.sleep(1)
+                    # Delay between requests (configurable via min_delay)
+                    time.sleep(self.min_delay)
                 
                 # Report all results in a single batch call (uses bulk_write on server)
                 if batch_results:
@@ -549,8 +553,34 @@ def main():
                         help="Run once and exit (don't loop continuously)")
     parser.add_argument("--slow", action="store_true",
                         help="Slow mode - longer delays between requests for unstable connections")
+    parser.add_argument("--fast", action="store_true",
+                        help="Fast mode - maximize throughput (use when IB is dedicated to collection)")
+    parser.add_argument("--turbo", action="store_true",
+                        help="Turbo mode - aggressive collection (may hit pacing limits, auto-recovers)")
     
     args = parser.parse_args()
+    
+    # Determine speed mode and settings
+    if args.turbo:
+        speed_mode = "TURBO"
+        batch_size = max(args.batch_size, 10)  # Larger batches
+        pacing_requests = 58  # Push closer to limit
+        min_delay = 0.3  # Minimal delay
+    elif args.fast:
+        speed_mode = "FAST"
+        batch_size = max(args.batch_size, 8)  # Larger batches
+        pacing_requests = 55  # Standard buffer
+        min_delay = 0.5  # Slightly reduced delay
+    elif args.slow:
+        speed_mode = "SLOW"
+        batch_size = min(args.batch_size, 2)  # Smaller batches
+        pacing_requests = 50  # More conservative
+        min_delay = 2.0  # Longer delays
+    else:
+        speed_mode = "NORMAL"
+        batch_size = args.batch_size
+        pacing_requests = 55
+        min_delay = 1.0
     
     print("=" * 60)
     print("  IB Historical Data Collector")
@@ -559,9 +589,11 @@ def main():
     print(f"  Cloud URL: {args.cloud_url}")
     print(f"  IB Gateway: {args.ib_host}:{args.ib_port}")
     print(f"  Client ID: {args.client_id}")
-    print(f"  Batch Size: {args.batch_size}")
+    print(f"  Batch Size: {batch_size}")
     print(f"  Mode: {'Single Run' if args.once else 'Continuous'}")
-    print(f"  Speed: {'SLOW (for unstable connections)' if args.slow else 'Normal'}")
+    print(f"  Speed: {speed_mode}")
+    if speed_mode in ["FAST", "TURBO"]:
+        print(f"  ⚡ Optimized for dedicated collection - max throughput")
     print("")
     print("  NOTE: Run this alongside ib_data_pusher.py")
     print("        Trading continues unaffected while collecting data")
@@ -574,10 +606,10 @@ def main():
         client_id=args.client_id
     )
     
-    # If slow mode, reduce batch size further
-    batch_size = min(args.batch_size, 2) if args.slow else args.batch_size
+    # Apply speed settings to pacing manager
+    collector.pacing.max_requests = pacing_requests
     
-    collector.run(batch_size=batch_size, continuous=not args.once)
+    collector.run(batch_size=batch_size, continuous=not args.once, min_delay=min_delay)
 
 
 if __name__ == "__main__":
