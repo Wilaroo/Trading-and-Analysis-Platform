@@ -49,6 +49,22 @@ async def get_connection_status():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/status")
+async def get_status():
+    """Get overall learning connectors status (alias for /connections)"""
+    try:
+        service = get_learning_connectors()
+        status = service.get_connection_status()
+        
+        return {
+            "success": True,
+            **status
+        }
+    except Exception as e:
+        logger.error(f"Error getting status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/metrics")
 async def get_learning_metrics():
     """Get overall learning system metrics"""
