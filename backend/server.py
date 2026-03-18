@@ -34,6 +34,8 @@ from routers.trades import router as trades_router, init_trade_journal_service
 from routers.catalyst import router as catalyst_router, init_catalyst_service
 from routers.rules import router as rules_router, init_trading_rules
 from routers.ib import router as ib_router, init_ib_service
+# Refactored IB modules are available at routers.ib_modules but not yet active
+# from routers.ib_modules import router as ib_historical_router
 from routers.strategies import router as strategies_router, init_strategy_service
 from routers.scoring import router as scoring_router
 from routers.features import router as features_router
@@ -362,6 +364,8 @@ app.include_router(trades_router)
 app.include_router(catalyst_router)
 app.include_router(rules_router)
 app.include_router(ib_router)
+# Refactored IB historical endpoints available but not active yet
+# app.include_router(ib_historical_router, prefix="/api/ib")
 app.include_router(strategies_router)
 app.include_router(scoring_router)
 app.include_router(features_router)

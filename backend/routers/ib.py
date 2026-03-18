@@ -1919,19 +1919,6 @@ async def get_historical_data_request_status(request_id: str):
     except Exception as e:
         logger.error(f"Error getting historical data request status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-        logger.warning(f"MongoDB status failed, using legacy: {e}")
-        return {
-            "success": True,
-            "pending": list(_order_queue_legacy["pending"].values()),
-            "executing": list(_order_queue_legacy["executing"].values()),
-            "completed": list(_order_queue_legacy["completed"].values())[-20:],
-            "counts": {
-                "pending": len(_order_queue_legacy["pending"]),
-                "executing": len(_order_queue_legacy["executing"]),
-                "completed": len(_order_queue_legacy["completed"])
-            },
-            "storage": "memory"
-        }
 
 
 @router.delete("/orders/queue/{order_id}")
