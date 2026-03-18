@@ -4680,11 +4680,27 @@ async def call_ollama_via_http_proxy(model: str, messages: list, options: dict =
     """Call Ollama through the HTTP proxy"""
     import uuid
     
-    # Check if any HTTP proxy is connected
-    active_sessions = [
-        sid for sid, info in _http_proxy_sessions.items()
-        if info.get("ollama_status", {}).get("available", False)
-    ]
+    # Check if any HTTP proxy is connected (check both ollama_status.available and recent heartbeat)
+    now = datetime.now(timezone.utc)
+    active_sessions = []
+    for sid, info in _http_proxy_sessions.items():
+        # Check for recent heartbeat (within 2 minutes)
+        last_hb = info.get("last_heartbeat", "")
+        if last_hb:
+            try:
+                hb_time = datetime.fromisoformat(last_hb.replace('Z', '+00:00'))
+                is_recent = (now - hb_time).total_seconds() < 120
+            except:
+                is_recent = False
+        else:
+            is_recent = False
+        
+        # Check if Ollama is available (either via ollama_status or just has models)
+        ollama_status = info.get("ollama_status", {})
+        is_available = ollama_status.get("available", False) or len(ollama_status.get("models", [])) > 0
+        
+        if is_recent and is_available:
+            active_sessions.append(sid)
     
     if not active_sessions:
         return {"success": False, "error": "No HTTP proxy connected"}
