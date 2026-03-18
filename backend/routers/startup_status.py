@@ -7,7 +7,6 @@ This endpoint provides a fast snapshot of system status for the UI.
 from fastapi import APIRouter
 from datetime import datetime, timezone
 import logging
-import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -32,20 +31,29 @@ async def get_startup_status():
         except Exception as e:
             logger.warning(f"DB check failed: {e}")
         
-        # Quick IB check
+        # Quick IB check - check both pushed data AND direct IB service
         ib_status = {"status": "waiting", "message": "No data received yet"}
         try:
-            import server
-            ib_pushed_data = getattr(server, 'ib_pushed_data', None)
-            if ib_pushed_data:
-                positions = ib_pushed_data.get("positions", [])
-                quotes = ib_pushed_data.get("quotes", {})
-                if quotes or positions:
-                    ib_status = {
-                        "status": "ready",
-                        "positions": len(positions),
-                        "quotes": len(quotes)
-                    }
+            # First check if IB service is connected directly
+            from services.ib_service import get_ib_service
+            ib_service = get_ib_service()
+            if ib_service and hasattr(ib_service, 'ib') and ib_service.ib:
+                if ib_service.ib.isConnected():
+                    ib_status = {"status": "ready", "message": "Connected via IB service"}
+            
+            # Also check pushed data (from external IB Data Pusher)
+            if ib_status["status"] != "ready":
+                import server
+                ib_pushed_data = getattr(server, 'ib_pushed_data', None)
+                if ib_pushed_data:
+                    positions = ib_pushed_data.get("positions", [])
+                    quotes = ib_pushed_data.get("quotes", {})
+                    if quotes or positions:
+                        ib_status = {
+                            "status": "ready",
+                            "positions": len(positions),
+                            "quotes": len(quotes)
+                        }
         except Exception as e:
             logger.warning(f"IB check failed: {e}")
         
@@ -75,15 +83,19 @@ async def get_startup_status():
         except Exception:
             pass
         
-        # Quick trading bot check
+        # Quick trading bot check - use the actual trading bot service
         bot_status = {"status": "initializing", "message": "Starting up"}
         try:
-            from services.sentcom_orchestrator import get_orchestrator
-            orch = get_orchestrator()
-            if orch and hasattr(orch, 'trading_bot') and orch.trading_bot:
-                bot_status = {"status": "ready", "running": True}
-        except Exception:
-            pass
+            from services.trading_bot_service import get_trading_bot_service
+            bot = get_trading_bot_service()
+            if bot is not None:
+                bot_status = {
+                    "status": "ready",
+                    "running": getattr(bot, 'running', False),
+                    "mode": "AUTONOMOUS" if getattr(bot, 'autonomous_mode', False) else "MANUAL"
+                }
+        except Exception as e:
+            logger.warning(f"Bot check failed: {e}")
         
         # Quick scanner check
         scanner_status = {"status": "initializing", "message": "Starting up"}

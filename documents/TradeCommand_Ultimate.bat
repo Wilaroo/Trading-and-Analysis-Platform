@@ -151,6 +151,7 @@ taskkill /F /FI "WINDOWTITLE eq TradeCommand Frontend*" >nul 2>&1
 echo REACT_APP_BACKEND_URL=http://localhost:8001> "%FRONTEND_DIR%\.env"
 echo DANGEROUSLY_DISABLE_HOST_CHECK=true>> "%FRONTEND_DIR%\.env"
 echo FAST_REFRESH=false>> "%FRONTEND_DIR%\.env"
+echo BROWSER=none>> "%FRONTEND_DIR%\.env"
 
 start "TradeCommand Frontend" cmd /k "title TradeCommand Frontend && color 0B && cd /d %FRONTEND_DIR% && yarn start"
 echo        Frontend starting on port 3000...
