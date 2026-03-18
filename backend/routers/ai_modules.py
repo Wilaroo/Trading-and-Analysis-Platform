@@ -939,17 +939,26 @@ async def get_timeseries_status():
 
 class TrainRequest(BaseModel):
     symbols: Optional[List[str]] = Field(None, description="Symbols to train on")
+    max_symbols: Optional[int] = Field(100, description="Maximum number of symbols to train on (default: 100)")
 
 
 @router.post("/timeseries/train")
 async def train_timeseries_model(request: Optional[TrainRequest] = None):
-    """Train/update the time-series model"""
+    """
+    Train/update the time-series model.
+    
+    Args (in request body):
+        symbols: Optional list of specific symbols to train on
+        max_symbols: Maximum number of symbols (default: 100, max: 500)
+    """
     if not _timeseries_ai:
         raise HTTPException(status_code=503, detail="Time-series AI not initialized")
     
     try:
         symbols = request.symbols if request else None
-        result = await _timeseries_ai.train_model(symbols=symbols)
+        max_symbols = min(request.max_symbols if request and request.max_symbols else 100, 500)
+        
+        result = await _timeseries_ai.train_model(symbols=symbols, max_symbols=max_symbols)
         
         return {
             "success": result.get("success", False),

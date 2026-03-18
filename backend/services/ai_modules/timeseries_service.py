@@ -151,21 +151,23 @@ class TimeSeriesAIService:
         
     async def train_model(
         self,
-        symbols: List[str] = None
+        symbols: List[str] = None,
+        max_symbols: int = 100
     ) -> Dict[str, Any]:
         """
         Train/update the model with historical data from MongoDB.
         
         Args:
             symbols: List of symbols to train on (default: fetch from history)
+            max_symbols: Maximum number of symbols to train on (default: 100)
             
         Returns:
             Training result with metrics
         """
         if self._db is None:
             return {"success": False, "error": "Database not connected"}
-            
-        logger.info("Starting model training from MongoDB ib_historical_data (unified dataset)...")
+        
+        logger.info(f"Starting model training from MongoDB ib_historical_data (up to {max_symbols} symbols)...")
         
         try:
             # Get historical bars directly from MongoDB
@@ -173,21 +175,22 @@ class TimeSeriesAIService:
             
             if symbols is None:
                 # Get symbols with most data from MongoDB
-                symbols = await self._get_training_symbols_from_db()
+                symbols = await self._get_training_symbols_from_db(limit=max_symbols)
                 
-            logger.info(f"Training symbols: {symbols}")
+            logger.info(f"Training symbols: {len(symbols)} symbols queued")
             
-            for symbol in symbols[:30]:  # Train on up to 30 symbols
+            for symbol in symbols[:max_symbols]:  # Train on up to max_symbols
                 bars = await self._get_historical_bars_from_db(symbol)
                 if bars and len(bars) >= self.MIN_BARS_FOR_TRAINING:
                     bars_by_symbol[symbol] = bars
-                    logger.info(f"  {symbol}: {len(bars)} bars")
+                    if len(bars_by_symbol) % 20 == 0:  # Log progress every 20 symbols
+                        logger.info(f"  Loaded {len(bars_by_symbol)} symbols...")
                     
             if not bars_by_symbol:
                 return {"success": False, "error": "No historical data available in MongoDB"}
                 
             total_bars = sum(len(b) for b in bars_by_symbol.values())
-            logger.info(f"Training on {len(bars_by_symbol)} symbols, {total_bars} total bars")
+            logger.info(f"Training on {len(bars_by_symbol)} symbols, {total_bars:,} total bars")
             
             # Train model
             metrics = self._model.train(bars_by_symbol)
@@ -206,7 +209,7 @@ class TimeSeriesAIService:
             logger.error(f"Training error: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
             
-    async def _get_training_symbols_from_db(self) -> List[str]:
+    async def _get_training_symbols_from_db(self, limit: int = 100) -> List[str]:
         """Get symbols with most historical data from MongoDB (unified ib_historical_data)"""
         if self._db is None:
             return []
@@ -218,7 +221,7 @@ class TimeSeriesAIService:
                 {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
                 {"$match": {"count": {"$gte": 100}}},  # At least 100 bars
                 {"$sort": {"count": -1}},
-                {"$limit": 30}
+                {"$limit": limit}
             ]
             result = list(self._db["ib_historical_data"].aggregate(pipeline))
             symbols = [r["_id"] for r in result]
