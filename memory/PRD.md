@@ -1,252 +1,120 @@
-# SentCom AI Trading Bot - Product Requirements Document
+# TradeCommand PRD - Product Requirements Document
 
 ## Original Problem Statement
-Build a self-improving AI trading bot system "SentCom" with:
-1. Robust data pipeline for historical data collection
-2. Autonomous learning loop (nightly/weekend automation)
-3. Comprehensive UI for AI, learning, and data management
-4. Data coverage dashboard for tracking collected data
-5. High-quality live scanner with AI predictions
+Build a self-improving AI trading bot ("SentCom") with:
+- Robust data pipeline for multiple timeframes
+- Autonomous learning loop (nightly/weekend automation)
+- Comprehensive UI consolidating all AI/learning features
+- High-quality live scanner with actionable alerts
+- Persistent MongoDB Atlas storage
 
-## Core Architecture
-```
-/app
-├── backend/          # FastAPI backend
-│   ├── routers/      # API endpoints
-│   ├── services/     # Business logic
-│   ├── models/       # Data models
-│   └── agents/       # AI agents
-├── frontend/         # React frontend
-│   ├── src/
-│   │   ├── components/   # UI components
-│   │   ├── pages/        # Page components
-│   │   ├── hooks/        # Custom hooks
-│   │   └── contexts/     # React contexts
-└── memory/           # Documentation
-```
+## Current Architecture
 
-## Key Features Implemented
+### Environment Strategy
+- **Local**: Full trading with IB Gateway, ML training (GPU), all features
+- **Preview** (sentcom-evolve.preview.emergentagent.com): Development/testing
+- **Production** (tradecommand.trade): Lightweight deployment (ML disabled)
 
-### Phase 1: Data Pipeline ✅
-- Historical data collection from IB Gateway
-- Multi-timeframe support (1 min, 5 mins, 15 mins, 30 mins, 1 hour, 1 day, 1 week)
-- ADV-based tier filtering (Intraday, Swing, Investment)
-- "Quick Fill" feature for collecting only missing data
+### Tech Stack
+- Backend: FastAPI (Python 3.13)
+- Frontend: React
+- Database: MongoDB Atlas
+- ML: LightGBM, PyTorch (CUDA 12.8), ChromaDB
+- AI: Ollama (llama3:8b local), gpt-oss cloud fallback
+- Broker: Interactive Brokers Gateway
 
-### Phase 2: Training Automation ✅
-- Auto-train toggle after data collection
-- Training status endpoint
-- Training job tracking in MongoDB
+### User Hardware
+- RAM: 16GB
+- GPU: NVIDIA GeForce RTX 5060 Ti
+- Local ML: Fully configured with CUDA support
 
-### Phase 3: Scanner AI Integration ✅
-- Live scanner with AI predictions
-- Confidence score and predicted move display
-- Filtering by AI confidence
+---
 
-### Phase 4: Data Coverage Dashboard ✅
-- Per-tier coverage visualization
-- Per-timeframe coverage statistics
-- Data gaps identification
-- Backend fix for correct MongoDB collection names
+## Completed Work (March 18, 2026)
 
-## Key Endpoints
-- `GET /api/ib-collector/data-coverage` - Data coverage statistics
-- `POST /api/ib-collector/fill-gaps` - Collect missing data
-- `GET /api/training/status` - Training job status
-- `GET /api/scanner/alerts` - Live scanner alerts with AI
+### Local Environment Setup ✅
+- Created `TradeCommand_Ultimate.bat` - one-click startup script
+- Auto git pull on startup
+- Sequential IB Gateway login with auto-credentials
+- Starts: Backend, Frontend, Ollama, IB Data Pusher
+- GPU detection and CUDA configuration
 
-## Key Components
-- `NIA.jsx` - Neural Intelligence Agency dashboard
-- `MarketScannerPanel.jsx` - Live scanner UI
-- `AdvancedBacktestPanel.jsx` - Backtesting interface
+### ML/GPU Setup ✅
+- Installed PyTorch with CUDA 12.8 support
+- Installed: lightgbm, transformers, sentence-transformers, chromadb
+- RTX 5060 Ti detected and ready for training
+- Made ML dependencies optional for production deployment
 
-## Database Collections
-- `ib_historical_data` - **UNIFIED** time-series bar data (IB + Alpaca merged)
-- `symbol_adv_cache` - Average daily volume cache
-- `training_jobs` - Training job metadata
-- `app_settings` - Application settings
-- `historical_data_requests` - Queue of pending/completed data collection requests
-- `live_alerts` - Real-time trading alerts
+### Production Deployment Fix ✅
+- Removed heavy ML dependencies from requirements.txt for production
+- Made ChromaDB optional with graceful degradation
+- Production can now deploy without crashing
 
-**Note**: `historical_bars` has been deprecated and merged into `ib_historical_data` (March 18, 2026)
+### Desktop Shortcuts Created
+- `StartLocal.bat` → Calls TradeCommand_Ultimate.bat
+- `StartHistoricalCollector.bat` → Historical data collection (client 11)
 
-## Current Status (March 18, 2026)
-- ✅ Database migrated to MongoDB Atlas (persistent storage)
-- ✅ ~29,000 data fetch requests queued (~10,500 completed = 36%)
-- ✅ Data Coverage Dashboard verified working
-- ✅ Backend returns correct data (12,198 symbols in ADV cache)
-- ✅ **FIX: Heartbeat tolerance increased from 30s to 90s** (fixes fluctuating "All Systems Offline" status)
-- ✅ **SIMPLIFIED PRIORITY COLLECTION SYSTEM** (March 17, 2026) - Replaces confusing mode toggle
-- ✅ **FIX: MongoDB Atlas Write Performance** (March 18, 2026) - Bulk write optimization for historical data
-- ✅ **UNIFIED DATA COLLECTION** (March 18, 2026) - Consolidated historical_bars into ib_historical_data
-- ✅ **HYBRID DATA ARCHITECTURE** (March 18, 2026) - IB real-time + MongoDB historical + Alpaca fallback
+---
 
-## Data Architecture (March 18, 2026)
+## In Progress / Backlog
 
-### Real-Time Data Priority
-| Data Type | Primary | Fallback |
-|-----------|---------|----------|
-| Current Price | IB Pushed | Alpaca |
-| Current Volume | IB Pushed | Alpaca |
+### P0 - High Priority
+- [ ] **Startup Status Dashboard** - Visual indicator showing all services initializing
+  - Shows: Backend, MongoDB, IB Gateway, Data Pusher, Ollama, Trading Bot, WebSocket
+  - Auto-dismisses when ready
+  - Prevents user interaction during startup
 
-### Historical Data Priority  
-| Data Type | Primary | Fallback |
-|-----------|---------|----------|
-| Daily Bars (ATR, RVOL) | ib_historical_data (MongoDB) | Alpaca API |
-| Previous Close | ib_historical_data (MongoDB) | Alpaca API |
-| Intraday Bars | Alpaca API | - |
+### P1 - Medium Priority
+- [ ] Complete backend router refactoring (ib_modules not yet activated)
+- [ ] Complete frontend hook refactoring (useSentCom.js not yet integrated)
+- [ ] Full AI model training run with GPU
 
-### Services Using Hybrid Approach
-- RealTimeTechnicalService: IB quotes + MongoDB daily bars
-- Brief Me Agent: IB quotes + MongoDB prev close
-- Smart Stop Service: MongoDB for ATR/volume
-- Scanner: IB quotes + MongoDB historical
-- AI Training: MongoDB only (ib_historical_data)
+### P2 - Lower Priority
+- [ ] Refactor NIA.jsx and server.py
+- [ ] Setup-specific AI models (77 trading setups)
+- [ ] Deep scanner overhaul
+- [ ] Portfolio analytics dashboard
+- [ ] Advanced model training dashboard
 
-### Phase 5: Priority-Based Data Collection ✅ (SIMPLIFIED)
-Per user feedback, the explicit "Trading vs Collection Mode" toggle was replaced with a simpler priority-based system:
+---
 
-**How It Works:**
-1. Script always runs in "trading" mode (live quotes + orders always active)
-2. Historical data collection happens passively in background at low priority
-3. When user clicks "Fill Gaps" button, `priority_collection` flag is set automatically
-4. Priority mode speeds up historical data fetching (more requests, faster polling)
-5. Priority mode auto-disables when the queue is empty
+## Key Files Reference
 
-**Backend Endpoints:**
-- `GET /api/ib/mode` - Returns current mode (always "trading"), priority_collection flag, pending count
-- `POST /api/ib/priority-collection/enable` - Enable priority collection
-- `POST /api/ib/priority-collection/disable` - Disable priority collection
-- `GET /api/ib/priority-collection/status` - Full status with queue stats
+### Startup Scripts
+- `/app/documents/TradeCommand_Ultimate.bat` - Main local startup
+- `/app/documents/scripts/ib_historical_collector.py` - Historical data (client 11)
+- `/app/documents/scripts/ib_data_pusher.py` - Live data (client 10)
 
-**Frontend Changes (NIA.jsx):**
-- Removed confusing "Trading/Collection Mode" toggle
-- Added simple "Priority Collection" status indicator
-- Shows "Normal Trading" (green) or "Priority Collection" (amber)
-- "Speed Up" / "Slow Down" button to manually toggle priority
-- Fill Gaps button auto-enables priority collection
+### Backend
+- `/app/backend/server.py` - Main server
+- `/app/backend/services/ai_modules/__init__.py` - ML optional loading
+- `/app/backend/services/rag/vector_store.py` - ChromaDB optional
 
-**Local Script Changes (ib_data_pusher.py):**
-- Default mode changed from "auto" to "trading"
-- Main `run()` method now includes integrated historical data polling
-- Checks for `priority_collection` flag every 30 seconds
-- Priority mode: polls every 10s, fetches 10 requests per batch, quote push slowed to 30s
-- Normal mode: polls every 60s, fetches 2 requests per batch, quote push at 5s
-- Live trading (orders) always works regardless of priority mode
+### Frontend
+- `/app/frontend/src/components/SentCom.jsx` - Main trading UI
+- `/app/frontend/src/components/NIA.jsx` - AI training UI
+- `/app/frontend/src/hooks/useSentCom.js` - Extracted hooks (not yet integrated)
 
-## Recent Changes
-### March 18, 2026 - UNIFIED DATA COLLECTION (MAJOR)
-- **Goal**: Optimize for AI learning speed and quality
-- **Action**: Consolidated `historical_bars` (Alpaca data) into `ib_historical_data` (IB data)
-- **Result**: Single unified dataset with:
-  - **9,388+ symbols** (combined from both sources)
-  - **3.4M+ bars** (and growing)
-  - **8 years of history** (2018-2026)
-  - **7 timeframe types** (1min to 1week)
-- **Files Updated**:
-  - `services/ai_modules/timeseries_service.py` - Now uses ib_historical_data
-  - `services/ai_modules/timeseries_gbm.py` - Now uses ib_historical_data  
-  - `services/enhanced_scanner.py` - Now uses ib_historical_data
-  - `services/historical_simulation_engine.py` - Now uses ib_historical_data
-  - `services/slow_learning/historical_data_service.py` - Now uses ib_historical_data
-  - `services/hybrid_data_service.py` - Now uses ib_historical_data
-  - `services/market_regime_engine.py` - Now uses ib_historical_data (with MongoDB as primary)
-- **Benefits for AI**:
-  - Faster training (no dual-collection lookups)
-  - More training data (combined datasets)
-  - Consistent data format (single schema)
-  - Deeper history (8 years vs 1 year)
+---
 
-### March 18, 2026 - Atlas Performance Advisor Fixes
-- Created indexes recommended by Atlas Performance Advisor:
-  - `historical_data_requests`: `{bar_size: 1, status: 1, completed_at: -1}` - Fixes 927:1 scan ratio
-  - `live_alerts`: `{id: 1}` - Fixes full collection scan (12,370 docs)
-- Updated `ib_historical_collector.py` script:
-  - Auto-calls `/api/ib/historical-data/optimize-indexes` on startup
-  - Uses batch reporting via `/api/ib/historical-data/batch-result` for faster writes
+## Configuration
 
-### March 18, 2026 - MongoDB Atlas Write Performance Fix (CRITICAL)
-- **Issue**: `POST /api/ib/historical-data/result` endpoint timing out when saving historical data to MongoDB Atlas
-- **Root Cause**: Individual `update_one()` calls in a loop for each bar - extremely slow with 2.7M+ documents
-- **Solution**: Replaced with `bulk_write()` operations using `UpdateOne` batches
-- **Performance Gain**: ~10-50x faster writes for typical data batches (50-100+ bars)
-- **Files Modified**:
-  - `backend/routers/ib.py` - Optimized `/historical-data/result` and `/historical-data/batch-result` endpoints
-  - Added new endpoint: `POST /api/ib/historical-data/optimize-indexes` - Creates/verifies MongoDB indexes
-  - Added new endpoint: `GET /api/ib/mongodb/diagnostics` - Full MongoDB Atlas analysis with recommendations
-- **Additional Improvements**:
-  - Don't store raw bar data in queue collection (saves space and time)
-  - Created additional indexes for common query patterns
-- **Database Stats After Fix**:
-  - `ib_historical_data`: 2.77M documents, 565 MB data, 7 indexes (274 MB index size)
-  - `historical_data_requests`: 29K documents, 9 indexes
+### IB Gateway
+- Path: `C:\Jts\ibgateway\1037\ibgateway.exe`
+- Port: 4002
+- Client IDs: 10 (data pusher), 11 (historical collector)
 
-### March 18, 2026 - Atlas Performance Advisor Fixes
-- **Created indexes recommended by Atlas Performance Advisor**:
-  - `historical_data_requests`: `{bar_size: 1, status: 1, completed_at: -1}` - Fixes 927:1 scan ratio
-  - `live_alerts`: `{id: 1}` - Fixes full collection scan (12,370 docs)
-- **Updated `ib_historical_collector.py` script**:
-  - Auto-calls `/api/ib/historical-data/optimize-indexes` on startup
-  - Uses batch reporting via `/api/ib/historical-data/batch-result` for faster writes
-  - Reports all results in single API call instead of one-by-one
+### Local URLs
+- Backend: http://localhost:8001
+- Frontend: http://localhost:3000
+- Ollama: http://localhost:11434
 
-### March 17, 2026 - Simplified Priority Collection System (MAJOR)
-- **User Feedback**: "Trading vs Collection Mode" toggle was confusing and slow
-- **Solution**: Replaced explicit mode toggle with priority-based background collection
-- **Key Change**: Script always in trading mode, priority flag speeds up historical data fetch
-- **User Experience**: Click "Fill Gaps" → collection speeds up automatically → auto-returns to normal when done
-- **Files Modified**:
-  - `backend/routers/ib.py` - New priority collection endpoints
-  - `backend/routers/ib_collector_router.py` - Fill Gaps now auto-enables priority
-  - `frontend/src/components/NIA.jsx` - Removed mode toggle, added priority status
-  - `documents/scripts/ib_data_pusher.py` - Integrated historical data polling with priority support
+### User Repo Path
+- `C:\Users\13174\Trading-and-Analysis-Platform`
 
-### March 17, 2026 - Connection Status Fix
-- **Issue**: System status indicator was fluctuating between "Online" and "Offline" due to tight 30-second heartbeat window
-- **Root cause**: Network latency to MongoDB Atlas + rate limiting + concurrent operations caused heartbeat delays
-- **Fix**: Increased heartbeat tolerance from 30 seconds to 90 seconds in `/app/backend/routers/ib.py`
-- **Files modified**: `backend/routers/ib.py` (functions: `is_pusher_connected`, `get_connection_status`, `get_pushed_ib_data`)
+---
 
-### March 18, 2026 - Code Cleanup & Bug Fixes
-- **Console.log Cleanup**: Removed 38 `console.log` statements from frontend code for production readiness
-- **Import Error Fixes**: Fixed multiple import/method name mismatches in backend:
-  - `get_timeseries_service` → `get_timeseries_ai` (enhanced_scanner.py, ib_historical_collector.py)
-  - `analyze_symbol` → `analyze_sentiment` (trade_context_service.py, analyst_agent.py)
-  - `get_sector_context` → `get_stock_sector_context` (trade_context_service.py, analyst_agent.py)
-  - `get_ib_data` → `get_fundamentals` (trade_context_service.py, fundamental_quality.py)
-  - Fixed `predict` → `get_forecast` method call in enhanced_scanner.py
-  - Fixed SectorContext dataclass attribute access (was using dict `.get()` on dataclass)
-- **Files Modified**:
-  - Backend: `services/enhanced_scanner.py`, `services/trade_context_service.py`, `agents/analyst_agent.py`, `services/tqs/fundamental_quality.py`, `services/ib_historical_collector.py`
-  - Frontend: 14 files cleaned of console.log statements
-- **Documentation**: Created `/app/documents/REFACTORING_PLAN.md` for future code organization
-
-### March 18, 2026 - Backend Router Refactoring
-- **Created refactored router modules** at `/app/backend/routers/ib_modules/`:
-  - `historical_data.py` (638 lines) - Historical data collection, storage, index optimization
-  - `collection_mode.py` (297 lines) - Collection mode tracking and priority collection system
-  - `news.py` (182 lines) - News providers, historical news, article retrieval
-  - `alerts.py` (358 lines) - Price alerts and enhanced alerts functionality
-  - `__init__.py` (49 lines) - Module initializer combining all sub-routers
-- **Total lines refactored**: 1,524 lines of clean, modular code
-- **Status**: Ready but not yet active (to avoid disruption to data collection)
-- **To Activate**: Uncomment imports in server.py and remove corresponding endpoints from ib.py
-
-## Next Tasks
-1. ✅ **Deployment**: Complete - app deployed to production
-2. ✅ **Code Cleanup**: Console.log removal and bug fixes complete
-3. ✅ **Router Refactoring**: 4 modules created (historical_data, collection_mode, news, alerts)
-4. ⏳ **Data Collection**: Currently at 37.5% (10,939/29,184) - running on user's local machine
-5. ⏳ **Activate Refactored Modules**: When ready for maintenance window
-6. After collection completes, verify auto-training triggers
-
-## Backlog
-- (P0 - DONE) ~~Cloud API Stability - investigate timeouts (server-side root cause)~~
-- (P1) Deep Scanner Overhaul - alternative data sources
-- (P2) Advanced Model Training Dashboard
-- (P2) Portfolio Analytics Dashboard
-- (P2) Backend Router Refactoring - Split ib.py (5,230 lines) into focused modules
-- (P2) Server.py Refactoring - Extract service initialization
-- (P3) Frontend Component Refactoring - Split SentCom.jsx and NIA.jsx
-- (P3) Trade Journal & Alerts
-
+## Notes
+- Ollama falls back from gpt-oss:120b-cloud to llama3:8b when cloud unavailable
+- `emergentintegrations` not installed locally (fine - uses Ollama directly)
+- Production deployment limited to non-ML features due to resource constraints
