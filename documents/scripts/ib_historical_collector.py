@@ -449,14 +449,31 @@ class IBHistoricalCollector:
                     report_result = self.report_batch_results(batch_results)
                     logger.info(f"  Batch reported: {report_result['processed']} results, {report_result['bars_stored']} bars stored to DB")
                 
-                # Progress report
+                # Progress report with overall queue status
                 elapsed = (datetime.now(timezone.utc) - self.stats["started_at"]).total_seconds() / 60
                 rate = self.stats["requests_completed"] / elapsed if elapsed > 0 else 0
-                logger.info(f"[Stats] Completed: {self.stats['requests_completed']}, "
-                           f"Failed: {self.stats['requests_failed']}, "
-                           f"Bars: {self.stats['bars_collected']:,}, "
-                           f"Rate: {rate:.1f}/min, "
-                           f"Pacing: {self.pacing.requests_remaining()} remaining")
+                
+                # Fetch overall queue progress
+                try:
+                    queue_data = self.api.get('/api/ib-collector/queue-progress')
+                    if queue_data:
+                        q_completed = queue_data.get('completed', 0)
+                        q_total = queue_data.get('total', 0)
+                        q_pct = (q_completed / q_total * 100) if q_total > 0 else 0
+                        bar_visual = '█' * int(q_pct/5) + '░' * (20 - int(q_pct/5))
+                        logger.info(f"")
+                        logger.info(f"╔{'═'*58}╗")
+                        logger.info(f"║  QUEUE: {bar_visual} {q_pct:>5.1f}%  ({q_completed:,}/{q_total:,})  ║")
+                        logger.info(f"║  This Session: {self.stats['requests_completed']} done, {self.stats['bars_collected']:,} bars, {rate:.1f}/min  ║")
+                        logger.info(f"╚{'═'*58}╝")
+                        logger.info(f"")
+                except:
+                    # Fallback to simple stats
+                    logger.info(f"[Stats] Completed: {self.stats['requests_completed']}, "
+                               f"Failed: {self.stats['requests_failed']}, "
+                               f"Bars: {self.stats['bars_collected']:,}, "
+                               f"Rate: {rate:.1f}/min, "
+                               f"Pacing: {self.pacing.requests_remaining()} remaining")
                 
                 if not continuous:
                     break
