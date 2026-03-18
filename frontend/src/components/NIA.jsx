@@ -96,7 +96,7 @@ const TrainAllPanel = memo(({ onTrainComplete }) => {
           setAutoTrainAfterCollection(res.data.auto_training?.after_collection || false);
         }
       } catch (e) {
-        console.log('Training status fetch error:', e);
+        // Training status fetch error - non-critical
       }
     };
     fetchStatus();
@@ -632,7 +632,6 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
             // Only update coverage state if data actually changed
             const newCoverageStr = JSON.stringify(data);
             if (lastDataRef.current?.coverage !== newCoverageStr) {
-              console.log('[Coverage] Data changed, updating UI');
               lastDataRef.current = { ...lastDataRef.current, coverage: newCoverageStr };
               setDataCoverage(data);
               setLastDataChange(new Date()); // Mark when data actually changed

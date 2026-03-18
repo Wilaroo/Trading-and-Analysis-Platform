@@ -35,7 +35,8 @@ class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    console.log('Caught error:', error, errorInfo);
+    // Error boundary caught an error
+    console.error('Widget error:', error);
   }
 
   render() {
@@ -176,10 +177,7 @@ function App() {
   useEffect(() => {
     const interval = setInterval(async () => {
       // Only poll if not getting WebSocket updates
-      const connected = await checkIbConnection();
-      if (!connected && ibConnectionChecked) {
-        console.log('IB connection check (fallback): disconnected');
-      }
+      await checkIbConnection();
     }, 60000);  // Reduced to 60s - WebSocket handles real-time updates
     return () => clearInterval(interval);
   }, [checkIbConnection, ibConnectionChecked]);

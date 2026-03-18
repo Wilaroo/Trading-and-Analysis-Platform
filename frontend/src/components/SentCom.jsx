@@ -1094,7 +1094,6 @@ const useAIInsights = (pollInterval = 60000) => {  // Increased to 60s to avoid 
 
 // AI Insights Dashboard Panel
 const AIInsightsDashboard = ({ onClose }) => {
-  console.log('AIInsightsDashboard component mounted');
   const { shadowDecisions, shadowPerformance, timeseriesStatus, predictionAccuracy, recentPredictions, loading, refresh } = useAIInsights();
   const [activeTab, setActiveTab] = useState('decisions');
   const [forecastSymbol, setForecastSymbol] = useState('');
@@ -3312,7 +3311,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
                     )}
                   </button>
                   <button
-                    onClick={() => { console.log('AI Insights clicked, setting to true'); setShowAIInsights(true); }}
+                    onClick={() => { setShowAIInsights(true); }}
                     className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all bg-gradient-to-r from-cyan-500/20 to-violet-500/20 text-cyan-400 border border-cyan-500/30 hover:border-cyan-500/50 flex items-center gap-1.5"
                     data-testid="open-ai-insights"
                   >

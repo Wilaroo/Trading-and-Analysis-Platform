@@ -3963,20 +3963,23 @@ class EnhancedBackgroundScanner:
         Uses Time-Series AI to predict direction and confidence.
         """
         try:
-            from services.ai_modules.timeseries_service import get_timeseries_service
-            ts_service = get_timeseries_service()
+            from services.ai_modules.timeseries_service import get_timeseries_ai
+            ts_service = get_timeseries_ai()
             
             if not ts_service:
                 return
             
-            # Get AI prediction for this symbol
-            prediction = await ts_service.predict(alert.symbol)
+            # Get AI prediction for this symbol using get_forecast method
+            prediction = await ts_service.get_forecast(alert.symbol)
             
-            if prediction and prediction.get("success"):
+            if prediction and prediction.get("usable"):
                 # Extract prediction details
                 direction = prediction.get("direction", "neutral")
                 confidence = prediction.get("confidence", 0.0) * 100  # Convert to 0-100
-                predicted_move = prediction.get("predicted_return", 0.0) * 100  # Convert to percentage
+                prob_up = prediction.get("probability_up", 0.5)
+                prob_down = prediction.get("probability_down", 0.5)
+                # Estimate predicted move based on direction probabilities
+                predicted_move = (prob_up - prob_down) * 2  # Simple estimate
                 
                 # Populate alert with AI data
                 alert.ai_confidence = round(confidence, 1)

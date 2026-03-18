@@ -139,8 +139,8 @@ const AICoachTab = ({
           openPnl={account?.unrealized_pnl || 0}
           onBriefMe={handleBriefMe}
           onViewAnalytics={() => onNavigateToTab?.('analytics')}
-          onViewHistory={() => console.log('View history')}
-          onViewAllAlerts={() => console.log('View all alerts')}
+          onViewHistory={() => {}}
+          onViewAllAlerts={() => {}}
           onNavigateToTab={onNavigateToTab}
         >
           {/* Right column content: Learning Insights + Market Regime */}
@@ -155,7 +155,7 @@ const AICoachTab = ({
             <MarketRegimeWidget 
               className="h-full"
               onStateChange={(newState, oldState) => {
-                console.log(`Market regime changed: ${oldState} -> ${newState}`);
+                // Market regime changed - handled internally
               }}
             />
           </div>
@@ -183,7 +183,7 @@ const AICoachTab = ({
           <MarketRegimeWidget 
             className="h-full"
             onStateChange={(newState, oldState) => {
-              console.log(`Market regime changed: ${oldState} -> ${newState}`);
+              // Market regime changed - handled internally
             }}
           />
           

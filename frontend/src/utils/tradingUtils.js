@@ -30,7 +30,7 @@ export const playSound = (type = 'alert') => {
       oscillator.stop(audioContext.currentTime + 0.4);
     }
   } catch (e) {
-    console.log('Sound not supported');
+    // Sound not supported - silently ignore
   }
 };
 

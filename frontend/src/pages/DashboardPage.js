@@ -106,7 +106,7 @@ const MarketOverviewCard = ({ symbol = 'SPY' }) => {
         const res = await api.get(`/api/quotes/${symbol}`);
         setQuote(res.data);
       } catch (e) {
-        console.log('Failed to fetch quote:', e);
+        // Silently ignore quote fetch errors - common during market close
       }
     };
     fetchQuote();

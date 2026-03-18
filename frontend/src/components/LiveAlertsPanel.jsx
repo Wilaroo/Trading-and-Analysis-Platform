@@ -569,7 +569,6 @@ const LiveAlertsPanel = ({
     eventSourceRef.current = eventSource;
     
     eventSource.onopen = () => {
-      console.log('Live alerts SSE connected');
       setConnected(true);
     };
     
@@ -578,7 +577,6 @@ const LiveAlertsPanel = ({
         const data = JSON.parse(event.data);
         
         if (data.type === 'connected') {
-          console.log('Live scanner connected:', data.timestamp);
           setConnected(true);
         } else if (data.type === 'alert') {
           const newAlert = data.alert;

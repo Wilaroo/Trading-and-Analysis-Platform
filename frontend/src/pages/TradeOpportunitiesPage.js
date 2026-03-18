@@ -147,7 +147,7 @@ const playTradeSound = (type = 'success') => {
       oscillator.stop(audioContext.currentTime + 0.2);
     }
   } catch (e) {
-    console.log('Audio not supported');
+    // Audio not supported - silently ignore
   }
 };
 
@@ -1086,8 +1086,6 @@ const QuickTradeModal = ({ opportunity, action, onClose, onSuccess }) => {
         orderData.stop_price = parseFloat(stopPrice);
       }
       
-      console.log('Placing order:', orderData);
-      
       const response = await api.post('/api/ib/order', orderData);
       
       // Play success sound
@@ -1913,8 +1911,6 @@ const TradeOpportunitiesPage = () => {
     setError(null);
     
     try {
-      console.log('Running enhanced scanner:', selectedScanType);
-      
       // Run enhanced IB scanner with conviction scoring
       const scanResponse = await api.post('/api/ib/scanner/enhanced', {
         scan_type: selectedScanType,
@@ -1922,20 +1918,15 @@ const TradeOpportunitiesPage = () => {
         calculate_features: true
       });
       
-      console.log('Enhanced scanner response:', scanResponse.data);
-      
       const scanResults = scanResponse.data.results || [];
       const highConvictionCount = scanResponse.data.high_conviction_count || 0;
       
       if (scanResults.length === 0) {
-        console.log('No scanner results');
         setOpportunities([]);
         setLastScanTime(new Date());
         setIsScanning(false);
         return;
       }
-      
-      console.log('Scanner found', scanResults.length, 'symbols,', highConvictionCount, 'high conviction');
       
       // Map results to opportunities with conviction data
       const opps = scanResults.map(result => {
@@ -2003,9 +1994,8 @@ const TradeOpportunitiesPage = () => {
         };
       });
       
-      console.log('Created', opps.length, 'opportunities');
       setOpportunities(opps);
-      setLastScanTime(new Date());
+      setLastScanTime(new Date);
       
     } catch (err) {
       console.error('Scanner error:', err);
@@ -2053,8 +2043,6 @@ const TradeOpportunitiesPage = () => {
   
   // Handle successful trade
   const handleTradeSuccess = (orderData) => {
-    console.log('Trade successful:', orderData);
-    
     // Add to active trades for P&L tracking
     setActiveTrades(prev => [...prev, {
       symbol: orderData.symbol,

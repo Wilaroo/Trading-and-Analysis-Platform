@@ -114,9 +114,9 @@ class FundamentalQualityService:
         # Fetch fundamental data if not provided
         if self._ib_service:
             try:
-                ib_data = self._ib_service.get_ib_data(symbol)
-                if ib_data:
-                    fund = ib_data.get("fundamentals", {})
+                ib_data = await self._ib_service.get_fundamentals(symbol)
+                if ib_data and ib_data.get("success"):
+                    fund = ib_data.get("data", {})
                     if short_interest_pct is None:
                         short_interest_pct = fund.get("short_interest_percent", 0)
                     if float_shares is None:

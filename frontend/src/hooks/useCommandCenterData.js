@@ -152,7 +152,7 @@ export function useCommandCenterData({
         positionsFetched = true;
       }
     } catch (ibErr) {
-      console.log('IB pushed data fetch failed:', ibErr.message);
+      // IB pushed data fetch failed - will try fallback
     }
     
     // Fall back to Alpaca positions if IB not connected
@@ -177,7 +177,7 @@ export function useCommandCenterData({
           positionsFetched = true;
         }
       } catch (botErr) {
-        console.log('Trading bot positions fetch failed:', botErr.message);
+        // Trading bot positions fetch failed - will try final fallback
       }
     }
     
@@ -187,7 +187,7 @@ export function useCommandCenterData({
         const positionsRes = await api.get('/api/ib/account/positions');
         positionsData = positionsRes.data?.positions || [];
       } catch (err) {
-        console.log('Direct IB positions fetch failed:', err.message);
+        // Direct IB positions fetch failed - no positions available
       }
     }
     
@@ -257,7 +257,7 @@ export function useCommandCenterData({
             }
           });
         } catch (qualityErr) {
-          console.log('Quality enhancement failed:', qualityErr.message);
+          // Quality enhancement failed - non-critical, continue with results
         }
       }
       setOpportunities(results);
@@ -331,7 +331,7 @@ export function useCommandCenterData({
         });
       }
     } catch (err) {
-      console.log('Enhanced alerts unavailable:', err.response?.data?.detail?.message);
+      // Enhanced alerts unavailable - non-critical
     }
   };
 
@@ -351,10 +351,9 @@ export function useCommandCenterData({
   const fetchCreditBudget = async () => {
     try {
       const res = await api.get('/api/research/budget');
-      console.log('Credit budget fetched:', res.data);
       setCreditBudget(res.data);
     } catch (err) {
-      console.log('Credit budget fetch failed:', err.message);
+      // Credit budget fetch failed - non-critical
     }
   };
 

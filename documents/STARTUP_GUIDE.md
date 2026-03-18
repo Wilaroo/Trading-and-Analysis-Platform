@@ -37,7 +37,7 @@ Wait for: `Session Status: online`
 
 **Step 3: Open TradeCommand**
 ```
-https://data-sync-issue-3.preview.emergentagent.com
+https://ai-data-hub-10.preview.emergentagent.com
 ```
 
 **That's it!** The app auto-connects to Alpaca and Finnhub.
@@ -153,6 +153,6 @@ Your app automatically routes AI requests to save credits:
 
 ## Current URLs
 
-- **Cloud App:** https://data-sync-issue-3.preview.emergentagent.com
+- **Cloud App:** https://ai-data-hub-10.preview.emergentagent.com
 - **Local App:** http://localhost:3000
 - **ngrok Tunnel:** https://pseudoaccidentally-linty-addie.ngrok-free.dev

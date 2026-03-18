@@ -65,7 +65,7 @@ const CommandCenterPage = ({
           setOllamaUsage(data);
         }
       } catch (e) {
-        console.log('Failed to fetch Ollama usage:', e);
+        // Ollama usage fetch failed - non-critical
       }
     };
     

@@ -45,19 +45,16 @@ export const useWebSocket = (onMessage) => {
     try {
       // Clean up any existing connection first
       if (wsRef.current) {
-        console.log('Cleaning up existing WebSocket connection');
         wsRef.current.close();
         wsRef.current = null;
       }
       
       const wsUrl = getWebSocketUrl();
-      console.log('Connecting to WebSocket:', wsUrl);
       
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
-        console.log('WebSocket connected successfully');
         setIsConnected(true);
         // Start heartbeat to keep connection alive
         startHeartbeat(ws);
@@ -84,7 +81,6 @@ export const useWebSocket = (onMessage) => {
       };
 
       ws.onclose = (event) => {
-        console.log('WebSocket disconnected, code:', event.code, 'reason:', event.reason, 'wasClean:', event.wasClean);
         setIsConnected(false);
         stopHeartbeat();
         // Reconnect after 3 seconds (only if not a clean close from cleanup)

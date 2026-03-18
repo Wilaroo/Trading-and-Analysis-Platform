@@ -311,11 +311,12 @@ End with which stock looks better right now and why. Keep it actionable and unde
         try:
             sector_service = self._services.get("sector_service")
             if sector_service:
-                sector_ctx = await sector_service.get_sector_context(symbol)
+                sector_ctx = await sector_service.get_stock_sector_context(symbol)
                 if sector_ctx:
-                    context.sector = sector_ctx.get("sector", "")
-                    context.sector_performance = sector_ctx.get("sector_change", 0)
-                    context.sector_rank = sector_ctx.get("sector_rank", 0)
+                    # SectorContext is a dataclass - access attributes directly
+                    context.sector = sector_ctx.sector if hasattr(sector_ctx, 'sector') else ""
+                    context.sector_performance = sector_ctx.sector_change if hasattr(sector_ctx, 'sector_change') else 0
+                    context.sector_rank = sector_ctx.sector_rank if hasattr(sector_ctx, 'sector_rank') else 0
         except Exception as e:
             logger.warning(f"Error getting sector data: {e}")
         
@@ -336,10 +337,11 @@ End with which stock looks better right now and why. Keep it actionable and unde
         try:
             sentiment_service = self._services.get("sentiment_service")
             if sentiment_service:
-                sentiment = await sentiment_service.analyze_symbol(symbol)
+                sentiment = await sentiment_service.analyze_sentiment(symbol)
                 if sentiment:
-                    context.sentiment_score = sentiment.get("score", 0)
-                    context.recent_news = sentiment.get("headlines", [])[:3]
+                    # SentimentResult is a dataclass with sentiment_score and key_headlines attributes
+                    context.sentiment_score = sentiment.sentiment_score if hasattr(sentiment, 'sentiment_score') else sentiment.get("sentiment_score", 0)
+                    context.recent_news = (sentiment.key_headlines if hasattr(sentiment, 'key_headlines') else sentiment.get("key_headlines", []))[:3]
         except Exception as e:
             logger.warning(f"Error getting sentiment: {e}")
         

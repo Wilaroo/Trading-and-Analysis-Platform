@@ -207,16 +207,34 @@ Per user feedback, the explicit "Trading vs Collection Mode" toggle was replaced
 - **Fix**: Increased heartbeat tolerance from 30 seconds to 90 seconds in `/app/backend/routers/ib.py`
 - **Files modified**: `backend/routers/ib.py` (functions: `is_pusher_connected`, `get_connection_status`, `get_pushed_ib_data`)
 
+### March 18, 2026 - Code Cleanup & Bug Fixes
+- **Console.log Cleanup**: Removed 38 `console.log` statements from frontend code for production readiness
+- **Import Error Fixes**: Fixed multiple import/method name mismatches in backend:
+  - `get_timeseries_service` → `get_timeseries_ai` (enhanced_scanner.py, ib_historical_collector.py)
+  - `analyze_symbol` → `analyze_sentiment` (trade_context_service.py, analyst_agent.py)
+  - `get_sector_context` → `get_stock_sector_context` (trade_context_service.py, analyst_agent.py)
+  - `get_ib_data` → `get_fundamentals` (trade_context_service.py, fundamental_quality.py)
+  - Fixed `predict` → `get_forecast` method call in enhanced_scanner.py
+- **Files Modified**:
+  - Backend: `services/enhanced_scanner.py`, `services/trade_context_service.py`, `agents/analyst_agent.py`, `services/tqs/fundamental_quality.py`, `services/ib_historical_collector.py`
+  - Frontend: 14 files cleaned of console.log statements
+- **Documentation**: Created `/app/documents/REFACTORING_PLAN.md` for future code organization
+
 ## Next Tasks
 1. ✅ **MongoDB Write Performance Fixed**: Bulk write optimization implemented and tested
 2. ⏳ **User Action**: Pull the latest code from git and restart the local `ib_historical_collector.py`
 3. ⏳ **User Action**: Optionally call `POST /api/ib/historical-data/optimize-indexes` to ensure optimal indexes
-4. Monitor collection progress - should now complete without timeouts
-5. After collection completes (~18,580 pending requests), verify auto-training triggers
+4. Monitor collection progress - currently at 37.4% (10,904/29,184)
+5. After collection completes (~18,207 pending requests), verify auto-training triggers
+6. ⏳ **Deployment**: Waiting for Emergent platform deployment to complete
 
 ## Backlog
 - (P0 - DONE) ~~Cloud API Stability - investigate timeouts (server-side root cause)~~
 - (P1) Deep Scanner Overhaul - alternative data sources
 - (P2) Advanced Model Training Dashboard
 - (P2) Portfolio Analytics Dashboard
+- (P2) Backend Router Refactoring - Split ib.py (5,230 lines) into focused modules
+- (P2) Server.py Refactoring - Extract service initialization
+- (P3) Frontend Component Refactoring - Split SentCom.jsx and NIA.jsx
 - (P3) Trade Journal & Alerts
+

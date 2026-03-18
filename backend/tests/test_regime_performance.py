@@ -273,7 +273,7 @@ class TestRegimePerformanceAPI:
         import httpx
         
         # Get the API URL from env
-        api_url = "https://data-sync-issue-3.preview.emergentagent.com"
+        api_url = "https://ai-data-hub-10.preview.emergentagent.com"
         
         endpoints = [
             "/api/regime-performance/summary",

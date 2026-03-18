@@ -297,7 +297,7 @@ const WatchlistWidget = ({ onTickerSelect, onViewChart, wsWatchlist = [] }) => {
           quotesRes.data.quotes?.forEach(q => { quotesMap[q.symbol] = q; });
           setQuotes(quotesMap);
         } catch (e) {
-          console.log('Quote fetch failed, continuing without quotes');
+          // Quote fetch failed - continue without quotes
         }
       }
     } catch (err) {

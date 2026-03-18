@@ -229,7 +229,7 @@ class TradeContextService:
                 return
                 
             # Get sector for symbol
-            sector_context = await self._sector_service.get_sector_context(symbol)
+            sector_context = await self._sector_service.get_stock_sector_context(symbol)
             
             if sector_context:
                 context.sector = sector_context.get('sector', 'unknown')
@@ -246,10 +246,10 @@ class TradeContextService:
         try:
             # Try IB Gateway first
             if self._ib_service is not None:
-                ib_data = self._ib_service.get_ib_data(symbol)
+                ib_data = await self._ib_service.get_fundamentals(symbol)
                 
-                if ib_data:
-                    fund = ib_data.get('fundamentals', {})
+                if ib_data and ib_data.get('success'):
+                    fund = ib_data.get('data', {})
                     fundamentals.short_interest_percent = fund.get('short_interest_percent', 0.0)
                     fundamentals.float_shares = fund.get('float_shares', 0)
                     fundamentals.institutional_ownership_percent = fund.get('institutional_ownership_percent', 0.0)
@@ -347,15 +347,16 @@ class TradeContextService:
         """Capture news sentiment"""
         try:
             if self._sentiment_service is not None:
-                sentiment = await self._sentiment_service.analyze_symbol(symbol)
+                sentiment = await self._sentiment_service.analyze_sentiment(symbol)
                 
                 if sentiment:
-                    context.news_sentiment = sentiment.get('sentiment_score', 0.0)
-                    context.has_recent_news = sentiment.get('has_recent_news', False)
+                    # SentimentResult is a dataclass - access attributes directly
+                    context.news_sentiment = sentiment.sentiment_score if hasattr(sentiment, 'sentiment_score') else 0.0
+                    context.has_recent_news = (sentiment.news_count > 0) if hasattr(sentiment, 'news_count') else False
                     
-                    headlines = sentiment.get('headlines', [])
+                    headlines = sentiment.key_headlines if hasattr(sentiment, 'key_headlines') else []
                     if headlines:
-                        context.news_headline = headlines[0].get('headline', '')
+                        context.news_headline = headlines[0] if isinstance(headlines[0], str) else headlines[0].get('headline', '')
                         
         except Exception as e:
             logger.warning(f"Error capturing sentiment context for {symbol}: {e}")

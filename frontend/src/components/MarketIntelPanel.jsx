@@ -78,7 +78,7 @@ const MarketIntelPanel = ({ onTickerSelect }) => {
         setActiveReport(reportsRes.data.reports[reportsRes.data.reports.length - 1]);
       }
     } catch (err) {
-      console.log('Market intel fetch error:', err.message);
+      // Market intel fetch error - non-critical
     }
     setLoading(false);
   }, []);
@@ -101,12 +101,12 @@ const MarketIntelPanel = ({ onTickerSelect }) => {
               fetchData();
             }
           } catch (genErr) {
-            console.log('Auto-trigger generation failed:', genErr.message);
+            // Auto-trigger generation failed - non-critical
           }
           setGenerating(null);
         }
       } catch (err) {
-        console.log('Auto-trigger check failed:', err.message);
+        // Auto-trigger check failed - non-critical
       }
     };
 

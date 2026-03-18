@@ -2129,8 +2129,8 @@ class IBHistoricalCollector:
             logger.info("Auto-training triggered after data collection...")
             
             # Import and trigger training
-            from services.ai_modules.timeseries_service import get_timeseries_service
-            ts_service = get_timeseries_service()
+            from services.ai_modules.timeseries_service import get_timeseries_ai
+            ts_service = get_timeseries_ai()
             
             if ts_service:
                 result = await ts_service.train_model()
