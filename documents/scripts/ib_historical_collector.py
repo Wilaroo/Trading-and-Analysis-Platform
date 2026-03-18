@@ -6,7 +6,7 @@ Dedicated script for collecting historical data from IB Gateway.
 Runs separately from the trading pusher with a different client ID.
 
 Usage:
-    python ib_historical_collector.py --cloud-url https://sentcom-data-sync.preview.emergentagent.com
+    python ib_historical_collector.py --cloud-url https://data-sync-issue-3.preview.emergentagent.com
 
 Features:
     - Connects to IB Gateway with client_id=11 (separate from trading pusher)

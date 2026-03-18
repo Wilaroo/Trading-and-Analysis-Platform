@@ -20,7 +20,7 @@ ollama serve
 
 ### Step 3: Open App
 ```
-https://sentcom-data-sync.preview.emergentagent.com
+https://data-sync-issue-3.preview.emergentagent.com
 ```
 
 ---
@@ -67,5 +67,5 @@ Window 2:
 
 Window 3 (browser):
 ```
-https://sentcom-data-sync.preview.emergentagent.com
+https://data-sync-issue-3.preview.emergentagent.com
 ```

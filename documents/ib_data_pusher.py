@@ -3,7 +3,7 @@ IB Data Pusher - Runs on your local machine
 Connects to IB Gateway locally and pushes data to the cloud backend.
 
 Usage:
-    python ib_data_pusher.py --cloud-url https://sentcom-data-sync.preview.emergentagent.com
+    python ib_data_pusher.py --cloud-url https://data-sync-issue-3.preview.emergentagent.com
 
 This script should be run on your trading laptop alongside IB Gateway.
 """
