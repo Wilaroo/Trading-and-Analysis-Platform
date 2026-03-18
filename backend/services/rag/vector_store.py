@@ -10,6 +10,8 @@ Features:
 - Persistent storage (survives restarts)
 - Auto-rebuild from MongoDB on startup
 - Multiple collections (trades, playbooks, patterns)
+
+Note: ChromaDB is optional - if not installed, vector features will be disabled.
 """
 
 import logging
@@ -19,6 +21,16 @@ import os
 
 logger = logging.getLogger(__name__)
 
+# Check if ChromaDB is available
+CHROMADB_AVAILABLE = False
+try:
+    import chromadb
+    from chromadb.config import Settings
+    CHROMADB_AVAILABLE = True
+    logger.info("ChromaDB is available")
+except ImportError:
+    logger.warning("ChromaDB not installed - vector store features will be disabled")
+
 # ChromaDB client (lazy loaded)
 _chroma_client = None
 _persist_directory = "/app/backend/data/chromadb"
@@ -27,11 +39,13 @@ _persist_directory = "/app/backend/data/chromadb"
 def get_chroma_client():
     """Get or initialize ChromaDB client"""
     global _chroma_client
+    
+    if not CHROMADB_AVAILABLE:
+        logger.warning("ChromaDB not available - returning None")
+        return None
+        
     if _chroma_client is None:
         try:
-            import chromadb
-            from chromadb.config import Settings
-            
             # Ensure directory exists
             os.makedirs(_persist_directory, exist_ok=True)
             
@@ -47,7 +61,7 @@ def get_chroma_client():
             
         except Exception as e:
             logger.error(f"Failed to initialize ChromaDB: {e}")
-            raise
+            return None
             
     return _chroma_client
 
