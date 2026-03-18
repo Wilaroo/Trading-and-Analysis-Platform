@@ -992,10 +992,10 @@ async def get_historical_data(
 ):
     """
     Get historical bar data for a symbol.
-    Priority: Alpaca -> IB Gateway (if not busy) -> Cached data
+    Priority: ib_historical_data (MongoDB) -> Alpaca -> IB Gateway -> Cached data
     
-    When IB is busy (e.g., running comprehensive scan), we use cached data
-    or Alpaca to avoid overloading the IB connection.
+    For intraday bars (< 1 day), uses Alpaca for real-time data.
+    For daily+ bars, prefers ib_historical_data collection (faster, no API call).
     """
     cache = get_data_cache()
     symbol = symbol.upper()
@@ -1006,9 +1006,51 @@ async def get_historical_data(
     if _ib_service:
         ib_is_busy, busy_operation = _ib_service.is_busy()
         if ib_is_busy:
-            print(f"[IB Historical] IB is busy with '{busy_operation}', prioritizing Alpaca/cache for {symbol}")
+            print(f"[IB Historical] IB is busy with '{busy_operation}', prioritizing MongoDB/Alpaca for {symbol}")
     
-    # Try Alpaca first (free, no subscription needed, and doesn't conflict with IB)
+    # Determine if this is a daily or higher timeframe (can use MongoDB)
+    is_daily_or_higher = bar_size in ["1 day", "1 week", "1 month", "1D", "1W", "1M"]
+    
+    # For daily bars, try ib_historical_data collection first (fastest, no API call)
+    if is_daily_or_higher:
+        try:
+            from database import get_database
+            db = get_database()
+            if db is not None:
+                # Parse duration to get limit
+                limit = _convert_ib_duration_to_limit(duration, bar_size)
+                
+                # Fetch from unified collection
+                bars = list(db["ib_historical_data"].find(
+                    {"symbol": symbol, "bar_size": "1 day"},
+                    {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+                ).sort("date", -1).limit(limit))
+                
+                if bars and len(bars) >= 5:
+                    # Reverse to chronological order and format
+                    bars.reverse()
+                    formatted_bars = [{
+                        "time": bar.get("date"),
+                        "open": bar.get("open"),
+                        "high": bar.get("high"),
+                        "low": bar.get("low"),
+                        "close": bar.get("close"),
+                        "volume": bar.get("volume")
+                    } for bar in bars]
+                    
+                    return {
+                        "symbol": symbol,
+                        "bars": formatted_bars,
+                        "count": len(formatted_bars),
+                        "last_updated": datetime.now(timezone.utc).isoformat(),
+                        "is_cached": False,
+                        "is_realtime": False,
+                        "source": "ib_historical_data"
+                    }
+        except Exception as e:
+            print(f"MongoDB historical data error for {symbol}: {e}")
+    
+    # Try Alpaca (for intraday or if MongoDB didn't have data)
     if _alpaca_service:
         try:
             alpaca_timeframe = _convert_ib_to_alpaca_timeframe(bar_size)

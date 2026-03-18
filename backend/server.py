@@ -175,6 +175,10 @@ app.add_middleware(
 mongo_client = MongoClient(os.environ.get("MONGO_URL"))
 db = mongo_client[os.environ.get("DB_NAME", "tradecommand")]
 
+# Register database instance for other modules to access
+from database import set_database
+set_database(db)
+
 # Initialize services
 stock_service = get_stock_service()
 notification_service = get_notification_service(db)
