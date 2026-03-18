@@ -89,6 +89,7 @@ from routers.ib_collector_router import router as ib_collector_router
 from routers.data_storage_router import router as data_storage_router
 from routers.strategy_promotion_router import router as strategy_promotion_router, init_strategy_promotion_router
 from routers.scripts import router as scripts_router
+from routers.startup_status import router as startup_status_router
 from services.sentcom_service import get_sentcom_service, init_sentcom_service
 from services.dynamic_risk_engine import get_dynamic_risk_engine
 from services.ai_modules import (
@@ -419,6 +420,7 @@ app.include_router(ib_collector_router)  # IB Historical Data Collector
 app.include_router(data_storage_router)  # Data Storage Management
 app.include_router(strategy_promotion_router)  # Strategy Promotion - Autonomous Loop
 app.include_router(scripts_router)  # Scripts auto-update endpoint for StartTrading.bat
+app.include_router(startup_status_router)  # Startup Status Dashboard
 
 # Collections
 strategies_col = db["strategies"]

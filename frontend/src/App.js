@@ -10,6 +10,7 @@ import { TickerModalProvider } from './hooks/useTickerModal';
 import { DataCacheProvider } from './contexts';
 import api from './utils/api';
 import StartupModal from './components/StartupModal';
+import StartupStatusDashboard from './components/StartupStatusDashboard';
 
 // Import pages
 import {
@@ -90,6 +91,10 @@ if (typeof window !== 'undefined') {
 
 // ===================== MAIN APP =====================
 function App() {
+  // Startup status dashboard - shows system initialization progress
+  const [showStartupStatus, setShowStartupStatus] = useState(true);
+  const [startupStatusMinimized, setStartupStatusMinimized] = useState(false);
+  
   // Startup modal state - DISABLED for development (will be re-enabled after Phase 6 complete)
   const [showStartupModal, setShowStartupModal] = useState(false);
   
@@ -343,6 +348,15 @@ function App() {
         {/* Startup Modal */}
         {showStartupModal && (
           <StartupModal onComplete={() => setShowStartupModal(false)} />
+        )}
+        
+        {/* Startup Status Dashboard - shows system initialization progress */}
+        {showStartupStatus && (
+          <StartupStatusDashboard 
+            onClose={() => setShowStartupStatus(false)}
+            minimized={startupStatusMinimized}
+            onMinimize={() => setStartupStatusMinimized(!startupStatusMinimized)}
+          />
         )}
       
       {/* Toast notifications */}
