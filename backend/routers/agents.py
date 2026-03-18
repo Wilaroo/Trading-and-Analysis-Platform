@@ -186,9 +186,14 @@ def get_brief_me_agent():
         from agents.brief_me_agent import BriefMeAgent
         from routers.ib import get_pushed_ib_data
         from services.news_service import get_news_service
+        from database import get_database
         
         llm = get_llm_provider()
         _brief_me_agent = BriefMeAgent(llm_provider=llm)
+        
+        # Inject MongoDB for historical data access (uses unified ib_historical_data)
+        db = get_database()
+        _brief_me_agent.set_db(db)
         
         # Inject services (now including news_service)
         _brief_me_agent.inject_services(
@@ -203,7 +208,7 @@ def get_brief_me_agent():
             news_service=get_news_service()  # NEW: Inject news service for real news/catalysts
         )
         
-        logger.info("BriefMeAgent initialized with Alpaca, IB data, and News services")
+        logger.info("BriefMeAgent initialized with IB data (primary), Alpaca (fallback), and ib_historical_data")
     
     return _brief_me_agent
 

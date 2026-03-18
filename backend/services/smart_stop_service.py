@@ -299,12 +299,42 @@ class SmartStopService:
         self._regime_service = None
         self._sector_service = None
         self._data_service = None
+        self._db = None  # MongoDB connection for historical data
     
     def inject_services(self, regime_service=None, sector_service=None, data_service=None):
         """Inject external services for enhanced analysis"""
         self._regime_service = regime_service
         self._sector_service = sector_service
         self._data_service = data_service
+    
+    def set_db(self, db):
+        """Set MongoDB connection for historical data access"""
+        self._db = db
+    
+    async def _get_historical_bars_from_db(self, symbol: str, limit: int = 50) -> Optional[pd.DataFrame]:
+        """
+        Get historical bars from unified ib_historical_data collection.
+        Used for ATR calculation, volume profile, and other analysis.
+        """
+        if self._db is None:
+            return None
+        
+        try:
+            bars = list(self._db["ib_historical_data"].find(
+                {"symbol": symbol.upper(), "bar_size": "1 day"},
+                {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+            ).sort("date", -1).limit(limit))
+            
+            if bars and len(bars) >= 10:
+                df = pd.DataFrame(bars)
+                # Rename columns if needed
+                if 'date' in df.columns:
+                    df = df.rename(columns={'date': 'timestamp'})
+                return df
+        except Exception as e:
+            logger.warning(f"Error fetching historical bars for {symbol}: {e}")
+        
+        return None
     
     # ========================================================================
     # MAIN ENTRY POINTS
@@ -379,6 +409,12 @@ class SmartStopService:
         """
         factors = []
         warnings = []
+        
+        # Auto-fetch historical bars from ib_historical_data if not provided
+        if historical_bars is None:
+            historical_bars = await self._get_historical_bars_from_db(symbol, limit=50)
+            if historical_bars is not None:
+                factors.append("Using IB historical data for volume profile")
         
         # 1. Get setup rules
         rules = self._get_setup_rules(setup_type)

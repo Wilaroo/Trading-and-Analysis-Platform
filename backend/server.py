@@ -589,11 +589,13 @@ smart_stop_service = init_smart_stop_service(
     sector_service=sector_service,
     data_service=alpaca_service
 )
+# Inject MongoDB for historical data access (uses unified ib_historical_data collection)
+smart_stop_service.set_db(db)
 register_service('smart_stop_service', smart_stop_service)
 print("Unified Smart Stop System initialized")
 print("  - 6 Stop Modes: original, atr_dynamic, anti_hunt, volatility_adjusted, layered, chandelier")
 print("  - 8 Setup Rules: breakout, pullback, momentum, mean_reversion, gap_and_go, vwap_reversal, earnings_play, default")
-print("  - Volume Profile Analysis: POC, VAH/VAL, HVN/LVN detection")
+print("  - Volume Profile Analysis: POC, VAH/VAL, HVN/LVN detection (from ib_historical_data)")
 print("  - Sector Correlation: Relative strength-based adjustments")
 print("  - Stop Hunt Protection: Anti-hunt, layered stops, round number avoidance")
 print("  - Endpoints: /api/smart-stops/calculate, /api/smart-stops/intelligent-calculate, /api/smart-stops/analyze-trade")

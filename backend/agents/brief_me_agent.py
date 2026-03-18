@@ -55,6 +55,11 @@ class BriefMeAgent:
         self.alpaca_service = None
         self.ib_pushed_data = None  # For real-time IB data
         self.news_service = None  # For real news
+        self._db = None  # MongoDB for historical data
+    
+    def set_db(self, db):
+        """Set MongoDB connection for historical data access"""
+        self._db = db
     
     def inject_services(
         self,
@@ -316,8 +321,50 @@ class BriefMeAgent:
         except Exception as e:
             logger.warning(f"Failed to get scanner alerts: {e}")
     
+    async def _get_ib_quote(self, symbol: str) -> Optional[Dict]:
+        """Get real-time quote from IB pushed data if available."""
+        try:
+            if self.ib_pushed_data:
+                quote_data = self.ib_pushed_data.get(symbol.upper())
+                if quote_data and quote_data.get("last_price"):
+                    return {
+                        "price": quote_data.get("last_price"),
+                        "bid": quote_data.get("bid"),
+                        "ask": quote_data.get("ask"),
+                        "volume": quote_data.get("volume"),
+                        "source": "ib"
+                    }
+        except Exception as e:
+            logger.debug(f"Error getting IB quote for {symbol}: {e}")
+        return None
+    
+    async def _get_prev_close_from_db(self, symbol: str) -> Optional[float]:
+        """Get previous close from ib_historical_data collection."""
+        if self._db is None:
+            return None
+        try:
+            bars = list(self._db["ib_historical_data"].find(
+                {"symbol": symbol.upper(), "bar_size": "1 day"},
+                {"_id": 0, "close": 1, "date": 1}
+            ).sort("date", -1).limit(2))
+            
+            if bars and len(bars) >= 2:
+                # Return the second most recent close (previous day)
+                return bars[1].get("close")
+            elif bars and len(bars) == 1:
+                return bars[0].get("close")
+        except Exception as e:
+            logger.debug(f"Error fetching prev close for {symbol}: {e}")
+        return None
+    
     async def _fetch_premarket_data(self, data: Dict):
-        """Fetch pre-market gappers and movers from Alpaca."""
+        """
+        Fetch pre-market gappers and movers.
+        
+        Data source priority:
+        1. Current price: IB pushed data (if available) -> Alpaca
+        2. Previous close: ib_historical_data (MongoDB) -> Alpaca API
+        """
         try:
             # Key symbols to check - expanded list
             index_etfs = ["SPY", "QQQ", "IWM", "DIA"]
@@ -334,35 +381,63 @@ class BriefMeAgent:
             
             for symbol in index_etfs + watchlist:
                 try:
-                    quote = await asyncio.to_thread(
-                        self.alpaca_service.get_latest_quote, symbol
-                    )
-                    bars = await asyncio.to_thread(
-                        self.alpaca_service.get_historical_bars, symbol, 2
-                    )
+                    current_price = None
+                    quote_source = None
                     
-                    if quote and bars is not None and len(bars) >= 2:
-                        current_price = quote.get("price", 0)
-                        prev_close = bars.iloc[-2]["close"] if len(bars) >= 2 else current_price
+                    # 1. Try IB pushed data first (real-time, highest quality)
+                    ib_quote = await self._get_ib_quote(symbol)
+                    if ib_quote and ib_quote.get("price"):
+                        current_price = ib_quote["price"]
+                        quote_source = "ib"
+                    
+                    # 2. Fallback to Alpaca if IB not available
+                    if current_price is None and self.alpaca_service:
+                        try:
+                            alpaca_quote = await asyncio.to_thread(
+                                self.alpaca_service.get_latest_quote, symbol
+                            )
+                            if alpaca_quote and alpaca_quote.get("price"):
+                                current_price = alpaca_quote["price"]
+                                quote_source = "alpaca"
+                        except Exception:
+                            pass
+                    
+                    if current_price is None or current_price <= 0:
+                        continue
+                    
+                    # 3. Get prev close from ib_historical_data first (fast, no API call)
+                    prev_close = await self._get_prev_close_from_db(symbol)
+                    
+                    # 4. Fallback to Alpaca API if not in DB
+                    if prev_close is None and self.alpaca_service:
+                        try:
+                            bars = await asyncio.to_thread(
+                                self.alpaca_service.get_historical_bars, symbol, 2
+                            )
+                            if bars is not None and len(bars) >= 2:
+                                prev_close = bars.iloc[-2]["close"]
+                        except Exception:
+                            pass
+                    
+                    if prev_close and prev_close > 0:
+                        gap_pct = ((current_price - prev_close) / prev_close) * 100
                         
-                        if prev_close > 0:
-                            gap_pct = ((current_price - prev_close) / prev_close) * 100
-                            
-                            item = {
-                                "symbol": symbol,
-                                "price": current_price,
-                                "prev_close": prev_close,
-                                "gap_pct": round(gap_pct, 2),
-                                "gap_dollars": round(current_price - prev_close, 2)
-                            }
-                            
-                            if symbol in index_etfs:
-                                index_status[symbol] = item
-                            elif abs(gap_pct) >= 1.0:  # 1%+ gap (lowered from 2%)
-                                if gap_pct > 0:
-                                    gappers_up.append(item)
-                                else:
-                                    gappers_down.append(item)
+                        item = {
+                            "symbol": symbol,
+                            "price": current_price,
+                            "prev_close": prev_close,
+                            "gap_pct": round(gap_pct, 2),
+                            "gap_dollars": round(current_price - prev_close, 2),
+                            "quote_source": quote_source  # Track where quote came from
+                        }
+                        
+                        if symbol in index_etfs:
+                            index_status[symbol] = item
+                        elif abs(gap_pct) >= 1.0:  # 1%+ gap (lowered from 2%)
+                            if gap_pct > 0:
+                                gappers_up.append(item)
+                            else:
+                                gappers_down.append(item)
                 except Exception as e:
                     logger.debug(f"Failed to get data for {symbol}: {e}")
             
