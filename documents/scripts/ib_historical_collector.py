@@ -66,22 +66,25 @@ class CloudAPIClient:
                 time.sleep(2 ** attempt)
         return None
     
-    def post(self, endpoint: str, data: dict, timeout: int = 30) -> Optional[dict]:
-        """POST request with retry logic."""
+    def post(self, endpoint: str, data: dict, timeout: int = 15) -> Optional[dict]:
+        """POST request with retry logic. Uses shorter timeout for resilience."""
         url = f"{self.base_url}{endpoint}"
-        for attempt in range(3):
+        for attempt in range(2):  # Reduced retries
             try:
                 resp = self.session.post(url, json=data, timeout=timeout)
                 if resp.status_code in [200, 201]:
                     return resp.json()
+                elif resp.status_code == 409:
+                    # Conflict - already claimed/processed, that's OK
+                    return {"success": True, "status": "already_processed"}
                 else:
                     logger.warning(f"POST {endpoint} returned {resp.status_code}")
             except requests.exceptions.Timeout:
-                logger.warning(f"Timeout on POST {endpoint} (attempt {attempt + 1}/3)")
+                logger.warning(f"Timeout on POST {endpoint} (attempt {attempt + 1}/2)")
                 time.sleep(2 ** attempt)
             except Exception as e:
                 logger.error(f"Error on POST {endpoint}: {e}")
-                time.sleep(2 ** attempt)
+                time.sleep(1)
         return None
 
 
@@ -451,10 +454,12 @@ def main():
     parser.add_argument("--ib-port", type=int, default=4002, help="IB Gateway port")
     parser.add_argument("--client-id", type=int, default=11, 
                         help="IB client ID (default: 11, different from trading pusher)")
-    parser.add_argument("--batch-size", type=int, default=5, 
-                        help="Number of requests to process per cycle")
+    parser.add_argument("--batch-size", type=int, default=3, 
+                        help="Number of requests to process per cycle (default: 3, lower for slow connections)")
     parser.add_argument("--once", action="store_true", 
                         help="Run once and exit (don't loop continuously)")
+    parser.add_argument("--slow", action="store_true",
+                        help="Slow mode - longer delays between requests for unstable connections")
     
     args = parser.parse_args()
     
@@ -467,6 +472,7 @@ def main():
     print(f"  Client ID: {args.client_id}")
     print(f"  Batch Size: {args.batch_size}")
     print(f"  Mode: {'Single Run' if args.once else 'Continuous'}")
+    print(f"  Speed: {'SLOW (for unstable connections)' if args.slow else 'Normal'}")
     print("")
     print("  NOTE: Run this alongside ib_data_pusher.py")
     print("        Trading continues unaffected while collecting data")
@@ -479,7 +485,10 @@ def main():
         client_id=args.client_id
     )
     
-    collector.run(batch_size=args.batch_size, continuous=not args.once)
+    # If slow mode, reduce batch size further
+    batch_size = min(args.batch_size, 2) if args.slow else args.batch_size
+    
+    collector.run(batch_size=batch_size, continuous=not args.once)
 
 
 if __name__ == "__main__":
