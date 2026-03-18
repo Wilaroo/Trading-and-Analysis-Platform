@@ -165,7 +165,7 @@ class TimeSeriesAIService:
         if self._db is None:
             return {"success": False, "error": "Database not connected"}
             
-        logger.info("Starting model training from MongoDB historical_bars...")
+        logger.info("Starting model training from MongoDB ib_historical_data (unified dataset)...")
         
         try:
             # Get historical bars directly from MongoDB
@@ -207,21 +207,22 @@ class TimeSeriesAIService:
             return {"success": False, "error": str(e)}
             
     async def _get_training_symbols_from_db(self) -> List[str]:
-        """Get symbols with most historical data from MongoDB"""
+        """Get symbols with most historical data from MongoDB (unified ib_historical_data)"""
         if self._db is None:
             return []
             
         try:
-            # Aggregate to find symbols with most bars
+            # Aggregate to find symbols with most bars in unified collection
             pipeline = [
+                {"$match": {"bar_size": "1 day"}},  # Focus on daily bars for training
                 {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
                 {"$match": {"count": {"$gte": 100}}},  # At least 100 bars
                 {"$sort": {"count": -1}},
                 {"$limit": 30}
             ]
-            result = list(self._db["historical_bars"].aggregate(pipeline))
+            result = list(self._db["ib_historical_data"].aggregate(pipeline))
             symbols = [r["_id"] for r in result]
-            logger.info(f"Found {len(symbols)} symbols with sufficient data")
+            logger.info(f"Found {len(symbols)} symbols with sufficient data in ib_historical_data")
             return symbols
         except Exception as e:
             logger.error(f"Error getting training symbols: {e}")
@@ -232,21 +233,25 @@ class TimeSeriesAIService:
             ]
             
     async def _get_historical_bars_from_db(self, symbol: str) -> Optional[List[Dict]]:
-        """Get historical bars for a symbol directly from MongoDB"""
+        """Get historical bars for a symbol from unified ib_historical_data collection"""
         if self._db is None:
             return None
             
         try:
-            # Fetch bars sorted by timestamp (oldest first for proper training)
+            # Fetch bars sorted by date (oldest first for proper training)
             # Training expects chronological order (oldest first)
-            cursor = self._db["historical_bars"].find(
-                {"symbol": symbol},
-                {"_id": 0, "symbol": 1, "timestamp": 1, "open": 1, "high": 1, 
+            cursor = self._db["ib_historical_data"].find(
+                {"symbol": symbol, "bar_size": "1 day"},
+                {"_id": 0, "symbol": 1, "date": 1, "open": 1, "high": 1, 
                  "low": 1, "close": 1, "volume": 1}
-            ).sort("timestamp", 1)  # Ascending order (oldest first)
+            ).sort("date", 1)  # Ascending order (oldest first)
             
             bars = list(cursor)
-            # Keep oldest-first for training
+            
+            # Convert 'date' field to 'timestamp' for compatibility with model
+            for bar in bars:
+                bar['timestamp'] = bar.pop('date', None)
+            
             return bars if bars else None
             
         except Exception as e:
@@ -285,26 +290,30 @@ class TimeSeriesAIService:
             return None
 
     async def _get_bars_from_db_for_prediction(self, symbol: str) -> Optional[List[Dict]]:
-        """Get historical bars from MongoDB for running a prediction"""
+        """Get historical bars from unified ib_historical_data for running a prediction"""
         if self._db is None:
             logger.warning("DB not connected, cannot fetch bars for prediction")
             return None
             
         try:
-            # Fetch most recent 50 bars (sorted by timestamp descending for most recent first)
-            cursor = self._db["historical_bars"].find(
-                {"symbol": symbol.upper()},
-                {"_id": 0, "symbol": 1, "timestamp": 1, "open": 1, "high": 1, 
+            # Fetch most recent 50 bars (sorted by date descending for most recent first)
+            cursor = self._db["ib_historical_data"].find(
+                {"symbol": symbol.upper(), "bar_size": "1 day"},
+                {"_id": 0, "symbol": 1, "date": 1, "open": 1, "high": 1, 
                  "low": 1, "close": 1, "volume": 1}
-            ).sort("timestamp", -1).limit(50)  # Most recent first
+            ).sort("date", -1).limit(50)  # Most recent first
             
             bars = list(cursor)
             
+            # Convert 'date' field to 'timestamp' for compatibility
+            for bar in bars:
+                bar['timestamp'] = bar.pop('date', None)
+            
             if bars and len(bars) >= 20:
-                logger.info(f"Fetched {len(bars)} bars from MongoDB for {symbol}")
+                logger.info(f"Fetched {len(bars)} bars from ib_historical_data for {symbol}")
                 return bars
             else:
-                logger.warning(f"Insufficient bars in MongoDB for {symbol}: {len(bars) if bars else 0}")
+                logger.warning(f"Insufficient bars in ib_historical_data for {symbol}: {len(bars) if bars else 0}")
                 return None
                 
         except Exception as e:

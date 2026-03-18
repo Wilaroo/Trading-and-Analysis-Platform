@@ -61,10 +61,14 @@ Build a self-improving AI trading bot system "SentCom" with:
 - `AdvancedBacktestPanel.jsx` - Backtesting interface
 
 ## Database Collections
-- `ib_historical_data` - Time-series bar data
+- `ib_historical_data` - **UNIFIED** time-series bar data (IB + Alpaca merged)
 - `symbol_adv_cache` - Average daily volume cache
 - `training_jobs` - Training job metadata
 - `app_settings` - Application settings
+- `historical_data_requests` - Queue of pending/completed data collection requests
+- `live_alerts` - Real-time trading alerts
+
+**Note**: `historical_bars` has been deprecated and merged into `ib_historical_data` (March 18, 2026)
 
 ## Current Status (March 18, 2026)
 - ✅ Database migrated to MongoDB Atlas (persistent storage)
@@ -74,6 +78,7 @@ Build a self-improving AI trading bot system "SentCom" with:
 - ✅ **FIX: Heartbeat tolerance increased from 30s to 90s** (fixes fluctuating "All Systems Offline" status)
 - ✅ **SIMPLIFIED PRIORITY COLLECTION SYSTEM** (March 17, 2026) - Replaces confusing mode toggle
 - ✅ **FIX: MongoDB Atlas Write Performance** (March 18, 2026) - Bulk write optimization for historical data
+- ✅ **UNIFIED DATA COLLECTION** (March 18, 2026) - Consolidated historical_bars into ib_historical_data
 
 ### Phase 5: Priority-Based Data Collection ✅ (SIMPLIFIED)
 Per user feedback, the explicit "Trading vs Collection Mode" toggle was replaced with a simpler priority-based system:
@@ -107,6 +112,36 @@ Per user feedback, the explicit "Trading vs Collection Mode" toggle was replaced
 - Live trading (orders) always works regardless of priority mode
 
 ## Recent Changes
+### March 18, 2026 - UNIFIED DATA COLLECTION (MAJOR)
+- **Goal**: Optimize for AI learning speed and quality
+- **Action**: Consolidated `historical_bars` (Alpaca data) into `ib_historical_data` (IB data)
+- **Result**: Single unified dataset with:
+  - **9,388+ symbols** (combined from both sources)
+  - **3.4M+ bars** (and growing)
+  - **8 years of history** (2018-2026)
+  - **7 timeframe types** (1min to 1week)
+- **Files Updated**:
+  - `services/ai_modules/timeseries_service.py` - Now uses ib_historical_data
+  - `services/ai_modules/timeseries_gbm.py` - Now uses ib_historical_data  
+  - `services/enhanced_scanner.py` - Now uses ib_historical_data
+  - `services/historical_simulation_engine.py` - Now uses ib_historical_data
+  - `services/slow_learning/historical_data_service.py` - Now uses ib_historical_data
+  - `services/hybrid_data_service.py` - Now uses ib_historical_data
+  - `services/market_regime_engine.py` - Now uses ib_historical_data (with MongoDB as primary)
+- **Benefits for AI**:
+  - Faster training (no dual-collection lookups)
+  - More training data (combined datasets)
+  - Consistent data format (single schema)
+  - Deeper history (8 years vs 1 year)
+
+### March 18, 2026 - Atlas Performance Advisor Fixes
+- Created indexes recommended by Atlas Performance Advisor:
+  - `historical_data_requests`: `{bar_size: 1, status: 1, completed_at: -1}` - Fixes 927:1 scan ratio
+  - `live_alerts`: `{id: 1}` - Fixes full collection scan (12,370 docs)
+- Updated `ib_historical_collector.py` script:
+  - Auto-calls `/api/ib/historical-data/optimize-indexes` on startup
+  - Uses batch reporting via `/api/ib/historical-data/batch-result` for faster writes
+
 ### March 18, 2026 - MongoDB Atlas Write Performance Fix (CRITICAL)
 - **Issue**: `POST /api/ib/historical-data/result` endpoint timing out when saving historical data to MongoDB Atlas
 - **Root Cause**: Individual `update_one()` calls in a loop for each bar - extremely slow with 2.7M+ documents

@@ -560,10 +560,10 @@ class HistoricalSimulationEngine:
         end: datetime,
         bar_size: str = "1 day"
     ) -> List[Dict]:
-        """Get historical OHLCV bars for a symbol with specified bar size"""
+        """Get historical OHLCV bars for a symbol with specified bar size from unified ib_historical_data"""
         try:
             if self._db is not None:
-                # Try IB collected data first (primary source after data collection)
+                # Use unified ib_historical_data collection (contains both IB and migrated Alpaca data)
                 ib_bars = list(self._db["ib_historical_data"].find(
                     {
                         "symbol": symbol,
@@ -588,34 +588,31 @@ class HistoricalSimulationEngine:
                         "symbol": symbol,
                         "bar_size": bar_size
                     } for bar in ib_bars]
-                
-                # Fallback: Try legacy historical_bars collection (only for daily)
-                if bar_size == "1 day":
-                    bars = list(self._db["historical_bars"].find(
-                        {
-                            "symbol": symbol,
-                            "timestamp": {
-                                "$gte": start.isoformat(),
-                                "$lte": end.isoformat()
-                            }
-                        },
-                        {"_id": 0}
-                    ).sort("timestamp", 1))
-                    
-                    if bars and len(bars) >= 10:
-                        return bars
             
-            # Fetch from Alpaca if not in database (only supports daily)
+            # Fetch from Alpaca if not in database (only supports daily) and cache to ib_historical_data
             if self._alpaca_service and bar_size == "1 day":
                 bars = await self._fetch_alpaca_bars(symbol, start, end)
                 
-                # Cache the data
+                # Cache the data to unified collection
                 if bars and self._db:
+                    from datetime import timezone as tz
                     for bar in bars:
-                        bar["symbol"] = symbol
-                        self._db["historical_bars"].update_one(
-                            {"symbol": symbol, "timestamp": bar["timestamp"]},
-                            {"$set": bar},
+                        timestamp = bar.get("timestamp", "")
+                        date_str = timestamp[:10] if isinstance(timestamp, str) else timestamp.strftime("%Y-%m-%d")
+                        self._db["ib_historical_data"].update_one(
+                            {"symbol": symbol, "bar_size": "1 day", "date": date_str},
+                            {"$set": {
+                                "symbol": symbol,
+                                "bar_size": "1 day", 
+                                "date": date_str,
+                                "open": bar.get("open"),
+                                "high": bar.get("high"),
+                                "low": bar.get("low"),
+                                "close": bar.get("close"),
+                                "volume": bar.get("volume"),
+                                "source": "alpaca",
+                                "collected_at": datetime.now(tz.utc).isoformat()
+                            }},
                             upsert=True
                         )
                 
@@ -1436,15 +1433,17 @@ class HistoricalSimulationEngine:
         return None
     
     async def _get_close_price(self, symbol: str, date: datetime) -> Optional[float]:
-        """Get closing price for a symbol on a date"""
+        """Get closing price for a symbol on a date from unified ib_historical_data"""
         try:
             if self._db is not None:
-                bar = self._db["historical_bars"].find_one(
+                date_str = date.strftime("%Y-%m-%d")
+                bar = self._db["ib_historical_data"].find_one(
                     {
                         "symbol": symbol,
-                        "timestamp": {"$lte": date.isoformat()}
+                        "bar_size": "1 day",
+                        "date": {"$lte": date_str}
                     },
-                    sort=[("timestamp", -1)]
+                    sort=[("date", -1)]
                 )
                 if bar:
                     return bar.get("close")

@@ -138,24 +138,15 @@ class HybridDataService:
         }
         
     def set_db(self, db):
-        """Set MongoDB connection"""
+        """Set MongoDB connection - now uses unified ib_historical_data collection"""
         self._db = db
         if db is not None:
-            self._bars_collection = db['historical_bars']
+            # Use unified ib_historical_data collection
+            self._bars_collection = db['ib_historical_data']
             self._cache_stats_collection = db['data_cache_stats']
             
-            # Create indexes for efficient querying
-            self._bars_collection.create_index([
-                ("symbol", 1),
-                ("timeframe", 1),
-                ("timestamp", 1)
-            ], unique=True)
-            self._bars_collection.create_index([
-                ("symbol", 1),
-                ("timeframe", 1),
-                ("cached_at", 1)
-            ])
-            logger.info("HybridDataService: MongoDB connected")
+            # Indexes already exist on ib_historical_data (created by optimize-indexes endpoint)
+            logger.info("HybridDataService: MongoDB connected (using ib_historical_data)")
             
     def set_ib_service(self, ib_service):
         """Set IB service reference"""

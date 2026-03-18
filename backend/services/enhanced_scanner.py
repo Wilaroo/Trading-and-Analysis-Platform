@@ -1898,22 +1898,22 @@ class EnhancedBackgroundScanner:
             if db is None:
                 return adv_data
             
-            # Check historical_bars collection for recent daily data
-            bars_col = db.get('historical_bars') or db.get('ib_historical_bars')
+            # Use unified ib_historical_data collection
+            bars_col = db.get('ib_historical_data')
             if bars_col is None:
                 return adv_data
             
             # Look for daily bars from last 30 days
-            cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
             
             for symbol in symbols:
                 try:
-                    # Find daily bars for this symbol
+                    # Find daily bars for this symbol from unified collection
                     bars = list(bars_col.find(
                         {
                             "symbol": symbol,
-                            "timeframe": {"$in": ["1D", "1day", "day", "daily"]},
-                            "timestamp": {"$gte": cutoff}
+                            "bar_size": "1 day",
+                            "date": {"$gte": cutoff}
                         },
                         {"volume": 1}
                     ).limit(20))
@@ -1926,7 +1926,7 @@ class EnhancedBackgroundScanner:
                     continue
                     
         except Exception as e:
-            logger.debug(f"Error accessing IB historical data: {e}")
+            logger.debug(f"Error accessing ib_historical_data: {e}")
         
         return adv_data
     

@@ -470,16 +470,19 @@ class TimeSeriesGBM:
                 if pred_price is None:
                     continue
                 
-                # Get price after forecast horizon from historical_bars
+                # Get price after forecast horizon from ib_historical_data (unified collection)
                 # Find the first bar after (pred_time + forecast_horizon)
                 target_time = datetime.fromisoformat(pred_time.replace("Z", "+00:00")) + timedelta(days=self.forecast_horizon)
                 
-                future_bar = self._db["historical_bars"].find_one(
+                # Try to find by date string (YYYY-MM-DD format for daily bars)
+                target_date_str = target_time.strftime("%Y-%m-%d")
+                future_bar = self._db["ib_historical_data"].find_one(
                     {
                         "symbol": symbol,
-                        "timestamp": {"$gte": target_time.isoformat()}
+                        "bar_size": "1 day",
+                        "date": {"$gte": target_date_str}
                     },
-                    sort=[("timestamp", 1)]
+                    sort=[("date", 1)]
                 )
                 
                 if future_bar and "close" in future_bar:

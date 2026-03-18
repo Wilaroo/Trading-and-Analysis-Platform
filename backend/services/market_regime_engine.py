@@ -877,7 +877,31 @@ class MarketRegimeEngine:
     # === Data Fetching Methods ===
     
     async def _get_historical_bars(self, symbol: str, limit: int = 200) -> List[Dict]:
-        """Get historical daily bars from Alpaca (primary) or IB (fallback)."""
+        """Get historical daily bars from unified ib_historical_data (primary), then Alpaca or IB."""
+        # Try unified MongoDB collection first (fastest)
+        try:
+            from database import get_database
+            db = get_database()
+            if db is not None:
+                bars = list(db["ib_historical_data"].find(
+                    {"symbol": symbol, "bar_size": "1 day"},
+                    {"_id": 0}
+                ).sort("date", -1).limit(limit))
+                
+                if bars and len(bars) >= 20:
+                    # Convert to expected format and reverse to chronological order
+                    return [{
+                        "timestamp": bar.get("date"),
+                        "open": bar.get("open"),
+                        "high": bar.get("high"),
+                        "low": bar.get("low"),
+                        "close": bar.get("close"),
+                        "volume": bar.get("volume")
+                    } for bar in reversed(bars)]
+        except Exception as e:
+            print(f"MongoDB bars error for {symbol}: {e}")
+        
+        # Fallback to Alpaca
         try:
             if self.alpaca_service:
                 bars = await self.alpaca_service.get_bars(symbol, "1Day", limit)

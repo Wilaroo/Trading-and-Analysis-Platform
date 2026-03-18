@@ -59,24 +59,19 @@ class HistoricalDataService:
     
     def __init__(self):
         self._db = None
-        self._historical_bars_col = None
+        self._historical_bars_col = None  # Now points to ib_historical_data
         self._historical_stats_col = None
         self._alpaca_service = None
         
     def set_db(self, db):
-        """Set database connection"""
+        """Set database connection - now uses unified ib_historical_data collection"""
         self._db = db
         if db is not None:
-            self._historical_bars_col = db['historical_bars']
+            # Use unified ib_historical_data collection
+            self._historical_bars_col = db['ib_historical_data']
             self._historical_stats_col = db['historical_data_stats']
             
-            # Create indexes for efficient querying
-            self._historical_bars_col.create_index([
-                ("symbol", 1),
-                ("timeframe", 1),
-                ("timestamp", 1)
-            ], unique=True)
-            self._historical_bars_col.create_index([("symbol", 1), ("timeframe", 1)])
+            # Indexes already exist on ib_historical_data (created by optimize-indexes endpoint)
             
     def set_alpaca_service(self, alpaca_service):
         """Set Alpaca service for data fetching"""
@@ -232,20 +227,40 @@ class HistoricalDataService:
         timeframe: str,
         bars: List[Dict]
     ) -> int:
-        """Store bars in MongoDB with upsert"""
+        """Store bars in unified ib_historical_data collection with upsert"""
         if self._historical_bars_col is None or not bars:
             return 0
+        
+        # Map timeframe to bar_size
+        bar_size_map = {"1Day": "1 day", "1day": "1 day", "5Min": "5 mins", "5min": "5 mins", 
+                        "15Min": "15 mins", "1Hour": "1 hour"}
+        bar_size = bar_size_map.get(timeframe, "1 day")
+        is_daily = "day" in bar_size.lower()
             
         stored = 0
         for bar in bars:
             try:
+                timestamp = bar.get("timestamp", "")
+                date_str = timestamp[:10] if is_daily and isinstance(timestamp, str) else timestamp
+                
                 self._historical_bars_col.update_one(
                     {
                         "symbol": symbol,
-                        "timeframe": timeframe,
-                        "timestamp": bar["timestamp"]
+                        "bar_size": bar_size,
+                        "date": date_str
                     },
-                    {"$set": bar},
+                    {"$set": {
+                        "symbol": symbol,
+                        "bar_size": bar_size,
+                        "date": date_str,
+                        "open": bar.get("open"),
+                        "high": bar.get("high"),
+                        "low": bar.get("low"),
+                        "close": bar.get("close"),
+                        "volume": bar.get("volume"),
+                        "source": "alpaca",
+                        "collected_at": datetime.now(timezone.utc).isoformat()
+                    }},
                     upsert=True
                 )
                 stored += 1
@@ -255,23 +270,28 @@ class HistoricalDataService:
         return stored
         
     async def _update_data_stats(self, symbol: str, timeframe: str):
-        """Update statistics for stored data"""
+        """Update statistics for stored data using unified ib_historical_data schema"""
         if self._historical_bars_col is None or self._historical_stats_col is None:
             return
+        
+        # Map timeframe to bar_size
+        bar_size_map = {"1Day": "1 day", "1day": "1 day", "5Min": "5 mins", "5min": "5 mins", 
+                        "15Min": "15 mins", "1Hour": "1 hour"}
+        bar_size = bar_size_map.get(timeframe, "1 day")
             
-        # Get first and last bars
+        # Get first and last bars using new schema
         first_bar = self._historical_bars_col.find_one(
-            {"symbol": symbol, "timeframe": timeframe},
-            sort=[("timestamp", 1)]
+            {"symbol": symbol, "bar_size": bar_size},
+            sort=[("date", 1)]
         )
         last_bar = self._historical_bars_col.find_one(
-            {"symbol": symbol, "timeframe": timeframe},
-            sort=[("timestamp", -1)]
+            {"symbol": symbol, "bar_size": bar_size},
+            sort=[("date", -1)]
         )
         
         bar_count = self._historical_bars_col.count_documents({
             "symbol": symbol,
-            "timeframe": timeframe
+            "bar_size": bar_size
         })
         
         # Detect gaps (simplified)
@@ -281,8 +301,8 @@ class HistoricalDataService:
             symbol=symbol,
             timeframe=timeframe,
             bar_count=bar_count,
-            first_bar=first_bar["timestamp"] if first_bar else "",
-            last_bar=last_bar["timestamp"] if last_bar else "",
+            first_bar=first_bar.get("date", "") if first_bar else "",
+            last_bar=last_bar.get("date", "") if last_bar else "",
             data_quality="good" if gaps == 0 else "gaps",
             gaps_detected=gaps,
             last_updated=datetime.now(timezone.utc).isoformat()
@@ -295,28 +315,35 @@ class HistoricalDataService:
         )
         
     async def _detect_gaps(self, symbol: str, timeframe: str) -> int:
-        """Simple gap detection for daily bars"""
+        """Simple gap detection for daily bars using unified schema"""
         if self._historical_bars_col is None or timeframe != "1Day":
             return 0
             
-        # Get all timestamps
+        # Get all dates using new schema
         bars = list(self._historical_bars_col.find(
-            {"symbol": symbol, "timeframe": timeframe},
-            {"timestamp": 1}
-        ).sort("timestamp", 1))
+            {"symbol": symbol, "bar_size": "1 day"},
+            {"date": 1}
+        ).sort("date", 1))
         
         if len(bars) < 2:
             return 0
             
         gaps = 0
         for i in range(1, len(bars)):
-            prev_ts = datetime.fromisoformat(bars[i-1]["timestamp"].replace("Z", "+00:00"))
-            curr_ts = datetime.fromisoformat(bars[i]["timestamp"].replace("Z", "+00:00"))
+            # Use date field from new schema
+            prev_date = bars[i-1].get("date", "")
+            curr_date = bars[i].get("date", "")
             
-            # Check if gap is more than 4 days (accounting for weekends)
-            day_diff = (curr_ts - prev_ts).days
-            if day_diff > 4:
-                gaps += 1
+            try:
+                prev_dt = datetime.fromisoformat(prev_date[:10] if len(prev_date) > 10 else prev_date)
+                curr_dt = datetime.fromisoformat(curr_date[:10] if len(curr_date) > 10 else curr_date)
+                
+                # Check if gap is more than 4 days (accounting for weekends)
+                day_diff = (curr_dt - prev_dt).days
+                if day_diff > 4:
+                    gaps += 1
+            except Exception:
+                continue
                 
         return gaps
         
@@ -329,7 +356,7 @@ class HistoricalDataService:
         limit: int = None
     ) -> List[Dict]:
         """
-        Get historical bars from stored data.
+        Get historical bars from unified ib_historical_data collection.
         
         Args:
             symbol: Stock symbol
@@ -343,26 +370,45 @@ class HistoricalDataService:
         """
         if self._historical_bars_col is None:
             return []
+        
+        # Map timeframe to bar_size
+        bar_size_map = {"1Day": "1 day", "1day": "1 day", "5Min": "5 mins", "5min": "5 mins", 
+                        "15Min": "15 mins", "1Hour": "1 hour"}
+        bar_size = bar_size_map.get(timeframe, "1 day")
             
-        query = {"symbol": symbol.upper(), "timeframe": timeframe}
+        query = {"symbol": symbol.upper(), "bar_size": bar_size}
         
         if start_date:
-            query["timestamp"] = {"$gte": start_date}
+            query["date"] = {"$gte": start_date}
         if end_date:
-            if "timestamp" in query:
-                query["timestamp"]["$lte"] = end_date
+            if "date" in query:
+                query["date"]["$lte"] = end_date
             else:
-                query["timestamp"] = {"$lte": end_date}
+                query["date"] = {"$lte": end_date}
                 
         cursor = self._historical_bars_col.find(
             query,
             {"_id": 0}
-        ).sort("timestamp", 1)
+        ).sort("date", 1)
         
         if limit:
             cursor = cursor.limit(limit)
+        
+        # Convert to old format for compatibility
+        bars = []
+        for bar in cursor:
+            bars.append({
+                "symbol": bar.get("symbol"),
+                "timestamp": bar.get("date"),
+                "open": bar.get("open"),
+                "high": bar.get("high"),
+                "low": bar.get("low"),
+                "close": bar.get("close"),
+                "volume": bar.get("volume"),
+                "timeframe": timeframe
+            })
             
-        return list(cursor)
+        return bars
         
     async def get_data_stats(self, symbol: str = None) -> List[HistoricalDataStats]:
         """Get statistics about stored historical data"""
@@ -388,19 +434,26 @@ class HistoricalDataService:
         symbol: str,
         timeframe: str = None
     ) -> Dict[str, Any]:
-        """Delete stored historical data"""
+        """Delete stored historical data from unified ib_historical_data"""
         if self._historical_bars_col is None:
             return {"success": False, "error": "Database not connected"}
-            
+        
+        # Map timeframe to bar_size for unified schema
         query = {"symbol": symbol.upper()}
         if timeframe:
-            query["timeframe"] = timeframe
+            bar_size_map = {"1Day": "1 day", "1day": "1 day", "5Min": "5 mins", "5min": "5 mins", 
+                            "15Min": "15 mins", "1Hour": "1 hour"}
+            bar_size = bar_size_map.get(timeframe, "1 day")
+            query["bar_size"] = bar_size
             
         result = self._historical_bars_col.delete_many(query)
         
         # Also delete stats
         if self._historical_stats_col is not None:
-            self._historical_stats_col.delete_many(query)
+            stats_query = {"symbol": symbol.upper()}
+            if timeframe:
+                stats_query["timeframe"] = timeframe
+            self._historical_stats_col.delete_many(stats_query)
             
         return {
             "success": True,
