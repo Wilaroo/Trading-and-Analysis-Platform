@@ -1677,6 +1677,188 @@ async def optimize_historical_data_indexes():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/mongodb/diagnostics")
+async def get_mongodb_diagnostics():
+    """
+    Get comprehensive MongoDB Atlas diagnostics and recommendations.
+    
+    This endpoint provides:
+    - Connection settings analysis
+    - Collection statistics
+    - Index efficiency analysis
+    - Performance recommendations for Atlas configuration
+    """
+    try:
+        from services.ib_historical_collector import get_ib_collector
+        collector = get_ib_collector()
+        
+        if collector._db is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        
+        diagnostics = {
+            "connection": {},
+            "collections": {},
+            "indexes": {},
+            "recommendations": []
+        }
+        
+        # Get server info and connection details
+        try:
+            server_info = collector._db.client.server_info()
+            diagnostics["connection"] = {
+                "mongodb_version": server_info.get("version", "unknown"),
+                "is_atlas": "mongodb.net" in str(collector._db.client.address) if collector._db.client.address else False,
+                "max_pool_size": collector._db.client.options.pool_options.max_pool_size,
+                "min_pool_size": collector._db.client.options.pool_options.min_pool_size,
+                "server_selection_timeout_ms": collector._db.client.options.server_selection_timeout * 1000,
+                "connect_timeout_ms": collector._db.client.options.connect_timeout * 1000 if collector._db.client.options.connect_timeout else None,
+                "socket_timeout_ms": collector._db.client.options.socket_timeout * 1000 if collector._db.client.options.socket_timeout else None,
+            }
+        except Exception as e:
+            diagnostics["connection"]["error"] = str(e)
+        
+        # Get detailed collection stats
+        collections_to_check = ["ib_historical_data", "historical_data_requests", "symbol_adv_cache", "historical_bars"]
+        
+        for col_name in collections_to_check:
+            try:
+                if col_name in collector._db.list_collection_names():
+                    stats = collector._db.command("collStats", col_name)
+                    col = collector._db[col_name]
+                    
+                    # Get index info
+                    indexes = list(col.list_indexes())
+                    index_info = []
+                    for idx in indexes:
+                        index_info.append({
+                            "name": idx.get("name"),
+                            "keys": list(idx.get("key", {}).keys()),
+                            "unique": idx.get("unique", False),
+                            "sparse": idx.get("sparse", False)
+                        })
+                    
+                    diagnostics["collections"][col_name] = {
+                        "exists": True,
+                        "count": stats.get("count", 0),
+                        "size_mb": round(stats.get("size", 0) / (1024 * 1024), 2),
+                        "storage_size_mb": round(stats.get("storageSize", 0) / (1024 * 1024), 2),
+                        "avg_doc_size_bytes": stats.get("avgObjSize", 0),
+                        "index_count": stats.get("nindexes", 0),
+                        "total_index_size_mb": round(stats.get("totalIndexSize", 0) / (1024 * 1024), 2),
+                        "indexes": index_info,
+                        "capped": stats.get("capped", False),
+                        "wired_tiger": {
+                            "compression": stats.get("wiredTiger", {}).get("creationString", "").split("block_compressor=")[-1].split(",")[0] if stats.get("wiredTiger") else None
+                        }
+                    }
+                else:
+                    diagnostics["collections"][col_name] = {"exists": False}
+            except Exception as e:
+                diagnostics["collections"][col_name] = {"error": str(e)}
+        
+        # Analyze and provide recommendations
+        recommendations = []
+        
+        # Check ib_historical_data collection
+        hist_data = diagnostics["collections"].get("ib_historical_data", {})
+        if hist_data.get("exists"):
+            doc_count = hist_data.get("count", 0)
+            index_size = hist_data.get("total_index_size_mb", 0)
+            data_size = hist_data.get("size_mb", 0)
+            
+            # Check if index size is proportionally large
+            if data_size > 0 and index_size / data_size > 0.5:
+                recommendations.append({
+                    "priority": "MEDIUM",
+                    "area": "indexes",
+                    "issue": f"Index size ({index_size:.0f}MB) is {(index_size/data_size*100):.0f}% of data size ({data_size:.0f}MB)",
+                    "suggestion": "Consider if all indexes are necessary. Drop unused indexes to reduce storage and write overhead."
+                })
+            
+            # Check document count for Atlas tier recommendations
+            if doc_count > 5_000_000:
+                recommendations.append({
+                    "priority": "HIGH",
+                    "area": "atlas_tier",
+                    "issue": f"Collection has {doc_count:,} documents",
+                    "suggestion": "For 5M+ documents, consider upgrading to M10+ cluster for dedicated resources and better write throughput."
+                })
+            elif doc_count > 1_000_000:
+                recommendations.append({
+                    "priority": "MEDIUM",
+                    "area": "atlas_tier",
+                    "issue": f"Collection has {doc_count:,} documents",
+                    "suggestion": "M0/M2/M5 shared tiers have limited IOPS. Consider M10 dedicated cluster for sustained write performance."
+                })
+        
+        # Check historical_data_requests queue
+        queue_data = diagnostics["collections"].get("historical_data_requests", {})
+        if queue_data.get("exists"):
+            queue_size = queue_data.get("size_mb", 0)
+            if queue_size > 100:
+                recommendations.append({
+                    "priority": "LOW",
+                    "area": "cleanup",
+                    "issue": f"Queue collection is {queue_size:.0f}MB",
+                    "suggestion": "Consider purging old completed requests to reduce storage. Call /api/ib-collector/clear-completed endpoint."
+                })
+        
+        # Check for historical_bars redundancy
+        hist_bars = diagnostics["collections"].get("historical_bars", {})
+        if hist_bars.get("exists") and hist_bars.get("count", 0) > 0:
+            recommendations.append({
+                "priority": "MEDIUM",
+                "area": "cleanup",
+                "issue": f"historical_bars collection exists with {hist_bars.get('count', 0):,} documents",
+                "suggestion": "This appears redundant with ib_historical_data. Consider consolidating to reduce storage costs."
+            })
+        
+        # Connection pool recommendations
+        conn = diagnostics.get("connection", {})
+        if conn.get("max_pool_size", 0) < 50:
+            recommendations.append({
+                "priority": "MEDIUM",
+                "area": "connection",
+                "issue": f"Connection pool max size is {conn.get('max_pool_size', 'unknown')}",
+                "suggestion": "For high-throughput writes, consider increasing maxPoolSize to 100 in connection string: ?maxPoolSize=100"
+            })
+        
+        # Atlas-specific recommendations
+        recommendations.append({
+            "priority": "INFO",
+            "area": "atlas_settings",
+            "issue": "Atlas Performance Advisor",
+            "suggestion": "Check Atlas UI > Performance Advisor for slow query analysis and index suggestions."
+        })
+        
+        recommendations.append({
+            "priority": "INFO", 
+            "area": "atlas_settings",
+            "issue": "Write Concern",
+            "suggestion": "For faster writes (with slight durability tradeoff), add ?w=1&journal=false to connection string. Current default is w=majority which waits for replication."
+        })
+        
+        recommendations.append({
+            "priority": "INFO",
+            "area": "atlas_network",
+            "issue": "Network Latency",
+            "suggestion": "Ensure your IB Data Pusher runs in a region close to your Atlas cluster. Check Atlas > Network Access > Peering for VPC options if latency is high."
+        })
+        
+        diagnostics["recommendations"] = recommendations
+        
+        return {
+            "success": True,
+            **diagnostics
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting MongoDB diagnostics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/historical-data/status/{request_id}")
 async def get_historical_data_request_status(request_id: str):
     """Get the status of a historical data request"""
