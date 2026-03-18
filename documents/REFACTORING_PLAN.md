@@ -8,7 +8,7 @@ This document outlines the planned refactoring tasks to improve code maintainabi
 ### Large Files Identified
 | File | Lines | Status | Priority |
 |------|-------|--------|----------|
-| `/app/backend/routers/ib.py` | 5,218 | Partial refactoring done | P2 |
+| `/app/backend/routers/ib.py` | 5,218 | 4 modules extracted | P2 |
 | `/app/backend/server.py` | 4,774 | Needs splitting | P2 |
 | `/app/frontend/src/components/SentCom.jsx` | 3,717 | Needs refactoring | P3 |
 | `/app/frontend/src/components/NIA.jsx` | 3,370 | Needs refactoring | P3 |
@@ -18,31 +18,49 @@ This document outlines the planned refactoring tasks to improve code maintainabi
 - [x] Fixed import errors (`get_timeseries_service` → `get_timeseries_ai`)
 - [x] Fixed method name mismatches (`analyze_symbol` → `analyze_sentiment`, etc.)
 - [x] Fixed dead code in `ib.py` (unreachable code after raise statement)
-- [x] Created refactored historical data module at `/app/backend/routers/ib_modules/historical_data.py`
+- [x] Fixed SectorContext dataclass access errors in trade_context_service.py
+- [x] Created refactored modules at `/app/backend/routers/ib_modules/`
 
 ### Refactored Modules Ready (Not Active)
 The following modules have been created but are not yet active to avoid disruption:
 
 ```
 /app/backend/routers/ib_modules/
-├── __init__.py           # Module initializer with combined router
-└── historical_data.py    # Historical data endpoints (~570 lines)
-                          # - /historical-data/pending
-                          # - /historical-data/claim/{request_id}
-                          # - /historical-data/result
-                          # - /historical-data/batch-result
-                          # - /historical-data/optimize-indexes
-                          # - /mongodb/diagnostics
-                          # - /historical-data/status/{request_id}
+├── __init__.py              # Module initializer with combined router
+├── historical_data.py       # Historical data endpoints (~570 lines)
+│                            # - /historical-data/pending
+│                            # - /historical-data/claim/{request_id}
+│                            # - /historical-data/result
+│                            # - /historical-data/batch-result
+│                            # - /historical-data/optimize-indexes
+│                            # - /mongodb/diagnostics
+│                            # - /historical-data/status/{request_id}
+├── collection_mode.py       # Collection mode tracking (~280 lines)
+│                            # - /collection-mode/start
+│                            # - /collection-mode/progress
+│                            # - /collection-mode/stop
+│                            # - /collection-mode/status
+│                            # - /mode
+│                            # - /mode/set
+│                            # - /mode/status
+│                            # - /priority-collection/enable
+│                            # - /priority-collection/disable
+│                            # - /priority-collection/status
+├── news.py                  # News endpoints (~170 lines)
+│                            # - /news/providers
+│                            # - /news/historical/{symbol}
+│                            # - /news/article/{provider_code}/{article_id}
+│                            # - /news/{symbol}
+│                            # - /news
+└── alerts.py                # Alert endpoints (~320 lines)
+                             # - /alerts/price (CRUD)
+                             # - /alerts/price/check
+                             # - /alerts/price/history
+                             # - /alerts/enhanced (CRUD)
+                             # - /alerts/enhanced/generate/{symbol}
 ```
 
-To activate these modules, uncomment in `/app/backend/server.py`:
-```python
-from routers.ib_modules import router as ib_historical_router
-app.include_router(ib_historical_router, prefix="/api/ib")
-```
-
-Then remove the corresponding endpoints from `/app/backend/routers/ib.py` (lines 1293-1921).
+**Total lines refactored**: ~1,340 lines (ready but not active)
 
 ## Proposed Refactoring
 

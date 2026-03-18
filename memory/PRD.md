@@ -215,18 +215,30 @@ Per user feedback, the explicit "Trading vs Collection Mode" toggle was replaced
   - `get_sector_context` → `get_stock_sector_context` (trade_context_service.py, analyst_agent.py)
   - `get_ib_data` → `get_fundamentals` (trade_context_service.py, fundamental_quality.py)
   - Fixed `predict` → `get_forecast` method call in enhanced_scanner.py
+  - Fixed SectorContext dataclass attribute access (was using dict `.get()` on dataclass)
 - **Files Modified**:
   - Backend: `services/enhanced_scanner.py`, `services/trade_context_service.py`, `agents/analyst_agent.py`, `services/tqs/fundamental_quality.py`, `services/ib_historical_collector.py`
   - Frontend: 14 files cleaned of console.log statements
 - **Documentation**: Created `/app/documents/REFACTORING_PLAN.md` for future code organization
 
+### March 18, 2026 - Backend Router Refactoring
+- **Created refactored router modules** at `/app/backend/routers/ib_modules/`:
+  - `historical_data.py` (638 lines) - Historical data collection, storage, index optimization
+  - `collection_mode.py` (297 lines) - Collection mode tracking and priority collection system
+  - `news.py` (182 lines) - News providers, historical news, article retrieval
+  - `alerts.py` (358 lines) - Price alerts and enhanced alerts functionality
+  - `__init__.py` (49 lines) - Module initializer combining all sub-routers
+- **Total lines refactored**: 1,524 lines of clean, modular code
+- **Status**: Ready but not yet active (to avoid disruption to data collection)
+- **To Activate**: Uncomment imports in server.py and remove corresponding endpoints from ib.py
+
 ## Next Tasks
-1. ✅ **MongoDB Write Performance Fixed**: Bulk write optimization implemented and tested
-2. ⏳ **User Action**: Pull the latest code from git and restart the local `ib_historical_collector.py`
-3. ⏳ **User Action**: Optionally call `POST /api/ib/historical-data/optimize-indexes` to ensure optimal indexes
-4. Monitor collection progress - currently at 37.4% (10,904/29,184)
-5. After collection completes (~18,207 pending requests), verify auto-training triggers
-6. ⏳ **Deployment**: Waiting for Emergent platform deployment to complete
+1. ✅ **Deployment**: Complete - app deployed to production
+2. ✅ **Code Cleanup**: Console.log removal and bug fixes complete
+3. ✅ **Router Refactoring**: 4 modules created (historical_data, collection_mode, news, alerts)
+4. ⏳ **Data Collection**: Currently at 37.5% (10,939/29,184) - running on user's local machine
+5. ⏳ **Activate Refactored Modules**: When ready for maintenance window
+6. After collection completes, verify auto-training triggers
 
 ## Backlog
 - (P0 - DONE) ~~Cloud API Stability - investigate timeouts (server-side root cause)~~

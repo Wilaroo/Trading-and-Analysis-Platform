@@ -232,9 +232,10 @@ class TradeContextService:
             sector_context = await self._sector_service.get_stock_sector_context(symbol)
             
             if sector_context:
-                context.sector = sector_context.get('sector', 'unknown')
-                context.sector_performance_rank = sector_context.get('sector_rank', 6)
-                context.sector_is_leader = sector_context.get('is_leader', False)
+                # SectorContext is a dataclass - access attributes directly
+                context.sector = getattr(sector_context, 'sector', 'unknown')
+                context.sector_performance_rank = getattr(sector_context, 'sector_rank', 6)
+                context.sector_is_leader = getattr(sector_context, 'is_leader', False)
                 
         except Exception as e:
             logger.warning(f"Error capturing sector context for {symbol}: {e}")
