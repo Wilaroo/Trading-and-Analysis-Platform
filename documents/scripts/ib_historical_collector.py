@@ -6,13 +6,14 @@ Dedicated script for collecting historical data from IB Gateway.
 Runs separately from the trading pusher with a different client ID.
 
 Usage:
-    python ib_historical_collector.py --cloud-url https://tradecommand.trade
+    python ib_historical_collector.py --url http://localhost:8001
 
 Features:
     - Connects to IB Gateway with client_id=11 (separate from trading pusher)
-    - Fetches pending requests from cloud queue
+    - Fetches pending requests from queue (fill-gaps populates the queue)
     - Respects IB pacing rules (60 requests per 10 min)
     - Handles rate limiting gracefully
+    - Auto-reconnects on connection loss
     - Can run alongside ib_data_pusher.py without conflicts
 """
 
@@ -33,15 +34,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class CloudAPIClient:
-    """Simple API client with retry logic for cloud communication."""
+class APIClient:
+    """Simple API client with retry logic for backend communication."""
     
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip('/')
         self.session = requests.Session()
-        # Browser-like headers to avoid Cloudflare issues
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'User-Agent': 'IB-Historical-Collector/2.0',
             'Accept': 'application/json',
             'Content-Type': 'application/json'
         })
@@ -67,15 +67,14 @@ class CloudAPIClient:
         return None
     
     def post(self, endpoint: str, data: dict, timeout: int = 15) -> Optional[dict]:
-        """POST request with retry logic. Uses shorter timeout for resilience."""
+        """POST request with retry logic."""
         url = f"{self.base_url}{endpoint}"
-        for attempt in range(2):  # Reduced retries
+        for attempt in range(2):
             try:
                 resp = self.session.post(url, json=data, timeout=timeout)
                 if resp.status_code in [200, 201]:
                     return resp.json()
                 elif resp.status_code == 409:
-                    # Conflict - already claimed/processed, that's OK
                     return {"success": True, "status": "already_processed"}
                 else:
                     logger.warning(f"POST {endpoint} returned {resp.status_code}")
@@ -95,12 +94,6 @@ class CloudAPIClient:
             created = result.get("indexes_created", [])
             verified = result.get("indexes_verified", [])
             logger.info(f"  Indexes created: {len(created)}, verified: {len(verified)}")
-            
-            # Log collection stats if available
-            stats = result.get("collection_stats", {})
-            if stats.get("ib_historical_data"):
-                hd = stats["ib_historical_data"]
-                logger.info(f"  ib_historical_data: {hd.get('count', 0):,} docs, {hd.get('index_count', 0)} indexes")
             return True
         else:
             logger.warning("  Could not optimize indexes (non-critical)")
@@ -118,24 +111,21 @@ class IBPacingManager:
     """
     
     def __init__(self, max_requests: int = 55, window_seconds: int = 600):
-        self.max_requests = max_requests  # Leave buffer below 60
-        self.window_seconds = window_seconds  # 10 minutes
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
         self.request_times = deque()
-        self.recent_requests = {}  # {(symbol, bar_size): timestamp}
+        self.recent_requests = {}
     
     def can_make_request(self, symbol: str = None, bar_size: str = None) -> bool:
         """Check if we can make a request without violating pacing."""
         now = time.time()
         
-        # Clean old entries
         while self.request_times and self.request_times[0] < now - self.window_seconds:
             self.request_times.popleft()
         
-        # Check rate limit
         if len(self.request_times) >= self.max_requests:
             return False
         
-        # Check for identical request within 15 seconds
         if symbol and bar_size:
             key = (symbol, bar_size)
             if key in self.recent_requests:
@@ -174,19 +164,18 @@ class IBHistoricalCollector:
     Dedicated historical data collector for IB Gateway.
     """
     
-    def __init__(self, cloud_url: str, ib_host: str = "127.0.0.1", 
+    def __init__(self, backend_url: str, ib_host: str = "127.0.0.1", 
                  ib_port: int = 4002, client_id: int = 11):
-        self.cloud_url = cloud_url
+        self.backend_url = backend_url
         self.ib_host = ib_host
         self.ib_port = ib_port
-        self.client_id = client_id  # Different from trading pusher (10)
+        self.client_id = client_id
         
-        self.api = CloudAPIClient(cloud_url)
+        self.api = APIClient(backend_url)
         self.pacing = IBPacingManager()
         self.ib = None
         self.running = False
         
-        # Stats
         self.stats = {
             "started_at": None,
             "requests_completed": 0,
@@ -216,7 +205,7 @@ class IBHistoricalCollector:
             except Exception as e:
                 logger.error(f"Failed to connect to IB Gateway (attempt {attempt + 1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
-                    wait_time = min(30 * (attempt + 1), 120)  # 30s, 60s, 90s, 120s
+                    wait_time = min(30 * (attempt + 1), 120)
                     logger.info(f"Retrying in {wait_time} seconds...")
                     time.sleep(wait_time)
         
@@ -237,7 +226,7 @@ class IBHistoricalCollector:
             logger.info("Disconnected from IB Gateway")
     
     def fetch_pending_requests(self, limit: int = 10) -> List[dict]:
-        """Fetch pending historical data requests from cloud."""
+        """Fetch pending historical data requests from backend."""
         result = self.api.get(f"/api/ib/historical-data/pending?limit={limit}", timeout=15)
         if result:
             return result.get("requests", [])
@@ -249,18 +238,12 @@ class IBHistoricalCollector:
         return result is not None
     
     def report_result(self, result: dict) -> bool:
-        """Report collection result to cloud (single result)."""
+        """Report collection result to backend (single result)."""
         resp = self.api.post("/api/ib/historical-data/result", result, timeout=30)
         return resp is not None
     
     def report_batch_results(self, results: List[dict]) -> dict:
-        """
-        Report multiple collection results to cloud in a single call.
-        Uses bulk_write on server side for optimal MongoDB performance.
-        
-        Returns:
-            dict with 'processed' count and 'bars_stored' count
-        """
+        """Report multiple collection results in a single call."""
         if not results:
             return {"processed": 0, "bars_stored": 0}
         
@@ -273,11 +256,7 @@ class IBHistoricalCollector:
         return {"processed": 0, "bars_stored": 0}
     
     def fetch_historical_data(self, request: dict) -> dict:
-        """
-        Fetch historical data from IB for a single request.
-        
-        Returns result dict with status, data, etc.
-        """
+        """Fetch historical data from IB for a single request."""
         from ib_insync import Stock
         
         request_id = request.get("request_id")
@@ -298,7 +277,6 @@ class IBHistoricalCollector:
         }
         
         try:
-            # Check pacing before request
             if not self.pacing.can_make_request(symbol, bar_size):
                 wait = self.pacing.wait_time()
                 if wait > 0:
@@ -306,20 +284,17 @@ class IBHistoricalCollector:
                     self.stats["pacing_waits"] += 1
                     time.sleep(wait + 1)
             
-            # Create and qualify contract
             contract = Stock(symbol, "SMART", "USD")
             try:
                 self.ib.qualifyContracts(contract)
             except Exception as e:
-                result["success"] = True  # Mark as processed
+                result["success"] = True
                 result["status"] = "no_data"
                 result["error"] = f"Symbol not available: {e}"
                 return result
             
-            # Record the request for pacing
             self.pacing.record_request(symbol, bar_size)
             
-            # Fetch historical data
             bars = self.ib.reqHistoricalData(
                 contract,
                 endDateTime="",
@@ -329,10 +304,8 @@ class IBHistoricalCollector:
                 useRTH=True
             )
             
-            # Allow IB to process
             self.ib.sleep(0.5)
             
-            # Format bars
             bar_data = []
             for bar in bars:
                 bar_data.append({
@@ -354,12 +327,11 @@ class IBHistoricalCollector:
         except Exception as e:
             error_str = str(e)
             
-            # Handle specific IB errors
             if "pacing" in error_str.lower():
                 logger.warning(f"IB PACING violation for {symbol} - waiting 60s")
                 result["status"] = "rate_limited"
                 result["error"] = "IB pacing violation"
-                time.sleep(60)  # IB requires longer wait after violation
+                time.sleep(60)
             elif "no data" in error_str.lower() or "no historical data" in error_str.lower():
                 result["success"] = True
                 result["status"] = "no_data"
@@ -371,15 +343,8 @@ class IBHistoricalCollector:
         return result
     
     def run(self, batch_size: int = 5, continuous: bool = True, min_delay: float = 1.0):
-        """
-        Main collection loop.
-        
-        Args:
-            batch_size: Number of requests to fetch per cycle
-            continuous: If True, keep running until stopped. If False, run once.
-            min_delay: Minimum delay between requests (seconds)
-        """
-        self.min_delay = min_delay  # Store for use in loop
+        """Main collection loop."""
+        self.min_delay = min_delay
         
         if not self.connect():
             return
@@ -389,9 +354,9 @@ class IBHistoricalCollector:
         
         logger.info("")
         logger.info("=" * 60)
-        logger.info("  IB Historical Data Collector")
+        logger.info("  IB Historical Data Collector v2.0")
         logger.info("=" * 60)
-        logger.info(f"  Cloud URL: {self.cloud_url}")
+        logger.info(f"  Backend URL: {self.backend_url}")
         logger.info(f"  IB Gateway: {self.ib_host}:{self.ib_port}")
         logger.info(f"  Client ID: {self.client_id}")
         logger.info(f"  Batch Size: {batch_size}")
@@ -401,7 +366,6 @@ class IBHistoricalCollector:
         logger.info("=" * 60)
         logger.info("")
         
-        # Optimize MongoDB indexes on startup for best performance
         self.api.optimize_indexes()
         logger.info("")
         
@@ -412,7 +376,6 @@ class IBHistoricalCollector:
             while self.running:
                 cycle += 1
                 
-                # Fetch pending requests
                 requests = self.fetch_pending_requests(batch_size)
                 
                 if not requests:
@@ -432,33 +395,28 @@ class IBHistoricalCollector:
                 empty_cycles = 0
                 logger.info(f"[Cycle {cycle}] Processing {len(requests)} requests...")
                 
-                # Collect results for batch reporting
                 batch_results = []
                 
                 for req in requests:
                     if not self.running:
                         break
                     
-                    # Ensure IB connection is active before each request
                     if not self.ensure_connected():
                         logger.error("Cannot reconnect to IB Gateway - pausing for 5 minutes...")
-                        time.sleep(300)  # 5 minute pause before retry
-                        break  # Break inner loop to refetch requests
+                        time.sleep(300)
+                        break
                     
                     request_id = req.get("request_id")
                     symbol = req.get("symbol")
                     bar_size = req.get("bar_size")
                     
-                    # Try to claim the request
                     if not self.claim_request(request_id):
                         logger.debug(f"  {symbol} ({bar_size}): Already claimed, skipping")
                         continue
                     
-                    # Fetch the data
                     result = self.fetch_historical_data(req)
                     batch_results.append(result)
                     
-                    # Log individual result
                     if result["status"] == "success":
                         self.stats["requests_completed"] += 1
                         logger.info(f"  {symbol} ({bar_size}): {result['bar_count']} bars")
@@ -469,39 +427,34 @@ class IBHistoricalCollector:
                         self.stats["requests_failed"] += 1
                         logger.warning(f"  {symbol} ({bar_size}): {result['status']} - {result.get('error', 'Unknown error')}")
                     
-                    # Delay between requests (configurable via min_delay)
                     time.sleep(self.min_delay)
                 
-                # Report all results in a single batch call (uses bulk_write on server)
                 if batch_results:
                     report_result = self.report_batch_results(batch_results)
                     logger.info(f"  Batch reported: {report_result['processed']} results, {report_result['bars_stored']} bars stored to DB")
                 
-                # Progress report with overall queue status
                 elapsed = (datetime.now(timezone.utc) - self.stats["started_at"]).total_seconds() / 60
                 rate = self.stats["requests_completed"] / elapsed if elapsed > 0 else 0
                 
-                # Fetch overall queue progress
                 try:
                     queue_data = self.api.get('/api/ib-collector/queue-progress')
                     if queue_data:
                         q_completed = queue_data.get('completed', 0)
-                        q_total = queue_data.get('total', 0)
+                        q_pending = queue_data.get('pending', 0)
+                        q_total = q_completed + q_pending + queue_data.get('claimed', 0) + queue_data.get('failed', 0)
                         q_pct = (q_completed / q_total * 100) if q_total > 0 else 0
                         bar_visual = '█' * int(q_pct/5) + '░' * (20 - int(q_pct/5))
                         logger.info(f"")
                         logger.info(f"╔{'═'*58}╗")
                         logger.info(f"║  QUEUE: {bar_visual} {q_pct:>5.1f}%  ({q_completed:,}/{q_total:,})  ║")
-                        logger.info(f"║  This Session: {self.stats['requests_completed']} done, {self.stats['bars_collected']:,} bars, {rate:.1f}/min  ║")
+                        logger.info(f"║  Pending: {q_pending:,} | This Session: {self.stats['requests_completed']} done, {self.stats['bars_collected']:,} bars  ║")
                         logger.info(f"╚{'═'*58}╝")
                         logger.info(f"")
                 except:
-                    # Fallback to simple stats
                     logger.info(f"[Stats] Completed: {self.stats['requests_completed']}, "
                                f"Failed: {self.stats['requests_failed']}, "
                                f"Bars: {self.stats['bars_collected']:,}, "
-                               f"Rate: {rate:.1f}/min, "
-                               f"Pacing: {self.pacing.requests_remaining()} remaining")
+                               f"Rate: {rate:.1f}/min")
                 
                 if not continuous:
                     break
@@ -540,42 +493,44 @@ class IBHistoricalCollector:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="IB Historical Data Collector - Dedicated script for collecting historical data"
+        description="IB Historical Data Collector v2.0 - Fills gaps in historical data"
     )
-    parser.add_argument("--cloud-url", required=True, help="Cloud backend URL")
+    parser.add_argument("--url", default="http://localhost:8001", 
+                        help="Backend URL (default: http://localhost:8001)")
+    parser.add_argument("--cloud-url", dest="url", help="Alias for --url (backward compatibility)")
     parser.add_argument("--ib-host", default="127.0.0.1", help="IB Gateway host")
     parser.add_argument("--ib-port", type=int, default=4002, help="IB Gateway port")
     parser.add_argument("--client-id", type=int, default=11, 
                         help="IB client ID (default: 11, different from trading pusher)")
     parser.add_argument("--batch-size", type=int, default=3, 
-                        help="Number of requests to process per cycle (default: 3, lower for slow connections)")
+                        help="Number of requests to process per cycle (default: 3)")
     parser.add_argument("--once", action="store_true", 
                         help="Run once and exit (don't loop continuously)")
     parser.add_argument("--slow", action="store_true",
-                        help="Slow mode - longer delays between requests for unstable connections")
+                        help="Slow mode - longer delays for unstable connections")
     parser.add_argument("--fast", action="store_true",
-                        help="Fast mode - maximize throughput (use when IB is dedicated to collection)")
+                        help="Fast mode - maximize throughput")
     parser.add_argument("--turbo", action="store_true",
-                        help="Turbo mode - aggressive collection (may hit pacing limits, auto-recovers)")
+                        help="Turbo mode - aggressive collection (may hit pacing limits)")
     
     args = parser.parse_args()
     
     # Determine speed mode and settings
     if args.turbo:
         speed_mode = "TURBO"
-        batch_size = max(args.batch_size, 10)  # Larger batches
-        pacing_requests = 58  # Push closer to limit
-        min_delay = 0.3  # Minimal delay
+        batch_size = max(args.batch_size, 10)
+        pacing_requests = 58
+        min_delay = 0.3
     elif args.fast:
         speed_mode = "FAST"
-        batch_size = max(args.batch_size, 8)  # Larger batches
-        pacing_requests = 55  # Standard buffer
-        min_delay = 0.5  # Slightly reduced delay
+        batch_size = max(args.batch_size, 8)
+        pacing_requests = 55
+        min_delay = 0.5
     elif args.slow:
         speed_mode = "SLOW"
-        batch_size = min(args.batch_size, 2)  # Smaller batches
-        pacing_requests = 50  # More conservative
-        min_delay = 2.0  # Longer delays
+        batch_size = min(args.batch_size, 2)
+        pacing_requests = 50
+        min_delay = 2.0
     else:
         speed_mode = "NORMAL"
         batch_size = args.batch_size
@@ -583,10 +538,10 @@ def main():
         min_delay = 1.0
     
     print("=" * 60)
-    print("  IB Historical Data Collector")
-    print("  Dedicated process for historical data collection")
+    print("  IB Historical Data Collector v2.0")
+    print("  Collects intraday data for 500K+ ADV symbols")
     print("=" * 60)
-    print(f"  Cloud URL: {args.cloud_url}")
+    print(f"  Backend URL: {args.url}")
     print(f"  IB Gateway: {args.ib_host}:{args.ib_port}")
     print(f"  Client ID: {args.client_id}")
     print(f"  Batch Size: {batch_size}")
@@ -595,18 +550,17 @@ def main():
     if speed_mode in ["FAST", "TURBO"]:
         print(f"  ⚡ Optimized for dedicated collection - max throughput")
     print("")
-    print("  NOTE: Run this alongside ib_data_pusher.py")
-    print("        Trading continues unaffected while collecting data")
+    print("  NOTE: Run fill-gaps first to queue the missing data")
+    print("        This collector processes whatever is in the queue")
     print("=" * 60)
     
     collector = IBHistoricalCollector(
-        cloud_url=args.cloud_url,
+        backend_url=args.url,
         ib_host=args.ib_host,
         ib_port=args.ib_port,
         client_id=args.client_id
     )
     
-    # Apply speed settings to pacing manager
     collector.pacing.max_requests = pacing_requests
     
     collector.run(batch_size=batch_size, continuous=not args.once, min_delay=min_delay)
