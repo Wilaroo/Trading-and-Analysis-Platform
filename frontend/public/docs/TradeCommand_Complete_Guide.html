@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TradeCommand SentCom - Complete System Guide</title>
+    <title>SentCom Complete System Guide - TradeCommand</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
         
@@ -14,139 +14,166 @@
             --warning: #f59e0b;
             --danger: #ef4444;
             --purple: #8b5cf6;
-            --bg-dark: #0f172a;
-            --bg-card: #1e293b;
-            --bg-card-hover: #334155;
+            --cyan: #06b6d4;
+            --bg-dark: #0a0f1a;
+            --bg-card: #111827;
+            --bg-card-light: #1f2937;
             --text-primary: #f1f5f9;
             --text-secondary: #94a3b8;
-            --border: #334155;
+            --text-muted: #64748b;
+            --border: #1e293b;
+            --glow: rgba(59, 130, 246, 0.3);
         }
         
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background: var(--bg-dark);
             color: var(--text-primary);
-            line-height: 1.6;
-        }
-        
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 2rem;
+            line-height: 1.7;
+            font-size: 16px;
         }
         
         /* Cover Page */
-        .cover-page {
+        .cover {
             min-height: 100vh;
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
             text-align: center;
-            background: linear-gradient(135deg, var(--bg-dark) 0%, #1a1a2e 50%, var(--bg-dark) 100%);
-            padding: 4rem 2rem;
-            page-break-after: always;
+            background: radial-gradient(ellipse at top, #1a1a3e 0%, var(--bg-dark) 70%);
+            padding: 3rem;
+            position: relative;
+            overflow: hidden;
         }
         
-        .cover-logo {
+        .cover::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%233b82f6' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+            opacity: 0.5;
+        }
+        
+        .cover-content { position: relative; z-index: 1; }
+        
+        .logo-container {
             font-size: 5rem;
-            margin-bottom: 1rem;
+            margin-bottom: 1.5rem;
+            animation: pulse 3s ease-in-out infinite;
         }
         
-        .cover-title {
-            font-size: 3.5rem;
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        
+        .cover h1 {
+            font-size: 4rem;
             font-weight: 800;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--purple) 100%);
+            background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #34d399 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
             margin-bottom: 0.5rem;
+            letter-spacing: -0.02em;
         }
         
-        .cover-subtitle {
+        .cover .subtitle {
             font-size: 1.5rem;
             color: var(--text-secondary);
+            margin-bottom: 1rem;
+            font-weight: 300;
+        }
+        
+        .cover .tagline {
+            font-size: 1.1rem;
+            color: var(--secondary);
+            font-weight: 500;
+            padding: 0.75rem 2rem;
+            border: 1px solid var(--secondary);
+            border-radius: 50px;
+            display: inline-block;
             margin-bottom: 3rem;
         }
         
-        .cover-tagline {
-            font-size: 1.25rem;
-            color: var(--secondary);
-            font-weight: 500;
-            margin-bottom: 4rem;
-        }
-        
-        .cover-meta {
-            color: var(--text-secondary);
+        .cover .version {
+            color: var(--text-muted);
             font-size: 0.9rem;
         }
         
-        /* Table of Contents */
-        .toc {
-            background: var(--bg-card);
-            border-radius: 16px;
+        /* Container */
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
             padding: 2rem;
-            margin: 2rem 0;
-            page-break-after: always;
+        }
+        
+        /* TOC */
+        .toc {
+            background: linear-gradient(135deg, var(--bg-card) 0%, #1a2744 100%);
+            border-radius: 20px;
+            padding: 2.5rem;
+            margin: 3rem 0;
+            border: 1px solid var(--border);
         }
         
         .toc h2 {
-            font-size: 2rem;
+            font-size: 1.75rem;
             margin-bottom: 1.5rem;
-            color: var(--primary);
-        }
-        
-        .toc-list {
-            list-style: none;
-        }
-        
-        .toc-list li {
-            padding: 0.75rem 0;
-            border-bottom: 1px solid var(--border);
             display: flex;
-            justify-content: space-between;
             align-items: center;
+            gap: 0.75rem;
         }
         
-        .toc-list li:last-child {
-            border-bottom: none;
+        .toc-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1rem;
         }
         
-        .toc-list a {
-            color: var(--text-primary);
+        .toc-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem;
+            background: var(--bg-card-light);
+            border-radius: 12px;
             text-decoration: none;
-            font-weight: 500;
-            transition: color 0.2s;
+            color: var(--text-primary);
+            transition: all 0.2s;
+            border: 1px solid transparent;
         }
         
-        .toc-list a:hover {
-            color: var(--primary);
+        .toc-item:hover {
+            border-color: var(--primary);
+            transform: translateX(4px);
         }
         
-        .toc-number {
-            background: var(--primary);
-            color: white;
-            width: 28px;
-            height: 28px;
-            border-radius: 50%;
-            display: inline-flex;
+        .toc-num {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--purple) 100%);
+            border-radius: 10px;
+            display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 0.85rem;
-            font-weight: 600;
-            margin-right: 1rem;
+            font-weight: 700;
+            font-size: 0.9rem;
+            flex-shrink: 0;
         }
         
-        /* Section Headers */
+        .toc-text { font-weight: 500; }
+        
+        /* Sections */
         .section {
-            margin: 3rem 0;
-            page-break-inside: avoid;
+            margin: 4rem 0;
+            padding-top: 2rem;
         }
         
         .section-header {
@@ -154,327 +181,127 @@
             align-items: center;
             gap: 1rem;
             margin-bottom: 2rem;
-            padding-bottom: 1rem;
-            border-bottom: 2px solid var(--primary);
         }
         
-        .section-number {
+        .section-num {
+            width: 56px;
+            height: 56px;
             background: linear-gradient(135deg, var(--primary) 0%, var(--purple) 100%);
-            color: white;
-            width: 50px;
-            height: 50px;
-            border-radius: 12px;
+            border-radius: 16px;
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 1.5rem;
             font-weight: 700;
+            flex-shrink: 0;
+            box-shadow: 0 4px 20px var(--glow);
         }
         
-        .section-title {
+        .section h2 {
             font-size: 2rem;
             font-weight: 700;
+            letter-spacing: -0.01em;
+        }
+        
+        .section-intro {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+            max-width: 800px;
         }
         
         /* Cards */
         .card {
             background: var(--bg-card);
-            border-radius: 12px;
+            border-radius: 16px;
             padding: 1.5rem;
-            margin: 1rem 0;
+            margin: 1.5rem 0;
             border: 1px solid var(--border);
         }
         
-        .card-title {
-            font-size: 1.25rem;
-            font-weight: 600;
-            margin-bottom: 1rem;
+        .card-header {
             display: flex;
             align-items: center;
-            gap: 0.5rem;
-        }
-        
-        /* Feature Grid */
-        .feature-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 1.5rem;
-            margin: 1.5rem 0;
-        }
-        
-        .feature-card {
-            background: var(--bg-card);
-            border-radius: 12px;
-            padding: 1.5rem;
-            border: 1px solid var(--border);
-            transition: transform 0.2s, border-color 0.2s;
-        }
-        
-        .feature-card:hover {
-            transform: translateY(-2px);
-            border-color: var(--primary);
-        }
-        
-        .feature-icon {
-            font-size: 2.5rem;
+            gap: 0.75rem;
             margin-bottom: 1rem;
-        }
-        
-        .feature-card h3 {
             font-size: 1.1rem;
-            margin-bottom: 0.5rem;
-            color: var(--text-primary);
+            font-weight: 600;
         }
         
-        .feature-card p {
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-        }
+        .card-header .icon { font-size: 1.25rem; }
         
-        /* Flow Diagrams */
-        .flow-diagram {
-            background: linear-gradient(135deg, var(--bg-card) 0%, #1a2744 100%);
+        /* Diagram Boxes */
+        .diagram {
+            background: linear-gradient(135deg, var(--bg-card) 0%, #0d1424 100%);
             border-radius: 16px;
-            padding: 2rem;
+            padding: 1.5rem;
             margin: 1.5rem 0;
+            overflow-x: auto;
+            border: 1px solid var(--border);
+        }
+        
+        .diagram pre {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            line-height: 1.5;
+            color: var(--text-secondary);
+            white-space: pre;
             overflow-x: auto;
         }
         
-        .flow-step {
-            display: flex;
-            align-items: flex-start;
-            margin: 1rem 0;
+        /* Flow Steps */
+        .flow {
             position: relative;
+            padding-left: 3rem;
+        }
+        
+        .flow::before {
+            content: '';
+            position: absolute;
+            left: 18px;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: linear-gradient(to bottom, var(--primary), var(--purple), var(--secondary));
+            border-radius: 3px;
+        }
+        
+        .flow-step {
+            position: relative;
+            margin-bottom: 1.5rem;
+            padding: 1.25rem;
+            background: var(--bg-card);
+            border-radius: 12px;
+            border: 1px solid var(--border);
         }
         
         .flow-step::before {
-            content: '';
+            content: attr(data-step);
             position: absolute;
-            left: 20px;
-            top: 40px;
-            bottom: -1rem;
-            width: 2px;
-            background: var(--border);
-        }
-        
-        .flow-step:last-child::before {
-            display: none;
-        }
-        
-        .step-number {
+            left: -3rem;
+            top: 1.25rem;
+            width: 36px;
+            height: 36px;
             background: var(--primary);
-            color: white;
-            width: 40px;
-            height: 40px;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-weight: 600;
-            flex-shrink: 0;
-            margin-right: 1rem;
-            z-index: 1;
+            font-weight: 700;
+            font-size: 0.85rem;
+            transform: translateX(-50%);
+            border: 3px solid var(--bg-dark);
         }
         
-        .step-content {
-            flex: 1;
-        }
-        
-        .step-content h4 {
-            font-size: 1.1rem;
+        .flow-step h4 {
+            font-size: 1rem;
             margin-bottom: 0.5rem;
+            color: var(--text-primary);
         }
         
-        .step-content p {
+        .flow-step p {
             color: var(--text-secondary);
             font-size: 0.9rem;
-        }
-        
-        /* Code Blocks */
-        .code-block {
-            background: #0d1117;
-            border-radius: 8px;
-            padding: 1rem;
-            margin: 1rem 0;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.85rem;
-            overflow-x: auto;
-            border: 1px solid var(--border);
-        }
-        
-        .code-block code {
-            color: #e6edf3;
-        }
-        
-        /* Tables */
-        .table-container {
-            overflow-x: auto;
-            margin: 1rem 0;
-        }
-        
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            background: var(--bg-card);
-            border-radius: 8px;
-            overflow: hidden;
-        }
-        
-        th, td {
-            padding: 1rem;
-            text-align: left;
-            border-bottom: 1px solid var(--border);
-        }
-        
-        th {
-            background: var(--bg-card-hover);
-            font-weight: 600;
-            color: var(--primary);
-        }
-        
-        tr:hover {
-            background: var(--bg-card-hover);
-        }
-        
-        /* Status Badges */
-        .badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.25rem;
-            padding: 0.25rem 0.75rem;
-            border-radius: 9999px;
-            font-size: 0.8rem;
-            font-weight: 500;
-        }
-        
-        .badge-success {
-            background: rgba(16, 185, 129, 0.2);
-            color: var(--secondary);
-        }
-        
-        .badge-warning {
-            background: rgba(245, 158, 11, 0.2);
-            color: var(--warning);
-        }
-        
-        .badge-danger {
-            background: rgba(239, 68, 68, 0.2);
-            color: var(--danger);
-        }
-        
-        .badge-info {
-            background: rgba(59, 130, 246, 0.2);
-            color: var(--primary);
-        }
-        
-        /* Callout Boxes */
-        .callout {
-            border-radius: 12px;
-            padding: 1.25rem;
-            margin: 1rem 0;
-            display: flex;
-            gap: 1rem;
-        }
-        
-        .callout-icon {
-            font-size: 1.5rem;
-            flex-shrink: 0;
-        }
-        
-        .callout-info {
-            background: rgba(59, 130, 246, 0.1);
-            border-left: 4px solid var(--primary);
-        }
-        
-        .callout-success {
-            background: rgba(16, 185, 129, 0.1);
-            border-left: 4px solid var(--secondary);
-        }
-        
-        .callout-warning {
-            background: rgba(245, 158, 11, 0.1);
-            border-left: 4px solid var(--warning);
-        }
-        
-        .callout-danger {
-            background: rgba(239, 68, 68, 0.1);
-            border-left: 4px solid var(--danger);
-        }
-        
-        .callout-title {
-            font-weight: 600;
-            margin-bottom: 0.25rem;
-        }
-        
-        .callout-content {
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-        }
-        
-        /* Architecture Diagram */
-        .architecture {
-            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-            border-radius: 16px;
-            padding: 2rem;
-            margin: 1.5rem 0;
-        }
-        
-        .arch-row {
-            display: flex;
-            justify-content: center;
-            gap: 2rem;
-            margin: 1rem 0;
-            flex-wrap: wrap;
-        }
-        
-        .arch-box {
-            background: var(--bg-card);
-            border: 2px solid var(--border);
-            border-radius: 12px;
-            padding: 1rem 1.5rem;
-            text-align: center;
-            min-width: 150px;
-        }
-        
-        .arch-box.primary {
-            border-color: var(--primary);
-            background: rgba(59, 130, 246, 0.1);
-        }
-        
-        .arch-box.secondary {
-            border-color: var(--secondary);
-            background: rgba(16, 185, 129, 0.1);
-        }
-        
-        .arch-box.purple {
-            border-color: var(--purple);
-            background: rgba(139, 92, 246, 0.1);
-        }
-        
-        .arch-box h4 {
-            font-size: 0.9rem;
-            margin-bottom: 0.25rem;
-        }
-        
-        .arch-box p {
-            font-size: 0.75rem;
-            color: var(--text-secondary);
-        }
-        
-        .arch-arrow {
-            font-size: 1.5rem;
-            color: var(--text-secondary);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .arch-label {
-            text-align: center;
-            color: var(--text-secondary);
-            font-size: 0.85rem;
-            margin: 0.5rem 0;
-            font-style: italic;
         }
         
         /* Timeline */
@@ -486,34 +313,34 @@
         .timeline::before {
             content: '';
             position: absolute;
-            left: 0;
+            left: 6px;
             top: 0;
             bottom: 0;
             width: 2px;
-            background: linear-gradient(to bottom, var(--primary), var(--purple), var(--secondary));
+            background: linear-gradient(to bottom, var(--primary), var(--purple), var(--secondary), var(--warning));
         }
         
         .timeline-item {
             position: relative;
-            padding-bottom: 2rem;
+            padding: 1rem 0 1.5rem 1.5rem;
         }
         
         .timeline-item::before {
             content: '';
             position: absolute;
-            left: -2rem;
-            top: 0;
-            width: 12px;
-            height: 12px;
+            left: 0;
+            top: 1.25rem;
+            width: 14px;
+            height: 14px;
             background: var(--primary);
             border-radius: 50%;
-            transform: translateX(-5px);
+            border: 3px solid var(--bg-dark);
         }
         
         .timeline-time {
             font-size: 0.85rem;
-            color: var(--primary);
             font-weight: 600;
+            color: var(--primary);
             margin-bottom: 0.25rem;
         }
         
@@ -528,842 +355,1070 @@
             font-size: 0.9rem;
         }
         
-        /* Print Styles */
-        @media print {
-            body {
-                background: white;
-                color: #1a1a1a;
-            }
-            
-            .cover-page {
-                background: white;
-            }
-            
-            .cover-title {
-                color: #1d4ed8;
-                -webkit-text-fill-color: initial;
-            }
-            
-            .card, .feature-card, .flow-diagram, .architecture {
-                background: #f8fafc;
-                border: 1px solid #e2e8f0;
-            }
-            
-            .toc, .section {
-                page-break-inside: avoid;
-            }
+        /* Grid Layouts */
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin: 1.5rem 0;
+        }
+        
+        .grid-3 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin: 1.5rem 0;
+        }
+        
+        /* Feature Cards */
+        .feature {
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 1.5rem;
+            border: 1px solid var(--border);
+            transition: all 0.2s;
+        }
+        
+        .feature:hover {
+            border-color: var(--primary);
+            transform: translateY(-2px);
+        }
+        
+        .feature-icon {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .feature h3 {
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .feature p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+        
+        /* Debate Box */
+        .debate {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin: 1.5rem 0;
+        }
+        
+        .debate-side {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 1.25rem;
+            border: 2px solid var(--border);
+        }
+        
+        .debate-side.bull { border-color: var(--secondary); }
+        .debate-side.bear { border-color: var(--danger); }
+        
+        .debate-header {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .debate-side.bull .debate-header { color: var(--secondary); }
+        .debate-side.bear .debate-header { color: var(--danger); }
+        
+        .debate-list {
+            list-style: none;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+        
+        .debate-list li {
+            padding: 0.4rem 0;
+            padding-left: 1.25rem;
+            position: relative;
+        }
+        
+        .debate-side.bull .debate-list li::before { content: '+'; color: var(--secondary); position: absolute; left: 0; font-weight: bold; }
+        .debate-side.bear .debate-list li::before { content: '-'; color: var(--danger); position: absolute; left: 0; font-weight: bold; }
+        
+        .debate-score {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+            font-weight: 600;
+        }
+        
+        /* Tables */
+        .table-wrap {
+            overflow-x: auto;
+            margin: 1.5rem 0;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+        
+        th, td {
+            padding: 0.875rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        th {
+            background: var(--bg-card-light);
+            font-weight: 600;
+            color: var(--primary);
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+        
+        tr:hover { background: var(--bg-card); }
+        
+        /* Code */
+        .code {
+            background: #0d1117;
+            border-radius: 12px;
+            padding: 1.25rem;
+            margin: 1rem 0;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            overflow-x: auto;
+            border: 1px solid var(--border);
+        }
+        
+        .code code {
+            color: #e6edf3;
+            white-space: pre;
+        }
+        
+        /* Callouts */
+        .callout {
+            border-radius: 12px;
+            padding: 1.25rem;
+            margin: 1.5rem 0;
+            display: flex;
+            gap: 1rem;
+            align-items: flex-start;
+        }
+        
+        .callout-icon { font-size: 1.5rem; flex-shrink: 0; }
+        .callout-title { font-weight: 600; margin-bottom: 0.25rem; }
+        .callout-text { font-size: 0.9rem; color: var(--text-secondary); }
+        
+        .callout-info { background: rgba(59, 130, 246, 0.1); border-left: 4px solid var(--primary); }
+        .callout-success { background: rgba(16, 185, 129, 0.1); border-left: 4px solid var(--secondary); }
+        .callout-warning { background: rgba(245, 158, 11, 0.1); border-left: 4px solid var(--warning); }
+        
+        /* Chat Examples */
+        .chat {
+            background: var(--bg-card);
+            border-radius: 16px;
+            overflow: hidden;
+            margin: 1.5rem 0;
+            border: 1px solid var(--border);
+        }
+        
+        .chat-user {
+            background: var(--bg-card-light);
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .chat-user::before {
+            content: 'YOU: ';
+            color: var(--primary);
+            font-weight: 600;
+        }
+        
+        .chat-ai {
+            padding: 1.5rem;
+        }
+        
+        .chat-ai-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            font-weight: 600;
+            color: var(--secondary);
+        }
+        
+        /* Quick Reference */
+        .quick-ref {
+            background: linear-gradient(135deg, var(--bg-card) 0%, #1a2744 100%);
+            border-radius: 16px;
+            padding: 2rem;
+            margin: 2rem 0;
+            border: 1px solid var(--border);
+        }
+        
+        .quick-ref h3 {
+            font-size: 1.25rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        /* Summary Ecosystem */
+        .ecosystem {
+            background: linear-gradient(135deg, #0a0f1a 0%, #1a1a3e 50%, #0a0f1a 100%);
+            border-radius: 20px;
+            padding: 2.5rem;
+            margin: 2rem 0;
+            border: 1px solid var(--border);
+            text-align: center;
+        }
+        
+        .ecosystem h3 {
+            font-size: 1.5rem;
+            margin-bottom: 2rem;
+            color: var(--primary);
+        }
+        
+        .eco-layer {
+            margin: 1.5rem 0;
+        }
+        
+        .eco-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-muted);
+            margin-bottom: 0.75rem;
+        }
+        
+        .eco-boxes {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        
+        .eco-box {
+            background: var(--bg-card);
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+            min-width: 120px;
+        }
+        
+        .eco-box.highlight { border-color: var(--primary); background: rgba(59, 130, 246, 0.1); }
+        .eco-box h4 { font-size: 0.9rem; margin-bottom: 0.25rem; }
+        .eco-box p { font-size: 0.75rem; color: var(--text-muted); }
+        
+        .eco-arrow {
+            color: var(--text-muted);
+            font-size: 1.5rem;
+            margin: 0.5rem 0;
+        }
+        
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 3rem 0;
+            margin-top: 4rem;
+            border-top: 1px solid var(--border);
+            color: var(--text-muted);
+        }
+        
+        .footer p { margin: 0.5rem 0; }
+        
+        /* Print Button */
+        .print-btn {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--purple) 100%);
+            color: white;
+            border: none;
+            padding: 1rem 1.5rem;
+            border-radius: 50px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 20px var(--glow);
+            z-index: 1000;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .print-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 25px var(--glow);
         }
         
         /* Responsive */
         @media (max-width: 768px) {
-            .cover-title {
-                font-size: 2.5rem;
-            }
-            
-            .feature-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .arch-row {
-                flex-direction: column;
-                align-items: center;
-            }
+            .cover h1 { font-size: 2.5rem; }
+            .debate { grid-template-columns: 1fr; }
+            .section-num { width: 44px; height: 44px; font-size: 1.25rem; }
+            .section h2 { font-size: 1.5rem; }
+        }
+        
+        /* Print */
+        @media print {
+            body { background: white; color: #1a1a1a; }
+            .cover { background: white; }
+            .cover h1 { -webkit-text-fill-color: #1d4ed8; }
+            .card, .diagram, .feature, .chat, .callout { background: #f8fafc; border-color: #e2e8f0; }
+            .print-btn { display: none; }
         }
     </style>
 </head>
 <body>
-    <!-- Cover Page -->
-    <div class="cover-page">
-        <div class="cover-logo">🤖📈</div>
-        <h1 class="cover-title">TradeCommand SentCom</h1>
-        <p class="cover-subtitle">Complete System Guide</p>
-        <p class="cover-tagline">Your AI-Powered Autonomous Trading System</p>
-        <div class="cover-meta">
-            <p>Version 3.0 | Last Updated: December 2025</p>
-            <p style="margin-top: 0.5rem;">From Startup to Shutdown - Everything You Need to Know</p>
+    <!-- Cover -->
+    <div class="cover">
+        <div class="cover-content">
+            <div class="logo-container">🤖📈</div>
+            <h1>SentCom</h1>
+            <p class="subtitle">Complete System Guide</p>
+            <p class="tagline">From Startup to Shutdown - Everything That Happens</p>
+            <p class="version">TradeCommand v3.0 | Your AI-Powered Autonomous Trading System</p>
         </div>
     </div>
 
     <div class="container">
-        <!-- Table of Contents -->
+        <!-- TOC -->
         <div class="toc">
             <h2>📚 Table of Contents</h2>
-            <ol class="toc-list">
-                <li>
-                    <a href="#overview"><span class="toc-number">1</span> System Overview</a>
-                </li>
-                <li>
-                    <a href="#architecture"><span class="toc-number">2</span> Architecture & Components</a>
-                </li>
-                <li>
-                    <a href="#startup"><span class="toc-number">3</span> Startup Sequence</a>
-                </li>
-                <li>
-                    <a href="#trading-day"><span class="toc-number">4</span> The Trading Day</a>
-                </li>
-                <li>
-                    <a href="#ai-decision"><span class="toc-number">5</span> AI Decision Making</a>
-                </li>
-                <li>
-                    <a href="#trade-execution"><span class="toc-number">6</span> Trade Execution Flow</a>
-                </li>
-                <li>
-                    <a href="#data-collection"><span class="toc-number">7</span> Historical Data Collection</a>
-                </li>
-                <li>
-                    <a href="#learning"><span class="toc-number">8</span> Learning & Self-Improvement</a>
-                </li>
-                <li>
-                    <a href="#chat"><span class="toc-number">9</span> Chat & AI Coaching</a>
-                </li>
-                <li>
-                    <a href="#scripts"><span class="toc-number">10</span> Scripts & Automation</a>
-                </li>
-                <li>
-                    <a href="#troubleshooting"><span class="toc-number">11</span> Troubleshooting</a>
-                </li>
-                <li>
-                    <a href="#api-reference"><span class="toc-number">12</span> API Quick Reference</a>
-                </li>
-            </ol>
+            <div class="toc-grid">
+                <a href="#startup" class="toc-item"><span class="toc-num">1</span><span class="toc-text">Startup Sequence</span></a>
+                <a href="#architecture" class="toc-item"><span class="toc-num">2</span><span class="toc-text">System Architecture</span></a>
+                <a href="#trading-day" class="toc-item"><span class="toc-num">3</span><span class="toc-text">The Trading Day</span></a>
+                <a href="#ai-decision" class="toc-item"><span class="toc-num">4</span><span class="toc-text">AI Decision Making</span></a>
+                <a href="#execution" class="toc-item"><span class="toc-num">5</span><span class="toc-text">Trade Execution Flow</span></a>
+                <a href="#data" class="toc-item"><span class="toc-num">6</span><span class="toc-text">Data Collection</span></a>
+                <a href="#learning" class="toc-item"><span class="toc-num">7</span><span class="toc-text">Learning & Self-Improvement</span></a>
+                <a href="#chat" class="toc-item"><span class="toc-num">8</span><span class="toc-text">Chat Interactions</span></a>
+                <a href="#eod" class="toc-item"><span class="toc-num">9</span><span class="toc-text">End of Day</span></a>
+                <a href="#weekend" class="toc-item"><span class="toc-num">10</span><span class="toc-text">Weekend Automation</span></a>
+            </div>
         </div>
 
-        <!-- Section 1: Overview -->
-        <div class="section" id="overview">
+        <!-- Section 1: Startup -->
+        <div class="section" id="startup">
             <div class="section-header">
-                <div class="section-number">1</div>
-                <h2 class="section-title">System Overview</h2>
+                <div class="section-num">1</div>
+                <h2>Startup Sequence</h2>
+            </div>
+            <p class="section-intro">What happens when you run StartTrading.bat to begin your trading day.</p>
+            
+            <div class="flow">
+                <div class="flow-step" data-step="1">
+                    <h4>Check Prerequisites</h4>
+                    <p>Python installed? ✓ | Required packages? ✓ | Network connection? ✓</p>
+                </div>
+                <div class="flow-step" data-step="2">
+                    <h4>Start IB Gateway (Port 4002)</h4>
+                    <p>Launch TWS/Gateway application, auto-login with stored credentials, wait for "Accepting connections" status</p>
+                </div>
+                <div class="flow-step" data-step="3">
+                    <h4>Start IB Data Pusher</h4>
+                    <p>Connects to IB Gateway locally, connects to Cloud backend, begins polling for data requests</p>
+                </div>
+                <div class="flow-step" data-step="4">
+                    <h4>Start Ollama Proxy (if using local LLM)</h4>
+                    <p>Routes AI requests to local Ollama instance for fast response times</p>
+                </div>
+                <div class="flow-step" data-step="5">
+                    <h4>Health Check Loop</h4>
+                    <p>Continuously monitors all connections: IB Gateway ✓ | Data Pusher ✓ | Cloud API ✓</p>
+                </div>
             </div>
             
-            <p style="font-size: 1.1rem; color: var(--text-secondary); margin-bottom: 2rem;">
-                TradeCommand SentCom is an AI-powered autonomous trading system that combines real-time market analysis, 
-                intelligent decision-making, and continuous learning to help you trade smarter.
-            </p>
-            
-            <div class="feature-grid">
-                <div class="feature-card">
-                    <div class="feature-icon">🔍</div>
-                    <h3>Smart Scanner</h3>
-                    <p>Real-time market scanning with pattern recognition, finding setups across thousands of stocks automatically.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🤖</div>
-                    <h3>AI Trading Bot</h3>
-                    <p>Autonomous trade execution with Bull/Bear debate, risk assessment, and intelligent position sizing.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">📊</div>
-                    <h3>TQS Engine</h3>
-                    <p>Trade Quality Scoring system that evaluates every setup across 5 pillars for objective trade grading.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🧠</div>
-                    <h3>AI Coaching</h3>
-                    <p>Natural language chat interface for market briefings, trade analysis, and performance reviews.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">📈</div>
-                    <h3>Learning Loop</h3>
-                    <p>Three-speed learning architecture that continuously improves based on your trading outcomes.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🛡️</div>
-                    <h3>Risk Management</h3>
-                    <p>Circuit breakers, dynamic position sizing, and smart stop-loss management to protect your capital.</p>
-                </div>
+            <div class="card">
+                <div class="card-header"><span class="icon">💻</span> Example Startup Console Output</div>
+                <div class="code"><code>============================================
+   TradeCommand - Starting Up
+============================================
+[OK] Python 3.11 found
+[OK] IB Gateway starting...
+[OK] IB Gateway connected on port 4002
+[OK] IB Data Pusher connected to cloud
+[OK] All systems ready!
+
+Health Check: IB Gateway ✓ | Data Pusher ✓ | Cloud API ✓</code></div>
             </div>
         </div>
 
         <!-- Section 2: Architecture -->
         <div class="section" id="architecture">
             <div class="section-header">
-                <div class="section-number">2</div>
-                <h2 class="section-title">Architecture & Components</h2>
+                <div class="section-num">2</div>
+                <h2>System Architecture</h2>
             </div>
+            <p class="section-intro">The big picture of how all the components work together.</p>
             
-            <div class="architecture">
-                <h3 style="text-align: center; margin-bottom: 1.5rem; color: var(--primary);">System Architecture</h3>
+            <div class="ecosystem">
+                <h3>🏗️ System Architecture Overview</h3>
                 
-                <div class="arch-label">YOUR COMPUTER</div>
-                <div class="arch-row">
-                    <div class="arch-box primary">
-                        <h4>🏦 IB Gateway</h4>
-                        <p>Port 4002</p>
-                        <p>Orders & Data</p>
-                    </div>
-                    <div class="arch-box secondary">
-                        <h4>🔌 IB Pusher</h4>
-                        <p>Bridge to Cloud</p>
-                        <p>Data Sync</p>
-                    </div>
-                    <div class="arch-box purple">
-                        <h4>🧠 Ollama</h4>
-                        <p>Local LLM</p>
-                        <p>Fast AI</p>
+                <div class="eco-layer">
+                    <div class="eco-label">Your Computer</div>
+                    <div class="eco-boxes">
+                        <div class="eco-box highlight">
+                            <h4>🏦 IB Gateway</h4>
+                            <p>Port 4002</p>
+                            <p>Live quotes, Orders, Account</p>
+                        </div>
+                        <div class="eco-box highlight">
+                            <h4>🔌 IB Data Pusher</h4>
+                            <p>Python Bridge</p>
+                            <p>Polls cloud, Fetches data</p>
+                        </div>
+                        <div class="eco-box">
+                            <h4>🧠 Ollama (LLM)</h4>
+                            <p>Optional</p>
+                            <p>Local AI, Fast response</p>
+                        </div>
                     </div>
                 </div>
                 
-                <div class="arch-arrow">⬇️ Internet ⬇️</div>
+                <div class="eco-arrow">⬇️ INTERNET ⬇️</div>
                 
-                <div class="arch-label">CLOUD SERVER</div>
-                <div class="arch-row">
-                    <div class="arch-box primary">
-                        <h4>⚡ FastAPI</h4>
-                        <p>Backend</p>
-                        <p>Port 8001</p>
-                    </div>
-                    <div class="arch-box secondary">
-                        <h4>⚛️ React</h4>
-                        <p>Frontend</p>
-                        <p>Port 3000</p>
-                    </div>
-                    <div class="arch-box purple">
-                        <h4>🗄️ MongoDB</h4>
-                        <p>Atlas Cloud</p>
-                        <p>All Data</p>
-                    </div>
-                </div>
-                
-                <div style="margin-top: 2rem;">
-                    <div class="arch-label">CORE SERVICES</div>
-                    <div class="arch-row">
-                        <div class="arch-box">
+                <div class="eco-layer">
+                    <div class="eco-label">Cloud Server</div>
+                    <div class="eco-boxes">
+                        <div class="eco-box highlight">
                             <h4>🔍 Scanner</h4>
-                            <p>Pattern Detection</p>
+                            <p>Finds setups, Filters alerts</p>
                         </div>
-                        <div class="arch-box">
+                        <div class="eco-box highlight">
                             <h4>🤖 Trading Bot</h4>
-                            <p>Auto Execution</p>
+                            <p>Executes trades, Manages positions</p>
                         </div>
-                        <div class="arch-box">
-                            <h4>⚖️ Debate Agents</h4>
-                            <p>Bull vs Bear</p>
+                        <div class="eco-box highlight">
+                            <h4>🎭 AI Modules</h4>
+                            <p>Debate, Risk Mgr, Coach</p>
                         </div>
-                        <div class="arch-box">
-                            <h4>🛡️ Risk Manager</h4>
-                            <p>Protection</p>
-                        </div>
-                        <div class="arch-box">
+                    </div>
+                    <div class="eco-boxes" style="margin-top: 1rem;">
+                        <div class="eco-box">
                             <h4>📚 Learning</h4>
-                            <p>Self-Improve</p>
+                            <p>Calibrate, Improve</p>
+                        </div>
+                        <div class="eco-box">
+                            <h4>📈 Time-Series AI</h4>
+                            <p>Predict, Forecast</p>
+                        </div>
+                        <div class="eco-box">
+                            <h4>🎓 Training Center</h4>
+                            <p>Collect, Store</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="eco-arrow">⬇️</div>
+                
+                <div class="eco-layer">
+                    <div class="eco-label">MongoDB Database</div>
+                    <div class="eco-boxes">
+                        <div class="eco-box">
+                            <h4>Historical Data</h4>
+                        </div>
+                        <div class="eco-box">
+                            <h4>Trade Journal</h4>
+                        </div>
+                        <div class="eco-box">
+                            <h4>Learning Data</h4>
+                        </div>
+                        <div class="eco-box">
+                            <h4>Module Weights</h4>
                         </div>
                     </div>
                 </div>
             </div>
-            
-            <div class="callout callout-info">
-                <div class="callout-icon">💡</div>
-                <div>
-                    <div class="callout-title">Key Insight</div>
-                    <div class="callout-content">
-                        IB Gateway runs locally on your computer for security - your credentials never leave your machine. 
-                        The cloud handles all the AI processing and analysis.
-                    </div>
-                </div>
-            </div>
         </div>
 
-        <!-- Section 3: Startup -->
-        <div class="section" id="startup">
-            <div class="section-header">
-                <div class="section-number">3</div>
-                <h2 class="section-title">Startup Sequence</h2>
-            </div>
-            
-            <div class="card">
-                <div class="card-title">🚀 Starting the System</div>
-                <p style="margin-bottom: 1rem; color: var(--text-secondary);">
-                    Double-click <code style="background: var(--bg-card-hover); padding: 0.25rem 0.5rem; border-radius: 4px;">StartTrading.bat</code> 
-                    or <code style="background: var(--bg-card-hover); padding: 0.25rem 0.5rem; border-radius: 4px;">TradeCommand_Ultimate.bat</code> to begin.
-                </p>
-            </div>
-            
-            <div class="flow-diagram">
-                <div class="flow-step">
-                    <div class="step-number">1</div>
-                    <div class="step-content">
-                        <h4>Git Pull</h4>
-                        <p>Updates code to latest version from GitHub repository</p>
-                    </div>
-                </div>
-                <div class="flow-step">
-                    <div class="step-number">2</div>
-                    <div class="step-content">
-                        <h4>Prerequisites Check</h4>
-                        <p>Verifies Python, Node.js, and GPU availability</p>
-                    </div>
-                </div>
-                <div class="flow-step">
-                    <div class="step-number">3</div>
-                    <div class="step-content">
-                        <h4>IB Gateway Launch</h4>
-                        <p>Opens IB Gateway and auto-logs in with your credentials</p>
-                    </div>
-                </div>
-                <div class="flow-step">
-                    <div class="step-number">4</div>
-                    <div class="step-content">
-                        <h4>Backend Server</h4>
-                        <p>Starts FastAPI server on port 8001 with all services</p>
-                    </div>
-                </div>
-                <div class="flow-step">
-                    <div class="step-number">5</div>
-                    <div class="step-content">
-                        <h4>Frontend UI</h4>
-                        <p>Launches React dashboard in your browser</p>
-                    </div>
-                </div>
-                <div class="flow-step">
-                    <div class="step-number">6</div>
-                    <div class="step-content">
-                        <h4>Health Checks</h4>
-                        <p>Verifies all connections and syncs open positions</p>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="callout callout-success">
-                <div class="callout-icon">✅</div>
-                <div>
-                    <div class="callout-title">Ready to Trade</div>
-                    <div class="callout-content">
-                        When you see "Trading bot auto-started in AUTONOMOUS mode" in the console, 
-                        the system is fully operational and ready to find trades.
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Section 4: Trading Day -->
+        <!-- Section 3: Trading Day -->
         <div class="section" id="trading-day">
             <div class="section-header">
-                <div class="section-number">4</div>
-                <h2 class="section-title">The Trading Day</h2>
+                <div class="section-num">3</div>
+                <h2>The Trading Day</h2>
             </div>
+            <p class="section-intro">Timeline of what happens throughout a typical trading day.</p>
             
             <div class="timeline">
                 <div class="timeline-item">
                     <div class="timeline-time">4:00 AM ET</div>
                     <div class="timeline-title">Pre-Market Opens</div>
-                    <div class="timeline-desc">Scanner monitors pre-market movers, gap scanner identifies overnight gaps, news service fetches headlines.</div>
+                    <div class="timeline-desc">Scanner begins monitoring pre-market movers, gap scanner identifies overnight gaps, news service fetches overnight headlines.</div>
                 </div>
                 <div class="timeline-item">
                     <div class="timeline-time">8:00 AM ET</div>
                     <div class="timeline-title">You Start the App</div>
-                    <div class="timeline-desc">Run StartTrading.bat, IB Gateway connects, system syncs your open positions.</div>
+                    <div class="timeline-desc">StartTrading.bat launches, IB Gateway connects, system syncs open positions.</div>
                 </div>
                 <div class="timeline-item">
                     <div class="timeline-time">9:30 AM ET</div>
                     <div class="timeline-title">Market Opens</div>
-                    <div class="timeline-desc">Scanner shifts to intraday mode, ORB setups activate, high volatility scanning begins.</div>
+                    <div class="timeline-desc">Scanner shifts to intraday mode, ORB (Opening Range Breakout) setups activate, first 15-30 mins: high volatility scanning.</div>
                 </div>
                 <div class="timeline-item">
                     <div class="timeline-time">9:30-10:00 AM</div>
-                    <div class="timeline-title">Opening Range Breakouts</div>
-                    <div class="timeline-desc">ORB window - breakout alerts generated as stocks establish their ranges.</div>
+                    <div class="timeline-title">ORB Window</div>
+                    <div class="timeline-desc">Opening range established, ORB breakout alerts generated. Example: "NVDA ORB Breakout Long at $485.50"</div>
                 </div>
                 <div class="timeline-item">
                     <div class="timeline-time">10:00-12:00 PM</div>
                     <div class="timeline-title">Morning Session</div>
-                    <div class="timeline-desc">VWAP plays, 9 EMA scalps, pattern breakouts - this is typically the highest edge window.</div>
+                    <div class="timeline-desc">VWAP reclaim/reject plays, 9 EMA scalps, pattern breakouts (flags, triangles).</div>
                 </div>
                 <div class="timeline-item">
                     <div class="timeline-time">12:00-2:00 PM</div>
                     <div class="timeline-title">Midday Lull</div>
-                    <div class="timeline-desc">Scanner widens thresholds, focus shifts to swing setups and daily chart patterns.</div>
+                    <div class="timeline-desc">Scanner widens thresholds (less activity), focus on swing setups, daily chart patterns.</div>
                 </div>
                 <div class="timeline-item">
                     <div class="timeline-time">2:00-4:00 PM</div>
                     <div class="timeline-title">Power Hour</div>
-                    <div class="timeline-desc">Volume picks up, EOD setups, position sizing for overnight holds.</div>
+                    <div class="timeline-desc">Volume picks up, EOD (End of Day) setups, position sizing for overnight holds.</div>
                 </div>
                 <div class="timeline-item">
                     <div class="timeline-time">4:00 PM ET</div>
                     <div class="timeline-title">Market Closes</div>
-                    <div class="timeline-desc">Final position sync, trade journal updated, learning connections sync, daily P&L calculated.</div>
+                    <div class="timeline-desc">Final position sync with IB, trade journal updated, learning connections sync, daily performance calculated.</div>
                 </div>
             </div>
         </div>
 
-        <!-- Section 5: AI Decision Making -->
+        <!-- Section 4: AI Decision Making -->
         <div class="section" id="ai-decision">
             <div class="section-header">
-                <div class="section-number">5</div>
-                <h2 class="section-title">AI Decision Making</h2>
+                <div class="section-num">4</div>
+                <h2>AI Decision Making</h2>
             </div>
+            <p class="section-intro">How SentCom decides whether to take a trade when an alert comes in.</p>
             
-            <p style="margin-bottom: 1.5rem; color: var(--text-secondary);">
-                When an alert comes in, SentCom runs through a multi-step analysis process before deciding to trade.
-            </p>
-            
-            <div class="flow-diagram">
-                <div class="flow-step">
-                    <div class="step-number">1</div>
-                    <div class="step-content">
-                        <h4>Initial Filtering</h4>
-                        <p>ADV check (500K+ volume), price range, spread check, blacklist check</p>
-                        <div style="margin-top: 0.5rem;">
-                            <span class="badge badge-success">Pass</span> → Continue | 
-                            <span class="badge badge-danger">Fail</span> → Reject
-                        </div>
-                    </div>
-                </div>
-                <div class="flow-step">
-                    <div class="step-number">2</div>
-                    <div class="step-content">
-                        <h4>Intelligence Gathering</h4>
-                        <p>Fetches news sentiment, technical indicators (RSI, MACD, EMAs), and setup quality metrics in parallel.</p>
-                    </div>
-                </div>
-                <div class="flow-step">
-                    <div class="step-number">3</div>
-                    <div class="step-content">
-                        <h4>Bull vs Bear Debate</h4>
-                        <p>Two AI agents argue for and against the trade. Each presents arguments with scores.</p>
-                        <div class="card" style="margin-top: 1rem; display: flex; gap: 1rem;">
-                            <div style="flex: 1; padding: 0.5rem; border-right: 1px solid var(--border);">
-                                <strong style="color: var(--secondary);">🐂 Bull Agent</strong>
-                                <p style="font-size: 0.85rem; color: var(--text-secondary);">Pattern quality, volume, catalyst, technicals</p>
-                            </div>
-                            <div style="flex: 1; padding: 0.5rem;">
-                                <strong style="color: var(--danger);">🐻 Bear Agent</strong>
-                                <p style="font-size: 0.85rem; color: var(--text-secondary);">Resistance, overbought, sector weakness, risks</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="flow-step">
-                    <div class="step-number">4</div>
-                    <div class="step-content">
-                        <h4>Risk Assessment</h4>
-                        <p>Evaluates position size risk, market regime, correlation, volatility, liquidity, time of day, and historical performance.</p>
-                    </div>
-                </div>
-                <div class="flow-step">
-                    <div class="step-number">5</div>
-                    <div class="step-content">
-                        <h4>Trade Construction</h4>
-                        <p>Calculates entry, stop loss, position size (risk-based), and scale-out targets.</p>
-                    </div>
-                </div>
-                <div class="flow-step">
-                    <div class="step-number">6</div>
-                    <div class="step-content">
-                        <h4>Execution</h4>
-                        <p>In autonomous mode, executes automatically. In manual mode, shows alert for your confirmation.</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Section 6: Trade Execution -->
-        <div class="section" id="trade-execution">
-            <div class="section-header">
-                <div class="section-number">6</div>
-                <h2 class="section-title">Trade Execution Flow</h2>
-            </div>
-            
-            <div class="card">
-                <div class="card-title">📤 Order Flow</div>
-                <div class="code-block">
-                    <code>
-Cloud Backend → IB Data Pusher → IB Gateway → Exchange → FILL
-    ↓                                                    ↓
-Trade Journal ← Position Monitor ← Stop Loss Placed ← ──┘
-                    </code>
-                </div>
-            </div>
-            
-            <div class="feature-grid">
-                <div class="feature-card">
-                    <div class="feature-icon">📝</div>
-                    <h3>Order Types</h3>
-                    <p>Limit orders for entries, stop-loss orders for protection, scale-out orders for targets.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🎯</div>
-                    <h3>Scale-Out Strategy</h3>
-                    <p>Sell 33% at Target 1, 33% at Target 2, remainder at Target 3 or trailing stop.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🛑</div>
-                    <h3>Stop Management</h3>
-                    <p>Initial stop set on entry. After T1 hit, stop moves to breakeven. After T2, locks in profit.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">📊</div>
-                    <h3>Position Monitoring</h3>
-                    <p>Real-time P&L updates, target tracking, and optional trailing stop activation.</p>
-                </div>
-            </div>
-            
-            <div class="callout callout-warning">
-                <div class="callout-icon">⚠️</div>
+            <div class="callout callout-info">
+                <div class="callout-icon">📢</div>
                 <div>
-                    <div class="callout-title">Important</div>
-                    <div class="callout-content">
-                        IB Gateway must be running and connected for order execution. If disconnected, orders are simulated only.
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Section 7: Data Collection -->
-        <div class="section" id="data-collection">
-            <div class="section-header">
-                <div class="section-number">7</div>
-                <h2 class="section-title">Historical Data Collection</h2>
-            </div>
-            
-            <p style="margin-bottom: 1.5rem; color: var(--text-secondary);">
-                SentCom collects historical OHLCV data from IB Gateway to train AI models and analyze patterns.
-            </p>
-            
-            <div class="card">
-                <div class="card-title">🗂️ Data Tiers by Volume</div>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Tier</th>
-                                <th>ADV Range</th>
-                                <th>Symbols</th>
-                                <th>Timeframes Collected</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td><span class="badge badge-success">Intraday</span></td>
-                                <td>500K+ shares/day</td>
-                                <td>~2,500</td>
-                                <td>1min, 5min, 15min, 30min, 1hr, 1day</td>
-                            </tr>
-                            <tr>
-                                <td><span class="badge badge-info">Swing</span></td>
-                                <td>100K-500K</td>
-                                <td>~1,400</td>
-                                <td>5min, 30min, 1hr, 1day</td>
-                            </tr>
-                            <tr>
-                                <td><span class="badge badge-warning">Investment</span></td>
-                                <td>50K-100K</td>
-                                <td>~700</td>
-                                <td>1hr, 1day, 1week</td>
-                            </tr>
-                        </tbody>
-                    </table>
+                    <div class="callout-title">Alert Received</div>
+                    <div class="callout-text">Example: "AAPL Bull Flag Breakout at $178.50"</div>
                 </div>
             </div>
             
-            <div class="card">
-                <div class="card-title">🚀 Running the Historical Collector</div>
-                <div class="code-block">
-                    <code>
-# Start collection with optimized settings
-.\documents\scripts\StartHistoricalCollector.bat --fast
-
-# Options:
---fast       8 batch size, 0.5s delay (recommended)
---turbo      10 batch size, 0.3s delay (may hit limits)
---slow       2 batch size, 2s delay (conservative)
---skip-login Skip IB Gateway restart if already running
-                    </code>
+            <div class="flow">
+                <div class="flow-step" data-step="1">
+                    <h4>Initial Filtering</h4>
+                    <p><strong>ADV Check:</strong> AAPL daily volume = 50M shares ✓ (need 500K+)<br>
+                    <strong>Price Check:</strong> $178.50 ✓ (within $1-$1000 range)<br>
+                    <strong>Spread Check:</strong> $0.02 spread ✓ (acceptable)<br>
+                    <strong>Blacklist:</strong> Not blacklisted ✓<br>
+                    <em>Result: PASSED → Continue to analysis</em></p>
+                </div>
+                <div class="flow-step" data-step="2">
+                    <h4>Intelligence Gathering</h4>
+                    <p>Run in parallel (10 second timeout):<br>
+                    <strong>📰 News:</strong> "Apple announces record iPhone sales" - Sentiment: BULLISH<br>
+                    <strong>📊 Technicals:</strong> RSI: 58, MACD: Bullish crossover, Above 9 EMA ✓, Above VWAP ✓<br>
+                    <strong>📈 Quality Metrics:</strong> Setup Score: 7.2/10, Historical Win Rate: 62%, Avg R: 1.4R</p>
+                </div>
+            </div>
+            
+            <h3 style="margin: 2rem 0 1rem;">Step 3: Bull vs Bear Debate</h3>
+            <div class="debate">
+                <div class="debate-side bull">
+                    <div class="debate-header">🐂 Bull Agent</div>
+                    <ul class="debate-list">
+                        <li>Clean bull flag pattern (+0.15)</li>
+                        <li>Strong volume confirmation (+0.12)</li>
+                        <li>Bullish news catalyst (+0.10)</li>
+                        <li>Above VWAP (+0.08)</li>
+                    </ul>
+                    <div class="debate-score">Score: 0.72 | Confidence: 75%</div>
+                </div>
+                <div class="debate-side bear">
+                    <div class="debate-header">🐻 Bear Agent</div>
+                    <ul class="debate-list">
+                        <li>Market slightly overbought (-0.10)</li>
+                        <li>Near resistance at $180 (-0.08)</li>
+                        <li>Sector rotation concerns (-0.05)</li>
+                    </ul>
+                    <div class="debate-score">Score: 0.38 | Confidence: 45%</div>
                 </div>
             </div>
             
             <div class="callout callout-success">
-                <div class="callout-icon">⚡</div>
+                <div class="callout-icon">⚖️</div>
                 <div>
-                    <div class="callout-title">Smart Skip Feature</div>
-                    <div class="callout-content">
-                        The collector automatically skips symbols that already have complete data, 
-                        checking timeframe-specific thresholds (e.g., 1500+ bars for daily data).
-                        This significantly speeds up gap-filling runs.
-                    </div>
+                    <div class="callout-title">Arbiter Decision</div>
+                    <div class="callout-text">Bull Score: 0.72 vs Bear Score: 0.38 | Margin: +0.34 (Bull wins by significant margin)<br>
+                    <strong>VERDICT: PROCEED WITH TRADE</strong> | Combined Confidence: 68% | Recommended Size: FULL POSITION</div>
+                </div>
+            </div>
+            
+            <div class="flow">
+                <div class="flow-step" data-step="4">
+                    <h4>Risk Manager Assessment</h4>
+                    <p>Position Size Risk: 3/10 | Market Regime: 4/10 | Correlation: 2/10 | Volatility: 5/10 | Liquidity: 1/10<br>
+                    <strong>Total Risk Score: 3.10/10 - ACCEPTABLE</strong><br>
+                    Recommendation: PROCEED (no risk flags)</p>
+                </div>
+                <div class="flow-step" data-step="5">
+                    <h4>Final Trade Construction</h4>
+                    <p><strong>Symbol:</strong> AAPL | <strong>Direction:</strong> LONG | <strong>Entry:</strong> $178.50 | <strong>Stop:</strong> $176.80<br>
+                    <strong>Position Size:</strong> $500 risk ÷ $1.70 = 294 shares ($52,479)<br>
+                    <strong>Targets:</strong> T1: $181.90 (+2R) - 33% | T2: $183.60 (+3R) - 33% | T3: $186.20 (+4.5R) - remaining</p>
+                </div>
+                <div class="flow-step" data-step="6">
+                    <h4>User Confirmation</h4>
+                    <p>Alert shown in UI with all details: Entry, Stop, Targets, AI Confidence, Risk Score, Bull/Bear verdict<br>
+                    <strong>Options:</strong> [ ✓ CONFIRM ] [ ✗ REJECT ] [ ✏️ MODIFY ]</p>
                 </div>
             </div>
         </div>
 
-        <!-- Section 8: Learning -->
-        <div class="section" id="learning">
+        <!-- Section 5: Trade Execution -->
+        <div class="section" id="execution">
             <div class="section-header">
-                <div class="section-number">8</div>
-                <h2 class="section-title">Learning & Self-Improvement</h2>
+                <div class="section-num">5</div>
+                <h2>Trade Execution Flow</h2>
+            </div>
+            <p class="section-intro">What happens when you confirm a trade.</p>
+            
+            <div class="flow">
+                <div class="flow-step" data-step="1">
+                    <h4>Order Preparation</h4>
+                    <p>Price at/near bid? → LIMIT ORDER at $178.50<br>Fast-moving? → Could use MARKET ORDER<br>Large size? → Could use TWAP/VWAP algo</p>
+                </div>
+                <div class="flow-step" data-step="2">
+                    <h4>Send to IB Gateway</h4>
+                    <p>Cloud Backend → IB Data Pusher → IB Gateway → Exchange<br>
+                    Order: BUY 294 AAPL @ $178.50 LMT DAY</p>
+                </div>
+                <div class="flow-step" data-step="3">
+                    <h4>Order Status Updates</h4>
+                    <p>09:45:01.234 Order submitted | 09:45:01.456 Acknowledged (ID: 12847)<br>
+                    09:45:01.892 Routed to NASDAQ | 09:45:02.103 <strong>FILLED 294 @ $178.48</strong><br>
+                    Commission: $0.35 | Total Cost: $52,465.47</p>
+                </div>
+                <div class="flow-step" data-step="4">
+                    <h4>Stop Loss Placed</h4>
+                    <p>Automatic stop: SELL 294 AAPL STP @ $176.80<br>
+                    Status: WORKING (will trigger if price hits $176.80)</p>
+                </div>
+                <div class="flow-step" data-step="5">
+                    <h4>Position Monitoring</h4>
+                    <p>Price updates every 250ms | P&L tracking | Target tracking<br>
+                    Trailing stop (optional) | Time-based rules | Auto-scale on targets</p>
+                </div>
             </div>
             
-            <p style="margin-bottom: 1.5rem; color: var(--text-secondary);">
-                SentCom uses a three-speed learning architecture to continuously improve based on trading outcomes.
-            </p>
-            
-            <div class="feature-grid">
-                <div class="feature-card">
-                    <div class="feature-icon">⚡</div>
-                    <h3>Fast Learning</h3>
-                    <p><strong>Real-time</strong> - Circuit breakers, position sizing adjustments, and tilt detection based on immediate trading activity.</p>
+            <h3 style="margin: 2rem 0 1rem;">Scale-Out Execution</h3>
+            <div class="grid-3">
+                <div class="feature">
+                    <div class="feature-icon">🎯</div>
+                    <h3>Target 1 Hit ($181.90)</h3>
+                    <p>10:23 AM - Sell 97 shares @ $181.88<br>Realized: +$329.88 (+1.9%)<br>Stop moved to BREAKEVEN</p>
                 </div>
-                <div class="feature-card">
-                    <div class="feature-icon">📊</div>
-                    <h3>Medium Learning</h3>
-                    <p><strong>Daily/Weekly</strong> - Scanner threshold calibration, module weight adjustments, and edge decay detection.</p>
+                <div class="feature">
+                    <div class="feature-icon">🎯</div>
+                    <h3>Target 2 Hit ($183.60)</h3>
+                    <p>11:47 AM - Sell 97 shares @ $183.55<br>Realized: +$491.79 (+2.8%)<br>Stop moved to $181.00</p>
                 </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🧠</div>
-                    <h3>Slow Learning</h3>
-                    <p><strong>Weekly/Monthly</strong> - Time-series model retraining, strategy backtesting, and pattern recognition updates.</p>
-                </div>
-            </div>
-            
-            <div class="card">
-                <div class="card-title">🔄 Learning Connections</div>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Connection</th>
-                                <th>What It Does</th>
-                                <th>When</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td>Outcomes → Scanner</td>
-                                <td>Adjusts thresholds based on win/loss rates per setup type</td>
-                                <td>Daily</td>
-                            </tr>
-                            <tr>
-                                <td>Shadow → Weights</td>
-                                <td>Calibrates AI module influence based on prediction accuracy</td>
-                                <td>Weekly</td>
-                            </tr>
-                            <tr>
-                                <td>Simulations → Model</td>
-                                <td>Retrains time-series AI with new historical + simulation data</td>
-                                <td>Weekly</td>
-                            </tr>
-                        </tbody>
-                    </table>
+                <div class="feature">
+                    <div class="feature-icon">🏆</div>
+                    <h3>Trade Closed</h3>
+                    <p>Target 3: +$767 (+3.2R) 🎉<br>or Trailing Stop: +$247 (+1.6R)<br>Logged to journal</p>
                 </div>
             </div>
         </div>
 
-        <!-- Section 9: Chat -->
-        <div class="section" id="chat">
+        <!-- Section 6: Data Collection -->
+        <div class="section" id="data">
             <div class="section-header">
-                <div class="section-number">9</div>
-                <h2 class="section-title">Chat & AI Coaching</h2>
+                <div class="section-num">6</div>
+                <h2>Data Collection</h2>
             </div>
+            <p class="section-intro">What data SentCom collects and stores for trading and learning.</p>
             
-            <p style="margin-bottom: 1.5rem; color: var(--text-secondary);">
-                Talk to SentCom in natural language for briefings, analysis, and coaching.
-            </p>
-            
-            <div class="feature-grid">
-                <div class="card" style="margin: 0;">
-                    <div class="card-title">💬 Example Commands</div>
-                    <ul style="list-style: none; color: var(--text-secondary);">
-                        <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
-                            <strong style="color: var(--primary);">"Brief me on today"</strong> - Morning market overview
-                        </li>
-                        <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
-                            <strong style="color: var(--primary);">"Should I take this NVDA long?"</strong> - Trade analysis
-                        </li>
-                        <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
-                            <strong style="color: var(--primary);">"Why did my TSLA trade fail?"</strong> - Post-trade review
-                        </li>
-                        <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
-                            <strong style="color: var(--primary);">"How am I doing this week?"</strong> - Performance report
-                        </li>
-                        <li style="padding: 0.5rem 0;">
-                            <strong style="color: var(--primary);">"What setups are working best?"</strong> - Strategy analysis
-                        </li>
-                    </ul>
+            <h3 style="margin: 1.5rem 0 1rem;">📊 Real-Time Data Streams</h3>
+            <div class="grid-3">
+                <div class="feature">
+                    <div class="feature-icon">📈</div>
+                    <h3>Price Data</h3>
+                    <p>Bid/Ask/Last every 250ms, Volume tick-by-tick, High/Low of day from IB Gateway</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">📰</div>
+                    <h3>News Data</h3>
+                    <p>IB News feed (primary), Finnhub headlines (backup), Sentiment analysis on each</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">🌍</div>
+                    <h3>Market Context</h3>
+                    <p>SPY/QQQ levels, VIX level, Sector performance, Market breadth</p>
                 </div>
             </div>
-        </div>
-
-        <!-- Section 10: Scripts -->
-        <div class="section" id="scripts">
-            <div class="section-header">
-                <div class="section-number">10</div>
-                <h2 class="section-title">Scripts & Automation</h2>
+            
+            <h3 style="margin: 2rem 0 1rem;">📦 Historical Data Collection Flow</h3>
+            <div class="flow">
+                <div class="flow-step" data-step="1">
+                    <h4>Cloud Creates Request</h4>
+                    <p>Request queued: AAPL, 1 month, daily bars → Status: "pending"</p>
+                </div>
+                <div class="flow-step" data-step="2">
+                    <h4>IB Data Pusher Polls</h4>
+                    <p>GET /api/ib/historical-data/pending → Sees AAPL request → Claims it (status → "claimed")</p>
+                </div>
+                <div class="flow-step" data-step="3">
+                    <h4>Fetch from IB Gateway</h4>
+                    <p>Sends request to IB Gateway (port 4002) → IB fetches from servers → Returns ~22 daily bars</p>
+                </div>
+                <div class="flow-step" data-step="4">
+                    <h4>Report Back to Cloud</h4>
+                    <p>POST /api/ib/historical-data/result → Data stored in ib_historical_data collection</p>
+                </div>
             </div>
             
-            <div class="table-container">
+            <h3 style="margin: 2rem 0 1rem;">🗄️ MongoDB Collections</h3>
+            <div class="table-wrap">
                 <table>
                     <thead>
-                        <tr>
-                            <th>Script</th>
-                            <th>Purpose</th>
-                            <th>When to Use</th>
-                        </tr>
+                        <tr><th>Collection</th><th>Purpose</th><th>Example Data</th></tr>
                     </thead>
                     <tbody>
-                        <tr>
-                            <td><code>StartTrading.bat</code></td>
-                            <td>Full trading system startup</td>
-                            <td>Daily trading</td>
-                        </tr>
-                        <tr>
-                            <td><code>TradeCommand_Ultimate.bat</code></td>
-                            <td>Complete local setup with GPU</td>
-                            <td>Full local development</td>
-                        </tr>
-                        <tr>
-                            <td><code>StartHistoricalCollector.bat</code></td>
-                            <td>Historical data collection</td>
-                            <td>Data backfill / gap filling</td>
-                        </tr>
-                        <tr>
-                            <td><code>PostRestartAuto.bat</code></td>
-                            <td>Auto-recovery after restart</td>
-                            <td>Post system reboot</td>
-                        </tr>
-                        <tr>
-                            <td><code>WeekendAuto.bat</code></td>
-                            <td>Weekend learning tasks</td>
-                            <td>Saturday/Sunday</td>
-                        </tr>
-                        <tr>
-                            <td><code>Diagnostics.bat</code></td>
-                            <td>System health check</td>
-                            <td>Troubleshooting</td>
-                        </tr>
+                        <tr><td><strong>ib_historical_data</strong></td><td>Price History</td><td>OHLCV bars by symbol and timeframe</td></tr>
+                        <tr><td><strong>trade_journal</strong></td><td>Your Trades</td><td>Entry/exit, P&L, R-multiple, AI scores</td></tr>
+                        <tr><td><strong>alert_outcomes</strong></td><td>Learning Data</td><td>Was traded? Outcome? R-multiple?</td></tr>
+                        <tr><td><strong>module_weights</strong></td><td>Calibration</td><td>Bull agent accuracy, weight adjustments</td></tr>
+                        <tr><td><strong>timeseries_predictions</strong></td><td>AI Forecasts</td><td>Predicted vs actual, was correct?</td></tr>
                     </tbody>
                 </table>
             </div>
         </div>
 
-        <!-- Section 11: Troubleshooting -->
-        <div class="section" id="troubleshooting">
+        <!-- Section 7: Learning -->
+        <div class="section" id="learning">
             <div class="section-header">
-                <div class="section-number">11</div>
-                <h2 class="section-title">Troubleshooting</h2>
+                <div class="section-num">7</div>
+                <h2>Learning & Self-Improvement</h2>
+            </div>
+            <p class="section-intro">How SentCom gets smarter over time through the learning loop.</p>
+            
+            <div class="callout callout-success">
+                <div class="callout-icon">🔄</div>
+                <div>
+                    <div class="callout-title">The Learning Loop</div>
+                    <div class="callout-text">COLLECT DATA → TRADE OUTCOMES → LEARN PATTERNS → IMPROVE DECISIONS → REPEAT FOREVER</div>
+                </div>
             </div>
             
+            <h3 style="margin: 2rem 0 1rem;">Learning Connection #1: Outcomes → Scanner Calibration</h3>
             <div class="card">
-                <div class="card-title">🔧 Common Issues</div>
-                
-                <div style="margin: 1rem 0; padding: 1rem; background: var(--bg-card-hover); border-radius: 8px;">
-                    <strong style="color: var(--danger);">IB Gateway won't connect</strong>
-                    <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem;">
-                        • Check IB Gateway is running and logged in<br>
-                        • Verify port 4002 is not blocked<br>
-                        • Ensure API connections are enabled in TWS/Gateway settings
-                    </p>
+                <div class="card-header"><span class="icon">🎯</span> Scanner Threshold Calibration</div>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;">Analyzes which setup types are winning/losing, adjusts scanner sensitivity accordingly.</p>
+                <div class="grid-2">
+                    <div>
+                        <strong style="color: var(--secondary);">ORB Breakout (Last 30 Days)</strong>
+                        <p style="font-size: 0.9rem; color: var(--text-secondary);">47 alerts | 31 profitable | 66% win rate | +1.8R avg<br>
+                        Current threshold: 1.0 → New: 0.95 ✓<br>
+                        <em>Can lower threshold (more alerts, still good edge)</em></p>
+                    </div>
+                    <div>
+                        <strong style="color: var(--danger);">VWAP Reject (Last 30 Days)</strong>
+                        <p style="font-size: 0.9rem; color: var(--text-secondary);">38 alerts | 14 profitable | 37% win rate | -0.3R avg<br>
+                        Current threshold: 1.0 → New: 1.30 ✗<br>
+                        <em>Must raise threshold (fewer alerts, higher quality)</em></p>
+                    </div>
                 </div>
-                
-                <div style="margin: 1rem 0; padding: 1rem; background: var(--bg-card-hover); border-radius: 8px;">
-                    <strong style="color: var(--danger);">Client ID already in use</strong>
-                    <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem;">
-                        • Close other applications using IB Gateway<br>
-                        • Change client ID in script (99 for collector, 1 for backend)
-                    </p>
+            </div>
+            
+            <h3 style="margin: 2rem 0 1rem;">Learning Connection #2: Shadow Tracker → Module Weights</h3>
+            <div class="card">
+                <div class="card-header"><span class="icon">⚖️</span> Module Weight Calibration</div>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;">Tracks how accurate each AI module is, adjusts how much influence each has in decisions.</p>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Module</th><th>Predictions</th><th>Correct</th><th>Accuracy</th><th>Weight</th></tr></thead>
+                        <tbody>
+                            <tr><td>Bull Agent</td><td>234</td><td>156</td><td>67%</td><td>0.32 (+)</td></tr>
+                            <tr><td>Bear Agent</td><td>234</td><td>142</td><td>61%</td><td>0.28</td></tr>
+                            <tr><td>Risk Manager</td><td>189</td><td>134</td><td>71%</td><td>0.35 (++)</td></tr>
+                            <tr><td>Time-Series AI</td><td>150</td><td>87</td><td>58%</td><td>0.05 (new)</td></tr>
+                        </tbody>
+                    </table>
                 </div>
-                
-                <div style="margin: 1rem 0; padding: 1rem; background: var(--bg-card-hover); border-radius: 8px;">
-                    <strong style="color: var(--danger);">Backend not responding</strong>
-                    <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem;">
-                        • Check backend window for errors<br>
-                        • Run: <code>curl http://localhost:8001/api/health</code><br>
-                        • Restart backend if needed
-                    </p>
+                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 1rem;">
+                    <strong>Weight Adjustment:</strong> Accuracy > 65%? → +5% | Accuracy < 50%? → -10% | New module? → Start at 5%
+                </p>
+            </div>
+            
+            <h3 style="margin: 2rem 0 1rem;">Learning Connection #3: Simulations → Model Training</h3>
+            <div class="card">
+                <div class="card-header"><span class="icon">🧠</span> Time-Series Model Training</div>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;">Uses historical data + simulation results to train the Time-Series AI to make better predictions.</p>
+                <p style="font-size: 0.9rem; color: var(--text-secondary);">
+                    <strong>Training Data:</strong> ~5,900 symbols × 22 days = 129,800 bars + Simulation results + Feature engineering (RSI, MACD, Volume, etc.)<br><br>
+                    <strong>Model Learns:</strong> "When RSI ~58, MACD positive, volume elevated, and price above both EMAs with low VIX → likely to go UP"
+                </p>
+            </div>
+        </div>
+
+        <!-- Section 8: Chat -->
+        <div class="section" id="chat">
+            <div class="section-header">
+                <div class="section-num">8</div>
+                <h2>Chat Interactions</h2>
+            </div>
+            <p class="section-intro">Common conversations with your AI trading coach.</p>
+            
+            <h3 style="margin: 1.5rem 0 1rem;">Example 1: Morning Briefing</h3>
+            <div class="chat">
+                <div class="chat-user">"Brief me on today"</div>
+                <div class="chat-ai">
+                    <div class="chat-ai-header">🤖 SENTCOM (AI Coach)</div>
+                    <p>Good morning! Here's your market briefing:</p>
+                    <p style="margin: 1rem 0;"><strong>📊 Market Context:</strong> SPY: $512.45 (+0.3%) | QQQ: $445.80 (+0.5%) | VIX: 16.8 (risk-on)</p>
+                    <p style="margin: 1rem 0;"><strong>🔥 Pre-Market Movers:</strong> NVDA +4.2% (upgrade) | TSLA -2.1% (delivery concerns) | AMD +1.8% (sympathy)</p>
+                    <p style="margin: 1rem 0;"><strong>📈 Your Open Positions:</strong> AAPL Long: +$485 (+1.2%) | MSFT Long: -$120 (-0.4%)</p>
+                    <p style="margin: 1rem 0;"><strong>🎯 Setups to Watch:</strong> NVDA: Gap up ORB | AMD: Bull flag | META: Breakout at $510</p>
+                    <p style="margin: 1rem 0;"><strong>💡 Coaching Note:</strong> Your win rate on gap-up ORB plays is 72% this month. NVDA fits that pattern - be ready!</p>
                 </div>
-                
-                <div style="margin: 1rem 0; padding: 1rem; background: var(--bg-card-hover); border-radius: 8px;">
-                    <strong style="color: var(--danger);">Pacing violations (IB limit)</strong>
-                    <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.5rem;">
-                        • Normal - collector auto-waits when hitting limits<br>
-                        • Use --slow mode if hitting too many limits<br>
-                        • IB allows ~60 requests per 10 minutes
-                    </p>
+            </div>
+            
+            <h3 style="margin: 2rem 0 1rem;">Example 2: Trade Analysis</h3>
+            <div class="chat">
+                <div class="chat-user">"Should I take this NVDA long?"</div>
+                <div class="chat-ai">
+                    <div class="chat-ai-header">🤖 SENTCOM (Running Analysis...)</div>
+                    <p><strong>🐂 Bull Case (0.78):</strong> Gap up on upgrade, above all MAs, volume 2.3x avg, sector leading</p>
+                    <p style="margin: 0.5rem 0;"><strong>🐻 Bear Case (0.31):</strong> Extended from 9 EMA (2.1%), near $900 resistance, RSI at 68</p>
+                    <p style="margin: 1rem 0;"><strong>⚖️ Verdict: PROCEED WITH CAUTION</strong></p>
+                    <p>Wait for pullback to $892 (VWAP) for better R:R, or take half size now and add on pullback.</p>
+                    <p style="margin: 0.5rem 0;">If entering at $897: Stop $889 | T1 $908 (1.4R) | T2 $920 (2.9R) | Historical win rate: 68%</p>
+                </div>
+            </div>
+            
+            <h3 style="margin: 2rem 0 1rem;">Example 3: Learning from Mistakes</h3>
+            <div class="chat">
+                <div class="chat-user">"Why did my TSLA trade fail?"</div>
+                <div class="chat-ai">
+                    <div class="chat-ai-header">🤖 SENTCOM (Trade Analysis)</div>
+                    <p><strong>📋 Summary:</strong> Entry $245.50 | Stop $242.00 | Exit $241.80 (stopped out) | Loss: -1.06R</p>
+                    <p style="margin: 1rem 0;"><strong>🔍 What Went Wrong:</strong></p>
+                    <p>1. <strong>Market Context Ignored:</strong> SPY was rolling over (-0.4% in 30 mins). High-beta stocks amplify this.</p>
+                    <p>2. <strong>News Missed:</strong> "TSLA delivery concerns" headline 30 mins before entry.</p>
+                    <p>3. <strong>Entry Timing:</strong> You entered at 2:15 PM (midday). Your stats: 45% win rate midday vs 67% morning.</p>
+                    <p style="margin: 1rem 0;"><strong>💡 Lessons:</strong> Check market direction before high-beta entries. Quick news check on volatile names. Your edge is strongest 9:30-11:00 AM.</p>
+                </div>
+            </div>
+            
+            <h3 style="margin: 2rem 0 1rem;">Example 4: Performance Review</h3>
+            <div class="chat">
+                <div class="chat-user">"How am I doing this week?"</div>
+                <div class="chat-ai">
+                    <div class="chat-ai-header">🤖 SENTCOM (Performance Report)</div>
+                    <p><strong>📊 Weekly Stats:</strong> 12 trades | 8 winners | 67% win rate | +$2,847 P&L | 2.38 profit factor | +1.4R avg</p>
+                    <p style="margin: 0.5rem 0;"><strong>🏆 Best:</strong> NVDA Long +$892 (+3.2R) | <strong>📉 Worst:</strong> TSLA Long -$462 (-1.5R)</p>
+                    <p style="margin: 1rem 0;"><strong>What's Working:</strong> ✓ Morning ORB (5/6 wins) | ✓ Cutting losers faster | ✓ Semiconductor plays</p>
+                    <p><strong>Needs Work:</strong> ✗ Midday trades (2/5 wins) | ✗ Taking profits too early on runners</p>
+                    <p style="margin: 1rem 0;"><strong>🎯 Suggestion:</strong> Focus on morning sessions (9:30-11:30). Skip midday unless exceptional.</p>
                 </div>
             </div>
         </div>
 
-        <!-- Section 12: API Reference -->
-        <div class="section" id="api-reference">
+        <!-- Section 9: End of Day -->
+        <div class="section" id="eod">
             <div class="section-header">
-                <div class="section-number">12</div>
-                <h2 class="section-title">API Quick Reference</h2>
+                <div class="section-num">9</div>
+                <h2>End of Day</h2>
+            </div>
+            <p class="section-intro">What happens when the market closes and you shut down.</p>
+            
+            <div class="flow">
+                <div class="flow-step" data-step="1">
+                    <h4>Final Position Sync (4:00 PM)</h4>
+                    <p>Compare SentCom positions vs IB Gateway, flag any discrepancies, update P&L with closing prices</p>
+                </div>
+                <div class="flow-step" data-step="2">
+                    <h4>Trade Journal Update</h4>
+                    <p>Save all closed trades to database, calculate final R-multiples, tag each trade with setup type, time, outcome</p>
+                </div>
+                <div class="flow-step" data-step="3">
+                    <h4>Learning Sync</h4>
+                    <p>Update alert_outcomes with today's results, run scanner calibration if needed, update module weights if accuracy changed</p>
+                </div>
+                <div class="flow-step" data-step="4">
+                    <h4>Daily Stats Calculation</h4>
+                    <p>Total P&L, trade count, win rate, best/worst trades - all logged for your records</p>
+                </div>
+                <div class="flow-step" data-step="5">
+                    <h4>Prediction Verification</h4>
+                    <p>Check Time-Series AI predictions vs actual moves, log accuracy for model improvement</p>
+                </div>
+                <div class="flow-step" data-step="6">
+                    <h4>Cleanup</h4>
+                    <p>Clear expired alerts, archive old queue items, compress logs</p>
+                </div>
             </div>
             
             <div class="card">
-                <div class="card-title">🔌 Useful Endpoints</div>
-                <div class="code-block">
-                    <code>
-# Health Check
-curl http://localhost:8001/api/health
+                <div class="card-header"><span class="icon">🔌</span> Shutting Down</div>
+                <p style="color: var(--text-secondary);">
+                    <strong>IB Data Pusher:</strong> Disconnects from cloud (pending requests stay in queue for next session)<br>
+                    <strong>IB Gateway:</strong> Closes or stays open based on settings (Auto-Logoff at 11:59 PM, Auto-Restart at 1:45 AM)<br>
+                    <strong>Cloud Backend:</strong> Keeps running - all data safe, learning continues, ready for next session
+                </p>
+            </div>
+        </div>
 
-# Trading Bot Control
-curl -X POST http://localhost:8001/api/trading-bot/start
-curl -X POST http://localhost:8001/api/trading-bot/stop
-
-# Scanner Control
-curl -X POST http://localhost:8001/api/live-scanner/start
-curl -X POST http://localhost:8001/api/live-scanner/stop
-
-# Data Collection Progress
-curl http://localhost:8001/api/ib-collector/queue-progress
-curl http://localhost:8001/api/ib-collector/stats
-curl http://localhost:8001/api/ib-collector/adv-cache-stats
-
-# Fill Data Gaps
-curl -X POST http://localhost:8001/api/ib-collector/fill-gaps
-
-# Market Regime
-curl http://localhost:8001/api/market-regime/current
-
-# Positions
-curl http://localhost:8001/api/ib/positions
-                    </code>
+        <!-- Section 10: Weekend Automation -->
+        <div class="section" id="weekend">
+            <div class="section-header">
+                <div class="section-num">10</div>
+                <h2>Weekend Automation</h2>
+            </div>
+            <p class="section-intro">What happens automatically when markets are closed to prepare for Monday.</p>
+            
+            <div class="timeline">
+                <div class="timeline-item">
+                    <div class="timeline-time">Friday 4:00 PM</div>
+                    <div class="timeline-title">Market Closes</div>
+                    <div class="timeline-desc">Normal end-of-day process. You close app, enjoy your weekend.</div>
                 </div>
+                <div class="timeline-item">
+                    <div class="timeline-time">Friday 11:59 PM</div>
+                    <div class="timeline-title">IB Gateway Auto-Logoff</div>
+                    <div class="timeline-desc">IB Gateway shuts down cleanly, frees up resources.</div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-time">Saturday 1:45 AM</div>
+                    <div class="timeline-title">IB Gateway Auto-Restart</div>
+                    <div class="timeline-desc">IB Gateway starts up and is ready for connection.</div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-time">Saturday 2:00 AM</div>
+                    <div class="timeline-title">WeekendAuto.bat Runs</div>
+                    <div class="timeline-desc">Task Scheduler wakes computer, auto-login. Runs StartTrading.bat and weekend_batch.py.</div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-time">Saturday 2:04 AM</div>
+                    <div class="timeline-title">Smart Collection Starts</div>
+                    <div class="timeline-desc">~5,900 data requests queued. Intraday tier (~16 min), Swing tier (~87 min), Investment tier (~140 min).</div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-time">Saturday ~6:00 AM</div>
+                    <div class="timeline-title">Collection Complete</div>
+                    <div class="timeline-desc">~5,900 symbols refreshed, ~130,000 new daily bars stored.</div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-time">Saturday 6:05 AM</div>
+                    <div class="timeline-title">Model Retraining</div>
+                    <div class="timeline-desc">Time-Series AI trains on new data, updates prediction weights (~10-15 minutes).</div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-time">Saturday 6:20 AM</div>
+                    <div class="timeline-title">Batch Simulations</div>
+                    <div class="timeline-desc">Backtests on all 5,900 symbols, tests momentum strategy, identifies what's working (~30-45 min).</div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-time">Saturday 7:00 AM</div>
+                    <div class="timeline-title">Learning Sync</div>
+                    <div class="timeline-desc">Scanner thresholds calibrated, module weights updated, prediction accuracy logged.</div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-time">Saturday 7:15 AM</div>
+                    <div class="timeline-title">Weekend Batch Complete! 🎉</div>
+                    <div class="timeline-desc">All results logged. SentCom is now smarter. Ready for Monday trading.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Reference -->
+        <div class="quick-ref">
+            <h3>⚡ Quick Reference Card</h3>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>When</th><th>What Happens</th></tr></thead>
+                    <tbody>
+                        <tr><td><strong>Startup</strong></td><td>StartTrading.bat → IB Gateway → Data Pusher → Cloud Connected</td></tr>
+                        <tr><td><strong>Pre-Market</strong></td><td>Scanner monitors gaps, news flows in</td></tr>
+                        <tr><td><strong>Market Open</strong></td><td>ORB setups, high activity, alerts generated</td></tr>
+                        <tr><td><strong>Alert Received</strong></td><td>Filter → Intel Gather → Bull/Bear Debate → Risk Check → Your Approval</td></tr>
+                        <tr><td><strong>Trade Confirmed</strong></td><td>Order → IB Gateway → Exchange → Fill → Monitor</td></tr>
+                        <tr><td><strong>Targets Hit</strong></td><td>Auto scale-out, stop adjustments</td></tr>
+                        <tr><td><strong>Trade Closed</strong></td><td>Journal updated, outcomes recorded</td></tr>
+                        <tr><td><strong>Market Close</strong></td><td>Final sync, daily stats, learning update</td></tr>
+                        <tr><td><strong>Weekend</strong></td><td>Auto batch: Collection → Training → Simulations → Calibration</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Summary Ecosystem -->
+        <div class="ecosystem">
+            <h3>🌐 The Complete SentCom Ecosystem</h3>
+            
+            <div class="eco-layer">
+                <div class="eco-label">You (The Trader)</div>
+                <div class="eco-boxes">
+                    <div class="eco-box highlight"><h4>💬 Chat</h4><p>Interface</p></div>
+                    <div class="eco-box highlight"><h4>🔔 Alerts</h4><p>& Trades</p></div>
+                    <div class="eco-box highlight"><h4>📊 Dashboard</h4><p>& Stats</p></div>
+                </div>
+            </div>
+            
+            <div class="eco-arrow">⬇️</div>
+            
+            <div class="eco-layer">
+                <div class="eco-label">AI Brain</div>
+                <div class="eco-boxes">
+                    <div class="eco-box"><h4>🎓 Coach</h4></div>
+                    <div class="eco-box"><h4>🐂 Bull</h4></div>
+                    <div class="eco-box"><h4>🐻 Bear</h4></div>
+                    <div class="eco-box"><h4>🛡️ Risk</h4></div>
+                    <div class="eco-box"><h4>🔍 Scanner</h4></div>
+                    <div class="eco-box"><h4>📈 Time-Series</h4></div>
+                    <div class="eco-box"><h4>📚 Learning</h4></div>
+                    <div class="eco-box"><h4>🤖 Bot</h4></div>
+                </div>
+            </div>
+            
+            <div class="eco-arrow">⬇️</div>
+            
+            <div class="eco-layer">
+                <div class="eco-label">Data Layer</div>
+                <div class="eco-boxes">
+                    <div class="eco-box"><h4>Historical Prices</h4></div>
+                    <div class="eco-box"><h4>Trade Journal</h4></div>
+                    <div class="eco-box"><h4>Learning Data</h4></div>
+                </div>
+            </div>
+            
+            <div class="eco-arrow">⬇️</div>
+            
+            <div class="eco-layer">
+                <div class="eco-label">Execution Layer</div>
+                <div class="eco-boxes">
+                    <div class="eco-box highlight"><h4>Your Computer</h4><p>IB Gateway + Pusher</p></div>
+                    <div class="eco-box"><h4>Exchanges</h4><p>NYSE, NASDAQ</p></div>
+                </div>
+            </div>
+            
+            <div style="margin-top: 2rem; padding: 1.5rem; background: var(--bg-card); border-radius: 12px;">
+                <strong style="color: var(--secondary);">🔄 THE LEARNING LOOP</strong>
+                <p style="color: var(--text-secondary); margin-top: 0.5rem;">Trade → Outcome → Learn → Improve → Trade (smarter) → REPEAT FOREVER</p>
             </div>
         </div>
 
         <!-- Footer -->
-        <div style="text-align: center; padding: 3rem 0; margin-top: 3rem; border-top: 1px solid var(--border);">
-            <p style="color: var(--text-secondary);">
-                TradeCommand SentCom v3.0 | Built with 🤖 AI + 💙 Passion
-            </p>
-            <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.5rem;">
-                For support, check the GitHub repository or contact your administrator.
-            </p>
+        <div class="footer">
+            <p><strong>SentCom Complete System Guide</strong></p>
+            <p>TradeCommand v3.0 | Built with 🤖 AI + 📈 Data + 🧠 Learning</p>
+            <p style="margin-top: 1rem; font-size: 0.85rem;">Your AI-Powered Autonomous Trading System</p>
         </div>
     </div>
 
-    <script>
-        // Print/Download as PDF button
-        document.addEventListener('DOMContentLoaded', function() {
-            const printBtn = document.createElement('button');
-            printBtn.innerHTML = '📄 Download as PDF';
-            printBtn.style.cssText = `
-                position: fixed;
-                bottom: 2rem;
-                right: 2rem;
-                background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
-                color: white;
-                border: none;
-                padding: 1rem 1.5rem;
-                border-radius: 50px;
-                font-size: 1rem;
-                font-weight: 600;
-                cursor: pointer;
-                box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
-                z-index: 1000;
-                transition: transform 0.2s, box-shadow 0.2s;
-            `;
-            printBtn.onmouseover = () => {
-                printBtn.style.transform = 'translateY(-2px)';
-                printBtn.style.boxShadow = '0 6px 20px rgba(59, 130, 246, 0.5)';
-            };
-            printBtn.onmouseout = () => {
-                printBtn.style.transform = 'translateY(0)';
-                printBtn.style.boxShadow = '0 4px 15px rgba(59, 130, 246, 0.4)';
-            };
-            printBtn.onclick = () => window.print();
-            document.body.appendChild(printBtn);
-        });
-    </script>
+    <button class="print-btn" onclick="window.print()">📄 Download PDF</button>
 </body>
 </html>
