@@ -848,7 +848,12 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
         <div className="flex items-center gap-2">
           {hasActiveCollections && (
             <span className="px-2 py-1 rounded-full bg-amber-500/20 text-amber-400 text-[10px] font-medium animate-pulse">
-              COLLECTING
+              WEB COLLECTING
+            </span>
+          )}
+          {!hasActiveCollections && collectionMode?.queue?.pending > 0 && (
+            <span className="px-2 py-1 rounded-full bg-cyan-500/20 text-cyan-400 text-[10px] font-medium animate-pulse">
+              SCRIPT ACTIVE
             </span>
           )}
           {expanded ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
@@ -1210,11 +1215,18 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
                   <div className="p-3 rounded-xl bg-gradient-to-r from-zinc-900 to-black border border-white/10">
                     <div className="flex items-center justify-between mb-3">
                       <span className="text-xs font-medium text-zinc-400">Collection Queue Status</span>
-                      {collectionMode?.collection_mode?.active && (
-                        <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 text-[10px] font-medium animate-pulse">
-                          COLLECTING
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {collectionMode?.queue?.pending > 0 && !collectionMode?.collection_mode?.active && (
+                          <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 text-[10px] font-medium animate-pulse">
+                            SCRIPT COLLECTING
+                          </span>
+                        )}
+                        {collectionMode?.collection_mode?.active && (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 text-[10px] font-medium animate-pulse">
+                            WEB COLLECTING
+                          </span>
+                        )}
+                      </div>
                     </div>
                     
                     {collectionMode?.queue && (
@@ -1246,11 +1258,20 @@ const DataCollectionPanel = memo(({ collectionData, loading, onRefresh }) => {
                           />
                         </div>
                         
-                        {/* ETA if collecting */}
-                        {collectionMode?.collection_mode?.active && collectionMode.collection_mode.rate_per_hour > 0 && (
+                        {/* ETA estimate - show for both web and script collection */}
+                        {collectionMode?.queue?.pending > 0 && (
                           <div className="flex items-center justify-between mt-2 text-[10px] text-zinc-500">
-                            <span>Rate: {Math.round(collectionMode.collection_mode.rate_per_hour)}/hour</span>
-                            <span>ETA: ~{Math.round(collectionMode.queue.pending / collectionMode.collection_mode.rate_per_hour)} hours</span>
+                            {collectionMode?.collection_mode?.active && collectionMode.collection_mode.rate_per_hour > 0 ? (
+                              <>
+                                <span>Rate: {Math.round(collectionMode.collection_mode.rate_per_hour)}/hour</span>
+                                <span>ETA: ~{Math.round(collectionMode.queue.pending / collectionMode.collection_mode.rate_per_hour)} hours</span>
+                              </>
+                            ) : (
+                              <>
+                                <span className="text-cyan-400">Script collection active</span>
+                                <span>~{Math.round(collectionMode.queue.pending / 360)} hours @ ~6/min</span>
+                              </>
+                            )}
                           </div>
                         )}
                       </>
