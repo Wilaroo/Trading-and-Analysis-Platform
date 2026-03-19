@@ -91,13 +91,40 @@ echo   Step 3/5: Checking Backend Server
 echo ======================================
 cd /d "%REPO_DIR%\backend"
 
-curl.exe -s -o nul -w "" %LOCAL_URL%/api/ib-collector/queue-progress >nul 2>&1
+curl.exe -s -o nul -w "" %LOCAL_URL%/api/health >nul 2>&1
 if errorlevel 1 (
     echo   [!] Backend not running - starting it now...
-    start "TradeCommand Backend" cmd /k "title TradeCommand Backend && color 0E && cd /d %REPO_DIR%\backend && .\venv\Scripts\activate && python -m uvicorn server:app --host 0.0.0.0 --port 8001"
-    echo   Waiting 30 seconds for backend to initialize...
-    timeout /t 30 /nobreak >nul
-    echo   [OK] Backend started
+    
+    REM Try multiple methods to start the backend
+    if exist "%REPO_DIR%\venv\Scripts\python.exe" (
+        echo   Using venv Python...
+        start "TradeCommand Backend" cmd /k "title TradeCommand Backend && color 0E && cd /d %REPO_DIR%\backend && %REPO_DIR%\venv\Scripts\python.exe -m uvicorn server:app --host 0.0.0.0 --port 8001"
+    ) else if exist "%REPO_DIR%\backend\venv\Scripts\python.exe" (
+        echo   Using backend venv Python...
+        start "TradeCommand Backend" cmd /k "title TradeCommand Backend && color 0E && cd /d %REPO_DIR%\backend && %REPO_DIR%\backend\venv\Scripts\python.exe -m uvicorn server:app --host 0.0.0.0 --port 8001"
+    ) else (
+        echo   Using system Python...
+        start "TradeCommand Backend" cmd /k "title TradeCommand Backend && color 0E && cd /d %REPO_DIR%\backend && python -m uvicorn server:app --host 0.0.0.0 --port 8001"
+    )
+    
+    echo   Waiting for backend to start...
+    set BACKEND_READY=0
+    for /L %%i in (1,1,60) do (
+        timeout /t 1 /nobreak >nul
+        curl.exe -s -o nul -w "" %LOCAL_URL%/api/health >nul 2>&1
+        if not errorlevel 1 (
+            set BACKEND_READY=1
+            goto backend_started
+        )
+        echo|set /p="."
+    )
+    :backend_started
+    echo.
+    if "%BACKEND_READY%"=="1" (
+        echo   [OK] Backend started successfully
+    ) else (
+        echo   [!] Backend may still be starting - continuing anyway
+    )
 ) else (
     echo   [OK] Backend already running
 )
