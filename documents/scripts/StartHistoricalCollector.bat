@@ -23,7 +23,7 @@ color 0A
 REM === CONFIGURATION ===
 set REPO_DIR=C:\Users\13174\Trading-and-Analysis-Platform
 set LOCAL_URL=http://localhost:8001
-set IB_CLIENT_ID=11
+set IB_CLIENT_ID=99
 set BATCH_SIZE=5
 
 REM === Parse Arguments ===
