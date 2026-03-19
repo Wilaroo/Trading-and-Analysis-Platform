@@ -30,47 +30,68 @@ Build a self-improving AI trading bot ("SentCom") with:
 
 ---
 
-## Completed Work (March 18, 2026)
+## Completed Work
 
-### Local Environment Setup ✅
-- Created `TradeCommand_Ultimate.bat` - one-click startup script
-- Auto git pull on startup
-- Sequential IB Gateway login with auto-credentials
-- Starts: Backend, Frontend, Ollama, IB Data Pusher
-- GPU detection and CUDA configuration
+### March 19, 2026 ✅
+- **Comprehensive User Guide Created** - `TradeCommand_Complete_Guide.html`
+  - Full visual guide covering all SentCom features
+  - Sections: Startup, Architecture, Trading Day, AI Decision Making, Trade Execution, Data Collection, Learning Systems, Chat Examples, End of Day, Weekend Automation
+  - Located at `/app/frontend/public/docs/TradeCommand_Complete_Guide.html`
+  - Downloadable/printable with styled dark theme
 
-### ML/GPU Setup ✅
-- Installed PyTorch with CUDA 12.8 support
-- Installed: lightgbm, transformers, sentence-transformers, chromadb
-- RTX 5060 Ti detected and ready for training
-- Made ML dependencies optional for production deployment
+- **Optimized Historical Data Collection Pipeline**
+  - Implemented "smart-batch-claim" API endpoint (`/api/ib-collector/smart-batch-claim`)
+  - Added intelligent skip logic to avoid re-fetching complete data
+  - ~3x performance improvement in collection throughput
+  - Updated `ib_historical_collector.py` with new skip feature
 
-### Production Deployment Fix ✅
-- Removed heavy ML dependencies from requirements.txt for production
-- Made ChromaDB optional with graceful degradation
-- Production can now deploy without crashing
+- **Enhanced StartHistoricalCollector.bat (v3.0)**
+  - Robust auto-login with VBScript-based IB Gateway credentials
+  - Backend health checks before starting collection
+  - Client ID conflict management
+  - Full error handling and recovery
 
-### Desktop Shortcuts Created
-- `StartLocal.bat` → Calls TradeCommand_Ultimate.bat
-- `StartHistoricalCollector.bat` → Historical data collection (client 11)
+### March 18, 2026 ✅
+- **Local Environment Setup**
+  - Created `TradeCommand_Ultimate.bat` - one-click startup script
+  - Auto git pull on startup
+  - Sequential IB Gateway login with auto-credentials
+  - Starts: Backend, Frontend, Ollama, IB Data Pusher
+  - GPU detection and CUDA configuration
+
+- **ML/GPU Setup**
+  - Installed PyTorch with CUDA 12.8 support
+  - Installed: lightgbm, transformers, sentence-transformers, chromadb
+  - RTX 5060 Ti detected and ready for training
+  - Made ML dependencies optional for production deployment
+
+- **Production Deployment Fix**
+  - Removed heavy ML dependencies from requirements.txt for production
+  - Made ChromaDB optional with graceful degradation
+  - Production can now deploy without crashing
+
+- **Desktop Shortcuts Created**
+  - `StartLocal.bat` → Calls TradeCommand_Ultimate.bat
+  - `StartHistoricalCollector.bat` → Historical data collection (client 11)
 
 ---
 
 ## In Progress / Backlog
 
 ### P0 - High Priority
-- [x] **Startup Status Dashboard** - Visual indicator showing all services initializing ✅ COMPLETED (March 18, 2026)
-  - Shows: Backend, MongoDB, IB Gateway, Ollama, AI Agents, Learning Systems, RAG, Trading Bot, Scanner, Historical Data
-  - Displays percentage progress (e.g., "8/11 systems ready - 73%")
-  - Auto-refreshes every 3 seconds
-  - Can minimize to bottom-right corner
-  - Collapsible sections for each category
-  - Files: `/app/backend/routers/startup_status.py`, `/app/frontend/src/components/StartupStatusDashboard.jsx`
+- [x] **Startup Status Dashboard** ✅ COMPLETED (March 18, 2026)
+- [x] **Comprehensive User Guide** ✅ COMPLETED (March 19, 2026)
+- [x] **Optimized Data Collection Pipeline** ✅ COMPLETED (March 19, 2026)
+- [ ] **Complete Historical Data Collection** - IN PROGRESS (37.8% as of March 19, ~28-35 hrs remaining)
+- [ ] **Install Missing ML Dependencies** - BLOCKED until collection completes
+  - Run: `.\venv\Scripts\pip install lightgbm chromadb`
+- [ ] **Full AI Model Training** - BLOCKED on data collection + dependencies
 
 ### P1 - Medium Priority
+- [ ] Fix `/api/ib-collector/fill-gaps` endpoint (hangs under load, needs non-blocking refactor)
 - [ ] Complete backend router refactoring (ib_modules not yet activated)
 - [ ] Complete frontend hook refactoring (useSentCom.js not yet integrated)
-- [ ] Full AI model training run with GPU
+- [ ] Re-enable trading bot & schedulers after data collection
 
 ### P2 - Lower Priority
 - [ ] Refactor NIA.jsx and server.py
@@ -90,6 +111,7 @@ Build a self-improving AI trading bot ("SentCom") with:
 
 ### Backend
 - `/app/backend/server.py` - Main server
+- `/app/backend/routers/ib.py` - IB endpoints including smart-batch-claim
 - `/app/backend/services/ai_modules/__init__.py` - ML optional loading
 - `/app/backend/services/rag/vector_store.py` - ChromaDB optional
 
@@ -97,6 +119,7 @@ Build a self-improving AI trading bot ("SentCom") with:
 - `/app/frontend/src/components/SentCom.jsx` - Main trading UI
 - `/app/frontend/src/components/NIA.jsx` - AI training UI
 - `/app/frontend/src/hooks/useSentCom.js` - Extracted hooks (not yet integrated)
+- `/app/frontend/public/docs/TradeCommand_Complete_Guide.html` - User Guide
 
 ---
 
