@@ -26,9 +26,15 @@ set LOCAL_URL=http://localhost:8001
 set IB_CLIENT_ID=99
 set BATCH_SIZE=5
 
+REM === IB Gateway Auto-Login Credentials ===
+set IB_USERNAME=Wilaroo
+set IB_PASSWORD=Idgt14gt!
+set IB_GATEWAY_PATH=C:\Jts\ibgateway\1030
+
 REM === Parse Arguments ===
 set MODE=normal
 set TIER=all
+set SKIP_LOGIN=0
 :parse_args
 if "%~1"=="" goto done_args
 if /i "%~1"=="--fast" set MODE=fast
@@ -37,6 +43,7 @@ if /i "%~1"=="--slow" set MODE=slow
 if /i "%~1"=="--intraday" set TIER=intraday
 if /i "%~1"=="--swing" set TIER=swing
 if /i "%~1"=="--investment" set TIER=investment
+if /i "%~1"=="--skip-login" set SKIP_LOGIN=1
 shift
 goto parse_args
 :done_args
@@ -69,20 +76,53 @@ if errorlevel 1 (
     echo   [OK] Code updated successfully
 )
 
-REM === STEP 2: Check IB Gateway ===
+REM === STEP 2: Check/Start IB Gateway ===
 echo.
 echo ======================================
-echo   Step 2/5: Checking IB Gateway
+echo   Step 2/5: IB Gateway Setup
 echo ======================================
-tasklist /FI "IMAGENAME eq ibgateway.exe" 2>NUL | find /I "ibgateway.exe" >NUL
-if errorlevel 1 (
-    echo   [!] IB Gateway not running
-    echo.
-    echo   Please start IB Gateway and login, then press any key...
-    pause >nul
-) else (
-    echo   [OK] IB Gateway is running
+
+if "%SKIP_LOGIN%"=="1" (
+    echo   --skip-login flag detected, checking if IB Gateway is running...
+    tasklist /FI "IMAGENAME eq ibgateway.exe" 2>NUL | find /I "ibgateway.exe" >NUL
+    if errorlevel 1 (
+        echo   [!] IB Gateway not running - starting with auto-login...
+        goto start_ib_gateway
+    ) else (
+        echo   [OK] IB Gateway already running - skipping login
+        goto ib_gateway_ready
+    )
 )
+
+:start_ib_gateway
+echo   Starting IB Gateway...
+start "" "%IB_GATEWAY_PATH%\ibgateway.exe"
+echo   Waiting 10 seconds for window to load...
+timeout /t 10 /nobreak >nul
+
+echo   Auto-login to account...
+REM Use PowerShell to send keystrokes for login
+powershell -Command "$wshell = New-Object -ComObject wscript.shell; Start-Sleep -Milliseconds 500; $wshell.AppActivate('IB Gateway'); Start-Sleep -Milliseconds 300; $wshell.SendKeys('%{TAB}'); Start-Sleep -Milliseconds 200"
+powershell -Command "$wshell = New-Object -ComObject wscript.shell; $wshell.AppActivate('IB Gateway'); Start-Sleep -Milliseconds 200; $wshell.SendKeys('%IB_USERNAME%'); Start-Sleep -Milliseconds 100; $wshell.SendKeys('{TAB}'); Start-Sleep -Milliseconds 100; $wshell.SendKeys('%IB_PASSWORD%'); Start-Sleep -Milliseconds 100; $wshell.SendKeys('{ENTER}')"
+
+echo   Waiting for authentication (10 seconds)...
+timeout /t 10 /nobreak >nul
+
+echo   Dismissing any popups...
+powershell -Command "$wshell = New-Object -ComObject wscript.shell; $wshell.AppActivate('IB Gateway'); Start-Sleep -Milliseconds 200; $wshell.SendKeys('{ENTER}'); Start-Sleep -Milliseconds 500; $wshell.SendKeys('{ENTER}')"
+
+echo   Waiting for IB Gateway API port 4002...
+:wait_for_ib
+timeout /t 2 /nobreak >nul
+netstat -an | find "4002" | find "LISTENING" >nul
+if errorlevel 1 (
+    echo|set /p="."
+    goto wait_for_ib
+)
+echo.
+echo   [OK] IB Gateway API ready!
+
+:ib_gateway_ready
 
 REM === STEP 3: Start Backend Server ===
 echo.
