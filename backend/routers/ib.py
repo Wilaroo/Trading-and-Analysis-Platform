@@ -334,7 +334,7 @@ async def get_pusher_setup_info():
     cloud_url = os.environ.get("REACT_APP_BACKEND_URL", "")
     if not cloud_url:
         # Try to infer from request or env
-        cloud_url = os.environ.get("APP_URL", "https://startup-dashboard-7.preview.emergentagent.com")
+        cloud_url = os.environ.get("APP_URL", "https://data-gap-filler.preview.emergentagent.com")
     
     pusher_connected = False
     last_update = _pushed_ib_data.get("last_update")
@@ -1381,6 +1381,116 @@ async def batch_claim_historical_data_requests(request: Request):
         return {"success": True, "claimed": claimed, "failed": failed}
     except Exception as e:
         logger.error(f"Error batch claiming: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/historical-data/smart-batch-claim")
+async def smart_batch_claim_historical_data_requests(request: Request):
+    """
+    SMART batch claim - claims requests AND checks if data already exists in DB.
+    This allows the collector to SKIP IB API calls for symbols that already have data.
+    
+    Body: {"request_ids": ["id1", "id2", ...], "check_existing": true}
+    Returns: {
+        "claimed": ["id1", "id2"],      # Claimed and need IB fetch
+        "skip": ["id3", "id4"],          # Already have data - skip IB fetch
+        "failed": ["id5"]                # Could not claim
+    }
+    """
+    service = _get_historical_data_service()
+    if not service:
+        raise HTTPException(status_code=503, detail="Historical data service not available")
+    
+    try:
+        body = await request.json()
+        request_ids = body.get("request_ids", [])
+        check_existing = body.get("check_existing", True)
+        min_bars_threshold = body.get("min_bars_threshold", 100)  # Consider "has data" if >= 100 bars
+        
+        from services.ib_historical_collector import get_ib_collector
+        collector = get_ib_collector()
+        data_col = collector._data_col if collector else None
+        
+        claimed = []
+        skip = []  # Items that already have data - can be marked complete without IB fetch
+        skip_details = []  # Details about skipped items
+        failed = []
+        
+        # First, get all requests details in one query
+        request_details = {}
+        if request_ids:
+            requests_cursor = service.collection.find(
+                {"request_id": {"$in": request_ids}},
+                {"request_id": 1, "symbol": 1, "bar_size": 1, "_id": 0}
+            )
+            for req in requests_cursor:
+                request_details[req["request_id"]] = req
+        
+        for request_id in request_ids:
+            try:
+                # Claim the request first
+                if not service.claim_request(request_id):
+                    failed.append(request_id)
+                    continue
+                
+                # Check if we should skip this item (data already exists)
+                should_skip = False
+                bar_count_existing = 0
+                
+                if check_existing and data_col is not None and request_id in request_details:
+                    req = request_details[request_id]
+                    symbol = req.get("symbol")
+                    bar_size = req.get("bar_size", "1 day")
+                    
+                    # Quick count query to check if data exists
+                    bar_count_existing = data_col.count_documents(
+                        {"symbol": symbol, "bar_size": bar_size},
+                        limit=min_bars_threshold + 1  # Just need to know if >= threshold
+                    )
+                    
+                    if bar_count_existing >= min_bars_threshold:
+                        should_skip = True
+                        # Mark as complete immediately - no need to fetch from IB
+                        service.complete_request(
+                            request_id=request_id,
+                            success=True,
+                            data=None,
+                            error=None,
+                            status="skipped_existing",
+                            bar_count=bar_count_existing
+                        )
+                        skip.append(request_id)
+                        skip_details.append({
+                            "request_id": request_id,
+                            "symbol": symbol,
+                            "bar_size": bar_size,
+                            "existing_bars": bar_count_existing
+                        })
+                        continue
+                
+                # Needs IB fetch
+                claimed.append(request_id)
+                
+            except Exception as e:
+                logger.warning(f"Error processing {request_id}: {e}")
+                failed.append(request_id)
+        
+        logger.info(f"Smart batch claim: {len(claimed)} to fetch, {len(skip)} skipped (existing data), {len(failed)} failed")
+        
+        return {
+            "success": True, 
+            "claimed": claimed, 
+            "skip": skip,
+            "skip_details": skip_details,
+            "failed": failed,
+            "summary": {
+                "to_fetch": len(claimed),
+                "skipped_existing": len(skip),
+                "failed": len(failed)
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error in smart batch claim: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

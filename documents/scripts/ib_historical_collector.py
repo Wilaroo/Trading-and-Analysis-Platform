@@ -248,6 +248,41 @@ class IBHistoricalCollector:
                 claimed.append(rid)
         return claimed
     
+    def smart_batch_claim_requests(self, request_ids: List[str], min_bars: int = 100) -> dict:
+        """
+        SMART batch claim - claims requests AND checks if data already exists.
+        Returns dict with:
+          - 'claimed': IDs that need IB fetch
+          - 'skip': IDs that already have data (skipped)
+          - 'skip_details': Details about skipped items
+          - 'failed': IDs that couldn't be claimed
+        """
+        if not request_ids:
+            return {"claimed": [], "skip": [], "skip_details": [], "failed": []}
+        
+        result = self.api.post(
+            "/api/ib/historical-data/smart-batch-claim", 
+            {
+                "request_ids": request_ids, 
+                "check_existing": True,
+                "min_bars_threshold": min_bars
+            }, 
+            timeout=60  # Longer timeout as it checks DB
+        )
+        
+        if result:
+            return {
+                "claimed": result.get("claimed", []),
+                "skip": result.get("skip", []),
+                "skip_details": result.get("skip_details", []),
+                "failed": result.get("failed", [])
+            }
+        
+        # Fallback to regular batch claim if smart claim fails
+        logger.warning("Smart batch claim failed, falling back to regular batch claim")
+        claimed = self.batch_claim_requests(request_ids)
+        return {"claimed": claimed, "skip": [], "skip_details": [], "failed": []}
+    
     def report_result(self, result: dict) -> bool:
         """Report collection result to backend (single result)."""
         resp = self.api.post("/api/ib/historical-data/result", result, timeout=30)
@@ -406,18 +441,35 @@ class IBHistoricalCollector:
                 empty_cycles = 0
                 logger.info(f"[Cycle {cycle}] Processing {len(requests)} requests...")
                 
-                # Batch claim all requests at once
+                # SMART batch claim - checks for existing data and skips IB calls
                 request_ids = [req.get("request_id") for req in requests]
-                claimed_ids = set(self.batch_claim_requests(request_ids))
+                smart_result = self.smart_batch_claim_requests(request_ids)
                 
-                if not claimed_ids:
+                claimed_ids = set(smart_result.get("claimed", []))
+                skipped_ids = set(smart_result.get("skip", []))
+                skip_details = smart_result.get("skip_details", [])
+                
+                # Log skipped items (already have data)
+                if skipped_ids:
+                    self.stats["requests_skipped"] = self.stats.get("requests_skipped", 0) + len(skipped_ids)
+                    logger.info(f"  ⚡ SKIPPED {len(skipped_ids)} items (data already exists):")
+                    for detail in skip_details[:3]:  # Show first 3
+                        logger.info(f"     {detail.get('symbol')} ({detail.get('bar_size')}): {detail.get('existing_bars', 0)} bars in DB")
+                    if len(skip_details) > 3:
+                        logger.info(f"     ... and {len(skip_details) - 3} more")
+                
+                if not claimed_ids and not skipped_ids:
                     logger.warning("  No requests could be claimed, skipping cycle")
                     time.sleep(5)
                     continue
                 
-                # Filter to only claimed requests
+                # Filter to only requests that need IB fetch
                 requests_to_process = [req for req in requests if req.get("request_id") in claimed_ids]
-                logger.info(f"  Claimed {len(requests_to_process)}/{len(requests)} requests")
+                
+                if requests_to_process:
+                    logger.info(f"  Fetching {len(requests_to_process)} from IB Gateway...")
+                else:
+                    logger.info(f"  All {len(skipped_ids)} items had existing data - no IB fetch needed!")
                 
                 batch_results = []
                 
@@ -464,14 +516,17 @@ class IBHistoricalCollector:
                         q_total = q_completed + q_pending + queue_data.get('claimed', 0) + queue_data.get('failed', 0)
                         q_pct = (q_completed / q_total * 100) if q_total > 0 else 0
                         bar_visual = '█' * int(q_pct/5) + '░' * (20 - int(q_pct/5))
+                        skipped = self.stats.get('requests_skipped', 0)
+                        skip_str = f", ⚡{skipped} skipped" if skipped > 0 else ""
                         logger.info(f"")
-                        logger.info(f"╔{'═'*58}╗")
+                        logger.info(f"╔{'═'*62}╗")
                         logger.info(f"║  QUEUE: {bar_visual} {q_pct:>5.1f}%  ({q_completed:,}/{q_total:,})  ║")
-                        logger.info(f"║  Pending: {q_pending:,} | This Session: {self.stats['requests_completed']} done, {self.stats['bars_collected']:,} bars  ║")
-                        logger.info(f"╚{'═'*58}╝")
+                        logger.info(f"║  Pending: {q_pending:,} | Session: {self.stats['requests_completed']} done{skip_str}, {self.stats['bars_collected']:,} bars  ║")
+                        logger.info(f"╚{'═'*62}╝")
                         logger.info(f"")
                 except:
                     logger.info(f"[Stats] Completed: {self.stats['requests_completed']}, "
+                               f"Skipped: {self.stats.get('requests_skipped', 0)}, "
                                f"Failed: {self.stats['requests_failed']}, "
                                f"Bars: {self.stats['bars_collected']:,}, "
                                f"Rate: {rate:.1f}/min")
@@ -492,6 +547,8 @@ class IBHistoricalCollector:
             return
         
         elapsed = (datetime.now(timezone.utc) - self.stats["started_at"]).total_seconds()
+        skipped = self.stats.get('requests_skipped', 0)
+        total_processed = self.stats['requests_completed'] + skipped
         
         logger.info("")
         logger.info("=" * 60)
@@ -499,11 +556,14 @@ class IBHistoricalCollector:
         logger.info("=" * 60)
         logger.info(f"  Duration: {elapsed/60:.1f} minutes")
         logger.info(f"  Requests Completed: {self.stats['requests_completed']}")
+        if skipped > 0:
+            logger.info(f"  Requests Skipped (existing): {skipped}")
+            logger.info(f"  Total Processed: {total_processed}")
         logger.info(f"  Requests Failed: {self.stats['requests_failed']}")
         logger.info(f"  Total Bars Collected: {self.stats['bars_collected']:,}")
         logger.info(f"  Pacing Waits: {self.stats['pacing_waits']}")
         if elapsed > 0:
-            logger.info(f"  Average Rate: {self.stats['requests_completed'] / (elapsed/60):.1f} requests/min")
+            logger.info(f"  Average Rate: {total_processed / (elapsed/60):.1f} requests/min")
         logger.info("=" * 60)
     
     def stop(self):

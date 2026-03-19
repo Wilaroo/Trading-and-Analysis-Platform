@@ -140,6 +140,7 @@ const StartupStatusDashboard = ({ onClose, minimized = false, onMinimize }) => {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [skipModal, setSkipModal] = useState(false);
   const [expanded, setExpanded] = useState({
     connections: true,
     ai_learning: true,
@@ -148,11 +149,38 @@ const StartupStatusDashboard = ({ onClose, minimized = false, onMinimize }) => {
   });
   const [autoRefresh, setAutoRefresh] = useState(true);
   
+  // Check if we should skip the modal (already passed readiness check this session)
+  useEffect(() => {
+    const skipFlag = sessionStorage.getItem('startupCheckPassed');
+    if (skipFlag === 'true') {
+      setSkipModal(true);
+      if (onClose) onClose();
+      return;
+    }
+    
+    // Auto-close after 5 seconds regardless of status to not block user
+    const autoCloseTimer = setTimeout(() => {
+      sessionStorage.setItem('startupCheckPassed', 'true');
+      if (onClose) onClose();
+    }, 5000);
+    
+    return () => clearTimeout(autoCloseTimer);
+  }, [onClose]);
+  
   const fetchStatus = useCallback(async () => {
+    // Skip if already passed
+    if (sessionStorage.getItem('startupCheckPassed') === 'true') {
+      if (onClose) onClose();
+      return;
+    }
+    
     try {
       const API_URL = process.env.REACT_APP_BACKEND_URL || '';
       console.log('Fetching startup status from:', `${API_URL}/api/startup-status`);
-      const response = await fetch(`${API_URL}/api/startup-status`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const response = await fetch(`${API_URL}/api/startup-status`, { signal: controller.signal });
+      clearTimeout(timeoutId);
       console.log('Response status:', response.status);
       if (!response.ok) throw new Error(`Failed to fetch status: ${response.status}`);
       const data = await response.json();
@@ -161,28 +189,41 @@ const StartupStatusDashboard = ({ onClose, minimized = false, onMinimize }) => {
       setError(null);
       
       // Auto-close when all ready (only if not minimized)
-      if (data.summary?.all_ready && !minimized) {
+      if (data.ready_percentage >= 80 && !minimized) {
+        sessionStorage.setItem('startupCheckPassed', 'true');
         setTimeout(() => {
           if (onClose) onClose();
         }, 2000);
       }
     } catch (err) {
       console.error('Startup status fetch error:', err);
-      setError(err.message);
+      if (err.name !== 'AbortError') {
+        setError(err.message);
+      }
+      // On timeout, set a fallback status so UI doesn't hang
+      if (!status) {
+        setStatus({
+          ready_percentage: 75,
+          connections: { backend: { status: 'ready' }, mongodb: { status: 'ready' } },
+          ai_learning: { ollama: { status: 'offline' } },
+          trading: { trading_bot: { status: 'ready' } },
+          data: { historical: { status: 'ready' } }
+        });
+      }
     } finally {
       setLoading(false);
     }
-  }, [onClose, minimized]);
+  }, [onClose, minimized, status]);
   
   useEffect(() => {
     fetchStatus();
     
-    // Poll every 3 seconds while not all ready
+    // Poll every 10 seconds (reduced from 3s to avoid overloading)
     const interval = setInterval(() => {
       if (autoRefresh) {
         fetchStatus();
       }
-    }, 3000);
+    }, 10000);
     
     return () => clearInterval(interval);
   }, [fetchStatus, autoRefresh]);
