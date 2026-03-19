@@ -1266,7 +1266,63 @@ async def clear_stuck_items(bar_size: str = None, older_than_minutes: int = 10):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/resume-collection")
+@router.get("/failed-items")
+async def get_failed_items(
+    bar_size: str = None,
+    limit: int = 500
+):
+    """
+    Get list of failed items with their error details.
+    
+    - **bar_size**: Optional - filter by bar_size
+    - **limit**: Max items to return (default 500)
+    """
+    try:
+        from server import db
+        
+        query = {"status": "failed"}
+        if bar_size:
+            query["bar_size"] = bar_size
+        
+        cursor = db.historical_data_queue.find(
+            query,
+            {"symbol": 1, "bar_size": 1, "failure_reason": 1, "error": 1, "updated_at": 1}
+        ).limit(limit)
+        
+        items = []
+        error_groups = {}
+        
+        for item in cursor:
+            symbol = item.get("symbol", "?")
+            bs = item.get("bar_size", "?")
+            error = item.get("failure_reason", item.get("error", "unknown"))
+            
+            items.append({
+                "symbol": symbol,
+                "bar_size": bs,
+                "error": error
+            })
+            
+            # Group by error type
+            error_key = error[:50] if error else "unknown"
+            if error_key not in error_groups:
+                error_groups[error_key] = {"symbols": [], "count": 0}
+            error_groups[error_key]["symbols"].append(symbol)
+            error_groups[error_key]["count"] += 1
+        
+        # Dedupe symbols in each group
+        for key in error_groups:
+            error_groups[key]["symbols"] = sorted(set(error_groups[key]["symbols"]))
+        
+        return {
+            "success": True,
+            "total_failed": len(items),
+            "by_error_type": error_groups,
+            "items": items
+        }
+    except Exception as e:
+        logger.error(f"Error getting failed items: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 async def resume_barsize_collection(
     bar_size: str,
     retry_failed: bool = True,
