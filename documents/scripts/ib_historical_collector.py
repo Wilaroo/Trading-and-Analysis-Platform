@@ -66,24 +66,21 @@ class APIClient:
                 time.sleep(2 ** attempt)
         return None
     
-    def post(self, endpoint: str, data: dict, timeout: int = 15) -> Optional[dict]:
-        """POST request with retry logic."""
+    def post(self, endpoint: str, data: dict, timeout: int = 30) -> Optional[dict]:
+        """POST request with minimal retry - fail fast to keep collecting."""
         url = f"{self.base_url}{endpoint}"
-        for attempt in range(2):
-            try:
-                resp = self.session.post(url, json=data, timeout=timeout)
-                if resp.status_code in [200, 201]:
-                    return resp.json()
-                elif resp.status_code == 409:
-                    return {"success": True, "status": "already_processed"}
-                else:
-                    logger.warning(f"POST {endpoint} returned {resp.status_code}")
-            except requests.exceptions.Timeout:
-                logger.warning(f"Timeout on POST {endpoint} (attempt {attempt + 1}/2)")
-                time.sleep(2 ** attempt)
-            except Exception as e:
-                logger.error(f"Error on POST {endpoint}: {e}")
-                time.sleep(1)
+        try:
+            resp = self.session.post(url, json=data, timeout=timeout)
+            if resp.status_code in [200, 201]:
+                return resp.json()
+            elif resp.status_code == 409:
+                return {"success": True, "status": "already_processed"}
+            else:
+                logger.debug(f"POST {endpoint} returned {resp.status_code}")
+        except requests.exceptions.Timeout:
+            logger.debug(f"Timeout on POST {endpoint} - skipping")
+        except Exception as e:
+            logger.debug(f"Error on POST {endpoint}: {e}")
         return None
     
     def optimize_indexes(self) -> bool:
@@ -227,15 +224,29 @@ class IBHistoricalCollector:
     
     def fetch_pending_requests(self, limit: int = 10) -> List[dict]:
         """Fetch pending historical data requests from backend."""
-        result = self.api.get(f"/api/ib/historical-data/pending?limit={limit}", timeout=15)
+        result = self.api.get(f"/api/ib/historical-data/pending?limit={limit}", timeout=30)
         if result:
             return result.get("requests", [])
         return []
     
     def claim_request(self, request_id: str) -> bool:
         """Claim a request to prevent duplicate processing."""
-        result = self.api.post(f"/api/ib/historical-data/claim/{request_id}", {}, timeout=10)
+        result = self.api.post(f"/api/ib/historical-data/claim/{request_id}", {}, timeout=5)
         return result is not None
+    
+    def batch_claim_requests(self, request_ids: List[str]) -> List[str]:
+        """Claim multiple requests at once. Returns list of successfully claimed IDs."""
+        if not request_ids:
+            return []
+        result = self.api.post("/api/ib/historical-data/batch-claim", {"request_ids": request_ids}, timeout=30)
+        if result:
+            return result.get("claimed", [])
+        # Fallback to individual claims if batch fails
+        claimed = []
+        for rid in request_ids:
+            if self.claim_request(rid):
+                claimed.append(rid)
+        return claimed
     
     def report_result(self, result: dict) -> bool:
         """Report collection result to backend (single result)."""
@@ -395,9 +406,22 @@ class IBHistoricalCollector:
                 empty_cycles = 0
                 logger.info(f"[Cycle {cycle}] Processing {len(requests)} requests...")
                 
+                # Batch claim all requests at once
+                request_ids = [req.get("request_id") for req in requests]
+                claimed_ids = set(self.batch_claim_requests(request_ids))
+                
+                if not claimed_ids:
+                    logger.warning("  No requests could be claimed, skipping cycle")
+                    time.sleep(5)
+                    continue
+                
+                # Filter to only claimed requests
+                requests_to_process = [req for req in requests if req.get("request_id") in claimed_ids]
+                logger.info(f"  Claimed {len(requests_to_process)}/{len(requests)} requests")
+                
                 batch_results = []
                 
-                for req in requests:
+                for req in requests_to_process:
                     if not self.running:
                         break
                     
@@ -409,10 +433,6 @@ class IBHistoricalCollector:
                     request_id = req.get("request_id")
                     symbol = req.get("symbol")
                     bar_size = req.get("bar_size")
-                    
-                    if not self.claim_request(request_id):
-                        logger.debug(f"  {symbol} ({bar_size}): Already claimed, skipping")
-                        continue
                     
                     result = self.fetch_historical_data(req)
                     batch_results.append(result)

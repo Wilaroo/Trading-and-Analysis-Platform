@@ -1348,6 +1348,43 @@ async def claim_historical_data_request(request_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+@router.post("/historical-data/batch-claim")
+async def batch_claim_historical_data_requests(request: Request):
+    """
+    Claim multiple historical data requests at once.
+    Reduces round trips for faster collection.
+    
+    Body: {"request_ids": ["id1", "id2", ...]}
+    Returns: {"claimed": ["id1", "id2"], "failed": ["id3"]}
+    """
+    service = _get_historical_data_service()
+    if not service:
+        raise HTTPException(status_code=503, detail="Historical data service not available")
+    
+    try:
+        body = await request.json()
+        request_ids = body.get("request_ids", [])
+        
+        claimed = []
+        failed = []
+        
+        for request_id in request_ids:
+            try:
+                if service.claim_request(request_id):
+                    claimed.append(request_id)
+                else:
+                    failed.append(request_id)
+            except:
+                failed.append(request_id)
+        
+        return {"success": True, "claimed": claimed, "failed": failed}
+    except Exception as e:
+        logger.error(f"Error batch claiming: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
 @router.post("/historical-data/result")
 async def report_historical_data_result(request: Request):
     """
