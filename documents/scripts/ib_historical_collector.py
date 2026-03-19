@@ -248,25 +248,31 @@ class IBHistoricalCollector:
                 claimed.append(rid)
         return claimed
     
-    def smart_batch_claim_requests(self, request_ids: List[str], min_bars: int = 100) -> dict:
+    def smart_batch_claim_requests(self, request_ids: List[str], min_bars: int = None) -> dict:
         """
         SMART batch claim - claims requests AND checks if data already exists.
+        Uses TIMEFRAME-SPECIFIC thresholds to ensure only truly complete data is skipped.
+        
         Returns dict with:
           - 'claimed': IDs that need IB fetch
-          - 'skip': IDs that already have data (skipped)
+          - 'skip': IDs that already have complete data (skipped)
           - 'skip_details': Details about skipped items
           - 'failed': IDs that couldn't be claimed
         """
         if not request_ids:
             return {"claimed": [], "skip": [], "skip_details": [], "failed": []}
         
+        payload = {
+            "request_ids": request_ids, 
+            "check_existing": True
+        }
+        # Only add custom threshold if explicitly provided
+        if min_bars is not None:
+            payload["min_bars_threshold"] = min_bars
+        
         result = self.api.post(
             "/api/ib/historical-data/smart-batch-claim", 
-            {
-                "request_ids": request_ids, 
-                "check_existing": True,
-                "min_bars_threshold": min_bars
-            }, 
+            payload,
             timeout=60  # Longer timeout as it checks DB
         )
         
@@ -449,12 +455,13 @@ class IBHistoricalCollector:
                 skipped_ids = set(smart_result.get("skip", []))
                 skip_details = smart_result.get("skip_details", [])
                 
-                # Log skipped items (already have data)
+                # Log skipped items (already have COMPLETE data)
                 if skipped_ids:
                     self.stats["requests_skipped"] = self.stats.get("requests_skipped", 0) + len(skipped_ids)
-                    logger.info(f"  ⚡ SKIPPED {len(skipped_ids)} items (data already exists):")
+                    logger.info(f"  ⚡ SKIPPED {len(skipped_ids)} items (data already COMPLETE):")
                     for detail in skip_details[:3]:  # Show first 3
-                        logger.info(f"     {detail.get('symbol')} ({detail.get('bar_size')}): {detail.get('existing_bars', 0)} bars in DB")
+                        threshold = detail.get('threshold', '?')
+                        logger.info(f"     {detail.get('symbol')} ({detail.get('bar_size')}): {detail.get('existing_bars', 0)} bars >= {threshold} threshold")
                     if len(skip_details) > 3:
                         logger.info(f"     ... and {len(skip_details) - 3} more")
                 

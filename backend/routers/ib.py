@@ -1390,10 +1390,16 @@ async def smart_batch_claim_historical_data_requests(request: Request):
     SMART batch claim - claims requests AND checks if data already exists in DB.
     This allows the collector to SKIP IB API calls for symbols that already have data.
     
+    Uses TIMEFRAME-SPECIFIC thresholds to ensure we only skip truly complete data:
+    - 1 day: 1500+ bars (covers ~6 years of daily data)
+    - 1 week: 400+ bars (covers ~8 years of weekly data)
+    - 1 hour: 1500+ bars (IB typically provides ~1700 hourly bars)
+    - 30/15/5/1 min: 1400+ bars (IB provides limited intraday history)
+    
     Body: {"request_ids": ["id1", "id2", ...], "check_existing": true}
     Returns: {
         "claimed": ["id1", "id2"],      # Claimed and need IB fetch
-        "skip": ["id3", "id4"],          # Already have data - skip IB fetch
+        "skip": ["id3", "id4"],          # Already have complete data - skip IB fetch
         "failed": ["id5"]                # Could not claim
     }
     """
@@ -1401,18 +1407,32 @@ async def smart_batch_claim_historical_data_requests(request: Request):
     if not service:
         raise HTTPException(status_code=503, detail="Historical data service not available")
     
+    # Timeframe-specific thresholds based on typical IB data availability
+    # These are set conservatively - only skip if data is truly complete
+    COMPLETENESS_THRESHOLDS = {
+        "1 day": 1500,      # ~6 years of daily bars (252/year)
+        "1 week": 400,      # ~8 years of weekly bars
+        "1 hour": 1500,     # IB provides ~1700+ hourly bars
+        "30 mins": 1400,    # IB provides ~1600 bars
+        "15 mins": 1400,    # IB provides ~1500+ bars
+        "5 mins": 1400,     # IB provides ~1600+ bars
+        "1 min": 1500,      # IB provides ~1750+ bars
+    }
+    DEFAULT_THRESHOLD = 1400  # Conservative default
+    
     try:
         body = await request.json()
         request_ids = body.get("request_ids", [])
         check_existing = body.get("check_existing", True)
-        min_bars_threshold = body.get("min_bars_threshold", 100)  # Consider "has data" if >= 100 bars
+        # Allow override but use smart defaults
+        custom_threshold = body.get("min_bars_threshold", None)
         
         from services.ib_historical_collector import get_ib_collector
         collector = get_ib_collector()
         data_col = collector._data_col if collector else None
         
         claimed = []
-        skip = []  # Items that already have data - can be marked complete without IB fetch
+        skip = []  # Items that already have COMPLETE data - can be marked complete without IB fetch
         skip_details = []  # Details about skipped items
         failed = []
         
@@ -1433,7 +1453,7 @@ async def smart_batch_claim_historical_data_requests(request: Request):
                     failed.append(request_id)
                     continue
                 
-                # Check if we should skip this item (data already exists)
+                # Check if we should skip this item (data already COMPLETE)
                 should_skip = False
                 bar_count_existing = 0
                 
@@ -1442,21 +1462,27 @@ async def smart_batch_claim_historical_data_requests(request: Request):
                     symbol = req.get("symbol")
                     bar_size = req.get("bar_size", "1 day")
                     
-                    # Quick count query to check if data exists
+                    # Get the appropriate threshold for this timeframe
+                    if custom_threshold is not None:
+                        threshold = custom_threshold
+                    else:
+                        threshold = COMPLETENESS_THRESHOLDS.get(bar_size, DEFAULT_THRESHOLD)
+                    
+                    # Quick count query to check if data is complete
                     bar_count_existing = data_col.count_documents(
                         {"symbol": symbol, "bar_size": bar_size},
-                        limit=min_bars_threshold + 1  # Just need to know if >= threshold
+                        limit=threshold + 1  # Just need to know if >= threshold
                     )
                     
-                    if bar_count_existing >= min_bars_threshold:
+                    if bar_count_existing >= threshold:
                         should_skip = True
-                        # Mark as complete immediately - no need to fetch from IB
+                        # Mark as complete immediately - data is already complete
                         service.complete_request(
                             request_id=request_id,
                             success=True,
                             data=None,
                             error=None,
-                            status="skipped_existing",
+                            status="skipped_complete",
                             bar_count=bar_count_existing
                         )
                         skip.append(request_id)
@@ -1464,18 +1490,19 @@ async def smart_batch_claim_historical_data_requests(request: Request):
                             "request_id": request_id,
                             "symbol": symbol,
                             "bar_size": bar_size,
-                            "existing_bars": bar_count_existing
+                            "existing_bars": bar_count_existing,
+                            "threshold": threshold
                         })
                         continue
                 
-                # Needs IB fetch
+                # Needs IB fetch (incomplete or no data)
                 claimed.append(request_id)
                 
             except Exception as e:
                 logger.warning(f"Error processing {request_id}: {e}")
                 failed.append(request_id)
         
-        logger.info(f"Smart batch claim: {len(claimed)} to fetch, {len(skip)} skipped (existing data), {len(failed)} failed")
+        logger.info(f"Smart batch claim: {len(claimed)} to fetch, {len(skip)} skipped (complete data), {len(failed)} failed")
         
         return {
             "success": True, 
@@ -1485,9 +1512,10 @@ async def smart_batch_claim_historical_data_requests(request: Request):
             "failed": failed,
             "summary": {
                 "to_fetch": len(claimed),
-                "skipped_existing": len(skip),
+                "skipped_complete": len(skip),
                 "failed": len(failed)
-            }
+            },
+            "thresholds_used": COMPLETENESS_THRESHOLDS
         }
     except Exception as e:
         logger.error(f"Error in smart batch claim: {e}")
