@@ -273,7 +273,7 @@ class TestRegimePerformanceAPI:
         import httpx
         
         # Get the API URL from env
-        api_url = "https://local-gpu-trade.preview.emergentagent.com"
+        api_url = "https://startup-dashboard-7.preview.emergentagent.com"
         
         endpoints = [
             "/api/regime-performance/summary",
