@@ -1308,17 +1308,23 @@ def _get_historical_data_service():
 
 
 @router.get("/historical-data/pending")
-async def get_pending_historical_data_requests():
+async def get_pending_historical_data_requests(limit: int = 12):
     """
     Get pending historical data requests for the IB Data Pusher to fulfill.
     Called by the local IB Data Pusher to check for work.
+    
+    Args:
+        limit: Maximum number of requests to return (default: 12, max: 50)
     """
     service = _get_historical_data_service()
     if not service:
         return {"success": True, "requests": []}
     
+    # Cap at 50 to prevent overload
+    limit = min(max(limit, 1), 50)
+    
     try:
-        requests = service.get_pending_requests(limit=10)
+        requests = service.get_pending_requests(limit=limit)
         return {"success": True, "requests": requests}
     except Exception as e:
         logger.error(f"Error getting pending historical data requests: {e}")
