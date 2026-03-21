@@ -1,0 +1,816 @@
+/**
+ * Unified AI Training & Calibration Panel
+ * ========================================
+ * Single source of truth for all AI training operations.
+ * Combines multi-timeframe model training with calibration workflow.
+ * 
+ * Features:
+ * - Multi-timeframe model training (7 models from 39M+ bars)
+ * - Quick Train: Daily model + calibration (daily refresh)
+ * - Full Train: All 7 timeframe models
+ * - Calibration: Scanner thresholds, module weights
+ * - Training history with accuracy tracking
+ */
+
+import React, { useState, useEffect, useCallback, memo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Brain,
+  Clock,
+  TrendingUp,
+  Zap,
+  Target,
+  Calendar,
+  PlayCircle,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  ChevronDown,
+  ChevronUp,
+  Database,
+  BarChart3,
+  RefreshCw,
+  Layers,
+  History,
+  Settings,
+  GitBranch,
+  Gauge,
+  Sparkles,
+  AlertCircle
+} from 'lucide-react';
+import { toast } from 'sonner';
+import api, { apiLongRunning } from '../utils/api';
+
+// Timeframe configurations
+const TIMEFRAME_CONFIG = {
+  '1 min': { 
+    icon: Zap, 
+    label: '1 Minute', 
+    shortLabel: '1m',
+    description: 'Ultra-short scalping',
+    color: 'text-red-400',
+    bgColor: 'bg-red-500/20',
+    borderColor: 'border-red-500/30'
+  },
+  '5 mins': { 
+    icon: TrendingUp, 
+    label: '5 Minutes',
+    shortLabel: '5m',
+    description: 'Intraday scalping',
+    color: 'text-orange-400',
+    bgColor: 'bg-orange-500/20',
+    borderColor: 'border-orange-500/30'
+  },
+  '15 mins': { 
+    icon: Clock, 
+    label: '15 Minutes',
+    shortLabel: '15m',
+    description: 'Short-term swings',
+    color: 'text-amber-400',
+    bgColor: 'bg-amber-500/20',
+    borderColor: 'border-amber-500/30'
+  },
+  '30 mins': { 
+    icon: Target, 
+    label: '30 Minutes',
+    shortLabel: '30m',
+    description: 'Intraday swings',
+    color: 'text-yellow-400',
+    bgColor: 'bg-yellow-500/20',
+    borderColor: 'border-yellow-500/30'
+  },
+  '1 hour': { 
+    icon: BarChart3, 
+    label: '1 Hour',
+    shortLabel: '1h',
+    description: 'Swing trading',
+    color: 'text-green-400',
+    bgColor: 'bg-green-500/20',
+    borderColor: 'border-green-500/30'
+  },
+  '1 day': { 
+    icon: Calendar, 
+    label: 'Daily',
+    shortLabel: '1D',
+    description: 'Position trades',
+    color: 'text-cyan-400',
+    bgColor: 'bg-cyan-500/20',
+    borderColor: 'border-cyan-500/30'
+  },
+  '1 week': { 
+    icon: Layers, 
+    label: 'Weekly',
+    shortLabel: '1W',
+    description: 'Long-term trends',
+    color: 'text-violet-400',
+    bgColor: 'bg-violet-500/20',
+    borderColor: 'border-violet-500/30'
+  }
+};
+
+const formatNumber = (num) => {
+  if (!num) return '0';
+  if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+  if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
+  return num.toLocaleString();
+};
+
+// Individual timeframe card component
+const TimeframeCard = memo(({ 
+  timeframe, 
+  data, 
+  modelStatus, 
+  onTrain, 
+  isTraining,
+  isCurrentlyTraining 
+}) => {
+  const config = TIMEFRAME_CONFIG[timeframe] || TIMEFRAME_CONFIG['1 day'];
+  const Icon = config.icon;
+  const status = modelStatus?.[timeframe];
+  
+  const getStatusBadge = () => {
+    if (isCurrentlyTraining) {
+      return (
+        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 text-xs">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          Training
+        </span>
+      );
+    }
+    if (status?.status === 'completed') {
+      return (
+        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 text-xs">
+          <CheckCircle2 className="w-3 h-3" />
+          Trained
+        </span>
+      );
+    }
+    if (status?.status === 'error') {
+      return (
+        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 text-xs">
+          <XCircle className="w-3 h-3" />
+          Error
+        </span>
+      );
+    }
+    return (
+      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-zinc-500/20 text-zinc-400 text-xs">
+        <Clock className="w-3 h-3" />
+        Ready
+      </span>
+    );
+  };
+
+  return (
+    <div className={`p-3 rounded-lg border ${config.borderColor} ${config.bgColor} transition-all hover:border-opacity-60`}>
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <Icon className={`w-4 h-4 ${config.color}`} />
+          <span className="text-sm font-medium text-white">{config.label}</span>
+        </div>
+        {getStatusBadge()}
+      </div>
+      
+      <div className="grid grid-cols-2 gap-2 mb-2 text-xs">
+        <div className="bg-black/20 rounded p-1.5">
+          <div className="text-zinc-500">Bars</div>
+          <div className="text-white font-medium">{formatNumber(data?.bar_count)}</div>
+        </div>
+        <div className="bg-black/20 rounded p-1.5">
+          <div className="text-zinc-500">Symbols</div>
+          <div className="text-white font-medium">{formatNumber(data?.symbol_count)}</div>
+        </div>
+      </div>
+
+      {status?.message && (
+        <div className="text-xs text-zinc-400 mb-2 truncate" title={status.message}>
+          {status.message}
+        </div>
+      )}
+
+      <button
+        onClick={() => onTrain(timeframe)}
+        disabled={isTraining || !data?.bar_count}
+        className={`
+          w-full py-1.5 px-2 rounded text-xs font-medium flex items-center justify-center gap-1.5 transition-all
+          ${isTraining || !data?.bar_count
+            ? 'bg-zinc-700/50 text-zinc-500 cursor-not-allowed'
+            : `${config.bgColor} ${config.color} hover:bg-opacity-40 border ${config.borderColor}`
+          }
+        `}
+        data-testid={`train-${timeframe.replace(/\s/g, '-')}-btn`}
+      >
+        {isCurrentlyTraining ? (
+          <><Loader2 className="w-3 h-3 animate-spin" /> Training...</>
+        ) : (
+          <><PlayCircle className="w-3 h-3" /> Train</>
+        )}
+      </button>
+    </div>
+  );
+});
+
+// Calibration step component
+const CalibrationStep = memo(({ step, status, isActive }) => {
+  const Icon = step.icon;
+  
+  return (
+    <div className={`
+      flex items-center gap-3 p-3 rounded-lg transition-all
+      ${isActive ? 'bg-cyan-500/10 border border-cyan-500/30' : 'bg-white/[0.02]'}
+    `}>
+      <div className={`
+        w-8 h-8 rounded-lg flex items-center justify-center
+        ${status === 'completed' ? 'bg-green-500/20' : 
+          status === 'running' ? 'bg-cyan-500/20' : 
+          status === 'error' ? 'bg-red-500/20' : 'bg-white/5'}
+      `}>
+        {status === 'running' ? (
+          <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />
+        ) : status === 'completed' ? (
+          <CheckCircle2 className="w-4 h-4 text-green-400" />
+        ) : status === 'error' ? (
+          <XCircle className="w-4 h-4 text-red-400" />
+        ) : (
+          <Icon className="w-4 h-4 text-zinc-400" />
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm text-white font-medium">{step.label}</div>
+        <div className="text-xs text-zinc-400 truncate">{step.description}</div>
+      </div>
+      {status === 'completed' && step.result && (
+        <div className="text-xs text-green-400">{step.result}</div>
+      )}
+    </div>
+  );
+});
+
+// Main unified component
+const UnifiedAITraining = memo(({ onTrainComplete }) => {
+  const [expanded, setExpanded] = useState(true);
+  const [activeTab, setActiveTab] = useState('models'); // 'models' | 'calibration' | 'history'
+  
+  // Data states
+  const [availableData, setAvailableData] = useState(null);
+  const [modelStatus, setModelStatus] = useState({});
+  const [trainingHistory, setTrainingHistory] = useState([]);
+  const [calibrationConfig, setCalibrationConfig] = useState(null);
+  
+  // Training states
+  const [isTraining, setIsTraining] = useState(false);
+  const [currentTimeframe, setCurrentTimeframe] = useState(null);
+  const [loading, setLoading] = useState(true);
+  
+  // Calibration workflow state
+  const [calibrationProgress, setCalibrationProgress] = useState({
+    connectors: { status: 'pending', message: '' },
+    scanner: { status: 'pending', message: '' },
+    weights: { status: 'pending', message: '' }
+  });
+  const [isCalibrating, setIsCalibrating] = useState(false);
+
+  // Auto-train settings
+  const [autoTrainEnabled, setAutoTrainEnabled] = useState(false);
+  const [autoTrainAfterCollection, setAutoTrainAfterCollection] = useState(false);
+
+  // Fetch all data
+  const fetchData = useCallback(async () => {
+    try {
+      const [dataRes, statusRes, historyRes, configRes, trainingStatusRes] = await Promise.all([
+        api.get('/api/ai-modules/timeseries/available-data').catch(() => ({ data: null })),
+        api.get('/api/ai-modules/timeseries/training-status').catch(() => ({ data: null })),
+        api.get('/api/ai-modules/timeseries/training-history?limit=20').catch(() => ({ data: null })),
+        api.get('/api/medium-learning/calibration/config').catch(() => ({ data: null })),
+        api.get('/api/ai-modules/training-status').catch(() => ({ data: null }))
+      ]);
+      
+      if (dataRes.data?.success) {
+        setAvailableData(dataRes.data);
+      }
+      if (statusRes.data?.success) {
+        setModelStatus(statusRes.data.status?.timeframe_status || {});
+      }
+      if (historyRes.data?.success) {
+        setTrainingHistory(historyRes.data.history || []);
+      }
+      if (configRes.data?.success) {
+        setCalibrationConfig(configRes.data.config);
+      }
+      if (trainingStatusRes.data?.success) {
+        setAutoTrainEnabled(trainingStatusRes.data.auto_training?.enabled || false);
+        setAutoTrainAfterCollection(trainingStatusRes.data.auto_training?.after_collection || false);
+      }
+    } catch (e) {
+      console.error('Error fetching AI training data:', e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Train single timeframe
+  const handleTrainTimeframe = async (timeframe) => {
+    setIsTraining(true);
+    setCurrentTimeframe(timeframe);
+    
+    setModelStatus(prev => ({
+      ...prev,
+      [timeframe]: { status: 'running', message: 'Loading data...' }
+    }));
+
+    try {
+      toast.info(`Training ${TIMEFRAME_CONFIG[timeframe]?.label || timeframe} model...`);
+
+      const res = await apiLongRunning.post('/api/ai-modules/timeseries/train', {
+        bar_size: timeframe
+      });
+
+      if (res.data?.success && res.data?.result?.success) {
+        const result = res.data.result;
+        const accuracy = result.metrics?.accuracy ? (result.metrics.accuracy * 100).toFixed(1) : '?';
+        
+        setModelStatus(prev => ({
+          ...prev,
+          [timeframe]: { 
+            status: 'completed', 
+            message: `${accuracy}% accuracy, ${formatNumber(result.training_samples)} samples` 
+          }
+        }));
+        
+        toast.success(`${TIMEFRAME_CONFIG[timeframe]?.label} trained! ${accuracy}% accuracy`);
+        fetchData(); // Refresh history
+      } else if (res.data?.ml_not_available) {
+        setModelStatus(prev => ({
+          ...prev,
+          [timeframe]: { status: 'error', message: 'ML not installed locally' }
+        }));
+        toast.error('ML libraries not installed. Run: pip install lightgbm');
+      } else {
+        const errorMsg = res.data?.result?.error || 'Training failed';
+        setModelStatus(prev => ({
+          ...prev,
+          [timeframe]: { status: 'error', message: errorMsg }
+        }));
+        toast.error(`Training failed: ${errorMsg}`);
+      }
+    } catch (e) {
+      console.error('Training error:', e);
+      setModelStatus(prev => ({
+        ...prev,
+        [timeframe]: { status: 'error', message: e.message }
+      }));
+      toast.error(`Training error: ${e.message}`);
+    } finally {
+      setIsTraining(false);
+      setCurrentTimeframe(null);
+      if (onTrainComplete) onTrainComplete();
+    }
+  };
+
+  // Train ALL timeframes
+  const handleTrainAll = async () => {
+    setIsTraining(true);
+    const timeframes = Object.keys(availableData?.timeframes || {});
+    
+    toast.info(`Training ${timeframes.length} timeframe models...`);
+
+    try {
+      const res = await apiLongRunning.post('/api/ai-modules/timeseries/train-all');
+
+      if (res.data?.success) {
+        const result = res.data.result;
+        
+        // Update status for all timeframes
+        const newStatus = {};
+        for (const [tf, tfResult] of Object.entries(result.results || {})) {
+          if (tfResult.success) {
+            const accuracy = tfResult.metrics?.accuracy ? (tfResult.metrics.accuracy * 100).toFixed(1) : '?';
+            newStatus[tf] = { status: 'completed', message: `${accuracy}% accuracy` };
+          } else {
+            newStatus[tf] = { status: 'error', message: tfResult.error || 'Failed' };
+          }
+        }
+        setModelStatus(newStatus);
+        
+        toast.success(`Trained ${result.timeframes_trained}/${result.total_timeframes} models!`);
+        fetchData();
+      } else if (res.data?.ml_not_available) {
+        toast.error('ML libraries not installed. Run: pip install lightgbm');
+      } else {
+        toast.error('Training failed');
+      }
+    } catch (e) {
+      console.error('Train-all error:', e);
+      toast.error(`Training error: ${e.message}`);
+    } finally {
+      setIsTraining(false);
+      if (onTrainComplete) onTrainComplete();
+    }
+  };
+
+  // Quick Train: Daily model + calibration
+  const handleQuickTrain = async () => {
+    setIsTraining(true);
+    setIsCalibrating(true);
+    
+    // Reset calibration progress
+    setCalibrationProgress({
+      connectors: { status: 'pending', message: '' },
+      scanner: { status: 'pending', message: '' },
+      weights: { status: 'pending', message: '' }
+    });
+
+    try {
+      // Step 1: Train Daily model
+      setCurrentTimeframe('1 day');
+      setModelStatus(prev => ({
+        ...prev,
+        '1 day': { status: 'running', message: 'Training Daily model...' }
+      }));
+      
+      toast.info('Quick Train: Training Daily model...');
+      
+      const trainRes = await apiLongRunning.post('/api/ai-modules/timeseries/train', {
+        bar_size: '1 day'
+      });
+
+      if (trainRes.data?.success && trainRes.data?.result?.success) {
+        const accuracy = trainRes.data.result.metrics?.accuracy ? 
+          (trainRes.data.result.metrics.accuracy * 100).toFixed(1) : '?';
+        setModelStatus(prev => ({
+          ...prev,
+          '1 day': { status: 'completed', message: `${accuracy}% accuracy` }
+        }));
+      } else if (trainRes.data?.ml_not_available) {
+        setModelStatus(prev => ({
+          ...prev,
+          '1 day': { status: 'error', message: 'ML not installed' }
+        }));
+      }
+
+      setCurrentTimeframe(null);
+
+      // Step 2: Run calibrations
+      setCalibrationProgress(prev => ({
+        ...prev,
+        connectors: { status: 'running', message: 'Syncing...' }
+      }));
+
+      toast.info('Quick Train: Running calibrations...');
+
+      const calRes = await apiLongRunning.post('/api/learning-connectors/sync/run-all-calibrations');
+      
+      if (calRes.data?.success || calRes.data?.results) {
+        const results = calRes.data.results || {};
+        
+        setCalibrationProgress({
+          connectors: { 
+            status: results.shadow_to_weights?.success ? 'completed' : 'error',
+            message: results.shadow_to_weights?.success ? 'Synced' : 'No data yet'
+          },
+          scanner: { 
+            status: results.outcomes_to_scanner?.success ? 'completed' : 'error',
+            message: results.outcomes_to_scanner?.applied_count ? 
+              `${results.outcomes_to_scanner.applied_count} thresholds` : 'No outcomes yet'
+          },
+          weights: { 
+            status: results.predictions_verification?.success ? 'completed' : 'error',
+            message: results.predictions_verification?.verified_count ?
+              `${results.predictions_verification.verified_count} verified` : 'No predictions yet'
+          }
+        });
+
+        toast.success(`Quick Train complete! ${calRes.data.applied_calibrations || 0} calibrations applied`);
+      } else {
+        setCalibrationProgress({
+          connectors: { status: 'error', message: 'Failed' },
+          scanner: { status: 'error', message: 'Failed' },
+          weights: { status: 'error', message: 'Failed' }
+        });
+      }
+
+      fetchData();
+    } catch (e) {
+      console.error('Quick train error:', e);
+      toast.error(`Quick train error: ${e.message}`);
+    } finally {
+      setIsTraining(false);
+      setIsCalibrating(false);
+      setCurrentTimeframe(null);
+      if (onTrainComplete) onTrainComplete();
+    }
+  };
+
+  // Toggle auto-train settings
+  const handleAutoTrainToggle = async (setting, value) => {
+    try {
+      const params = new URLSearchParams({
+        auto_train_enabled: setting === 'enabled' ? value : autoTrainEnabled,
+        train_after_collection: setting === 'after_collection' ? value : autoTrainAfterCollection
+      });
+      
+      await api.post(`/api/ai-modules/training-settings?${params}`);
+      
+      if (setting === 'enabled') {
+        setAutoTrainEnabled(value);
+        toast.success(value ? 'Auto-training enabled' : 'Auto-training disabled');
+      } else {
+        setAutoTrainAfterCollection(value);
+        toast.success(value ? 'Will train after data collection' : 'Disabled');
+      }
+    } catch (e) {
+      toast.error('Failed to update settings');
+    }
+  };
+
+  const totalBars = availableData?.total_bars || 0;
+  const timeframes = availableData?.timeframes || {};
+  const timeframeCount = Object.keys(timeframes).length;
+  const trainedCount = Object.values(modelStatus).filter(s => s?.status === 'completed').length;
+
+  // Calibration steps config
+  const calibrationSteps = [
+    { key: 'connectors', label: 'Sync Learning Connectors', icon: GitBranch, description: 'Update data pipelines' },
+    { key: 'scanner', label: 'Calibrate Scanner', icon: Target, description: 'Optimize alert thresholds' },
+    { key: 'weights', label: 'Update Module Weights', icon: Gauge, description: 'Adjust AI module influence' }
+  ];
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-white/10 p-6 mb-4" style={{ background: 'linear-gradient(135deg, rgba(21, 28, 36, 0.95), rgba(30, 40, 55, 0.95))' }}>
+        <div className="flex items-center justify-center gap-3 text-zinc-400">
+          <Loader2 className="w-5 h-5 animate-spin" />
+          Loading AI training data...
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'linear-gradient(135deg, rgba(21, 28, 36, 0.95), rgba(30, 40, 55, 0.95))' }}>
+      {/* Header */}
+      <div 
+        className="p-4 flex items-center justify-between cursor-pointer hover:bg-white/[0.02] transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #06b6d4, #8b5cf6)' }}>
+            <Brain className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              AI Training & Calibration
+              <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 text-xs font-normal">
+                {formatNumber(totalBars)} bars
+              </span>
+            </h3>
+            <p className="text-xs text-zinc-400">
+              {trainedCount}/{timeframeCount} models trained
+            </p>
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-2">
+          <button
+            onClick={(e) => { e.stopPropagation(); fetchData(); }}
+            className="p-2 rounded-lg hover:bg-white/5 text-zinc-400 hover:text-white transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+          {expanded ? <ChevronUp className="w-5 h-5 text-zinc-400" /> : <ChevronDown className="w-5 h-5 text-zinc-400" />}
+        </div>
+      </div>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            <div className="px-4 pb-4">
+              {/* Action Buttons */}
+              <div className="flex flex-wrap gap-2 mb-4">
+                <button
+                  onClick={handleQuickTrain}
+                  disabled={isTraining}
+                  className={`
+                    flex-1 min-w-[140px] py-2.5 px-4 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-all
+                    ${isTraining
+                      ? 'bg-zinc-700/50 text-zinc-400 cursor-not-allowed'
+                      : 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white hover:from-cyan-400 hover:to-blue-400 shadow-lg shadow-cyan-500/25'
+                    }
+                  `}
+                  data-testid="quick-train-btn"
+                >
+                  {isTraining && currentTimeframe === '1 day' ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Training...</>
+                  ) : (
+                    <><Sparkles className="w-4 h-4" /> Quick Train</>
+                  )}
+                </button>
+                
+                <button
+                  onClick={handleTrainAll}
+                  disabled={isTraining || timeframeCount === 0}
+                  className={`
+                    flex-1 min-w-[140px] py-2.5 px-4 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-all
+                    ${isTraining || timeframeCount === 0
+                      ? 'bg-zinc-700/50 text-zinc-400 cursor-not-allowed'
+                      : 'bg-gradient-to-r from-violet-500 to-purple-500 text-white hover:from-violet-400 hover:to-purple-400 shadow-lg shadow-violet-500/25'
+                    }
+                  `}
+                  data-testid="train-all-btn"
+                >
+                  {isTraining && !currentTimeframe ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Training All...</>
+                  ) : (
+                    <><Database className="w-4 h-4" /> Full Train ({timeframeCount})</>
+                  )}
+                </button>
+              </div>
+
+              {/* Quick description */}
+              <div className="text-xs text-zinc-500 mb-4 flex items-center gap-4">
+                <span><strong>Quick Train:</strong> Daily model + calibration</span>
+                <span><strong>Full Train:</strong> All {timeframeCount} timeframe models</span>
+              </div>
+
+              {/* Tab Navigation */}
+              <div className="flex gap-1 mb-4 bg-black/20 p-1 rounded-lg">
+                {[
+                  { id: 'models', label: 'Timeframe Models', icon: Brain },
+                  { id: 'calibration', label: 'Calibration', icon: Settings },
+                  { id: 'history', label: 'History', icon: History }
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`
+                      flex-1 py-2 px-3 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 transition-all
+                      ${activeTab === tab.id 
+                        ? 'bg-white/10 text-white' 
+                        : 'text-zinc-400 hover:text-white hover:bg-white/5'
+                      }
+                    `}
+                  >
+                    <tab.icon className="w-3.5 h-3.5" />
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab Content */}
+              {activeTab === 'models' && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-2">
+                  {Object.entries(timeframes)
+                    .sort((a, b) => {
+                      const order = ['1 min', '5 mins', '15 mins', '30 mins', '1 hour', '1 day', '1 week'];
+                      return order.indexOf(a[0]) - order.indexOf(b[0]);
+                    })
+                    .map(([timeframe, data]) => (
+                      <TimeframeCard
+                        key={timeframe}
+                        timeframe={timeframe}
+                        data={data}
+                        modelStatus={modelStatus}
+                        onTrain={handleTrainTimeframe}
+                        isTraining={isTraining}
+                        isCurrentlyTraining={currentTimeframe === timeframe}
+                      />
+                    ))}
+                </div>
+              )}
+
+              {activeTab === 'calibration' && (
+                <div className="space-y-3">
+                  {/* Auto-train settings */}
+                  <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Settings className="w-4 h-4 text-zinc-400" />
+                        <span className="text-sm text-white">Auto-train after data collection</span>
+                      </div>
+                      <button
+                        onClick={() => handleAutoTrainToggle('after_collection', !autoTrainAfterCollection)}
+                        className={`
+                          w-10 h-5 rounded-full transition-colors relative
+                          ${autoTrainAfterCollection ? 'bg-cyan-500' : 'bg-zinc-600'}
+                        `}
+                      >
+                        <div className={`
+                          absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform
+                          ${autoTrainAfterCollection ? 'left-5' : 'left-0.5'}
+                        `} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Calibration steps */}
+                  <div className="space-y-2">
+                    {calibrationSteps.map(step => (
+                      <CalibrationStep
+                        key={step.key}
+                        step={step}
+                        status={calibrationProgress[step.key]?.status}
+                        isActive={isCalibrating}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Calibration config preview */}
+                  {calibrationConfig && (
+                    <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5">
+                      <div className="text-xs text-zinc-400 mb-2">Current TQS Thresholds</div>
+                      <div className="grid grid-cols-4 gap-2 text-xs">
+                        <div className="text-center">
+                          <div className="text-green-400 font-medium">{calibrationConfig.tqs_strong_buy_threshold}+</div>
+                          <div className="text-zinc-500">Strong Buy</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-cyan-400 font-medium">{calibrationConfig.tqs_buy_threshold}+</div>
+                          <div className="text-zinc-500">Buy</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-yellow-400 font-medium">{calibrationConfig.tqs_hold_threshold}+</div>
+                          <div className="text-zinc-500">Hold</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-red-400 font-medium">&lt;{calibrationConfig.tqs_avoid_threshold}</div>
+                          <div className="text-zinc-500">Avoid</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'history' && (
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {trainingHistory.length === 0 ? (
+                    <div className="text-center py-8 text-zinc-400">
+                      <History className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                      <div className="text-sm">No training history yet</div>
+                      <div className="text-xs">Train a model to see results here</div>
+                    </div>
+                  ) : (
+                    trainingHistory.map((record, idx) => {
+                      const config = TIMEFRAME_CONFIG[record.bar_size] || TIMEFRAME_CONFIG['1 day'];
+                      const accuracy = record.accuracy ? (record.accuracy * 100).toFixed(1) : '?';
+                      const timestamp = record.timestamp ? new Date(record.timestamp).toLocaleString() : 'Unknown';
+                      
+                      return (
+                        <div 
+                          key={idx}
+                          className={`p-3 rounded-lg bg-black/20 border ${config.borderColor} flex items-center justify-between`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${config.bgColor}`}>
+                              <config.icon className={`w-4 h-4 ${config.color}`} />
+                            </div>
+                            <div>
+                              <div className="text-sm text-white font-medium">{config.label}</div>
+                              <div className="text-xs text-zinc-500">{timestamp}</div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className={`text-sm font-semibold ${
+                              record.accuracy >= 0.6 ? 'text-green-400' : 
+                              record.accuracy >= 0.5 ? 'text-yellow-400' : 'text-red-400'
+                            }`}>
+                              {accuracy}%
+                            </div>
+                            <div className="text-xs text-zinc-500">
+                              {formatNumber(record.training_samples)} samples
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+
+              {/* No data warning */}
+              {timeframeCount === 0 && (
+                <div className="text-center py-6 text-zinc-400">
+                  <AlertCircle className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                  <div className="text-sm">No historical data available</div>
+                  <div className="text-xs mt-1">Run the IB data collector to gather training data</div>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+});
+
+export default UnifiedAITraining;
