@@ -82,10 +82,27 @@ Build a self-improving AI trading bot ("SentCom") with:
 - [x] **Startup Status Dashboard** ✅ COMPLETED (March 18, 2026)
 - [x] **Comprehensive User Guide** ✅ COMPLETED (March 19, 2026)
 - [x] **Optimized Data Collection Pipeline** ✅ COMPLETED (March 19, 2026)
-- [ ] **Complete Historical Data Collection** - IN PROGRESS (37.8% as of March 19, ~28-35 hrs remaining)
-- [ ] **Install Missing ML Dependencies** - BLOCKED until collection completes
-  - Run: `.\venv\Scripts\pip install lightgbm chromadb`
-- [ ] **Full AI Model Training** - BLOCKED on data collection + dependencies
+- [x] **Complete Historical Data Collection** ✅ COMPLETED (March 20, 2026) - 39M+ bars collected
+- [x] **Install Missing ML Dependencies** ✅ COMPLETED - lightgbm, chromadb installed
+- [x] **Multi-Timeframe AI Training System** ✅ COMPLETED (March 21, 2026)
+  - Backend: New endpoints for training models per timeframe
+    - `POST /api/ai-modules/timeseries/train` - Train single timeframe model
+    - `POST /api/ai-modules/timeseries/train-all` - Train all 7 timeframe models
+    - `GET /api/ai-modules/timeseries/available-data` - View data by timeframe
+    - `GET /api/ai-modules/timeseries/training-status` - Monitor training progress
+  - Frontend: New MultiTimeframeTraining component in NIA
+    - Visual cards for each timeframe showing bar count and symbol count
+    - Individual "Train Model" buttons per timeframe
+    - "Train All" button for sequential training of all models
+  - 7 specialized models for different trading styles:
+    - 1 min (5M bars) - Ultra-short scalping
+    - 5 mins (8.5M bars) - Intraday scalping  
+    - 15 mins (6.1M bars) - Short-term swings
+    - 30 mins (4M bars) - Intraday swings
+    - 1 hour (7.6M bars) - Swing trading
+    - 1 day (7M bars) - Position trades
+    - 1 week (690K bars) - Long-term trends
+- [ ] **Run Full AI Model Training** - NEXT: User needs to run training on local machine
 
 ### P1 - Medium Priority
 - [ ] Fix `/api/ib-collector/fill-gaps` endpoint (hangs under load, needs non-blocking refactor)

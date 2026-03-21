@@ -67,6 +67,7 @@ import api, { apiLongRunning } from '../utils/api';
 import { useDataCache } from '../contexts';
 import MarketScannerPanel from './MarketScannerPanel';
 import AdvancedBacktestPanel from './AdvancedBacktestPanel';
+import MultiTimeframeTraining from './MultiTimeframeTraining';
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL;
 
@@ -3342,6 +3343,9 @@ const NIA = () => {
 
       {/* TRAIN ALL - Top Priority Action */}
       <TrainAllPanel onTrainComplete={handleTrainComplete} />
+
+      {/* Multi-Timeframe AI Training - Train on full 39M+ bar dataset */}
+      <MultiTimeframeTraining onTrainComplete={handleTrainComplete} />
 
       {/* Intel Overview - doesn't need loading prop, will show data or placeholder */}
       <IntelOverview data={intelOverviewData} />

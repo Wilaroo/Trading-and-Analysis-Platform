@@ -939,17 +939,27 @@ async def get_timeseries_status():
 
 class TrainRequest(BaseModel):
     symbols: Optional[List[str]] = Field(None, description="Symbols to train on")
-    max_symbols: Optional[int] = Field(100, description="Maximum number of symbols to train on (default: 100)")
+    max_symbols: Optional[int] = Field(None, description="Maximum number of symbols (default: 1000)")
+    bar_size: Optional[str] = Field("1 day", description="Bar size/timeframe to train on")
+    max_bars_per_symbol: Optional[int] = Field(None, description="Max bars per symbol (default: 10000)")
+
+
+class TrainAllRequest(BaseModel):
+    max_symbols: Optional[int] = Field(None, description="Maximum symbols per timeframe (default: 1000)")
+    max_bars_per_symbol: Optional[int] = Field(None, description="Max bars per symbol (default: 10000)")
+    timeframes: Optional[List[str]] = Field(None, description="Specific timeframes to train (default: all)")
 
 
 @router.post("/timeseries/train")
 async def train_timeseries_model(request: Optional[TrainRequest] = None):
     """
-    Train/update the time-series model.
+    Train/update a time-series model for a specific timeframe.
     
     Args (in request body):
         symbols: Optional list of specific symbols to train on
-        max_symbols: Maximum number of symbols (default: 100, max: 500)
+        max_symbols: Maximum number of symbols (default: 1000)
+        bar_size: Timeframe to train on (e.g., "1 min", "5 mins", "1 hour", "1 day")
+        max_bars_per_symbol: Max bars per symbol for memory management (default: 10000)
     """
     # Check if ML is available
     from services.ai_modules import ML_AVAILABLE
@@ -974,9 +984,16 @@ async def train_timeseries_model(request: Optional[TrainRequest] = None):
     
     try:
         symbols = request.symbols if request else None
-        max_symbols = min(request.max_symbols if request and request.max_symbols else 100, 500)
+        max_symbols = request.max_symbols if request and request.max_symbols else None
+        bar_size = request.bar_size if request and request.bar_size else "1 day"
+        max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else None
         
-        result = await _timeseries_ai.train_model(symbols=symbols, max_symbols=max_symbols)
+        result = await _timeseries_ai.train_model(
+            symbols=symbols, 
+            max_symbols=max_symbols,
+            bar_size=bar_size,
+            max_bars_per_symbol=max_bars_per_symbol
+        )
         
         return {
             "success": result.get("success", False),
@@ -986,6 +1003,73 @@ async def train_timeseries_model(request: Optional[TrainRequest] = None):
     except Exception as e:
         logger.error(f"Training error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/timeseries/train-all")
+async def train_all_timeframe_models(request: Optional[TrainAllRequest] = None):
+    """
+    Train models for all timeframes sequentially.
+    
+    This is a long-running operation that trains separate models for each available timeframe.
+    Use this to fully utilize all your historical data across all bar sizes.
+    
+    Args (in request body):
+        max_symbols: Max symbols per timeframe (default: 1000)
+        max_bars_per_symbol: Max bars per symbol (default: 10000)
+        timeframes: Optional list of specific timeframes to train
+    """
+    from services.ai_modules import ML_AVAILABLE
+    if not ML_AVAILABLE:
+        return {
+            "success": False,
+            "ml_not_available": True,
+            "error": "ML libraries not installed",
+            "install_command": "pip install lightgbm"
+        }
+    
+    if not _timeseries_ai:
+        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
+    
+    try:
+        max_symbols = request.max_symbols if request and request.max_symbols else None
+        max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else None
+        timeframes = request.timeframes if request and request.timeframes else None
+        
+        result = await _timeseries_ai.train_all_timeframes(
+            max_symbols=max_symbols,
+            max_bars_per_symbol=max_bars_per_symbol,
+            timeframes=timeframes
+        )
+        
+        return {
+            "success": result.get("success", False),
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"Train-all error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/timeseries/training-status")
+async def get_timeseries_training_status():
+    """Get current training status for all timeframe models"""
+    if not _timeseries_ai:
+        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
+    
+    return {
+        "success": True,
+        "status": _timeseries_ai.get_training_status()
+    }
+
+
+@router.get("/timeseries/available-data")
+async def get_available_timeframe_data():
+    """Get info about available data for each timeframe in the database"""
+    if not _timeseries_ai:
+        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
+    
+    return _timeseries_ai.get_available_timeframe_data()
 
 
 @router.get("/timeseries/metrics")

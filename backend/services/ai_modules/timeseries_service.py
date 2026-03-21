@@ -53,6 +53,7 @@ class TimeSeriesAIService:
     High-level service for time-series AI predictions.
     
     Used by AI Trade Consultation to get directional forecasts.
+    Supports multiple timeframe models for different trading styles.
     Note: Gracefully degrades if lightgbm is not installed.
     """
     
@@ -63,12 +64,30 @@ class TimeSeriesAIService:
     AUTO_TRAIN_INTERVAL_HOURS = 24
     MIN_BARS_FOR_TRAINING = 100
     
+    # Supported timeframes for multi-model training
+    SUPPORTED_TIMEFRAMES = {
+        "1 min": {"model_name": "direction_predictor_1min", "description": "Ultra-short scalping"},
+        "5 mins": {"model_name": "direction_predictor_5min", "description": "Intraday scalping"},
+        "15 mins": {"model_name": "direction_predictor_15min", "description": "Short-term swings"},
+        "30 mins": {"model_name": "direction_predictor_30min", "description": "Intraday swings"},
+        "1 hour": {"model_name": "direction_predictor_1hour", "description": "Swing trading"},
+        "1 day": {"model_name": "direction_predictor_daily", "description": "Position trades"},
+        "1 week": {"model_name": "direction_predictor_weekly", "description": "Long-term trends"},
+    }
+    
+    # Default max symbols (removed hard limit of 100)
+    DEFAULT_MAX_SYMBOLS = 1000
+    DEFAULT_MAX_BARS_PER_SYMBOL = 10000
+    
     def __init__(self):
         self._model = get_timeseries_model() if ML_AVAILABLE else None
+        self._models = {}  # Cache for multi-timeframe models
         self._db = None
         self._historical_service = None
         self._last_train_time = None
         self._ml_available = ML_AVAILABLE
+        self._training_in_progress = False
+        self._training_status = {}
         
     def set_db(self, db):
         """Set database connection"""
@@ -179,106 +198,285 @@ class TimeSeriesAIService:
     async def train_model(
         self,
         symbols: List[str] = None,
-        max_symbols: int = 100
+        max_symbols: int = None,
+        bar_size: str = "1 day",
+        max_bars_per_symbol: int = None
     ) -> Dict[str, Any]:
         """
-        Train/update the model with historical data from MongoDB.
+        Train/update a model for a specific timeframe with historical data from MongoDB.
         
         Args:
             symbols: List of symbols to train on (default: fetch from history)
-            max_symbols: Maximum number of symbols to train on (default: 100)
+            max_symbols: Maximum number of symbols (default: 1000, no hard cap)
+            bar_size: Bar size/timeframe to train on (default: "1 day")
+            max_bars_per_symbol: Max bars per symbol for memory management (default: 10000)
             
         Returns:
             Training result with metrics
         """
         # Check if ML is available
-        if not self._ml_available or self._model is None:
+        if not self._ml_available:
             return {"success": False, "error": "ML not available - lightgbm not installed"}
             
         if self._db is None:
             return {"success": False, "error": "Database not connected"}
         
-        logger.info(f"Starting model training from MongoDB ib_historical_data (up to {max_symbols} symbols)...")
+        # Use defaults if not specified
+        if max_symbols is None:
+            max_symbols = self.DEFAULT_MAX_SYMBOLS
+        if max_bars_per_symbol is None:
+            max_bars_per_symbol = self.DEFAULT_MAX_BARS_PER_SYMBOL
+            
+        # Validate bar_size
+        if bar_size not in self.SUPPORTED_TIMEFRAMES:
+            return {
+                "success": False, 
+                "error": f"Unsupported bar_size: {bar_size}. Supported: {list(self.SUPPORTED_TIMEFRAMES.keys())}"
+            }
+        
+        # Get or create model for this timeframe
+        model_config = self.SUPPORTED_TIMEFRAMES[bar_size]
+        model_name = model_config["model_name"]
+        
+        logger.info(f"Starting {model_name} training from MongoDB ({bar_size} bars, up to {max_symbols} symbols)...")
+        
+        # Mark training in progress
+        self._training_in_progress = True
+        self._training_status[bar_size] = {
+            "status": "running",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "message": "Loading data..."
+        }
         
         try:
+            # Create a dedicated model for this timeframe
+            model = TimeSeriesGBM(model_name=model_name)
+            model.set_db(self._db)
+            
             # Get historical bars directly from MongoDB
             bars_by_symbol = {}
             
             if symbols is None:
-                # Get symbols with most data from MongoDB
-                symbols = await self._get_training_symbols_from_db(limit=max_symbols)
+                # Get symbols with most data from MongoDB for this bar_size
+                symbols = await self._get_training_symbols_from_db(
+                    bar_size=bar_size, 
+                    limit=max_symbols
+                )
                 
-            logger.info(f"Training symbols: {len(symbols)} symbols queued")
+            logger.info(f"Training symbols: {len(symbols)} symbols queued for {bar_size}")
             
-            for symbol in symbols[:max_symbols]:  # Train on up to max_symbols
-                bars = await self._get_historical_bars_from_db(symbol)
+            self._training_status[bar_size]["message"] = f"Loading data for {len(symbols)} symbols..."
+            
+            loaded_count = 0
+            for symbol in symbols:
+                bars = await self._get_historical_bars_from_db(
+                    symbol, 
+                    bar_size=bar_size,
+                    max_bars=max_bars_per_symbol
+                )
                 if bars and len(bars) >= self.MIN_BARS_FOR_TRAINING:
                     bars_by_symbol[symbol] = bars
-                    if len(bars_by_symbol) % 20 == 0:  # Log progress every 20 symbols
-                        logger.info(f"  Loaded {len(bars_by_symbol)} symbols...")
+                    loaded_count += 1
+                    if loaded_count % 50 == 0:
+                        logger.info(f"  Loaded {loaded_count} symbols...")
+                        self._training_status[bar_size]["message"] = f"Loaded {loaded_count}/{len(symbols)} symbols..."
                     
             if not bars_by_symbol:
-                return {"success": False, "error": "No historical data available in MongoDB"}
+                self._training_status[bar_size] = {
+                    "status": "error",
+                    "message": f"No historical data available for {bar_size}"
+                }
+                return {"success": False, "error": f"No historical data available for {bar_size}"}
                 
             total_bars = sum(len(b) for b in bars_by_symbol.values())
-            logger.info(f"Training on {len(bars_by_symbol)} symbols, {total_bars:,} total bars")
+            logger.info(f"Training {model_name} on {len(bars_by_symbol)} symbols, {total_bars:,} total bars")
+            
+            self._training_status[bar_size]["message"] = f"Training on {total_bars:,} bars..."
             
             # Train model
-            metrics = self._model.train(bars_by_symbol)
+            metrics = model.train(bars_by_symbol)
             
             self._last_train_time = datetime.now(timezone.utc)
             
+            # Cache the trained model
+            self._models[bar_size] = model
+            
+            # Update status
+            self._training_status[bar_size] = {
+                "status": "completed",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "message": f"Trained with {metrics.accuracy*100:.1f}% accuracy"
+            }
+            
             return {
                 "success": True,
+                "bar_size": bar_size,
+                "model_name": model_name,
                 "metrics": metrics.to_dict(),
-                "symbols_used": list(bars_by_symbol.keys()),
+                "symbols_used": len(bars_by_symbol),
+                "symbol_list": list(bars_by_symbol.keys())[:50],  # First 50 for display
                 "total_bars": total_bars,
+                "training_samples": metrics.training_samples,
+                "validation_samples": metrics.validation_samples,
                 "samples": metrics.training_samples + metrics.validation_samples
             }
             
         except Exception as e:
-            logger.error(f"Training error: {e}", exc_info=True)
+            logger.error(f"Training error for {bar_size}: {e}", exc_info=True)
+            self._training_status[bar_size] = {
+                "status": "error",
+                "message": str(e)
+            }
+            return {"success": False, "error": str(e)}
+        finally:
+            self._training_in_progress = False
+            
+    async def train_all_timeframes(
+        self,
+        max_symbols: int = None,
+        max_bars_per_symbol: int = None,
+        timeframes: List[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Train models for all (or specified) timeframes sequentially.
+        
+        Args:
+            max_symbols: Max symbols per timeframe (default: 1000)
+            max_bars_per_symbol: Max bars per symbol (default: 10000)
+            timeframes: List of specific timeframes to train (default: all)
+            
+        Returns:
+            Combined results for all timeframes
+        """
+        if not self._ml_available:
+            return {"success": False, "error": "ML not available - lightgbm not installed"}
+        
+        if timeframes is None:
+            timeframes = list(self.SUPPORTED_TIMEFRAMES.keys())
+        
+        results = {}
+        overall_success = True
+        total_bars_trained = 0
+        total_samples = 0
+        
+        logger.info(f"Starting multi-timeframe training for {len(timeframes)} timeframes...")
+        
+        for tf in timeframes:
+            if tf not in self.SUPPORTED_TIMEFRAMES:
+                results[tf] = {"success": False, "error": f"Unsupported timeframe: {tf}"}
+                continue
+                
+            logger.info(f"Training {tf} model...")
+            result = await self.train_model(
+                bar_size=tf,
+                max_symbols=max_symbols,
+                max_bars_per_symbol=max_bars_per_symbol
+            )
+            results[tf] = result
+            
+            if result.get("success"):
+                total_bars_trained += result.get("total_bars", 0)
+                total_samples += result.get("samples", 0)
+            else:
+                overall_success = False
+        
+        return {
+            "success": overall_success,
+            "timeframes_trained": len([r for r in results.values() if r.get("success")]),
+            "total_timeframes": len(timeframes),
+            "total_bars_trained": total_bars_trained,
+            "total_samples": total_samples,
+            "results": results
+        }
+    
+    def get_training_status(self) -> Dict[str, Any]:
+        """Get current training status for all timeframes"""
+        return {
+            "training_in_progress": self._training_in_progress,
+            "timeframe_status": self._training_status,
+            "supported_timeframes": list(self.SUPPORTED_TIMEFRAMES.keys()),
+            "last_train_time": self._last_train_time.isoformat() if self._last_train_time else None
+        }
+    
+    def get_available_timeframe_data(self) -> Dict[str, Any]:
+        """Get info about available data for each timeframe from the database"""
+        if self._db is None:
+            return {"success": False, "error": "Database not connected"}
+        
+        try:
+            pipeline = [
+                {"$group": {"_id": "$bar_size", "count": {"$sum": 1}, "symbols": {"$addToSet": "$symbol"}}},
+                {"$project": {"_id": 1, "count": 1, "symbol_count": {"$size": "$symbols"}}},
+                {"$sort": {"count": -1}}
+            ]
+            result = list(self._db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True))
+            
+            timeframe_data = {}
+            for r in result:
+                bar_size = r["_id"]
+                if bar_size in self.SUPPORTED_TIMEFRAMES:
+                    timeframe_data[bar_size] = {
+                        "bar_count": r["count"],
+                        "symbol_count": r["symbol_count"],
+                        "model_name": self.SUPPORTED_TIMEFRAMES[bar_size]["model_name"],
+                        "description": self.SUPPORTED_TIMEFRAMES[bar_size]["description"]
+                    }
+            
+            return {
+                "success": True,
+                "timeframes": timeframe_data,
+                "total_bars": sum(t["bar_count"] for t in timeframe_data.values())
+            }
+        except Exception as e:
+            logger.error(f"Error getting timeframe data: {e}")
             return {"success": False, "error": str(e)}
             
-    async def _get_training_symbols_from_db(self, limit: int = 100) -> List[str]:
-        """Get symbols with most historical data from MongoDB (unified ib_historical_data)"""
+    async def _get_training_symbols_from_db(self, bar_size: str = "1 day", limit: int = 1000) -> List[str]:
+        """Get symbols with most historical data from MongoDB for a specific bar_size"""
         if self._db is None:
             return []
             
         try:
-            # Aggregate to find symbols with most bars in unified collection
+            # Aggregate to find symbols with most bars for this timeframe
             pipeline = [
-                {"$match": {"bar_size": "1 day"}},  # Focus on daily bars for training
+                {"$match": {"bar_size": bar_size}},
                 {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
-                {"$match": {"count": {"$gte": 100}}},  # At least 100 bars
+                {"$match": {"count": {"$gte": self.MIN_BARS_FOR_TRAINING}}},
                 {"$sort": {"count": -1}},
                 {"$limit": limit}
             ]
-            result = list(self._db["ib_historical_data"].aggregate(pipeline))
+            result = list(self._db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True))
             symbols = [r["_id"] for r in result]
-            logger.info(f"Found {len(symbols)} symbols with sufficient data in ib_historical_data")
+            logger.info(f"Found {len(symbols)} symbols with sufficient {bar_size} data")
             return symbols
         except Exception as e:
-            logger.error(f"Error getting training symbols: {e}")
+            logger.error(f"Error getting training symbols for {bar_size}: {e}")
             # Fallback to default list
             return [
                 "NVDA", "TSLA", "ORCL", "AVGO", "MSFT", "GOOGL", "AAPL", 
                 "META", "AMZN", "JPM", "ADBE", "V"
             ]
             
-    async def _get_historical_bars_from_db(self, symbol: str) -> Optional[List[Dict]]:
+    async def _get_historical_bars_from_db(
+        self, 
+        symbol: str, 
+        bar_size: str = "1 day",
+        max_bars: int = None
+    ) -> Optional[List[Dict]]:
         """Get historical bars for a symbol from unified ib_historical_data collection"""
         if self._db is None:
             return None
+        
+        if max_bars is None:
+            max_bars = self.DEFAULT_MAX_BARS_PER_SYMBOL
             
         try:
             # Fetch bars sorted by date (oldest first for proper training)
-            # Training expects chronological order (oldest first)
             cursor = self._db["ib_historical_data"].find(
-                {"symbol": symbol, "bar_size": "1 day"},
+                {"symbol": symbol, "bar_size": bar_size},
                 {"_id": 0, "symbol": 1, "date": 1, "open": 1, "high": 1, 
                  "low": 1, "close": 1, "volume": 1}
-            ).sort("date", 1)  # Ascending order (oldest first)
+            ).sort("date", 1).limit(max_bars)  # Ascending order (oldest first), limited
             
             bars = list(cursor)
             
@@ -289,7 +487,7 @@ class TimeSeriesAIService:
             return bars if bars else None
             
         except Exception as e:
-            logger.warning(f"Could not get bars for {symbol} from DB: {e}")
+            logger.warning(f"Could not get {bar_size} bars for {symbol} from DB: {e}")
             return None
             
     async def _get_training_symbols(self) -> List[str]:
