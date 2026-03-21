@@ -75,9 +75,10 @@ class TimeSeriesAIService:
         "1 week": {"model_name": "direction_predictor_weekly", "description": "Long-term trends"},
     }
     
-    # Default max symbols (removed hard limit of 100)
-    DEFAULT_MAX_SYMBOLS = 1000
-    DEFAULT_MAX_BARS_PER_SYMBOL = 10000
+    # Training defaults - optimized for using ALL available data
+    # Your actual data is already limited, so no need for artificial caps
+    DEFAULT_MAX_SYMBOLS = 10000  # Use all symbols (you have ~9,400 max)
+    DEFAULT_MAX_BARS_PER_SYMBOL = 50000  # Use all bars (your max is ~2,000 per symbol anyway)
     
     def __init__(self):
         self._model = get_timeseries_model() if ML_AVAILABLE else None
@@ -300,6 +301,15 @@ class TimeSeriesAIService:
             
             # Cache the trained model
             self._models[bar_size] = model
+            
+            # Log training to history for tracking improvement over time
+            await self._log_training_history(
+                bar_size=bar_size,
+                model_name=model_name,
+                metrics=metrics,
+                symbols_used=len(bars_by_symbol),
+                total_bars=total_bars
+            )
             
             # Update status
             self._training_status[bar_size] = {
@@ -551,6 +561,62 @@ class TimeSeriesAIService:
         except Exception as e:
             logger.warning(f"Could not get bars for {symbol} from DB for prediction: {e}")
             return None
+    
+    async def _log_training_history(
+        self,
+        bar_size: str,
+        model_name: str,
+        metrics,
+        symbols_used: int,
+        total_bars: int
+    ):
+        """Log training run to history for tracking model improvement over time"""
+        if self._db is None:
+            return
+            
+        try:
+            history_record = {
+                "timestamp": datetime.now(timezone.utc),
+                "bar_size": bar_size,
+                "model_name": model_name,
+                "accuracy": metrics.accuracy,
+                "precision_up": metrics.precision_up,
+                "recall_up": metrics.recall_up,
+                "f1_up": metrics.f1_up,
+                "training_samples": metrics.training_samples,
+                "validation_samples": metrics.validation_samples,
+                "symbols_used": symbols_used,
+                "total_bars": total_bars,
+                "top_features": metrics.top_features[:5] if metrics.top_features else [],
+                "version": getattr(metrics, 'last_trained', None)
+            }
+            
+            self._db["model_training_history"].insert_one(history_record)
+            logger.info(f"Logged training history for {model_name}: {metrics.accuracy*100:.1f}% accuracy")
+            
+        except Exception as e:
+            logger.warning(f"Could not log training history: {e}")
+    
+    def get_training_history(self, bar_size: str = None, limit: int = 20) -> List[Dict]:
+        """Get training history for tracking model improvement"""
+        if self._db is None:
+            return []
+            
+        try:
+            query = {}
+            if bar_size:
+                query["bar_size"] = bar_size
+                
+            history = list(
+                self._db["model_training_history"]
+                .find(query, {"_id": 0})
+                .sort("timestamp", -1)
+                .limit(limit)
+            )
+            return history
+        except Exception as e:
+            logger.warning(f"Could not get training history: {e}")
+            return []
             
     async def auto_train_if_needed(self):
         """Check and auto-train if interval has passed"""

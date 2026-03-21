@@ -1072,6 +1072,27 @@ async def get_available_timeframe_data():
     return _timeseries_ai.get_available_timeframe_data()
 
 
+@router.get("/timeseries/training-history")
+async def get_training_history(bar_size: str = None, limit: int = 20):
+    """
+    Get training history for tracking model improvement over time.
+    
+    Args:
+        bar_size: Optional filter by timeframe (e.g., "1 day", "5 mins")
+        limit: Max records to return (default: 20)
+    """
+    if not _timeseries_ai:
+        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
+    
+    history = _timeseries_ai.get_training_history(bar_size=bar_size, limit=limit)
+    
+    return {
+        "success": True,
+        "history": history,
+        "count": len(history)
+    }
+
+
 @router.get("/timeseries/metrics")
 async def get_model_metrics():
     """Get model performance metrics"""
