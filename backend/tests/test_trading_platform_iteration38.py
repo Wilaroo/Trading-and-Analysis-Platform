@@ -11,7 +11,7 @@ load_dotenv()
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 if not BASE_URL:
-    BASE_URL = "https://sentcom-ai-forge.preview.emergentagent.com"
+    BASE_URL = "https://multi-timeframe-ml.preview.emergentagent.com"
 
 
 class TestHealthAndStatus:
