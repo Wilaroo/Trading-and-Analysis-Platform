@@ -24,7 +24,8 @@ import {
   Database,
   BarChart3,
   RefreshCw,
-  Layers
+  Layers,
+  History
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api, { apiLongRunning } from '../utils/api';
@@ -217,17 +218,20 @@ const MultiTimeframeTraining = memo(({ onTrainComplete }) => {
   const [expanded, setExpanded] = useState(true);
   const [availableData, setAvailableData] = useState(null);
   const [trainingStatus, setTrainingStatus] = useState({});
+  const [trainingHistory, setTrainingHistory] = useState([]);
   const [isTraining, setIsTraining] = useState(false);
   const [currentTimeframe, setCurrentTimeframe] = useState(null);
   const [isTrainingAll, setIsTrainingAll] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [showHistory, setShowHistory] = useState(false);
 
   // Fetch available data on mount
   const fetchData = useCallback(async () => {
     try {
-      const [dataRes, statusRes] = await Promise.all([
+      const [dataRes, statusRes, historyRes] = await Promise.all([
         api.get('/api/ai-modules/timeseries/available-data'),
-        api.get('/api/ai-modules/timeseries/training-status')
+        api.get('/api/ai-modules/timeseries/training-status'),
+        api.get('/api/ai-modules/timeseries/training-history?limit=30')
       ]);
       
       if (dataRes.data?.success) {
@@ -235,6 +239,9 @@ const MultiTimeframeTraining = memo(({ onTrainComplete }) => {
       }
       if (statusRes.data?.success) {
         setTrainingStatus(statusRes.data.status?.timeframe_status || {});
+      }
+      if (historyRes.data?.success) {
+        setTrainingHistory(historyRes.data.history || []);
       }
     } catch (e) {
       console.error('Error fetching timeframe data:', e);
@@ -498,6 +505,67 @@ const MultiTimeframeTraining = memo(({ onTrainComplete }) => {
                   <Database className="w-12 h-12 mx-auto mb-3 opacity-50" />
                   <p className="text-sm">No historical data available for training.</p>
                   <p className="text-xs mt-1">Run the data collector to gather training data.</p>
+                </div>
+              )}
+
+              {/* Training History Section */}
+              {trainingHistory.length > 0 && (
+                <div className="mt-4 border-t border-white/10 pt-4">
+                  <button
+                    onClick={() => setShowHistory(!showHistory)}
+                    className="flex items-center gap-2 text-sm text-zinc-400 hover:text-white transition-colors mb-3"
+                  >
+                    <History className="w-4 h-4" />
+                    Training History ({trainingHistory.length} runs)
+                    {showHistory ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </button>
+                  
+                  <AnimatePresence>
+                    {showHistory && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="space-y-2 max-h-64 overflow-y-auto">
+                          {trainingHistory.map((record, idx) => {
+                            const config = TIMEFRAME_CONFIG[record.bar_size] || TIMEFRAME_CONFIG['1 day'];
+                            const accuracy = record.accuracy ? (record.accuracy * 100).toFixed(1) : '?';
+                            const timestamp = record.timestamp ? new Date(record.timestamp).toLocaleString() : 'Unknown';
+                            
+                            return (
+                              <div 
+                                key={idx}
+                                className={`p-3 rounded-lg bg-black/20 border ${config.borderColor} flex items-center justify-between`}
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center bg-${config.color}-500/20`}>
+                                    <config.icon className={`w-4 h-4 text-${config.color}-400`} />
+                                  </div>
+                                  <div>
+                                    <div className="text-sm text-white font-medium">{config.label}</div>
+                                    <div className="text-xs text-zinc-500">{timestamp}</div>
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className={`text-sm font-semibold ${
+                                    record.accuracy >= 0.6 ? 'text-green-400' : 
+                                    record.accuracy >= 0.5 ? 'text-yellow-400' : 'text-red-400'
+                                  }`}>
+                                    {accuracy}% accuracy
+                                  </div>
+                                  <div className="text-xs text-zinc-500">
+                                    {formatNumber(record.training_samples)} samples
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               )}
             </div>

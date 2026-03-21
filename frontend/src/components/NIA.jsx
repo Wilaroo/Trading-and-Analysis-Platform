@@ -139,12 +139,16 @@ const TrainAllPanel = memo(({ onTrainComplete }) => {
     try {
       // Step 1: Train Time-Series AI
       setCurrentStep('timeseries');
-      newProgress.timeseries = { status: 'running', message: 'Training model (this may take 1-2 min)...' };
+      newProgress.timeseries = { status: 'running', message: 'Training Daily model (this may take 2-5 min)...' };
       setProgress({ ...newProgress });
       
       try {
         // Use long-running API client for training (5 min timeout)
-        const tsRes = await apiLongRunning.post('/api/ai-modules/timeseries/train', { max_symbols: 100 });
+        // Train on Daily timeframe by default (best data quality)
+        const tsRes = await apiLongRunning.post('/api/ai-modules/timeseries/train', { 
+          bar_size: '1 day',
+          max_symbols: 5000  // Use all available symbols
+        });
         
         // Check if ML is not available
         if (tsRes.data?.ml_not_available) {
