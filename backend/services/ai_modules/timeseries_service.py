@@ -89,6 +89,10 @@ class TimeSeriesAIService:
         self._ml_available = ML_AVAILABLE
         self._training_in_progress = False
         self._training_status = {}
+        # Cache for available data (expensive aggregation query)
+        self._available_data_cache = None
+        self._available_data_cache_time = None
+        self._cache_ttl_seconds = 3600  # Cache for 1 hour
         
     def set_db(self, db):
         """Set database connection"""
@@ -409,11 +413,44 @@ class TimeSeriesAIService:
         }
     
     def get_available_timeframe_data(self) -> Dict[str, Any]:
-        """Get info about available data for each timeframe from the database"""
+        """Get info about available data for each timeframe from the database.
+        Uses caching and stored summaries to avoid expensive aggregations."""
+        import time
+        
         if self._db is None:
             return {"success": False, "error": "Database not connected"}
         
+        # Check memory cache first (fastest)
+        current_time = time.time()
+        if (self._available_data_cache is not None and 
+            self._available_data_cache_time is not None and
+            current_time - self._available_data_cache_time < self._cache_ttl_seconds):
+            logger.info("Returning cached available data")
+            return self._available_data_cache
+        
         try:
+            # Try to get from stored summary first (much faster than aggregation)
+            stored_summary = self._db["data_summaries"].find_one(
+                {"type": "timeframe_bars"},
+                {"_id": 0}
+            )
+            
+            if stored_summary and stored_summary.get("data"):
+                logger.info("Using stored data summary from database")
+                result_data = {
+                    "success": True,
+                    "timeframes": stored_summary["data"].get("timeframes", {}),
+                    "total_bars": stored_summary["data"].get("total_bars", 0),
+                    "cached": True,
+                    "cache_time": stored_summary.get("updated_at")
+                }
+                # Update memory cache
+                self._available_data_cache = result_data
+                self._available_data_cache_time = current_time
+                return result_data
+            
+            # Fall back to aggregation (slow but accurate)
+            logger.info("Running aggregation query for available data...")
             pipeline = [
                 {"$group": {"_id": "$bar_size", "count": {"$sum": 1}, "symbols": {"$addToSet": "$symbol"}}},
                 {"$project": {"_id": 1, "count": 1, "symbol_count": {"$size": "$symbols"}}},
@@ -432,11 +469,29 @@ class TimeSeriesAIService:
                         "description": self.SUPPORTED_TIMEFRAMES[bar_size]["description"]
                     }
             
-            return {
+            result_data = {
                 "success": True,
                 "timeframes": timeframe_data,
                 "total_bars": sum(t["bar_count"] for t in timeframe_data.values())
             }
+            
+            # Store the summary for future fast access
+            from datetime import datetime, timezone
+            self._db["data_summaries"].update_one(
+                {"type": "timeframe_bars"},
+                {"$set": {
+                    "type": "timeframe_bars",
+                    "data": result_data,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }},
+                upsert=True
+            )
+            
+            # Update memory cache
+            self._available_data_cache = result_data
+            self._available_data_cache_time = current_time
+            
+            return result_data
         except Exception as e:
             logger.error(f"Error getting timeframe data: {e}")
             return {"success": False, "error": str(e)}
