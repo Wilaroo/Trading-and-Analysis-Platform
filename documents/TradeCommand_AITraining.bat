@@ -69,20 +69,23 @@ echo [3/9] Starting Ollama (AI Backend)...
 curl -s http://localhost:11434/api/tags >nul 2>&1
 if %errorlevel%==0 (
     echo        Ollama already running!
-) else (
-    echo        Starting Ollama server...
-    start "Ollama Server" /MIN cmd /c "title Ollama Server && set OLLAMA_HOST=0.0.0.0 && set OLLAMA_ORIGINS=* && ollama serve"
-    echo        Waiting for Ollama startup (8 sec)...
-    timeout /t 8 /nobreak >nul
-    
-    :: Verify Ollama is ready
-    curl -s http://localhost:11434/api/tags >nul 2>&1
-    if %errorlevel%==0 (
-        echo        Ollama ready!
-    ) else (
-        echo        [WARN] Ollama may still be starting...
-    )
+    goto ollama_done
 )
+
+echo        Starting Ollama server...
+start "Ollama Server" /MIN cmd /c "title Ollama Server & set OLLAMA_HOST=0.0.0.0 & ollama serve"
+echo        Waiting for Ollama startup (8 sec)...
+timeout /t 8 /nobreak >nul
+
+:: Verify Ollama is ready
+curl -s http://localhost:11434/api/tags >nul 2>&1
+if %errorlevel%==0 (
+    echo        Ollama ready!
+) else (
+    echo        [WARN] Ollama may still be starting...
+)
+
+:ollama_done
 echo.
 
 :: =====================================================
