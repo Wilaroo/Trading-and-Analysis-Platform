@@ -75,10 +75,10 @@ class TimeSeriesAIService:
         "1 week": {"model_name": "direction_predictor_weekly", "description": "Long-term trends"},
     }
     
-    # Training defaults - optimized for using ALL available data
-    # Your actual data is already limited, so no need for artificial caps
-    DEFAULT_MAX_SYMBOLS = 10000  # Use all symbols (you have ~9,400 max)
-    DEFAULT_MAX_BARS_PER_SYMBOL = 50000  # Use all bars (your max is ~2,000 per symbol anyway)
+    # Training defaults - balanced for performance and memory
+    # Start with smaller batches to avoid memory issues on local machines
+    DEFAULT_MAX_SYMBOLS = 500  # Start conservative, can increase
+    DEFAULT_MAX_BARS_PER_SYMBOL = 2000  # Reasonable per-symbol limit
     
     def __init__(self):
         self._model = get_timeseries_model() if ML_AVAILABLE else None
