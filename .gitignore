@@ -1366,3 +1366,12 @@
 # Environment files
 *.env
 *.env.*
+
+# Node modules cache (large files)
+frontend/node_modules/.cache/
+frontend/node_modules/
+
+# Python cache
+**/__pycache__/
+*.pyc
+
