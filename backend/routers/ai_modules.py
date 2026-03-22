@@ -12,10 +12,11 @@ Provides endpoints for:
 - Agent historical context (NEW)
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -1074,6 +1075,8 @@ async def train_full_universe_single(request: Optional[FullUniverseTrainRequest]
     This uses chunked loading to process ALL symbols without memory overflow.
     Expected runtime: 10-30 minutes per timeframe depending on data size.
     
+    This endpoint returns immediately and runs training in the background.
+    
     Args:
         bar_size: Timeframe to train (default: "1 day")
         symbol_batch_size: How many symbols to load at once (default: 100)
@@ -1096,17 +1099,33 @@ async def train_full_universe_single(request: Optional[FullUniverseTrainRequest]
         symbol_batch_size = request.symbol_batch_size if request and request.symbol_batch_size else 100
         max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else 2000
         
-        logger.info(f"Starting full universe training: {bar_size}, batch={symbol_batch_size}, max_bars={max_bars_per_symbol}")
+        logger.info(f"Full universe training requested: {bar_size}")
+        logger.info(f"Settings: batch={symbol_batch_size}, max_bars={max_bars_per_symbol}")
         
-        result = await _timeseries_ai.train_full_universe(
-            bar_size=bar_size,
-            symbol_batch_size=symbol_batch_size,
-            max_bars_per_symbol=max_bars_per_symbol
-        )
+        # Run training in background so request doesn't timeout
+        async def run_single_universe_training():
+            try:
+                result = await _timeseries_ai.train_full_universe(
+                    bar_size=bar_size,
+                    symbol_batch_size=symbol_batch_size,
+                    max_bars_per_symbol=max_bars_per_symbol
+                )
+                logger.info(f"Full Universe ({bar_size}) training completed: {result}")
+            except Exception as e:
+                logger.error(f"Full Universe ({bar_size}) training error: {e}", exc_info=True)
+        
+        # Start the background task
+        asyncio.create_task(run_single_universe_training())
         
         return {
-            "success": result.get("success", False),
-            "result": result
+            "success": True,
+            "message": f"Full Universe training started for {bar_size}",
+            "settings": {
+                "bar_size": bar_size,
+                "symbol_batch_size": symbol_batch_size,
+                "max_bars_per_symbol": max_bars_per_symbol
+            },
+            "monitor": "Watch backend terminal for [FULL UNIVERSE] logs"
         }
         
     except Exception as e:
@@ -1115,7 +1134,10 @@ async def train_full_universe_single(request: Optional[FullUniverseTrainRequest]
 
 
 @router.post("/timeseries/train-full-universe-all")
-async def train_full_universe_all_timeframes(request: Optional[FullUniverseAllRequest] = None):
+async def train_full_universe_all_timeframes(
+    request: Optional[FullUniverseAllRequest] = None,
+    background_tasks: BackgroundTasks = None
+):
     """
     Train FULL UNIVERSE on ALL 7 timeframes.
     
@@ -1124,6 +1146,7 @@ async def train_full_universe_all_timeframes(request: Optional[FullUniverseAllRe
     
     **Expected runtime: 1-3 hours**
     
+    This endpoint returns immediately and runs training in the background.
     Monitor progress in your backend terminal or via /timeseries/training-status
     
     Args:
@@ -1148,19 +1171,37 @@ async def train_full_universe_all_timeframes(request: Optional[FullUniverseAllRe
         max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else 2000
         timeframes = request.timeframes if request and request.timeframes else None
         
-        logger.info("Starting FULL UNIVERSE ALL TIMEFRAMES training!")
+        logger.info("=" * 60)
+        logger.info("FULL UNIVERSE ALL TIMEFRAMES training requested!")
         logger.info(f"Settings: batch={symbol_batch_size}, max_bars={max_bars_per_symbol}")
         logger.info(f"Timeframes: {timeframes or 'ALL'}")
+        logger.info("Starting training in background...")
+        logger.info("=" * 60)
         
-        result = await _timeseries_ai.train_full_universe_all_timeframes(
-            symbol_batch_size=symbol_batch_size,
-            max_bars_per_symbol=max_bars_per_symbol,
-            timeframes=timeframes
-        )
+        # Run training in background so request doesn't timeout
+        async def run_full_universe_training():
+            try:
+                result = await _timeseries_ai.train_full_universe_all_timeframes(
+                    symbol_batch_size=symbol_batch_size,
+                    max_bars_per_symbol=max_bars_per_symbol,
+                    timeframes=timeframes
+                )
+                logger.info(f"Full Universe training completed: {result}")
+            except Exception as e:
+                logger.error(f"Full Universe training error: {e}", exc_info=True)
+        
+        # Start the background task
+        asyncio.create_task(run_full_universe_training())
         
         return {
-            "success": result.get("success", False),
-            "result": result
+            "success": True,
+            "message": "Full Universe training started in background",
+            "settings": {
+                "symbol_batch_size": symbol_batch_size,
+                "max_bars_per_symbol": max_bars_per_symbol,
+                "timeframes": timeframes or "ALL"
+            },
+            "monitor": "Watch backend terminal for [FULL UNIVERSE] logs or poll /api/ai-modules/timeseries/training-status"
         }
         
     except Exception as e:

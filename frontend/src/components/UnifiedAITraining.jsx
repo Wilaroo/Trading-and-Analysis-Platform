@@ -626,6 +626,8 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
     
     if (!confirmed) return;
     
+    console.log('[NIA] Full Universe: User confirmed, starting request...');
+    
     setIsTraining(true);
     setTrainingStartTime(Date.now());
     setTrainingProgress({
@@ -644,33 +646,44 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
     });
     
     try {
+      console.log('[NIA] Full Universe: Sending POST request to /api/ai-modules/timeseries/train-full-universe-all');
       const res = await apiLongRunning.post('/api/ai-modules/timeseries/train-full-universe-all', {
         symbol_batch_size: 100,
         max_bars_per_symbol: 2000
       });
+      console.log('[NIA] Full Universe: Response received:', res.data);
       
       if (res.data?.success) {
-        const result = res.data.result;
-        const trainedCount = result.timeframes_trained || 0;
-        const totalTime = result.total_elapsed_seconds || 0;
-        
+        // Training started in background
         toast.success(
-          `🎉 Full Universe complete! ${trainedCount}/${result.total_timeframes} models trained in ${(totalTime/60).toFixed(0)} minutes`,
-          { duration: 15000 }
+          `🚀 Full Universe training started! Watch the backend terminal for progress.`,
+          { duration: 10000 }
         );
         
-        // Update status for all timeframes
-        const newStatus = {};
-        for (const [tf, tfResult] of Object.entries(result.results || {})) {
-          if (tfResult.success) {
-            const accuracy = tfResult.accuracy ? (tfResult.accuracy * 100).toFixed(1) : '?';
-            newStatus[tf] = { status: 'completed', message: `${accuracy}% accuracy (full universe)` };
-          } else {
-            newStatus[tf] = { status: 'error', message: tfResult.error || 'Failed' };
+        // If we get immediate results (unlikely for full universe), handle them
+        if (res.data.result) {
+          const result = res.data.result;
+          const trainedCount = result.timeframes_trained || 0;
+          const totalTime = result.total_elapsed_seconds || 0;
+          
+          toast.success(
+            `🎉 Full Universe complete! ${trainedCount}/${result.total_timeframes} models trained in ${(totalTime/60).toFixed(0)} minutes`,
+            { duration: 15000 }
+          );
+          
+          // Update status for all timeframes
+          const newStatus = {};
+          for (const [tf, tfResult] of Object.entries(result.results || {})) {
+            if (tfResult.success) {
+              const accuracy = tfResult.accuracy ? (tfResult.accuracy * 100).toFixed(1) : '?';
+              newStatus[tf] = { status: 'completed', message: `${accuracy}% accuracy (full universe)` };
+            } else {
+              newStatus[tf] = { status: 'error', message: tfResult.error || 'Failed' };
+            }
           }
+          setModelStatus(newStatus);
+          localStorage.setItem(STORAGE_KEYS.modelStatus, JSON.stringify(newStatus));
         }
-        setModelStatus(newStatus);
-        localStorage.setItem(STORAGE_KEYS.modelStatus, JSON.stringify(newStatus));
         
         fetchData();
       } else if (res.data?.ml_not_available) {
