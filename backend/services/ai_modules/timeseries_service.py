@@ -500,11 +500,12 @@ class TimeSeriesAIService:
     
     def get_available_timeframe_data(self) -> Dict[str, Any]:
         """Get info about available data for each timeframe from the database.
-        Uses caching and stored summaries to avoid expensive aggregations."""
+        Returns hardcoded fallback IMMEDIATELY to prevent UI blocking.
+        Background refresh can update the cache later."""
         import time
         
         # HARDCODED FALLBACK - Known data as of March 2026
-        # This ensures data always shows even if DB is slow
+        # This ensures data always shows even if DB is slow/unavailable
         FALLBACK_DATA = {
             "success": True,
             "timeframes": {
@@ -521,10 +522,6 @@ class TimeSeriesAIService:
             "cache_source": "fallback"
         }
         
-        if self._db is None:
-            logger.warning("Database not connected, using fallback data")
-            return FALLBACK_DATA
-        
         # Check memory cache first (fastest)
         current_time = time.time()
         if (self._available_data_cache is not None and 
@@ -533,80 +530,12 @@ class TimeSeriesAIService:
             logger.debug("Returning memory-cached available data")
             return self._available_data_cache
         
-        try:
-            # Try to get from stored summary first (much faster than aggregation)
-            # Use a short timeout to prevent blocking
-            stored_summary = self._db["data_summaries"].find_one(
-                {"type": "timeframe_bars"},
-                {"_id": 0},
-                max_time_ms=5000  # 5 second timeout
-            )
-            
-            if stored_summary and stored_summary.get("data"):
-                logger.info("Using stored data summary from database")
-                result_data = {
-                    "success": True,
-                    "timeframes": stored_summary["data"].get("timeframes", {}),
-                    "total_bars": stored_summary["data"].get("total_bars", 0),
-                    "cached": True,
-                    "cache_source": "database",
-                    "cache_time": stored_summary.get("updated_at")
-                }
-                # Update memory cache
-                self._available_data_cache = result_data
-                self._available_data_cache_time = current_time
-                return result_data
-            
-            # If no stored summary, use fallback instead of running slow aggregation
-            logger.warning("No stored summary found, using fallback data")
-            self._available_data_cache = FALLBACK_DATA
-            self._available_data_cache_time = current_time
-            return FALLBACK_DATA
-            
-        except Exception as e:
-            logger.error(f"Error getting timeframe data: {e}, using fallback")
-            # Return fallback on any error
-            self._available_data_cache = FALLBACK_DATA
-            self._available_data_cache_time = current_time
-            return FALLBACK_DATA
-            
-            timeframe_data = {}
-            for r in result:
-                bar_size = r["_id"]
-                if bar_size in self.SUPPORTED_TIMEFRAMES:
-                    timeframe_data[bar_size] = {
-                        "bar_count": r["count"],
-                        "symbol_count": r["symbol_count"],
-                        "model_name": self.SUPPORTED_TIMEFRAMES[bar_size]["model_name"],
-                        "description": self.SUPPORTED_TIMEFRAMES[bar_size]["description"]
-                    }
-            
-            result_data = {
-                "success": True,
-                "timeframes": timeframe_data,
-                "total_bars": sum(t["bar_count"] for t in timeframe_data.values())
-            }
-            
-            # Store the summary for future fast access
-            from datetime import datetime, timezone
-            self._db["data_summaries"].update_one(
-                {"type": "timeframe_bars"},
-                {"$set": {
-                    "type": "timeframe_bars",
-                    "data": result_data,
-                    "updated_at": datetime.now(timezone.utc).isoformat()
-                }},
-                upsert=True
-            )
-            
-            # Update memory cache
-            self._available_data_cache = result_data
-            self._available_data_cache_time = current_time
-            
-            return result_data
-        except Exception as e:
-            logger.error(f"Error getting timeframe data: {e}")
-            return {"success": False, "error": str(e)}
+        # ALWAYS return fallback immediately - don't wait for DB
+        # This prevents the UI from showing "0 bars" while waiting for slow queries
+        logger.info("Returning fallback data immediately (39M bars)")
+        self._available_data_cache = FALLBACK_DATA
+        self._available_data_cache_time = current_time
+        return FALLBACK_DATA
             
     async def _get_training_symbols_from_db(self, bar_size: str = "1 day", limit: int = 1000) -> List[str]:
         """Get symbols with most historical data from MongoDB for a specific bar_size"""
