@@ -947,26 +947,37 @@ class TimeSeriesAIService:
         }
     
     async def _get_all_symbols_for_timeframe(self, bar_size: str) -> List[str]:
-        """Get ALL symbols that have data for a specific timeframe."""
+        """Get ALL symbols that have data for a specific timeframe.
+        Runs MongoDB query in thread pool to avoid blocking the event loop."""
         if self._db is None:
             return []
         
+        def _blocking_query():
+            """This runs in a thread pool"""
+            try:
+                pipeline = [
+                    {"$match": {"bar_size": bar_size}},
+                    {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
+                    {"$match": {"count": {"$gte": self.MIN_BARS_FOR_TRAINING}}},
+                    {"$sort": {"count": -1}}  # Most data first
+                ]
+                
+                result = list(self._db["ib_historical_data"].aggregate(
+                    pipeline, 
+                    allowDiskUse=True,
+                    maxTimeMS=120000  # 2 minute timeout for large queries
+                ))
+                
+                return [r["_id"] for r in result]
+            except Exception as e:
+                logger.error(f"Error in blocking query for {bar_size}: {e}")
+                return []
+        
         try:
-            # Get distinct symbols for this bar_size with at least MIN_BARS
-            pipeline = [
-                {"$match": {"bar_size": bar_size}},
-                {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
-                {"$match": {"count": {"$gte": self.MIN_BARS_FOR_TRAINING}}},
-                {"$sort": {"count": -1}}  # Most data first
-            ]
-            
-            result = list(self._db["ib_historical_data"].aggregate(
-                pipeline, 
-                allowDiskUse=True,
-                maxTimeMS=60000  # 60 second timeout
-            ))
-            
-            symbols = [r["_id"] for r in result]
+            # Run blocking MongoDB query in thread pool
+            logger.info(f"[FULL UNIVERSE] Fetching symbols for {bar_size} (running in thread pool)...")
+            loop = asyncio.get_event_loop()
+            symbols = await loop.run_in_executor(None, _blocking_query)
             logger.info(f"[FULL UNIVERSE] Found {len(symbols)} symbols for {bar_size}")
             return symbols
             
@@ -1024,26 +1035,37 @@ class TimeSeriesAIService:
         return FALLBACK_DATA
             
     async def _get_training_symbols_from_db(self, bar_size: str = "1 day", limit: int = 1000) -> List[str]:
-        """Get symbols with most historical data from MongoDB for a specific bar_size"""
+        """Get symbols with most historical data from MongoDB for a specific bar_size.
+        Runs MongoDB query in thread pool to avoid blocking the event loop."""
         if self._db is None:
             return []
+        
+        def _blocking_query():
+            """This runs in a thread pool"""
+            try:
+                pipeline = [
+                    {"$match": {"bar_size": bar_size}},
+                    {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
+                    {"$match": {"count": {"$gte": self.MIN_BARS_FOR_TRAINING}}},
+                    {"$sort": {"count": -1}},
+                    {"$limit": limit}
+                ]
+                result = list(self._db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True))
+                return [r["_id"] for r in result]
+            except Exception as e:
+                logger.error(f"Error in blocking query for training symbols {bar_size}: {e}")
+                return []
             
         try:
-            # Aggregate to find symbols with most bars for this timeframe
-            pipeline = [
-                {"$match": {"bar_size": bar_size}},
-                {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
-                {"$match": {"count": {"$gte": self.MIN_BARS_FOR_TRAINING}}},
-                {"$sort": {"count": -1}},
-                {"$limit": limit}
-            ]
-            result = list(self._db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True))
-            symbols = [r["_id"] for r in result]
+            loop = asyncio.get_event_loop()
+            symbols = await loop.run_in_executor(None, _blocking_query)
             logger.info(f"Found {len(symbols)} symbols with sufficient {bar_size} data")
-            return symbols
+            return symbols if symbols else [
+                "NVDA", "TSLA", "ORCL", "AVGO", "MSFT", "GOOGL", "AAPL", 
+                "META", "AMZN", "JPM", "ADBE", "V"
+            ]
         except Exception as e:
             logger.error(f"Error getting training symbols for {bar_size}: {e}")
-            # Fallback to default list
             return [
                 "NVDA", "TSLA", "ORCL", "AVGO", "MSFT", "GOOGL", "AAPL", 
                 "META", "AMZN", "JPM", "ADBE", "V"
@@ -1055,28 +1077,38 @@ class TimeSeriesAIService:
         bar_size: str = "1 day",
         max_bars: int = None
     ) -> Optional[List[Dict]]:
-        """Get historical bars for a symbol from unified ib_historical_data collection"""
+        """Get historical bars for a symbol from unified ib_historical_data collection.
+        Runs MongoDB query in thread pool to avoid blocking the event loop."""
         if self._db is None:
             return None
         
         if max_bars is None:
             max_bars = self.DEFAULT_MAX_BARS_PER_SYMBOL
+        
+        def _blocking_query():
+            """This runs in a thread pool"""
+            try:
+                cursor = self._db["ib_historical_data"].find(
+                    {"symbol": symbol, "bar_size": bar_size},
+                    {"_id": 0, "symbol": 1, "date": 1, "open": 1, "high": 1, 
+                     "low": 1, "close": 1, "volume": 1}
+                ).sort("date", 1).limit(max_bars)
+                
+                bars = list(cursor)
+                
+                # Convert 'date' field to 'timestamp' for compatibility with model
+                for bar in bars:
+                    bar['timestamp'] = bar.pop('date', None)
+                
+                return bars if bars else None
+            except Exception as e:
+                logger.warning(f"Could not get {bar_size} bars for {symbol} from DB: {e}")
+                return None
             
         try:
-            # Fetch bars sorted by date (oldest first for proper training)
-            cursor = self._db["ib_historical_data"].find(
-                {"symbol": symbol, "bar_size": bar_size},
-                {"_id": 0, "symbol": 1, "date": 1, "open": 1, "high": 1, 
-                 "low": 1, "close": 1, "volume": 1}
-            ).sort("date", 1).limit(max_bars)  # Ascending order (oldest first), limited
-            
-            bars = list(cursor)
-            
-            # Convert 'date' field to 'timestamp' for compatibility with model
-            for bar in bars:
-                bar['timestamp'] = bar.pop('date', None)
-            
-            return bars if bars else None
+            # Run blocking MongoDB query in thread pool
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, _blocking_query)
             
         except Exception as e:
             logger.warning(f"Could not get {bar_size} bars for {symbol} from DB: {e}")
