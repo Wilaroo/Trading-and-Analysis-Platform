@@ -1057,10 +1057,36 @@ async def get_timeseries_training_status():
     if not _timeseries_ai:
         raise HTTPException(status_code=503, detail="Time-series AI not initialized")
     
+    # Include training mode status
+    training_mode_status = None
+    try:
+        from services.training_mode import training_mode_manager
+        training_mode_status = training_mode_manager.get_status()
+    except ImportError:
+        pass
+    
     return {
         "success": True,
-        "status": _timeseries_ai.get_training_status()
+        "status": _timeseries_ai.get_training_status(),
+        "training_mode": training_mode_status
     }
+
+
+@router.get("/training-mode/status")
+async def get_training_mode_status():
+    """Get current training mode status (paused tasks, elapsed time, etc.)"""
+    try:
+        from services.training_mode import training_mode_manager
+        return {
+            "success": True,
+            **training_mode_manager.get_status()
+        }
+    except ImportError:
+        return {
+            "success": False,
+            "error": "Training mode manager not available",
+            "training_active": False
+        }
 
 
 @router.get("/timeseries/available-data")

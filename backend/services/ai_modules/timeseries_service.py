@@ -9,6 +9,7 @@ Key Features:
 - Probability-based confidence
 - Auto-training from historical data
 - Performance tracking
+- Training Priority Mode - pauses non-essential tasks during training
 
 Note: Requires lightgbm to be installed. Will gracefully degrade if not available.
 """
@@ -19,6 +20,12 @@ from datetime import datetime, timezone, timedelta
 import asyncio
 
 logger = logging.getLogger(__name__)
+
+# Import training mode manager
+try:
+    from services.training_mode import training_mode_manager
+except ImportError:
+    training_mode_manager = None
 
 # Try to import ML dependencies
 ML_AVAILABLE = False
@@ -75,10 +82,10 @@ class TimeSeriesAIService:
         "1 week": {"model_name": "direction_predictor_weekly", "description": "Long-term trends"},
     }
     
-    # Training defaults - balanced for performance and memory
-    # Start with smaller batches to avoid memory issues on local machines
-    DEFAULT_MAX_SYMBOLS = 500  # Start conservative, can increase
-    DEFAULT_MAX_BARS_PER_SYMBOL = 2000  # Reasonable per-symbol limit
+    # Training defaults - optimized for fast local training
+    # Smaller batches = faster training, less memory usage
+    DEFAULT_MAX_SYMBOLS = 100  # Fast training (~30 seconds)
+    DEFAULT_MAX_BARS_PER_SYMBOL = 500  # Enough data for good accuracy
     
     def __init__(self):
         self._model = get_timeseries_model() if ML_AVAILABLE else None
@@ -239,6 +246,11 @@ class TimeSeriesAIService:
                 "error": f"Unsupported bar_size: {bar_size}. Supported: {list(self.SUPPORTED_TIMEFRAMES.keys())}"
             }
         
+        # ENTER TRAINING MODE - Pause non-essential background tasks
+        if training_mode_manager:
+            training_mode_manager.enter_training_mode(training_type='single', timeframe=bar_size)
+            logger.info(f"[TRAINING MODE] Entered for {bar_size}")
+        
         # Get or create model for this timeframe
         model_config = self.SUPPORTED_TIMEFRAMES[bar_size]
         model_name = model_config["model_name"]
@@ -344,6 +356,59 @@ class TimeSeriesAIService:
             return {"success": False, "error": str(e)}
         finally:
             self._training_in_progress = False
+            # EXIT TRAINING MODE - Resume background tasks
+            if training_mode_manager:
+                training_mode_manager.exit_training_mode()
+                logger.info(f"[TRAINING MODE] Exited for {bar_size}")
+    
+    async def _train_model_internal(
+        self,
+        bar_size: str = "1 day",
+        max_symbols: int = None,
+        max_bars_per_symbol: int = None
+    ) -> Dict[str, Any]:
+        """
+        Internal training method used by train_all_timeframes.
+        Does NOT manage training mode (caller handles that).
+        """
+        if max_symbols is None:
+            max_symbols = self.DEFAULT_MAX_SYMBOLS
+        if max_bars_per_symbol is None:
+            max_bars_per_symbol = self.DEFAULT_MAX_BARS_PER_SYMBOL
+            
+        model_config = self.SUPPORTED_TIMEFRAMES[bar_size]
+        model_name = model_config["model_name"]
+        
+        try:
+            model = TimeSeriesGBM(model_name=model_name)
+            model.set_db(self._db)
+            
+            symbols = await self._get_training_symbols_from_db(bar_size=bar_size, limit=max_symbols)
+            
+            bars_by_symbol = {}
+            for symbol in symbols:
+                bars = await self._get_historical_bars_from_db(symbol, bar_size=bar_size, max_bars=max_bars_per_symbol)
+                if bars and len(bars) >= self.MIN_BARS_FOR_TRAINING:
+                    bars_by_symbol[symbol] = bars
+            
+            if not bars_by_symbol:
+                return {"success": False, "error": f"No data for {bar_size}"}
+            
+            total_bars = sum(len(b) for b in bars_by_symbol.values())
+            metrics = model.train(bars_by_symbol)
+            self._models[bar_size] = model
+            
+            await self._log_training_history(bar_size=bar_size, model_name=model_name, metrics=metrics, samples=total_bars)
+            
+            return {
+                "success": True,
+                "total_bars": total_bars,
+                "samples": total_bars,
+                "metrics": {"accuracy": getattr(metrics, 'accuracy', None)} if metrics else {}
+            }
+        except Exception as e:
+            logger.error(f"Internal training error for {bar_size}: {e}")
+            return {"success": False, "error": str(e)}
             
     async def train_all_timeframes(
         self,
@@ -368,6 +433,11 @@ class TimeSeriesAIService:
         if timeframes is None:
             timeframes = list(self.SUPPORTED_TIMEFRAMES.keys())
         
+        # ENTER TRAINING MODE for full training
+        if training_mode_manager:
+            training_mode_manager.enter_training_mode(training_type='full', timeframe='all')
+            logger.info(f"[TRAINING MODE] Entered for FULL training ({len(timeframes)} timeframes)")
+        
         results = {}
         overall_success = True
         total_bars_trained = 0
@@ -375,24 +445,39 @@ class TimeSeriesAIService:
         
         logger.info(f"Starting multi-timeframe training for {len(timeframes)} timeframes...")
         
-        for tf in timeframes:
-            if tf not in self.SUPPORTED_TIMEFRAMES:
-                results[tf] = {"success": False, "error": f"Unsupported timeframe: {tf}"}
-                continue
+        try:
+            for tf in timeframes:
+                if tf not in self.SUPPORTED_TIMEFRAMES:
+                    results[tf] = {"success": False, "error": f"Unsupported timeframe: {tf}"}
+                    continue
+                    
+                logger.info(f"Training {tf} model...")
+                # Note: train_model will not re-enter/exit training mode since we're already in it
+                self._training_in_progress = True
+                self._training_status[tf] = {
+                    "status": "running",
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "message": "Loading data..."
+                }
                 
-            logger.info(f"Training {tf} model...")
-            result = await self.train_model(
-                bar_size=tf,
-                max_symbols=max_symbols,
-                max_bars_per_symbol=max_bars_per_symbol
-            )
-            results[tf] = result
-            
-            if result.get("success"):
-                total_bars_trained += result.get("total_bars", 0)
-                total_samples += result.get("samples", 0)
-            else:
-                overall_success = False
+                result = await self._train_model_internal(
+                    bar_size=tf,
+                    max_symbols=max_symbols,
+                    max_bars_per_symbol=max_bars_per_symbol
+                )
+                results[tf] = result
+                
+                if result.get("success"):
+                    total_bars_trained += result.get("total_bars", 0)
+                    total_samples += result.get("samples", 0)
+                else:
+                    overall_success = False
+        finally:
+            self._training_in_progress = False
+            # EXIT TRAINING MODE
+            if training_mode_manager:
+                training_mode_manager.exit_training_mode()
+                logger.info("[TRAINING MODE] Exited for FULL training")
         
         return {
             "success": overall_success,
