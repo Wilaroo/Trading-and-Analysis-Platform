@@ -479,10 +479,10 @@ class TimeSeriesAIService:
         total_samples = 0
         completed_count = 0
         
-        logger.info(f"=" * 60)
+        logger.info("=" * 60)
         logger.info(f"[FULL TRAIN] Starting training for {len(timeframes)} timeframes")
         logger.info(f"[FULL TRAIN] Settings: max_symbols={max_symbols or self.DEFAULT_MAX_SYMBOLS}, max_bars={max_bars_per_symbol or self.DEFAULT_MAX_BARS_PER_SYMBOL}")
-        logger.info(f"=" * 60)
+        logger.info("=" * 60)
         
         self._training_in_progress = True
         
@@ -492,7 +492,7 @@ class TimeSeriesAIService:
                     results[tf] = {"success": False, "error": f"Unsupported timeframe: {tf}"}
                     continue
                 
-                logger.info(f"")
+                logger.info("")
                 logger.info(f"[FULL TRAIN] === Training {idx}/{len(timeframes)}: {tf} ===")
                 
                 self._training_status[tf] = {
@@ -525,7 +525,7 @@ class TimeSeriesAIService:
                 
                 # Small delay between timeframes to prevent memory buildup
                 if idx < len(timeframes):
-                    logger.info(f"[FULL TRAIN] Pausing 2s before next timeframe...")
+                    logger.info("[FULL TRAIN] Pausing 2s before next timeframe...")
                     await asyncio.sleep(2)
                     
         except Exception as e:
@@ -538,11 +538,11 @@ class TimeSeriesAIService:
                 training_mode_manager.exit_training_mode()
                 logger.info("[TRAINING MODE] Exited for FULL training")
         
-        logger.info(f"")
-        logger.info(f"=" * 60)
+        logger.info("")
+        logger.info("=" * 60)
         logger.info(f"[FULL TRAIN] COMPLETE: {completed_count}/{len(timeframes)} models trained")
         logger.info(f"[FULL TRAIN] Total bars: {total_bars_trained:,}")
-        logger.info(f"=" * 60)
+        logger.info("=" * 60)
         
         return {
             "success": overall_success,
@@ -552,6 +552,428 @@ class TimeSeriesAIService:
             "total_samples": total_samples,
             "results": results
         }
+
+    async def train_full_universe(
+        self,
+        bar_size: str = "1 day",
+        symbol_batch_size: int = 100,
+        max_bars_per_symbol: int = 2000,
+        progress_callback = None
+    ) -> Dict[str, Any]:
+        """
+        Train on the FULL UNIVERSE of symbols using chunked loading.
+        
+        This method processes symbols in batches to avoid memory overload:
+        1. Get ALL symbols with data for this timeframe
+        2. Process symbols in batches of `symbol_batch_size`
+        3. Extract features from each batch (features are small, bars are large)
+        4. Accumulate features, discard raw bars to free memory
+        5. Train model on all accumulated features
+        
+        Args:
+            bar_size: Timeframe to train (e.g., "1 day")
+            symbol_batch_size: How many symbols to load at once (default: 100)
+            max_bars_per_symbol: Max bars per symbol (default: 2000 = ~8 years daily)
+            progress_callback: Optional callback for progress updates
+            
+        Returns:
+            Training result with metrics
+        """
+        import gc
+        import numpy as np
+        
+        if not self._ml_available:
+            return {"success": False, "error": "ML not available - lightgbm not installed"}
+            
+        if self._db is None:
+            return {"success": False, "error": "Database not connected"}
+            
+        if bar_size not in self.SUPPORTED_TIMEFRAMES:
+            return {"success": False, "error": f"Unsupported bar_size: {bar_size}"}
+        
+        model_config = self.SUPPORTED_TIMEFRAMES[bar_size]
+        model_name = model_config["model_name"]
+        
+        # Enter training mode
+        if training_mode_manager:
+            training_mode_manager.enter_training_mode(training_type='full_universe', timeframe=bar_size)
+        
+        self._training_in_progress = True
+        self._training_status[bar_size] = {
+            "status": "running",
+            "phase": "initializing",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "message": "Starting full universe training..."
+        }
+        
+        start_time = datetime.now(timezone.utc)
+        
+        try:
+            # Step 1: Get ALL symbols with data for this timeframe
+            logger.info("")
+            logger.info("=" * 70)
+            logger.info(f"[FULL UNIVERSE] Starting training for {bar_size}")
+            logger.info(f"[FULL UNIVERSE] Batch size: {symbol_batch_size} symbols, Max bars: {max_bars_per_symbol}")
+            logger.info("=" * 70)
+            
+            self._training_status[bar_size]["phase"] = "fetching_symbols"
+            self._training_status[bar_size]["message"] = "Fetching all symbols..."
+            
+            all_symbols = await self._get_all_symbols_for_timeframe(bar_size)
+            total_symbols = len(all_symbols)
+            
+            if total_symbols == 0:
+                return {"success": False, "error": f"No symbols found for {bar_size}"}
+            
+            logger.info(f"[FULL UNIVERSE] Found {total_symbols:,} symbols with {bar_size} data")
+            
+            # Step 2: Create model and feature engineer
+            model = TimeSeriesGBM(model_name=model_name)
+            model.set_db(self._db)
+            feature_engineer = model._feature_engineer
+            feature_names = model._feature_names
+            forecast_horizon = model.forecast_horizon
+            
+            # Step 3: Process symbols in batches, accumulating features
+            all_features = []
+            all_targets = []
+            symbols_processed = 0
+            symbols_with_data = 0
+            total_bars_processed = 0
+            
+            self._training_status[bar_size]["phase"] = "loading_data"
+            self._training_status[bar_size]["total_symbols"] = total_symbols
+            
+            num_batches = (total_symbols + symbol_batch_size - 1) // symbol_batch_size
+            
+            for batch_idx in range(num_batches):
+                batch_start = batch_idx * symbol_batch_size
+                batch_end = min(batch_start + symbol_batch_size, total_symbols)
+                batch_symbols = all_symbols[batch_start:batch_end]
+                
+                batch_features = []
+                batch_targets = []
+                
+                logger.info(f"[FULL UNIVERSE] Processing batch {batch_idx + 1}/{num_batches} ({batch_start + 1}-{batch_end} of {total_symbols})")
+                
+                for symbol in batch_symbols:
+                    try:
+                        # Load bars for this symbol
+                        bars = await self._get_historical_bars_from_db(
+                            symbol, 
+                            bar_size=bar_size,
+                            max_bars=max_bars_per_symbol
+                        )
+                        
+                        if not bars or len(bars) < 50 + forecast_horizon:
+                            continue
+                        
+                        symbols_with_data += 1
+                        total_bars_processed += len(bars)
+                        
+                        # Extract features using sliding window
+                        for i in range(len(bars) - 50 - forecast_horizon):
+                            window_bars = bars[i:i+50]
+                            window_bars_recent_first = window_bars[::-1]
+                            
+                            feature_set = feature_engineer.extract_features(
+                                window_bars_recent_first,
+                                symbol=symbol,
+                                include_target=False
+                            )
+                            
+                            if feature_set is not None:
+                                feature_vector = [
+                                    feature_set.features.get(f, 0.0)
+                                    for f in feature_names
+                                ]
+                                
+                                current_price = bars[i + 49]["close"]
+                                future_price = bars[i + 49 + forecast_horizon]["close"]
+                                target_return = (future_price - current_price) / current_price
+                                target = 1 if target_return > 0 else 0
+                                
+                                batch_features.append(feature_vector)
+                                batch_targets.append(target)
+                        
+                        # Clear bars from memory after processing
+                        del bars
+                        
+                    except Exception as e:
+                        logger.warning(f"[FULL UNIVERSE] Error processing {symbol}: {e}")
+                        continue
+                
+                # Accumulate batch features
+                all_features.extend(batch_features)
+                all_targets.extend(batch_targets)
+                symbols_processed = batch_end
+                
+                # Update status
+                progress_pct = (symbols_processed / total_symbols) * 100
+                self._training_status[bar_size].update({
+                    "message": f"Loaded {symbols_processed:,}/{total_symbols:,} symbols ({progress_pct:.1f}%)",
+                    "symbols_processed": symbols_processed,
+                    "symbols_with_data": symbols_with_data,
+                    "samples_collected": len(all_features),
+                    "bars_processed": total_bars_processed
+                })
+                
+                logger.info(f"[FULL UNIVERSE] Batch complete: {len(batch_features):,} samples, Total: {len(all_features):,} samples")
+                
+                # Force garbage collection after each batch
+                del batch_features
+                del batch_targets
+                gc.collect()
+                
+                # Small delay to prevent overwhelming the system
+                await asyncio.sleep(0.5)
+            
+            # Step 4: Train the model on accumulated features
+            if len(all_features) < 1000:
+                return {
+                    "success": False, 
+                    "error": f"Insufficient training data: {len(all_features)} samples (need 1000+)"
+                }
+            
+            logger.info("")
+            logger.info("[FULL UNIVERSE] Feature extraction complete!")
+            logger.info(f"[FULL UNIVERSE] Total samples: {len(all_features):,}")
+            logger.info(f"[FULL UNIVERSE] Symbols with data: {symbols_with_data:,}")
+            logger.info(f"[FULL UNIVERSE] Total bars processed: {total_bars_processed:,}")
+            logger.info("")
+            logger.info("[FULL UNIVERSE] Starting LightGBM training...")
+            
+            self._training_status[bar_size]["phase"] = "training"
+            self._training_status[bar_size]["message"] = f"Training on {len(all_features):,} samples..."
+            
+            # Convert to numpy arrays
+            X = np.array(all_features)
+            y = np.array(all_targets)
+            
+            # Free the lists
+            del all_features
+            del all_targets
+            gc.collect()
+            
+            # Log class distribution
+            n_up = np.sum(y == 1)
+            n_down = np.sum(y == 0)
+            logger.info(f"[FULL UNIVERSE] Class distribution: UP={n_up:,} ({n_up/len(y)*100:.1f}%), DOWN={n_down:,} ({n_down/len(y)*100:.1f}%)")
+            
+            # Train/validation split
+            validation_split = 0.2
+            split_idx = int(len(X) * (1 - validation_split))
+            X_train, X_val = X[:split_idx], X[split_idx:]
+            y_train, y_val = y[:split_idx], y[split_idx:]
+            
+            logger.info(f"[FULL UNIVERSE] Training samples: {len(X_train):,}, Validation: {len(X_val):,}")
+            
+            # Create LightGBM datasets
+            import lightgbm as lgb
+            train_data = lgb.Dataset(X_train, label=y_train, feature_name=feature_names)
+            val_data = lgb.Dataset(X_val, label=y_val, feature_name=feature_names, reference=train_data)
+            
+            # Train with more rounds for full universe
+            callbacks = [lgb.early_stopping(20)]  # More patience for large dataset
+            
+            trained_model = lgb.train(
+                model.params,
+                train_data,
+                num_boost_round=500,  # More rounds for comprehensive training
+                valid_sets=[train_data, val_data],
+                valid_names=["train", "val"],
+                callbacks=callbacks
+            )
+            
+            # Evaluate
+            y_pred_proba = trained_model.predict(X_val)
+            y_pred = (y_pred_proba >= 0.52).astype(int)
+            
+            accuracy = np.mean(y_pred == y_val)
+            
+            # Calculate metrics
+            from sklearn.metrics import precision_score, recall_score, f1_score
+            precision_up = precision_score(y_val, y_pred, zero_division=0)
+            recall_up = recall_score(y_val, y_pred, zero_division=0)
+            f1_up = f1_score(y_val, y_pred, zero_division=0)
+            
+            logger.info("")
+            logger.info("[FULL UNIVERSE] ✓ Training complete!")
+            logger.info(f"[FULL UNIVERSE] Accuracy: {accuracy*100:.2f}%")
+            logger.info(f"[FULL UNIVERSE] Precision: {precision_up*100:.2f}%, Recall: {recall_up*100:.2f}%, F1: {f1_up*100:.2f}%")
+            
+            # Save model
+            model._model = trained_model
+            model._version = f"v{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+            
+            from .timeseries_gbm import ModelMetrics
+            model._metrics = ModelMetrics(
+                accuracy=accuracy,
+                precision_up=precision_up,
+                recall_up=recall_up,
+                f1_up=f1_up,
+                training_samples=len(X_train),
+                validation_samples=len(X_val),
+                last_trained=datetime.now(timezone.utc).isoformat()
+            )
+            
+            model._save_model()
+            self._models[bar_size] = model
+            
+            # Log training history
+            await self._log_training_history(
+                bar_size=bar_size,
+                model_name=model_name,
+                metrics=model._metrics,
+                symbols_used=symbols_with_data,
+                total_bars=total_bars_processed
+            )
+            
+            elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+            
+            self._training_status[bar_size] = {
+                "status": "completed",
+                "phase": "complete",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "message": f"Full universe trained: {accuracy*100:.1f}% accuracy",
+                "elapsed_seconds": elapsed
+            }
+            
+            logger.info("")
+            logger.info("=" * 70)
+            logger.info(f"[FULL UNIVERSE] COMPLETE for {bar_size}")
+            logger.info(f"[FULL UNIVERSE] Elapsed time: {elapsed/60:.1f} minutes")
+            logger.info("=" * 70)
+            
+            return {
+                "success": True,
+                "bar_size": bar_size,
+                "model_name": model_name,
+                "accuracy": accuracy,
+                "precision": precision_up,
+                "recall": recall_up,
+                "f1": f1_up,
+                "training_samples": len(X_train),
+                "validation_samples": len(X_val),
+                "symbols_processed": symbols_with_data,
+                "total_bars": total_bars_processed,
+                "elapsed_seconds": elapsed
+            }
+            
+        except Exception as e:
+            logger.error(f"[FULL UNIVERSE] Fatal error: {e}", exc_info=True)
+            self._training_status[bar_size] = {
+                "status": "error",
+                "message": str(e)
+            }
+            return {"success": False, "error": str(e)}
+            
+        finally:
+            self._training_in_progress = False
+            if training_mode_manager:
+                training_mode_manager.exit_training_mode()
+            gc.collect()
+    
+    async def train_full_universe_all_timeframes(
+        self,
+        symbol_batch_size: int = 100,
+        max_bars_per_symbol: int = 2000,
+        timeframes: List[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Train FULL UNIVERSE on ALL timeframes sequentially.
+        
+        This is the comprehensive training that uses all 39M+ bars.
+        Expected runtime: 1-3 hours depending on system performance.
+        
+        Args:
+            symbol_batch_size: Symbols per batch (default: 100)
+            max_bars_per_symbol: Max bars per symbol (default: 2000)
+            timeframes: Specific timeframes or all if None
+        """
+        if timeframes is None:
+            # Order from most to least data for better progress feel
+            timeframes = ["1 day", "1 hour", "5 mins", "15 mins", "30 mins", "1 min", "1 week"]
+        
+        logger.info("")
+        logger.info("#" * 70)
+        logger.info("# FULL UNIVERSE TRAINING - ALL TIMEFRAMES")
+        logger.info(f"# Timeframes: {len(timeframes)}")
+        logger.info("# This may take 1-3 hours...")
+        logger.info("#" * 70)
+        
+        results = {}
+        total_elapsed = 0
+        completed_count = 0
+        
+        for idx, tf in enumerate(timeframes, 1):
+            logger.info("")
+            logger.info(f">>> Starting timeframe {idx}/{len(timeframes)}: {tf}")
+            
+            result = await self.train_full_universe(
+                bar_size=tf,
+                symbol_batch_size=symbol_batch_size,
+                max_bars_per_symbol=max_bars_per_symbol
+            )
+            
+            results[tf] = result
+            
+            if result.get("success"):
+                completed_count += 1
+                elapsed = result.get("elapsed_seconds", 0)
+                total_elapsed += elapsed
+                logger.info(f">>> ✓ {tf} complete: {result.get('accuracy', 0)*100:.1f}% accuracy in {elapsed/60:.1f} min")
+            else:
+                logger.error(f">>> ✗ {tf} failed: {result.get('error', 'Unknown')}")
+            
+            # Longer pause between timeframes
+            if idx < len(timeframes):
+                logger.info(">>> Pausing 5 seconds before next timeframe...")
+                await asyncio.sleep(5)
+        
+        logger.info("")
+        logger.info("#" * 70)
+        logger.info("# FULL UNIVERSE TRAINING COMPLETE")
+        logger.info(f"# Timeframes trained: {completed_count}/{len(timeframes)}")
+        logger.info(f"# Total elapsed: {total_elapsed/60:.1f} minutes")
+        logger.info("#" * 70)
+        
+        return {
+            "success": completed_count > 0,
+            "timeframes_trained": completed_count,
+            "total_timeframes": len(timeframes),
+            "total_elapsed_seconds": total_elapsed,
+            "results": results
+        }
+    
+    async def _get_all_symbols_for_timeframe(self, bar_size: str) -> List[str]:
+        """Get ALL symbols that have data for a specific timeframe."""
+        if self._db is None:
+            return []
+        
+        try:
+            # Get distinct symbols for this bar_size with at least MIN_BARS
+            pipeline = [
+                {"$match": {"bar_size": bar_size}},
+                {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
+                {"$match": {"count": {"$gte": self.MIN_BARS_FOR_TRAINING}}},
+                {"$sort": {"count": -1}}  # Most data first
+            ]
+            
+            result = list(self._db["ib_historical_data"].aggregate(
+                pipeline, 
+                allowDiskUse=True,
+                maxTimeMS=60000  # 60 second timeout
+            ))
+            
+            symbols = [r["_id"] for r in result]
+            logger.info(f"[FULL UNIVERSE] Found {len(symbols)} symbols for {bar_size}")
+            return symbols
+            
+        except Exception as e:
+            logger.error(f"Error getting symbols for {bar_size}: {e}")
+            return []
+
     
     def get_training_status(self) -> Dict[str, Any]:
         """Get current training status for all timeframes"""

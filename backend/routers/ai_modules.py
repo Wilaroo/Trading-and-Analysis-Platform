@@ -1051,6 +1051,124 @@ async def train_all_timeframe_models(request: Optional[TrainAllRequest] = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+class FullUniverseTrainRequest(BaseModel):
+    """Request for full universe training"""
+    bar_size: Optional[str] = Field(default="1 day", description="Timeframe to train")
+    symbol_batch_size: Optional[int] = Field(default=100, description="Symbols to process per batch")
+    max_bars_per_symbol: Optional[int] = Field(default=2000, description="Max bars per symbol")
+
+
+class FullUniverseAllRequest(BaseModel):
+    """Request for full universe training on all timeframes"""
+    symbol_batch_size: Optional[int] = Field(default=100, description="Symbols to process per batch")
+    max_bars_per_symbol: Optional[int] = Field(default=2000, description="Max bars per symbol")
+    timeframes: Optional[List[str]] = Field(default=None, description="Specific timeframes or all")
+
+
+@router.post("/timeseries/train-full-universe")
+async def train_full_universe_single(request: Optional[FullUniverseTrainRequest] = None):
+    """
+    Train on the FULL UNIVERSE of symbols for a single timeframe.
+    
+    This uses chunked loading to process ALL symbols without memory overflow.
+    Expected runtime: 10-30 minutes per timeframe depending on data size.
+    
+    Args:
+        bar_size: Timeframe to train (default: "1 day")
+        symbol_batch_size: How many symbols to load at once (default: 100)
+        max_bars_per_symbol: Max historical bars per symbol (default: 2000)
+    """
+    from services.ai_modules import ML_AVAILABLE
+    if not ML_AVAILABLE:
+        return {
+            "success": False,
+            "ml_not_available": True,
+            "error": "ML libraries not installed",
+            "install_command": "pip install lightgbm scikit-learn"
+        }
+    
+    if not _timeseries_ai:
+        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
+    
+    try:
+        bar_size = request.bar_size if request and request.bar_size else "1 day"
+        symbol_batch_size = request.symbol_batch_size if request and request.symbol_batch_size else 100
+        max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else 2000
+        
+        logger.info(f"Starting full universe training: {bar_size}, batch={symbol_batch_size}, max_bars={max_bars_per_symbol}")
+        
+        result = await _timeseries_ai.train_full_universe(
+            bar_size=bar_size,
+            symbol_batch_size=symbol_batch_size,
+            max_bars_per_symbol=max_bars_per_symbol
+        )
+        
+        return {
+            "success": result.get("success", False),
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"Full universe training error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/timeseries/train-full-universe-all")
+async def train_full_universe_all_timeframes(request: Optional[FullUniverseAllRequest] = None):
+    """
+    Train FULL UNIVERSE on ALL 7 timeframes.
+    
+    This is the comprehensive training that uses all 39M+ bars of historical data.
+    It processes each timeframe sequentially with chunked loading.
+    
+    **Expected runtime: 1-3 hours**
+    
+    Monitor progress in your backend terminal or via /timeseries/training-status
+    
+    Args:
+        symbol_batch_size: Symbols per batch (default: 100)
+        max_bars_per_symbol: Max bars per symbol (default: 2000)
+        timeframes: Optional list of specific timeframes (default: all 7)
+    """
+    from services.ai_modules import ML_AVAILABLE
+    if not ML_AVAILABLE:
+        return {
+            "success": False,
+            "ml_not_available": True,
+            "error": "ML libraries not installed",
+            "install_command": "pip install lightgbm scikit-learn"
+        }
+    
+    if not _timeseries_ai:
+        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
+    
+    try:
+        symbol_batch_size = request.symbol_batch_size if request and request.symbol_batch_size else 100
+        max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else 2000
+        timeframes = request.timeframes if request and request.timeframes else None
+        
+        logger.info("Starting FULL UNIVERSE ALL TIMEFRAMES training!")
+        logger.info(f"Settings: batch={symbol_batch_size}, max_bars={max_bars_per_symbol}")
+        logger.info(f"Timeframes: {timeframes or 'ALL'}")
+        
+        result = await _timeseries_ai.train_full_universe_all_timeframes(
+            symbol_batch_size=symbol_batch_size,
+            max_bars_per_symbol=max_bars_per_symbol,
+            timeframes=timeframes
+        )
+        
+        return {
+            "success": result.get("success", False),
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"Full universe all-timeframes error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
 @router.get("/timeseries/training-status")
 async def get_timeseries_training_status():
     """Get current training status for all timeframe models"""

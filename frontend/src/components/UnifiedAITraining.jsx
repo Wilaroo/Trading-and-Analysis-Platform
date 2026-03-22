@@ -36,7 +36,8 @@ import {
   GitBranch,
   Gauge,
   Sparkles,
-  AlertCircle
+  AlertCircle,
+  Globe
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api, { apiLongRunning } from '../utils/api';
@@ -611,6 +612,97 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
     }
   };
 
+  // FULL UNIVERSE training - uses ALL data
+  const handleFullUniverseTrain = async () => {
+    // Confirm with user since this takes a long time
+    const confirmed = window.confirm(
+      `🌐 Full Universe Training\n\n` +
+      `This will train on ALL ${formatNumber(totalBars)} bars across ALL symbols.\n\n` +
+      `⏱️ Expected time: 1-3 hours\n` +
+      `📊 Uses chunked loading to prevent crashes\n` +
+      `📈 Progress will show in the terminal\n\n` +
+      `Continue?`
+    );
+    
+    if (!confirmed) return;
+    
+    setIsTraining(true);
+    setTrainingStartTime(Date.now());
+    setTrainingProgress({
+      phase: 'full_universe',
+      currentStep: 1,
+      totalSteps: 5,
+      symbolsLoaded: 0,
+      totalSymbols: 0,
+      barsLoaded: 0,
+      elapsedTime: 0,
+      message: 'Starting full universe training...'
+    });
+    
+    toast.info('🌐 Starting Full Universe training - check backend terminal for progress', {
+      duration: 10000
+    });
+    
+    try {
+      const res = await apiLongRunning.post('/api/ai-modules/timeseries/train-full-universe-all', {
+        symbol_batch_size: 100,
+        max_bars_per_symbol: 2000
+      });
+      
+      if (res.data?.success) {
+        const result = res.data.result;
+        const trainedCount = result.timeframes_trained || 0;
+        const totalTime = result.total_elapsed_seconds || 0;
+        
+        toast.success(
+          `🎉 Full Universe complete! ${trainedCount}/${result.total_timeframes} models trained in ${(totalTime/60).toFixed(0)} minutes`,
+          { duration: 15000 }
+        );
+        
+        // Update status for all timeframes
+        const newStatus = {};
+        for (const [tf, tfResult] of Object.entries(result.results || {})) {
+          if (tfResult.success) {
+            const accuracy = tfResult.accuracy ? (tfResult.accuracy * 100).toFixed(1) : '?';
+            newStatus[tf] = { status: 'completed', message: `${accuracy}% accuracy (full universe)` };
+          } else {
+            newStatus[tf] = { status: 'error', message: tfResult.error || 'Failed' };
+          }
+        }
+        setModelStatus(newStatus);
+        localStorage.setItem(STORAGE_KEYS.modelStatus, JSON.stringify(newStatus));
+        
+        fetchData();
+      } else if (res.data?.ml_not_available) {
+        toast.error('ML libraries not installed. Run: pip install lightgbm scikit-learn');
+      } else {
+        toast.error('Full universe training failed: ' + (res.data?.result?.error || 'Unknown error'));
+      }
+    } catch (e) {
+      console.error('Full universe error:', e);
+      if (e.message?.includes('timeout')) {
+        toast.warning('Request timed out but training may still be running. Check backend terminal.', {
+          duration: 10000
+        });
+      } else {
+        toast.error(`Full universe error: ${e.message}`);
+      }
+    } finally {
+      setIsTraining(false);
+      setTrainingProgress({
+        phase: '',
+        currentStep: 0,
+        totalSteps: 5,
+        symbolsLoaded: 0,
+        totalSymbols: 0,
+        barsLoaded: 0,
+        elapsedTime: 0,
+        message: ''
+      });
+      if (onTrainComplete) onTrainComplete();
+    }
+  };
+
   // Train ALL timeframes
   const handleTrainAll = async () => {
     setIsTraining(true);
@@ -949,12 +1041,37 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
                     <><Database className="w-4 h-4" /> Full Train ({timeframeCount})</>
                   )}
                 </button>
+                
+                <button
+                  onClick={handleFullUniverseTrain}
+                  disabled={isTraining || timeframeCount === 0}
+                  className={`
+                    flex-1 min-w-[140px] py-2.5 px-4 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-all
+                    ${isTraining || timeframeCount === 0
+                      ? 'bg-zinc-700/50 text-zinc-400 cursor-not-allowed'
+                      : 'bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-400 hover:to-orange-400 shadow-lg shadow-amber-500/25'
+                    }
+                  `}
+                  data-testid="full-universe-btn"
+                  title="Train on ALL symbols across ALL timeframes (1-3 hours)"
+                >
+                  {isTraining && trainingProgress.phase === 'full_universe' ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Full Universe...</>
+                  ) : (
+                    <><Globe className="w-4 h-4" /> Full Universe</>
+                  )}
+                </button>
               </div>
 
               {/* Quick description */}
-              <div className="text-xs text-zinc-500 mb-4 flex items-center gap-4">
-                <span><strong>Quick Train:</strong> Daily model + calibration</span>
-                <span><strong>Full Train:</strong> All {timeframeCount} timeframe models</span>
+              <div className="text-xs text-zinc-500 mb-4 flex flex-col gap-1">
+                <div className="flex items-center gap-4">
+                  <span><strong>Quick Train:</strong> Daily model + calibration (~1-2 min)</span>
+                  <span><strong>Full Train:</strong> All {timeframeCount} timeframes, sampled symbols (~5-10 min)</span>
+                </div>
+                <div>
+                  <span className="text-amber-400"><strong>Full Universe:</strong> ALL {formatNumber(totalBars)} bars, ALL symbols, ALL timeframes (1-3 hours)</span>
+                </div>
               </div>
 
               {/* Training Progress Panel - Shows during active training */}
