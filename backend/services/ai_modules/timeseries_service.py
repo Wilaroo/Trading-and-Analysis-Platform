@@ -380,35 +380,69 @@ class TimeSeriesAIService:
         model_config = self.SUPPORTED_TIMEFRAMES[bar_size]
         model_name = model_config["model_name"]
         
+        logger.info(f"[FULL TRAIN] Starting internal training for {bar_size}...")
+        
         try:
             model = TimeSeriesGBM(model_name=model_name)
             model.set_db(self._db)
             
+            logger.info(f"[FULL TRAIN] Fetching symbols for {bar_size}...")
             symbols = await self._get_training_symbols_from_db(bar_size=bar_size, limit=max_symbols)
+            logger.info(f"[FULL TRAIN] Found {len(symbols)} symbols for {bar_size}")
             
             bars_by_symbol = {}
+            loaded_count = 0
             for symbol in symbols:
                 bars = await self._get_historical_bars_from_db(symbol, bar_size=bar_size, max_bars=max_bars_per_symbol)
                 if bars and len(bars) >= self.MIN_BARS_FOR_TRAINING:
                     bars_by_symbol[symbol] = bars
+                    loaded_count += 1
+                    if loaded_count % 25 == 0:
+                        logger.info(f"[FULL TRAIN] {bar_size}: Loaded {loaded_count} symbols...")
             
             if not bars_by_symbol:
+                logger.warning(f"[FULL TRAIN] No data available for {bar_size}")
                 return {"success": False, "error": f"No data for {bar_size}"}
             
             total_bars = sum(len(b) for b in bars_by_symbol.values())
+            symbols_used = len(bars_by_symbol)
+            logger.info(f"[FULL TRAIN] Training {bar_size} model on {symbols_used} symbols, {total_bars:,} bars...")
+            
             metrics = model.train(bars_by_symbol)
             self._models[bar_size] = model
             
-            await self._log_training_history(bar_size=bar_size, model_name=model_name, metrics=metrics, samples=total_bars)
+            # Update training status
+            self._training_status[bar_size] = {
+                "status": "completed",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "message": f"{metrics.accuracy*100:.1f}% accuracy" if metrics else "Completed"
+            }
+            
+            # Log to history with correct parameters
+            await self._log_training_history(
+                bar_size=bar_size, 
+                model_name=model_name, 
+                metrics=metrics, 
+                symbols_used=symbols_used,
+                total_bars=total_bars
+            )
+            
+            accuracy = getattr(metrics, 'accuracy', None) if metrics else None
+            logger.info(f"[FULL TRAIN] ✓ Completed {bar_size}: {accuracy*100:.1f}% accuracy" if accuracy else f"[FULL TRAIN] ✓ Completed {bar_size}")
             
             return {
                 "success": True,
                 "total_bars": total_bars,
                 "samples": total_bars,
-                "metrics": {"accuracy": getattr(metrics, 'accuracy', None)} if metrics else {}
+                "symbols_used": symbols_used,
+                "metrics": {"accuracy": accuracy} if metrics else {}
             }
         except Exception as e:
-            logger.error(f"Internal training error for {bar_size}: {e}")
+            logger.error(f"[FULL TRAIN] Error training {bar_size}: {e}", exc_info=True)
+            self._training_status[bar_size] = {
+                "status": "error",
+                "message": str(e)
+            }
             return {"success": False, "error": str(e)}
             
     async def train_all_timeframes(
@@ -421,8 +455,8 @@ class TimeSeriesAIService:
         Train models for all (or specified) timeframes sequentially.
         
         Args:
-            max_symbols: Max symbols per timeframe (default: 1000)
-            max_bars_per_symbol: Max bars per symbol (default: 10000)
+            max_symbols: Max symbols per timeframe (default: 50)
+            max_bars_per_symbol: Max bars per symbol (default: 500)
             timeframes: List of specific timeframes to train (default: all)
             
         Returns:
@@ -443,36 +477,60 @@ class TimeSeriesAIService:
         overall_success = True
         total_bars_trained = 0
         total_samples = 0
+        completed_count = 0
         
-        logger.info(f"Starting multi-timeframe training for {len(timeframes)} timeframes...")
+        logger.info(f"=" * 60)
+        logger.info(f"[FULL TRAIN] Starting training for {len(timeframes)} timeframes")
+        logger.info(f"[FULL TRAIN] Settings: max_symbols={max_symbols or self.DEFAULT_MAX_SYMBOLS}, max_bars={max_bars_per_symbol or self.DEFAULT_MAX_BARS_PER_SYMBOL}")
+        logger.info(f"=" * 60)
+        
+        self._training_in_progress = True
         
         try:
-            for tf in timeframes:
+            for idx, tf in enumerate(timeframes, 1):
                 if tf not in self.SUPPORTED_TIMEFRAMES:
                     results[tf] = {"success": False, "error": f"Unsupported timeframe: {tf}"}
                     continue
-                    
-                logger.info(f"Training {tf} model...")
-                # Note: train_model will not re-enter/exit training mode since we're already in it
-                self._training_in_progress = True
+                
+                logger.info(f"")
+                logger.info(f"[FULL TRAIN] === Training {idx}/{len(timeframes)}: {tf} ===")
+                
                 self._training_status[tf] = {
                     "status": "running",
                     "started_at": datetime.now(timezone.utc).isoformat(),
                     "message": "Loading data..."
                 }
                 
-                result = await self._train_model_internal(
-                    bar_size=tf,
-                    max_symbols=max_symbols,
-                    max_bars_per_symbol=max_bars_per_symbol
-                )
-                results[tf] = result
-                
-                if result.get("success"):
-                    total_bars_trained += result.get("total_bars", 0)
-                    total_samples += result.get("samples", 0)
-                else:
+                try:
+                    result = await self._train_model_internal(
+                        bar_size=tf,
+                        max_symbols=max_symbols,
+                        max_bars_per_symbol=max_bars_per_symbol
+                    )
+                    results[tf] = result
+                    
+                    if result.get("success"):
+                        total_bars_trained += result.get("total_bars", 0)
+                        total_samples += result.get("samples", 0)
+                        completed_count += 1
+                        logger.info(f"[FULL TRAIN] ✓ {tf} completed ({completed_count}/{len(timeframes)})")
+                    else:
+                        logger.warning(f"[FULL TRAIN] ✗ {tf} failed: {result.get('error', 'Unknown error')}")
+                        overall_success = False
+                        
+                except Exception as e:
+                    logger.error(f"[FULL TRAIN] Exception training {tf}: {e}", exc_info=True)
+                    results[tf] = {"success": False, "error": str(e)}
                     overall_success = False
+                
+                # Small delay between timeframes to prevent memory buildup
+                if idx < len(timeframes):
+                    logger.info(f"[FULL TRAIN] Pausing 2s before next timeframe...")
+                    await asyncio.sleep(2)
+                    
+        except Exception as e:
+            logger.error(f"[FULL TRAIN] Fatal error: {e}", exc_info=True)
+            overall_success = False
         finally:
             self._training_in_progress = False
             # EXIT TRAINING MODE
@@ -480,9 +538,15 @@ class TimeSeriesAIService:
                 training_mode_manager.exit_training_mode()
                 logger.info("[TRAINING MODE] Exited for FULL training")
         
+        logger.info(f"")
+        logger.info(f"=" * 60)
+        logger.info(f"[FULL TRAIN] COMPLETE: {completed_count}/{len(timeframes)} models trained")
+        logger.info(f"[FULL TRAIN] Total bars: {total_bars_trained:,}")
+        logger.info(f"=" * 60)
+        
         return {
             "success": overall_success,
-            "timeframes_trained": len([r for r in results.values() if r.get("success")]),
+            "timeframes_trained": completed_count,
             "total_timeframes": len(timeframes),
             "total_bars_trained": total_bars_trained,
             "total_samples": total_samples,

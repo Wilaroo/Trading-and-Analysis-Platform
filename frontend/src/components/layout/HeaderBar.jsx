@@ -454,12 +454,14 @@ const SystemStatusPopover = ({
   const getOverallStatus = () => {
     const quotesOk = wsConnected;
     const ibOk = isConnected || (ibPusherStatus?.connected);
-    // If all services are up
+    const anyServiceOk = quotesOk || ibOk;
+    
+    // If quotes stream OR IB is connected, we're at least partially operational
     if (quotesOk && ibOk) return { status: 'online', label: 'All Systems Online', color: 'emerald' };
-    // If some services are up
-    if (quotesOk || ibOk) return { status: 'partial', label: 'Partial', color: 'amber' };
-    // If nothing is connected
-    return { status: 'offline', label: 'Systems Offline', color: 'red' };
+    // If any service is up, show partial (not offline)
+    if (anyServiceOk) return { status: 'partial', label: 'Partial', color: 'amber' };
+    // Only show offline if truly nothing is connected
+    return { status: 'offline', label: 'Connecting...', color: 'amber' };
   };
   
   const overall = getOverallStatus();
