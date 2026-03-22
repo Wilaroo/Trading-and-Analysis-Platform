@@ -438,6 +438,23 @@ const SystemStatusPopover = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const popoverRef = useRef(null);
+  const [hasEverConnected, setHasEverConnected] = useState(false);
+  
+  // Track if we've ever had a successful connection (prevents "Offline" on initial load)
+  useEffect(() => {
+    if (wsConnected || isConnected || ibPusherStatus?.connected) {
+      setHasEverConnected(true);
+      // Also store in sessionStorage for persistence across tab switches
+      sessionStorage.setItem('hasEverConnected', 'true');
+    }
+  }, [wsConnected, isConnected, ibPusherStatus?.connected]);
+  
+  // Check sessionStorage on mount
+  useEffect(() => {
+    if (sessionStorage.getItem('hasEverConnected') === 'true') {
+      setHasEverConnected(true);
+    }
+  }, []);
   
   // Close popover when clicking outside
   useEffect(() => {
@@ -460,7 +477,11 @@ const SystemStatusPopover = ({
     if (quotesOk && ibOk) return { status: 'online', label: 'All Systems Online', color: 'emerald' };
     // If any service is up, show partial (not offline)
     if (anyServiceOk) return { status: 'partial', label: 'Partial', color: 'amber' };
-    // Only show offline if truly nothing is connected
+    // If we've connected before, show "Reconnecting" instead of "Offline"
+    if (hasEverConnected) return { status: 'reconnecting', label: 'Reconnecting...', color: 'amber' };
+    // Initial load - still checking
+    if (!connectionChecked) return { status: 'checking', label: 'Checking...', color: 'zinc' };
+    // Only show offline if truly nothing is connected and we've checked
     return { status: 'offline', label: 'Connecting...', color: 'amber' };
   };
   
@@ -513,11 +534,16 @@ const SystemStatusPopover = ({
         className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all hover:scale-[1.02] ${
           overall.color === 'emerald' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
           overall.color === 'amber' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' :
-          'bg-red-500/10 border-red-500/30 text-red-400'
+          overall.color === 'zinc' ? 'bg-zinc-500/10 border-zinc-500/30 text-zinc-400' :
+          'bg-amber-500/10 border-amber-500/30 text-amber-400'
         } border`}
         data-testid="system-status-trigger"
       >
-        <Server className="w-4 h-4" />
+        {overall.status === 'reconnecting' || overall.status === 'checking' ? (
+          <Loader2 className="w-4 h-4 animate-spin" />
+        ) : (
+          <Server className="w-4 h-4" />
+        )}
         <span className="text-xs font-medium hidden md:inline">{overall.label}</span>
         <ChevronDown className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
