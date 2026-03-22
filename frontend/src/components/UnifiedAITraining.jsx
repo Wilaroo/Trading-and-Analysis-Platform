@@ -431,6 +431,36 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
     return () => clearInterval(interval);
   }, [isTraining, trainingStartTime]);
 
+  // LocalStorage keys for persistence
+  const STORAGE_KEYS = {
+    availableData: 'nia_available_data',
+    modelStatus: 'nia_model_status',
+    trainingHistory: 'nia_training_history'
+  };
+
+  // Load cached data from localStorage on mount
+  useEffect(() => {
+    try {
+      const cachedData = localStorage.getItem(STORAGE_KEYS.availableData);
+      const cachedStatus = localStorage.getItem(STORAGE_KEYS.modelStatus);
+      const cachedHistory = localStorage.getItem(STORAGE_KEYS.trainingHistory);
+      
+      if (cachedData) {
+        const parsed = JSON.parse(cachedData);
+        setAvailableData(parsed);
+        console.log('[NIA] Loaded cached available data:', parsed.total_bars, 'bars');
+      }
+      if (cachedStatus) {
+        setModelStatus(JSON.parse(cachedStatus));
+      }
+      if (cachedHistory) {
+        setTrainingHistory(JSON.parse(cachedHistory));
+      }
+    } catch (e) {
+      console.warn('[NIA] Error loading cached data:', e);
+    }
+  }, []);
+
   // Fetch all data
   const fetchData = useCallback(async () => {
     try {
@@ -444,12 +474,19 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       
       if (dataRes.data?.success) {
         setAvailableData(dataRes.data);
+        // Cache to localStorage for persistence
+        localStorage.setItem(STORAGE_KEYS.availableData, JSON.stringify(dataRes.data));
+        console.log('[NIA] Cached available data:', dataRes.data.total_bars, 'bars');
       }
       if (statusRes.data?.success) {
-        setModelStatus(statusRes.data.status?.timeframe_status || {});
+        const status = statusRes.data.status?.timeframe_status || {};
+        setModelStatus(status);
+        localStorage.setItem(STORAGE_KEYS.modelStatus, JSON.stringify(status));
       }
       if (historyRes.data?.success) {
-        setTrainingHistory(historyRes.data.history || []);
+        const history = historyRes.data.history || [];
+        setTrainingHistory(history);
+        localStorage.setItem(STORAGE_KEYS.trainingHistory, JSON.stringify(history));
       }
       if (configRes.data?.success) {
         setCalibrationConfig(configRes.data.config);
@@ -460,6 +497,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       }
     } catch (e) {
       console.error('Error fetching AI training data:', e);
+      // On error, keep showing cached data (don't clear state)
     } finally {
       setLoading(false);
     }
@@ -816,7 +854,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
     { key: 'weights', label: 'Update Module Weights', icon: Gauge, description: 'Adjust AI module influence' }
   ];
 
-  if (loading) {
+  if (loading && !availableData) {
     return (
       <div className="rounded-xl border border-white/10 p-6 mb-4" style={{ background: 'linear-gradient(135deg, rgba(21, 28, 36, 0.95), rgba(30, 40, 55, 0.95))' }}>
         <div className="flex items-center justify-center gap-3 text-zinc-400">
