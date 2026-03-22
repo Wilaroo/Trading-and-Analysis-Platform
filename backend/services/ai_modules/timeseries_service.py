@@ -82,10 +82,11 @@ class TimeSeriesAIService:
         "1 week": {"model_name": "direction_predictor_weekly", "description": "Long-term trends"},
     }
     
-    # Training defaults - balanced for quality and performance
-    # Using more data = better model accuracy
-    DEFAULT_MAX_SYMBOLS = 500  # Good coverage of market
-    DEFAULT_MAX_BARS_PER_SYMBOL = 2000  # Enough history for patterns
+    # Training defaults - optimized for reliable completion
+    # Smaller batches ensure training finishes within timeout
+    # Can be increased via API parameters for longer training sessions
+    DEFAULT_MAX_SYMBOLS = 50  # Start small, complete quickly (~30-60 seconds)
+    DEFAULT_MAX_BARS_PER_SYMBOL = 500  # ~25,000 bars total
     
     def __init__(self):
         self._model = get_timeseries_model() if ML_AVAILABLE else None
