@@ -1150,10 +1150,13 @@ async def train_full_universe_all_timeframes(
     Monitor progress in your backend terminal or via /timeseries/training-status
     
     Args:
-        symbol_batch_size: Symbols per batch (default: 100)
-        max_bars_per_symbol: Max bars per symbol (default: 2000)
+        symbol_batch_size: Symbols per batch (default: 50 - reduced for stability)
+        max_bars_per_symbol: Max bars per symbol (default: 1000 - reduced for stability)
         timeframes: Optional list of specific timeframes (default: all 7)
     """
+    import sys
+    import traceback
+    
     from services.ai_modules import ML_AVAILABLE
     if not ML_AVAILABLE:
         return {
@@ -1167,8 +1170,9 @@ async def train_full_universe_all_timeframes(
         raise HTTPException(status_code=503, detail="Time-series AI not initialized")
     
     try:
-        symbol_batch_size = request.symbol_batch_size if request and request.symbol_batch_size else 100
-        max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else 2000
+        # REDUCED DEFAULTS for stability - prevent memory crashes
+        symbol_batch_size = request.symbol_batch_size if request and request.symbol_batch_size else 50
+        max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else 1000
         timeframes = request.timeframes if request and request.timeframes else None
         
         logger.info("=" * 60)
@@ -1178,24 +1182,66 @@ async def train_full_universe_all_timeframes(
         logger.info("Starting training in background...")
         logger.info("=" * 60)
         
+        # Flush logs immediately
+        sys.stdout.flush()
+        sys.stderr.flush()
+        
         # Run training in background so request doesn't timeout
         async def run_full_universe_training():
-            logger.info("[BACKGROUND] Full Universe task started!")
+            """Background task with aggressive error handling"""
+            import gc
+            
+            # IMMEDIATE logging to confirm task started
+            print("[BACKGROUND TASK] ===== TASK STARTED =====", flush=True)
+            logger.info("[BACKGROUND TASK] Full Universe task entered!")
+            sys.stdout.flush()
+            sys.stderr.flush()
+            
             try:
-                logger.info("[BACKGROUND] Calling train_full_universe_all_timeframes...")
+                # Force garbage collection before starting
+                gc.collect()
+                logger.info("[BACKGROUND TASK] GC completed, starting training...")
+                sys.stdout.flush()
+                
+                logger.info("[BACKGROUND TASK] Calling train_full_universe_all_timeframes...")
+                sys.stdout.flush()
+                
                 result = await _timeseries_ai.train_full_universe_all_timeframes(
                     symbol_batch_size=symbol_batch_size,
                     max_bars_per_symbol=max_bars_per_symbol,
                     timeframes=timeframes
                 )
-                logger.info(f"[BACKGROUND] Full Universe training completed: {result}")
+                
+                logger.info(f"[BACKGROUND TASK] Full Universe training completed!")
+                logger.info(f"[BACKGROUND TASK] Result: {result}")
+                sys.stdout.flush()
+                
+            except MemoryError as me:
+                logger.error(f"[BACKGROUND TASK] MEMORY ERROR: {me}")
+                logger.error(f"[BACKGROUND TASK] System ran out of memory during training")
+                traceback.print_exc()
+                sys.stdout.flush()
+                sys.stderr.flush()
+                
             except Exception as e:
-                logger.error(f"[BACKGROUND] Full Universe training error: {e}", exc_info=True)
+                logger.error(f"[BACKGROUND TASK] EXCEPTION: {type(e).__name__}: {e}")
+                logger.error(f"[BACKGROUND TASK] Full traceback:")
+                traceback.print_exc()
+                sys.stdout.flush()
+                sys.stderr.flush()
+                
+            finally:
+                logger.info("[BACKGROUND TASK] ===== TASK FINISHED =====")
+                sys.stdout.flush()
+                gc.collect()
         
-        # Start the background task using asyncio.ensure_future for better compatibility
+        # Start the background task
         logger.info("Creating background task...")
-        task = asyncio.ensure_future(run_full_universe_training())
+        sys.stdout.flush()
+        
+        task = asyncio.create_task(run_full_universe_training())
         logger.info(f"Background task created: {task}")
+        sys.stdout.flush()
         
         return {
             "success": True,
@@ -1205,7 +1251,7 @@ async def train_full_universe_all_timeframes(
                 "max_bars_per_symbol": max_bars_per_symbol,
                 "timeframes": timeframes or "ALL"
             },
-            "monitor": "Watch backend terminal for [FULL UNIVERSE] logs or poll /api/ai-modules/timeseries/training-status"
+            "monitor": "Watch backend terminal for [BACKGROUND TASK] and [FULL UNIVERSE] logs"
         }
         
     except Exception as e:

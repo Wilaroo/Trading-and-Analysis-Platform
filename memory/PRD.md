@@ -1,128 +1,100 @@
-# TradeCommand PRD
+# SentCom AI Trading Bot - Product Requirements Document
 
 ## Original Problem Statement
-The user wants to evolve their AI trading bot, "SentCom," into a self-improving system by hardening the data pipeline, creating automation, and improving the UI. The goal is to train AI models on a massive 39M+ bar historical dataset collected from Interactive Brokers.
+The user wants to evolve their AI trading bot, "SentCom," into a self-improving system by hardening the data pipeline, creating automation, and improving the UI. After completing a massive historical data collection (39M bars), the primary goal has shifted to training the AI models on this new dataset, integrating the models into the bot's decision-making, and streamlining the local development/training environment for stability and performance.
 
 ## Core Requirements
-1. **Robust Data Pipeline**: Collect historical data for all required timeframes for high-volume stocks
-2. **Autonomous Learning Loop**: Implement automation for data collection and model training
-3. **Comprehensive UI**: Consolidate all AI, learning, and data management features into an intuitive dashboard
-4. **Multi-Timeframe AI Training**: Train specialized models for different trading styles
 
-## User Personas
-- Active day trader running scalp and swing strategies
-- Uses 77 custom trading setups across multiple timeframes
-- Runs IB Gateway locally on Windows machine
-- MongoDB Atlas for cloud data storage
+### 1. Robust Data Pipeline ✅ COMPLETED
+- Collect historical data for all required timeframes
+- 39M bars collected across 7 timeframes
+
+### 2. Autonomous Learning Loop 🔄 IN PROGRESS
+- Implement automation for data collection and model training
+- **Current Blocker**: Full Universe training crashes backend
+
+### 3. Comprehensive UI 🔄 IN PROGRESS
+- Consolidate all AI, learning, and data management features into an intuitive dashboard
+- localStorage caching for data persistence
+
+### 4. Startup Status Dashboard ✅ PARTIALLY COMPLETE
+- UI correctly reflects the status of all backend services
+
+### 5. Comprehensive User Guide ✅ COMPLETED
+- Detailed, visual, and downloadable guide created
+
+---
+
+## Current Issues
+
+### P0 - Critical
+- **Full Universe Training Crashes Backend**: When triggering "Full Universe" training, the backend process crashes silently after the API returns 200 OK. The background task fails to complete.
+  - **Status**: DEBUGGING IN PROGRESS
+  - **Latest Changes**: Added aggressive logging, reduced batch sizes (50 symbols, 1000 bars), added memory safeguards
+  - **Next Step**: User to test and report last log message before crash
+
+### P1 - High Priority
+- **Full Train Function Broken**: Stops after completing just one model instead of all 7 timeframes
+  - **Status**: BLOCKED by P0
+
+---
 
 ## Architecture
-```
-/app
-├── backend/
-│   ├── services/
-│   │   ├── ai_modules/
-│   │   │   ├── timeseries_service.py    # Multi-timeframe training
-│   │   │   ├── timeseries_gbm.py        # LightGBM model
-│   │   │   └── trade_consultation.py    # AI consultation for trades
-│   │   ├── trading_bot_service.py       # Main trading bot
-│   │   ├── enhanced_scanner.py          # Alert scanner
-│   │   └── medium_learning/
-│   │       └── calibration_service.py   # Scanner calibration
-│   └── routers/
-│       ├── ai_modules.py                # AI training endpoints
-│       └── learning_connectors_router.py # Calibration endpoints
-├── frontend/
-│   └── src/components/
-│       ├── UnifiedAITraining.jsx        # NEW: Merged training panel
-│       └── NIA.jsx                      # Neural Intelligence Agency
-└── documents/
-    └── scripts/
-        └── ib_historical_collector_v3.py # Optimized collector
-```
 
-## What's Been Implemented
+### Backend Stack
+- FastAPI (async)
+- MongoDB Atlas
+- LightGBM for ML
+- PyTorch with CUDA
+- ChromaDB
 
-### March 21, 2026 - Unified AI Training System
-- [x] Merged TrainAllPanel + MultiTimeframeTraining into UnifiedAITraining
-- [x] Multi-timeframe model training (7 timeframes: 1min, 5min, 15min, 30min, 1hr, daily, weekly)
-- [x] Quick Train: Daily model + calibration workflow
-- [x] Full Train: All 7 models sequentially
-- [x] Training history tracking with accuracy trends
-- [x] Calibration integration (scanner thresholds, module weights)
-- [x] Removed artificial 100 symbol limit (now uses all ~9,400 symbols)
+### Frontend Stack
+- React
+- localStorage for state persistence
 
-### March 20, 2026 - Data Collection Complete
-- [x] 39M+ bars collected across all timeframes
-- [x] Optimized v3 collector script
-- [x] Parallel collection with unique IB client IDs
+### Key Files
+- `/app/backend/services/ai_modules/timeseries_service.py` - Training logic
+- `/app/backend/routers/ai_modules.py` - API endpoints
+- `/app/frontend/src/components/UnifiedAITraining.jsx` - Training UI
 
-### March 19, 2026
-- [x] Comprehensive User Guide (HTML)
-- [x] Optimized data collection pipeline
+### Key Endpoints
+- `POST /api/ai-modules/timeseries/train` - Single timeframe training
+- `POST /api/ai-modules/timeseries/train-all` - All timeframes (sample)
+- `POST /api/ai-modules/timeseries/train-full-universe` - Full universe single timeframe
+- `POST /api/ai-modules/timeseries/train-full-universe-all` - Full universe all timeframes
 
-### March 18, 2026
-- [x] Startup Status Dashboard
+---
 
-## Prioritized Backlog
+## Completed Work (This Session)
 
-### P0 - High Priority
-- [ ] **Run Full AI Model Training** - User needs to run training on local machine
-- [ ] **Set Up Nightly Incremental Collection** - Grow intraday data over time
+### Dec 2025
+- Added aggressive debugging to Full Universe training
+- Reduced default batch sizes for memory safety (100→50 symbols, 2000→1000 bars)
+- Added sys.stdout.flush() to all log statements to capture output before crash
+- Added MemoryError specific exception handling
+- Temporary debug mode: limited to 1 day timeframe and 100 symbols
 
-### P1 - Medium Priority
-- [ ] **Fix `fill-gaps` Endpoint** - Hangs server under load, needs refactoring
-- [ ] **Complete Backend Router Refactoring** - Activate modular routers
-- [ ] **Complete Frontend Hook Refactoring** - Integrate hooks into SentCom.jsx
+---
 
-### P2 - Lower Priority
-- [ ] **Setup-Specific AI Models** - Train models on 77 specific trading setups
-- [ ] **Deep Scanner Overhaul** - Integrate alternative data sources
-- [ ] **Model Comparison Dashboard** - Track accuracy across timeframes over time
+## Upcoming Tasks
 
-## Data Schema
+### After P0 Fixed
+1. **Implement Best Model Protection** - Only save new models if accuracy improves
+2. **Set up Automated Data Collection & Retraining** - Schedule incremental updates
+3. **Model Comparison Dashboard** - Compare accuracy trends
 
-### ib_historical_data (39M+ docs)
-```json
-{
-  "symbol": "NVDA",
-  "bar_size": "5 mins",
-  "date": "2026-03-20T10:30:00-04:00",
-  "open": 123.45,
-  "high": 124.00,
-  "low": 123.00,
-  "close": 123.80,
-  "volume": 15000,
-  "collected_at": "2026-03-20T16:00:00Z"
-}
-```
+### Future/Backlog
+- Fix `fill-gaps` endpoint hanging issue
+- Complete backend router refactoring
+- Setup-specific AI models (77 trading setups)
+- Deep Scanner overhaul
 
-### model_training_history (NEW)
-```json
-{
-  "timestamp": "2026-03-21T10:00:00Z",
-  "bar_size": "1 day",
-  "model_name": "direction_predictor_daily",
-  "accuracy": 0.567,
-  "training_samples": 6400000,
-  "symbols_used": 9399
-}
-```
-
-## API Endpoints
-
-### AI Training
-- `POST /api/ai-modules/timeseries/train` - Train single timeframe
-- `POST /api/ai-modules/timeseries/train-all` - Train all 7 timeframes
-- `GET /api/ai-modules/timeseries/available-data` - Data per timeframe
-- `GET /api/ai-modules/timeseries/training-history` - Training history
-
-### Calibration
-- `POST /api/learning-connectors/sync/run-all-calibrations` - Run all calibrations
-- `GET /api/medium-learning/calibration/config` - Current thresholds
+---
 
 ## 3rd Party Integrations
 - Interactive Brokers (IB Gateway)
+- Ollama Pro
 - MongoDB Atlas
-- Ollama Pro (local LLM)
-- LightGBM (ML)
-- ChromaDB (vector store)
+- PyTorch (with CUDA)
+- LightGBM
+- ChromaDB

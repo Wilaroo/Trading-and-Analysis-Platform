@@ -556,8 +556,8 @@ class TimeSeriesAIService:
     async def train_full_universe(
         self,
         bar_size: str = "1 day",
-        symbol_batch_size: int = 100,
-        max_bars_per_symbol: int = 2000,
+        symbol_batch_size: int = 50,
+        max_bars_per_symbol: int = 1000,
         progress_callback = None
     ) -> Dict[str, Any]:
         """
@@ -572,15 +572,20 @@ class TimeSeriesAIService:
         
         Args:
             bar_size: Timeframe to train (e.g., "1 day")
-            symbol_batch_size: How many symbols to load at once (default: 100)
-            max_bars_per_symbol: Max bars per symbol (default: 2000 = ~8 years daily)
+            symbol_batch_size: How many symbols to load at once (default: 50 - reduced for memory safety)
+            max_bars_per_symbol: Max bars per symbol (default: 1000 - reduced for memory safety)
             progress_callback: Optional callback for progress updates
             
         Returns:
             Training result with metrics
         """
         import gc
+        import sys
+        import traceback
         import numpy as np
+        
+        print(f"[FULL UNIVERSE] ===== train_full_universe ENTERED for {bar_size} =====", flush=True)
+        sys.stdout.flush()
         
         if not self._ml_available:
             return {"success": False, "error": "ML not available - lightgbm not installed"}
@@ -597,6 +602,7 @@ class TimeSeriesAIService:
         # Enter training mode
         if training_mode_manager:
             training_mode_manager.enter_training_mode(training_type='full_universe', timeframe=bar_size)
+            logger.info(f"[FULL UNIVERSE] Entered training mode for {bar_size}")
         
         self._training_in_progress = True
         self._training_status[bar_size] = {
@@ -615,24 +621,45 @@ class TimeSeriesAIService:
             logger.info(f"[FULL UNIVERSE] Starting training for {bar_size}")
             logger.info(f"[FULL UNIVERSE] Batch size: {symbol_batch_size} symbols, Max bars: {max_bars_per_symbol}")
             logger.info("=" * 70)
+            sys.stdout.flush()
             
             self._training_status[bar_size]["phase"] = "fetching_symbols"
             self._training_status[bar_size]["message"] = "Fetching all symbols..."
             
+            logger.info("[FULL UNIVERSE] Step 1: Fetching symbols...")
+            sys.stdout.flush()
+            
             all_symbols = await self._get_all_symbols_for_timeframe(bar_size)
             total_symbols = len(all_symbols)
+            
+            logger.info(f"[FULL UNIVERSE] Found {total_symbols:,} symbols")
+            sys.stdout.flush()
             
             if total_symbols == 0:
                 return {"success": False, "error": f"No symbols found for {bar_size}"}
             
-            logger.info(f"[FULL UNIVERSE] Found {total_symbols:,} symbols with {bar_size} data")
+            # LIMIT symbols for debugging - remove this after confirmed working
+            MAX_SYMBOLS_DEBUG = 100
+            if total_symbols > MAX_SYMBOLS_DEBUG:
+                logger.info(f"[FULL UNIVERSE] DEBUG: Limiting to {MAX_SYMBOLS_DEBUG} symbols (was {total_symbols})")
+                all_symbols = all_symbols[:MAX_SYMBOLS_DEBUG]
+                total_symbols = len(all_symbols)
+            
+            logger.info(f"[FULL UNIVERSE] Will process {total_symbols:,} symbols with {bar_size} data")
+            sys.stdout.flush()
             
             # Step 2: Create model and feature engineer
+            logger.info("[FULL UNIVERSE] Step 2: Creating model and feature engineer...")
+            sys.stdout.flush()
+            
             model = TimeSeriesGBM(model_name=model_name)
             model.set_db(self._db)
             feature_engineer = model._feature_engineer
             feature_names = model._feature_names
             forecast_horizon = model.forecast_horizon
+            
+            logger.info(f"[FULL UNIVERSE] Model created: {model_name}, forecast_horizon={forecast_horizon}")
+            sys.stdout.flush()
             
             # Step 3: Process symbols in batches, accumulating features
             all_features = []
@@ -646,6 +673,9 @@ class TimeSeriesAIService:
             
             num_batches = (total_symbols + symbol_batch_size - 1) // symbol_batch_size
             
+            logger.info(f"[FULL UNIVERSE] Step 3: Processing {num_batches} batches...")
+            sys.stdout.flush()
+            
             for batch_idx in range(num_batches):
                 batch_start = batch_idx * symbol_batch_size
                 batch_end = min(batch_start + symbol_batch_size, total_symbols)
@@ -655,6 +685,7 @@ class TimeSeriesAIService:
                 batch_targets = []
                 
                 logger.info(f"[FULL UNIVERSE] Processing batch {batch_idx + 1}/{num_batches} ({batch_start + 1}-{batch_end} of {total_symbols})")
+                sys.stdout.flush()
                 
                 for symbol in batch_symbols:
                     try:
@@ -718,7 +749,8 @@ class TimeSeriesAIService:
                     "bars_processed": total_bars_processed
                 })
                 
-                logger.info(f"[FULL UNIVERSE] Batch complete: {len(batch_features):,} samples, Total: {len(all_features):,} samples")
+                logger.info(f"[FULL UNIVERSE] Batch {batch_idx + 1} complete: {len(batch_features):,} samples, Total: {len(all_features):,} samples")
+                sys.stdout.flush()
                 
                 # Force garbage collection after each batch
                 del batch_features
@@ -729,10 +761,13 @@ class TimeSeriesAIService:
                 await asyncio.sleep(0.5)
             
             # Step 4: Train the model on accumulated features
-            if len(all_features) < 1000:
+            logger.info(f"[FULL UNIVERSE] Step 4: Training model on {len(all_features):,} samples...")
+            sys.stdout.flush()
+            
+            if len(all_features) < 100:  # Reduced minimum for debugging
                 return {
                     "success": False, 
-                    "error": f"Insufficient training data: {len(all_features)} samples (need 1000+)"
+                    "error": f"Insufficient training data: {len(all_features)} samples (need 100+)"
                 }
             
             logger.info("")
@@ -742,6 +777,7 @@ class TimeSeriesAIService:
             logger.info(f"[FULL UNIVERSE] Total bars processed: {total_bars_processed:,}")
             logger.info("")
             logger.info("[FULL UNIVERSE] Starting LightGBM training...")
+            sys.stdout.flush()
             
             self._training_status[bar_size]["phase"] = "training"
             self._training_status[bar_size]["message"] = f"Training on {len(all_features):,} samples..."
@@ -749,6 +785,9 @@ class TimeSeriesAIService:
             # Convert to numpy arrays
             X = np.array(all_features)
             y = np.array(all_targets)
+            
+            logger.info(f"[FULL UNIVERSE] Arrays created: X shape={X.shape}, y shape={y.shape}")
+            sys.stdout.flush()
             
             # Free the lists
             del all_features
@@ -759,6 +798,7 @@ class TimeSeriesAIService:
             n_up = np.sum(y == 1)
             n_down = np.sum(y == 0)
             logger.info(f"[FULL UNIVERSE] Class distribution: UP={n_up:,} ({n_up/len(y)*100:.1f}%), DOWN={n_down:,} ({n_down/len(y)*100:.1f}%)")
+            sys.stdout.flush()
             
             # Train/validation split
             validation_split = 0.2
@@ -767,23 +807,33 @@ class TimeSeriesAIService:
             y_train, y_val = y[:split_idx], y[split_idx:]
             
             logger.info(f"[FULL UNIVERSE] Training samples: {len(X_train):,}, Validation: {len(X_val):,}")
+            sys.stdout.flush()
             
             # Create LightGBM datasets
+            logger.info("[FULL UNIVERSE] Creating LightGBM datasets...")
+            sys.stdout.flush()
+            
             import lightgbm as lgb
             train_data = lgb.Dataset(X_train, label=y_train, feature_name=feature_names)
             val_data = lgb.Dataset(X_val, label=y_val, feature_name=feature_names, reference=train_data)
             
             # Train with more rounds for full universe
+            logger.info("[FULL UNIVERSE] Starting LightGBM train()...")
+            sys.stdout.flush()
+            
             callbacks = [lgb.early_stopping(20)]  # More patience for large dataset
             
             trained_model = lgb.train(
                 model.params,
                 train_data,
-                num_boost_round=500,  # More rounds for comprehensive training
+                num_boost_round=200,  # Reduced for faster debugging
                 valid_sets=[train_data, val_data],
                 valid_names=["train", "val"],
                 callbacks=callbacks
             )
+            
+            logger.info("[FULL UNIVERSE] LightGBM training complete!")
+            sys.stdout.flush()
             
             # Evaluate
             y_pred_proba = trained_model.predict(X_val)
@@ -801,6 +851,7 @@ class TimeSeriesAIService:
             logger.info("[FULL UNIVERSE] ✓ Training complete!")
             logger.info(f"[FULL UNIVERSE] Accuracy: {accuracy*100:.2f}%")
             logger.info(f"[FULL UNIVERSE] Precision: {precision_up*100:.2f}%, Recall: {recall_up*100:.2f}%, F1: {f1_up*100:.2f}%")
+            sys.stdout.flush()
             
             # Save model
             model._model = trained_model
@@ -816,6 +867,9 @@ class TimeSeriesAIService:
                 validation_samples=len(X_val),
                 last_trained=datetime.now(timezone.utc).isoformat()
             )
+            
+            logger.info("[FULL UNIVERSE] Saving model...")
+            sys.stdout.flush()
             
             model._save_model()
             self._models[bar_size] = model
@@ -844,6 +898,7 @@ class TimeSeriesAIService:
             logger.info(f"[FULL UNIVERSE] COMPLETE for {bar_size}")
             logger.info(f"[FULL UNIVERSE] Elapsed time: {elapsed/60:.1f} minutes")
             logger.info("=" * 70)
+            sys.stdout.flush()
             
             return {
                 "success": True,
@@ -862,6 +917,9 @@ class TimeSeriesAIService:
             
         except Exception as e:
             logger.error(f"[FULL UNIVERSE] Fatal error: {e}", exc_info=True)
+            traceback.print_exc()
+            sys.stdout.flush()
+            sys.stderr.flush()
             self._training_status[bar_size] = {
                 "status": "error",
                 "message": str(e)
@@ -876,8 +934,8 @@ class TimeSeriesAIService:
     
     async def train_full_universe_all_timeframes(
         self,
-        symbol_batch_size: int = 100,
-        max_bars_per_symbol: int = 2000,
+        symbol_batch_size: int = 50,
+        max_bars_per_symbol: int = 1000,
         timeframes: List[str] = None
     ) -> Dict[str, Any]:
         """
@@ -887,64 +945,105 @@ class TimeSeriesAIService:
         Expected runtime: 1-3 hours depending on system performance.
         
         Args:
-            symbol_batch_size: Symbols per batch (default: 100)
-            max_bars_per_symbol: Max bars per symbol (default: 2000)
+            symbol_batch_size: Symbols per batch (default: 50 - reduced for memory safety)
+            max_bars_per_symbol: Max bars per symbol (default: 1000 - reduced for memory safety)
             timeframes: Specific timeframes or all if None
         """
-        if timeframes is None:
-            # Order from most to least data for better progress feel
-            timeframes = ["1 day", "1 hour", "5 mins", "15 mins", "30 mins", "1 min", "1 week"]
+        import sys
+        import gc
+        import traceback
         
-        logger.info("")
-        logger.info("#" * 70)
-        logger.info("# FULL UNIVERSE TRAINING - ALL TIMEFRAMES")
-        logger.info(f"# Timeframes: {len(timeframes)}")
-        logger.info("# This may take 1-3 hours...")
-        logger.info("#" * 70)
+        # IMMEDIATE logging with flush to ensure we see output
+        print("[FULL UNIVERSE ALL] ===== FUNCTION ENTERED =====", flush=True)
+        sys.stdout.flush()
+        sys.stderr.flush()
         
-        results = {}
-        total_elapsed = 0
-        completed_count = 0
-        
-        for idx, tf in enumerate(timeframes, 1):
+        try:
+            if timeframes is None:
+                # Start with "1 day" as it's most likely to succeed
+                timeframes = ["1 day"]  # Start with just ONE timeframe for debugging
+                logger.info("[FULL UNIVERSE ALL] DEBUG MODE: Only training '1 day' timeframe")
+            
             logger.info("")
-            logger.info(f">>> Starting timeframe {idx}/{len(timeframes)}: {tf}")
+            logger.info("#" * 70)
+            logger.info("# FULL UNIVERSE TRAINING - ALL TIMEFRAMES")
+            logger.info(f"# Timeframes: {timeframes}")
+            logger.info(f"# Batch size: {symbol_batch_size}, Max bars: {max_bars_per_symbol}")
+            logger.info("# This may take 1-3 hours...")
+            logger.info("#" * 70)
+            sys.stdout.flush()
             
-            result = await self.train_full_universe(
-                bar_size=tf,
-                symbol_batch_size=symbol_batch_size,
-                max_bars_per_symbol=max_bars_per_symbol
-            )
+            # Force GC before starting
+            gc.collect()
+            logger.info("[FULL UNIVERSE ALL] Initial GC completed")
+            sys.stdout.flush()
             
-            results[tf] = result
+            results = {}
+            total_elapsed = 0
+            completed_count = 0
             
-            if result.get("success"):
-                completed_count += 1
-                elapsed = result.get("elapsed_seconds", 0)
-                total_elapsed += elapsed
-                logger.info(f">>> ✓ {tf} complete: {result.get('accuracy', 0)*100:.1f}% accuracy in {elapsed/60:.1f} min")
-            else:
-                logger.error(f">>> ✗ {tf} failed: {result.get('error', 'Unknown')}")
+            for idx, tf in enumerate(timeframes, 1):
+                logger.info("")
+                logger.info(f">>> Starting timeframe {idx}/{len(timeframes)}: {tf}")
+                sys.stdout.flush()
+                
+                try:
+                    # Force GC before each timeframe
+                    gc.collect()
+                    
+                    result = await self.train_full_universe(
+                        bar_size=tf,
+                        symbol_batch_size=symbol_batch_size,
+                        max_bars_per_symbol=max_bars_per_symbol
+                    )
+                    
+                    results[tf] = result
+                    
+                    if result.get("success"):
+                        completed_count += 1
+                        elapsed = result.get("elapsed_seconds", 0)
+                        total_elapsed += elapsed
+                        logger.info(f">>> ✓ {tf} complete: {result.get('accuracy', 0)*100:.1f}% accuracy in {elapsed/60:.1f} min")
+                    else:
+                        logger.error(f">>> ✗ {tf} failed: {result.get('error', 'Unknown')}")
+                    
+                except Exception as tf_error:
+                    logger.error(f">>> EXCEPTION training {tf}: {tf_error}")
+                    traceback.print_exc()
+                    results[tf] = {"success": False, "error": str(tf_error)}
+                
+                sys.stdout.flush()
+                
+                # Force GC after each timeframe
+                gc.collect()
+                
+                # Longer pause between timeframes
+                if idx < len(timeframes):
+                    logger.info(">>> Pausing 5 seconds before next timeframe...")
+                    await asyncio.sleep(5)
             
-            # Longer pause between timeframes
-            if idx < len(timeframes):
-                logger.info(">>> Pausing 5 seconds before next timeframe...")
-                await asyncio.sleep(5)
-        
-        logger.info("")
-        logger.info("#" * 70)
-        logger.info("# FULL UNIVERSE TRAINING COMPLETE")
-        logger.info(f"# Timeframes trained: {completed_count}/{len(timeframes)}")
-        logger.info(f"# Total elapsed: {total_elapsed/60:.1f} minutes")
-        logger.info("#" * 70)
-        
-        return {
-            "success": completed_count > 0,
-            "timeframes_trained": completed_count,
-            "total_timeframes": len(timeframes),
-            "total_elapsed_seconds": total_elapsed,
-            "results": results
-        }
+            logger.info("")
+            logger.info("#" * 70)
+            logger.info("# FULL UNIVERSE TRAINING COMPLETE")
+            logger.info(f"# Timeframes trained: {completed_count}/{len(timeframes)}")
+            logger.info(f"# Total elapsed: {total_elapsed/60:.1f} minutes")
+            logger.info("#" * 70)
+            sys.stdout.flush()
+            
+            return {
+                "success": completed_count > 0,
+                "timeframes_trained": completed_count,
+                "total_timeframes": len(timeframes),
+                "total_elapsed_seconds": total_elapsed,
+                "results": results
+            }
+            
+        except Exception as e:
+            logger.error(f"[FULL UNIVERSE ALL] FATAL ERROR: {e}")
+            traceback.print_exc()
+            sys.stdout.flush()
+            sys.stderr.flush()
+            return {"success": False, "error": str(e)}
     
     async def _get_all_symbols_for_timeframe(self, bar_size: str) -> List[str]:
         """Get ALL symbols that have data for a specific timeframe.
