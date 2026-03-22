@@ -614,6 +614,8 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
 
   // FULL UNIVERSE training - uses ALL data
   const handleFullUniverseTrain = async () => {
+    console.log('[NIA] Full Universe button clicked!');
+    
     // Confirm with user since this takes a long time
     const confirmed = window.confirm(
       `🌐 Full Universe Training\n\n` +
@@ -624,7 +626,10 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       `Continue?`
     );
     
-    if (!confirmed) return;
+    if (!confirmed) {
+      console.log('[NIA] Full Universe: User cancelled');
+      return;
+    }
     
     console.log('[NIA] Full Universe: User confirmed, starting request...');
     
@@ -647,9 +652,15 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
     
     try {
       console.log('[NIA] Full Universe: Sending POST request to /api/ai-modules/timeseries/train-full-universe-all');
+      
+      // Log the full URL being called
+      const fullUrl = (apiLongRunning.defaults.baseURL || '') + '/api/ai-modules/timeseries/train-full-universe-all';
+      console.log('[NIA] Full URL:', fullUrl);
+      console.log('[NIA] Timeout setting:', apiLongRunning.defaults.timeout);
+      
       const res = await apiLongRunning.post('/api/ai-modules/timeseries/train-full-universe-all', {
-        symbol_batch_size: 100,
-        max_bars_per_symbol: 2000
+        symbol_batch_size: 50,   // Reduced for stability
+        max_bars_per_symbol: 1000  // Reduced for stability
       });
       console.log('[NIA] Full Universe: Response received:', res.data);
       
@@ -692,9 +703,19 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
         toast.error('Full universe training failed: ' + (res.data?.result?.error || 'Unknown error'));
       }
     } catch (e) {
-      console.error('Full universe error:', e);
+      console.error('[NIA] Full universe error:', e);
+      console.error('[NIA] Error details:', {
+        message: e.message,
+        code: e.code,
+        response: e.response?.data,
+        status: e.response?.status
+      });
       if (e.message?.includes('timeout')) {
         toast.warning('Request timed out but training may still be running. Check backend terminal.', {
+          duration: 10000
+        });
+      } else if (e.message?.includes('Network Error')) {
+        toast.error('Network Error - Backend may be down or not responding. Check backend terminal.', {
           duration: 10000
         });
       } else {
