@@ -1180,18 +1180,22 @@ async def train_full_universe_all_timeframes(
         
         # Run training in background so request doesn't timeout
         async def run_full_universe_training():
+            logger.info("[BACKGROUND] Full Universe task started!")
             try:
+                logger.info("[BACKGROUND] Calling train_full_universe_all_timeframes...")
                 result = await _timeseries_ai.train_full_universe_all_timeframes(
                     symbol_batch_size=symbol_batch_size,
                     max_bars_per_symbol=max_bars_per_symbol,
                     timeframes=timeframes
                 )
-                logger.info(f"Full Universe training completed: {result}")
+                logger.info(f"[BACKGROUND] Full Universe training completed: {result}")
             except Exception as e:
-                logger.error(f"Full Universe training error: {e}", exc_info=True)
+                logger.error(f"[BACKGROUND] Full Universe training error: {e}", exc_info=True)
         
-        # Start the background task
-        asyncio.create_task(run_full_universe_training())
+        # Start the background task using asyncio.ensure_future for better compatibility
+        logger.info("Creating background task...")
+        task = asyncio.ensure_future(run_full_universe_training())
+        logger.info(f"Background task created: {task}")
         
         return {
             "success": True,
