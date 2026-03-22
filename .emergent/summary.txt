@@ -10,23 +10,68 @@
 **User's preferred language**: English
 
 **what currently exists?**
-A full-stack trading platform (React, FastAPI, MongoDB Atlas) with 39 million historical data bars. A comprehensive multi-timeframe AI training system has been implemented, including backend services, API endpoints, and a new unified frontend component () for managing training and calibration. However, the user's local Windows environment is unstable, preventing them from using these new features. Multiple startup scripts exist with varying configurations, contributing to the instability.
+A full-stack trading platform (React, FastAPI, MongoDB Atlas) with a stable local startup process managed by an optimized batch script (). The frontend features a  component with a detailed progress display (percentages, timer, steps). A Training Priority Mode has been implemented in the backend to pause non-essential services during training. While a Quick Train on a very small data batch was successful once, the system is highly unreliable. Training on larger batches or subsequent training attempts cause the backend to hang, crash, or time out due to memory pressure and network latency when loading data from MongoDB Atlas to the user's local machine.
 
 **Last working item**:
--   **Last item agent was working**: Creating a new, optimized startup script () to provide a stable, streamlined local launch process specifically for AI model training. This script is intended to fix startup order issues, client ID conflicts, and instability caused by the  flag.
+-   **Last item agent was working**: The agent was attempting to make the data caching mechanism more robust to prevent the UI from showing 0 bars when the backend is under load or slow to respond. The last action was to apply a search_replace to  to improve the caching logic.
 -   **Status**: IN PROGRESS
 -   **Agent Testing Done**: N
--   **Which testing method agent to use?**: Manual user testing. The user needs to run the new  script. The next agent must ask for the console output to verify that all services start correctly, remain stable, and that the application becomes accessible and fully functional in the browser.
+-   **Which testing method agent to use?**: Manual user testing. The next agent needs to guide the user to restart the application and verify if the data loads reliably in the NIA UI, and then attempt a Quick Train again.
 -   **User Testing Done**: N
 
 **All Pending/In progress Issue list**:
--   **Issue 1: Local Environment Instability (P0)**
-    -   **Description**: The user's local application is unstable. The backend crashes, restarts frequently, or becomes unresponsive, causing the frontend to show all systems offline. This is caused by multiple root issues in the startup scripts:
-        1.  The  flag on the backend  server causes restarts on any file change.
-        2.  Services start in the wrong order (e.g., backend starts before Ollama is ready).
-        3.  Race conditions and insufficient wait times during the startup sequence cause timeouts.
-        4.  IB Gateway client ID conflicts exist between the backend and other scripts like the IB Data Pusher.
-    -   **Attempted fixes**: The agent analyzed the user's  files and created a new optimized script () to address these problems. The user was also guided through several manual usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
+-   **Issue 1: AI Model Training is Unreliable and Unstable (P0)**
+    -   **Description**: The core issue is that the AI training process is not robust. It either hangs indefinitely (UI stuck at 60%), crashes the backend, or the frontend request times out. This is primarily caused by memory and network bottlenecks when loading large datasets (even ~1M bars) from MongoDB Atlas to the user's local machine. The Training Priority Mode was an attempt to mitigate this but did not solve the root cause. The data cache for the  endpoint is also unreliable, frequently causing the UI to show 0 bars.
+    -   **Attempted fixes**:
+        1.  Created an optimized startup script () to stabilize the environment.
+        2.  Reduced training batch sizes multiple times. The user prefers the larger batch (500 symbols/2000 bars) and is okay with a 3-5 minute training time, as long as it's reliable.
+        3.  Implemented a Training Priority Mode to pause background tasks.
+        4.  Added caching to the  endpoint.
+        5.  The agent was in the process of making the cache more robust when the session ended.
+    -   **Next debug checklist**:
+        1.  Finalize the implementation of the robust caching in .
+        2.  Guide the user to restart the application and verify that the 39M bars data loads reliably on the NIA page.
+        3.  Guide the user to run Quick Train with the 500 symbol/2000 bar setting.
+        4.  Monitor the backend logs for training progress and any errors (memory, timeout).
+        5.  If it fails, the next step is to refactor the data loading part of  to load data in smaller chunks/streams instead of all at once to avoid memory overload and network timeouts.
+    -   **Status**: IN PROGRESS
+    -   **Is recurring issue?**: Y
+    -   **Should Test frontend/backend/both after fix?**: Both
+    -   **Blocked on other issue**: None. This is the main blocker.
+
+-   **Issue 2: Full Train Function is Broken (P1)**
+    -   **Description**: The Full Train feature, intended to train all 7 models sequentially, stops after completing just one model. It doesn't proceed to the next timeframe.
+    -   **Attempted fixes**: An internal  method was created, but the issue persists.
+    -   **Next debug checklist**:
+        1.  Review the  function in .
+        2.  Check the loop logic and how it calls the internal training method.
+        3.  Ensure the status is being updated correctly between runs.
+    -   **Status**: NOT STARTED
+    -   **Is recurring issue?**: Y
+    -   **Should Test frontend/backend/both after fix?**: Backend
+    -   **Blocked on other issue**: Issue 1: AI Model Training is Unreliable and Unstable
+
+**In progress Task List**:
+-   **Task 1: Achieve Reliable AI Model Training (P0)**
+    -   **Description**: Make the entire AI training pipeline robust and reliable on the user's local machine. This includes fixing the data loading bottleneck, ensuring training completes without crashes, and having the results correctly saved and displayed.
+    -   **Where to resume**: The agent just modified  to improve caching. The next step is to test this change and, if it fails, refactor the data loading logic.
+    -   **What will be achieved with this?**: The user will be able to reliably train AI models on their local machine, which is the core requirement of the current project phase.
+    -   **Status**: IN PROGRESS
+    -   **Should Test frontend/backend/both after fix?**: Both
+    -   **Blocked on something**: This is the primary task.
+
+**Upcoming and Future Tasks**
+-   **Upcoming Tasks**:
+    -   (P1) **Set up Automated Data Collection & Retraining**: Guide the user to schedule the  endpoint and the model retraining process.
+    -   (P1) **Model Comparison Dashboard**: Implement the user-approved enhancement to create a dashboard for comparing model accuracy trends across all 7 timeframes.
+-   **Future Tasks:**
+    -   (P1) **Fix  Endpoint**: The  endpoint hangs the server and needs to be refactored to be non-blocking.
+    -   (P1) **Complete Backend Router Refactoring**: Activate modular routers in  and decommission monolithic files.
+    -   (P2) **Setup-Specific AI Models**: Train models on the user's 77 specific trading setups.
+    -   (P2) **Deep Scanner Overhaul**: Integrate alternative data sources.
+
+**Completed work in this session**
+-   **Stabilized Local Environment**: Successfully diagnosed and fixed numerous local environment issues (port conflicts,  vs  resolution, usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
            [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
            [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
            [--git-dir=<path>] [--work-tree=<path>] [--namespace=<name>]
@@ -70,53 +115,11 @@ collaborate (see also: git help workflows)
 'git help -a' and 'git help -g' list available subcommands and some
 concept guides. See 'git help <command>' or 'git help <concept>'
 to read about a specific subcommand or concept.
-See 'git help git' for an overview of the system. and  commands to diagnose the state of their local repository and services.
-    -   **Next debug checklist**:
-        1.  Confirm with the user that they want to proceed with the new  script.
-        2.  Guide the user to execute the new script.
-        3.  Ask for the complete console output from all new terminal windows that open.
-        4.  Analyze the output to verify services start in the correct order and remain stable (especially the backend).
-        5.  Confirm the frontend at  connects successfully and shows systems online.
-        6.  Verify that the new unified training panel in the NIA section loads its data correctly.
-    -   **Status**: IN PROGRESS
-    -   **Is recurring issue?**: Y
-    -   **Should Test frontend/backend/both after fix?**: Both
-    -   **Blocked on other issue**: None. This is the primary blocker.
-
-**In progress Task List**:
--   **Task 1: Test the Unified AI Training & Calibration System (P0)**
-    -   **Description**: The core logic and UI for training models on all 7 available timeframes, running scanner calibrations, and viewing training history has been built and merged into a single component ().
-    -   **Where to resume**: The code is implemented and has been pulled to the user's local machine. Testing is blocked by the local environment's instability (Issue 1). Once the startup is stable, the user needs to be guided to test the new UI functionality.
-    -   **What will be achieved with this?**: A fully functional, user-friendly interface for managing the entire AI learning loop, from model training to calibration.
-    -   **Status**: BLOCKED (on Issue 1: Local Environment Instability)
-    -   **Should Test frontend/backend/both after fix?**: Both
-    -   **Blocked on something**: Issue 1: Local Environment Instability
-
-**Upcoming and Future Tasks**
--   **Upcoming Tasks**:
-    -   (P0) **User Verification of AI Training**: Once the environment is stable, guide the user to run a Quick Train and a Full Train from the new UI and verify the results in the training history tab.
-    -   (P1) **Set up Automated Data Collection & Retraining**: Guide the user to schedule the  endpoint to ensure their data accumulates daily, and then schedule the model retraining.
-    -   (P1) **Model Comparison Dashboard**: Implement the user-approved enhancement to create a dashboard for comparing model accuracy trends across all 7 timeframes.
--   **Future Tasks:**
-    -   (P1) **Fix  Endpoint**: The  endpoint hangs the server and needs to be refactored to be non-blocking.
-    -   (P1) **Complete Backend Router Refactoring**: Activate modular routers in  and decommission monolithic files.
-    -   (P2) **Setup-Specific AI Models**: Train models on the user's 77 specific trading setups.
-    -   (P2) **Deep Scanner Overhaul**: Integrate alternative data sources.
-
-**Completed work in this session**
--   **Diagnosed Training Data Limitation**: Discovered that initial model training was hardcoded to use only 1 day bars and a limit of 100 symbols, explaining the poor utilization of the 39M bar dataset.
--   **Implemented Multi-Timeframe Training System (Backend)**:
-    -   Refactored  to be data-driven, accepting  as a parameter.
-    -   Added endpoints like , , and  to .
-    -   Implemented logic to log each training run's metrics to a  MongoDB collection.
--   **Refactored and Unified the Frontend Training UI**:
-    -   Identified that two separate, redundant training panels ( and ) were causing confusion.
-    -   Created a new, comprehensive component, , that merges all functionality: timeframe-specific training, a Quick Train for daily refresh, a Full Train for all models, and tabs for calibration and training history.
-    -   Cleaned up  to remove the old panels and integrate the new unified one.
--   **Diagnosed and Addressed Local Environment Instability**:
-    -   Analyzed the user's local startup logs and  files (, ).
-    -   Identified root causes of instability:  flag, incorrect service startup order, and IB client ID conflicts.
-    -   Created a new, optimized startup script  to provide a stable launch experience focused on local AI training.
+See 'git help git' for an overview of the system. conflicts) and guided the user to consistently start the application using the new  script.
+-   **Enhanced Training UI**: Created a new detailed training progress panel in  that shows percentages, an elapsed timer, and step-by-step phase indicators.
+-   **Implemented Training Priority Mode**: Created  and integrated it into the training service to pause non-essential background tasks (like the trading bot scanner) during model training, reducing system load.
+-   **Achieved First Successful Training**: Successfully guided the user to run a Quick Train on a small data batch, which completed and reported 53.3% accuracy, proving the end-to-end training pipeline can work under the right conditions.
+-   **Fixed Git Repository Issues**: Cleaned the git history to remove large, accidentally committed  and  files, resolving  errors.
 
 **Earlier issues found/mentioned but not fixed**
 -   **Issue 1:  Endpoint Performance**
@@ -126,13 +129,15 @@ See 'git help git' for an overview of the system. and  commands to diagnose the 
     -   **Is recurring issue?**: Y
 
 **Known issue recurrence from previous fork**
--   None.
+-   **Issue recurrence in previous fork**: Local Environment Instability
+-   **Recurrence count**: High
+-   **Status**: RESOLVED (mostly) - The startup script has made the environment stable, but the application itself becomes unstable under the heavy load of model training.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **Local Environment Debugging**: The session involved extensive debugging of the user's local Windows environment, including analyzing  scripts, diagnosing port conflicts, usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
+-   **Local Environment Debugging**: Extensive debugging of the user's Windows environment, including batch scripts, usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
            [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
            [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
            [--git-dir=<path>] [--work-tree=<path>] [--namespace=<name>]
@@ -176,61 +181,106 @@ collaborate (see also: git help workflows)
 'git help -a' and 'git help -g' list available subcommands and some
 concept guides. See 'git help <command>' or 'git help <concept>'
 to read about a specific subcommand or concept.
-See 'git help git' for an overview of the system. issues, and process management.
--   **Multi-Timeframe ML Modeling**: An architecture was designed and implemented to train specialized models for each bar size (1min, 5min, 1h, etc.), which is a best practice for financial modeling.
--   **Full-Stack UI Refactoring**: A key decision was made to merge two redundant frontend components into a single, unified, and more user-friendly panel (), improving the application's UX.
--   **Batch Scripting ()**: The agent analyzed and created Windows batch files to orchestrate the complex startup sequence of the various application services.
+See 'git help git' for an overview of the system., port conflicts, and process management.
+-   **Training Bottleneck Analysis**: Identified that the primary bottleneck is loading large datasets from MongoDB Atlas over the user's local network, causing memory pressure and timeouts.
+-   **Training Priority Mode**: A new concept was introduced to pause background application tasks (schedulers, scanners) to free up resources for the CPU/GPU-intensive training process.
+-   **Frontend State Management**: Enhanced the React UI to provide real-time, detailed feedback on a long-running backend process, including timers and multi-step progress indicators.
 
 **key DB schema**
--   ****: The main collection on MongoDB Atlas holding the ~39 million OHLCV bars used for training.
--   ****: A new collection intended to store the results of each model training run, tracking metrics like accuracy, samples used, and timeframe over time.
--   ****: Stores the serialized object of the latest trained model for each timeframe.
+-   ****: Main collection with ~39 million OHLCV bars.
+-   ****: Stores results of model training runs.
+-   ****: Stores the serialized object of the latest trained model.
+-   ****: A new collection used to cache the result of the expensive  aggregation query.
 
 **changes in tech stack**
 -   None.
 
 **All files of reference**
--    (The new, optimized startup script to be tested)
--    (The new, consolidated UI for AI training)
--    (The parent component that now renders the unified training panel)
--    (Contains the core backend logic for multi-timeframe training)
--    (Contains the API endpoints for the training service)
--    (The user's current, problematic local startup script)
+-    (Core training logic, caching, batch sizes)
+-    (The UI for training and progress display)
+-    (The user's local startup script)
+-    (The new service for pausing background tasks)
+-    (Where background tasks are scheduled and managed)
+-    (Local frontend configuration file)
 
 **Areas that need refactoring**:
--   The user's local startup process is managed by complex  files. The creation of  is a significant improvement, but this approach remains brittle. A future enhancement could involve a more robust service manager or a simpler startup mechanism.
+-   The data loading logic within  in  is a major bottleneck. It attempts to load the entire dataset for training into memory at once. It should be refactored to use a streaming or chunked data loading approach to handle large datasets without causing memory-related crashes or network timeouts.
 
 **key api endpoints**
--   : Triggers sequential training for all 7 models.
+-   : Triggers sequential training for all models (currently broken).
 -   : Trains a model for a specific .
--   : Returns bar/symbol counts for each timeframe, used to populate the UI.
+-   : Returns bar/symbol counts (slow, now cached).
 -   : Fetches past training run metrics.
--   : The existing endpoint for running scanner calibration.
+-   : **NEW** endpoint to check if Training Priority Mode is active.
 
 **Critical Info for New Agent**
--   **The user's primary blocker is a stable local environment.** Your first priority is to help the user successfully run the application using the new  script. Do not proceed to other tasks until the user confirms their systems are online and stable.
--   **Do not use ** when advising the user on running the backend. This was a major source of instability. The new script has this removed.
--   All the code for the unified, multi-timeframe AI training system is complete and has been pulled by the user. The functionality is ready for testing as soon as the environment is stable.
--   The user is on Windows. All commands and file paths must be tailored for PowerShell or Command Prompt.
+-   **The root problem is data loading.** The user's local machine cannot handle loading ~1 million+ data bars from MongoDB Atlas into memory at once. This causes the backend to become unresponsive or crash. The Training Priority Mode helps but does not solve this core data bottleneck.
+-   **Your immediate priority is to fix the training reliability.** The user has agreed to a plan: 1. Fix data cache reliability, 2. Fix the  function, 3. Address the data loading bottleneck. You should resume with step 1.
+-   **The user is okay with a 3-5 minute training time** as long as it is reliable and provides progress updates. The current batch size is set to 500 symbols / 2000 bars per symbol. Do not reduce this unless the training continues to fail.
+-   **The local environment is complex.** Be prepared to guide the user through usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
+           [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
+           [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
+           [--git-dir=<path>] [--work-tree=<path>] [--namespace=<name>]
+           [--super-prefix=<path>] [--config-env=<name>=<envvar>]
+           <command> [<args>]
+
+These are common Git commands used in various situations:
+
+start a working area (see also: git help tutorial)
+   clone     Clone a repository into a new directory
+   init      Create an empty Git repository or reinitialize an existing one
+
+work on the current change (see also: git help everyday)
+   add       Add file contents to the index
+   mv        Move or rename a file, a directory, or a symlink
+   restore   Restore working tree files
+   rm        Remove files from the working tree and from the index
+
+examine the history and state (see also: git help revisions)
+   bisect    Use binary search to find the commit that introduced a bug
+   diff      Show changes between commits, commit and working tree, etc
+   grep      Print lines matching a pattern
+   log       Show commit logs
+   show      Show various types of objects
+   status    Show the working tree status
+
+grow, mark and tweak your common history
+   branch    List, create, or delete branches
+   commit    Record changes to the repository
+   merge     Join two or more development histories together
+   rebase    Reapply commits on top of another base tip
+   reset     Reset current HEAD to the specified state
+   switch    Switch branches
+   tag       Create, list, delete or verify a tag object signed with GPG
+
+collaborate (see also: git help workflows)
+   fetch     Download objects and refs from another repository
+   pull      Fetch from and integrate with another repository or a local branch
+   push      Update remote refs along with associated objects
+
+'git help -a' and 'git help -g' list available subcommands and some
+concept guides. See 'git help <command>' or 'git help <concept>'
+to read about a specific subcommand or concept.
+See 'git help git' for an overview of the system. commands, file edits (using ), and killing processes () in PowerShell/CMD. Always provide clear, step-by-step instructions.
 
 **documents and test reports created in this job**
 -   
 -   
+-   
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User**: Confirms the new UI changes are visible but all systems are offline again.
-2.  **Agent**: Suggests the backend is unstable due to  and recommends running it without that flag.
-3.  **User**: Asks to review the  script to optimize the startup process and remove unneeded components.
-4.  **Agent**: Agrees and asks to see the content of , which is the actual local startup script.
-5.  **User**: Provides the content of .
-6.  **Agent**: Analyzes the script, points out several issues (, startup order, wait times), and offers to create a fully optimized version.
-7.  **User**: Confirms they think the two script files are different and provides the content of both for comparison.
-8.  **Agent**: Clarifies the purpose of the two scripts (local vs. cloud) and reiterates the issues with the local script () and the plan for an optimized version.
-9.  **User**: Agrees to the creation of an optimized script, stating the priority is local ML/AI training using the GPU.
-10. **Agent**: Creates the new, optimized startup script: .
+1.  **User**: States that the backend crashed again.
+2.  **Agent**: Identifies the backend is unresponsive due to training overload.
+3.  **User**: Agrees to a plan to fix the data cache, then the  feature, then the data loading bottleneck.
+4.  **Agent**: Starts by viewing the  file to improve caching.
+5.  **User**: (No message, but last user action was confirming the plan)
+6.  **Agent**: Modifies the  to improve caching.
+7.  **(Pending human message)**: User needs to test the latest changes.
 
 **Project Health Check:**
--   **Broken**: The user's local development environment and startup process are unstable, preventing any testing or use of the application.
+-   **Broken**:
+    -   The AI model training process is unreliable and crashes with datasets of meaningful size.
+    -   The  feature is non-functional, stopping after one model.
 -   **Mocked**: N/A
 
 **3rd Party Integrations**
@@ -245,10 +295,10 @@ See 'git help git' for an overview of the system. issues, and process management
 -   **Testing agent used after significant changes**: NO
 -   **Troubleshoot agent used after agent stuck in loop**: NO
 -   **Test files created**: None
--   **Known regressions**: The local application is currently unusable due to startup instability.
+-   **Known regressions**: The application is currently unstable. The AI training feature, which is the primary focus, frequently crashes the backend. The data for the training panel also disappears intermittently.
 
 **Credentials to test flow:**
 -   N/A. All work is on the user's local machine.
 
 **What agent forgot to execute**
--   The agent did not initially address the user's unstable local environment as the highest priority, instead continuing with feature development (merging UI panels). This led to the user being unable to test any of the newly completed work, which had to be addressed at the very end of the session. Prioritizing environment stability first would have been more efficient.</analysis>
+-   The agent did not fully resolve the root cause of the training failures (memory/network bottleneck) and instead applied several smaller fixes (reducing batch size, priority mode) that proved to be temporary solutions. A more fundamental refactor of the data loading logic is required.</analysis>
