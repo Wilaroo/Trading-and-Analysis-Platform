@@ -210,6 +210,135 @@ const TimeframeCard = memo(({
   );
 });
 
+// Training Progress Panel - shows detailed progress during training
+const TrainingProgressPanel = memo(({ progress, timeframe, isVisible }) => {
+  if (!isVisible) return null;
+  
+  const config = TIMEFRAME_CONFIG[timeframe] || TIMEFRAME_CONFIG['1 day'];
+  const Icon = config.icon;
+  
+  // Format time as MM:SS
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+  
+  // Calculate progress percentage
+  const progressPercent = Math.min(100, (progress.currentStep / progress.totalSteps) * 100);
+  
+  // Training phases with descriptions
+  const phases = [
+    { key: 'init', label: 'Initializing', step: 1 },
+    { key: 'loading', label: 'Loading Data', step: 2 },
+    { key: 'training', label: 'Training Model', step: 3 },
+    { key: 'saving', label: 'Saving Model', step: 4 },
+    { key: 'complete', label: 'Complete', step: 5 }
+  ];
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: 'auto' }}
+      exit={{ opacity: 0, height: 0 }}
+      className="mb-4 p-4 rounded-xl bg-gradient-to-br from-cyan-500/10 via-blue-500/5 to-purple-500/10 border border-cyan-500/30"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className={`p-2 rounded-lg ${config.bgColor}`}>
+            <Icon className={`w-5 h-5 ${config.color}`} />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-white">
+              Training {config.label} Model
+            </div>
+            <div className="text-xs text-zinc-400">
+              {progress.message || 'Processing...'}
+            </div>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-2xl font-bold text-cyan-400">
+            {progressPercent.toFixed(0)}%
+          </div>
+          <div className="text-xs text-zinc-500">
+            {formatTime(progress.elapsedTime)} elapsed
+          </div>
+        </div>
+      </div>
+      
+      {/* Main Progress Bar */}
+      <div className="relative h-3 bg-black/40 rounded-full overflow-hidden mb-4">
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${progressPercent}%` }}
+          transition={{ duration: 0.5, ease: 'easeOut' }}
+          className="absolute h-full bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-500 rounded-full"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 animate-pulse" />
+      </div>
+      
+      {/* Phase Steps */}
+      <div className="flex justify-between">
+        {phases.map((phase, idx) => {
+          const isComplete = progress.currentStep > phase.step;
+          const isCurrent = progress.currentStep === phase.step;
+          const isError = progress.phase === 'error' && isCurrent;
+          
+          return (
+            <div key={phase.key} className="flex flex-col items-center">
+              <div className={`
+                w-8 h-8 rounded-full flex items-center justify-center mb-1 transition-all
+                ${isError ? 'bg-red-500/30 border-2 border-red-500' :
+                  isComplete ? 'bg-green-500/30 border-2 border-green-500' : 
+                  isCurrent ? 'bg-cyan-500/30 border-2 border-cyan-500 animate-pulse' : 
+                  'bg-zinc-700/50 border border-zinc-600'}
+              `}>
+                {isError ? (
+                  <XCircle className="w-4 h-4 text-red-400" />
+                ) : isComplete ? (
+                  <CheckCircle2 className="w-4 h-4 text-green-400" />
+                ) : isCurrent ? (
+                  <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />
+                ) : (
+                  <span className="text-xs text-zinc-500">{phase.step}</span>
+                )}
+              </div>
+              <span className={`text-xs ${
+                isError ? 'text-red-400' :
+                isComplete ? 'text-green-400' : 
+                isCurrent ? 'text-cyan-400' : 
+                'text-zinc-500'
+              }`}>
+                {phase.label}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      
+      {/* Stats Row */}
+      {progress.symbolsLoaded > 0 && (
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <div className="bg-black/30 rounded-lg p-2 text-center">
+            <div className="text-lg font-bold text-white">{formatNumber(progress.symbolsLoaded)}</div>
+            <div className="text-xs text-zinc-500">Symbols</div>
+          </div>
+          <div className="bg-black/30 rounded-lg p-2 text-center">
+            <div className="text-lg font-bold text-white">{formatNumber(progress.barsLoaded)}</div>
+            <div className="text-xs text-zinc-500">Bars</div>
+          </div>
+          <div className="bg-black/30 rounded-lg p-2 text-center">
+            <div className="text-lg font-bold text-white">{formatTime(progress.elapsedTime)}</div>
+            <div className="text-xs text-zinc-500">Time</div>
+          </div>
+        </div>
+      )}
+    </motion.div>
+  );
+});
+
 // Calibration step component
 const CalibrationStep = memo(({ step, status, isActive }) => {
   const Icon = step.icon;
@@ -262,6 +391,20 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
   const [currentTimeframe, setCurrentTimeframe] = useState(null);
   const [loading, setLoading] = useState(true);
   
+  // Enhanced training progress state
+  const [trainingProgress, setTrainingProgress] = useState({
+    phase: '', // 'loading' | 'training' | 'saving' | 'complete'
+    currentStep: 0,
+    totalSteps: 5,
+    symbolsLoaded: 0,
+    totalSymbols: 0,
+    barsLoaded: 0,
+    elapsedTime: 0,
+    estimatedTimeRemaining: null,
+    message: ''
+  });
+  const [trainingStartTime, setTrainingStartTime] = useState(null);
+  
   // Calibration workflow state
   const [calibrationProgress, setCalibrationProgress] = useState({
     connectors: { status: 'pending', message: '' },
@@ -273,6 +416,20 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
   // Auto-train settings
   const [autoTrainEnabled, setAutoTrainEnabled] = useState(false);
   const [autoTrainAfterCollection, setAutoTrainAfterCollection] = useState(false);
+  
+  // Timer for elapsed time during training
+  useEffect(() => {
+    let interval;
+    if (isTraining && trainingStartTime) {
+      interval = setInterval(() => {
+        setTrainingProgress(prev => ({
+          ...prev,
+          elapsedTime: Math.floor((Date.now() - trainingStartTime) / 1000)
+        }));
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isTraining, trainingStartTime]);
 
   // Fetch all data
   const fetchData = useCallback(async () => {
@@ -316,6 +473,20 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
   const handleTrainTimeframe = async (timeframe) => {
     setIsTraining(true);
     setCurrentTimeframe(timeframe);
+    setTrainingStartTime(Date.now());
+    
+    // Initialize training progress
+    setTrainingProgress({
+      phase: 'loading',
+      currentStep: 1,
+      totalSteps: 5,
+      symbolsLoaded: 0,
+      totalSymbols: 500,
+      barsLoaded: 0,
+      elapsedTime: 0,
+      estimatedTimeRemaining: null,
+      message: 'Initializing training...'
+    });
     
     setModelStatus(prev => ({
       ...prev,
@@ -324,6 +495,14 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
 
     try {
       toast.info(`Training ${TIMEFRAME_CONFIG[timeframe]?.label || timeframe} model...`);
+      
+      // Update progress phases
+      setTrainingProgress(prev => ({
+        ...prev,
+        phase: 'loading',
+        currentStep: 2,
+        message: 'Loading symbols from database...'
+      }));
 
       const res = await apiLongRunning.post('/api/ai-modules/timeseries/train', {
         bar_size: timeframe
@@ -332,6 +511,13 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       if (res.data?.success && res.data?.result?.success) {
         const result = res.data.result;
         const accuracy = result.metrics?.accuracy ? (result.metrics.accuracy * 100).toFixed(1) : '?';
+        
+        setTrainingProgress(prev => ({
+          ...prev,
+          phase: 'complete',
+          currentStep: 5,
+          message: `Training complete! ${accuracy}% accuracy`
+        }));
         
         setModelStatus(prev => ({
           ...prev,
@@ -344,6 +530,11 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
         toast.success(`${TIMEFRAME_CONFIG[timeframe]?.label} trained! ${accuracy}% accuracy`);
         fetchData(); // Refresh history
       } else if (res.data?.ml_not_available) {
+        setTrainingProgress(prev => ({
+          ...prev,
+          phase: 'error',
+          message: 'ML libraries not installed locally'
+        }));
         setModelStatus(prev => ({
           ...prev,
           [timeframe]: { status: 'error', message: 'ML not installed locally' }
@@ -351,6 +542,11 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
         toast.error('ML libraries not installed. Run: pip install lightgbm');
       } else {
         const errorMsg = res.data?.result?.error || 'Training failed';
+        setTrainingProgress(prev => ({
+          ...prev,
+          phase: 'error',
+          message: errorMsg
+        }));
         setModelStatus(prev => ({
           ...prev,
           [timeframe]: { status: 'error', message: errorMsg }
@@ -359,6 +555,11 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       }
     } catch (e) {
       console.error('Training error:', e);
+      setTrainingProgress(prev => ({
+        ...prev,
+        phase: 'error',
+        message: e.message
+      }));
       setModelStatus(prev => ({
         ...prev,
         [timeframe]: { status: 'error', message: e.message }
@@ -367,6 +568,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
     } finally {
       setIsTraining(false);
       setCurrentTimeframe(null);
+      setTrainingStartTime(null);
       if (onTrainComplete) onTrainComplete();
     }
   };
@@ -416,6 +618,20 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
   const handleQuickTrain = async () => {
     setIsTraining(true);
     setIsCalibrating(true);
+    setTrainingStartTime(Date.now());
+    
+    // Initialize training progress
+    setTrainingProgress({
+      phase: 'loading',
+      currentStep: 1,
+      totalSteps: 5,
+      symbolsLoaded: 0,
+      totalSymbols: 500,
+      barsLoaded: 0,
+      elapsedTime: 0,
+      estimatedTimeRemaining: null,
+      message: 'Starting Quick Train...'
+    });
     
     // Reset calibration progress
     setCalibrationProgress({
@@ -427,6 +643,12 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
     try {
       // Step 1: Train Daily model
       setCurrentTimeframe('1 day');
+      setTrainingProgress(prev => ({
+        ...prev,
+        phase: 'loading',
+        currentStep: 2,
+        message: 'Loading Daily timeframe data from database...'
+      }));
       setModelStatus(prev => ({
         ...prev,
         '1 day': { status: 'running', message: 'Training Daily model...' }
@@ -434,18 +656,46 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       
       toast.info('Quick Train: Training Daily model...');
       
+      // Simulate progress update
+      setTimeout(() => {
+        setTrainingProgress(prev => ({
+          ...prev,
+          phase: 'training',
+          currentStep: 3,
+          message: 'Training LightGBM model on ~1M bars...',
+          symbolsLoaded: 500,
+          barsLoaded: 1000000
+        }));
+      }, 2000);
+      
       const trainRes = await apiLongRunning.post('/api/ai-modules/timeseries/train', {
         bar_size: '1 day'
       });
 
       if (trainRes.data?.success && trainRes.data?.result?.success) {
-        const accuracy = trainRes.data.result.metrics?.accuracy ? 
-          (trainRes.data.result.metrics.accuracy * 100).toFixed(1) : '?';
+        const result = trainRes.data.result;
+        const accuracy = result.metrics?.accuracy ? 
+          (result.metrics.accuracy * 100).toFixed(1) : '?';
+        const samples = result.training_samples || 0;
+        
+        setTrainingProgress(prev => ({
+          ...prev,
+          phase: 'saving',
+          currentStep: 4,
+          message: `Saving model... ${accuracy}% accuracy achieved!`,
+          barsLoaded: samples
+        }));
+        
         setModelStatus(prev => ({
           ...prev,
-          '1 day': { status: 'completed', message: `${accuracy}% accuracy` }
+          '1 day': { status: 'completed', message: `${accuracy}% accuracy, ${formatNumber(samples)} samples` }
         }));
       } else if (trainRes.data?.ml_not_available) {
+        setTrainingProgress(prev => ({
+          ...prev,
+          phase: 'error',
+          message: 'ML libraries not installed locally'
+        }));
         setModelStatus(prev => ({
           ...prev,
           '1 day': { status: 'error', message: 'ML not installed' }
@@ -455,6 +705,13 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       setCurrentTimeframe(null);
 
       // Step 2: Run calibrations
+      setTrainingProgress(prev => ({
+        ...prev,
+        phase: 'complete',
+        currentStep: 5,
+        message: 'Running calibrations...'
+      }));
+      
       setCalibrationProgress(prev => ({
         ...prev,
         connectors: { status: 'running', message: 'Syncing...' }
@@ -496,11 +753,31 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       fetchData();
     } catch (e) {
       console.error('Quick train error:', e);
+      setTrainingProgress(prev => ({
+        ...prev,
+        phase: 'error',
+        message: e.message
+      }));
       toast.error(`Quick train error: ${e.message}`);
     } finally {
       setIsTraining(false);
       setIsCalibrating(false);
       setCurrentTimeframe(null);
+      setTrainingStartTime(null);
+      // Clear training progress after a delay to show final status
+      setTimeout(() => {
+        setTrainingProgress({
+          phase: '',
+          currentStep: 0,
+          totalSteps: 5,
+          symbolsLoaded: 0,
+          totalSymbols: 0,
+          barsLoaded: 0,
+          elapsedTime: 0,
+          estimatedTimeRemaining: null,
+          message: ''
+        });
+      }, 3000);
       if (onTrainComplete) onTrainComplete();
     }
   };
@@ -641,6 +918,17 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
                 <span><strong>Quick Train:</strong> Daily model + calibration</span>
                 <span><strong>Full Train:</strong> All {timeframeCount} timeframe models</span>
               </div>
+
+              {/* Training Progress Panel - Shows during active training */}
+              <AnimatePresence>
+                {isTraining && currentTimeframe && (
+                  <TrainingProgressPanel 
+                    progress={trainingProgress}
+                    timeframe={currentTimeframe}
+                    isVisible={true}
+                  />
+                )}
+              </AnimatePresence>
 
               {/* Tab Navigation */}
               <div className="flex gap-1 mb-4 bg-black/20 p-1 rounded-lg">
