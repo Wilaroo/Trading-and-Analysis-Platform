@@ -82,6 +82,18 @@ class TimeSeriesAIService:
         "1 week": {"model_name": "direction_predictor_weekly", "description": "Long-term trends"},
     }
     
+    # Memory-safe settings per timeframe
+    # Intraday timeframes have more data and need smaller batches to prevent OOM
+    TIMEFRAME_SETTINGS = {
+        "1 min": {"batch_size": 10, "max_bars": 200, "is_intraday": True},    # Most data, smallest batch
+        "5 mins": {"batch_size": 15, "max_bars": 300, "is_intraday": True},   # High data volume
+        "15 mins": {"batch_size": 20, "max_bars": 400, "is_intraday": True},  # Medium-high data
+        "30 mins": {"batch_size": 25, "max_bars": 500, "is_intraday": True},  # Medium data
+        "1 hour": {"batch_size": 50, "max_bars": 1000, "is_intraday": False}, # Moderate data
+        "1 day": {"batch_size": 100, "max_bars": 2000, "is_intraday": False}, # Lower data volume
+        "1 week": {"batch_size": 100, "max_bars": 2000, "is_intraday": False}, # Lowest data
+    }
+    
     # Training defaults - optimized for reliable completion
     # Smaller batches ensure training finishes within timeout
     # Can be increased via API parameters for longer training sessions
@@ -752,6 +764,22 @@ class TimeSeriesAIService:
                 del batch_targets
                 gc.collect()
                 
+                # Log memory usage periodically for monitoring
+                try:
+                    import psutil
+                    process = psutil.Process()
+                    mem_mb = process.memory_info().rss / 1024 / 1024
+                    logger.info(f"[FULL UNIVERSE] Memory usage: {mem_mb:.0f} MB")
+                    
+                    # Emergency stop if memory usage is too high (>3GB)
+                    if mem_mb > 3000:
+                        logger.warning(f"[FULL UNIVERSE] HIGH MEMORY WARNING: {mem_mb:.0f} MB - stopping early to prevent crash")
+                        break
+                except ImportError:
+                    pass  # psutil not installed
+                
+                sys.stdout.flush()
+                
                 # Small delay to prevent overwhelming the system
                 await asyncio.sleep(0.5)
             
@@ -993,10 +1021,23 @@ class TimeSeriesAIService:
                     # Force GC before each timeframe
                     gc.collect()
                     
+                    # Use timeframe-specific settings for memory safety
+                    tf_settings = self.TIMEFRAME_SETTINGS.get(tf, {})
+                    tf_batch_size = tf_settings.get("batch_size", symbol_batch_size)
+                    tf_max_bars = tf_settings.get("max_bars", max_bars_per_symbol)
+                    is_intraday = tf_settings.get("is_intraday", False)
+                    
+                    # Override with provided values only if they're smaller (safer)
+                    actual_batch_size = min(symbol_batch_size, tf_batch_size)
+                    actual_max_bars = min(max_bars_per_symbol, tf_max_bars)
+                    
+                    logger.info(f">>> Memory-safe settings for {tf}: batch={actual_batch_size}, max_bars={actual_max_bars}, intraday={is_intraday}")
+                    sys.stdout.flush()
+                    
                     result = await self.train_full_universe(
                         bar_size=tf,
-                        symbol_batch_size=symbol_batch_size,
-                        max_bars_per_symbol=max_bars_per_symbol
+                        symbol_batch_size=actual_batch_size,
+                        max_bars_per_symbol=actual_max_bars
                     )
                     
                     results[tf] = result
@@ -1019,10 +1060,22 @@ class TimeSeriesAIService:
                 # Force GC after each timeframe
                 gc.collect()
                 
-                # Longer pause between timeframes
+                # Log memory after GC
+                try:
+                    import psutil
+                    process = psutil.Process()
+                    mem_mb = process.memory_info().rss / 1024 / 1024
+                    logger.info(f">>> Memory after GC: {mem_mb:.0f} MB")
+                except ImportError:
+                    pass
+                
+                # Longer pause between timeframes - even longer for intraday
                 if idx < len(timeframes):
-                    logger.info(">>> Pausing 5 seconds before next timeframe...")
-                    await asyncio.sleep(5)
+                    next_tf = timeframes[idx] if idx < len(timeframes) else None
+                    next_is_intraday = self.TIMEFRAME_SETTINGS.get(next_tf, {}).get("is_intraday", False)
+                    pause_seconds = 10 if next_is_intraday else 5
+                    logger.info(f">>> Pausing {pause_seconds} seconds before next timeframe...")
+                    await asyncio.sleep(pause_seconds)
             
             logger.info("")
             logger.info("#" * 70)

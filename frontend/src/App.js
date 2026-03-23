@@ -7,10 +7,11 @@ import { Toaster } from 'sonner';
 import { Sidebar, TickerTape, PriceAlertNotification, AlertSettingsPanel } from './components';
 import { useWebSocket, usePriceAlerts } from './hooks';
 import { TickerModalProvider } from './hooks/useTickerModal';
-import { DataCacheProvider } from './contexts';
+import { DataCacheProvider, TrainingModeProvider } from './contexts';
 import api from './utils/api';
 import StartupModal from './components/StartupModal';
 import StartupStatusDashboard from './components/StartupStatusDashboard';
+import TrainingModeIndicator from './components/TrainingModeIndicator';
 
 // Import pages
 import {
@@ -342,6 +343,7 @@ function App() {
   };
 
   return (
+    <TrainingModeProvider>
     <DataCacheProvider>
     <TickerModalProvider>
       <div className="min-h-screen" style={{ background: 'var(--bg-default)' }} onClick={initializeAudio}>
@@ -424,6 +426,9 @@ function App() {
         </div>
       )}
       
+      {/* Training Mode Indicator - shows when AI training is active */}
+      <TrainingModeIndicator />
+      
       <main className="ml-[52px] min-h-screen relative">
         {/* Vibrant gradient orbs for visual pop */}
         <div className="fixed inset-0 ml-[52px] pointer-events-none overflow-hidden">
@@ -450,6 +455,7 @@ function App() {
       </div>
     </TickerModalProvider>
     </DataCacheProvider>
+    </TrainingModeProvider>
   );
 }
 

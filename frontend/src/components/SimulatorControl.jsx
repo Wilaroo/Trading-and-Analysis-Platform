@@ -20,6 +20,7 @@ import {
   CheckCircle2,
   XCircle
 } from 'lucide-react';
+import { useTrainingMode } from '../contexts';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -172,6 +173,9 @@ const SimulatorControl = ({ onAlertGenerated, onAlertsUpdated, className = '' })
   };
 
   // Poll status and alerts when running
+  // Reduce polling frequency during AI training to prevent resource exhaustion
+  const { getPollingInterval, isTrainingActive } = useTrainingMode();
+  
   useEffect(() => {
     fetchStatus();
     
@@ -179,18 +183,26 @@ const SimulatorControl = ({ onAlertGenerated, onAlertsUpdated, className = '' })
     let alertsInterval;
     
     if (status.running) {
-      // Poll status every 5 seconds
-      statusInterval = setInterval(fetchStatus, 5000);
-      // Poll alerts more frequently (every 3 seconds) to catch new ones
+      // Get adjusted intervals - slower during training
+      const statusPollInterval = getPollingInterval(5000, false); // Non-essential
+      const alertsPollInterval = getPollingInterval(3000, false); // Non-essential
+      
+      // Poll status 
+      statusInterval = setInterval(fetchStatus, statusPollInterval);
+      // Poll alerts
       fetchAlerts(); // Initial fetch
-      alertsInterval = setInterval(fetchAlerts, 3000);
+      alertsInterval = setInterval(fetchAlerts, alertsPollInterval);
+      
+      if (isTrainingActive) {
+        console.log(`[SimulatorControl] Training active - polling slowed to ${statusPollInterval}ms / ${alertsPollInterval}ms`);
+      }
     }
     
     return () => {
       if (statusInterval) clearInterval(statusInterval);
       if (alertsInterval) clearInterval(alertsInterval);
     };
-  }, [status.running, fetchStatus, fetchAlerts]);
+  }, [status.running, fetchStatus, fetchAlerts, getPollingInterval, isTrainingActive]);
 
   const currentScenario = SCENARIO_CONFIG[status.scenario] || SCENARIO_CONFIG.range_bound;
   const ScenarioIcon = currentScenario.icon;

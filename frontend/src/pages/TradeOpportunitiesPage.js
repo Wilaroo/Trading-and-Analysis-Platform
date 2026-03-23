@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import * as LightweightCharts from 'lightweight-charts';
 import api from '../utils/api';
+import { useTrainingMode } from '../contexts';
 
 // ===================== DESIGN TOKENS =====================
 const colors = {
@@ -1781,6 +1782,9 @@ const AccountPanel = ({ account, positions }) => (
 
 // ===================== MAIN COMPONENT =====================
 const TradeOpportunitiesPage = () => {
+  // Training mode - reduce polling when AI training is active
+  const { getPollingInterval, isTrainingActive } = useTrainingMode();
+  
   // State
   const [isConnected, setIsConnected] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
@@ -1831,9 +1835,11 @@ const TradeOpportunitiesPage = () => {
     };
     
     checkConnection();
-    const interval = setInterval(checkConnection, 10000);
+    // Slow down polling during training
+    const pollInterval = getPollingInterval(10000, true); // Essential but can be slower
+    const interval = setInterval(checkConnection, pollInterval);
     return () => clearInterval(interval);
-  }, []);
+  }, [getPollingInterval]);
   
   // Load account data when connected
   useEffect(() => {
@@ -1853,9 +1859,11 @@ const TradeOpportunitiesPage = () => {
     };
     
     loadAccountData();
-    const interval = setInterval(loadAccountData, 30000);
+    // Slow down during training
+    const pollInterval = getPollingInterval(30000, false); // Non-essential
+    const interval = setInterval(loadAccountData, pollInterval);
     return () => clearInterval(interval);
-  }, [isConnected]);
+  }, [isConnected, getPollingInterval]);
   
   // Load market context
   useEffect(() => {
@@ -1877,9 +1885,11 @@ const TradeOpportunitiesPage = () => {
     };
     
     loadMarketContext();
-    const interval = setInterval(loadMarketContext, 60000); // Every minute
+    // Slow down during training
+    const pollInterval = getPollingInterval(60000, false); // Non-essential
+    const interval = setInterval(loadMarketContext, pollInterval);
     return () => clearInterval(interval);
-  }, []);
+  }, [getPollingInterval]);
   
   // Connect to IB
   const handleConnect = async () => {

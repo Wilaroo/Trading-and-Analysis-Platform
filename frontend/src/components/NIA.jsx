@@ -64,7 +64,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api, { apiLongRunning } from '../utils/api';
-import { useDataCache } from '../contexts';
+import { useDataCache, useTrainingMode } from '../contexts';
 import MarketScannerPanel from './MarketScannerPanel';
 import AdvancedBacktestPanel from './AdvancedBacktestPanel';
 import UnifiedAITraining from './UnifiedAITraining';
@@ -2683,6 +2683,8 @@ const ReportCardPanel = memo(({ reportCard, loading }) => {
 const NIA = () => {
   // Data cache for persistent data across tab switches
   const { getCached, setCached, shouldRefresh } = useDataCache();
+  // Training mode - reduce polling when AI training is active
+  const { getPollingInterval, isTrainingActive } = useTrainingMode();
   const isFirstMount = useRef(true);
   
   const [loading, setLoading] = useState(true);
@@ -2899,10 +2901,16 @@ const NIA = () => {
     }
     isFirstMount.current = false;
     
-    // Refresh every 60 seconds
-    const interval = setInterval(() => fetchAllData(), 60000);
+    // Refresh polling - slow down during training to prevent resource exhaustion
+    const pollInterval = getPollingInterval(60000, false); // Non-essential
+    const interval = setInterval(() => fetchAllData(), pollInterval);
+    
+    if (isTrainingActive) {
+      console.log(`[NIA] Training active - polling slowed to ${pollInterval}ms`);
+    }
+    
     return () => clearInterval(interval);
-  }, [fetchAllData, getCached]);
+  }, [fetchAllData, getCached, getPollingInterval, isTrainingActive]);
 
   const handlePromote = async (strategyName, targetPhase) => {
     try {

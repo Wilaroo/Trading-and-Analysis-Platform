@@ -17,8 +17,19 @@ Build a self-improving AI trading bot "SentCom" by hardening the data pipeline, 
 │   ├── routers/ai_modules.py       # AI endpoints (predictions, training)
 │   ├── scripts/setup_mongodb_indexes.py
 │   └── services/ai_modules/
-│       ├── timeseries_service.py   # Training orchestration
-│       └── timeseries_gbm.py       # LightGBM model (FIXED: model loading)
+│       ├── timeseries_service.py   # Training orchestration (memory-safe settings added)
+│       └── timeseries_gbm.py       # LightGBM model (model loading fixed)
+├── frontend/src/
+│   ├── contexts/
+│   │   ├── DataCacheContext.jsx
+│   │   └── TrainingModeContext.jsx # NEW: Centralized training mode control
+│   ├── components/
+│   │   ├── UnifiedAITraining.jsx   # Updated with training mode notifications
+│   │   ├── SimulatorControl.jsx    # Updated with training-aware polling
+│   │   ├── NIA.jsx                 # Updated with training-aware polling
+│   │   └── TrainingModeIndicator.jsx # NEW: Visual training indicator
+│   └── pages/
+│       └── TradeOpportunitiesPage.js # Updated with training-aware polling
 ├── documents/
 │   └── AI_TRAINING_GUIDE.md
 └── memory/PRD.md
@@ -26,17 +37,36 @@ Build a self-improving AI trading bot "SentCom" by hardening the data pipeline, 
 
 ## What's Been Implemented
 
-### March 23, 2026
-- **FIXED**: Prediction API 404 errors - Enhanced `_load_model()` with fallback chain
-  - Now loads `direction_predictor_daily` when default model not found
-  - Verified working: `/api/ai-modules/timeseries/forecast` returns real predictions
-  
-### March 22-23, 2026 (Previous Session)
+### March 23, 2026 (Current Session)
+
+#### Fix 1: Prediction API 404 Errors - FIXED
+- Enhanced `_load_model()` in `timeseries_gbm.py` with fallback chain
+- Now auto-loads `direction_predictor_daily` when default model not found
+- Verified: `/api/ai-modules/timeseries/forecast` returns real predictions
+
+#### Fix 2: Frontend Polling Overload - FIXED
+- Created `TrainingModeContext` to centrally control polling during training
+- When training is active, polling intervals are automatically slowed 10x
+- Updated components: `UnifiedAITraining`, `SimulatorControl`, `TradeOpportunitiesPage`, `NIA`
+- Added `TrainingModeIndicator` component for visual feedback
+
+#### Fix 3: Intraday Training Memory Safety - IMPLEMENTED
+- Added `TIMEFRAME_SETTINGS` with per-timeframe batch sizes:
+  - "1 min": batch_size=10, max_bars=200
+  - "5 mins": batch_size=15, max_bars=300
+  - "15 mins": batch_size=20, max_bars=400
+  - "30 mins": batch_size=25, max_bars=500
+  - "1 hour": batch_size=50, max_bars=1000
+  - "1 day": batch_size=100, max_bars=2000
+- Added memory monitoring with 3GB emergency stop
+- Added longer pauses (10s) between intraday timeframes
+
+### Previous Session (March 22-23, 2026)
 - Fixed "Full Universe" backend crash for larger timeframes
 - Fixed MongoDB "duplicate key" error on model saving
 - Trained models: "1 day" (53.7% accuracy), "1 hour" (55.4% accuracy)
 - Created MongoDB index script for faster data loading
-- Created AI Training Guide (`/app/documents/AI_TRAINING_GUIDE.md`)
+- Created AI Training Guide
 
 ## Trained Models
 | Timeframe | Model Name | Accuracy | Training Samples |
@@ -46,20 +76,10 @@ Build a self-improving AI trading bot "SentCom" by hardening the data pipeline, 
 
 ## Outstanding Issues
 
-### P0 - Critical
-1. **Intraday Training Crashes**: Memory overload on 5-min/15-min timeframes
-   - Need smaller batch sizes for intraday
-   - Consider one-at-a-time training approach
-
-### P1 - High
-2. **Frontend Polling Overload**: `ERR_INSUFFICIENT_RESOURCES`
-   - Excessive API calls flooding browser/backend
-   - Need to slow/pause polling during training
-
-### P2 - Medium
-3. Implement Backtesting Workflow Automation
-4. Implement Best Model Protection (save only if accuracy improves)
-5. Enable GPU for LightGBM
+### P2 - Medium Priority
+1. **Implement Backtesting Workflow Automation** - Create automated backtesting scripts
+2. **Enable Best Model Protection** - Save only if accuracy improves
+3. **Enable GPU for LightGBM** - Re-install with GPU support
 
 ## Future Roadmap
 - Setup-Specific AI Models (77 trading setups)
@@ -67,10 +87,22 @@ Build a self-improving AI trading bot "SentCom" by hardening the data pipeline, 
 - Complete Backend Router Refactoring
 
 ## Key API Endpoints
-- `POST /api/ai-modules/timeseries/forecast` - Get prediction for symbol
-- `GET /api/ai-modules/timeseries/status` - Model status
-- `GET /api/ai-modules/timeseries/training-history` - Training history
-- `POST /api/ai-modules/timeseries/train-full-universe-all` - Train all timeframes
+- `POST /api/ai-modules/timeseries/forecast` - Get prediction for symbol ✅ WORKING
+- `GET /api/ai-modules/timeseries/status` - Model status ✅ WORKING
+- `GET /api/ai-modules/timeseries/training-history` - Training history ✅ WORKING
+- `POST /api/ai-modules/timeseries/train-full-universe-all` - Train all timeframes ✅ MEMORY-OPTIMIZED
+
+## Files Modified This Session
+- `/app/backend/services/ai_modules/timeseries_gbm.py` - Fixed model loading
+- `/app/backend/services/ai_modules/timeseries_service.py` - Added memory-safe settings
+- `/app/frontend/src/contexts/TrainingModeContext.jsx` - NEW
+- `/app/frontend/src/contexts/index.js` - Updated exports
+- `/app/frontend/src/components/TrainingModeIndicator.jsx` - NEW
+- `/app/frontend/src/components/UnifiedAITraining.jsx` - Training mode integration
+- `/app/frontend/src/components/SimulatorControl.jsx` - Training-aware polling
+- `/app/frontend/src/components/NIA.jsx` - Training-aware polling
+- `/app/frontend/src/pages/TradeOpportunitiesPage.js` - Training-aware polling
+- `/app/frontend/src/App.js` - Added TrainingModeProvider and indicator
 
 ## 3rd Party Integrations
 - Interactive Brokers (IB Gateway)

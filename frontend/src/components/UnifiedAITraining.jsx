@@ -41,6 +41,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api, { apiLongRunning } from '../utils/api';
+import { useTrainingMode } from '../contexts';
 
 // Timeframe configurations
 const TIMEFRAME_CONFIG = {
@@ -381,6 +382,9 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
   const [expanded, setExpanded] = useState(true);
   const [activeTab, setActiveTab] = useState('models'); // 'models' | 'calibration' | 'history'
   
+  // Training mode context - notifies other components to reduce polling
+  const { startTraining: notifyTrainingStart, endTraining: notifyTrainingEnd, updateProgress: notifyProgress } = useTrainingMode();
+  
   // Data states
   const [availableData, setAvailableData] = useState(null);
   const [modelStatus, setModelStatus] = useState({});
@@ -513,6 +517,8 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
     setIsTraining(true);
     setCurrentTimeframe(timeframe);
     setTrainingStartTime(Date.now());
+    // Notify all components to reduce polling during training
+    notifyTrainingStart('single-timeframe');
     
     // Initialize training progress
     setTrainingProgress({
@@ -608,6 +614,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       setIsTraining(false);
       setCurrentTimeframe(null);
       setTrainingStartTime(null);
+      notifyTrainingEnd();
       if (onTrainComplete) onTrainComplete();
     }
   };
@@ -645,6 +652,9 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       elapsedTime: 0,
       message: 'Starting full universe training...'
     });
+    
+    // Notify all components to reduce polling during training
+    notifyTrainingStart('full-universe');
     
     toast.info('🌐 Starting Full Universe training - check backend terminal for progress', {
       duration: 10000
@@ -733,6 +743,8 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
         elapsedTime: 0,
         message: ''
       });
+      // Notify components that training ended - they can resume normal polling
+      notifyTrainingEnd();
       if (onTrainComplete) onTrainComplete();
     }
   };
@@ -740,6 +752,8 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
   // Train ALL timeframes
   const handleTrainAll = async () => {
     setIsTraining(true);
+    // Notify all components to reduce polling during training
+    notifyTrainingStart('train-all');
     const timeframes = Object.keys(availableData?.timeframes || {});
     
     toast.info(`Training ${timeframes.length} timeframe models...`);
@@ -774,6 +788,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       toast.error(`Training error: ${e.message}`);
     } finally {
       setIsTraining(false);
+      notifyTrainingEnd();
       if (onTrainComplete) onTrainComplete();
     }
   };
@@ -783,6 +798,8 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
     setIsTraining(true);
     setIsCalibrating(true);
     setTrainingStartTime(Date.now());
+    // Notify all components to reduce polling during training
+    notifyTrainingStart('quick-train');
     
     // Initialize training progress
     setTrainingProgress({
@@ -928,6 +945,8 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       setIsCalibrating(false);
       setCurrentTimeframe(null);
       setTrainingStartTime(null);
+      // Notify components that training ended - they can resume normal polling
+      notifyTrainingEnd();
       // Clear training progress after a delay to show final status
       setTimeout(() => {
         setTrainingProgress({
