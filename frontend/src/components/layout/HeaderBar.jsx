@@ -20,7 +20,8 @@ import {
   XCircle,
   Loader2,
   Server,
-  Upload
+  Upload,
+  LineChart
 } from 'lucide-react';
 
 // Credit Budget Detail Modal Component
@@ -646,10 +647,18 @@ const HeaderBar = ({
   creditBudget,
   ollamaStatus = 'unknown',
   ollamaUsage = null,
-  ibPusherStatus = null
+  ibPusherStatus = null,
+  activeTab = 'coach',
+  setActiveTab = () => {}
 }) => {
   const [showCreditModal, setShowCreditModal] = useState(false);
   const [showOllamaModal, setShowOllamaModal] = useState(false);
+
+  // Tab configuration
+  const tabs = [
+    { id: 'coach', label: 'Command', icon: Target },
+    { id: 'charts', label: 'Charts', icon: LineChart }
+  ];
 
   // Credit budget status color and icon
   const getCreditStatusConfig = () => {
@@ -714,8 +723,31 @@ const HeaderBar = ({
               <h1 className="text-base font-bold tracking-tight text-white">
                 Command <span className="neon-text">Center</span>
               </h1>
-              <p className="text-zinc-500 text-[10px] tracking-wide">Real-time trading intelligence hub</p>
+              <p className="text-zinc-500 text-[10px] tracking-wide hidden sm:block">Real-time trading intelligence</p>
             </div>
+          </div>
+
+          {/* Integrated Tab Navigation */}
+          <div className="flex items-center gap-1 ml-2" data-testid="main-tabs">
+            {tabs.map(tab => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    isActive
+                      ? 'bg-cyan-400/15 text-cyan-400 border border-cyan-400/30 shadow-[0_0_10px_rgba(0,229,255,0.15)]'
+                      : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5 border border-transparent'
+                  }`}
+                  data-testid={`tab-${tab.id}`}
+                >
+                  <Icon className={`w-3.5 h-3.5 ${isActive ? 'drop-shadow-[0_0_6px_rgba(0,229,255,0.5)]' : ''}`} />
+                  <span className="hidden sm:inline">{tab.label}</span>
+                </button>
+              );
+            })}
           </div>
           
           {/* Credit Budget Indicator - COMPACT */}

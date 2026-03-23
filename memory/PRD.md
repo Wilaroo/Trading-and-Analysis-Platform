@@ -2,6 +2,24 @@
 
 **Last Updated:** March 23, 2026
 
+## UI Improvements This Session
+
+### 1. Command Center Header Consolidation - COMPLETED
+- Merged the "Command Center" page title and "Command/Charts" tabs into a single compact row
+- Saves vertical screen space
+- Tabs now integrated directly into the HeaderBar component
+- Files modified: `CommandCenterPage.js`, `HeaderBar.jsx`
+
+### 2. System Status Consolidation (Previous Fork)
+- Removed 5+ redundant connection status indicators
+- Created unified, color-coded status bar in TickerTape component
+- Single source of truth for all connection health
+
+### 3. Frontend Resilience Layer (Previous Fork)
+- Added `AppStateContext`, `ConnectionManagerContext`, `SystemStatusContext`, `TrainingModeContext`
+- Implemented `useSmartPolling` hook for visibility-aware polling
+- Persistent state across tab switches using localStorage
+
 ## Bug Fixes This Session
 
 ### 1. Prediction API 404 Errors - FIXED
@@ -107,6 +125,8 @@ Build a self-improving AI trading bot "SentCom" by hardening the data pipeline, 
 - `POST /api/ai-modules/timeseries/train-full-universe-all` - Train all timeframes ✅ MEMORY-OPTIMIZED
 
 ## Files Modified This Session
+- `/app/frontend/src/pages/CommandCenterPage.js` - Removed separate tab navigation, integrated into header
+- `/app/frontend/src/components/layout/HeaderBar.jsx` - Added integrated Command/Charts tabs
 - `/app/backend/services/ai_modules/timeseries_gbm.py` - Fixed model loading
 - `/app/backend/services/ai_modules/timeseries_service.py` - Added memory-safe settings
 - `/app/frontend/src/contexts/TrainingModeContext.jsx` - NEW

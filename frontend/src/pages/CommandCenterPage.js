@@ -5,7 +5,6 @@ import HeaderBar from '../components/layout/HeaderBar';
 import AICoachTab from '../components/tabs/AICoachTab';
 import ChartsTab from '../components/tabs/ChartsTab';
 import { useCommandCenterData } from '../hooks/useCommandCenterData';
-import { LineChart, Target } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -78,14 +77,9 @@ const CommandCenterPage = ({
     return () => clearInterval(interval);
   }, []);
 
-  const tabs = [
-    { id: 'coach', label: 'Command', icon: Target },
-    { id: 'charts', label: 'Charts', icon: LineChart }
-  ];
-
   return (
     <div className="space-y-3 pb-8" data-testid="command-center-page">
-      {/* Header */}
+      {/* Header with integrated tabs */}
       <HeaderBar
         systemHealth={data.systemHealth}
         wsConnected={wsConnected}
@@ -99,30 +93,9 @@ const CommandCenterPage = ({
         ollamaStatus={ollamaStatus}
         ollamaUsage={ollamaUsage}
         ibPusherStatus={ibPusherStatus}
+        activeTab={data.activeMainTab}
+        setActiveTab={data.setActiveMainTab}
       />
-
-      {/* Tab Navigation — Glass Style */}
-      <div className="flex items-center gap-1 glass-panel p-1.5 mt-1" data-testid="main-tabs">
-        {tabs.map(tab => {
-          const Icon = tab.icon;
-          const isActive = data.activeMainTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => data.setActiveMainTab(tab.id)}
-              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                isActive
-                  ? 'bg-cyan-400/10 text-cyan-400 border border-cyan-400/30 shadow-[0_0_15px_rgba(0,229,255,0.15)]'
-                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5 border border-transparent'
-              }`}
-              data-testid={`tab-${tab.id}`}
-            >
-              <Icon className={`w-4 h-4 ${isActive ? 'drop-shadow-[0_0_6px_rgba(0,229,255,0.5)]' : ''}`} />
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
 
       {/* Tab Content */}
       {data.activeMainTab === 'coach' && (
