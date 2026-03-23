@@ -395,6 +395,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
   const [isTraining, setIsTraining] = useState(false);
   const [currentTimeframe, setCurrentTimeframe] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   
   // Enhanced training progress state
   const [trainingProgress, setTrainingProgress] = useState({
@@ -468,13 +469,14 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
 
   // Fetch all data
   const fetchData = useCallback(async () => {
+    setLoadError(null); // Reset error state
     try {
       const [dataRes, statusRes, historyRes, configRes, trainingStatusRes] = await Promise.all([
-        api.get('/api/ai-modules/timeseries/available-data').catch(() => ({ data: null })),
-        api.get('/api/ai-modules/timeseries/training-status').catch(() => ({ data: null })),
-        api.get('/api/ai-modules/timeseries/training-history?limit=20').catch(() => ({ data: null })),
-        api.get('/api/medium-learning/calibration/config').catch(() => ({ data: null })),
-        api.get('/api/ai-modules/training-status').catch(() => ({ data: null }))
+        api.get('/api/ai-modules/timeseries/available-data').catch((e) => ({ data: null, error: e })),
+        api.get('/api/ai-modules/timeseries/training-status').catch((e) => ({ data: null, error: e })),
+        api.get('/api/ai-modules/timeseries/training-history?limit=20').catch((e) => ({ data: null, error: e })),
+        api.get('/api/medium-learning/calibration/config').catch((e) => ({ data: null, error: e })),
+        api.get('/api/ai-modules/training-status').catch((e) => ({ data: null, error: e }))
       ]);
       
       if (dataRes.data?.success) {
@@ -482,6 +484,9 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
         // Cache to localStorage for persistence
         localStorage.setItem(STORAGE_KEYS.availableData, JSON.stringify(dataRes.data));
         console.log('[NIA] Cached available data:', dataRes.data.total_bars, 'bars');
+      } else if (!availableData) {
+        // Only set error if we don't have cached data
+        setLoadError('Unable to load training data. Please try refreshing.');
       }
       if (statusRes.data?.success) {
         const status = statusRes.data.status?.timeframe_status || {};
@@ -502,11 +507,13 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       }
     } catch (e) {
       console.error('Error fetching AI training data:', e);
-      // On error, keep showing cached data (don't clear state)
+      if (!availableData) {
+        setLoadError('Failed to connect to the server. Please check your connection.');
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [availableData]);
 
   useEffect(() => {
     fetchData();
@@ -1005,6 +1012,48 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
         <div className="flex items-center justify-center gap-3 text-zinc-400">
           <Loader2 className="w-5 h-5 animate-spin" />
           Loading AI training data...
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state with retry button
+  if (!loading && !availableData && loadError) {
+    return (
+      <div className="rounded-xl border border-red-500/30 p-6 mb-4" style={{ background: 'linear-gradient(135deg, rgba(21, 28, 36, 0.95), rgba(30, 40, 55, 0.95))' }}>
+        <div className="flex flex-col items-center justify-center gap-3">
+          <div className="flex items-center gap-2 text-red-400">
+            <AlertCircle className="w-5 h-5" />
+            {loadError}
+          </div>
+          <button
+            onClick={() => { setLoading(true); fetchData(); }}
+            className="px-4 py-2 rounded-lg bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors flex items-center gap-2"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Show minimal fallback if no data but also no error (shouldn't happen often)
+  if (!availableData) {
+    return (
+      <div className="rounded-xl border border-white/10 p-6 mb-4" style={{ background: 'linear-gradient(135deg, rgba(21, 28, 36, 0.95), rgba(30, 40, 55, 0.95))' }}>
+        <div className="flex flex-col items-center justify-center gap-3">
+          <div className="flex items-center gap-2 text-zinc-400">
+            <Database className="w-5 h-5" />
+            No training data available
+          </div>
+          <button
+            onClick={() => { setLoading(true); fetchData(); }}
+            className="px-4 py-2 rounded-lg bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors flex items-center gap-2"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh
+          </button>
         </div>
       </div>
     );
