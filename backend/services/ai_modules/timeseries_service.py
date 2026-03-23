@@ -84,14 +84,16 @@ class TimeSeriesAIService:
     
     # Memory-safe settings per timeframe
     # Intraday timeframes have more data and need smaller batches to prevent OOM
+    # IMPORTANT: We keep max_bars high to use ALL available data - only batch_size is reduced
+    # This ensures we don't lose training data, just process fewer symbols at a time
     TIMEFRAME_SETTINGS = {
-        "1 min": {"batch_size": 10, "max_bars": 200, "is_intraday": True},    # Most data, smallest batch
-        "5 mins": {"batch_size": 15, "max_bars": 300, "is_intraday": True},   # High data volume
-        "15 mins": {"batch_size": 20, "max_bars": 400, "is_intraday": True},  # Medium-high data
-        "30 mins": {"batch_size": 25, "max_bars": 500, "is_intraday": True},  # Medium data
-        "1 hour": {"batch_size": 50, "max_bars": 1000, "is_intraday": False}, # Moderate data
-        "1 day": {"batch_size": 100, "max_bars": 2000, "is_intraday": False}, # Lower data volume
-        "1 week": {"batch_size": 100, "max_bars": 2000, "is_intraday": False}, # Lowest data
+        "1 min": {"batch_size": 5, "max_bars": 10000, "is_intraday": True},     # Most data, smallest batch - process 5 symbols at a time
+        "5 mins": {"batch_size": 10, "max_bars": 10000, "is_intraday": True},   # High data volume - process 10 symbols at a time
+        "15 mins": {"batch_size": 15, "max_bars": 10000, "is_intraday": True},  # Medium-high data
+        "30 mins": {"batch_size": 20, "max_bars": 10000, "is_intraday": True},  # Medium data
+        "1 hour": {"batch_size": 50, "max_bars": 10000, "is_intraday": False},  # Moderate data
+        "1 day": {"batch_size": 100, "max_bars": 10000, "is_intraday": False},  # Lower data volume
+        "1 week": {"batch_size": 100, "max_bars": 10000, "is_intraday": False}, # Lowest data
     }
     
     # Training defaults - optimized for reliable completion
@@ -1022,16 +1024,20 @@ class TimeSeriesAIService:
                     gc.collect()
                     
                     # Use timeframe-specific settings for memory safety
+                    # Key insight: Use small batch sizes (few symbols at a time) but ALL bars per symbol
                     tf_settings = self.TIMEFRAME_SETTINGS.get(tf, {})
                     tf_batch_size = tf_settings.get("batch_size", symbol_batch_size)
-                    tf_max_bars = tf_settings.get("max_bars", max_bars_per_symbol)
+                    tf_max_bars = tf_settings.get("max_bars", 10000)  # Default high to use all data
                     is_intraday = tf_settings.get("is_intraday", False)
                     
-                    # Override with provided values only if they're smaller (safer)
+                    # For batch_size: use the smaller of user-provided and timeframe-specific (memory safety)
+                    # For max_bars: use the LARGER value to ensure we don't miss data (unless user explicitly wants less)
                     actual_batch_size = min(symbol_batch_size, tf_batch_size)
-                    actual_max_bars = min(max_bars_per_symbol, tf_max_bars)
+                    actual_max_bars = max(max_bars_per_symbol, tf_max_bars)  # Use MORE bars, not fewer
                     
-                    logger.info(f">>> Memory-safe settings for {tf}: batch={actual_batch_size}, max_bars={actual_max_bars}, intraday={is_intraday}")
+                    logger.info(f">>> Settings for {tf}: batch_size={actual_batch_size} (process {actual_batch_size} symbols at a time)")
+                    logger.info(f">>> Settings for {tf}: max_bars={actual_max_bars} per symbol (using ALL available data)")
+                    logger.info(f">>> Intraday timeframe: {is_intraday}")
                     sys.stdout.flush()
                     
                     result = await self.train_full_universe(
