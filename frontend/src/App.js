@@ -7,11 +7,18 @@ import { Toaster } from 'sonner';
 import { Sidebar, TickerTape, PriceAlertNotification, AlertSettingsPanel } from './components';
 import { useWebSocket, usePriceAlerts } from './hooks';
 import { TickerModalProvider } from './hooks/useTickerModal';
-import { DataCacheProvider, TrainingModeProvider } from './contexts';
+import { 
+  DataCacheProvider, 
+  TrainingModeProvider, 
+  AppStateProvider, 
+  ConnectionManagerProvider 
+} from './contexts';
 import api from './utils/api';
 import StartupModal from './components/StartupModal';
 import StartupStatusDashboard from './components/StartupStatusDashboard';
 import TrainingModeIndicator from './components/TrainingModeIndicator';
+import ConnectionStatus from './components/ConnectionStatus';
+import ErrorBoundary from './components/ErrorBoundary';
 
 // Import pages
 import {
@@ -25,29 +32,9 @@ import NIA from './components/NIA';
 
 import './App.css';
 
-// Error Boundary to catch TradingView widget errors
-class ErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false };
-  }
-
-  static getDerivedStateFromError(error) {
-    return { hasError: true };
-  }
-
-  componentDidCatch(error, errorInfo) {
-    // Error boundary caught an error
-    console.error('Widget error:', error);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return this.props.fallback || <div className="p-4 text-zinc-500">Widget loading error</div>;
-    }
-    return this.props.children;
-  }
-}
+// Alias the imported ErrorBoundary to avoid naming conflicts
+// The imported one is more robust with retry functionality
+const WidgetErrorBoundary = ErrorBoundary;
 
 // Suppress third-party script errors in development
 if (typeof window !== 'undefined') {
@@ -333,16 +320,18 @@ function App() {
     
     switch (activeTab) {
       case 'command-center': return <CommandCenterPage {...ibProps} isActiveTab={true} />;
-      case 'nia': return <NIA />;
-      case 'chart': return <ErrorBoundary><ChartsPage {...ibProps} /></ErrorBoundary>;
-      case 'trade-journal': return <TradeJournalPage />;
-      case 'glossary': return <GlossaryPage />;
-      case 'settings': return <SettingsPage />;
+      case 'nia': return <ErrorBoundary name="NIA"><NIA /></ErrorBoundary>;
+      case 'chart': return <ErrorBoundary name="Charts"><ChartsPage {...ibProps} /></ErrorBoundary>;
+      case 'trade-journal': return <ErrorBoundary name="Trade Journal"><TradeJournalPage /></ErrorBoundary>;
+      case 'glossary': return <ErrorBoundary name="Glossary"><GlossaryPage /></ErrorBoundary>;
+      case 'settings': return <ErrorBoundary name="Settings"><SettingsPage /></ErrorBoundary>;
       default: return <CommandCenterPage {...ibProps} isActiveTab={activeTab === 'command-center'} />;
     }
   };
 
   return (
+    <AppStateProvider>
+    <ConnectionManagerProvider>
     <TrainingModeProvider>
     <DataCacheProvider>
     <TickerModalProvider>
@@ -447,15 +436,22 @@ function App() {
         <div className="p-6">
           <AnimatePresence mode="wait">
             <motion.div key={activeTab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
-              {renderPage()}
+              <ErrorBoundary name={activeTab}>
+                {renderPage()}
+              </ErrorBoundary>
             </motion.div>
           </AnimatePresence>
         </div>
       </main>
+      
+      {/* Connection Status Indicator */}
+      <ConnectionStatus />
       </div>
     </TickerModalProvider>
     </DataCacheProvider>
     </TrainingModeProvider>
+    </ConnectionManagerProvider>
+    </AppStateProvider>
   );
 }
 

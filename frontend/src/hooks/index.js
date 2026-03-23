@@ -1,5 +1,6 @@
 export { default as useWebSocket } from './useWebSocket';
 export { default as usePriceAlerts } from './usePriceAlerts';
+export { useSmartPolling, useFetchOnce } from './useSmartPolling';
 
 // SentCom hooks
 export {

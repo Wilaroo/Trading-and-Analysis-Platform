@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S.O.C. Style Mockups - SentCom</title>
+    
+    <!-- Font imports -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            background: #0a0a0a;
+            color: #fff;
+            padding: 40px;
+            min-height: 100vh;
+        }
+        
+        h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 28px;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #22d3ee, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .subtitle {
+            font-family: 'Inter', sans-serif;
+            color: #71717a;
+            margin-bottom: 40px;
+            font-size: 14px;
+        }
+        
+        .section {
+            margin-bottom: 60px;
+        }
+        
+        .section-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 18px;
+            color: #a1a1aa;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #27272a;
+        }
+        
+        .mockup-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 30px;
+        }
+        
+        .mockup-card {
+            background: #111;
+            border: 1px solid #27272a;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+        
+        .mockup-header {
+            padding: 16px 20px;
+            background: #18181b;
+            border-bottom: 1px solid #27272a;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .mockup-label {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 600;
+            font-size: 14px;
+            color: #22d3ee;
+        }
+        
+        .mockup-tag {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            padding: 4px 8px;
+            background: #27272a;
+            border-radius: 4px;
+            color: #a1a1aa;
+        }
+        
+        .mockup-content {
+            padding: 20px;
+        }
+        
+        /* ============================================
+           FONT STYLE A: JetBrains Mono (Terminal)
+           ============================================ */
+        .font-a {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .font-a .entry {
+            background: #0c0c0c;
+            border-left: 3px solid #22d3ee;
+            padding: 12px 16px;
+            margin-bottom: 12px;
+            border-radius: 0 8px 8px 0;
+        }
+        .font-a .entry-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .font-a .entry-type {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .font-a .type-badge {
+            font-size: 9px;
+            font-weight: 600;
+            padding: 3px 6px;
+            border-radius: 3px;
+            background: #22d3ee20;
+            color: #22d3ee;
+            letter-spacing: 0.5px;
+        }
+        .font-a .symbol {
+            font-size: 13px;
+            font-weight: 600;
+            color: #fff;
+        }
+        .font-a .timestamp {
+            font-size: 10px;
+            color: #52525b;
+        }
+        .font-a .content {
+            font-size: 12px;
+            color: #d4d4d8;
+            line-height: 1.5;
+            margin-bottom: 10px;
+        }
+        .font-a .data-row {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .font-a .data-chip {
+            font-size: 10px;
+            color: #a1a1aa;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .font-a .data-chip .value {
+            color: #22d3ee;
+            font-weight: 500;
+        }
+        .font-a .data-chip.green .value { color: #4ade80; }
+        .font-a .data-chip.red .value { color: #f87171; }
+        .font-a .data-chip.amber .value { color: #fbbf24; }
+        
+        /* ============================================
+           FONT STYLE B: Space Grotesk (Modern Techy)
+           ============================================ */
+        .font-b {
+            font-family: 'Space Grotesk', sans-serif;
+        }
+        .font-b .entry {
+            background: linear-gradient(135deg, #18181b 0%, #0f0f0f 100%);
+            border: 1px solid #27272a;
+            padding: 14px 18px;
+            margin-bottom: 12px;
+            border-radius: 12px;
+            position: relative;
+            overflow: hidden;
+        }
+        .font-b .entry::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: linear-gradient(180deg, #8b5cf6, #6366f1);
+        }
+        .font-b .entry-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .font-b .entry-type {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .font-b .type-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #8b5cf620 0%, #6366f120 100%);
+            border: 1px solid #8b5cf640;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+        }
+        .font-b .type-badge {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 6px;
+            background: #8b5cf620;
+            color: #a78bfa;
+            letter-spacing: 1px;
+        }
+        .font-b .symbol {
+            font-size: 14px;
+            font-weight: 700;
+            color: #fff;
+            background: #27272a;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+        .font-b .timestamp {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            color: #52525b;
+        }
+        .font-b .content {
+            font-size: 13px;
+            color: #e4e4e7;
+            line-height: 1.6;
+            margin-bottom: 12px;
+            font-weight: 400;
+        }
+        .font-b .data-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .font-b .data-chip {
+            font-size: 11px;
+            padding: 5px 10px;
+            background: #27272a;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: #a1a1aa;
+        }
+        .font-b .data-chip .value {
+            color: #fff;
+            font-weight: 600;
+        }
+        .font-b .data-chip.green { background: #4ade8015; border: 1px solid #4ade8030; }
+        .font-b .data-chip.green .value { color: #4ade80; }
+        .font-b .data-chip.red { background: #f8717115; border: 1px solid #f8717130; }
+        .font-b .data-chip.red .value { color: #f87171; }
+        
+        /* ============================================
+           FONT STYLE C: IBM Plex (Professional)
+           ============================================ */
+        .font-c {
+            font-family: 'IBM Plex Sans', sans-serif;
+        }
+        .font-c .entry {
+            background: #111;
+            border-bottom: 1px solid #27272a;
+            padding: 16px 0;
+        }
+        .font-c .entry-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 8px;
+        }
+        .font-c .entry-type {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .font-c .type-badge {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 10px;
+            font-weight: 500;
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: #10b98120;
+            color: #10b981;
+            border: 1px solid #10b98140;
+        }
+        .font-c .symbol {
+            font-size: 15px;
+            font-weight: 600;
+            color: #fff;
+        }
+        .font-c .trade-type {
+            font-size: 11px;
+            color: #71717a;
+            font-weight: 500;
+        }
+        .font-c .timestamp {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 11px;
+            color: #52525b;
+        }
+        .font-c .content {
+            font-size: 13px;
+            color: #d4d4d8;
+            line-height: 1.6;
+            margin-bottom: 12px;
+        }
+        .font-c .data-row {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            font-family: 'IBM Plex Mono', monospace;
+        }
+        .font-c .data-chip {
+            font-size: 11px;
+            color: #71717a;
+        }
+        .font-c .data-chip .label {
+            margin-right: 4px;
+        }
+        .font-c .data-chip .value {
+            color: #22d3ee;
+            font-weight: 500;
+        }
+        .font-c .data-chip.green .value { color: #4ade80; }
+        .font-c .data-chip.red .value { color: #f87171; }
+        
+        /* ============================================
+           FONT STYLE D: Outfit + JetBrains (Bold)
+           ============================================ */
+        .font-d {
+            font-family: 'Outfit', sans-serif;
+        }
+        .font-d .entry {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16161a 100%);
+            border: 1px solid #2d2d3a;
+            padding: 16px 20px;
+            margin-bottom: 14px;
+            border-radius: 14px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .font-d .entry.trade { border-left: 4px solid #4ade80; }
+        .font-d .entry.setup { border-left: 4px solid #22d3ee; }
+        .font-d .entry.market { border-left: 4px solid #fbbf24; }
+        .font-d .entry.watch { border-left: 4px solid #818cf8; }
+        .font-d .entry-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .font-d .entry-type {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .font-d .type-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 700;
+        }
+        .font-d .type-icon.trade { background: #4ade8020; color: #4ade80; }
+        .font-d .type-icon.setup { background: #22d3ee20; color: #22d3ee; }
+        .font-d .type-icon.market { background: #fbbf2420; color: #fbbf24; }
+        .font-d .type-icon.watch { background: #818cf820; color: #818cf8; }
+        .font-d .type-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .font-d .type-badge {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+        .font-d .type-badge.trade { color: #4ade80; }
+        .font-d .type-badge.setup { color: #22d3ee; }
+        .font-d .type-badge.market { color: #fbbf24; }
+        .font-d .type-badge.watch { color: #818cf8; }
+        .font-d .trade-type {
+            font-size: 10px;
+            color: #71717a;
+            font-weight: 500;
+        }
+        .font-d .header-right {
+            text-align: right;
+        }
+        .font-d .symbol {
+            font-size: 16px;
+            font-weight: 700;
+            color: #fff;
+        }
+        .font-d .timestamp {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            color: #52525b;
+        }
+        .font-d .content {
+            font-size: 14px;
+            color: #e4e4e7;
+            line-height: 1.6;
+            margin-bottom: 14px;
+            font-weight: 400;
+        }
+        .font-d .data-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .font-d .data-chip {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            padding: 6px 12px;
+            background: #27272a;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: #a1a1aa;
+        }
+        .font-d .data-chip .icon {
+            font-size: 11px;
+        }
+        .font-d .data-chip .value {
+            color: #fff;
+            font-weight: 600;
+        }
+        .font-d .data-chip.green { background: #4ade8010; border: 1px solid #4ade8030; }
+        .font-d .data-chip.green .value { color: #4ade80; }
+        .font-d .data-chip.red { background: #f8717110; border: 1px solid #f8717130; }
+        .font-d .data-chip.red .value { color: #f87171; }
+        .font-d .data-chip.cyan { background: #22d3ee10; border: 1px solid #22d3ee30; }
+        .font-d .data-chip.cyan .value { color: #22d3ee; }
+        
+        /* ============================================
+           VISUAL STYLE VARIATIONS
+           ============================================ */
+        .visual-section {
+            margin-top: 60px;
+        }
+        
+        /* Style 1: Gradient Bars */
+        .visual-1 .entry {
+            background: #111;
+            padding: 14px 18px;
+            margin-bottom: 10px;
+            border-radius: 10px;
+            border-left: 4px solid;
+            border-image: linear-gradient(180deg, #22d3ee, #8b5cf6) 1;
+        }
+        
+        /* Style 2: Glassmorphism */
+        .visual-2 .entry {
+            background: rgba(255,255,255,0.03);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.08);
+            padding: 16px 20px;
+            margin-bottom: 12px;
+            border-radius: 16px;
+        }
+        
+        /* Style 3: Cards with Glow */
+        .visual-3 .entry {
+            background: #111;
+            border: 1px solid #27272a;
+            padding: 16px 20px;
+            margin-bottom: 14px;
+            border-radius: 12px;
+            box-shadow: 0 0 20px rgba(34, 211, 238, 0.1);
+            transition: box-shadow 0.3s;
+        }
+        .visual-3 .entry:hover {
+            box-shadow: 0 0 30px rgba(34, 211, 238, 0.2);
+        }
+        
+        /* Style 4: Minimal Lines */
+        .visual-4 .entry {
+            padding: 12px 0;
+            border-bottom: 1px solid #27272a;
+        }
+        .visual-4 .entry:last-child {
+            border-bottom: none;
+        }
+        
+        /* Common entry styles for visual demos */
+        .visual-demo .entry-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            font-family: 'Outfit', sans-serif;
+        }
+        .visual-demo .entry-type {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .visual-demo .type-badge {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 6px;
+            background: #22d3ee20;
+            color: #22d3ee;
+            letter-spacing: 0.5px;
+        }
+        .visual-demo .symbol {
+            font-size: 14px;
+            font-weight: 700;
+            color: #fff;
+        }
+        .visual-demo .timestamp {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            color: #52525b;
+        }
+        .visual-demo .content {
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            color: #d4d4d8;
+            margin-bottom: 10px;
+        }
+        .visual-demo .data-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+        }
+        .visual-demo .data-chip {
+            padding: 4px 8px;
+            background: #27272a;
+            border-radius: 4px;
+            color: #a1a1aa;
+        }
+        .visual-demo .data-chip .value {
+            color: #22d3ee;
+        }
+    </style>
+</head>
+<body>
+    <h1>S.O.C. Style Mockups</h1>
+    <p class="subtitle">Font combinations and visual styles for the Stream of Consciousness panel</p>
+    
+    <!-- FONT STYLES SECTION -->
+    <div class="section">
+        <h2 class="section-title">📝 Font Styles</h2>
+        
+        <div class="mockup-grid">
+            <!-- Font Style A: JetBrains Mono -->
+            <div class="mockup-card">
+                <div class="mockup-header">
+                    <span class="mockup-label">Style A: JetBrains Mono</span>
+                    <span class="mockup-tag">Terminal / Data-Heavy</span>
+                </div>
+                <div class="mockup-content font-a">
+                    <div class="entry">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <span class="type-badge">TRADE</span>
+                                <span class="symbol">NVDA</span>
+                            </div>
+                            <span class="timestamp">17:32:45</span>
+                        </div>
+                        <div class="content">Trade closed: sold NVDA @ $485.20 (+3.2%)</div>
+                        <div class="data-row">
+                            <span class="data-chip">Entry <span class="value">$470.00</span></span>
+                            <span class="data-chip green">P&L <span class="value">+$1,520</span></span>
+                            <span class="data-chip green">R <span class="value">+2.1R</span></span>
+                            <span class="data-chip">Hold <span class="value">2h 15m</span></span>
+                            <span class="data-chip amber">Type <span class="value">Scalp • 5min</span></span>
+                        </div>
+                    </div>
+                    <div class="entry">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <span class="type-badge" style="background:#8b5cf620;color:#a78bfa;">SETUP</span>
+                                <span class="symbol">AMD</span>
+                            </div>
+                            <span class="timestamp">17:30:12</span>
+                        </div>
+                        <div class="content">Found setup: AMD Momentum Breakout @ $142.50</div>
+                        <div class="data-row">
+                            <span class="data-chip">Score <span class="value">8.5</span></span>
+                            <span class="data-chip">Stop <span class="value">$140.20</span></span>
+                            <span class="data-chip">Target <span class="value">$148.00</span></span>
+                            <span class="data-chip green">R:R <span class="value">2.4:1</span></span>
+                            <span class="data-chip amber">Type <span class="value">Swing • Daily</span></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Font Style B: Space Grotesk -->
+            <div class="mockup-card">
+                <div class="mockup-header">
+                    <span class="mockup-label">Style B: Space Grotesk</span>
+                    <span class="mockup-tag">Modern / Techy</span>
+                </div>
+                <div class="mockup-content font-b">
+                    <div class="entry">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <div class="type-icon">⚡</div>
+                                <span class="type-badge">TRADE</span>
+                                <span class="symbol">NVDA</span>
+                            </div>
+                            <span class="timestamp">17:32:45</span>
+                        </div>
+                        <div class="content">Trade closed: sold NVDA @ $485.20 — captured momentum breakout</div>
+                        <div class="data-row">
+                            <span class="data-chip green">P&L <span class="value">+$1,520</span></span>
+                            <span class="data-chip green">+3.2% <span class="value">• 2.1R</span></span>
+                            <span class="data-chip">$470 → $485</span>
+                            <span class="data-chip">Scalp • 5min</span>
+                        </div>
+                    </div>
+                    <div class="entry">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <div class="type-icon">🎯</div>
+                                <span class="type-badge" style="background:#22d3ee20;color:#22d3ee;">SETUP</span>
+                                <span class="symbol">AMD</span>
+                            </div>
+                            <span class="timestamp">17:30:12</span>
+                        </div>
+                        <div class="content">Momentum Breakout detected — price clearing resistance with volume</div>
+                        <div class="data-row">
+                            <span class="data-chip">Entry $142.50</span>
+                            <span class="data-chip red">Stop $140.20</span>
+                            <span class="data-chip green">Target $148</span>
+                            <span class="data-chip">Score 8.5</span>
+                            <span class="data-chip">Swing • Daily</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Font Style C: IBM Plex -->
+            <div class="mockup-card">
+                <div class="mockup-header">
+                    <span class="mockup-label">Style C: IBM Plex Sans/Mono</span>
+                    <span class="mockup-tag">Professional / Clean</span>
+                </div>
+                <div class="mockup-content font-c">
+                    <div class="entry">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <span class="type-badge">TRADE</span>
+                                <span class="symbol">NVDA</span>
+                                <span class="trade-type">Scalp • 5min</span>
+                            </div>
+                            <span class="timestamp">17:32:45</span>
+                        </div>
+                        <div class="content">Trade closed: sold NVDA @ $485.20 (+3.2%) — momentum breakout captured</div>
+                        <div class="data-row">
+                            <span class="data-chip"><span class="label">Entry:</span><span class="value">$470.00</span></span>
+                            <span class="data-chip"><span class="label">Exit:</span><span class="value">$485.20</span></span>
+                            <span class="data-chip green"><span class="label">P&L:</span><span class="value">+$1,520</span></span>
+                            <span class="data-chip green"><span class="label">R:</span><span class="value">+2.1</span></span>
+                            <span class="data-chip"><span class="label">Duration:</span><span class="value">2h 15m</span></span>
+                        </div>
+                    </div>
+                    <div class="entry">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <span class="type-badge" style="background:#22d3ee20;color:#22d3ee;border-color:#22d3ee40;">SETUP</span>
+                                <span class="symbol">AMD</span>
+                                <span class="trade-type">Swing • Daily</span>
+                            </div>
+                            <span class="timestamp">17:30:12</span>
+                        </div>
+                        <div class="content">Found setup: AMD Momentum Breakout @ $142.50 — clearing key resistance</div>
+                        <div class="data-row">
+                            <span class="data-chip"><span class="label">Score:</span><span class="value">8.5</span></span>
+                            <span class="data-chip"><span class="label">Entry:</span><span class="value">$142.50</span></span>
+                            <span class="data-chip red"><span class="label">Stop:</span><span class="value">$140.20</span></span>
+                            <span class="data-chip green"><span class="label">Target:</span><span class="value">$148.00</span></span>
+                            <span class="data-chip green"><span class="label">R:R:</span><span class="value">2.4:1</span></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Font Style D: Outfit + JetBrains -->
+            <div class="mockup-card">
+                <div class="mockup-header">
+                    <span class="mockup-label">Style D: Outfit + JetBrains Mono</span>
+                    <span class="mockup-tag">Bold / High Contrast</span>
+                </div>
+                <div class="mockup-content font-d">
+                    <div class="entry trade">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <div class="type-icon trade">⚡</div>
+                                <div class="type-info">
+                                    <span class="type-badge trade">TRADE CLOSED</span>
+                                    <span class="trade-type">Scalp • 5min Chart</span>
+                                </div>
+                            </div>
+                            <div class="header-right">
+                                <div class="symbol">NVDA</div>
+                                <div class="timestamp">17:32:45</div>
+                            </div>
+                        </div>
+                        <div class="content">Sold NVDA @ $485.20 — Momentum breakout target hit, trailing stop triggered</div>
+                        <div class="data-row">
+                            <span class="data-chip cyan"><span class="icon">📥</span> Entry <span class="value">$470.00</span></span>
+                            <span class="data-chip cyan"><span class="icon">📤</span> Exit <span class="value">$485.20</span></span>
+                            <span class="data-chip green"><span class="icon">💰</span> P&L <span class="value">+$1,520</span></span>
+                            <span class="data-chip green"><span class="icon">📊</span> <span class="value">+3.2% • 2.1R</span></span>
+                            <span class="data-chip"><span class="icon">⏱</span> <span class="value">2h 15m</span></span>
+                        </div>
+                    </div>
+                    <div class="entry setup">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <div class="type-icon setup">🎯</div>
+                                <div class="type-info">
+                                    <span class="type-badge setup">SETUP FOUND</span>
+                                    <span class="trade-type">Swing • Daily Chart</span>
+                                </div>
+                            </div>
+                            <div class="header-right">
+                                <div class="symbol">AMD</div>
+                                <div class="timestamp">17:30:12</div>
+                            </div>
+                        </div>
+                        <div class="content">Momentum Breakout — Price clearing $142 resistance with 2x avg volume</div>
+                        <div class="data-row">
+                            <span class="data-chip cyan"><span class="icon">🎯</span> Entry <span class="value">$142.50</span></span>
+                            <span class="data-chip red"><span class="icon">🛑</span> Stop <span class="value">$140.20</span></span>
+                            <span class="data-chip green"><span class="icon">🎪</span> Target <span class="value">$148.00</span></span>
+                            <span class="data-chip green"><span class="icon">⚖️</span> R:R <span class="value">2.4:1</span></span>
+                            <span class="data-chip"><span class="icon">⭐</span> Score <span class="value">8.5</span></span>
+                        </div>
+                    </div>
+                    <div class="entry watch">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <div class="type-icon watch">👁</div>
+                                <div class="type-info">
+                                    <span class="type-badge watch">WATCHING</span>
+                                    <span class="trade-type">Scalp • 15min Chart</span>
+                                </div>
+                            </div>
+                            <div class="header-right">
+                                <div class="symbol">TSLA</div>
+                                <div class="timestamp">17:28:33</div>
+                            </div>
+                        </div>
+                        <div class="content">Monitoring TSLA stop @ $245.80 — Price approaching support level</div>
+                        <div class="data-row">
+                            <span class="data-chip cyan"><span class="icon">💵</span> Now <span class="value">$248.50</span></span>
+                            <span class="data-chip red"><span class="icon">🛑</span> Stop <span class="value">$245.80 (1.1% away)</span></span>
+                            <span class="data-chip green"><span class="icon">📈</span> P&L <span class="value">+$420 (+1.8%)</span></span>
+                            <span class="data-chip"><span class="icon">⏱</span> Held <span class="value">45m</span></span>
+                        </div>
+                    </div>
+                    <div class="entry market">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <div class="type-icon market">📊</div>
+                                <div class="type-info">
+                                    <span class="type-badge market">MARKET</span>
+                                    <span class="trade-type">Regime Update</span>
+                                </div>
+                            </div>
+                            <div class="header-right">
+                                <div class="symbol">VIX</div>
+                                <div class="timestamp">17:25:00</div>
+                            </div>
+                        </div>
+                        <div class="content">VIX down 8.5% — RISK_ON signal confirmed, conditions favor momentum plays</div>
+                        <div class="data-row">
+                            <span class="data-chip green"><span class="icon">📉</span> VIX <span class="value">18.2 (-8.5%)</span></span>
+                            <span class="data-chip green"><span class="icon">🟢</span> Regime <span class="value">RISK_ON</span></span>
+                            <span class="data-chip green"><span class="icon">📈</span> SPY <span class="value">+1.2%</span></span>
+                            <span class="data-chip"><span class="icon">📊</span> Breadth <span class="value">62%</span></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- VISUAL STYLES SECTION -->
+    <div class="section visual-section">
+        <h2 class="section-title">🎨 Visual Styles</h2>
+        
+        <div class="mockup-grid">
+            <!-- Visual Style 1: Gradient Bars -->
+            <div class="mockup-card">
+                <div class="mockup-header">
+                    <span class="mockup-label">Visual 1: Gradient Accent Bars</span>
+                    <span class="mockup-tag">Colored left border</span>
+                </div>
+                <div class="mockup-content visual-demo visual-1">
+                    <div class="entry" style="border-image: linear-gradient(180deg, #4ade80, #22d3ee) 1;">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <span class="type-badge" style="background:#4ade8020;color:#4ade80;">TRADE</span>
+                                <span class="symbol">NVDA</span>
+                            </div>
+                            <span class="timestamp">17:32:45</span>
+                        </div>
+                        <div class="content">Trade closed: sold NVDA @ $485.20 (+3.2%)</div>
+                        <div class="data-row">
+                            <span class="data-chip">Entry <span class="value">$470</span></span>
+                            <span class="data-chip">P&L <span class="value" style="color:#4ade80">+$1,520</span></span>
+                        </div>
+                    </div>
+                    <div class="entry" style="border-image: linear-gradient(180deg, #8b5cf6, #ec4899) 1;">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <span class="type-badge" style="background:#8b5cf620;color:#a78bfa;">SETUP</span>
+                                <span class="symbol">AMD</span>
+                            </div>
+                            <span class="timestamp">17:30:12</span>
+                        </div>
+                        <div class="content">Found setup: AMD Momentum Breakout</div>
+                        <div class="data-row">
+                            <span class="data-chip">Score <span class="value">8.5</span></span>
+                            <span class="data-chip">R:R <span class="value" style="color:#4ade80">2.4:1</span></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Visual Style 2: Glassmorphism -->
+            <div class="mockup-card">
+                <div class="mockup-header">
+                    <span class="mockup-label">Visual 2: Glassmorphism</span>
+                    <span class="mockup-tag">Frosted glass effect</span>
+                </div>
+                <div class="mockup-content visual-demo visual-2" style="background: linear-gradient(135deg, #1a1a2e, #16161a);">
+                    <div class="entry">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <span class="type-badge">TRADE</span>
+                                <span class="symbol">NVDA</span>
+                            </div>
+                            <span class="timestamp">17:32:45</span>
+                        </div>
+                        <div class="content">Trade closed: sold NVDA @ $485.20 (+3.2%)</div>
+                        <div class="data-row">
+                            <span class="data-chip" style="background:rgba(255,255,255,0.05);">Entry <span class="value">$470</span></span>
+                            <span class="data-chip" style="background:rgba(74,222,128,0.1);">P&L <span class="value" style="color:#4ade80">+$1,520</span></span>
+                        </div>
+                    </div>
+                    <div class="entry">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <span class="type-badge" style="background:#8b5cf620;color:#a78bfa;">SETUP</span>
+                                <span class="symbol">AMD</span>
+                            </div>
+                            <span class="timestamp">17:30:12</span>
+                        </div>
+                        <div class="content">Found setup: AMD Momentum Breakout</div>
+                        <div class="data-row">
+                            <span class="data-chip" style="background:rgba(255,255,255,0.05);">Score <span class="value">8.5</span></span>
+                            <span class="data-chip" style="background:rgba(255,255,255,0.05);">R:R <span class="value" style="color:#4ade80">2.4:1</span></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Visual Style 3: Glow Cards -->
+            <div class="mockup-card">
+                <div class="mockup-header">
+                    <span class="mockup-label">Visual 3: Glow Cards</span>
+                    <span class="mockup-tag">Subtle glow on hover</span>
+                </div>
+                <div class="mockup-content visual-demo visual-3">
+                    <div class="entry" style="box-shadow: 0 0 20px rgba(74,222,128,0.15);">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <span class="type-badge" style="background:#4ade8020;color:#4ade80;">TRADE</span>
+                                <span class="symbol">NVDA</span>
+                            </div>
+                            <span class="timestamp">17:32:45</span>
+                        </div>
+                        <div class="content">Trade closed: sold NVDA @ $485.20 (+3.2%)</div>
+                        <div class="data-row">
+                            <span class="data-chip">Entry <span class="value">$470</span></span>
+                            <span class="data-chip">P&L <span class="value" style="color:#4ade80">+$1,520</span></span>
+                        </div>
+                    </div>
+                    <div class="entry" style="box-shadow: 0 0 20px rgba(139,92,246,0.15);">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <span class="type-badge" style="background:#8b5cf620;color:#a78bfa;">SETUP</span>
+                                <span class="symbol">AMD</span>
+                            </div>
+                            <span class="timestamp">17:30:12</span>
+                        </div>
+                        <div class="content">Found setup: AMD Momentum Breakout</div>
+                        <div class="data-row">
+                            <span class="data-chip">Score <span class="value">8.5</span></span>
+                            <span class="data-chip">R:R <span class="value" style="color:#4ade80">2.4:1</span></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Visual Style 4: Minimal Lines -->
+            <div class="mockup-card">
+                <div class="mockup-header">
+                    <span class="mockup-label">Visual 4: Minimal Lines</span>
+                    <span class="mockup-tag">Clean / Compact</span>
+                </div>
+                <div class="mockup-content visual-demo visual-4">
+                    <div class="entry">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <span class="type-badge" style="background:#4ade8020;color:#4ade80;">TRADE</span>
+                                <span class="symbol">NVDA</span>
+                            </div>
+                            <span class="timestamp">17:32:45</span>
+                        </div>
+                        <div class="content">Trade closed: sold NVDA @ $485.20 (+3.2%)</div>
+                        <div class="data-row">
+                            <span class="data-chip" style="background:transparent;padding:0;">Entry <span class="value">$470</span></span>
+                            <span class="data-chip" style="background:transparent;padding:0;">P&L <span class="value" style="color:#4ade80">+$1,520</span></span>
+                            <span class="data-chip" style="background:transparent;padding:0;">R <span class="value" style="color:#4ade80">+2.1</span></span>
+                        </div>
+                    </div>
+                    <div class="entry">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <span class="type-badge" style="background:#8b5cf620;color:#a78bfa;">SETUP</span>
+                                <span class="symbol">AMD</span>
+                            </div>
+                            <span class="timestamp">17:30:12</span>
+                        </div>
+                        <div class="content">Found setup: AMD Momentum Breakout</div>
+                        <div class="data-row">
+                            <span class="data-chip" style="background:transparent;padding:0;">Score <span class="value">8.5</span></span>
+                            <span class="data-chip" style="background:transparent;padding:0;">R:R <span class="value" style="color:#4ade80">2.4:1</span></span>
+                        </div>
+                    </div>
+                    <div class="entry" style="border-bottom:none;">
+                        <div class="entry-header">
+                            <div class="entry-type">
+                                <span class="type-badge" style="background:#fbbf2420;color:#fbbf24;">MARKET</span>
+                                <span class="symbol">VIX</span>
+                            </div>
+                            <span class="timestamp">17:25:00</span>
+                        </div>
+                        <div class="content">VIX down 8.5% — RISK_ON signal</div>
+                        <div class="data-row">
+                            <span class="data-chip" style="background:transparent;padding:0;">VIX <span class="value" style="color:#4ade80">18.2</span></span>
+                            <span class="data-chip" style="background:transparent;padding:0;">SPY <span class="value" style="color:#4ade80">+1.2%</span></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div style="margin-top:60px; padding:30px; background:#18181b; border-radius:12px; border:1px solid #27272a;">
+        <h3 style="font-family:'Outfit',sans-serif; font-size:16px; color:#22d3ee; margin-bottom:15px;">📋 Summary of Options</h3>
+        <div style="font-family:'Inter',sans-serif; font-size:13px; color:#a1a1aa; line-height:1.8;">
+            <p><strong style="color:#fff;">Font Styles:</strong></p>
+            <ul style="margin-left:20px; margin-bottom:15px;">
+                <li><strong>A) JetBrains Mono</strong> — Pure terminal/data feel, very readable numbers</li>
+                <li><strong>B) Space Grotesk</strong> — Modern, techy, geometric shapes</li>
+                <li><strong>C) IBM Plex</strong> — Professional, clean, corporate trading desk feel</li>
+                <li><strong>D) Outfit + JetBrains</strong> — Bold headers, clean data, high contrast (my recommendation)</li>
+            </ul>
+            <p><strong style="color:#fff;">Visual Styles:</strong></p>
+            <ul style="margin-left:20px;">
+                <li><strong>1) Gradient Bars</strong> — Colored left border by type</li>
+                <li><strong>2) Glassmorphism</strong> — Frosted glass, subtle and modern</li>
+                <li><strong>3) Glow Cards</strong> — Elevated cards with subtle glow</li>
+                <li><strong>4) Minimal Lines</strong> — Clean separators, compact</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>
