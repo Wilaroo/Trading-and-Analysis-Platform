@@ -40,11 +40,11 @@ export function safePolling(callback, interval, options = {}) {
   let cleaned = false;
 
   // Deterministic stagger based on order of creation + random jitter
-  // This ensures hooks created at the same time get spread out
+  // Spreads out initial requests to avoid thundering herd
   globalStaggerCounter++;
-  const baseDelay = (globalStaggerCounter % 10) * 300; // 0-2700ms spread by order
-  const jitter = Math.random() * Math.min(stagger, 1000); // 0-1000ms random
-  const totalStagger = essential ? Math.min(baseDelay, 500) : baseDelay + jitter;
+  const baseDelay = (globalStaggerCounter % 8) * 200; // 0-1400ms spread
+  const jitter = Math.random() * Math.min(stagger, 500); // 0-500ms random
+  const totalStagger = essential ? Math.min(baseDelay, 300) : baseDelay + jitter;
 
   const wrappedCallback = () => {
     if (cleaned) return;

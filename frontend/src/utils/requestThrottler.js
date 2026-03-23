@@ -70,6 +70,6 @@ class RequestThrottler {
 }
 
 // Global throttler instance - limit to 4 concurrent requests
-export const requestThrottler = new RequestThrottler(4);
+export const requestThrottler = new RequestThrottler(8);
 
 export default RequestThrottler;
