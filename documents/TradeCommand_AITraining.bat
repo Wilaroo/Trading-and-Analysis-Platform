@@ -291,7 +291,7 @@ if exist "%BACKEND_DIR%\worker.py" (
         echo pause
     ) > "%BACKEND_DIR%\run_worker.bat"
     
-    start "[WORKER] Background Jobs" cmd /k "title [WORKER] Background Jobs Processor && color 0D && cd /d %BACKEND_DIR% && echo. && echo ===================================================== && echo   [WORKER] Background Jobs Processor && echo   Training, Data Collection, Backtests && echo   Color: PURPLE && echo ===================================================== && echo. && echo Loading environment variables... && for /f "usebackq tokens=1,* delims==" %%a in ("%BACKEND_DIR%\.env") do set "%%a=%%b" && echo Waiting for backend to be ready... && timeout /t 10 /nobreak >nul && python worker.py"
+    start "[WORKER] Background Jobs" cmd /k "title [WORKER] Background Jobs Processor && color 0D && cd /d %BACKEND_DIR% && echo. && echo ===================================================== && echo   [WORKER] Background Jobs Processor && echo   Training, Data Collection, Backtests && echo   Color: PURPLE && echo ===================================================== && echo. && echo Waiting for backend to be ready... && timeout /t 10 /nobreak >nul && python worker.py"
     echo        Worker started (processes training jobs)
 ) else (
     echo        [SKIP] worker.py not found

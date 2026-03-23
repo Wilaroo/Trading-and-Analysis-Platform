@@ -29,7 +29,21 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
 # Add the backend directory to the path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+backend_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, backend_dir)
+
+# Load .env file directly (so worker doesn't depend on BAT file parsing)
+env_file = os.path.join(backend_dir, '.env')
+if os.path.exists(env_file):
+    with open(env_file, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, _, value = line.partition('=')
+                key = key.strip()
+                value = value.strip()
+                if key and not os.environ.get(key):  # Don't override existing env vars
+                    os.environ[key] = value
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from services.job_queue_manager import job_queue_manager, JobType, JobStatus
