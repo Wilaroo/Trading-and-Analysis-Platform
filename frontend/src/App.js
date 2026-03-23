@@ -107,6 +107,12 @@ function App() {
     return skipStartup !== 'true';
   });
   
+  // Controls whether main content renders (delays until startup modal is done)
+  const [appReady, setAppReady] = useState(() => {
+    const skipStartup = localStorage.getItem('tradecommand_skip_startup');
+    return skipStartup === 'true'; // Only ready immediately if skipping startup
+  });
+  
   // Persist activeTab in localStorage so it survives page refresh
   const [activeTab, setActiveTab] = useState(() => {
     // Check URL hash for direct navigation (e.g., #mockups)
@@ -364,7 +370,11 @@ function App() {
       <div className="min-h-screen" style={{ background: 'var(--bg-default)' }} onClick={initializeAudio}>
         {/* Startup Modal */}
         {showStartupModal && (
-          <StartupModal onComplete={() => setShowStartupModal(false)} />
+          <StartupModal onComplete={() => {
+            setShowStartupModal(false);
+            // Stagger the app ready state to give backend breathing room
+            setTimeout(() => setAppReady(true), 2000);
+          }} />
         )}
         
         {/* Startup Status Dashboard - shows system initialization progress */}
@@ -386,7 +396,20 @@ function App() {
         }}
       />
       
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+      {/* Show loading state while app initializes */}
+      {!appReady && !showStartupModal && (
+        <div className="fixed inset-0 flex items-center justify-center bg-zinc-900 z-40">
+          <div className="text-center">
+            <div className="w-12 h-12 border-4 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-zinc-400 text-sm">Initializing systems...</p>
+          </div>
+        </div>
+      )}
+      
+      {/* Main app content - only renders when ready */}
+      {appReady && (
+        <>
+          <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
       
       {/* Price Alert Notifications */}
       <PriceAlertNotification 
@@ -471,6 +494,8 @@ function App() {
       </main>
       
       {/* ConnectionStatus removed - redundant with System Status dropdown */}
+        </>
+      )}
       </div>
     </TickerModalProvider>
     </DataCacheProvider>
