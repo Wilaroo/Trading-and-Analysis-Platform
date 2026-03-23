@@ -38,18 +38,30 @@ class JobStatus(str, Enum):
 
 
 class JobQueueManager:
-    """Manages the job queue in MongoDB."""
+    """Manages the job queue in MongoDB.
+    
+    Works with both pymongo (sync) and motor (async) drivers.
+    - pymongo: wraps calls in asyncio.to_thread to avoid blocking
+    - motor: awaits calls directly (already async)
+    """
     
     COLLECTION_NAME = "job_queue"
     
     def __init__(self, db=None):
         self._db = db
         self._collection = None
+        self._is_motor = False
     
     def set_db(self, db):
         """Set the MongoDB database connection."""
         self._db = db
         self._collection = db[self.COLLECTION_NAME] if db is not None else None
+        # Detect if this is a motor (async) or pymongo (sync) database
+        self._is_motor = type(db).__module__.startswith('motor') if db is not None else False
+        if self._is_motor:
+            print("[JOB QUEUE] Using motor (async) driver")
+        else:
+            print("[JOB QUEUE] Using pymongo (sync) driver")
     
     @property
     def collection(self):
@@ -57,6 +69,24 @@ class JobQueueManager:
         if self._collection is None and self._db is not None:
             self._collection = self._db[self.COLLECTION_NAME]
         return self._collection
+    
+    async def _run(self, method, *args, **kwargs):
+        """Run a collection method, handling both motor and pymongo.
+        
+        - motor: method returns a coroutine, await it directly
+        - pymongo: method is synchronous, wrap in asyncio.to_thread
+        """
+        if self._is_motor:
+            return await method(*args, **kwargs)
+        else:
+            return await asyncio.to_thread(method, *args, **kwargs)
+    
+    async def _find_to_list(self, cursor):
+        """Convert a cursor to a list, handling both drivers."""
+        if self._is_motor:
+            return await cursor.to_list(length=None)
+        else:
+            return await asyncio.to_thread(list, cursor)
     
     async def create_job(
         self,
@@ -105,7 +135,7 @@ class JobQueueManager:
         }
         
         try:
-            result = await asyncio.to_thread(self.collection.insert_one, job)
+            result = await self._run(self.collection.insert_one, job)
             print(f"[JOB QUEUE] Created job {job_id}: {job_type} (acknowledged={result.acknowledged})")
             
             # Remove MongoDB _id for response
@@ -121,7 +151,7 @@ class JobQueueManager:
         if self.collection is None:
             return None
             
-        job = await asyncio.to_thread(
+        job = await self._run(
             self.collection.find_one,
             {'job_id': job_id},
             {'_id': 0}
@@ -145,7 +175,7 @@ class JobQueueManager:
             ('created_at', 1)  # Older jobs first within same priority
         ]).limit(limit)
         
-        return await asyncio.to_thread(list, cursor)
+        return await self._find_to_list(cursor)
     
     async def get_next_job(self, job_types: List[str] = None) -> Optional[Dict[str, Any]]:
         """
@@ -162,7 +192,7 @@ class JobQueueManager:
         worker_id = str(uuid.uuid4())[:8]
         
         # Atomically find and update
-        job = await asyncio.to_thread(
+        job = await self._run(
             self.collection.find_one_and_update,
             query,
             {
@@ -212,7 +242,7 @@ class JobQueueManager:
         if not update:
             return True
         
-        result = await asyncio.to_thread(
+        result = await self._run(
             self.collection.update_one,
             {'job_id': job_id},
             {'$set': update}
@@ -224,7 +254,7 @@ class JobQueueManager:
         if self.collection is None:
             return False
         
-        update_result = await asyncio.to_thread(
+        update_result = await self._run(
             self.collection.update_one,
             {'job_id': job_id},
             {
@@ -248,7 +278,7 @@ class JobQueueManager:
         if self.collection is None:
             return False
         
-        update_result = await asyncio.to_thread(
+        update_result = await self._run(
             self.collection.update_one,
             {'job_id': job_id},
             {
@@ -278,7 +308,7 @@ class JobQueueManager:
         if job['status'] in [JobStatus.COMPLETED.value, JobStatus.FAILED.value, JobStatus.CANCELLED.value]:
             return {'success': False, 'error': f"Cannot cancel job in {job['status']} status"}
         
-        update_result = await asyncio.to_thread(
+        update_result = await self._run(
             self.collection.update_one,
             {'job_id': job_id},
             {
@@ -317,7 +347,7 @@ class JobQueueManager:
             {'_id': 0}
         ).sort('created_at', -1).limit(limit)
         
-        return await asyncio.to_thread(list, cursor)
+        return await self._find_to_list(cursor)
     
     async def get_running_jobs(self) -> List[Dict[str, Any]]:
         """Get all currently running jobs."""
@@ -328,7 +358,7 @@ class JobQueueManager:
             {'status': JobStatus.RUNNING.value},
             {'_id': 0}
         )
-        return await asyncio.to_thread(list, cursor)
+        return await self._find_to_list(cursor)
     
     async def cleanup_old_jobs(self, days: int = 7) -> int:
         """Remove completed/failed/cancelled jobs older than X days."""
@@ -338,7 +368,7 @@ class JobQueueManager:
         from datetime import timedelta
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         
-        result = await asyncio.to_thread(
+        result = await self._run(
             self.collection.delete_many,
             {
                 'status': {'$in': [
@@ -370,7 +400,7 @@ class JobQueueManager:
         ]
         
         cursor = self.collection.aggregate(pipeline)
-        results = await asyncio.to_thread(list, cursor)
+        results = await self._find_to_list(cursor)
         stats = {doc['_id']: doc['count'] for doc in results}
         
         return {

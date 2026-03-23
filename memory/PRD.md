@@ -111,6 +111,8 @@ Multi-layered defense against backend overload during startup:
 
 **Fix**: Converted all 7 remaining methods to use `asyncio.to_thread` for pymongo calls. Moved `/jobs/stats` and `/jobs/cleanup` routes before the `{job_id}` wildcard. Cleaned up 10 stale "running" jobs from previous failed attempts.
 
+**Worker compatibility fix**: Added dual-driver support to `JobQueueManager`. The class now auto-detects whether it's been given a `motor` (async) or `pymongo` (sync) database via `_run()` and `_find_to_list()` helpers. Motor calls are awaited directly; pymongo calls are wrapped in `asyncio.to_thread`. Both paths verified with full E2E tests.
+
 **All 8 job queue endpoints verified working**: create, list, running, pending, stats, get-by-id, cancel, cleanup.
 
 ### Previous Implementations
