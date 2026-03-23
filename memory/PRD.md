@@ -81,6 +81,13 @@ Build a self-improving AI trading bot "SentCom" by hardening the data pipeline, 
 
 ### March 23, 2026 (Current Session)
 
+#### Fix 0: WebSocket Status Indicator - FIXED (NEW!)
+- **Problem:** The "Data" (WebSocket) status indicator in the TickerTape header was not updating
+- **Root Cause:** The `useWebSocket` hook's `isConnected` state wasn't being synced to `SystemStatusContext`
+- **Fix:** Created `WebSocketStatusSync` component in `App.js` that bridges the WebSocket hook state to the context
+- **Result:** "Data" indicator now shows real-time green/red status based on WebSocket connection
+- **Files Modified:** `/app/frontend/src/App.js`
+
 #### Fix 1: Prediction API 404 Errors - FIXED
 - Enhanced `_load_model()` in `timeseries_gbm.py` with fallback chain
 - Now auto-loads `direction_predictor_daily` when default model not found

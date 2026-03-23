@@ -13,7 +13,8 @@ import {
   AppStateProvider, 
   ConnectionManagerProvider,
   SystemStatusProvider,
-  FocusModeProvider
+  FocusModeProvider,
+  useSystemStatus
 } from './contexts';
 import api from './utils/api';
 import StartupModal from './components/StartupModal';
@@ -79,6 +80,18 @@ if (typeof window !== 'undefined') {
     }
   });
 }
+
+// ===================== WebSocket Status Sync =====================
+// This component syncs the WebSocket connection state to the SystemStatusContext
+const WebSocketStatusSync = ({ isConnected }) => {
+  const { setWebSocketConnected } = useSystemStatus();
+  
+  useEffect(() => {
+    setWebSocketConnected(isConnected);
+  }, [isConnected, setWebSocketConnected]);
+  
+  return null;
+};
 
 // ===================== MAIN APP =====================
 function App() {
@@ -340,6 +353,8 @@ function App() {
     <TrainingModeProvider>
     <DataCacheProvider>
     <TickerModalProvider>
+      {/* Sync WebSocket status to SystemStatusContext */}
+      <WebSocketStatusSync isConnected={isConnected} />
       <div className="min-h-screen" style={{ background: 'var(--bg-default)' }} onClick={initializeAudio}>
         {/* Startup Modal */}
         {showStartupModal && (

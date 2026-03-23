@@ -17,7 +17,7 @@ echo.
 :: CONFIGURATION
 :: =====================================================
 set SCRIPT_DIR=%~dp0
-set CLOUD_URL=https://resilient-trading.preview.emergentagent.com
+set CLOUD_URL=https://data-indicator-1.preview.emergentagent.com
 set LOG_FILE=%SCRIPT_DIR%post_restart.log
 
 :: Log start time

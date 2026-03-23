@@ -11,7 +11,7 @@ load_dotenv()
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 if not BASE_URL:
-    BASE_URL = "https://resilient-trading.preview.emergentagent.com"
+    BASE_URL = "https://data-indicator-1.preview.emergentagent.com"
 
 
 class TestHealthAndStatus:

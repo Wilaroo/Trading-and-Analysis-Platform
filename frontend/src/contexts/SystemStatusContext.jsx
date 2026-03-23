@@ -35,14 +35,14 @@ const SERVICES = {
     name: 'IB Data Pusher', 
     description: 'Local script pushing IB data',
     critical: false,
-    checkEndpoint: '/api/ib-pusher/status',
+    checkEndpoint: '/api/ib/pushed-data', // Check if pusher has sent data recently
   },
   ollama: {
     id: 'ollama',
     name: 'Ollama AI',
     description: 'AI chat and analysis',
     critical: false,
-    checkEndpoint: '/api/ollama/status',
+    checkEndpoint: '/api/assistant/check-ollama',
   },
   backend: {
     id: 'backend',
@@ -132,13 +132,21 @@ export const SystemStatusProvider = ({ children }) => {
         let message = null;
         
         if (serviceId === 'ibGateway') {
-          connected = data.connected || data.status === 'connected';
+          connected = data.connected === true;
           message = data.account_id ? `Account: ${data.account_id}` : null;
         } else if (serviceId === 'ollama') {
-          connected = data.available || data.status === 'available' || data.connected;
+          // /api/assistant/check-ollama returns { available: true/false }
+          connected = data.available === true;
           message = data.model ? `Model: ${data.model}` : null;
         } else if (serviceId === 'ibDataPusher') {
-          connected = data.running || data.connected || data.status === 'running';
+          // /api/ib/pushed-data returns { connected: true/false, last_update: ... }
+          connected = data.connected === true;
+          if (data.last_update) {
+            const lastUpdate = new Date(data.last_update);
+            const ageSeconds = (Date.now() - lastUpdate.getTime()) / 1000;
+            // Consider stale if no update in 60 seconds
+            connected = connected && ageSeconds < 60;
+          }
         } else {
           connected = data.status === 'healthy' || data.status === 'ok' || data.healthy || response.ok;
         }
