@@ -2686,6 +2686,8 @@ const NIA = () => {
   // Training mode - reduce polling when AI training is active
   const { getPollingInterval, isTrainingActive } = useTrainingMode();
   const isFirstMount = useRef(true);
+  // Track visibility for smart polling
+  const isVisibleRef = useRef(document.visibilityState === 'visible');
   
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -2887,6 +2889,20 @@ const NIA = () => {
   }, [setCached]);
 
   useEffect(() => {
+    // Track visibility changes
+    const handleVisibilityChange = () => {
+      const wasHidden = !isVisibleRef.current;
+      isVisibleRef.current = document.visibilityState === 'visible';
+      // Refresh data when tab becomes visible again (if it was hidden)
+      if (isVisibleRef.current && wasHidden) {
+        fetchAllData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [fetchAllData]);
+
+  useEffect(() => {
     // If we have cached data, show it immediately and refresh in background
     const cached = getCached('niaData');
     if (cached?.data && isFirstMount.current) {
@@ -2902,8 +2918,14 @@ const NIA = () => {
     isFirstMount.current = false;
     
     // Refresh polling - slow down during training to prevent resource exhaustion
+    // Also skip if tab is hidden
     const pollInterval = getPollingInterval(60000, false); // Non-essential
-    const interval = setInterval(() => fetchAllData(), pollInterval);
+    const interval = setInterval(() => {
+      // Only poll if tab is visible
+      if (isVisibleRef.current) {
+        fetchAllData();
+      }
+    }, pollInterval);
     
     if (isTrainingActive) {
       console.log(`[NIA] Training active - polling slowed to ${pollInterval}ms`);

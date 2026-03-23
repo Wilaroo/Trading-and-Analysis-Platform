@@ -3,6 +3,8 @@ import api, { apiLongRunning } from '../utils/api';
 import { toast } from 'sonner';
 import { playSound } from '../utils/tradingUtils';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
+import { useAppState } from '../contexts/AppStateContext';
+import { useTrainingMode } from '../contexts/TrainingModeContext';
 
 export function useCommandCenterData({
   ibConnected,
@@ -14,14 +16,21 @@ export function useCommandCenterData({
   const isConnected = ibConnected;
   const connectionChecked = ibConnectionChecked;
   const [connecting, setConnecting] = useState(false);
-
-  // Data State
-  const [account, setAccount] = useState(null);
-  const [positions, setPositions] = useState([]);
+  
+  // Use centralized state for persistent data
+  const { getData, setData, isStale } = useAppState();
+  const { getPollingInterval, isTrainingActive } = useTrainingMode();
+  
+  // Track visibility for smart polling
+  const isVisibleRef = useRef(document.visibilityState === 'visible');
+  
+  // Data State - initialize from cached state if available
+  const [account, setAccount] = useState(() => getData('accountSummary'));
+  const [positions, setPositions] = useState(() => getData('positions') || []);
   const [opportunities, setOpportunities] = useState([]);
-  const [marketContext, setMarketContext] = useState(null);
+  const [marketContext, setMarketContext] = useState(() => getData('marketContext'));
   const [alerts, setAlerts] = useState([]);
-  const [watchlist, setWatchlist] = useState([]);
+  const [watchlist, setWatchlist] = useState(() => getData('watchlist') || []);
   const [earnings, setEarnings] = useState([]);
 
   // UI State
@@ -192,13 +201,15 @@ export function useCommandCenterData({
     }
     
     setPositions(positionsData);
+    // Persist to centralized state for cross-component access
+    setData('positions', positionsData);
     
     // Try to fetch account summary - use new dedicated endpoint
     try {
       // First try the new account summary endpoint that has Net Liq, Buying Power, Daily P&L
       const summaryRes = await api.get('/api/ib/account/summary');
       if (summaryRes.data?.success && summaryRes.data?.net_liquidation > 0) {
-        setAccount({
+        const accountData = {
           net_liquidation: summaryRes.data.net_liquidation,
           buying_power: summaryRes.data.buying_power,
           available_funds: summaryRes.data.available_funds,
@@ -210,7 +221,9 @@ export function useCommandCenterData({
           account_id: summaryRes.data.account_id,
           connected: summaryRes.data.connected,
           source: 'ib_gateway'
-        });
+        };
+        setAccount(accountData);
+        setData('accountSummary', accountData);
       } else {
         // Fall back to raw pushed data
         const pushedRes = await api.get('/api/ib/pushed-data');
@@ -505,21 +518,46 @@ export function useCommandCenterData({
     }
   };
 
-  // System health - now part of batch init, only poll separately at longer interval
+  // Track page visibility for smart polling
   useEffect(() => {
-    // Initial system health comes from batch init
-    const interval = setInterval(fetchSystemHealth, 60000);
-    return () => clearInterval(interval);
-  }, []);
+    const handleVisibilityChange = () => {
+      isVisibleRef.current = document.visibilityState === 'visible';
+      // Refresh data when tab becomes visible again
+      if (isVisibleRef.current && isConnected) {
+        fetchAccountData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isConnected]);
+
+  // System health - now part of batch init, only poll separately at longer interval
+  // Visibility-aware and training-mode aware
+  useEffect(() => {
+    const poll = () => {
+      // Skip if tab hidden or training active (non-essential)
+      if (!isVisibleRef.current || isTrainingActive) return;
+      fetchSystemHealth();
+    };
+    const interval = getPollingInterval(60000, false); // Non-essential
+    const timer = setInterval(poll, interval);
+    return () => clearInterval(timer);
+  }, [isTrainingActive, getPollingInterval]);
 
   // Fetch positions immediately on mount - IB is primary, Alpaca is fallback
+  // Positions are essential - slower during training but still poll
   useEffect(() => {
     fetchAccountData();
-    // Refresh positions every 30 seconds
-    const positionsInterval = setInterval(fetchAccountData, 30000);
+    const poll = () => {
+      // Skip if tab hidden (will refresh when visible)
+      if (!isVisibleRef.current) return;
+      fetchAccountData();
+    };
+    const interval = getPollingInterval(30000, true); // Essential - positions matter
+    const positionsInterval = setInterval(poll, interval);
     return () => clearInterval(positionsInterval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isTrainingActive, getPollingInterval]);
 
   // Initial data load - optimized with batch init + staggered loading
   useEffect(() => {
@@ -558,23 +596,33 @@ export function useCommandCenterData({
   }, [connectionChecked, isConnected, isActiveTab]);
 
   // Refresh credit budget periodically (every 5 minutes)
+  // Non-essential - skip during training
   useEffect(() => {
-    // Fetch immediately on mount (doesn't depend on IB connection)
     fetchCreditBudget();
-    const budgetInterval = setInterval(fetchCreditBudget, 300000);
+    const poll = () => {
+      if (!isVisibleRef.current || isTrainingActive) return;
+      fetchCreditBudget();
+    };
+    const interval = getPollingInterval(300000, false);
+    const budgetInterval = setInterval(poll, interval);
     return () => clearInterval(budgetInterval);
-  }, []);
+  }, [isTrainingActive, getPollingInterval]);
 
   // Polling for order fills and price alerts (30s is appropriate)
+  // ESSENTIAL - these are trading-critical, continue during training
   useEffect(() => {
     if (!isConnected) return;
-    const fastPoll = setInterval(() => {
+    const poll = () => {
+      // Skip only if tab hidden - order fills are critical
+      if (!isVisibleRef.current) return;
       checkOrderFills();
       checkPriceAlerts();
-    }, 30000);
+    };
+    const interval = getPollingInterval(30000, true); // Essential
+    const fastPoll = setInterval(poll, interval);
     return () => clearInterval(fastPoll);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, soundEnabled, priceAlerts.length, isActiveTab, activeMainTab]);
+  }, [isConnected, soundEnabled, priceAlerts.length, isActiveTab, activeMainTab, isTrainingActive, getPollingInterval]);
 
   return {
     // Connection

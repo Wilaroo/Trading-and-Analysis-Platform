@@ -5,7 +5,7 @@
  * Monte Carlo simulations, and custom date range backtesting.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Play, Loader2, CheckCircle2, XCircle, RefreshCw, ChevronDown, ChevronRight,
   BarChart3, TrendingUp, Target, Shuffle, Calendar, Clock, Settings, 
@@ -14,6 +14,7 @@ import {
 import { toast } from 'sonner';
 import api from '../utils/api';
 import { Tip, TipIcon, CustomTip } from './shared/Tooltip';
+import { useTrainingMode } from '../contexts';
 
 // ============================================================================
 // Main Component
@@ -28,6 +29,19 @@ const AdvancedBacktestPanel = () => {
   const [allStrategies, setAllStrategies] = useState([]);
   const [recentResults, setRecentResults] = useState([]);
   const [selectedResult, setSelectedResult] = useState(null);
+  
+  const { getPollingInterval, isTrainingActive } = useTrainingMode();
+  const isVisibleRef = useRef(document.visibilityState === 'visible');
+
+  // Track visibility
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      isVisibleRef.current = document.visibilityState === 'visible';
+      if (isVisibleRef.current) fetchJobs();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
 
   // Fetch templates and strategies on mount
   useEffect(() => {
@@ -36,10 +50,15 @@ const AdvancedBacktestPanel = () => {
     fetchRecentResults();
     fetchJobs();
     
-    // Poll for job updates
-    const interval = setInterval(fetchJobs, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    // Poll for job updates - visibility aware and training mode aware
+    const interval = getPollingInterval(5000, false);
+    const timer = setInterval(() => {
+      if (isVisibleRef.current && !isTrainingActive) {
+        fetchJobs();
+      }
+    }, interval);
+    return () => clearInterval(timer);
+  }, [getPollingInterval, isTrainingActive]);
 
   const fetchTemplates = async () => {
     try {

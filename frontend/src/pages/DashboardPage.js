@@ -21,6 +21,7 @@ import {
   Tooltip
 } from 'recharts';
 import api from '../utils/api';
+import { useTrainingMode } from '../contexts';
 
 // ===================== COMPONENTS =====================
 const Card = ({ children, className = '', onClick, hover = true }) => (
@@ -99,20 +100,38 @@ const AlertItem = ({ alert }) => (
 // Simple Market Overview Card (replacing TradingView to avoid error overlay)
 const MarketOverviewCard = ({ symbol = 'SPY' }) => {
   const [quote, setQuote] = useState(null);
+  const { getPollingInterval } = useTrainingMode();
+  const isVisibleRef = useRef(document.visibilityState === 'visible');
   
   useEffect(() => {
-    const fetchQuote = async () => {
-      try {
-        const res = await api.get(`/api/quotes/${symbol}`);
-        setQuote(res.data);
-      } catch (e) {
-        // Silently ignore quote fetch errors - common during market close
+    const handleVisibilityChange = () => {
+      const wasHidden = !isVisibleRef.current;
+      isVisibleRef.current = document.visibilityState === 'visible';
+      if (isVisibleRef.current && wasHidden) {
+        fetchQuote();
       }
     };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
+  const fetchQuote = async () => {
+    try {
+      const res = await api.get(`/api/quotes/${symbol}`);
+      setQuote(res.data);
+    } catch (e) {
+      // Silently ignore quote fetch errors - common during market close
+    }
+  };
+  
+  useEffect(() => {
     fetchQuote();
-    const interval = setInterval(fetchQuote, 30000);
-    return () => clearInterval(interval);
-  }, [symbol]);
+    const interval = getPollingInterval(30000, false);
+    const timer = setInterval(() => {
+      if (isVisibleRef.current) fetchQuote();
+    }, interval);
+    return () => clearInterval(timer);
+  }, [symbol, getPollingInterval]);
   
   return (
     <div className="h-full flex flex-col items-center justify-center">
