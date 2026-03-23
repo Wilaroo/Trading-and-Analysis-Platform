@@ -59,8 +59,8 @@ IndexModel([("bar_size", ASCENDING)])  # For getting all symbols by timeframe
 ## Upcoming Tasks
 
 ### P0 - High Priority
-1. **Apply MongoDB indexes** - Will speed up training from 29 min to ~5 min
-2. **Train all 7 timeframes** - Currently only "1 day" is trained
+1. ✅ **Apply MongoDB indexes** - DONE! Speeds up training significantly
+2. 🔄 **Train all 7 timeframes** - IN PROGRESS (1 day ✅, 1 hour ✅, 5 mins 🔄, 4 more queued)
 3. **Fix Full Universe button in UI** - Frontend polling overloads browser
 
 ### P1 - Medium Priority
@@ -71,7 +71,88 @@ IndexModel([("bar_size", ASCENDING)])  # For getting all symbols by timeframe
 ### P2 - Lower Priority
 1. **Enable GPU for LightGBM** - Faster training
 2. **Fix `fill-gaps` endpoint** - Currently hangs server
-3. **Setup-specific AI models** - Train on 77 trading setups
+
+---
+
+## 🗺️ ROADMAP - Major Features
+
+### 🎯 Phase A: Setup-Specific AI Models (HIGH VALUE)
+**Goal:** Train 77 specialized models - one for each trading setup
+
+**Why:** A "gap_and_go" model learns different patterns than a "mean_reversion" model. Specialized models = better predictions.
+
+**Implementation Steps:**
+1. Add setup tagging to trade/alert collections
+2. Create `setup_training_data` collection from backtests
+3. Build `/api/ai-modules/timeseries/train-setup` endpoint
+4. Update prediction logic to select correct model per setup
+5. Train top 10 setups first, then expand to all 77
+
+**Performance Impact:** Minimal - 77 models = ~400MB RAM, <1ms per prediction
+
+**Data Requirements:** 500+ trades per setup (from backtests + real trades)
+
+---
+
+### 📊 Phase B: Automated Backtesting Workflow (HIGH VALUE)
+**Goal:** Prove AI adds value with rigorous backtesting
+
+**Workflow:**
+```
+1. Train AI Models (DONE)
+        ↓
+2. Baseline Backtest (No AI)
+        ↓
+3. AI-Enhanced Backtest
+        ↓
+4. Compare Results
+        ↓
+5. Optimize Thresholds (52%, 55%, 58%)
+        ↓
+6. Walk-Forward Validation
+        ↓
+7. Shadow Mode (Paper Trading)
+        ↓
+8. Go Live with Confidence
+```
+
+**Key Endpoints:**
+- `POST /api/simulation/run` - Run full bot simulation
+- `POST /api/backtest/walk-forward` - Out-of-sample testing
+- `POST /api/backtest/monte-carlo` - Risk analysis
+- `GET /api/simulation/compare/{job1}/{job2}` - Compare results
+
+**Automation Script:** Create PowerShell script to run entire workflow automatically
+
+**Metrics to Track:**
+- Win rate (baseline vs AI-enhanced)
+- Profit factor improvement
+- Drawdown reduction
+- AI prediction accuracy per setup
+
+---
+
+### 🔄 Phase C: Continuous Learning Pipeline
+**Goal:** Keep models fresh with new market data
+
+**Components:**
+1. **Weekly Retraining Schedule** - Auto-retrain on Sundays
+2. **Best Model Protection** - Only save if accuracy improves
+3. **Model Version History** - Track performance over time
+4. **Drift Detection** - Alert when model accuracy drops
+5. **A/B Testing** - Compare old vs new model in shadow mode
+
+---
+
+### 📈 Phase D: Advanced Analytics Dashboard
+**Goal:** Visualize AI performance and trading results
+
+**Features:**
+1. Model accuracy trends over time
+2. Per-setup performance breakdown
+3. Regime-based analysis (RISK_ON vs RISK_OFF)
+4. AI decision heatmaps
+5. Backtest comparison charts
 
 ---
 
@@ -149,7 +230,7 @@ IndexModel([("bar_size", ASCENDING)])  # For getting all symbols by timeframe
 
 ## Session Log
 
-### March 22, 2026
+### March 22-23, 2026
 - **Issue**: Full Universe training crashed backend
 - **Root cause**: Background task memory allocation + synchronous MongoDB queries blocking event loop + model save failing due to `model_id: null` unique index violation
 - **Fix**: 
@@ -157,7 +238,50 @@ IndexModel([("bar_size", ASCENDING)])  # For getting all symbols by timeframe
   2. Reduced default batch sizes (100→50 symbols, 2000→1000 bars)
   3. Added aggressive try-except with logging
   4. Added `model_id` field to model save
-- **Result**: Training completed successfully with 53.1% accuracy on "1 day" timeframe
+  5. Removed debug limits (100 symbols → ALL symbols)
+  6. Enabled all 7 timeframes
+- **MongoDB indexes**: Applied successfully, cleaned up null model_ids
+- **Training Results** (in progress):
+  - 1 day: ✅ 53.7% accuracy
+  - 1 hour: ✅ 55.4% accuracy  
+  - 5 mins: 🔄 In progress
+  - 15 mins, 30 mins, 1 min, 1 week: Queued
+- **Documentation Created**:
+  - `/documents/AI_TRAINING_GUIDE.md` - Complete training guide
+  - `/backend/scripts/setup_mongodb_indexes.py` - Index setup script
+- **Roadmap Added**:
+  - Phase A: Setup-Specific AI Models (77 models)
+  - Phase B: Automated Backtesting Workflow
+  - Phase C: Continuous Learning Pipeline
+  - Phase D: Advanced Analytics Dashboard
+
+---
+
+## Quick Reference
+
+### Training Commands (PowerShell)
+```powershell
+# Start full training (all 7 timeframes)
+Invoke-WebRequest -Uri "http://localhost:8001/api/ai-modules/timeseries/train-full-universe-all" -Method POST -ContentType "application/json" -Body '{"symbol_batch_size": 50, "max_bars_per_symbol": 1000}'
+
+# Check training status
+Invoke-WebRequest -Uri "http://localhost:8001/api/ai-modules/timeseries/training-status" | Select-Object -ExpandProperty Content
+
+# View training history
+Invoke-WebRequest -Uri "http://localhost:8001/api/ai-modules/timeseries/training-history?limit=10" | Select-Object -ExpandProperty Content
+```
+
+### Backtesting Commands (PowerShell)
+```powershell
+# Run simulation without AI (baseline)
+Invoke-WebRequest -Uri "http://localhost:8001/api/simulation/run" -Method POST -ContentType "application/json" -Body '{"name": "Baseline", "start_date": "2025-06-01", "end_date": "2026-03-01", "use_ai": false}'
+
+# Run simulation with AI
+Invoke-WebRequest -Uri "http://localhost:8001/api/simulation/run" -Method POST -ContentType "application/json" -Body '{"name": "With_AI", "start_date": "2025-06-01", "end_date": "2026-03-01", "use_ai": true, "ai_confidence_threshold": 0.55}'
+
+# View simulation results
+Invoke-WebRequest -Uri "http://localhost:8001/api/simulation/jobs?limit=5" | Select-Object -ExpandProperty Content
+```
 
 ---
 
