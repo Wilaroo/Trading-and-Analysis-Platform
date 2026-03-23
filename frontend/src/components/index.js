@@ -3,4 +3,5 @@ export { default as TickerTape } from './TickerTape';
 export { default as PriceAlertNotification, AlertSettingsPanel } from './PriceAlertNotification';
 export { default as LiveAlertsPanel } from './LiveAlertsPanel';
 export { default as TradingBotPanel } from './TradingBotPanel';
+export { default as JobManager } from './JobManager';
 export * from './shared';

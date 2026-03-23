@@ -1,129 +1,87 @@
 /**
- * TrainingModeContext - Central control for training mode
+ * TrainingModeContext - DEPRECATED - Thin wrapper around FocusModeContext
  * 
- * When AI training is active, non-essential polling should be reduced/paused
- * to prevent browser resource exhaustion (ERR_INSUFFICIENT_RESOURCES) and
- * reduce backend load.
+ * This context is maintained for backwards compatibility.
+ * New components should use `useFocusMode` from FocusModeContext directly.
  * 
- * Usage:
- * - Components check `isTrainingActive` before starting polling
- * - Use `getPollingInterval(baseInterval)` to get adjusted interval
- * - Training components call `setTrainingActive(true/false)` 
+ * The actual polling logic and mode management is now handled by FocusModeContext.
  */
 
-import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
+import React, { createContext, useContext, useCallback, useEffect } from 'react';
+import { useFocusMode, FOCUS_MODES } from './FocusModeContext';
 
 const TrainingModeContext = createContext(null);
 
-// Polling multiplier when training is active (10x slower)
-const TRAINING_SLOWDOWN_MULTIPLIER = 10;
-
-// Minimum polling interval during training (60 seconds)
-const MIN_TRAINING_INTERVAL = 60000;
-
-// Maximum polling interval during training (5 minutes)
-const MAX_TRAINING_INTERVAL = 300000;
-
 export const TrainingModeProvider = ({ children }) => {
-  // Core training state
-  const [isTrainingActive, setIsTrainingActive] = useState(false);
-  const [trainingType, setTrainingType] = useState(null); // 'full-universe', 'single', etc.
-  const [trainingStartTime, setTrainingStartTime] = useState(null);
-  const [trainingProgress, setTrainingProgress] = useState(null);
+  // Delegate to FocusModeContext
+  const focusMode = useFocusMode();
   
-  // Track components that are currently polling
-  const activePollers = useRef(new Set());
-  
-  // Subscribers to training state changes
-  const subscribers = useRef(new Set());
+  // Map training mode to focus mode
+  const isTrainingActive = focusMode.focusMode === 'training';
+  const trainingType = isTrainingActive ? focusMode.modeContext?.trainingType : null;
+  const trainingProgress = focusMode.progress;
 
   /**
-   * Start training mode - all components will slow down polling
+   * Start training mode - sets focus mode to 'training'
    */
-  const startTraining = useCallback((type = 'unknown') => {
+  const startTraining = useCallback(async (type = 'unknown') => {
     console.log(`[TrainingMode] Starting training mode: ${type}`);
-    setIsTrainingActive(true);
-    setTrainingType(type);
-    setTrainingStartTime(Date.now());
-    
-    // Notify all subscribers
-    subscribers.current.forEach(cb => cb(true, type));
-  }, []);
+    await focusMode.setMode('training', { trainingType: type });
+  }, [focusMode]);
 
   /**
-   * End training mode - components resume normal polling
+   * End training mode - resets to 'live' mode
    */
-  const endTraining = useCallback(() => {
+  const endTraining = useCallback(async () => {
     console.log('[TrainingMode] Ending training mode');
-    setIsTrainingActive(false);
-    setTrainingType(null);
-    setTrainingStartTime(null);
-    setTrainingProgress(null);
-    
-    // Notify all subscribers
-    subscribers.current.forEach(cb => cb(false, null));
-  }, []);
+    await focusMode.resetToLive();
+  }, [focusMode]);
 
   /**
-   * Update training progress (for UI display)
+   * Update training progress
    */
   const updateProgress = useCallback((progress) => {
-    setTrainingProgress(progress);
-  }, []);
+    focusMode.updateProgress(progress);
+  }, [focusMode]);
 
   /**
-   * Get adjusted polling interval based on training state
-   * 
-   * @param {number} baseInterval - Normal polling interval in ms
-   * @param {boolean} isEssential - If true, less slowdown is applied
-   * @returns {number} Adjusted interval
+   * Get adjusted polling interval based on focus mode
+   * Maps the old API to the new FocusMode API
    */
   const getPollingInterval = useCallback((baseInterval, isEssential = false) => {
-    if (!isTrainingActive) {
-      return baseInterval;
-    }
-    
-    // Essential polling gets 3x slowdown, non-essential gets 10x
-    const multiplier = isEssential ? 3 : TRAINING_SLOWDOWN_MULTIPLIER;
-    const adjusted = baseInterval * multiplier;
-    
-    // Clamp to reasonable bounds
-    return Math.min(Math.max(adjusted, MIN_TRAINING_INTERVAL), MAX_TRAINING_INTERVAL);
-  }, [isTrainingActive]);
+    const category = isEssential ? 'essential' : 'default';
+    const adjusted = focusMode.getAdjustedInterval(baseInterval, category);
+    return adjusted === null ? 300000 : adjusted; // Return 5 min if paused (backwards compat)
+  }, [focusMode]);
 
   /**
    * Check if a component should poll right now
-   * Returns false if training is active and component should skip this cycle
    */
   const shouldPoll = useCallback((componentId, isEssential = false) => {
-    if (!isTrainingActive) {
-      return true;
-    }
-    
-    // Essential components always poll (but at reduced rate via getPollingInterval)
-    if (isEssential) {
-      return true;
-    }
-    
-    // Non-essential components skip polling during training
-    return false;
-  }, [isTrainingActive]);
+    const category = isEssential ? 'essential' : 'default';
+    return focusMode.shouldPoll(category);
+  }, [focusMode]);
 
   /**
-   * Register a polling component (for debugging/monitoring)
+   * Register a polling component (stub for backwards compat)
    */
   const registerPoller = useCallback((componentId) => {
-    activePollers.current.add(componentId);
-    return () => activePollers.current.delete(componentId);
+    // No-op in new architecture
+    return () => {};
   }, []);
 
   /**
    * Subscribe to training state changes
    */
   const subscribe = useCallback((callback) => {
-    subscribers.current.add(callback);
-    return () => subscribers.current.delete(callback);
-  }, []);
+    return focusMode.subscribe((oldMode, newMode, context) => {
+      const wasTraining = oldMode === 'training';
+      const isTraining = newMode === 'training';
+      if (wasTraining !== isTraining) {
+        callback(isTraining, context?.trainingType);
+      }
+    });
+  }, [focusMode]);
 
   /**
    * Get current training stats
@@ -132,41 +90,12 @@ export const TrainingModeProvider = ({ children }) => {
     return {
       isActive: isTrainingActive,
       type: trainingType,
-      startTime: trainingStartTime,
-      elapsedMs: trainingStartTime ? Date.now() - trainingStartTime : 0,
+      startTime: focusMode.modeStartTime,
+      elapsedMs: focusMode.getElapsedTime() * 1000,
       progress: trainingProgress,
-      activePollers: Array.from(activePollers.current),
+      activePollers: [],
     };
-  }, [isTrainingActive, trainingType, trainingStartTime, trainingProgress]);
-
-  // Auto-check training status from backend periodically
-  useEffect(() => {
-    const checkTrainingStatus = async () => {
-      try {
-        const response = await fetch('/api/ai-modules/timeseries/training-status');
-        const data = await response.json();
-        
-        if (data.success && data.training_mode) {
-          const backendActive = data.training_mode.training_active;
-          
-          // Sync with backend state
-          if (backendActive && !isTrainingActive) {
-            startTraining(data.training_mode.training_type || 'backend');
-          } else if (!backendActive && isTrainingActive) {
-            endTraining();
-          }
-        }
-      } catch (e) {
-        // Silent fail - this is just a sync check
-      }
-    };
-
-    // Check immediately and then every 30 seconds
-    checkTrainingStatus();
-    const interval = setInterval(checkTrainingStatus, 30000);
-    
-    return () => clearInterval(interval);
-  }, [isTrainingActive, startTraining, endTraining]);
+  }, [isTrainingActive, trainingType, focusMode, trainingProgress]);
 
   return (
     <TrainingModeContext.Provider value={{
@@ -194,12 +123,12 @@ export const TrainingModeProvider = ({ children }) => {
 
 /**
  * Hook to access training mode context
+ * @deprecated Use useFocusMode from FocusModeContext instead
  */
 export const useTrainingMode = () => {
   const context = useContext(TrainingModeContext);
   if (!context) {
     // Return a default implementation if not wrapped in provider
-    // This prevents crashes during initial setup
     return {
       isTrainingActive: false,
       trainingType: null,
@@ -219,44 +148,14 @@ export const useTrainingMode = () => {
 
 /**
  * Hook for components that poll - automatically adjusts interval during training
- * 
- * @param {Function} callback - Function to call on each poll
- * @param {number} baseInterval - Normal polling interval in ms
- * @param {Object} options - { componentId, isEssential, enabled }
+ * @deprecated Use useFocusAwarePolling from FocusModeContext instead
  */
 export const useTrainingAwarePolling = (callback, baseInterval, options = {}) => {
   const { componentId = 'unknown', isEssential = false, enabled = true } = options;
-  const { getPollingInterval, shouldPoll, registerPoller, isTrainingActive } = useTrainingMode();
+  const { getPollingInterval, shouldPoll, isTrainingActive } = useTrainingMode();
   
-  const intervalRef = useRef(null);
-  const callbackRef = useRef(callback);
-  callbackRef.current = callback;
-
   useEffect(() => {
-    // Register this poller
-    const unregister = registerPoller(componentId);
-    
-    return () => {
-      unregister();
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [componentId, registerPoller]);
-
-  useEffect(() => {
-    if (!enabled) {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-      return;
-    }
-
-    // Clear existing interval
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-    }
+    if (!enabled) return;
 
     // Get adjusted interval
     const interval = getPollingInterval(baseInterval, isEssential);
@@ -264,7 +163,7 @@ export const useTrainingAwarePolling = (callback, baseInterval, options = {}) =>
     // Create poll function
     const poll = () => {
       if (shouldPoll(componentId, isEssential)) {
-        callbackRef.current();
+        callback();
       }
     };
 
@@ -272,19 +171,15 @@ export const useTrainingAwarePolling = (callback, baseInterval, options = {}) =>
     poll();
 
     // Set up interval
-    intervalRef.current = setInterval(poll, interval);
+    const intervalId = setInterval(poll, interval);
 
     // Log interval change during training
     if (isTrainingActive) {
       console.log(`[TrainingMode] ${componentId}: interval ${baseInterval}ms -> ${interval}ms`);
     }
 
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [enabled, baseInterval, isEssential, componentId, getPollingInterval, shouldPoll, isTrainingActive]);
+    return () => clearInterval(intervalId);
+  }, [enabled, baseInterval, isEssential, componentId, getPollingInterval, shouldPoll, isTrainingActive, callback]);
 };
 
 export default TrainingModeContext;

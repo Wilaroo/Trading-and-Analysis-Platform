@@ -6,31 +6,31 @@
  * 1. Pauses when tab is hidden (saves resources)
  * 2. Resumes immediately when tab becomes visible
  * 3. Deduplicates concurrent requests
- * 4. Respects training mode (slower polling)
+ * 4. Respects Focus Mode (pauses/slows polling based on mode)
  * 5. Exponential backoff on errors
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { useTrainingMode } from '../contexts';
+import { useFocusMode } from '../contexts';
 
 /**
- * Smart polling hook
+ * Smart polling hook - Focus Mode aware
  * 
  * @param {Function} fetchFn - Async function to call
  * @param {number} interval - Polling interval in ms
- * @param {Object} options - { enabled, isEssential, onSuccess, onError, immediate }
+ * @param {Object} options - { enabled, category, onSuccess, onError, immediate, componentId }
  */
 export const useSmartPolling = (fetchFn, interval, options = {}) => {
   const {
     enabled = true,
-    isEssential = false,  // Essential polls continue during training (but slower)
+    category = 'default',  // 'essential', 'default', or 'background'
     onSuccess = null,
     onError = null,
     immediate = true,     // Fetch immediately on mount
-    key = 'default'       // For deduplication
+    componentId = 'unknown' // For logging
   } = options;
 
-  const { getPollingInterval, isTrainingActive } = useTrainingMode();
+  const { getAdjustedInterval, shouldPoll, focusMode, isLive } = useFocusMode();
   
   const [isPolling, setIsPolling] = useState(false);
   const [lastPollTime, setLastPollTime] = useState(null);
@@ -49,11 +49,13 @@ export const useSmartPolling = (fetchFn, interval, options = {}) => {
     // Skip if already fetching (deduplication)
     if (fetchingRef.current) return;
     
-    // Skip if tab is hidden (unless essential)
-    if (!visibleRef.current && !isEssential) return;
+    // Skip if tab is hidden (unless essential category)
+    if (!visibleRef.current && category !== 'essential') return;
     
-    // Skip non-essential polling during training
-    if (isTrainingActive && !isEssential) return;
+    // Skip if polling is paused for this category in current focus mode
+    if (!shouldPoll(category)) {
+      return;
+    }
     
     fetchingRef.current = true;
     setIsPolling(true);
@@ -79,14 +81,19 @@ export const useSmartPolling = (fetchFn, interval, options = {}) => {
         setIsPolling(false);
       }
     }
-  }, [fetchFn, isEssential, isTrainingActive, onSuccess, onError]);
+  }, [fetchFn, category, shouldPoll, onSuccess, onError]);
 
   /**
    * Calculate effective interval with backoff on errors
    */
   const getEffectiveInterval = useCallback(() => {
-    // Base interval (may be slowed during training)
-    let effectiveInterval = getPollingInterval(interval, isEssential);
+    // Get interval adjusted for current focus mode
+    let effectiveInterval = getAdjustedInterval(interval, category);
+    
+    // If null, polling is paused
+    if (effectiveInterval === null) {
+      return null;
+    }
     
     // Apply exponential backoff on consecutive errors (max 5x slowdown)
     if (consecutiveErrors > 0) {
@@ -95,7 +102,7 @@ export const useSmartPolling = (fetchFn, interval, options = {}) => {
     }
     
     return effectiveInterval;
-  }, [interval, isEssential, getPollingInterval, consecutiveErrors]);
+  }, [interval, category, getAdjustedInterval, consecutiveErrors]);
 
   /**
    * Start polling timer
@@ -107,11 +114,22 @@ export const useSmartPolling = (fetchFn, interval, options = {}) => {
     
     const effectiveInterval = getEffectiveInterval();
     
+    // If null, polling is paused
+    if (effectiveInterval === null) {
+      console.log(`[SmartPolling] ${componentId}: Polling paused in ${focusMode} mode`);
+      return;
+    }
+    
+    // Log interval change if not in live mode
+    if (!isLive && effectiveInterval !== interval) {
+      console.log(`[SmartPolling] ${componentId}: Interval ${interval}ms -> ${effectiveInterval}ms (${focusMode} mode)`);
+    }
+    
     timerRef.current = setInterval(() => {
       executeFetch();
     }, effectiveInterval);
     
-  }, [executeFetch, getEffectiveInterval]);
+  }, [executeFetch, getEffectiveInterval, componentId, focusMode, isLive, interval]);
 
   /**
    * Handle visibility changes
@@ -163,13 +181,13 @@ export const useSmartPolling = (fetchFn, interval, options = {}) => {
   }, [enabled, immediate, executeFetch, startPolling]);
 
   /**
-   * Restart polling when interval changes (e.g., training mode changes)
+   * Restart polling when focus mode changes or error count changes
    */
   useEffect(() => {
     if (enabled && timerRef.current) {
       startPolling();
     }
-  }, [isTrainingActive, consecutiveErrors]);
+  }, [focusMode, consecutiveErrors, enabled, startPolling]);
 
   /**
    * Manual trigger

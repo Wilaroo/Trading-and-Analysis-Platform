@@ -2,6 +2,28 @@
 
 **Last Updated:** March 23, 2026
 
+## Recent Session Updates
+
+### 1. WebSocket Status Indicator Fix - COMPLETED (NEW!)
+- **Problem:** The "Data" (WebSocket) status indicator in the TickerTape header was not updating
+- **Fix:** Created `WebSocketStatusSync` component in `App.js` that bridges the WebSocket hook state to the `SystemStatusContext`
+- **Result:** "Data" indicator now shows real-time green/red status based on WebSocket connection
+
+### 2. Focus-Aware Polling Integration - COMPLETED (NEW!)
+- Updated `useSmartPolling` hook to use `FocusModeContext` instead of the deprecated `TrainingModeContext`
+- `TrainingModeContext` is now a thin wrapper that delegates to `FocusModeContext` for backwards compatibility
+- All polling hooks now automatically adjust based on the current Focus Mode (Live, Training, Collecting, Backtesting)
+
+### 3. Worker Process Jobs Implementation - COMPLETED (NEW!)
+- **Data Collection Jobs**: Fully implemented support for liquid, full_market, smart, and custom collection types
+- **Backtest Jobs**: Fully implemented with progress monitoring and result tracking
+- Jobs run in an isolated worker process to prevent main app freezes
+
+### 4. JobManager UI Component - COMPLETED (NEW!)
+- Created `/app/frontend/src/components/JobManager.jsx` for managing background jobs
+- Features: Start data collection, start backtests, view job progress, cancel jobs
+- Integrated into the AICoachTab (right sidebar in Command Center)
+
 ## UI Improvements This Session
 
 ### 1. Command Center Header Consolidation - COMPLETED

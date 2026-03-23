@@ -25,7 +25,7 @@ import logging
 import signal
 import sys
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
 # Add the backend directory to the path
@@ -171,7 +171,17 @@ async def process_training_job(job: dict, db) -> dict:
 
 
 async def process_data_collection_job(job: dict, db) -> dict:
-    """Process a data collection job."""
+    """Process a data collection job.
+    
+    Job params:
+        - bar_size: str (default '1 day')
+        - symbols: list or None (None = all liquid symbols)
+        - duration: str (default '1 M')
+        - collection_type: 'liquid' | 'full_market' | 'smart' | 'custom'
+        - min_adv: int (for liquid collection, default 100000)
+        - min_price: float (for full market, default 1.0)
+        - max_price: float (for full market, default 1000.0)
+    """
     params = job.get('params', {})
     job_id = job['job_id']
     
@@ -184,22 +194,86 @@ async def process_data_collection_job(job: dict, db) -> dict:
     collector = get_collector_service(db)
     
     try:
+        collection_type = params.get('collection_type', 'liquid')
         bar_size = params.get('bar_size', '1 day')
-        symbols = params.get('symbols')  # None means all
+        duration = params.get('duration', '1 M')
+        symbols = params.get('symbols')  # None means use collection_type logic
         
         await job_queue_manager.update_progress(
-            job_id, percent=5, message=f'Starting collection for {bar_size}...'
+            job_id, percent=5, message=f'Starting {collection_type} data collection for {bar_size}...'
         )
         
-        # This would need to be implemented based on your collector service
-        # For now, return a placeholder
-        result = {
-            'success': True,
-            'message': 'Data collection not yet implemented in worker',
-            'bar_size': bar_size
-        }
+        result = None
         
-        return result
+        if collection_type == 'liquid':
+            # Collect liquid stocks (high volume)
+            min_adv = params.get('min_adv', 100000)
+            logger.info(f"Starting liquid collection: {bar_size}, ADV >= {min_adv}")
+            result = await collector.start_liquid_collection(
+                bar_size=bar_size,
+                duration=duration,
+                min_adv=min_adv
+            )
+            
+        elif collection_type == 'full_market':
+            # Collect all US stocks
+            min_price = params.get('min_price', 1.0)
+            max_price = params.get('max_price', 1000.0)
+            logger.info(f"Starting full market collection: {bar_size}, price ${min_price}-${max_price}")
+            result = await collector.start_full_market_collection(
+                bar_size=bar_size,
+                duration=duration,
+                min_price=min_price,
+                max_price=max_price
+            )
+            
+        elif collection_type == 'smart':
+            # Smart collection - collect what's needed
+            logger.info(f"Starting smart collection: {bar_size}")
+            result = await collector.start_smart_collection(duration=duration)
+            
+        elif collection_type == 'custom' and symbols:
+            # Custom symbol list
+            logger.info(f"Starting custom collection: {bar_size}, {len(symbols)} symbols")
+            result = await collector.start_collection(
+                symbols=symbols,
+                bar_size=bar_size,
+                duration=duration,
+                use_defaults=False
+            )
+        else:
+            return {
+                'success': False,
+                'error': f'Unknown collection type or missing symbols: {collection_type}'
+            }
+        
+        # Monitor collection progress
+        if result and result.get('success'):
+            job_info = result.get('job', {})
+            total_symbols = job_info.get('total_symbols', 0)
+            
+            await job_queue_manager.update_progress(
+                job_id, 
+                percent=10, 
+                message=f'Collection started: {total_symbols} symbols queued'
+            )
+            
+            # Poll for completion (collection runs in background)
+            # Note: The actual collection runs via the IB pusher, so we just 
+            # return the job info. The UI can poll the collection status separately.
+            return {
+                'success': True,
+                'message': f'Data collection started for {total_symbols} symbols',
+                'collection_type': collection_type,
+                'bar_size': bar_size,
+                'total_symbols': total_symbols,
+                'job_info': job_info
+            }
+        else:
+            return {
+                'success': False,
+                'error': result.get('error', 'Failed to start collection')
+            }
         
     except Exception as e:
         logger.error(f"Data collection job failed: {e}", exc_info=True)
@@ -210,7 +284,20 @@ async def process_data_collection_job(job: dict, db) -> dict:
 
 
 async def process_backtest_job(job: dict, db) -> dict:
-    """Process a backtest job."""
+    """Process a backtest job.
+    
+    Job params:
+        - start_date: str (ISO format)
+        - end_date: str (ISO format)
+        - universe: 'all' | 'sp500' | 'nasdaq100' | 'custom'
+        - custom_symbols: list (if universe is 'custom')
+        - bar_size: str (default '1 day')
+        - starting_capital: float (default 100000)
+        - min_adv: int (default 100000)
+        - min_price: float (default 5.0)
+        - max_price: float (default 500.0)
+        - use_ai_agents: bool (default True)
+    """
     params = job.get('params', {})
     job_id = job['job_id']
     
@@ -219,23 +306,93 @@ async def process_backtest_job(job: dict, db) -> dict:
     
     try:
         # Import simulation service
-        from services.historical_simulation_engine import HistoricalSimulationEngine
+        from services.historical_simulation_engine import HistoricalSimulationEngine, SimulationConfig
         
         engine = HistoricalSimulationEngine(db)
+        await engine.initialize()
         
         await job_queue_manager.update_progress(
-            job_id, percent=5, message='Starting backtest...'
+            job_id, percent=5, message='Initializing backtest engine...'
         )
         
-        # Run the simulation
-        result = await engine.run_simulation(params)
+        # Build simulation config from params
+        config = SimulationConfig(
+            start_date=params.get('start_date', (datetime.now(timezone.utc) - timedelta(days=365)).isoformat()),
+            end_date=params.get('end_date', datetime.now(timezone.utc).isoformat()),
+            universe=params.get('universe', 'all'),
+            custom_symbols=params.get('custom_symbols', []),
+            bar_size=params.get('bar_size', '1 day'),
+            starting_capital=params.get('starting_capital', 100000.0),
+            min_adv=params.get('min_adv', 100000),
+            min_price=params.get('min_price', 5.0),
+            max_price=params.get('max_price', 500.0),
+            use_ai_agents=params.get('use_ai_agents', True),
+            data_source=params.get('data_source', 'ib')
+        )
         
-        if result.get('success'):
+        await job_queue_manager.update_progress(
+            job_id, percent=10, message=f'Starting backtest: {config.start_date[:10]} to {config.end_date[:10]}...'
+        )
+        
+        # Start the simulation
+        sim_job_id = await engine.start_simulation(config)
+        
+        # Monitor simulation progress
+        while True:
+            status = await engine.get_job_status(sim_job_id)
+            
+            if not status:
+                await asyncio.sleep(5)
+                continue
+            
+            sim_status = status.get('status')
+            progress = status.get('progress', {})
+            
+            # Update job progress
+            percent_complete = progress.get('percent', 0)
+            symbols_processed = progress.get('symbols_processed', 0)
+            symbols_total = progress.get('symbols_total', 0)
+            current_date = status.get('current_date', '')
+            
             await job_queue_manager.update_progress(
-                job_id, percent=100, message='Backtest complete!'
+                job_id,
+                percent=min(10 + int(percent_complete * 0.9), 99),
+                message=f'Processing {symbols_processed}/{symbols_total} symbols, date: {current_date[:10] if current_date else "..."}'
             )
-        
-        return result
+            
+            if sim_status == 'completed':
+                # Get final results
+                results = status.get('results', {})
+                metrics = results.get('metrics', {})
+                
+                await job_queue_manager.update_progress(
+                    job_id, percent=100, 
+                    message=f'Backtest complete! Return: {metrics.get("total_return_pct", 0):.1f}%'
+                )
+                
+                return {
+                    'success': True,
+                    'simulation_id': sim_job_id,
+                    'metrics': metrics,
+                    'trades_count': results.get('total_trades', 0),
+                    'win_rate': metrics.get('win_rate', 0),
+                    'total_return': metrics.get('total_return', 0),
+                    'details': results
+                }
+                
+            elif sim_status == 'failed':
+                return {
+                    'success': False,
+                    'error': status.get('error', 'Simulation failed')
+                }
+                
+            elif sim_status == 'cancelled':
+                return {
+                    'success': False,
+                    'error': 'Simulation was cancelled'
+                }
+            
+            await asyncio.sleep(5)
         
     except Exception as e:
         logger.error(f"Backtest job failed: {e}", exc_info=True)
@@ -247,7 +404,6 @@ async def process_backtest_job(job: dict, db) -> dict:
 
 async def process_calibration_job(job: dict, db) -> dict:
     """Process a calibration job."""
-    params = job.get('params', {})
     job_id = job['job_id']
     
     logger.info(f"Processing calibration job {job_id}")
