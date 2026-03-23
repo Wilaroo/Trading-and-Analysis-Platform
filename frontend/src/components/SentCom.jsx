@@ -28,6 +28,7 @@ import { useDataCache } from '../contexts';
 import { DynamicRiskBadge, DynamicRiskPanel } from './DynamicRiskPanel';
 import StreamOfConsciousness from './StreamOfConsciousness';
 import ConversationPanel from './ConversationPanel';
+import StatusDot from './StatusDot';
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL;
 
@@ -3118,14 +3119,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
                 <h2 className="text-base font-bold text-white tracking-tight">SENTCOM</h2>
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <div className="flex items-center gap-1">
-                    {connected ? (
-                      <PulsingDot color="emerald" />
-                    ) : (
-                      <Circle className="w-2 h-2 text-zinc-500" />
-                    )}
-                    <span className={`text-[9px] font-medium ${connected ? 'text-emerald-400' : 'text-zinc-500'}`}>
-                      {connected ? 'LIVE' : 'OFFLINE'}
-                    </span>
+                    <StatusDot service="quotesStream" size="sm" />
                   </div>
                   <span className="text-zinc-600">•</span>
                   {/* Market Session Badge */}
@@ -3181,20 +3175,10 @@ const SentCom = ({ compact = false, embedded = false }) => {
             {/* Dynamic Risk Badge */}
             <DynamicRiskBadge onClick={() => setShowRiskPanel(!showRiskPanel)} />
             
-            {/* IB Connection */}
-            <div className={`flex items-center gap-1 px-2 py-1 rounded-lg border ${
-              ibConnected 
-                ? 'bg-cyan-500/10 border-cyan-500/30' 
-                : 'bg-zinc-700/30 border-zinc-600/30'
-            }`}>
-              {ibConnected ? (
-                <Wifi className="w-3 h-3 text-cyan-400" />
-              ) : (
-                <WifiOff className="w-3 h-3 text-zinc-500" />
-              )}
-              <span className={`text-[9px] font-bold ${ibConnected ? 'text-cyan-400' : 'text-zinc-500'}`}>
-                {ibConnected ? 'IB' : 'IB OFF'}
-              </span>
+            {/* IB Connection - Minimal dot indicator */}
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-black/20 border border-white/5">
+              <StatusDot service="ibGateway" size="sm" />
+              <span className="text-[9px] font-medium text-zinc-400">IB</span>
             </div>
           </div>
           

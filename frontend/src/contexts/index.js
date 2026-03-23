@@ -2,3 +2,4 @@ export { DataCacheProvider, useDataCache, useCachedFetch } from './DataCacheCont
 export { TrainingModeProvider, useTrainingMode, useTrainingAwarePolling } from './TrainingModeContext';
 export { AppStateProvider, useAppState, useCachedData } from './AppStateContext';
 export { ConnectionManagerProvider, useConnectionManager } from './ConnectionManagerContext';
+export { SystemStatusProvider, useSystemStatus, useIBConnected, useAIAvailable } from './SystemStatusContext';

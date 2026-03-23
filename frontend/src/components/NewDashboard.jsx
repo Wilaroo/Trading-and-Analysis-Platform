@@ -22,6 +22,7 @@ import {
 import BotPerformanceChart from './BotPerformanceChart';
 import SentCom from './SentCom';
 import { useTickerModal } from '../hooks/useTickerModal';
+import SystemStatusBar from './SystemStatusBar';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 const DASHBOARD_REFRESH_INTERVAL = 15000; // 15 seconds for dashboard data
@@ -105,14 +106,8 @@ const DashboardHeader = ({
         
         {/* Right Side: Account + P&L - More compact */}
         <div className="flex items-center gap-3">
-          {/* Partial/Live Mode Toggle */}
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
-            <span className="text-[9px] text-zinc-500">Partial</span>
-            <div className="flex items-center gap-1">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-[10px] text-emerald-400 font-medium">LIVE</span>
-            </div>
-          </div>
+          {/* Unified System Status */}
+          <SystemStatusBar compact={false} />
           
           {/* Account Value */}
           <div className="text-right">

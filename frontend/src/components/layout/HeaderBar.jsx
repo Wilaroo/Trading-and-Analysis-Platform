@@ -821,12 +821,7 @@ const HeaderBar = ({
             ibPusherStatus={ibPusherStatus}
           />
           
-          {/* Live Time Indicator */}
-          <div className="hidden lg:flex items-center gap-2 text-zinc-400 text-xs font-mono">
-            <div className="neon-dot" style={{width: '6px', height: '6px'}} />
-            <span className="text-cyan-400 font-medium">LIVE</span>
-            <span>{new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
-          </div>
+          {/* Removed redundant LIVE indicator - already shown in SystemStatusPopover */}
         </div>
       </div>
 

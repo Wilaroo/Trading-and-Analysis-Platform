@@ -11,14 +11,15 @@ import {
   DataCacheProvider, 
   TrainingModeProvider, 
   AppStateProvider, 
-  ConnectionManagerProvider 
+  ConnectionManagerProvider,
+  SystemStatusProvider
 } from './contexts';
 import api from './utils/api';
 import StartupModal from './components/StartupModal';
 import StartupStatusDashboard from './components/StartupStatusDashboard';
 import TrainingModeIndicator from './components/TrainingModeIndicator';
-// ConnectionStatus removed - redundant with existing System Status dropdown
 import ErrorBoundary from './components/ErrorBoundary';
+import SystemStatusBar from './components/SystemStatusBar';
 
 // Import pages
 import {
@@ -331,6 +332,7 @@ function App() {
 
   return (
     <AppStateProvider>
+    <SystemStatusProvider>
     <ConnectionManagerProvider>
     <TrainingModeProvider>
     <DataCacheProvider>
@@ -450,6 +452,7 @@ function App() {
     </DataCacheProvider>
     </TrainingModeProvider>
     </ConnectionManagerProvider>
+    </SystemStatusProvider>
     </AppStateProvider>
   );
 }
