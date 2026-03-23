@@ -31,6 +31,30 @@
 - Toggle button to enable/disable notifications (bell icon in JobManager header)
 - Notifications for all job types: Data Collection, Backtest, AI Training, Calibration
 
+### 6. Startup Optimization System - COMPLETED (NEW!)
+- **StartupManager Context** (`/app/frontend/src/contexts/StartupManagerContext.jsx`):
+  - Wave 1 (0s): Core - Health, Auth, Positions, WebSocket
+  - Wave 2 (5s): Trading - Scanner, Alerts, Market Data
+  - Wave 3 (15s): AI - Status indicators, Debate advisor
+  - Wave 4 (30s): Analytics - Report card, Learning connectors
+  - Wave 5 (60s): Background - Historical data, Simulation jobs
+
+- **Smart Polling Intervals**:
+  - Critical (5s): Positions, Active trades, Alerts
+  - Important (15s): Scanner, SentCom status
+  - Standard (30s): AI status, Strategy promotion
+  - Relaxed (60s): Report card, Learning stats
+  - Background (5 min): IB collector, Simulation jobs
+
+- **useVisibility Hook** (`/app/frontend/src/hooks/useVisibility.js`):
+  - Lazy loading - only poll when component is visible
+  - Tab visibility awareness - pause when tab is hidden
+  - Jitter on startup - prevents thundering herd
+
+- **Consolidated Status Endpoint** (`/api/consolidated-status`):
+  - Combines 11+ status endpoints into 1 API call
+  - Reduces backend load significantly
+
 ## UI Improvements This Session
 
 ### 1. Command Center Header Consolidation - COMPLETED

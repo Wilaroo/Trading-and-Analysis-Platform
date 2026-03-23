@@ -14,6 +14,7 @@ import {
   ConnectionManagerProvider,
   SystemStatusProvider,
   FocusModeProvider,
+  StartupManagerProvider,
   useSystemStatus
 } from './contexts';
 import api from './utils/api';
@@ -347,6 +348,7 @@ function App() {
 
   return (
     <AppStateProvider>
+    <StartupManagerProvider>
     <SystemStatusProvider>
     <ConnectionManagerProvider>
     <FocusModeProvider>
@@ -472,6 +474,7 @@ function App() {
     </FocusModeProvider>
     </ConnectionManagerProvider>
     </SystemStatusProvider>
+    </StartupManagerProvider>
     </AppStateProvider>
   );
 }

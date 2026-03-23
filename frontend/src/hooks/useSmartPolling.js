@@ -7,23 +7,25 @@
  * 2. Resumes immediately when tab becomes visible
  * 3. Deduplicates concurrent requests
  * 4. Respects Focus Mode (pauses/slows polling based on mode)
- * 5. Exponential backoff on errors
+ * 5. Respects Startup Manager (staged loading)
+ * 6. Exponential backoff on errors
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { useFocusMode } from '../contexts';
+import { useFocusMode, useStartupManager } from '../contexts';
 
 /**
- * Smart polling hook - Focus Mode aware
+ * Smart polling hook - Focus Mode & Startup aware
  * 
  * @param {Function} fetchFn - Async function to call
- * @param {number} interval - Polling interval in ms
- * @param {Object} options - { enabled, category, onSuccess, onError, immediate, componentId }
+ * @param {number} interval - Polling interval in ms (may be overridden by feature config)
+ * @param {Object} options - { enabled, category, featureId, onSuccess, onError, immediate, componentId }
  */
 export const useSmartPolling = (fetchFn, interval, options = {}) => {
   const {
     enabled = true,
     category = 'default',  // 'essential', 'default', or 'background'
+    featureId = null,      // Feature ID for startup manager (e.g., 'report-card', 'learning-connectors')
     onSuccess = null,
     onError = null,
     immediate = true,     // Fetch immediately on mount
@@ -31,16 +33,19 @@ export const useSmartPolling = (fetchFn, interval, options = {}) => {
   } = options;
 
   const { getAdjustedInterval, shouldPoll, focusMode, isLive } = useFocusMode();
+  const { isFeatureReady, getPollingInterval, isStartupComplete } = useStartupManager();
   
   const [isPolling, setIsPolling] = useState(false);
   const [lastPollTime, setLastPollTime] = useState(null);
   const [error, setError] = useState(null);
   const [consecutiveErrors, setConsecutiveErrors] = useState(0);
+  const [isWaitingForStartup, setIsWaitingForStartup] = useState(!!featureId);
   
   const timerRef = useRef(null);
   const fetchingRef = useRef(false);
   const mountedRef = useRef(true);
   const visibleRef = useRef(document.visibilityState === 'visible');
+  const startupCheckedRef = useRef(false);
 
   /**
    * Execute the fetch with error handling
@@ -51,6 +56,11 @@ export const useSmartPolling = (fetchFn, interval, options = {}) => {
     
     // Skip if tab is hidden (unless essential category)
     if (!visibleRef.current && category !== 'essential') return;
+    
+    // Skip if feature not yet ready from startup manager
+    if (featureId && !isFeatureReady(featureId)) {
+      return;
+    }
     
     // Skip if polling is paused for this category in current focus mode
     if (!shouldPoll(category)) {
@@ -81,14 +91,23 @@ export const useSmartPolling = (fetchFn, interval, options = {}) => {
         setIsPolling(false);
       }
     }
-  }, [fetchFn, category, shouldPoll, onSuccess, onError]);
+  }, [fetchFn, category, featureId, isFeatureReady, shouldPoll, onSuccess, onError]);
 
   /**
    * Calculate effective interval with backoff on errors
    */
   const getEffectiveInterval = useCallback(() => {
+    // Use startup manager's recommended interval if featureId is specified
+    let baseInterval = interval;
+    if (featureId) {
+      const recommendedInterval = getPollingInterval(featureId);
+      if (recommendedInterval) {
+        baseInterval = recommendedInterval;
+      }
+    }
+    
     // Get interval adjusted for current focus mode
-    let effectiveInterval = getAdjustedInterval(interval, category);
+    let effectiveInterval = getAdjustedInterval(baseInterval, category);
     
     // If null, polling is paused
     if (effectiveInterval === null) {
@@ -102,7 +121,7 @@ export const useSmartPolling = (fetchFn, interval, options = {}) => {
     }
     
     return effectiveInterval;
-  }, [interval, category, getAdjustedInterval, consecutiveErrors]);
+  }, [interval, featureId, getPollingInterval, category, getAdjustedInterval, consecutiveErrors]);
 
   /**
    * Start polling timer
@@ -163,22 +182,38 @@ export const useSmartPolling = (fetchFn, interval, options = {}) => {
       return;
     }
     
-    // Immediate fetch on mount
-    if (immediate) {
-      executeFetch();
+    // Check if feature is ready from startup manager
+    if (featureId && !isFeatureReady(featureId)) {
+      // Not ready yet - wait for startup manager
+      setIsWaitingForStartup(true);
+      return;
     }
     
-    // Start polling
-    startPolling();
+    setIsWaitingForStartup(false);
+    
+    // Add jitter to prevent thundering herd on startup (0-3s random delay)
+    const startupJitter = startupCheckedRef.current ? 0 : Math.random() * 3000;
+    startupCheckedRef.current = true;
+    
+    const startTimer = setTimeout(() => {
+      // Immediate fetch on mount
+      if (immediate) {
+        executeFetch();
+      }
+      
+      // Start polling
+      startPolling();
+    }, startupJitter);
     
     return () => {
+      clearTimeout(startTimer);
       mountedRef.current = false;
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
     };
-  }, [enabled, immediate, executeFetch, startPolling]);
+  }, [enabled, immediate, featureId, isFeatureReady, executeFetch, startPolling]);
 
   /**
    * Restart polling when focus mode changes or error count changes
@@ -201,6 +236,7 @@ export const useSmartPolling = (fetchFn, interval, options = {}) => {
     lastPollTime,
     error,
     consecutiveErrors,
+    isWaitingForStartup,
     poll,  // Manual trigger
     effectiveInterval: getEffectiveInterval()
   };

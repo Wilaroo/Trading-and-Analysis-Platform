@@ -2410,6 +2410,122 @@ async def health_check():
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
+@app.get("/api/consolidated-status")
+async def consolidated_status():
+    """
+    Consolidated status endpoint - combines multiple status checks into one call.
+    Reduces frontend polling from 11+ endpoints to 1.
+    
+    Returns status for:
+    - AI modules (timeseries, debate, shadow)
+    - Learning connectors
+    - Strategy promotion
+    - IB collector
+    - Simulation jobs
+    """
+    from datetime import datetime, timezone
+    import asyncio
+    
+    result = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "ai_modules": {},
+        "learning": {},
+        "strategy": {},
+        "collector": {},
+        "simulation": {}
+    }
+    
+    try:
+        # AI Timeseries Status (quick check)
+        try:
+            ts_status = {
+                "available": ts_model_service is not None,
+                "training_active": getattr(ts_model_service, 'training_active', False) if ts_model_service else False,
+            }
+            if ts_model_service:
+                active = ts_model_service.get_active_model()
+                ts_status["model_active"] = active is not None
+            result["ai_modules"]["timeseries"] = ts_status
+        except Exception as e:
+            result["ai_modules"]["timeseries"] = {"error": str(e)}
+        
+        # AI Debate/Advisor Status (quick check)
+        try:
+            result["ai_modules"]["debate"] = {
+                "available": debate_service is not None,
+            }
+        except Exception as e:
+            result["ai_modules"]["debate"] = {"error": str(e)}
+        
+        # Shadow Stats (quick summary)
+        try:
+            if shadow_service:
+                stats = shadow_service.get_summary_stats()
+                result["ai_modules"]["shadow"] = {
+                    "total_signals": stats.get("total_signals", 0),
+                    "accurate_signals": stats.get("accurate_signals", 0),
+                }
+            else:
+                result["ai_modules"]["shadow"] = {"available": False}
+        except Exception as e:
+            result["ai_modules"]["shadow"] = {"error": str(e)}
+        
+        # Learning Connectors Status
+        try:
+            if learning_connector_service:
+                result["learning"]["status"] = {
+                    "connected": True,
+                    "thresholds_active": learning_connector_service.thresholds is not None
+                }
+            else:
+                result["learning"]["status"] = {"connected": False}
+        except Exception as e:
+            result["learning"]["status"] = {"error": str(e)}
+        
+        # Strategy Promotion (phases summary)
+        try:
+            if strategy_promotion_service:
+                phases = strategy_promotion_service.get_phase_status()
+                result["strategy"]["phases_count"] = len(phases) if phases else 0
+                result["strategy"]["available"] = True
+            else:
+                result["strategy"]["available"] = False
+        except Exception as e:
+            result["strategy"] = {"error": str(e)}
+        
+        # IB Collector Stats (quick summary)
+        try:
+            if ib_historical_collector:
+                stats = ib_historical_collector.get_collection_stats()
+                result["collector"] = {
+                    "available": True,
+                    "total_symbols": stats.get("total_symbols", 0),
+                    "active_collection": stats.get("is_collecting", False)
+                }
+            else:
+                result["collector"] = {"available": False}
+        except Exception as e:
+            result["collector"] = {"error": str(e)}
+        
+        # Simulation Jobs (count only)
+        try:
+            if simulation_engine:
+                jobs = await simulation_engine.get_recent_jobs(limit=5)
+                result["simulation"] = {
+                    "recent_jobs": len(jobs) if jobs else 0,
+                    "available": True
+                }
+            else:
+                result["simulation"] = {"available": False}
+        except Exception as e:
+            result["simulation"] = {"error": str(e)}
+            
+    except Exception as e:
+        result["error"] = str(e)
+    
+    return result
+
+
 @app.get("/api/llm/status")
 async def llm_status():
     """Check which LLM provider is active and show smart routing config"""
