@@ -147,7 +147,7 @@ async def process_training_job(job: dict, db) -> dict:
                     max_symbols=max_symbols
                 )
             else:
-                result = await timeseries_service.train_single_timeframe(
+                result = await timeseries_service.train_model(
                     bar_size=bar_size,
                     max_symbols=max_symbols
                 )
