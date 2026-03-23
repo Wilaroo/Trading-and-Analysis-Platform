@@ -638,13 +638,8 @@ class TimeSeriesAIService:
             if total_symbols == 0:
                 return {"success": False, "error": f"No symbols found for {bar_size}"}
             
-            # LIMIT symbols for debugging - remove this after confirmed working
-            MAX_SYMBOLS_DEBUG = 100
-            if total_symbols > MAX_SYMBOLS_DEBUG:
-                logger.info(f"[FULL UNIVERSE] DEBUG: Limiting to {MAX_SYMBOLS_DEBUG} symbols (was {total_symbols})")
-                all_symbols = all_symbols[:MAX_SYMBOLS_DEBUG]
-                total_symbols = len(all_symbols)
-            
+            # Production mode - train on ALL symbols
+            # For testing with fewer symbols, pass a smaller symbol_batch_size or max_symbols parameter
             logger.info(f"[FULL UNIVERSE] Will process {total_symbols:,} symbols with {bar_size} data")
             sys.stdout.flush()
             
@@ -968,9 +963,8 @@ class TimeSeriesAIService:
         
         try:
             if timeframes is None:
-                # Start with "1 day" as it's most likely to succeed
-                timeframes = ["1 day"]  # Start with just ONE timeframe for debugging
-                logger.info("[FULL UNIVERSE ALL] DEBUG MODE: Only training '1 day' timeframe")
+                # Train ALL 7 timeframes - order from most to least data
+                timeframes = ["1 day", "1 hour", "5 mins", "15 mins", "30 mins", "1 min", "1 week"]
             
             logger.info("")
             logger.info("#" * 70)

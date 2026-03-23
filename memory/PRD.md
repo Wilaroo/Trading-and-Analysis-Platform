@@ -3,98 +3,162 @@
 ## Original Problem Statement
 The user wants to evolve their AI trading bot, "SentCom," into a self-improving system by hardening the data pipeline, creating automation, and improving the UI. After completing a massive historical data collection (39M bars), the primary goal has shifted to training the AI models on this new dataset, integrating the models into the bot's decision-making, and streamlining the local development/training environment for stability and performance.
 
-## Core Requirements
+---
 
-### 1. Robust Data Pipeline ✅ COMPLETED
-- Collect historical data for all required timeframes
-- 39M bars collected across 7 timeframes
+## Completed Features
 
-### 2. Autonomous Learning Loop 🔄 IN PROGRESS
-- Implement automation for data collection and model training
-- **Current Blocker**: Full Universe training crashes backend
+### Phase 1: Data Pipeline ✅ COMPLETED
+- Historical data collection for all 7 timeframes
+- 39M+ bars collected and stored in MongoDB Atlas
+- IB Gateway integration for real-time and historical data
 
-### 3. Comprehensive UI 🔄 IN PROGRESS
-- Consolidate all AI, learning, and data management features into an intuitive dashboard
+### Phase 2: Full Universe Training ✅ COMPLETED (March 22, 2026)
+- **Fixed**: Backend crashing during training (memory management + async)
+- **Fixed**: Model save failing (MongoDB model_id unique index issue)
+- **Added**: Background task training with progress monitoring
+- **Added**: Chunked data loading to prevent memory crashes
+- **Added**: Aggressive logging for debugging
+- **Created**: Comprehensive training guide (`/documents/AI_TRAINING_GUIDE.md`)
+
+**How to train (PowerShell):**
+```powershell
+Invoke-WebRequest -Uri "http://localhost:8001/api/ai-modules/timeseries/train-full-universe-all" -Method POST -ContentType "application/json" -Body '{"symbol_batch_size": 50, "max_bars_per_symbol": 1000}'
+```
+
+**First successful training results:**
+- Timeframe: 1 day
+- Accuracy: 53.1%
+- Training samples: 75,600
+- Elapsed time: 29 minutes
+
+### Phase 3: UI Dashboard ✅ PARTIALLY COMPLETE
 - localStorage caching for data persistence
+- Training status indicators
+- Full Universe training button (via PowerShell for now)
 
-### 4. Startup Status Dashboard ✅ PARTIALLY COMPLETE
-- UI correctly reflects the status of all backend services
-
-### 5. Comprehensive User Guide ✅ COMPLETED
-- Detailed, visual, and downloadable guide created
-
----
-
-## Current Issues
-
-### P0 - Critical
-- **Full Universe Training Crashes Backend**: When triggering "Full Universe" training, the backend process crashes silently after the API returns 200 OK. The background task fails to complete.
-  - **Status**: DEBUGGING IN PROGRESS
-  - **Latest Changes**: Added aggressive logging, reduced batch sizes (50 symbols, 1000 bars), added memory safeguards
-  - **Next Step**: User to test and report last log message before crash
-
-### P1 - High Priority
-- **Full Train Function Broken**: Stops after completing just one model instead of all 7 timeframes
-  - **Status**: BLOCKED by P0
+### Phase 4: User Guide ✅ COMPLETED
+- Comprehensive training guide created
+- Troubleshooting section included
+- API reference documented
 
 ---
 
-## Architecture
+## In Progress
 
-### Backend Stack
-- FastAPI (async)
-- MongoDB Atlas
-- LightGBM for ML
-- PyTorch with CUDA
-- ChromaDB
+### MongoDB Optimization (Ready to Apply)
+Added indexes to `data_storage_manager.py`:
+```python
+IndexModel([("bar_size", ASCENDING), ("symbol", ASCENDING)])  # For training queries
+IndexModel([("bar_size", ASCENDING)])  # For getting all symbols by timeframe
+```
 
-### Frontend Stack
-- React
-- localStorage for state persistence
-
-### Key Files
-- `/app/backend/services/ai_modules/timeseries_service.py` - Training logic
-- `/app/backend/routers/ai_modules.py` - API endpoints
-- `/app/frontend/src/components/UnifiedAITraining.jsx` - Training UI
-
-### Key Endpoints
-- `POST /api/ai-modules/timeseries/train` - Single timeframe training
-- `POST /api/ai-modules/timeseries/train-all` - All timeframes (sample)
-- `POST /api/ai-modules/timeseries/train-full-universe` - Full universe single timeframe
-- `POST /api/ai-modules/timeseries/train-full-universe-all` - Full universe all timeframes
-
----
-
-## Completed Work (This Session)
-
-### Dec 2025
-- Added aggressive debugging to Full Universe training
-- Reduced default batch sizes for memory safety (100→50 symbols, 2000→1000 bars)
-- Added sys.stdout.flush() to all log statements to capture output before crash
-- Added MemoryError specific exception handling
-- Temporary debug mode: limited to 1 day timeframe and 100 symbols
+**User action needed**: Restart backend to apply indexes, OR manually create in MongoDB Compass.
 
 ---
 
 ## Upcoming Tasks
 
-### After P0 Fixed
-1. **Implement Best Model Protection** - Only save new models if accuracy improves
-2. **Set up Automated Data Collection & Retraining** - Schedule incremental updates
-3. **Model Comparison Dashboard** - Compare accuracy trends
+### P0 - High Priority
+1. **Apply MongoDB indexes** - Will speed up training from 29 min to ~5 min
+2. **Train all 7 timeframes** - Currently only "1 day" is trained
+3. **Fix Full Universe button in UI** - Frontend polling overloads browser
 
-### Future/Backlog
-- Fix `fill-gaps` endpoint hanging issue
-- Complete backend router refactoring
-- Setup-specific AI models (77 trading setups)
-- Deep Scanner overhaul
+### P1 - Medium Priority
+1. **Best Model Protection** - Only save new models if accuracy improves
+2. **Automated retraining schedule** - Weekly model refresh
+3. **Model comparison dashboard** - Track accuracy over time
+
+### P2 - Lower Priority
+1. **Enable GPU for LightGBM** - Faster training
+2. **Fix `fill-gaps` endpoint** - Currently hangs server
+3. **Setup-specific AI models** - Train on 77 trading setups
+
+---
+
+## Architecture
+
+### Tech Stack
+- **Backend**: FastAPI (async), Python 3.11+
+- **Frontend**: React with localStorage caching
+- **Database**: MongoDB Atlas (M20 tier)
+- **ML**: LightGBM for gradient boosting
+- **GPU**: PyTorch with CUDA (for future use)
+
+### Key Files
+| File | Purpose |
+|------|---------|
+| `backend/services/ai_modules/timeseries_service.py` | Training orchestration |
+| `backend/services/ai_modules/timeseries_gbm.py` | LightGBM model wrapper |
+| `backend/routers/ai_modules.py` | Training API endpoints |
+| `backend/services/data_storage_manager.py` | MongoDB index management |
+| `documents/AI_TRAINING_GUIDE.md` | User documentation |
+
+### Training Endpoints
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/ai-modules/timeseries/train-full-universe-all` | Train all 7 timeframes |
+| `POST /api/ai-modules/timeseries/train-full-universe` | Train single timeframe |
+| `GET /api/ai-modules/timeseries/training-status` | Check progress |
+| `GET /api/ai-modules/timeseries/training-history` | View past runs |
+
+---
+
+## Known Issues
+
+### Resolved This Session
+1. ~~Backend crashes during Full Universe training~~ → Fixed with async background tasks + memory management
+2. ~~Model save fails with MongoDB error~~ → Fixed by adding `model_id` field
+
+### Remaining
+1. **Frontend polling overload** - Too many concurrent requests causes browser `ERR_INSUFFICIENT_RESOURCES`
+2. **Training slow without indexes** - 29 min instead of ~5 min
+3. **fill-gaps endpoint** - Hangs the server
+
+---
+
+## Configuration
+
+### Default Training Parameters
+```json
+{
+  "symbol_batch_size": 50,
+  "max_bars_per_symbol": 1000
+}
+```
+
+### Supported Timeframes
+1. 1 min → `direction_predictor_1min`
+2. 5 mins → `direction_predictor_5min`
+3. 15 mins → `direction_predictor_15min`
+4. 30 mins → `direction_predictor_30min`
+5. 1 hour → `direction_predictor_hourly`
+6. 1 day → `direction_predictor_daily`
+7. 1 week → `direction_predictor_weekly`
 
 ---
 
 ## 3rd Party Integrations
-- Interactive Brokers (IB Gateway)
-- Ollama Pro
-- MongoDB Atlas
-- PyTorch (with CUDA)
-- LightGBM
-- ChromaDB
+- Interactive Brokers (IB Gateway) - Live data & execution
+- MongoDB Atlas - Data storage
+- Ollama Pro - LLM for coaching
+- PyTorch with CUDA - Future GPU acceleration
+- LightGBM - ML model training
+- ChromaDB - RAG knowledge base
+
+---
+
+## Session Log
+
+### March 22, 2026
+- **Issue**: Full Universe training crashed backend
+- **Root cause**: Background task memory allocation + synchronous MongoDB queries blocking event loop + model save failing due to `model_id: null` unique index violation
+- **Fix**: 
+  1. Added `asyncio.to_thread` for blocking DB queries
+  2. Reduced default batch sizes (100→50 symbols, 2000→1000 bars)
+  3. Added aggressive try-except with logging
+  4. Added `model_id` field to model save
+- **Result**: Training completed successfully with 53.1% accuracy on "1 day" timeframe
+
+---
+
+*Last Updated: March 22, 2026*

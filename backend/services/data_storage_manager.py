@@ -48,6 +48,8 @@ class DataStorageManager:
             "indexes": [
                 IndexModel([("symbol", ASCENDING), ("bar_size", ASCENDING), ("date", ASCENDING)], unique=True),
                 IndexModel([("symbol", ASCENDING), ("bar_size", ASCENDING)]),
+                IndexModel([("bar_size", ASCENDING), ("symbol", ASCENDING)]),  # For training queries
+                IndexModel([("bar_size", ASCENDING)]),  # For getting all symbols by timeframe
                 IndexModel([("collected_at", DESCENDING)]),
                 IndexModel([("date", DESCENDING)]),
             ],
@@ -120,7 +122,8 @@ class DataStorageManager:
         "timeseries_models": {
             "description": "Saved time-series model metadata",
             "indexes": [
-                IndexModel([("model_id", ASCENDING)], unique=True),
+                IndexModel([("name", ASCENDING)], unique=True),  # Primary key is model name
+                IndexModel([("model_id", ASCENDING)], sparse=True),  # Allow nulls with sparse
                 IndexModel([("created_at", DESCENDING)]),
                 IndexModel([("version", DESCENDING)]),
             ],
