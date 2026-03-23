@@ -265,6 +265,8 @@ taskkill /F /FI "WINDOWTITLE eq TradeCommand Worker*" >nul 2>&1
 timeout /t 1 /nobreak >nul
 
 if exist "%BACKEND_DIR%\worker.py" (
+    :: Ensure motor is installed for the worker
+    pip install motor --quiet 2>nul
     start "TradeCommand Worker" cmd /k "title TradeCommand Worker && color 0D && cd /d %BACKEND_DIR% && echo. && echo ========================================== && echo   BACKGROUND WORKER - Processes Jobs && echo   Training, Data Collection, Backtests && echo ========================================== && echo. && echo Waiting for backend to be ready... && timeout /t 10 /nobreak >nul && python worker.py"
     echo        Worker started (processes training jobs)
 ) else (
