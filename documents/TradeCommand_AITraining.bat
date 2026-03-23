@@ -1,11 +1,12 @@
 @echo off
-title TradeCommand - AI Training Optimized
-color 0A
+title [MAIN] TradeCommand Startup Controller
+color 0F
 
-echo ============================================
-echo    TradeCommand - AI TRAINING MODE
-echo    Optimized for ML/GPU Performance
-echo ============================================
+echo.
+echo  =====================================================
+echo   [MAIN] TradeCommand - AI Training Startup
+echo   This window controls startup - Color: WHITE
+echo  =====================================================
 echo.
 
 :: =====================================================
@@ -73,7 +74,7 @@ if %errorlevel%==0 (
 )
 
 echo        Starting Ollama server...
-start "Ollama Server" /MIN cmd /c "title Ollama Server & set OLLAMA_HOST=0.0.0.0 & ollama serve"
+start "Ollama Server" /MIN cmd /c "title [OLLAMA] AI Model Server && color 08 && set OLLAMA_HOST=0.0.0.0 && ollama serve"
 echo        Waiting for Ollama startup (8 sec)...
 timeout /t 8 /nobreak >nul
 
@@ -191,7 +192,7 @@ taskkill /F /FI "WINDOWTITLE eq TradeCommand Backend*" >nul 2>&1
 timeout /t 2 /nobreak >nul
 
 :: Start backend WITHOUT --reload (more stable, saves CPU for ML)
-start "TradeCommand Backend" cmd /k "title TradeCommand Backend && color 0E && cd /d %BACKEND_DIR% && echo Starting backend (stable mode - no auto-reload)... && echo. && python -m uvicorn server:app --host 0.0.0.0 --port 8001 --workers 1"
+start "TradeCommand Backend" cmd /k "title [BACKEND] TradeCommand API Server && color 0A && cd /d %BACKEND_DIR% && echo. && echo ===================================================== && echo   [BACKEND] TradeCommand API Server && echo   Port: 8001 ^| Color: GREEN && echo ===================================================== && echo. && echo Starting backend (stable mode - no auto-reload)... && echo. && python -m uvicorn server:app --host 0.0.0.0 --port 8001 --workers 1"
 
 echo        Backend starting (waiting 20 sec for full init)...
 timeout /t 20 /nobreak >nul
@@ -233,7 +234,7 @@ echo DANGEROUSLY_DISABLE_HOST_CHECK=true>> "%FRONTEND_DIR%\.env"
 echo FAST_REFRESH=false>> "%FRONTEND_DIR%\.env"
 echo BROWSER=none>> "%FRONTEND_DIR%\.env"
 
-start "TradeCommand Frontend" cmd /k "title TradeCommand Frontend && color 0B && cd /d %FRONTEND_DIR% && yarn start"
+start "TradeCommand Frontend" cmd /k "title [FRONTEND] TradeCommand UI && color 0B && cd /d %FRONTEND_DIR% && echo. && echo ===================================================== && echo   [FRONTEND] TradeCommand React UI && echo   Port: 3000 ^| Color: CYAN && echo ===================================================== && echo. && yarn start"
 echo        Frontend starting on port 3000...
 echo.
 
@@ -248,7 +249,7 @@ timeout /t 2 /nobreak >nul
 
 if exist "%SCRIPTS_DIR%\ib_data_pusher.py" (
     :: Use unique client ID (15) to avoid conflicts with backend (1)
-    start "IB Data Pusher" cmd /k "title IB Data Pusher && color 0C && cd /d %SCRIPTS_DIR% && python ib_data_pusher.py --cloud-url %LOCAL_BACKEND% --symbols %IB_SYMBOLS% --client-id %IB_PUSHER_CLIENT_ID%"
+    start "IB Data Pusher" cmd /k "title [IB PUSHER] Market Data Feed && color 0E && cd /d %SCRIPTS_DIR% && echo. && echo ===================================================== && echo   [IB PUSHER] Real-Time Market Data && echo   Client ID: %IB_PUSHER_CLIENT_ID% ^| Color: YELLOW && echo ===================================================== && echo. && python ib_data_pusher.py --cloud-url %LOCAL_BACKEND% --symbols %IB_SYMBOLS% --client-id %IB_PUSHER_CLIENT_ID%"
     echo        Data pusher started (client ID: %IB_PUSHER_CLIENT_ID%)
 ) else (
     echo        [SKIP] ib_data_pusher.py not found
@@ -272,14 +273,15 @@ if exist "%BACKEND_DIR%\worker.py" (
     :: This is needed because env vars from .env must be loaded in the worker's terminal
     (
         echo @echo off
-        echo title TradeCommand Worker
+        echo title [WORKER] Background Jobs Processor
         echo color 0D
         echo cd /d %BACKEND_DIR%
         echo echo.
-        echo echo ==========================================
-        echo echo   BACKGROUND WORKER - Processes Jobs
+        echo echo =====================================================
+        echo echo   [WORKER] Background Jobs Processor
         echo echo   Training, Data Collection, Backtests
-        echo echo ==========================================
+        echo echo   Color: PURPLE
+        echo echo =====================================================
         echo echo.
         echo echo Loading environment variables...
         echo for /f "usebackq tokens=1,* delims==" %%%%a in ^("%BACKEND_DIR%\.env"^) do set "%%%%a=%%%%b"
@@ -317,6 +319,16 @@ echo.
 echo    Frontend: %LOCAL_FRONTEND%
 echo    Backend:  %LOCAL_BACKEND%
 echo.
+echo    +-------------------------------------------------+
+echo    ^|  TERMINAL COLOR GUIDE                           ^|
+echo    +-------------------------------------------------+
+echo    ^|  GREEN  [BACKEND]    API Server (port 8001)     ^|
+echo    ^|  CYAN   [FRONTEND]   React UI (port 3000)       ^|
+echo    ^|  YELLOW [IB PUSHER]  Market Data Feed           ^|
+echo    ^|  PURPLE [WORKER]     Background Jobs            ^|
+echo    ^|  GRAY   [OLLAMA]     AI Model Server (hidden)   ^|
+echo    +-------------------------------------------------+
+echo.
 echo    ML Training Ready:
 echo    * GPU available for LightGBM training
 echo    * Backend in stable mode (no auto-reload)
@@ -327,14 +339,6 @@ echo    Focus Mode System:
 echo    * Click "Live" dropdown in header to switch modes
 echo    * Training mode pauses non-essential services
 echo    * Worker processes jobs without blocking main app
-echo.
-echo    Running Services:
-echo    * Ollama Server (local LLM)
-echo    * TradeCommand Backend (FastAPI)
-echo    * TradeCommand Frontend (React)
-echo    * TradeCommand Worker (background jobs)
-echo    * IB Data Pusher (market data)
-echo    * IB Gateway (broker connection)
 echo.
 echo ============================================
 echo.
