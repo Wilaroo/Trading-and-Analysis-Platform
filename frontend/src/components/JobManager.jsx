@@ -36,6 +36,7 @@ import {
   BellOff
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { safePolling } from '../utils/safePolling';
 import api from '../utils/api';
 import { useFocusMode } from '../contexts/FocusModeContext';
 
@@ -351,8 +352,7 @@ const JobManager = ({ compact = false }) => {
   // Initial load and polling
   useEffect(() => {
     loadJobs();
-    const interval = setInterval(loadJobs, 5000);
-    return () => clearInterval(interval);
+    return safePolling(loadJobs, 5000, { immediate: false });
   }, [loadJobs]);
   
   // Create data collection job

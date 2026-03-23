@@ -23,6 +23,7 @@ import {
   Play, Pause, Settings, Bot, Sliders, WifiOff, Star, Search
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { safePolling } from '../utils/safePolling';
 import EnhancedTickerModal from './EnhancedTickerModal';
 import { useDataCache } from '../contexts';
 import { DynamicRiskBadge, DynamicRiskPanel } from './DynamicRiskPanel';
@@ -1085,9 +1086,7 @@ const useAIInsights = (pollInterval = 60000) => {  // Increased to 60s to avoid 
   }, []);
 
   useEffect(() => {
-    fetchInsights();
-    const interval = setInterval(fetchInsights, pollInterval);
-    return () => clearInterval(interval);
+    return safePolling(fetchInsights, pollInterval);
   }, [fetchInsights, pollInterval]);
 
   return { shadowDecisions, shadowPerformance, timeseriesStatus, predictionAccuracy, recentPredictions, loading, refresh: fetchInsights };
@@ -1647,9 +1646,7 @@ const useMarketSession = (pollInterval = 30000) => {
   }, []);
 
   useEffect(() => {
-    fetchSession();
-    const interval = setInterval(fetchSession, pollInterval);
-    return () => clearInterval(interval);
+    return safePolling(fetchSession, pollInterval);
   }, [fetchSession, pollInterval]);
 
   return { session, loading, refresh: fetchSession };
@@ -1695,8 +1692,7 @@ const useSentComStatus = (pollInterval = 60000) => {  // Increased to 60s to avo
     }
     isFirstMount.current = false;
     
-    const interval = setInterval(fetchStatus, pollInterval);
-    return () => clearInterval(interval);
+    return safePolling(fetchStatus, pollInterval, { immediate: false });
   }, [fetchStatus, pollInterval, getCached]);
 
   return { status, loading, error, refresh: fetchStatus };
@@ -1768,8 +1764,7 @@ const useSentComStream = (pollInterval = 45000) => {  // Increased to 45s to avo
     }
     isFirstMount.current = false;
     
-    const interval = setInterval(fetchStream, pollInterval);
-    return () => clearInterval(interval);
+    return safePolling(fetchStream, pollInterval, { immediate: false });
   }, [fetchStream, pollInterval, getCached]);
 
   return { messages, loading, refresh: fetchStream };
@@ -1816,8 +1811,7 @@ const useSentComPositions = (pollInterval = 30000) => {  // Increased to 30s to 
     }
     isFirstMount.current = false;
     
-    const interval = setInterval(fetchPositions, pollInterval);
-    return () => clearInterval(interval);
+    return safePolling(fetchPositions, pollInterval, { immediate: false, essential: true });
   }, [fetchPositions, pollInterval, getCached]);
 
   return { positions, totalPnl, loading, refresh: fetchPositions };
@@ -1861,8 +1855,7 @@ const useSentComSetups = (pollInterval = 30000) => {
     }
     isFirstMount.current = false;
     
-    const interval = setInterval(fetchSetups, pollInterval);
-    return () => clearInterval(interval);
+    return safePolling(fetchSetups, pollInterval, { immediate: false });
   }, [fetchSetups, pollInterval, getCached]);
 
   return { setups, loading, refresh: fetchSetups };
@@ -1906,8 +1899,7 @@ const useSentComContext = (pollInterval = 30000) => {
     }
     isFirstMount.current = false;
     
-    const interval = setInterval(fetchContext, pollInterval);
-    return () => clearInterval(interval);
+    return safePolling(fetchContext, pollInterval, { immediate: false });
   }, [fetchContext, pollInterval, getCached]);
 
   return { context, loading, refresh: fetchContext };
@@ -1951,8 +1943,7 @@ const useSentComAlerts = (pollInterval = 5000) => {
     }
     isFirstMount.current = false;
     
-    const interval = setInterval(fetchAlerts, pollInterval);
-    return () => clearInterval(interval);
+    return safePolling(fetchAlerts, pollInterval, { immediate: false, essential: true });
   }, [fetchAlerts, pollInterval, getCached]);
 
   return { alerts, loading, refresh: fetchAlerts };
@@ -2091,8 +2082,7 @@ const useTradingBotControl = (pollInterval = 5000) => {
     }
     isFirstMount.current = false;
     
-    const interval = setInterval(fetchBotStatus, pollInterval);
-    return () => clearInterval(interval);
+    return safePolling(fetchBotStatus, pollInterval, { immediate: false, essential: true });
   }, [fetchBotStatus, pollInterval, getCached]);
 
   return { botStatus, loading, actionLoading, toggleBot, changeMode, updateRiskParams, refresh: fetchBotStatus };
@@ -2116,9 +2106,7 @@ const useIBConnectionStatus = (pollInterval = 3000) => {
   }, []);
 
   useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, pollInterval);
-    return () => clearInterval(interval);
+    return safePolling(fetchStatus, pollInterval, { essential: true });
   }, [fetchStatus, pollInterval]);
 
   return { ibConnected, loading };
@@ -2187,9 +2175,7 @@ const useAIModules = (pollInterval = 10000) => {
   }, [fetchStatus]);
 
   useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, pollInterval);
-    return () => clearInterval(interval);
+    return safePolling(fetchStatus, pollInterval);
   }, [fetchStatus, pollInterval]);
 
   return { status, loading, actionLoading, toggleModule, setGlobalShadowMode, refresh: fetchStatus };

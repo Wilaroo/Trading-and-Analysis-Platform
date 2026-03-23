@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import api, { apiLongRunning } from '../utils/api';
+import { safePolling } from '../utils/safePolling';
 import { toast } from 'sonner';
 import { playSound } from '../utils/tradingUtils';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
@@ -535,27 +536,22 @@ export function useCommandCenterData({
   // Visibility-aware and training-mode aware
   useEffect(() => {
     const poll = () => {
-      // Skip if tab hidden or training active (non-essential)
-      if (!isVisibleRef.current || isTrainingActive) return;
+      if (isTrainingActive) return;
       fetchSystemHealth();
     };
-    const interval = getPollingInterval(60000, false); // Non-essential
-    const timer = setInterval(poll, interval);
-    return () => clearInterval(timer);
+    const interval = getPollingInterval(60000, false);
+    return safePolling(poll, interval, { immediate: false });
   }, [isTrainingActive, getPollingInterval]);
 
   // Fetch positions immediately on mount - IB is primary, Alpaca is fallback
   // Positions are essential - slower during training but still poll
   useEffect(() => {
     fetchAccountData();
-    const poll = () => {
-      // Skip if tab hidden (will refresh when visible)
+    const interval = getPollingInterval(30000, true);
+    return safePolling(() => {
       if (!isVisibleRef.current) return;
       fetchAccountData();
-    };
-    const interval = getPollingInterval(30000, true); // Essential - positions matter
-    const positionsInterval = setInterval(poll, interval);
-    return () => clearInterval(positionsInterval);
+    }, interval, { immediate: false, essential: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTrainingActive, getPollingInterval]);
 
@@ -599,28 +595,23 @@ export function useCommandCenterData({
   // Non-essential - skip during training
   useEffect(() => {
     fetchCreditBudget();
-    const poll = () => {
+    const interval = getPollingInterval(300000, false);
+    return safePolling(() => {
       if (!isVisibleRef.current || isTrainingActive) return;
       fetchCreditBudget();
-    };
-    const interval = getPollingInterval(300000, false);
-    const budgetInterval = setInterval(poll, interval);
-    return () => clearInterval(budgetInterval);
+    }, interval, { immediate: false });
   }, [isTrainingActive, getPollingInterval]);
 
   // Polling for order fills and price alerts (30s is appropriate)
   // ESSENTIAL - these are trading-critical, continue during training
   useEffect(() => {
     if (!isConnected) return;
-    const poll = () => {
-      // Skip only if tab hidden - order fills are critical
+    const interval = getPollingInterval(30000, true);
+    return safePolling(() => {
       if (!isVisibleRef.current) return;
       checkOrderFills();
       checkPriceAlerts();
-    };
-    const interval = getPollingInterval(30000, true); // Essential
-    const fastPoll = setInterval(poll, interval);
-    return () => clearInterval(fastPoll);
+    }, interval, { immediate: false, essential: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected, soundEnabled, priceAlerts.length, isActiveTab, activeMainTab, isTrainingActive, getPollingInterval]);
 

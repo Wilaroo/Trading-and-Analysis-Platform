@@ -10,6 +10,7 @@
  * - Scanner Alerts strip at bottom
  */
 import React, { useState, useEffect, useCallback } from 'react';
+import { safePolling } from '../utils/safePolling';
 import { motion } from 'framer-motion';
 import { 
   Wifi, WifiOff, Brain, Sparkles, Activity, Target, Eye, 
@@ -56,8 +57,7 @@ const DashboardHeader = ({
     };
     
     fetchSession();
-    const interval = setInterval(fetchSession, 30000); // Update every 30 seconds
-    return () => clearInterval(interval);
+    return safePolling(fetchSession, 30000, { immediate: false });
   }, []);
   // Risk status calculations
   const dailyLossLimit = riskStatus?.daily_loss_limit || 10000;
@@ -526,14 +526,14 @@ const NewDashboard = ({
     fetchAccountData();
     fetchOrderQueue();
     
-    const dashboardInterval = setInterval(fetchDashboardData, DASHBOARD_REFRESH_INTERVAL);
-    const accountInterval = setInterval(fetchAccountData, ACCOUNT_REFRESH_INTERVAL);
-    const orderQueueInterval = setInterval(fetchOrderQueue, 15000); // 15 seconds for order queue
+    const cleanupDashboard = safePolling(fetchDashboardData, DASHBOARD_REFRESH_INTERVAL, { immediate: false });
+    const cleanupAccount = safePolling(fetchAccountData, ACCOUNT_REFRESH_INTERVAL, { immediate: false, essential: true });
+    const cleanupOrders = safePolling(fetchOrderQueue, 15000, { immediate: false, essential: true });
     
     return () => {
-      clearInterval(dashboardInterval);
-      clearInterval(accountInterval);
-      clearInterval(orderQueueInterval);
+      cleanupDashboard();
+      cleanupAccount();
+      cleanupOrders();
     };
   }, [fetchDashboardData, fetchAccountData, fetchOrderQueue]);
   

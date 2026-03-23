@@ -6,6 +6,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { safePolling } from '../utils/safePolling';
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -146,8 +147,7 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
 
   useEffect(() => {
     fetchRegime();
-    const interval = setInterval(() => fetchRegime(), UPDATE_INTERVAL);
-    return () => clearInterval(interval);
+    return safePolling(() => fetchRegime(), UPDATE_INTERVAL, { immediate: false });
   }, [fetchRegime]);
 
   const getStateConfig = (state) => {

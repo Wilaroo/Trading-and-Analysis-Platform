@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { safePolling } from '../utils/safePolling';
 import TickerDetailModal from '../components/TickerDetailModal';
 import QuickTradeModal from '../components/QuickTradeModal';
 import HeaderBar from '../components/layout/HeaderBar';
@@ -70,11 +71,10 @@ const CommandCenterPage = ({
     
     checkOllama();
     fetchOllamaUsage();
-    const interval = setInterval(() => {
+    return safePolling(() => {
       checkOllama();
       fetchOllamaUsage();
-    }, 30000); // Check every 30s
-    return () => clearInterval(interval);
+    }, 30000, { immediate: false });
   }, []);
 
   return (

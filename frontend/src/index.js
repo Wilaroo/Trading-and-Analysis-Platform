@@ -7,7 +7,7 @@ import { requestThrottler } from './utils/requestThrottler';
 // ============================================
 // GLOBAL FETCH THROTTLER
 // Prevents ERR_INSUFFICIENT_RESOURCES by limiting
-// concurrent requests to 4 at a time
+// concurrent requests to 4 at a time.
 // ============================================
 const originalFetch = window.fetch.bind(window);
 window.fetch = (url, options) => {

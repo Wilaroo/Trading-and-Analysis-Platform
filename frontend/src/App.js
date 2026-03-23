@@ -18,6 +18,7 @@ import {
   useSystemStatus
 } from './contexts';
 import api from './utils/api';
+import { resetStaggerCounter } from './utils/safePolling';
 import StartupModal from './components/StartupModal';
 import StartupStatusDashboard from './components/StartupStatusDashboard';
 import TrainingModeIndicator from './components/TrainingModeIndicator';
@@ -372,12 +373,13 @@ function App() {
         {showStartupModal && (
           <StartupModal onComplete={() => {
             setShowStartupModal(false);
+            resetStaggerCounter(); // Reset stagger so components spread out from 0
             setAppReady(true); // App is ready because modal verified everything
           }} />
         )}
         
         {/* Startup Status Dashboard - shows system initialization progress */}
-        {showStartupStatus && (
+        {showStartupStatus && !showStartupModal && appReady && (
           <StartupStatusDashboard 
             onClose={() => setShowStartupStatus(false)}
             minimized={startupStatusMinimized}

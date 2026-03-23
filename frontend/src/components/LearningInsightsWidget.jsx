@@ -6,6 +6,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { safePolling } from '../utils/safePolling';
 import { 
   Brain, AlertTriangle, CheckCircle2, ChevronRight, 
   TrendingUp, TrendingDown, RefreshCw
@@ -53,8 +54,7 @@ const LearningInsightsWidget = ({ onNavigateToHub, className = '' }) => {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 60000); // Refresh every minute
-    return () => clearInterval(interval);
+    return safePolling(fetchData, 60000, { immediate: false });
   }, [fetchData]);
 
   // Get top alerts (1 warning, 1 success)

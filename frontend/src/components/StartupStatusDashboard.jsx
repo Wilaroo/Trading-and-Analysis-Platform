@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { safePolling } from '../utils/safePolling';
 import { 
   CheckCircle, 
   XCircle, 
@@ -218,14 +219,11 @@ const StartupStatusDashboard = ({ onClose, minimized = false, onMinimize }) => {
   useEffect(() => {
     fetchStatus();
     
-    // Poll every 10 seconds (reduced from 3s to avoid overloading)
-    const interval = setInterval(() => {
+    return safePolling(() => {
       if (autoRefresh) {
         fetchStatus();
       }
-    }, 10000);
-    
-    return () => clearInterval(interval);
+    }, 10000, { immediate: false });
   }, [fetchStatus, autoRefresh]);
   
   const toggleSection = (section) => {

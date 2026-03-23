@@ -11,6 +11,7 @@
  * - Auto-refresh every 30 seconds
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { safePolling } from '../utils/safePolling';
 import { motion } from 'framer-motion';
 import { TrendingUp, TrendingDown, ChevronRight, Activity } from 'lucide-react';
 
@@ -446,8 +447,7 @@ const BotPerformanceChart = ({
     fetchEquityCurve();
     
     if (autoRefresh) {
-      const interval = setInterval(fetchEquityCurve, AUTO_REFRESH_INTERVAL);
-      return () => clearInterval(interval);
+      return safePolling(fetchEquityCurve, AUTO_REFRESH_INTERVAL, { immediate: false });
     }
   }, [fetchEquityCurve, autoRefresh]);
 

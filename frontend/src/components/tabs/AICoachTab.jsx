@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { safePolling } from '../../utils/safePolling';
 import RightSidebar from '../RightSidebar';
 import LearningInsightsWidget from '../LearningInsightsWidget';
 import MarketRegimeWidget from '../MarketRegimeWidget';
@@ -85,13 +86,10 @@ const AICoachTab = ({
     fetchRegimeData();
     fetchSessionData();
     
-    // Refresh every 60 seconds
-    const interval = setInterval(() => {
+    return safePolling(() => {
       fetchRegimeData();
       fetchSessionData();
-    }, 60000);
-    
-    return () => clearInterval(interval);
+    }, 60000, { immediate: false });
   }, [fetchRegimeData, fetchSessionData]);
   
   // Handle ticker click - opens the enhanced chart modal
