@@ -368,12 +368,11 @@ function App() {
       {/* Sync WebSocket status to SystemStatusContext */}
       <WebSocketStatusSync isConnected={isConnected} />
       <div className="min-h-screen" style={{ background: 'var(--bg-default)' }} onClick={initializeAudio}>
-        {/* Startup Modal */}
+        {/* Startup Modal - Real service verification */}
         {showStartupModal && (
           <StartupModal onComplete={() => {
             setShowStartupModal(false);
-            // Stagger the app ready state to give backend breathing room
-            setTimeout(() => setAppReady(true), 2000);
+            setAppReady(true); // App is ready because modal verified everything
           }} />
         )}
         
