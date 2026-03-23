@@ -140,7 +140,7 @@ const StartupModal = ({ onComplete }) => {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
 
       const response = await directFetch(`${API_URL}${service.endpoint}`, {
         signal: controller.signal
@@ -316,25 +316,25 @@ const StartupModal = ({ onComplete }) => {
         return <CheckCircle2 className="w-4 h-4 text-green-400" />;
       case 'loading':
       case undefined:
-        return <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />;
+      case 'timeout':
+        return <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />;
       case 'warning':
         return <AlertCircle className="w-4 h-4 text-yellow-400" />;
       case 'error':
-      case 'timeout':
         return <XCircle className="w-4 h-4 text-red-400" />;
       default:
-        return <Loader2 className="w-4 h-4 text-zinc-600 animate-spin" />;
+        return <Loader2 className="w-4 h-4 text-zinc-500 animate-spin" />;
     }
   };
 
   const getStatusText = (status) => {
     switch (status) {
       case 'success': return 'Ready';
-      case 'loading': return 'Checking...';
+      case 'loading': return 'Connecting...';
       case 'warning': return 'Limited';
       case 'error': return 'Offline';
-      case 'timeout': return 'Timeout';
-      default: return 'Pending';
+      case 'timeout': return 'Starting...';
+      default: return 'Waiting...';
     }
   };
 
@@ -403,11 +403,12 @@ const StartupModal = ({ onComplete }) => {
           </div>
 
           {/* Services by Category */}
-          <div className="px-5 py-4 space-y-3 max-h-[350px] overflow-y-auto">
+          <div className="px-5 py-4 space-y-3">
             {Object.entries(servicesByCategory).map(([categoryId, services]) => {
               const category = CATEGORIES[categoryId];
               const categoryReady = services.every(s => serviceStatus[s.id] === 'success');
-              const categoryHasError = services.some(s => ['error', 'timeout'].includes(serviceStatus[s.id]));
+              const categoryHasError = services.some(s => serviceStatus[s.id] === 'error');
+              const categoryStarting = services.some(s => serviceStatus[s.id] === 'timeout');
               
               return (
                 <div
@@ -417,7 +418,9 @@ const StartupModal = ({ onComplete }) => {
                       ? 'bg-green-500/10 border-green-500/30' 
                       : categoryHasError
                         ? 'bg-red-500/10 border-red-500/30'
-                        : 'bg-zinc-800/50 border-zinc-700'
+                        : categoryStarting
+                          ? 'bg-amber-500/5 border-amber-500/20'
+                          : 'bg-zinc-800/50 border-zinc-700'
                   }`}
                 >
                   {/* Category header */}
@@ -451,11 +454,13 @@ const StartupModal = ({ onComplete }) => {
                             <Icon className={`w-3.5 h-3.5 ${
                               status === 'success' ? 'text-green-400' :
                               status === 'error' ? 'text-red-400' :
+                              status === 'timeout' ? 'text-amber-400' :
                               'text-zinc-500'
                             }`} />
                             <span className={`text-sm ${
                               status === 'success' ? 'text-green-400' :
                               status === 'error' ? 'text-red-400' :
+                              status === 'timeout' ? 'text-amber-400' :
                               'text-zinc-400'
                             }`}>
                               {service.label}
@@ -466,6 +471,7 @@ const StartupModal = ({ onComplete }) => {
                             <span className={`text-[10px] ${
                               status === 'success' ? 'text-green-400' :
                               status === 'error' ? 'text-red-400' :
+                              status === 'timeout' ? 'text-amber-400' :
                               'text-zinc-500'
                             }`}>
                               {getStatusText(status)}
