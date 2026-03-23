@@ -240,7 +240,7 @@ echo.
 :: =====================================================
 :: STEP 7: START IB DATA PUSHER (unique client ID)
 :: =====================================================
-echo [7/9] Starting IB Data Pusher...
+echo [7/10] Starting IB Data Pusher...
 
 :: Kill existing pusher
 taskkill /F /FI "WINDOWTITLE eq IB Data Pusher*" >nul 2>&1
@@ -256,16 +256,33 @@ if exist "%SCRIPTS_DIR%\ib_data_pusher.py" (
 echo.
 
 :: =====================================================
-:: STEP 8: WAIT FOR FRONTEND
+:: STEP 8: START BACKGROUND WORKER (for training/collection)
 :: =====================================================
-echo [8/9] Waiting for frontend to compile...
+echo [8/10] Starting Background Worker...
+
+:: Kill existing worker
+taskkill /F /FI "WINDOWTITLE eq TradeCommand Worker*" >nul 2>&1
+timeout /t 1 /nobreak >nul
+
+if exist "%BACKEND_DIR%\worker.py" (
+    start "TradeCommand Worker" cmd /k "title TradeCommand Worker && color 0D && cd /d %BACKEND_DIR% && echo. && echo ========================================== && echo   BACKGROUND WORKER - Processes Jobs && echo   Training, Data Collection, Backtests && echo ========================================== && echo. && echo Waiting for backend to be ready... && timeout /t 10 /nobreak >nul && python worker.py"
+    echo        Worker started (processes training jobs)
+) else (
+    echo        [SKIP] worker.py not found
+)
+echo.
+
+:: =====================================================
+:: STEP 9: WAIT FOR FRONTEND
+:: =====================================================
+echo [9/10] Waiting for frontend to compile...
 timeout /t 20 /nobreak >nul
 echo.
 
 :: =====================================================
-:: STEP 9: OPEN BROWSER
+:: STEP 10: OPEN BROWSER
 :: =====================================================
-echo [9/9] Opening TradeCommand...
+echo [10/10] Opening TradeCommand...
 start "" "%LOCAL_FRONTEND%"
 
 echo.
@@ -279,12 +296,19 @@ echo.
 echo    ML Training Ready:
 echo    * GPU available for LightGBM training
 echo    * Backend in stable mode (no auto-reload)
+echo    * Background Worker running for isolated jobs
 echo    * Go to NIA page to train models
+echo.
+echo    Focus Mode System:
+echo    * Click "Live" dropdown in header to switch modes
+echo    * Training mode pauses non-essential services
+echo    * Worker processes jobs without blocking main app
 echo.
 echo    Running Services:
 echo    * Ollama Server (local LLM)
 echo    * TradeCommand Backend (FastAPI)
 echo    * TradeCommand Frontend (React)
+echo    * TradeCommand Worker (background jobs)
 echo    * IB Data Pusher (market data)
 echo    * IB Gateway (broker connection)
 echo.
@@ -329,6 +353,14 @@ if %errorlevel%==0 (
     echo Frontend:    RUNNING
 ) else (
     echo Frontend:    STARTING...
+)
+
+:: Worker (check if window exists)
+tasklist /FI "WINDOWTITLE eq TradeCommand Worker*" 2>NUL | find /I /N "cmd.exe">NUL
+if "%ERRORLEVEL%"=="0" (
+    echo Worker:      RUNNING
+) else (
+    echo Worker:      NOT RUNNING
 )
 
 :: ML Status
