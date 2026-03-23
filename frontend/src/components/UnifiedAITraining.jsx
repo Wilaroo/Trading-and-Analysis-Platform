@@ -556,9 +556,14 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
         message: 'Loading symbols from database...'
       }));
 
+      console.log('[NIA] Sending training request for:', timeframe);
+      console.log('[NIA] API URL:', apiLongRunning.defaults.baseURL || 'relative (proxy)');
+      
       const res = await apiLongRunning.post('/api/ai-modules/timeseries/train', {
         bar_size: timeframe
       });
+      
+      console.log('[NIA] Training response received:', res.data);
 
       if (res.data?.success && res.data?.result?.success) {
         const result = res.data.result;
@@ -606,17 +611,18 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
         toast.error(`Training failed: ${errorMsg}`);
       }
     } catch (e) {
-      console.error('Training error:', e);
+      console.error('[NIA] Training error:', e);
+      console.error('[NIA] Error details:', e.response?.data || e.message);
       setTrainingProgress(prev => ({
         ...prev,
         phase: 'error',
-        message: e.message
+        message: e.response?.data?.detail || e.message
       }));
       setModelStatus(prev => ({
         ...prev,
-        [timeframe]: { status: 'error', message: e.message }
+        [timeframe]: { status: 'error', message: e.response?.data?.detail || e.message }
       }));
-      toast.error(`Training error: ${e.message}`);
+      toast.error(`Training error: ${e.response?.data?.detail || e.message}`);
     } finally {
       setIsTraining(false);
       setCurrentTimeframe(null);
