@@ -116,6 +116,8 @@ const StartupModal = ({ onComplete }) => {
   const [wsConnected, setWsConnected] = useState(false);
   const wsRef = useRef(null);
   const checkIntervalRef = useRef(null);
+  const serviceStatusRef = useRef({});
+  const mountedRef = useRef(true);
 
   // Check if user has opted out
   useEffect(() => {
@@ -126,17 +128,21 @@ const StartupModal = ({ onComplete }) => {
     }
   }, [onComplete]);
 
-  // Check a single service
+  // Check a single service - uses un-throttled fetch to bypass the request queue
   const checkService = useCallback(async (service) => {
     if (service.checkType === 'websocket') {
       return wsConnected ? 'success' : 'loading';
     }
 
+    // Use original fetch to bypass the request throttler
+    // Health checks must not compete with other queued requests
+    const directFetch = window.__originalFetch || window.fetch;
+
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
-      const response = await fetch(`${API_URL}${service.endpoint}`, {
+      const response = await directFetch(`${API_URL}${service.endpoint}`, {
         signal: controller.signal
       });
       clearTimeout(timeoutId);
@@ -161,25 +167,39 @@ const StartupModal = ({ onComplete }) => {
     }
   }, [wsConnected]);
 
-  // Check all services - ONE AT A TIME with delays
+  // Check all services - ONE AT A TIME, skipping already-passed services
+  // Uses recursive setTimeout instead of setInterval to prevent overlapping rounds
   const checkAllServices = useCallback(async () => {
     setIsChecking(true);
     setCheckCount(prev => prev + 1);
 
-    // Check services sequentially with delays to avoid overwhelming backend
     for (const service of SERVICES) {
-      // Skip websocket - handled separately
-      if (service.checkType === 'websocket') {
+      if (service.checkType === 'websocket') continue;
+
+      // Skip services that already succeeded - no need to re-check
+      const currentStatus = serviceStatusRef.current[service.id];
+      if (currentStatus === 'success') continue;
+
+      // If backend passed, auto-pass database (same /api/health endpoint)
+      if (service.id === 'database' && serviceStatusRef.current['backend'] === 'success') {
+        setServiceStatus(prev => {
+          const next = { ...prev, database: 'success' };
+          serviceStatusRef.current = next;
+          return next;
+        });
         continue;
       }
-      
+
       const status = await checkService(service);
-      
-      // Update state for this service
-      setServiceStatus(prev => ({ ...prev, [service.id]: status }));
-      
-      // Wait 500ms between each check to give backend breathing room
-      await new Promise(resolve => setTimeout(resolve, 500));
+
+      setServiceStatus(prev => {
+        const next = { ...prev, [service.id]: status };
+        serviceStatusRef.current = next;
+        return next;
+      });
+
+      // 750ms between each check to give backend breathing room
+      await new Promise(resolve => setTimeout(resolve, 750));
     }
 
     setIsChecking(false);
@@ -224,24 +244,27 @@ const StartupModal = ({ onComplete }) => {
     };
   }, [visible]);
 
-  // Initial check and periodic re-check
+  // Initial check and periodic re-check using recursive setTimeout (no overlapping)
   useEffect(() => {
     if (!visible) return;
+    mountedRef.current = true;
+
+    const runCheck = async () => {
+      if (!mountedRef.current) return;
+      await checkAllServices();
+      // Schedule next round AFTER current round finishes (no overlap)
+      if (mountedRef.current) {
+        checkIntervalRef.current = setTimeout(runCheck, 3000);
+      }
+    };
 
     // Initial check after short delay
-    const initialTimer = setTimeout(() => {
-      checkAllServices();
-    }, 500);
-
-    // Re-check every 3 seconds until all required services are ready
-    checkIntervalRef.current = setInterval(() => {
-      checkAllServices();
-    }, 3000);
+    checkIntervalRef.current = setTimeout(runCheck, 500);
 
     return () => {
-      clearTimeout(initialTimer);
+      mountedRef.current = false;
       if (checkIntervalRef.current) {
-        clearInterval(checkIntervalRef.current);
+        clearTimeout(checkIntervalRef.current);
       }
     };
   }, [visible, checkAllServices]);
@@ -251,11 +274,13 @@ const StartupModal = ({ onComplete }) => {
   const requiredReady = requiredServices.every(s => serviceStatus[s.id] === 'success');
   const allServicesChecked = Object.keys(serviceStatus).length >= SERVICES.length;
   const isReady = requiredReady && allServicesChecked;
+  const canForceStart = checkCount >= 5; // Allow force-start after 5 attempts
 
   // Stop checking once ready
   useEffect(() => {
     if (isReady && checkIntervalRef.current) {
-      clearInterval(checkIntervalRef.current);
+      clearTimeout(checkIntervalRef.current);
+      mountedRef.current = false;
       checkIntervalRef.current = null;
     }
   }, [isReady]);
@@ -280,7 +305,9 @@ const StartupModal = ({ onComplete }) => {
 
   const handleRetry = () => {
     setServiceStatus({});
-    checkAllServices();
+    serviceStatusRef.current = {};
+    setCheckCount(0);
+    // The recursive setTimeout loop will pick up the reset state
   };
 
   const getStatusIcon = (status) => {
@@ -490,11 +517,13 @@ const StartupModal = ({ onComplete }) => {
 
             <button
               onClick={handleGetStarted}
-              disabled={!isReady}
+              disabled={!isReady && !canForceStart}
               className={`px-5 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
                 isReady
                   ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white hover:shadow-lg hover:shadow-green-500/25'
-                  : 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
+                  : canForceStart
+                    ? 'bg-gradient-to-r from-amber-600 to-orange-600 text-white hover:shadow-lg hover:shadow-amber-500/25'
+                    : 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
               }`}
               data-testid="get-started-btn"
             >
@@ -502,6 +531,11 @@ const StartupModal = ({ onComplete }) => {
                 <>
                   <Zap className="w-4 h-4" />
                   Get Started
+                </>
+              ) : canForceStart ? (
+                <>
+                  <Zap className="w-4 h-4" />
+                  Start Anyway
                 </>
               ) : (
                 <>

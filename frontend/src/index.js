@@ -10,6 +10,10 @@ import { requestThrottler } from './utils/requestThrottler';
 // concurrent requests to 4 at a time.
 // ============================================
 const originalFetch = window.fetch.bind(window);
+
+// Expose un-throttled fetch for critical startup health checks
+window.__originalFetch = originalFetch;
+
 window.fetch = (url, options) => {
   return requestThrottler.throttle(() => originalFetch(url, options));
 };

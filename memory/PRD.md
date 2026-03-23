@@ -55,7 +55,13 @@ A critical issue emerged where the user's local backend would freeze or crash du
 Multi-layered defense against backend overload during startup:
 
 1. **Sequential Health Checks** (StartupModal.jsx):
-   - Checks services one at a time with 500ms delay between each
+   - Checks services one at a time with 750ms delay between each
+   - Uses **recursive setTimeout** (not setInterval) — no overlapping rounds
+   - **Bypasses the request throttler** via `window.__originalFetch` — health checks don't compete with other queued requests
+   - Skips services that already returned 'success' — no redundant re-checks
+   - Auto-passes Database when Backend succeeds (same `/api/health` endpoint)
+   - 10s timeout (increased from 5s) for slow-starting backends
+   - **"Start Anyway" button** after 5 attempts — user is never stuck
    - Blocks main app content until core services verified
    - WebSocket check runs independently
 
@@ -71,11 +77,16 @@ Multi-layered defense against backend overload during startup:
    - Queue system for excess requests
    - Prevents browser ERR_INSUFFICIENT_RESOURCES
 
-4. **StartupManager** (contexts/StartupManagerContext.jsx):
+4. **Context Startup Deferral**:
+   - ConnectionManager delays health checks 5s, starts periodic loop after 10s (was: immediate + 30s setInterval)
+   - FocusModeContext delays sync 8s, reduced polling to 30s (was: immediate + 10s setInterval)
+   - StartupStatusDashboard deferred until after modal completes
+
+5. **StartupManager** (contexts/StartupManagerContext.jsx):
    - Wave-based feature loading (5 waves over 60s)
    - useSmartPolling respects wave readiness
 
-5. **Focus Mode** (contexts/FocusModeContext.jsx):
+6. **Focus Mode** (contexts/FocusModeContext.jsx):
    - Modes: Live Trading | Data Collection | AI Training | Backtesting
    - Non-essential polling auto-pauses in non-Live modes
 
