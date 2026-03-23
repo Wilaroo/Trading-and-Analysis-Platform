@@ -426,7 +426,7 @@ app.include_router(scripts_router)  # Scripts auto-update endpoint for StartTrad
 app.include_router(startup_status_router)  # Startup Status Dashboard
 app.include_router(focus_mode_router)  # Focus Mode & Job Queue System
 
-# Initialize job queue manager with database
+# Initialize job queue manager with sync database (uses asyncio.to_thread internally)
 job_queue_manager.set_db(db)
 
 # Collections
@@ -4339,6 +4339,7 @@ async def stream_coaching_notifications():
 @app.on_event("startup")
 async def startup_event():
     """Start background streaming task and background scanner"""
+    
     # Start WebSocket streaming tasks
     asyncio.create_task(stream_quotes())
     asyncio.create_task(stream_system_status())

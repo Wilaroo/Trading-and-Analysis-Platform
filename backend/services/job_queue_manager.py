@@ -105,15 +105,15 @@ class JobQueueManager:
         }
         
         try:
-            await self.collection.insert_one(job)
-            logger.info(f"[JOB QUEUE] Created job {job_id}: {job_type}")
+            result = await asyncio.to_thread(self.collection.insert_one, job)
+            print(f"[JOB QUEUE] Created job {job_id}: {job_type} (acknowledged={result.acknowledged})")
             
             # Remove MongoDB _id for response
             job.pop('_id', None)
             return {'success': True, 'job': job}
             
         except Exception as e:
-            logger.error(f"[JOB QUEUE] Error creating job: {e}")
+            print(f"[JOB QUEUE] Error creating job: {e}")
             return {'success': False, 'error': str(e)}
     
     async def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
@@ -121,7 +121,8 @@ class JobQueueManager:
         if self.collection is None:
             return None
             
-        job = await self.collection.find_one(
+        job = await asyncio.to_thread(
+            self.collection.find_one,
             {'job_id': job_id},
             {'_id': 0}
         )
@@ -144,7 +145,7 @@ class JobQueueManager:
             ('created_at', 1)  # Older jobs first within same priority
         ]).limit(limit)
         
-        return await cursor.to_list(length=limit)
+        return await asyncio.to_thread(list, cursor)
     
     async def get_next_job(self, job_types: List[str] = None) -> Optional[Dict[str, Any]]:
         """
@@ -161,7 +162,8 @@ class JobQueueManager:
         worker_id = str(uuid.uuid4())[:8]
         
         # Atomically find and update
-        job = await self.collection.find_one_and_update(
+        job = await asyncio.to_thread(
+            self.collection.find_one_and_update,
             query,
             {
                 '$set': {
@@ -210,7 +212,8 @@ class JobQueueManager:
         if not update:
             return True
         
-        result = await self.collection.update_one(
+        result = await asyncio.to_thread(
+            self.collection.update_one,
             {'job_id': job_id},
             {'$set': update}
         )
