@@ -24,6 +24,13 @@
 - Features: Start data collection, start backtests, view job progress, cancel jobs
 - Integrated into the AICoachTab (right sidebar in Command Center)
 
+### 5. Job Completion Notifications - COMPLETED (NEW!)
+- Browser notifications via Web Notifications API (works even when tab is not focused)
+- Sound notifications (success/failure tones)
+- In-app toast notifications
+- Toggle button to enable/disable notifications (bell icon in JobManager header)
+- Notifications for all job types: Data Collection, Backtest, AI Training, Calibration
+
 ## UI Improvements This Session
 
 ### 1. Command Center Header Consolidation - COMPLETED
