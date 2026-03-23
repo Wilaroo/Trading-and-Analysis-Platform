@@ -98,7 +98,7 @@ const WebSocketStatusSync = ({ isConnected }) => {
 // ===================== MAIN APP =====================
 function App() {
   // Startup status dashboard - shows system initialization progress
-  const [showStartupStatus, setShowStartupStatus] = useState(true);
+  const [showStartupStatus, setShowStartupStatus] = useState(false);
   const [startupStatusMinimized, setStartupStatusMinimized] = useState(false);
   
   // Startup modal state - shows wave-based loading progress
