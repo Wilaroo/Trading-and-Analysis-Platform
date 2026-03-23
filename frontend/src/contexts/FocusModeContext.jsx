@@ -156,12 +156,16 @@ export const FocusModeProvider = ({ children }) => {
     setIsChangingMode(true);
     
     try {
-      // Notify backend
-      const response = await api.post('/api/focus-mode', {
-        mode,
-        context,
-        job_id: jobId
+      // Notify backend - use un-throttled fetch for instant response
+      // Mode switches are user-initiated actions that should never queue behind polling
+      const directFetch = window.__originalFetch || window.fetch;
+      const API_URL = process.env.REACT_APP_BACKEND_URL || '';
+      const res = await directFetch(`${API_URL}/api/focus-mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode, context, job_id: jobId })
       });
+      const response = { data: await res.json() };
       
       if (response.data?.success) {
         setFocusMode(mode);
