@@ -185,6 +185,27 @@ async def get_pending_jobs(job_type: Optional[str] = None, limit: int = 10):
     }
 
 
+@router.get("/jobs/stats")
+async def get_queue_stats():
+    """Get job queue statistics."""
+    stats = await job_queue_manager.get_queue_stats()
+    return {
+        "success": True,
+        "stats": stats
+    }
+
+
+@router.post("/jobs/cleanup")
+async def cleanup_old_jobs(days: int = 7):
+    """Remove old completed/failed/cancelled jobs."""
+    deleted = await job_queue_manager.cleanup_old_jobs(days=days)
+    return {
+        "success": True,
+        "deleted_count": deleted,
+        "message": f"Removed {deleted} jobs older than {days} days"
+    }
+
+
 @router.get("/jobs/{job_id}")
 async def get_job(job_id: str):
     """Get status of a specific job."""
@@ -244,24 +265,3 @@ async def update_job_progress(
         )
     
     return {"success": success}
-
-
-@router.get("/jobs/stats")
-async def get_queue_stats():
-    """Get job queue statistics."""
-    stats = await job_queue_manager.get_queue_stats()
-    return {
-        "success": True,
-        "stats": stats
-    }
-
-
-@router.post("/jobs/cleanup")
-async def cleanup_old_jobs(days: int = 7):
-    """Remove old completed/failed/cancelled jobs."""
-    deleted = await job_queue_manager.cleanup_old_jobs(days=days)
-    return {
-        "success": True,
-        "deleted_count": deleted,
-        "message": f"Removed {deleted} jobs older than {days} days"
-    }

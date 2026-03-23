@@ -1,6 +1,6 @@
 # SentCom AI Trading Bot - Product Requirements Document
 
-**Last Updated:** March 23, 2026
+**Last Updated:** March 24, 2026
 
 ## Original Problem Statement
 Build a self-improving AI trading bot "SentCom" by hardening the data pipeline, creating automation, and improving the UI. After completing massive historical data collection (39M bars), the primary goal shifted to training AI models on this new dataset, integrating models into the bot's decision-making, and streamlining the local development/training environment.
@@ -10,6 +10,7 @@ A critical issue emerged where the user's local backend would freeze or crash du
 ## Core Requirements
 1. **Robust Data Pipeline**: Collect historical data for all required timeframes - COMPLETED
 2. **Autonomous Learning Loop**: Implement automation for data collection and model training - IN PROGRESS
+8. **Job Processing Pipeline**: Background jobs (AI training) correctly created, queued, and executed by worker - COMPLETED
 3. **Comprehensive UI**: Consolidate all AI, learning, and data management features - IN PROGRESS
 4. **Startup Status Dashboard**: Correctly reflect backend service status - COMPLETED
 5. **Comprehensive User Guide**: Create detailed, visual, downloadable guide - COMPLETED
@@ -104,6 +105,13 @@ Multi-layered defense against backend overload during startup:
 - LearningInsightsWidget.jsx (1 insights poll)
 - JobManager.jsx (1 jobs poll)
 - BotPerformanceChart.jsx (1 equity curve poll)
+
+### Job Queue Fix (March 24, 2026) - COMPLETED
+**Root cause**: `job_queue_manager.py` was partially refactored — first 5 methods used `asyncio.to_thread` correctly, but 7 remaining methods (`complete_job`, `fail_job`, `cancel_job`, `get_recent_jobs`, `get_running_jobs`, `cleanup_old_jobs`, `get_queue_stats`) still used raw `await` on synchronous pymongo calls or motor-style `cursor.to_list()` syntax. Additionally, the `/jobs/stats` and `/jobs/cleanup` routes were defined after the `/jobs/{job_id}` wildcard in `focus_mode_router.py`, causing them to be swallowed by the wildcard match.
+
+**Fix**: Converted all 7 remaining methods to use `asyncio.to_thread` for pymongo calls. Moved `/jobs/stats` and `/jobs/cleanup` routes before the `{job_id}` wildcard. Cleaned up 10 stale "running" jobs from previous failed attempts.
+
+**All 8 job queue endpoints verified working**: create, list, running, pending, stats, get-by-id, cancel, cleanup.
 
 ### Previous Implementations
 - WebSocket Status Fix

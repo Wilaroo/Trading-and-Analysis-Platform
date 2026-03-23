@@ -224,7 +224,8 @@ class JobQueueManager:
         if self.collection is None:
             return False
         
-        update_result = await self.collection.update_one(
+        update_result = await asyncio.to_thread(
+            self.collection.update_one,
             {'job_id': job_id},
             {
                 '$set': {
@@ -247,7 +248,8 @@ class JobQueueManager:
         if self.collection is None:
             return False
         
-        update_result = await self.collection.update_one(
+        update_result = await asyncio.to_thread(
+            self.collection.update_one,
             {'job_id': job_id},
             {
                 '$set': {
@@ -276,7 +278,8 @@ class JobQueueManager:
         if job['status'] in [JobStatus.COMPLETED.value, JobStatus.FAILED.value, JobStatus.CANCELLED.value]:
             return {'success': False, 'error': f"Cannot cancel job in {job['status']} status"}
         
-        update_result = await self.collection.update_one(
+        update_result = await asyncio.to_thread(
+            self.collection.update_one,
             {'job_id': job_id},
             {
                 '$set': {
@@ -314,7 +317,7 @@ class JobQueueManager:
             {'_id': 0}
         ).sort('created_at', -1).limit(limit)
         
-        return await cursor.to_list(length=limit)
+        return await asyncio.to_thread(list, cursor)
     
     async def get_running_jobs(self) -> List[Dict[str, Any]]:
         """Get all currently running jobs."""
@@ -325,7 +328,7 @@ class JobQueueManager:
             {'status': JobStatus.RUNNING.value},
             {'_id': 0}
         )
-        return await cursor.to_list(length=100)
+        return await asyncio.to_thread(list, cursor)
     
     async def cleanup_old_jobs(self, days: int = 7) -> int:
         """Remove completed/failed/cancelled jobs older than X days."""
@@ -335,14 +338,17 @@ class JobQueueManager:
         from datetime import timedelta
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         
-        result = await self.collection.delete_many({
-            'status': {'$in': [
-                JobStatus.COMPLETED.value,
-                JobStatus.FAILED.value,
-                JobStatus.CANCELLED.value
-            ]},
-            'completed_at': {'$lt': cutoff}
-        })
+        result = await asyncio.to_thread(
+            self.collection.delete_many,
+            {
+                'status': {'$in': [
+                    JobStatus.COMPLETED.value,
+                    JobStatus.FAILED.value,
+                    JobStatus.CANCELLED.value
+                ]},
+                'completed_at': {'$lt': cutoff}
+            }
+        )
         
         if result.deleted_count > 0:
             logger.info(f"[JOB QUEUE] Cleaned up {result.deleted_count} old jobs")
@@ -364,7 +370,8 @@ class JobQueueManager:
         ]
         
         cursor = self.collection.aggregate(pipeline)
-        stats = {doc['_id']: doc['count'] async for doc in cursor}
+        results = await asyncio.to_thread(list, cursor)
+        stats = {doc['_id']: doc['count'] for doc in results}
         
         return {
             'pending': stats.get(JobStatus.PENDING.value, 0),
