@@ -102,10 +102,10 @@ async def process_training_job(job: dict, db) -> dict:
     logger.info(f"Parameters: {params}")
     
     # Import training service
-    from services.ai_modules.timeseries_service import get_timeseries_service
+    from services.ai_modules.timeseries_service import init_timeseries_ai
     
     # Get the service
-    timeseries_service = get_timeseries_service(db)
+    timeseries_service = init_timeseries_ai(db=db)
     
     # Determine training type
     bar_size = params.get('bar_size') or params.get('timeframe', '1 day')
