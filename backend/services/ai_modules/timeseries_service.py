@@ -111,6 +111,7 @@ class TimeSeriesAIService:
         self._ml_available = ML_AVAILABLE
         self._training_in_progress = False
         self._training_status = {}
+        self._stop_training = False  # Flag to stop training early
         # Cache for available data (expensive aggregation query)
         self._available_data_cache = None
         self._available_data_cache_time = None
@@ -784,6 +785,20 @@ class TimeSeriesAIService:
                 
                 # Small delay to prevent overwhelming the system
                 await asyncio.sleep(0.5)
+                
+                # Check for stop request
+                if self._stop_training:
+                    logger.warning("[FULL UNIVERSE] Training stopped by user request")
+                    self._stop_training = False  # Reset flag
+                    return {
+                        "success": False,
+                        "error": "Training stopped by user",
+                        "partial_progress": {
+                            "symbols_processed": symbols_with_data,
+                            "samples_collected": len(all_features),
+                            "bars_processed": total_bars_processed
+                        }
+                    }
             
             # Step 4: Train the model on accumulated features
             logger.info(f"[FULL UNIVERSE] Step 4: Training model on {len(all_features):,} samples...")

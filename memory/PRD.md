@@ -1,5 +1,7 @@
 # SentCom AI Trading Bot - Product Requirements Document
 
+**Last Updated:** March 23, 2026
+
 ## Original Problem Statement
 Build a self-improving AI trading bot "SentCom" by hardening the data pipeline, creating automation, and improving the UI. After completing massive historical data collection (39M bars), the primary goal shifted to training AI models on this new dataset, integrating models into the bot's decision-making, and streamlining the local development/training environment.
 

@@ -1565,3 +1565,37 @@ async def update_training_settings(
 
 from datetime import datetime, timezone
 
+
+@router.post("/timeseries/stop-training")
+async def stop_training():
+    """
+    Stop any running training job.
+    Note: Progress is NOT saved - training must complete to save the model.
+    """
+    try:
+        service = get_timeseries_service()
+        
+        # Check if training is running
+        status = service.get_training_status()
+        was_running = status.get("training_in_progress", False)
+        
+        # Set stop flag
+        service._stop_training = True
+        
+        # Exit training mode
+        from services.training_mode_manager import training_mode_manager
+        training_mode_manager.exit_training_mode()
+        
+        return {
+            "success": True,
+            "message": "Training stop requested" if was_running else "No training was running",
+            "was_running": was_running,
+            "note": "Progress is NOT saved - only completed training saves the model"
+        }
+    except Exception as e:
+        logger.error(f"Error stopping training: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
