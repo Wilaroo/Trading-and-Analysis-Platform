@@ -152,18 +152,44 @@ class TimeSeriesGBM:
             self._load_model()
             
     def _load_model(self):
-        """Load model from database"""
+        """Load model from database.
+        
+        Loading priority:
+        1. Try exact model name match
+        2. Fallback to "direction_predictor_daily" (most reliable model)
+        3. Fallback to any available trained model
+        """
         if self._db is None:
             return
             
         try:
+            # Try to load exact model name first
             doc = self._db[self.MODEL_COLLECTION].find_one({"name": self.model_name})
+            
+            # Fallback 1: Try to load the daily model (most commonly trained)
+            if not doc or "model_data" not in doc:
+                logger.info(f"Model '{self.model_name}' not found, trying 'direction_predictor_daily'...")
+                doc = self._db[self.MODEL_COLLECTION].find_one({"name": "direction_predictor_daily"})
+            
+            # Fallback 2: Try to load any available model
+            if not doc or "model_data" not in doc:
+                logger.info("Daily model not found, searching for any trained model...")
+                doc = self._db[self.MODEL_COLLECTION].find_one(
+                    {"model_data": {"$exists": True}},
+                    sort=[("updated_at", -1)]  # Get most recently updated
+                )
+            
             if doc and "model_data" in doc:
                 model_bytes = base64.b64decode(doc["model_data"])
                 self._model = pickle.loads(model_bytes)
                 self._version = doc.get("version", "v0.0.0")
                 self._metrics = ModelMetrics(**doc.get("metrics", {}))
-                logger.info(f"Loaded model {self.model_name} {self._version}")
+                loaded_name = doc.get("name", "unknown")
+                logger.info(f"Loaded model '{loaded_name}' version {self._version} (requested: {self.model_name})")
+                # Update model name to reflect what was actually loaded
+                self.model_name = loaded_name
+            else:
+                logger.warning(f"No trained models found in database")
         except Exception as e:
             logger.warning(f"Could not load model: {e}")
             
