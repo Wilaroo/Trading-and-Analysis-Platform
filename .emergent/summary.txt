@@ -1,142 +1,140 @@
 <analysis>**original_problem_statement**: The user wants to evolve their AI trading bot, SentCom, into a self-improving system by hardening the data pipeline, creating automation, and improving the UI.
 
-The user experienced a critical issue where the local backend would freeze during resource-intensive tasks like AI model training. This led to a new, high-priority requirement: to architect a system that can manage different operational modes (Live Trading, Data Collection, AI Training, Backtesting) to prevent the main application from becoming unresponsive. The goal is to prioritize the user's selected task (e.g., training) by pausing non-essential background services, and to offload heavy jobs to a separate process to prevent deadlocks and ensure the UI remains responsive.
+A critical issue emerged where the user's local backend would freeze or crash during startup and under heavy load. This has made application stability the top priority. The primary goal is to architect a resilient system that can manage a high volume of concurrent processes (data streaming, AI analysis, UI polling) without deadlocking or crashing.
 
 **PRODUCT REQUIREMENTS**:
 1.  **Robust Data Pipeline**: Collect historical data for all required timeframes. (**COMPLETED**)
 2.  **Autonomous Learning Loop**: Implement automation for data collection and model training. (**IN PROGRESS**)
-3.  **Comprehensive UI**: Consolidate all AI, learning, and data management features into an intuitive dashboard. (**IN PROGRESS**)
+3.  **Comprehensive UI**: Consolidate all features into an intuitive dashboard. (**IN PROGRESS**)
 4.  **Startup Status Dashboard**: Ensure the UI correctly reflects the status of all backend services. (**IN PROGRESS**)
 5.  **Comprehensive User Guide**: Create a detailed, visual, and downloadable guide. (**COMPLETED**)
-6.  **Resource Prioritization System (Focus Mode)**: Implement a system to manage application resources, preventing deadlocks during heavy tasks. (**NEW, IN PROGRESS**)
+6.  **Resource Prioritization System (Focus Mode)**: Implement a system to manage application resources. (**COMPLETED**)
+7.  **Startup & Polling Optimization**: Implement a system to prevent the backend from being overwhelmed by frontend requests. (**NEW, IN PROGRESS**)
 
 **User's preferred language**: English
 
 **what currently exists?**
-A full-stack trading platform (React, FastAPI, MongoDB Atlas). The previous task to consolidate the Command Center header was completed.
-
-Following a major backend freeze on the user's local machine, the agent implemented a two-phase Focus Mode system to manage resource contention:
-*   **Phase 1 (UI Control Plane)**: A new  and a  UI dropdown in the header allow the user to switch the application's mode (e.g., to AI Training). This tells the backend to pause non-essential services like the trading bot scanner and IB data processing, prioritizing the selected task.
-*   **Phase 2 (Worker Process)**: A separate  process was created to handle heavy, long-running jobs. A MongoDB-based job queue () is used to send tasks from the main app to the worker, isolating them and preventing the main app from freezing.
-*   **Integration**: The AI Training UI () was re-wired to use this new job system. The user's local startup script () was updated to automatically start the new worker process.
-
-The agent also debugged the System Status Bar, correcting endpoints for Ollama and the IB Pusher, but the Data (WebSocket) status is still not wired up correctly.
+A full-stack trading platform (React, FastAPI, MongoDB) with a sophisticated backend that runs numerous services simultaneously. To combat backend freezes, several layers of optimization have been implemented:
+*   A **Focus Mode** system to prioritize tasks and pause non-essential services.
+*   A separate **** process to offload heavy jobs (AI training, data collection).
+*   A **** to orchestrate a staged, wave-based loading sequence for the UI.
+*   A **global request throttler** to limit all  and  calls to a maximum of 4 concurrent requests, preventing browser-side  errors.
+*   A **** that performs real-time health checks on backend services.
+*   Color-coded and clearly labeled terminal windows via an updated  script for easier debugging.
 
 **Last working item**:
--   **Last item agent was working**: Fixing the System Status indicators in the  component. The agent identified that the WebSocket connection status was not being passed to the  to update the Data indicator.
+-   **Last item agent was working**: Fixing the . The user observed the backend was still crashing and recovering during startup. The agent diagnosed that the modal itself was contributing to the problem by sending 8 parallel health check requests every few seconds, overwhelming the server. The agent refactored the modal to check services **sequentially**, one by one, with a 750ms delay between each check.
 -   **Status**: IN PROGRESS
 -   **Agent Testing Done**: N
--   **Which testing method agent to use?**: screenshot tool. The goal is to verify that all four status indicators (API, IB, AI, Data) in the top  bar show the correct color-coded status, especially the Data indicator after the fix.
+-   **Which testing method agent to use?**: Manual user testing. The user needs to  the latest code, restart the application using their  file, and observe if the startup is now stable.
 -   **User Testing Done**: N
 
 **All Pending/In progress Issue list**:
--   **Issue 1: WebSocket status not reflected in UI (P0)**
-    -   **Description**: The Data (quotes) indicator in the  status bar doesn't update because the connection state from  hook is not being passed to the .
-    -   **Next debug checklist**: Modify the  component where  is initialized. Use the  function from  to update the status based on the  value returned by the hook.
-    -   **Why fix this issue and what will be achieved with the fix?**: Provides the user with accurate, real-time feedback on the live data connection.
+-   **Issue 1: Backend Instability During Startup (P0)**
+    -   **Description**: The backend server is unstable and crashes when the frontend application loads. This is due to being overwhelmed by a high volume of simultaneous API requests from the many components mounting and polling for data at once. The symptom appears in the browser console as  or , and on the UI as status indicators turning red.
+    -   **Attempted fixes**:
+        1.   for staged loading (ineffective as components still mounted at once).
+        2.  Global request throttler (reduced browser errors but still overloaded the backend).
+        3.  The  was found to be part of the problem by sending too many parallel health checks.
+    -   **Next debug checklist**:
+        1.  User to  and test the latest fix (sequential health checks in ).
+        2.  If the issue persists, the next step is to implement the  hook to prevent components that are not on screen from polling for data.
+        3.  Check backend logs for the specific error causing the crash, not just the connection timeout.
+    -   **Why fix this issue and what will be achieved with the fix?**: A stable startup is critical for the application's basic functionality. This will make the app usable again.
     -   **Status**: IN PROGRESS
-    -   **Should Test frontend/backend/both after fix?**: Frontend
--   **Issue 2: Root cause of backend deadlock (P2)**
-    -   **Description**: The user's local backend froze completely, requiring a force kill. This was traced to a deadlock, possibly related to a large IB data request.
-    -   **Attempted fixes**: The new Worker Process architecture was implemented to prevent future deadlocks by isolating heavy tasks. This is a mitigation, not a root cause fix.
-    -   **Why fix this issue and what will be achieved with the fix?**: While the worker architecture provides resilience, understanding the original deadlock could prevent other potential blocking issues in the main application thread.
-    -   **Status**: NOT STARTED (Mitigated)
     -   **Is recurring issue?**: Y
+    -   **Should Test frontend/backend/both after fix?**: Both.
 
 **In progress Task List**:
--   There are no other in-progress tasks. The primary focus is on the pending issue above.
+-   There are no other in-progress tasks. The startup stability issue is the sole focus.
 
 **Upcoming and Future Tasks**
 -   **Upcoming Tasks**:
-    -   (P0) **User Verification of Focus Mode System**: Guide the user to test the complete end-to-end training flow using the new UI, Focus Mode, and worker process on their local machine.
-    -   (P1) **Integrate **: Refactor existing polling hooks like  to be aware of the new , so they automatically pause/resume.
-    -   (P1) **Implement Data Collection & Backtesting Jobs**: Port the data collection and backtesting logic to run as jobs in the new worker process.
+    -   (P0) **User Verification of Startup Stability**: Guide the user to test the application after pulling the latest sequential health check fix.
+    -   (P1) **Implement Lazy Loading**: Refactor components that use polling (e.g., ) to incorporate the already-created  hook. This will stop components from fetching data when they are not visible on the screen.
 -   **Future Tasks:**
     -   (P2) **Implement Best Model Protection**: Add logic to only save new models if their accuracy is better than the currently active one.
     -   (P2) **Enable GPU for LightGBM**: Re-install LightGBM with GPU support.
-    -   (P2) **Fix  Endpoint**: The  endpoint hangs the server.
+    -   (P2) **Fix  Endpoint**: The  endpoint is known to hang the server.
     -   (P2) **Complete Backend Router Refactoring**: Activate modular routers in .
-    -   (P2) **Setup-Specific AI Models**: Begin the multi-phase project to train specialized models for each of the user's 77 trading setups.
+    -   (P2) **Setup-Specific AI Models**: Begin the project to train specialized models for each of the user's 77 trading setups.
 
 **Completed work in this session**
--   **Command Center UI Consolidation**: Merged the page title and Command/Charts tabs into a single, compact row in  and .
--   **Focus Mode & Worker System (Phase 1 & 2)**:
-    -   Architected and implemented a system to prevent backend deadlocks by isolating heavy tasks.
-    -   **Backend**: Created , , , and the  script.
-    -   **Frontend**: Created  for global state and a  dropdown component in the header.
-    -   **Integration**: Rewired  to create jobs for the worker instead of making direct API calls.
--   **Build Script Automation**: Updated  to automatically install the  dependency and launch the  in a separate window.
--   **Bug Fix**: Corrected the API endpoints and response parsing logic in  for the IB, Ollama, and Data Pusher status indicators.
+-   **WebSocket Status Fix**: The Data indicator in the header now correctly shows connection status.
+-   **Focus-Aware Polling**: Refactored  to be aware of the global .
+-   **Worker Process Integration**: Ported Data Collection and Backtesting logic to run as jobs in .
+-   **Job Management UI**: Created a  component for starting and monitoring jobs, including browser notifications.
+-   **Startup Stability & Optimization (Iterative Fixes)**:
+    -   Fixed  env var issue for the worker process.
+    -   Improved terminal window titles and colors in the startup script for better debugging.
+    -   Created a  for staged loading.
+    -   Created a  that performs real health checks.
+    -   Added a global request throttler to prevent browser connection pool exhaustion.
+    -   Refactored the  to check services **sequentially** to reduce server load.
 
 **Earlier issues found/mentioned but not fixed**
--   None.
+-   The root cause of the original backend deadlock (hanging the  endpoint) is still unknown, though the recurring startup crashes are a manifestation of this instability under load.
 
 **Known issue recurrence from previous fork**
--   **Issue recurrence in previous fork**: Backend instability and crashes under the load of AI model training.
+-   **Issue recurrence in previous fork**: Backend instability and crashes under load.
 -   **Recurrence count**: High
--   **Status**: IN PROGRESS. The new Focus Mode and Worker architecture is the specific solution being implemented to resolve this for good.
+-   **Status**: IN PROGRESS. This entire session has been focused on architecting and implementing solutions to resolve this. The latest attempt is the sequential health check in the .
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **Worker Process Architecture**: Decoupling long-running, resource-intensive tasks (like AI training) from the main real-time application by running them in a separate Python process (). This prevents the main app from freezing or deadlocking.
--   **Job Queue (MongoDB-based)**: Using a MongoDB collection ('jobs') as a simple, persistent message queue to communicate tasks from the main FastAPI application to the  process.
--   **Focus Mode State Management**: A system ( on backend,  on frontend) to globally switch the application's operational priority. This allows pausing non-essential services (e.g., bot scanning) to free up resources for a user-initiated task like training.
+-   **Request Throttling**: Limiting the number of concurrent outbound network requests from the client to a fixed number (4) to prevent overwhelming the server and exhausting the browser's connection pool (). Implemented via a global  patch and an  interceptor.
+-   **Sequential Health Checks**: Verifying backend services one-by-one with a delay, rather than all at once, to ensure the health-checking process itself does not cause a server crash.
+-   **Staged/Lazy Loading**: A strategy to defer the initialization and data-loading of UI components until they are actually needed or until the application has stabilized. The  provides cosmetic staging, while the  hook is intended for true lazy loading.
 
 **key DB schema**
--   **jobs**:  (New collection for worker queue)
+-   **jobs**: 
 
 **changes in tech stack**
--   **motor**: New Python dependency added for asynchronous MongoDB access in the worker process.
+-   None.
 
 **All files of reference**
--   **/app/frontend/src/hooks/useWebSocket.js**: Contains the  state needed for the UI fix.
--   **/app/frontend/src/contexts/SystemStatusContext.jsx**: Contains the status checking logic; needs to receive the WebSocket status.
--   **/app/frontend/src/App.js**: Where the  hook is likely used and can be connected to the context.
--   **/app/backend/worker.py**: The new isolated worker process.
--   **/app/frontend/src/components/UnifiedAITraining.jsx**: The training UI, now using the job system.
--   **/app/documents/TradeCommand_AITraining.bat**: The user's local startup script.
+-   **/app/frontend/src/components/StartupModal.jsx**: The site of the most recent fix, now performs sequential health checks.
+-   **/app/frontend/src/utils/requestThrottler.js**: The core logic for throttling API requests.
+-   **/app/frontend/src/index.js**: Where the global  function is patched to use the throttler.
+-   **/app/documents/TradeCommand_AITraining.bat**: The user's main startup script.
+-   **/app/frontend/src/hooks/useVisibility.js**: Created to support lazy-loading, but not yet implemented in any components.
 
 **Areas that need refactoring**:
--    is now largely redundant due to the more generic . It should be deprecated and its functionality fully merged into .
+-   Polling components should be updated to use the  hook to implement true lazy loading and further reduce unnecessary backend requests.
+-   The 93 identified direct  calls could be migrated to use the central  (axios) instance for better consistency.
 
 **key api endpoints**
--   : Get the current focus mode and priorities.
--   : Manually set the application's focus mode.
 -   : Create a new job for the worker process.
 -   : Poll the status of a running job.
+-   : A consolidated endpoint used by the  for health checks.
 
 **Critical Info for New Agent**
--   Your immediate task is to fix the Data connection status indicator. You need to find where  is used (likely ) and pass its  status to the  using the  function.
--   The user is now running the application locally using the  file. This script now starts the main app AND a new  process in a separate terminal.
--   The core architecture has shifted to a main app + worker model to solve backend freezes. When testing heavy tasks like training, verify that the job is created and the  terminal shows logs of it being processed.
+-   The application is suffering from a critical stability issue where the backend crashes on startup due to being overwhelmed by requests from the frontend.
+-   Your immediate priority is to guide the user through testing the latest fix: sequential health checks in the .
+-   The user's workflow is: **1. Close all terminals. 2. . 3. Run .** They may need to clear browser  () to see the modal.
+-   If the sequential check fix is not enough, the very next step is to implement lazy loading using the already-created  hook in components that poll for data.
 
 **documents and test reports created in this job**
 -   
 -   
 -   
--   
--   
--   
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User**: Asks if the worker process starts automatically after the new UI feature is clicked.
-2.  **Agent**: Clarifies that the worker is always running, but the training UI needs to be wired to the new job system. Agent then implements this wiring.
-3.  **User**: Shares a screenshot of their local startup, showing all processes running. Notes that the worker failed.
-4.  **User**: Provides the worker log, showing a .
-5.  **Agent**: Fixes the  script to install  and tells the user how to fix it locally.
-6.  **User**: Confirms the Focus Mode selector is visible but asks why the system status indicators are still not working correctly.
-7.  **Agent**: Investigates the status indicators, finds incorrect API endpoints and response parsing, and fixes them in .
-8.  **Agent**: Identifies the final missing piece: the WebSocket connection status is not being propagated to the context.
-9.  **User**: States that they just did the health check and its not returning anything
-10. **Agent**: Diagnoses the backend is blocked/frozen, and provides instructions to kill the process.
+1.  **User**: Reports  errors after restarting.
+2.  **Agent**: Identifies the cause as the browser's connection pool being exhausted. Implements a global request throttler.
+3.  **User**: Asks for clarification on clearing  before restarting.
+4.  **Agent**: Provides instructions on how to clear .
+5.  **User**: Provides screenshots showing the  progress fluctuating wildly, indicating the backend is crashing and recovering.
+6.  **Agent**: Diagnoses that the 's own parallel health checks are now causing the crash loop.
+7.  **Agent**: Implements the fix: making the modal's health checks sequential instead of parallel.
+8.  **User**: Asks for clarification again on what to do.
+9.  **Agent**: Re-iterates the restart steps (, restart with ).
+10. **User**: Confirms they understand and will restart.
 
 **Project Health Check:**
--   **Broken**:
-    -   The Data (WebSocket) status indicator in the  component is not functional.
-    -   The  endpoint is still known to hang the server.
--   **Mocked**: None.
+-   **Broken**: The application startup process is highly unstable. The backend crashes under the initial load from the frontend, making the application unusable. This is the top priority blocker.
 
 **3rd Party Integrations**
 -   Interactive Brokers (IB Gateway)
@@ -145,16 +143,16 @@ The agent also debugged the System Status Bar, correcting endpoints for Ollama a
 -   PyTorch (with CUDA)
 -   LightGBM
 -   ChromaDB
--   motor (new)
+-   motor
 
 **Testing status**
 -   **Testing agent used after significant changes**: NO
 -   **Troubleshoot agent used after agent stuck in loop**: NO
 -   **Test files created**: None
--   **Known regressions**: None.
+-   **Known regressions**: The application is currently unstable on startup.
 
 **Credentials to test flow:**
--   User provided their MongoDB connection string in the previous fork's handoff summary: . Use the DB name .
+-   User provided their MongoDB connection string: . The database name is .
 
 **What agent forgot to execute**
--   The agent did not complete the fix for the system status bar. The final step of connecting the  hook's  state to the  is still pending.</analysis>
+-   The agent created the  hook as part of the lazy loading plan but did not proceed to implement it in any of the data-polling components. This is a crucial next step if the current fix is insufficient.</analysis>

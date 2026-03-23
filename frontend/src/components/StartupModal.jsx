@@ -161,27 +161,28 @@ const StartupModal = ({ onComplete }) => {
     }
   }, [wsConnected]);
 
-  // Check all services
+  // Check all services - ONE AT A TIME with delays
   const checkAllServices = useCallback(async () => {
     setIsChecking(true);
     setCheckCount(prev => prev + 1);
 
-    const results = {};
-    
-    // Check services in parallel but with slight stagger to avoid overwhelming backend
+    // Check services sequentially with delays to avoid overwhelming backend
     for (const service of SERVICES) {
-      // Small delay between checks
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Skip websocket - handled separately
+      if (service.checkType === 'websocket') {
+        continue;
+      }
       
       const status = await checkService(service);
-      results[service.id] = status;
       
-      // Update state incrementally so user sees progress
+      // Update state for this service
       setServiceStatus(prev => ({ ...prev, [service.id]: status }));
+      
+      // Wait 500ms between each check to give backend breathing room
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
 
     setIsChecking(false);
-    return results;
   }, [checkService]);
 
   // Setup WebSocket check
