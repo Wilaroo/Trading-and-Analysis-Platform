@@ -90,8 +90,11 @@ from routers.data_storage_router import router as data_storage_router
 from routers.strategy_promotion_router import router as strategy_promotion_router, init_strategy_promotion_router
 from routers.scripts import router as scripts_router
 from routers.startup_status import router as startup_status_router
+from routers.focus_mode_router import router as focus_mode_router
 from services.sentcom_service import get_sentcom_service, init_sentcom_service
 from services.dynamic_risk_engine import get_dynamic_risk_engine
+from services.focus_mode_manager import focus_mode_manager
+from services.job_queue_manager import job_queue_manager
 from services.ai_modules import (
     get_ai_module_config, init_ai_module_config,
     get_shadow_tracker, init_shadow_tracker,
@@ -421,6 +424,10 @@ app.include_router(data_storage_router)  # Data Storage Management
 app.include_router(strategy_promotion_router)  # Strategy Promotion - Autonomous Loop
 app.include_router(scripts_router)  # Scripts auto-update endpoint for StartTrading.bat
 app.include_router(startup_status_router)  # Startup Status Dashboard
+app.include_router(focus_mode_router)  # Focus Mode & Job Queue System
+
+# Initialize job queue manager with database
+job_queue_manager.set_db(db)
 
 # Collections
 strategies_col = db["strategies"]

@@ -23,6 +23,7 @@ import {
   Upload,
   LineChart
 } from 'lucide-react';
+import FocusModeSelector from '../FocusModeSelector';
 
 // Credit Budget Detail Modal Component
 const CreditBudgetModal = ({ isOpen, onClose, creditBudget }) => {
@@ -749,6 +750,9 @@ const HeaderBar = ({
               );
             })}
           </div>
+          
+          {/* Focus Mode Selector */}
+          <FocusModeSelector compact={true} />
           
           {/* Credit Budget Indicator - COMPACT */}
           {creditBudget && (

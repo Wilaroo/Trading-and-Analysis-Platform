@@ -12,7 +12,8 @@ import {
   TrainingModeProvider, 
   AppStateProvider, 
   ConnectionManagerProvider,
-  SystemStatusProvider
+  SystemStatusProvider,
+  FocusModeProvider
 } from './contexts';
 import api from './utils/api';
 import StartupModal from './components/StartupModal';
@@ -20,6 +21,7 @@ import StartupStatusDashboard from './components/StartupStatusDashboard';
 import TrainingModeIndicator from './components/TrainingModeIndicator';
 import ErrorBoundary from './components/ErrorBoundary';
 import SystemStatusBar from './components/SystemStatusBar';
+import FocusModeSelector from './components/FocusModeSelector';
 
 // Import pages
 import {
@@ -334,6 +336,7 @@ function App() {
     <AppStateProvider>
     <SystemStatusProvider>
     <ConnectionManagerProvider>
+    <FocusModeProvider>
     <TrainingModeProvider>
     <DataCacheProvider>
     <TickerModalProvider>
@@ -451,6 +454,7 @@ function App() {
     </TickerModalProvider>
     </DataCacheProvider>
     </TrainingModeProvider>
+    </FocusModeProvider>
     </ConnectionManagerProvider>
     </SystemStatusProvider>
     </AppStateProvider>

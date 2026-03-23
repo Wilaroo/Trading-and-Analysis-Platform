@@ -10,12 +10,22 @@
 - Tabs now integrated directly into the HeaderBar component
 - Files modified: `CommandCenterPage.js`, `HeaderBar.jsx`
 
-### 2. System Status Consolidation (Previous Fork)
+### 2. Focus Mode System - COMPLETED (NEW!)
+- **Phase 1: Focus Mode UI** - Dropdown in header to switch between modes
+- **Phase 2: Worker Process** - Background job processor for heavy tasks
+- Modes: Live Trading | Data Collection | AI Training | Backtesting
+- Each mode automatically pauses/throttles non-essential services
+- Progress tracking and elapsed time display
+- Files created:
+  - Backend: `focus_mode_manager.py`, `job_queue_manager.py`, `focus_mode_router.py`, `worker.py`
+  - Frontend: `FocusModeContext.jsx`, `FocusModeSelector.jsx`
+
+### 3. System Status Consolidation (Previous Fork)
 - Removed 5+ redundant connection status indicators
 - Created unified, color-coded status bar in TickerTape component
 - Single source of truth for all connection health
 
-### 3. Frontend Resilience Layer (Previous Fork)
+### 4. Frontend Resilience Layer (Previous Fork)
 - Added `AppStateContext`, `ConnectionManagerContext`, `SystemStatusContext`, `TrainingModeContext`
 - Implemented `useSmartPolling` hook for visibility-aware polling
 - Persistent state across tab switches using localStorage
