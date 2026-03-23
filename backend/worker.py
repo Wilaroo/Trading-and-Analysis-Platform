@@ -45,7 +45,7 @@ if os.path.exists(env_file):
                 if key and not os.environ.get(key):  # Don't override existing env vars
                     os.environ[key] = value
 
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import MongoClient
 from services.job_queue_manager import job_queue_manager, JobType, JobStatus
 
 # Configure logging
@@ -68,7 +68,11 @@ def signal_handler(signum, frame):
 
 
 async def setup_database():
-    """Connect to MongoDB."""
+    """Connect to MongoDB using pymongo (sync driver).
+    
+    All training services expect pymongo cursors. The job_queue_manager
+    supports both pymongo and motor via its _run() helper.
+    """
     mongo_url = os.environ.get('MONGO_URL')
     db_name = os.environ.get('DB_NAME', 'tradecommand')
     
@@ -76,12 +80,12 @@ async def setup_database():
         logger.error("MONGO_URL environment variable not set")
         sys.exit(1)
     
-    client = AsyncIOMotorClient(mongo_url)
+    client = MongoClient(mongo_url)
     db = client[db_name]
     
     # Test connection
     try:
-        await client.admin.command('ping')
+        client.admin.command('ping')
         logger.info(f"Connected to MongoDB database: {db_name}")
     except Exception as e:
         logger.error(f"Failed to connect to MongoDB: {e}")
