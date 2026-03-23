@@ -100,8 +100,12 @@ function App() {
   const [showStartupStatus, setShowStartupStatus] = useState(true);
   const [startupStatusMinimized, setStartupStatusMinimized] = useState(false);
   
-  // Startup modal state - DISABLED for development (will be re-enabled after Phase 6 complete)
-  const [showStartupModal, setShowStartupModal] = useState(false);
+  // Startup modal state - shows wave-based loading progress
+  const [showStartupModal, setShowStartupModal] = useState(() => {
+    // Check if user opted out
+    const skipStartup = localStorage.getItem('tradecommand_skip_startup');
+    return skipStartup !== 'true';
+  });
   
   // Persist activeTab in localStorage so it survives page refresh
   const [activeTab, setActiveTab] = useState(() => {

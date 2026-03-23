@@ -217,16 +217,21 @@ const StartupModal = ({ onComplete }) => {
     }
   }, [visible, currentWave, runWaveChecks]);
 
-  // Enable button after minimum time or when startup is complete
+  // Enable button after minimum time AND progress threshold
   useEffect(() => {
-    if (isStartupComplete || startupProgress >= 40) {
-      setAllReady(true);
+    // Require at least 60% progress OR startup complete
+    if (isStartupComplete || startupProgress >= 60) {
+      // Add a small delay so user can see the progress
+      const readyTimer = setTimeout(() => setAllReady(true), 1000);
+      return () => clearTimeout(readyTimer);
     }
-    
-    // Fallback: Enable after 8 seconds
-    const fallbackTimer = setTimeout(() => setAllReady(true), 8000);
-    return () => clearTimeout(fallbackTimer);
   }, [isStartupComplete, startupProgress]);
+  
+  // Fallback: Enable after 20 seconds minimum
+  useEffect(() => {
+    const fallbackTimer = setTimeout(() => setAllReady(true), 20000);
+    return () => clearTimeout(fallbackTimer);
+  }, []);
 
   const handleGetStarted = () => {
     if (dontShowAgain) {
