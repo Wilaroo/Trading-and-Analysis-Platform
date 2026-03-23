@@ -557,6 +557,11 @@ print("  - Endpoints: /api/market-regime/current, /api/market-regime/summary")
 trading_bot.set_market_regime_engine(market_regime_engine)
 print("  - Wired to Trading Bot: Position sizing adjusts based on regime")
 
+# Wire Market Regime to SentCom for regime-aware briefings and chat
+sentcom_svc = get_sentcom_service()
+sentcom_svc.inject_regime_engine(market_regime_engine)
+print("  - Wired to SentCom: Briefings and chat now use real market regime data")
+
 # Inject dependencies for regime performance endpoint
 from routers.market_regime import inject_dependencies as inject_market_regime_deps
 inject_market_regime_deps(db=db, trading_bot=trading_bot)

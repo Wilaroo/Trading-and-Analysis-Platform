@@ -200,6 +200,11 @@ class SentComService:
         self._services["dynamic_risk_engine"] = dynamic_risk_engine
         logger.info("SentCom: Dynamic risk engine injected")
     
+    def inject_regime_engine(self, regime_engine):
+        """Inject market regime engine for regime-aware responses"""
+        self._services["regime_engine"] = regime_engine
+        logger.info("SentCom: Market regime engine injected")
+    
     def _get_dynamic_risk_engine(self):
         """Get dynamic risk engine"""
         return self._services.get("dynamic_risk_engine")
@@ -1153,9 +1158,12 @@ class SentComService:
         if regime_engine:
             try:
                 regime_data = await regime_engine.get_current_regime()
-                context["regime"] = regime_data.get("regime", "UNKNOWN")
+                # The regime engine returns "state" not "regime"
+                context["regime"] = regime_data.get("state", regime_data.get("regime", "UNKNOWN"))
                 context["spy_trend"] = regime_data.get("spy_trend")
-                context["vix"] = regime_data.get("vix")
+                # Get VIX from signal blocks if not at top level
+                vix_data = regime_data.get("signal_blocks", {}).get("volume_vix", {}).get("signals", {})
+                context["vix"] = regime_data.get("vix") or vix_data.get("vix_price")
             except Exception as e:
                 logger.error(f"Error getting regime: {e}")
         

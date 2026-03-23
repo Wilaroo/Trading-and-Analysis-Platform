@@ -2,6 +2,18 @@
 
 **Last Updated:** March 23, 2026
 
+## Bug Fixes This Session
+
+### 1. Prediction API 404 Errors - FIXED
+- Enhanced model loading with fallback chain in `timeseries_gbm.py`
+
+### 2. Frontend Polling Overload - FIXED  
+- Created `TrainingModeContext` to slow polling during training
+
+### 3. SentCom Market Regime Bug - FIXED
+- **Problem:** SentCom showed "STRONG UPTREND" when market was "HOLD"
+- **Fix:** Wired regime engine into SentCom, fixed key name (`state` vs `regime`), fixed VIX extraction
+
 ## Original Problem Statement
 Build a self-improving AI trading bot "SentCom" by hardening the data pipeline, creating automation, and improving the UI. After completing massive historical data collection (39M bars), the primary goal shifted to training AI models on this new dataset, integrating models into the bot's decision-making, and streamlining the local development/training environment.
 
