@@ -2,173 +2,103 @@
 
 **Last Updated:** March 23, 2026
 
-## Recent Session Updates
-
-### 1. WebSocket Status Indicator Fix - COMPLETED (NEW!)
-- **Problem:** The "Data" (WebSocket) status indicator in the TickerTape header was not updating
-- **Fix:** Created `WebSocketStatusSync` component in `App.js` that bridges the WebSocket hook state to the `SystemStatusContext`
-- **Result:** "Data" indicator now shows real-time green/red status based on WebSocket connection
-
-### 2. Focus-Aware Polling Integration - COMPLETED (NEW!)
-- Updated `useSmartPolling` hook to use `FocusModeContext` instead of the deprecated `TrainingModeContext`
-- `TrainingModeContext` is now a thin wrapper that delegates to `FocusModeContext` for backwards compatibility
-- All polling hooks now automatically adjust based on the current Focus Mode (Live, Training, Collecting, Backtesting)
-
-### 3. Worker Process Jobs Implementation - COMPLETED (NEW!)
-- **Data Collection Jobs**: Fully implemented support for liquid, full_market, smart, and custom collection types
-- **Backtest Jobs**: Fully implemented with progress monitoring and result tracking
-- Jobs run in an isolated worker process to prevent main app freezes
-
-### 4. JobManager UI Component - COMPLETED (NEW!)
-- Created `/app/frontend/src/components/JobManager.jsx` for managing background jobs
-- Features: Start data collection, start backtests, view job progress, cancel jobs
-- Integrated into the AICoachTab (right sidebar in Command Center)
-
-### 5. Job Completion Notifications - COMPLETED (NEW!)
-- Browser notifications via Web Notifications API (works even when tab is not focused)
-- Sound notifications (success/failure tones)
-- In-app toast notifications
-- Toggle button to enable/disable notifications (bell icon in JobManager header)
-- Notifications for all job types: Data Collection, Backtest, AI Training, Calibration
-
-### 6. Startup Optimization System - COMPLETED (NEW!)
-- **StartupManager Context** (`/app/frontend/src/contexts/StartupManagerContext.jsx`):
-  - Wave 1 (0s): Core - Health, Auth, Positions, WebSocket
-  - Wave 2 (5s): Trading - Scanner, Alerts, Market Data
-  - Wave 3 (15s): AI - Status indicators, Debate advisor
-  - Wave 4 (30s): Analytics - Report card, Learning connectors
-  - Wave 5 (60s): Background - Historical data, Simulation jobs
-
-- **Smart Polling Intervals**:
-  - Critical (5s): Positions, Active trades, Alerts
-  - Important (15s): Scanner, SentCom status
-  - Standard (30s): AI status, Strategy promotion
-  - Relaxed (60s): Report card, Learning stats
-  - Background (5 min): IB collector, Simulation jobs
-
-- **useVisibility Hook** (`/app/frontend/src/hooks/useVisibility.js`):
-  - Lazy loading - only poll when component is visible
-  - Tab visibility awareness - pause when tab is hidden
-  - Jitter on startup - prevents thundering herd
-
-- **Consolidated Status Endpoint** (`/api/consolidated-status`):
-  - Combines 11+ status endpoints into 1 API call
-  - Reduces backend load significantly
-
-## UI Improvements This Session
-
-### 1. Command Center Header Consolidation - COMPLETED
-- Merged the "Command Center" page title and "Command/Charts" tabs into a single compact row
-- Saves vertical screen space
-- Tabs now integrated directly into the HeaderBar component
-- Files modified: `CommandCenterPage.js`, `HeaderBar.jsx`
-
-### 2. Focus Mode System - COMPLETED (NEW!)
-- **Phase 1: Focus Mode UI** - Dropdown in header to switch between modes
-- **Phase 2: Worker Process** - Background job processor for heavy tasks
-- Modes: Live Trading | Data Collection | AI Training | Backtesting
-- Each mode automatically pauses/throttles non-essential services
-- Progress tracking and elapsed time display
-- Files created:
-  - Backend: `focus_mode_manager.py`, `job_queue_manager.py`, `focus_mode_router.py`, `worker.py`
-  - Frontend: `FocusModeContext.jsx`, `FocusModeSelector.jsx`
-
-### 3. System Status Consolidation (Previous Fork)
-- Removed 5+ redundant connection status indicators
-- Created unified, color-coded status bar in TickerTape component
-- Single source of truth for all connection health
-
-### 4. Frontend Resilience Layer (Previous Fork)
-- Added `AppStateContext`, `ConnectionManagerContext`, `SystemStatusContext`, `TrainingModeContext`
-- Implemented `useSmartPolling` hook for visibility-aware polling
-- Persistent state across tab switches using localStorage
-
-## Bug Fixes This Session
-
-### 1. Prediction API 404 Errors - FIXED
-- Enhanced model loading with fallback chain in `timeseries_gbm.py`
-
-### 2. Frontend Polling Overload - FIXED  
-- Created `TrainingModeContext` to slow polling during training
-
-### 3. SentCom Market Regime Bug - FIXED
-- **Problem:** SentCom showed "STRONG UPTREND" when market was "HOLD"
-- **Fix:** Wired regime engine into SentCom, fixed key name (`state` vs `regime`), fixed VIX extraction
-
 ## Original Problem Statement
 Build a self-improving AI trading bot "SentCom" by hardening the data pipeline, creating automation, and improving the UI. After completing massive historical data collection (39M bars), the primary goal shifted to training AI models on this new dataset, integrating models into the bot's decision-making, and streamlining the local development/training environment.
 
+A critical issue emerged where the user's local backend would freeze or crash during startup and under heavy load. This made application stability the top priority.
+
 ## Core Requirements
-1. **Robust Data Pipeline**: Collect historical data for all required timeframes ✅ COMPLETED
-2. **Autonomous Learning Loop**: Implement automation for data collection and model training (IN PROGRESS)
-3. **Comprehensive UI**: Consolidate all AI, learning, and data management features
-4. **Startup Status Dashboard**: Correctly reflect backend service status
-5. **Comprehensive User Guide**: Create detailed, visual, downloadable guide ✅ COMPLETED
+1. **Robust Data Pipeline**: Collect historical data for all required timeframes - COMPLETED
+2. **Autonomous Learning Loop**: Implement automation for data collection and model training - IN PROGRESS
+3. **Comprehensive UI**: Consolidate all AI, learning, and data management features - IN PROGRESS
+4. **Startup Status Dashboard**: Correctly reflect backend service status - COMPLETED
+5. **Comprehensive User Guide**: Create detailed, visual, downloadable guide - COMPLETED
+6. **Resource Prioritization System ("Focus Mode")**: Manage application resources - COMPLETED
+7. **Startup & Polling Optimization**: Prevent backend overload from frontend requests - COMPLETED
 
 ## Architecture
 ```
 /app
-├── backend/
-│   ├── routers/ai_modules.py       # AI endpoints (predictions, training)
-│   ├── scripts/setup_mongodb_indexes.py
-│   └── services/ai_modules/
-│       ├── timeseries_service.py   # Training orchestration (memory-safe settings added)
-│       └── timeseries_gbm.py       # LightGBM model (model loading fixed)
-├── frontend/src/
-│   ├── contexts/
-│   │   ├── DataCacheContext.jsx
-│   │   └── TrainingModeContext.jsx # NEW: Centralized training mode control
-│   ├── components/
-│   │   ├── UnifiedAITraining.jsx   # Updated with training mode notifications
-│   │   ├── SimulatorControl.jsx    # Updated with training-aware polling
-│   │   ├── NIA.jsx                 # Updated with training-aware polling
-│   │   └── TrainingModeIndicator.jsx # NEW: Visual training indicator
-│   └── pages/
-│       └── TradeOpportunitiesPage.js # Updated with training-aware polling
-├── documents/
-│   └── AI_TRAINING_GUIDE.md
-└── memory/PRD.md
++-- backend/
+|   +-- server.py              # Main FastAPI server
+|   +-- worker.py              # Background job processor
+|   +-- routers/               # Modular API routers
+|   +-- services/              # Business logic
+|   +-- models/                # Data models
+|   +-- database.py            # MongoDB connection
++-- frontend/src/
+|   +-- components/
+|   |   +-- StartupModal.jsx   # Sequential health checks
+|   |   +-- SentCom.jsx        # Main AI command center (safePolling integrated)
+|   |   +-- NewDashboard.jsx   # Bot-centric dashboard (safePolling integrated)
+|   |   +-- JobManager.jsx     # Background jobs (safePolling integrated)
+|   +-- contexts/
+|   |   +-- FocusModeContext.jsx
+|   |   +-- StartupManagerContext.jsx
+|   +-- hooks/
+|   |   +-- useVisibility.js   # Viewport/tab visibility hook
+|   |   +-- useSmartPolling.js  # Focus-aware polling
+|   |   +-- useCommandCenterData.js # (safePolling integrated)
+|   +-- utils/
+|   |   +-- safePolling.js     # NEW: Staggered, visibility-aware polling
+|   |   +-- requestThrottler.js # 4-concurrent-max request limiter
+|   |   +-- api.js             # Axios instance with throttler
+|   +-- pages/
+|       +-- CommandCenterPage.js # (safePolling integrated)
++-- documents/                 # Guides, scripts, deployment docs
++-- memory/PRD.md
 ```
 
 ## What's Been Implemented
 
-### March 23, 2026 (Current Session)
+### Startup Stability System (March 23, 2026) - COMPLETED
+Multi-layered defense against backend overload during startup:
 
-#### Fix 0: WebSocket Status Indicator - FIXED (NEW!)
-- **Problem:** The "Data" (WebSocket) status indicator in the TickerTape header was not updating
-- **Root Cause:** The `useWebSocket` hook's `isConnected` state wasn't being synced to `SystemStatusContext`
-- **Fix:** Created `WebSocketStatusSync` component in `App.js` that bridges the WebSocket hook state to the context
-- **Result:** "Data" indicator now shows real-time green/red status based on WebSocket connection
-- **Files Modified:** `/app/frontend/src/App.js`
+1. **Sequential Health Checks** (StartupModal.jsx):
+   - Checks services one at a time with 500ms delay between each
+   - Blocks main app content until core services verified
+   - WebSocket check runs independently
 
-#### Fix 1: Prediction API 404 Errors - FIXED
-- Enhanced `_load_model()` in `timeseries_gbm.py` with fallback chain
-- Now auto-loads `direction_predictor_daily` when default model not found
-- Verified: `/api/ai-modules/timeseries/forecast` returns real predictions
+2. **safePolling Utility** (utils/safePolling.js) - NEW:
+   - Random stagger (0-3s) on first poll to prevent thundering herd
+   - Deterministic spread based on creation order (300ms increments)
+   - Tab visibility awareness - skips polls when tab is hidden
+   - `essential` flag for trading-critical polls that should continue
+   - Applied to 17+ polling intervals across the codebase
 
-#### Fix 2: Frontend Polling Overload - FIXED
-- Created `TrainingModeContext` to centrally control polling during training
-- When training is active, polling intervals are automatically slowed 10x
-- Updated components: `UnifiedAITraining`, `SimulatorControl`, `TradeOpportunitiesPage`, `NIA`
-- Added `TrainingModeIndicator` component for visual feedback
+3. **Request Throttler** (utils/requestThrottler.js):
+   - Global fetch() patch limits to 4 concurrent requests
+   - Queue system for excess requests
+   - Prevents browser ERR_INSUFFICIENT_RESOURCES
 
-#### Fix 3: Intraday Training Memory Safety - IMPLEMENTED
-- Added `TIMEFRAME_SETTINGS` with per-timeframe batch sizes:
-  - "1 min": batch_size=10, max_bars=200
-  - "5 mins": batch_size=15, max_bars=300
-  - "15 mins": batch_size=20, max_bars=400
-  - "30 mins": batch_size=25, max_bars=500
-  - "1 hour": batch_size=50, max_bars=1000
-  - "1 day": batch_size=100, max_bars=2000
-- Added memory monitoring with 3GB emergency stop
-- Added longer pauses (10s) between intraday timeframes
+4. **StartupManager** (contexts/StartupManagerContext.jsx):
+   - Wave-based feature loading (5 waves over 60s)
+   - useSmartPolling respects wave readiness
 
-### Previous Session (March 22-23, 2026)
-- Fixed "Full Universe" backend crash for larger timeframes
-- Fixed MongoDB "duplicate key" error on model saving
-- Trained models: "1 day" (53.7% accuracy), "1 hour" (55.4% accuracy)
-- Created MongoDB index script for faster data loading
-- Created AI Training Guide
+5. **Focus Mode** (contexts/FocusModeContext.jsx):
+   - Modes: Live Trading | Data Collection | AI Training | Backtesting
+   - Non-essential polling auto-pauses in non-Live modes
+
+### Components Updated with safePolling:
+- SentCom.jsx (11 polling hooks)
+- useCommandCenterData.js (5 polling intervals)
+- CommandCenterPage.js (1 Ollama poll)
+- AICoachTab.jsx (1 regime/session poll)
+- NewDashboard.jsx (4 polling intervals)
+- StartupStatusDashboard.jsx (1 status poll)
+- MarketRegimeWidget.jsx (1 regime poll)
+- LearningInsightsWidget.jsx (1 insights poll)
+- JobManager.jsx (1 jobs poll)
+- BotPerformanceChart.jsx (1 equity curve poll)
+
+### Previous Implementations
+- WebSocket Status Fix
+- Focus-Aware Polling Integration
+- Worker Process Jobs
+- JobManager UI Component
+- Job Completion Notifications
+- Command Center Header Consolidation
+- Frontend Resilience Layer (contexts, hooks)
 
 ## Trained Models
 | Timeframe | Model Name | Accuracy | Training Samples |
@@ -176,42 +106,35 @@ Build a self-improving AI trading bot "SentCom" by hardening the data pipeline, 
 | 1 day | direction_predictor_daily | 53.7% | 2,796,708 |
 | 1 hour | direction_predictor_1hour | 55.4% | 3,385,592 |
 
-## Outstanding Issues
+## Outstanding Issues / Backlog
+
+### P1 - High Priority
+1. **Implement Best Model Protection** - Save only if accuracy improves over current active model
+2. **Fix `fill-gaps` Endpoint** - `/api/ib-collector/fill-gaps` hangs the server
 
 ### P2 - Medium Priority
-1. **Implement Backtesting Workflow Automation** - Create automated backtesting scripts
-2. **Enable Best Model Protection** - Save only if accuracy improves
 3. **Enable GPU for LightGBM** - Re-install with GPU support
+4. **Complete Backend Router Refactoring** - Activate modular routers in server.py
+5. **Migrate remaining direct fetch() calls** - ~93 raw fetch calls to use central api (axios) instance
+6. **Implement useVisibility in off-screen components** - Further optimization using IntersectionObserver
 
-## Future Roadmap
-- Setup-Specific AI Models (77 trading setups)
-- Fix `fill-gaps` endpoint
-- Complete Backend Router Refactoring
+### P3 - Future
+7. **Setup-Specific AI Models** (77 trading setups)
+8. **Implement Backtesting Workflow Automation**
 
 ## Key API Endpoints
-- `POST /api/ai-modules/timeseries/forecast` - Get prediction for symbol ✅ WORKING
-- `GET /api/ai-modules/timeseries/status` - Model status ✅ WORKING
-- `GET /api/ai-modules/timeseries/training-history` - Training history ✅ WORKING
-- `POST /api/ai-modules/timeseries/train-full-universe-all` - Train all timeframes ✅ MEMORY-OPTIMIZED
-
-## Files Modified This Session
-- `/app/frontend/src/pages/CommandCenterPage.js` - Removed separate tab navigation, integrated into header
-- `/app/frontend/src/components/layout/HeaderBar.jsx` - Added integrated Command/Charts tabs
-- `/app/backend/services/ai_modules/timeseries_gbm.py` - Fixed model loading
-- `/app/backend/services/ai_modules/timeseries_service.py` - Added memory-safe settings
-- `/app/frontend/src/contexts/TrainingModeContext.jsx` - NEW
-- `/app/frontend/src/contexts/index.js` - Updated exports
-- `/app/frontend/src/components/TrainingModeIndicator.jsx` - NEW
-- `/app/frontend/src/components/UnifiedAITraining.jsx` - Training mode integration
-- `/app/frontend/src/components/SimulatorControl.jsx` - Training-aware polling
-- `/app/frontend/src/components/NIA.jsx` - Training-aware polling
-- `/app/frontend/src/pages/TradeOpportunitiesPage.js` - Training-aware polling
-- `/app/frontend/src/App.js` - Added TrainingModeProvider and indicator
+- `GET /api/health` - Backend health check
+- `GET /api/consolidated-status` - All service statuses in one call
+- `POST /api/jobs` - Create background job
+- `GET /api/jobs/status/{job_id}` - Poll job status
+- `POST /api/ai-modules/timeseries/forecast` - Get AI prediction
+- `GET /api/ai-modules/timeseries/status` - Model status
 
 ## 3rd Party Integrations
 - Interactive Brokers (IB Gateway)
 - Ollama Pro
-- MongoDB Atlas (84% disk usage - monitor)
+- MongoDB Atlas
 - PyTorch (with CUDA)
 - LightGBM
 - ChromaDB
+- motor (async MongoDB driver)
