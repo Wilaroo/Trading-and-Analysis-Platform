@@ -142,7 +142,7 @@ from services.trading_scheduler import (
     get_trading_scheduler, init_trading_scheduler
 )
 from services.eod_generation_service import get_eod_service
-from services.ib_service import get_ib_service
+from services.ib_service import get_ib_service, IBCommand
 from services.news_service import init_news_service
 from services.strategy_service import get_strategy_service
 from services.scoring_engine import get_scoring_engine
@@ -4362,20 +4362,28 @@ async def startup_event():
     await asyncio.sleep(3)
     
     # Attempt auto-connect to IB Gateway if it's running
+    # CRITICAL: ib_service.connect() uses synchronous queue.get() which blocks the event loop.
+    # We run it in a thread pool so the health endpoint remains responsive during startup.
     try:
         ib_service = get_ib_service()
         status = ib_service.get_connection_status()
         if not status.get("connected", False):
-            print("Attempting auto-connect to IB Gateway...")
-            success = await ib_service.connect()
+            print("Attempting auto-connect to IB Gateway (non-blocking)...")
+            try:
+                success = await asyncio.to_thread(
+                    lambda: ib_service._send_request(IBCommand.CONNECT, None, 15.0).success
+                )
+            except Exception:
+                success = False
+            
             if success:
-                print("✅ Auto-connected to IB Gateway")
+                print("Auto-connected to IB Gateway")
             else:
-                print("⚠️ IB Gateway not available - manual connect required")
+                print("IB Gateway not available - manual connect required")
         else:
-            print("✅ IB Gateway already connected")
+            print("IB Gateway already connected")
     except Exception as e:
-        print(f"⚠️ IB auto-connect skipped: {e}")
+        print(f"IB auto-connect skipped: {e}")
     
     # Wait a bit more after IB connection attempt
     await asyncio.sleep(2)
