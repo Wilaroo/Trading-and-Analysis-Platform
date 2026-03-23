@@ -106,8 +106,7 @@ const DashboardHeader = ({
         
         {/* Right Side: Account + P&L - More compact */}
         <div className="flex items-center gap-3">
-          {/* Unified System Status */}
-          <SystemStatusBar compact={false} />
+          {/* System Status now in ticker tape - removed from here */}
           
           {/* Account Value */}
           <div className="text-right">

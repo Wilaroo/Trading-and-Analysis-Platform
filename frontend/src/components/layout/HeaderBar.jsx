@@ -807,22 +807,7 @@ const HeaderBar = ({
           )}
         </div>
         
-        {/* Right Side - Status Indicators */}
-        <div className="flex items-center gap-3">
-          {/* Consolidated System Status Popover */}
-          <SystemStatusPopover
-            wsConnected={wsConnected}
-            wsLastUpdate={wsLastUpdate}
-            connectionChecked={connectionChecked}
-            isConnected={isConnected}
-            connecting={connecting}
-            handleConnectToIB={handleConnectToIB}
-            ollamaStatus={ollamaStatus}
-            ibPusherStatus={ibPusherStatus}
-          />
-          
-          {/* Removed redundant LIVE indicator - already shown in SystemStatusPopover */}
-        </div>
+        {/* Right Side - Removed SystemStatusPopover since status is now in ticker tape */}
       </div>
 
       {/* Credit Budget Modal */}

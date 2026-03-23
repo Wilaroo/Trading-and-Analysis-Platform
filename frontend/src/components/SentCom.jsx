@@ -3175,11 +3175,7 @@ const SentCom = ({ compact = false, embedded = false }) => {
             {/* Dynamic Risk Badge */}
             <DynamicRiskBadge onClick={() => setShowRiskPanel(!showRiskPanel)} />
             
-            {/* IB Connection - Minimal dot indicator */}
-            <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-black/20 border border-white/5">
-              <StatusDot service="ibGateway" size="sm" />
-              <span className="text-[9px] font-medium text-zinc-400">IB</span>
-            </div>
+            {/* Removed IB badge - now shown in ticker tape */}
           </div>
           
           <div className="flex items-center gap-2">
