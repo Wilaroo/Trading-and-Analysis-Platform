@@ -8,6 +8,7 @@ Communication between FastAPI and the IB thread uses thread-safe queues.
 """
 import threading
 import queue
+import asyncio
 import logging
 import os
 import time
@@ -1054,7 +1055,7 @@ class IBService:
         return False
     
     def _send_request(self, command: IBCommand, params: Dict = None, timeout: float = 30.0) -> IBResponse:
-        """Send a request to the worker thread and wait for response"""
+        """Send a request to the worker thread and wait for response (BLOCKING - use _async_request instead)"""
         self._ensure_worker_running()
         
         response_queue = queue.Queue()
@@ -1071,6 +1072,10 @@ class IBService:
             return response
         except queue.Empty:
             return IBResponse(success=False, error="Timeout waiting for IB response")
+    
+    async def _async_request(self, command: IBCommand, params: Dict = None, timeout: float = 30.0) -> IBResponse:
+        """Non-blocking wrapper - runs _send_request in a thread pool to avoid blocking the event loop"""
+        return await asyncio.to_thread(self._send_request, command, params, timeout)
     
     def get_connection_status(self) -> Dict:
         """Get current connection status - fast path using flag"""
@@ -1094,30 +1099,30 @@ class IBService:
     
     async def connect(self) -> bool:
         """Connect to IB Gateway"""
-        response = self._send_request(IBCommand.CONNECT, timeout=20.0)
+        response = await self._async_request(IBCommand.CONNECT, timeout=20.0)
         return response.success
     
     async def disconnect(self):
         """Disconnect from IB Gateway"""
-        self._send_request(IBCommand.DISCONNECT)
+        await self._async_request(IBCommand.DISCONNECT)
     
     async def get_account_summary(self) -> Dict:
         """Get account summary"""
-        response = self._send_request(IBCommand.GET_ACCOUNT_SUMMARY)
+        response = await self._async_request(IBCommand.GET_ACCOUNT_SUMMARY)
         if not response.success:
             raise ConnectionError(response.error)
         return response.data
     
     async def get_positions(self) -> List[Dict]:
         """Get all positions"""
-        response = self._send_request(IBCommand.GET_POSITIONS)
+        response = await self._async_request(IBCommand.GET_POSITIONS)
         if not response.success:
             raise ConnectionError(response.error)
         return response.data
     
     async def get_quote(self, symbol: str) -> Optional[Dict]:
         """Get quote for a symbol"""
-        response = self._send_request(IBCommand.GET_QUOTE, {"symbol": symbol})
+        response = await self._async_request(IBCommand.GET_QUOTE, {"symbol": symbol})
         if not response.success:
             return None
         return response.data
@@ -1132,7 +1137,7 @@ class IBService:
         stop_price: Optional[float] = None
     ) -> Optional[Dict]:
         """Place an order"""
-        response = self._send_request(
+        response = await self._async_request(
             IBCommand.PLACE_ORDER,
             {
                 "symbol": symbol,
@@ -1150,19 +1155,19 @@ class IBService:
     
     async def cancel_order(self, order_id: int) -> bool:
         """Cancel an order"""
-        response = self._send_request(IBCommand.CANCEL_ORDER, {"order_id": order_id})
+        response = await self._async_request(IBCommand.CANCEL_ORDER, {"order_id": order_id})
         return response.success
     
     async def get_open_orders(self) -> List[Dict]:
         """Get open orders"""
-        response = self._send_request(IBCommand.GET_OPEN_ORDERS)
+        response = await self._async_request(IBCommand.GET_OPEN_ORDERS)
         if not response.success:
             raise ConnectionError(response.error)
         return response.data
     
     async def get_executions(self) -> List[Dict]:
         """Get today's executions"""
-        response = self._send_request(IBCommand.GET_EXECUTIONS)
+        response = await self._async_request(IBCommand.GET_EXECUTIONS)
         if not response.success:
             raise ConnectionError(response.error)
         return response.data
@@ -1178,7 +1183,7 @@ class IBService:
         Returns:
             Dict with 'success', 'data', and optionally 'error' keys
         """
-        response = self._send_request(
+        response = await self._async_request(
             IBCommand.GET_HISTORICAL_DATA,
             {"symbol": symbol, "duration": duration, "bar_size": bar_size},
             timeout=60.0  # Longer timeout for historical data
@@ -1211,7 +1216,7 @@ class IBService:
         - HIGH_VS_52W_HL: Near 52-week high
         - LOW_VS_52W_HL: Near 52-week low
         """
-        response = self._send_request(
+        response = await self._async_request(
             IBCommand.RUN_SCANNER,
             {
                 "scan_type": scan_type,
@@ -1227,7 +1232,7 @@ class IBService:
     
     async def get_quotes_batch(self, symbols: List[str]) -> List[Dict]:
         """Get quotes for multiple symbols"""
-        response = self._send_request(
+        response = await self._async_request(
             IBCommand.GET_QUOTES_BATCH,
             {"symbols": symbols},
             timeout=90.0  # Increased timeout for batch processing
@@ -1238,7 +1243,7 @@ class IBService:
     
     async def get_fundamentals(self, symbol: str) -> Dict:
         """Get fundamental data for a symbol"""
-        response = self._send_request(
+        response = await self._async_request(
             IBCommand.GET_FUNDAMENTALS,
             {"symbol": symbol},
             timeout=30.0
@@ -1249,7 +1254,7 @@ class IBService:
     
     async def get_news_for_symbol(self, symbol: str) -> List[Dict]:
         """Get news headlines for a specific symbol"""
-        response = self._send_request(
+        response = await self._async_request(
             IBCommand.GET_NEWS,
             {"symbol": symbol},
             timeout=15.0
@@ -1260,7 +1265,7 @@ class IBService:
     
     async def get_general_news(self) -> List[Dict]:
         """Get general market news"""
-        response = self._send_request(
+        response = await self._async_request(
             IBCommand.GET_NEWS,
             {"symbol": None},
             timeout=15.0
@@ -1271,7 +1276,7 @@ class IBService:
     
     async def get_news_providers(self) -> List[Dict]:
         """Get list of subscribed news providers (e.g., BZ=Benzinga, FLY=Fly, DJ=Dow Jones)"""
-        response = self._send_request(
+        response = await self._async_request(
             IBCommand.GET_NEWS_PROVIDERS,
             {},
             timeout=15.0
@@ -1297,7 +1302,7 @@ class IBService:
         Returns:
             List of news items with headline, timestamp, provider, article_id
         """
-        response = self._send_request(
+        response = await self._async_request(
             IBCommand.GET_HISTORICAL_NEWS,
             {
                 "symbol": symbol,
@@ -1323,7 +1328,7 @@ class IBService:
         Returns:
             Dict with article content
         """
-        response = self._send_request(
+        response = await self._async_request(
             IBCommand.GET_NEWS_ARTICLE,
             {
                 "provider_code": provider_code,

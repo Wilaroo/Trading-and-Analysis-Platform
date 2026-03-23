@@ -51,7 +51,10 @@ A critical issue emerged where the user's local backend would freeze or crash du
 
 ## What's Been Implemented
 
-### Startup Stability System (March 23, 2026) - COMPLETED
+### IB Service Event Loop Fix (March 23, 2026) - COMPLETED
+**Root cause**: All 18 `async def` methods in `ib_service.py` called `_send_request()` synchronously, which uses `queue.get(timeout=30)` — a blocking call that froze the entire asyncio event loop. During IB Gateway connect (20s timeout), NO HTTP requests could be processed.
+
+**Fix**: Added `_async_request()` method that wraps `_send_request` in `asyncio.to_thread()`. All 18 async methods now use this non-blocking wrapper. The health endpoint responds in ~11ms even while IB operations are in progress.
 Multi-layered defense against backend overload during startup:
 
 1. **Sequential Health Checks** (StartupModal.jsx):
