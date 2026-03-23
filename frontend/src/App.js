@@ -17,7 +17,7 @@ import api from './utils/api';
 import StartupModal from './components/StartupModal';
 import StartupStatusDashboard from './components/StartupStatusDashboard';
 import TrainingModeIndicator from './components/TrainingModeIndicator';
-import ConnectionStatus from './components/ConnectionStatus';
+// ConnectionStatus removed - redundant with existing System Status dropdown
 import ErrorBoundary from './components/ErrorBoundary';
 
 // Import pages
@@ -444,8 +444,7 @@ function App() {
         </div>
       </main>
       
-      {/* Connection Status Indicator */}
-      <ConnectionStatus />
+      {/* ConnectionStatus removed - redundant with System Status dropdown */}
       </div>
     </TickerModalProvider>
     </DataCacheProvider>
