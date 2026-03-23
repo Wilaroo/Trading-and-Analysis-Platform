@@ -519,17 +519,15 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
     fetchData();
   }, [fetchData]);
 
-  // Train single timeframe
+  // Train single timeframe (uses job queue for worker processing)
   const handleTrainTimeframe = async (timeframe) => {
     setIsTraining(true);
     setCurrentTimeframe(timeframe);
     setTrainingStartTime(Date.now());
-    // Notify all components to reduce polling during training
-    notifyTrainingStart('single-timeframe');
     
     // Initialize training progress
     setTrainingProgress({
-      phase: 'loading',
+      phase: 'starting',
       currentStep: 1,
       totalSteps: 5,
       symbolsLoaded: 0,
@@ -537,98 +535,162 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       barsLoaded: 0,
       elapsedTime: 0,
       estimatedTimeRemaining: null,
-      message: 'Initializing training...'
+      message: 'Creating training job...'
     });
     
     setModelStatus(prev => ({
       ...prev,
-      [timeframe]: { status: 'running', message: 'Loading data...' }
+      [timeframe]: { status: 'running', message: 'Starting...' }
     }));
 
     try {
-      toast.info(`Training ${TIMEFRAME_CONFIG[timeframe]?.label || timeframe} model...`);
+      toast.info(`Starting ${TIMEFRAME_CONFIG[timeframe]?.label || timeframe} training...`);
       
-      // Update progress phases
-      setTrainingProgress(prev => ({
-        ...prev,
-        phase: 'loading',
-        currentStep: 2,
-        message: 'Loading symbols from database...'
-      }));
-
-      console.log('[NIA] Sending training request for:', timeframe);
-      console.log('[NIA] API URL:', apiLongRunning.defaults.baseURL || 'relative (proxy)');
+      console.log('[NIA] Creating training job for:', timeframe);
       
-      const res = await apiLongRunning.post('/api/ai-modules/timeseries/train', {
-        bar_size: timeframe
+      // Create a job in the queue (auto_start will set focus mode)
+      const jobRes = await api.post('/api/jobs', {
+        job_type: 'training',
+        params: {
+          bar_size: timeframe,
+          timeframe: timeframe
+        },
+        priority: 8,
+        auto_start: true  // This sets focus mode to 'training' automatically
       });
       
-      console.log('[NIA] Training response received:', res.data);
-
-      if (res.data?.success && res.data?.result?.success) {
-        const result = res.data.result;
-        const accuracy = result.metrics?.accuracy ? (result.metrics.accuracy * 100).toFixed(1) : '?';
-        
-        setTrainingProgress(prev => ({
-          ...prev,
-          phase: 'complete',
-          currentStep: 5,
-          message: `Training complete! ${accuracy}% accuracy`
-        }));
-        
-        setModelStatus(prev => ({
-          ...prev,
-          [timeframe]: { 
-            status: 'completed', 
-            message: `${accuracy}% accuracy, ${formatNumber(result.training_samples)} samples` 
-          }
-        }));
-        
-        toast.success(`${TIMEFRAME_CONFIG[timeframe]?.label} trained! ${accuracy}% accuracy`);
-        fetchData(); // Refresh history
-      } else if (res.data?.ml_not_available) {
-        setTrainingProgress(prev => ({
-          ...prev,
-          phase: 'error',
-          message: 'ML libraries not installed locally'
-        }));
-        setModelStatus(prev => ({
-          ...prev,
-          [timeframe]: { status: 'error', message: 'ML not installed locally' }
-        }));
-        toast.error('ML libraries not installed. Run: pip install lightgbm');
-      } else {
-        const errorMsg = res.data?.result?.error || 'Training failed';
-        setTrainingProgress(prev => ({
-          ...prev,
-          phase: 'error',
-          message: errorMsg
-        }));
-        setModelStatus(prev => ({
-          ...prev,
-          [timeframe]: { status: 'error', message: errorMsg }
-        }));
-        toast.error(`Training failed: ${errorMsg}`);
+      console.log('[NIA] Job created:', jobRes.data);
+      
+      if (!jobRes.data?.success) {
+        throw new Error(jobRes.data?.error || 'Failed to create job');
       }
+      
+      const job = jobRes.data.job;
+      const jobId = job.job_id;
+      
+      toast.success(`Training job created: ${jobId}`);
+      
+      setTrainingProgress(prev => ({
+        ...prev,
+        phase: 'queued',
+        currentStep: 2,
+        message: `Job ${jobId} queued - worker will process`,
+        details: { jobId }
+      }));
+      
+      // Poll for job completion
+      let pollCount = 0;
+      const maxPolls = 600; // 10 minutes max (1 second intervals)
+      
+      const pollJob = async () => {
+        pollCount++;
+        
+        try {
+          const statusRes = await api.get(`/api/jobs/${jobId}`);
+          const jobStatus = statusRes.data?.job;
+          
+          if (!jobStatus) {
+            console.warn('[NIA] Job status not found');
+            return;
+          }
+          
+          // Update progress from job
+          if (jobStatus.progress) {
+            setTrainingProgress(prev => ({
+              ...prev,
+              phase: jobStatus.status,
+              currentStep: Math.ceil((jobStatus.progress.percent / 100) * 5),
+              message: jobStatus.progress.message || 'Processing...',
+              details: { ...prev.details, ...jobStatus.progress.details }
+            }));
+          }
+          
+          setModelStatus(prev => ({
+            ...prev,
+            [timeframe]: { 
+              status: jobStatus.status, 
+              message: jobStatus.progress?.message || jobStatus.status 
+            }
+          }));
+          
+          // Check if job is complete
+          if (jobStatus.status === 'completed') {
+            const result = jobStatus.result || {};
+            const accuracy = result.accuracy_percent || (result.accuracy ? `${(result.accuracy * 100).toFixed(1)}%` : '?');
+            
+            setTrainingProgress(prev => ({
+              ...prev,
+              phase: 'complete',
+              currentStep: 5,
+              message: `Training complete! ${accuracy} accuracy`
+            }));
+            
+            setModelStatus(prev => ({
+              ...prev,
+              [timeframe]: { 
+                status: 'completed', 
+                message: `${accuracy} accuracy` 
+              }
+            }));
+            
+            toast.success(`${TIMEFRAME_CONFIG[timeframe]?.label} trained! ${accuracy}`);
+            notifyTrainingEnd();
+            setIsTraining(false);
+            setCurrentTimeframe(null);
+            fetchData(); // Refresh history
+            return; // Stop polling
+          }
+          
+          if (jobStatus.status === 'failed') {
+            throw new Error(jobStatus.error || 'Training failed');
+          }
+          
+          if (jobStatus.status === 'cancelled') {
+            toast.info('Training was cancelled');
+            notifyTrainingEnd();
+            setIsTraining(false);
+            setCurrentTimeframe(null);
+            return; // Stop polling
+          }
+          
+          // Continue polling if still running/pending
+          if (pollCount < maxPolls && (jobStatus.status === 'running' || jobStatus.status === 'pending')) {
+            setTimeout(pollJob, 1000);
+          } else if (pollCount >= maxPolls) {
+            toast.warning('Training is taking longer than expected. Check the Worker window.');
+          }
+          
+        } catch (pollError) {
+          console.error('[NIA] Poll error:', pollError);
+          // Don't stop polling on transient errors
+          if (pollCount < maxPolls) {
+            setTimeout(pollJob, 2000);
+          }
+        }
+      };
+      
+      // Start polling after a short delay
+      setTimeout(pollJob, 2000);
+      
     } catch (e) {
       console.error('[NIA] Training error:', e);
       console.error('[NIA] Error details:', e.response?.data || e.message);
+      
       setTrainingProgress(prev => ({
         ...prev,
         phase: 'error',
         message: e.response?.data?.detail || e.message
       }));
+      
       setModelStatus(prev => ({
         ...prev,
         [timeframe]: { status: 'error', message: e.response?.data?.detail || e.message }
       }));
+      
       toast.error(`Training error: ${e.response?.data?.detail || e.message}`);
-    } finally {
+      notifyTrainingEnd();
       setIsTraining(false);
       setCurrentTimeframe(null);
-      setTrainingStartTime(null);
-      notifyTrainingEnd();
-      if (onTrainComplete) onTrainComplete();
     }
   };
 
