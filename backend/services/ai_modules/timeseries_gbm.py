@@ -176,10 +176,12 @@ class TimeSeriesGBM:
             model_bytes = pickle.dumps(self._model)
             model_data = base64.b64encode(model_bytes).decode("utf-8")
             
+            # Use model_name as model_id to satisfy the unique index
             self._db[self.MODEL_COLLECTION].update_one(
                 {"name": self.model_name},
                 {"$set": {
                     "name": self.model_name,
+                    "model_id": self.model_name,  # Required for unique index
                     "model_data": model_data,
                     "version": self._version,
                     "metrics": self._metrics.to_dict(),

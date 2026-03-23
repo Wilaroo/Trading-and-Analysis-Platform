@@ -871,17 +871,25 @@ class TimeSeriesAIService:
             logger.info("[FULL UNIVERSE] Saving model...")
             sys.stdout.flush()
             
-            model._save_model()
+            save_success = model._save_model()
+            if save_success:
+                logger.info("[FULL UNIVERSE] Model saved successfully!")
+            else:
+                logger.warning("[FULL UNIVERSE] Model save failed, but training completed. Model is in memory.")
+            
             self._models[bar_size] = model
             
             # Log training history
-            await self._log_training_history(
-                bar_size=bar_size,
-                model_name=model_name,
-                metrics=model._metrics,
-                symbols_used=symbols_with_data,
-                total_bars=total_bars_processed
-            )
+            try:
+                await self._log_training_history(
+                    bar_size=bar_size,
+                    model_name=model_name,
+                    metrics=model._metrics,
+                    symbols_used=symbols_with_data,
+                    total_bars=total_bars_processed
+                )
+            except Exception as hist_err:
+                logger.warning(f"[FULL UNIVERSE] Could not log training history: {hist_err}")
             
             elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
             
