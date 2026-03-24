@@ -114,19 +114,62 @@ const StartupModal = ({ onComplete }) => {
   const [isChecking, setIsChecking] = useState(true);
   const [checkCount, setCheckCount] = useState(0);
   const [wsConnected, setWsConnected] = useState(false);
+  const [countdown, setCountdown] = useState(8);
   const wsRef = useRef(null);
   const checkIntervalRef = useRef(null);
   const serviceStatusRef = useRef({});
   const mountedRef = useRef(true);
+  const autoDismissRef = useRef(null);
+  const dismissedRef = useRef(false);
 
   // Check if user has opted out
   useEffect(() => {
     const skipStartup = localStorage.getItem('tradecommand_skip_startup');
     if (skipStartup === 'true') {
       setVisible(false);
+      dismissedRef.current = true;
       onComplete?.();
     }
   }, [onComplete]);
+
+  // AUTO-DISMISS: If backend hasn't responded within 8 seconds, let the user in anyway
+  // This prevents the modal from blocking the entire app on cold starts
+  useEffect(() => {
+    if (!visible || dismissedRef.current) return;
+    
+    // Countdown ticker
+    const countdownInterval = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(countdownInterval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    
+    autoDismissRef.current = setTimeout(() => {
+      if (!dismissedRef.current) {
+        dismissedRef.current = true;
+        mountedRef.current = false;
+        if (checkIntervalRef.current) {
+          clearTimeout(checkIntervalRef.current);
+        }
+        if (wsRef.current) {
+          wsRef.current.close();
+        }
+        setVisible(false);
+        onComplete?.();
+      }
+    }, 8000);
+    
+    return () => {
+      clearInterval(countdownInterval);
+      if (autoDismissRef.current) {
+        clearTimeout(autoDismissRef.current);
+      }
+    };
+  }, [visible, onComplete]);
 
   // Check a single service - uses un-throttled fetch to bypass the request queue
   const checkService = useCallback(async (service) => {
@@ -276,14 +319,18 @@ const StartupModal = ({ onComplete }) => {
         const res = await directFetch(`${API_URL}/api/health`, { signal: controller.signal });
         clearTimeout(timeoutId);
         
-        if (res.ok) {
-          // Backend is running — mark core services immediately
-          const coreSuccess = { backend: 'success', database: 'success', websocket: 'loading' };
-          setServiceStatus(coreSuccess);
-          serviceStatusRef.current = coreSuccess;
-          setCheckCount(1);
-          // Still run one full parallel round to check optional services
-          checkIntervalRef.current = setTimeout(runCheck, 100);
+        if (res.ok && !dismissedRef.current) {
+          // Backend is running — dismiss immediately (instant on refresh)
+          dismissedRef.current = true;
+          if (autoDismissRef.current) {
+            clearTimeout(autoDismissRef.current);
+          }
+          mountedRef.current = false;
+          if (wsRef.current) {
+            wsRef.current.close();
+          }
+          setVisible(false);
+          onComplete?.();
           return;
         }
       } catch (e) {
@@ -311,22 +358,49 @@ const StartupModal = ({ onComplete }) => {
   const isReady = requiredReady;
   const canForceStart = checkCount >= 3; // Allow force-start after 3 attempts (faster)
 
-  // Stop checking once all services have been checked at least once and required are ready
+  // Auto-proceed when required services are ready (mid-check)
   useEffect(() => {
-    if (isReady && allServicesChecked && checkIntervalRef.current) {
-      clearTimeout(checkIntervalRef.current);
-      mountedRef.current = false;
-      checkIntervalRef.current = null;
+    if (isReady && !dismissedRef.current) {
+      dismissedRef.current = true;
+      if (autoDismissRef.current) {
+        clearTimeout(autoDismissRef.current);
+      }
+      // Small delay so user sees the green checkmarks
+      setTimeout(() => {
+        mountedRef.current = false;
+        if (checkIntervalRef.current) {
+          clearTimeout(checkIntervalRef.current);
+        }
+        if (wsRef.current) {
+          wsRef.current.close();
+        }
+        setVisible(false);
+        onComplete?.();
+      }, 600);
     }
-  }, [isReady, allServicesChecked]);
+  }, [isReady, onComplete]);
 
   // Calculate progress
   const successCount = Object.values(serviceStatus).filter(s => s === 'success').length;
   const progress = Math.round((successCount / SERVICES.length) * 100);
 
   const handleGetStarted = () => {
+    if (dismissedRef.current) return;
+    dismissedRef.current = true;
+    
     if (dontShowAgain) {
       localStorage.setItem('tradecommand_skip_startup', 'true');
+    }
+    
+    // Cancel auto-dismiss timer
+    if (autoDismissRef.current) {
+      clearTimeout(autoDismissRef.current);
+    }
+    
+    // Stop checking
+    mountedRef.current = false;
+    if (checkIntervalRef.current) {
+      clearTimeout(checkIntervalRef.current);
     }
     
     // Close WebSocket used for checking
@@ -410,7 +484,7 @@ const StartupModal = ({ onComplete }) => {
                 <div>
                   <h1 className="text-lg font-bold text-white">TradeCommand</h1>
                   <p className="text-zinc-400 text-xs">
-                    {isReady ? 'All systems ready!' : 'Verifying systems...'}
+                    {isReady ? 'All systems ready!' : `Auto-continuing in ${countdown}s...`}
                   </p>
                 </div>
               </div>
@@ -558,32 +632,15 @@ const StartupModal = ({ onComplete }) => {
 
             <button
               onClick={handleGetStarted}
-              disabled={!isReady && !canForceStart}
               className={`px-5 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
                 isReady
                   ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white hover:shadow-lg hover:shadow-green-500/25'
-                  : canForceStart
-                    ? 'bg-gradient-to-r from-amber-600 to-orange-600 text-white hover:shadow-lg hover:shadow-amber-500/25'
-                    : 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
+                  : 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:shadow-lg hover:shadow-cyan-500/25'
               }`}
               data-testid="get-started-btn"
             >
-              {isReady ? (
-                <>
-                  <Zap className="w-4 h-4" />
-                  Get Started
-                </>
-              ) : canForceStart ? (
-                <>
-                  <Zap className="w-4 h-4" />
-                  Start Anyway
-                </>
-              ) : (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Waiting for services...
-                </>
-              )}
+              <Zap className="w-4 h-4" />
+              {isReady ? 'Get Started' : 'Enter App'}
             </button>
           </div>
         </motion.div>
