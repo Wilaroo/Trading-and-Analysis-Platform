@@ -224,10 +224,10 @@ export const ConnectionManagerProvider = ({ children }) => {
     // Initial WebSocket connection (lightweight, doesn't block HTTP pool)
     connectWebSocket();
     
-    // Delay initial health checks to let the StartupModal finish first
+    // Delay initial health checks briefly to let the StartupModal finish first
     const initialDelay = setTimeout(() => {
       runHealthChecks();
-    }, 20000);
+    }, 3000);
     
     // Periodic health checks - use recursive setTimeout to prevent overlap
     let healthTimer = null;
@@ -240,7 +240,7 @@ export const ConnectionManagerProvider = ({ children }) => {
       }, HEALTH_CHECK_INTERVAL);
     };
     // Start the periodic loop after initial delay
-    const periodicDelay = setTimeout(scheduleHealthCheck, 25000);
+    const periodicDelay = setTimeout(scheduleHealthCheck, 8000);
     
     return () => {
       // Cleanup

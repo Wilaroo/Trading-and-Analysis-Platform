@@ -2430,12 +2430,20 @@ async def startup_check():
     except Exception:
         pass
 
-    # Ollama/AI Assistant - check in-memory proxy sessions only
+    # Ollama/AI Assistant - check if ANY LLM provider is available (Ollama OR Emergent)
     ollama_available = False
     try:
-        ollama_available = is_http_ollama_proxy_connected()
+        # Check all registered providers in assistant service
+        for provider, cfg in assistant_service.llm_clients.items():
+            if cfg.get("available", False):
+                ollama_available = True
+                break
     except Exception:
-        pass
+        # Fallback: check HTTP proxy
+        try:
+            ollama_available = is_http_ollama_proxy_connected()
+        except Exception:
+            pass
 
     # AI Predictions (timeseries) - check if service object exists
     timeseries_available = False

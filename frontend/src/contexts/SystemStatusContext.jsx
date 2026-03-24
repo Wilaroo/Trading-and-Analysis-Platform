@@ -242,12 +242,12 @@ export const SystemStatusProvider = ({ children }) => {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [checkAllServices]);
 
-  // Initial check and polling — delay to let StartupModal complete first
+  // Initial check and polling — short delay to let StartupModal complete first
   useEffect(() => {
-    // Delay initial check by 20s - StartupModal handles service verification during startup
+    // Delay initial check by 3s - StartupModal verifies services during startup
     const initialDelay = setTimeout(() => {
       checkAllServices();
-    }, 20000);
+    }, 3000);
     
     // Poll every 60 seconds (reduced from 30s — WebSocket handles real-time updates)
     checkIntervalRef.current = setInterval(() => {
