@@ -68,7 +68,7 @@ async def check_ollama():
     ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
     
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=2.0) as client:
             response = await client.get(
                 f"{ollama_url}/api/tags",
                 headers={"ngrok-skip-browser-warning": "true"}
