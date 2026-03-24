@@ -259,7 +259,32 @@ const StartupModal = ({ onComplete }) => {
     };
 
     // Initial check after short delay
-    checkIntervalRef.current = setTimeout(runCheck, 500);
+    // Fast-path: if backend health responds instantly, skip full check cycle
+    const fastCheck = async () => {
+      try {
+        const directFetch = window.__originalFetch || window.fetch;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        const res = await directFetch(`${API_URL}/api/health`, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (res.ok) {
+          // Backend is already running — mark everything as success and dismiss
+          const allSuccess = {};
+          SERVICES.forEach(s => { allSuccess[s.id] = 'success'; });
+          setServiceStatus(allSuccess);
+          serviceStatusRef.current = allSuccess;
+          setCheckCount(1);
+          return; // Don't start the slow check cycle
+        }
+      } catch (e) {
+        // Backend not ready yet — fall through to normal check cycle
+      }
+      
+      checkIntervalRef.current = setTimeout(runCheck, 500);
+    };
+    
+    fastCheck();
 
     return () => {
       mountedRef.current = false;
