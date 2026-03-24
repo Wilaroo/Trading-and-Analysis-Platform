@@ -95,6 +95,9 @@ AI-powered trading platform that combines market scanning, strategy simulation, 
 - Consolidate `predictive_scanner.py` to delegate setup checks to `enhanced_scanner`
 - Phase out `background_scanner.py` (dead code) and `backtest_engine.py` (superseded)
 
+### P1.5
+- **AI Parameter Auto-Optimizer** — Sweep AI confidence thresholds (0.0→0.5) and lookback windows (20→200) across strategies to find the optimal settings per strategy. Runs as a background job and surfaces the best parameter combination automatically.
+
 ### P2
 - Enable GPU for LightGBM
 - Complete backend router refactoring (activate modular routers in server.py)
