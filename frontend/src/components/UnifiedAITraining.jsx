@@ -727,87 +727,143 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       totalSymbols: 0,
       barsLoaded: 0,
       elapsedTime: 0,
-      message: 'Starting full universe training...'
+      message: 'Creating full universe training job...'
     });
     
     // Notify all components to reduce polling during training
     notifyTrainingStart('full-universe');
     
-    toast.info('🌐 Starting Full Universe training - check backend terminal for progress', {
+    toast.info('Starting Full Universe training via worker...', {
       duration: 10000
     });
     
     try {
-      console.log('[NIA] Full Universe: Sending POST request to /api/ai-modules/timeseries/train-full-universe-all');
-      
-      // Log the full URL being called
-      const fullUrl = (apiLongRunning.defaults.baseURL || '') + '/api/ai-modules/timeseries/train-full-universe-all';
-      console.log('[NIA] Full URL:', fullUrl);
-      console.log('[NIA] Timeout setting:', apiLongRunning.defaults.timeout);
-      
-      const res = await apiLongRunning.post('/api/ai-modules/timeseries/train-full-universe-all', {
-        symbol_batch_size: 50,   // Reduced for stability
-        max_bars_per_symbol: 1000  // Reduced for stability
+      // Create a job in the queue — worker process handles the training
+      const jobRes = await api.post('/api/jobs', {
+        job_type: 'training',
+        params: {
+          full_universe: true,
+          all_timeframes: true,
+          bar_size: 'all'
+        },
+        priority: 10,
+        auto_start: true
       });
-      console.log('[NIA] Full Universe: Response received:', res.data);
       
-      if (res.data?.success) {
-        // Training started in background
-        toast.success(
-          `🚀 Full Universe training started! Watch the backend terminal for progress.`,
-          { duration: 10000 }
-        );
-        
-        // If we get immediate results (unlikely for full universe), handle them
-        if (res.data.result) {
-          const result = res.data.result;
-          const trainedCount = result.timeframes_trained || 0;
-          const totalTime = result.total_elapsed_seconds || 0;
-          
-          toast.success(
-            `🎉 Full Universe complete! ${trainedCount}/${result.total_timeframes} models trained in ${(totalTime/60).toFixed(0)} minutes`,
-            { duration: 15000 }
-          );
-          
-          // Update status for all timeframes
-          const newStatus = {};
-          for (const [tf, tfResult] of Object.entries(result.results || {})) {
-            if (tfResult.success) {
-              const accuracy = tfResult.accuracy ? (tfResult.accuracy * 100).toFixed(1) : '?';
-              newStatus[tf] = { status: 'completed', message: `${accuracy}% accuracy (full universe)` };
-            } else {
-              newStatus[tf] = { status: 'error', message: tfResult.error || 'Failed' };
-            }
-          }
-          setModelStatus(newStatus);
-          localStorage.setItem(STORAGE_KEYS.modelStatus, JSON.stringify(newStatus));
-        }
-        
-        fetchData();
-      } else if (res.data?.ml_not_available) {
-        toast.error('ML libraries not installed. Run: pip install lightgbm scikit-learn');
-      } else {
-        toast.error('Full universe training failed: ' + (res.data?.result?.error || 'Unknown error'));
+      console.log('[NIA] Full Universe job created:', jobRes.data);
+      
+      if (!jobRes.data?.success) {
+        throw new Error(jobRes.data?.error || 'Failed to create job');
       }
+      
+      const job = jobRes.data.job;
+      const jobId = job.job_id;
+      
+      toast.success(`Full Universe training job created: ${jobId} - Worker will process`);
+      
+      setTrainingProgress(prev => ({
+        ...prev,
+        phase: 'queued',
+        currentStep: 2,
+        message: `Job ${jobId} queued - worker will process all timeframes`,
+        details: { jobId }
+      }));
+      
+      // Poll for job completion (long timeout for full universe — up to 4 hours)
+      let pollCount = 0;
+      const maxPolls = 14400; // 4 hours at 1-second intervals
+      
+      const pollJob = async () => {
+        pollCount++;
+        
+        try {
+          const statusRes = await api.get(`/api/jobs/${jobId}`);
+          const jobStatus = statusRes.data?.job;
+          
+          if (!jobStatus) {
+            console.warn('[NIA] Job status not found');
+            if (pollCount < maxPolls) setTimeout(pollJob, 2000);
+            return;
+          }
+          
+          // Update progress from job
+          if (jobStatus.progress) {
+            setTrainingProgress(prev => ({
+              ...prev,
+              phase: jobStatus.status,
+              currentStep: Math.ceil((jobStatus.progress.percent / 100) * 5),
+              message: jobStatus.progress.message || 'Processing...',
+              details: { ...prev.details, ...jobStatus.progress.details }
+            }));
+          }
+          
+          if (jobStatus.status === 'completed') {
+            const result = jobStatus.result || {};
+            
+            // Update status for all timeframes from results
+            if (result.results) {
+              const newStatus = {};
+              for (const [tf, tfResult] of Object.entries(result.results)) {
+                if (tfResult.success) {
+                  const accuracy = tfResult.accuracy ? (tfResult.accuracy * 100).toFixed(1) : '?';
+                  newStatus[tf] = { status: 'completed', message: `${accuracy}% accuracy (full universe)` };
+                } else {
+                  newStatus[tf] = { status: 'error', message: tfResult.error || 'Failed' };
+                }
+              }
+              setModelStatus(newStatus);
+              localStorage.setItem(STORAGE_KEYS.modelStatus, JSON.stringify(newStatus));
+            }
+            
+            setTrainingProgress(prev => ({
+              ...prev,
+              phase: 'complete',
+              currentStep: 5,
+              message: `Full universe training complete!`
+            }));
+            
+            toast.success(`Full Universe training complete!`);
+            notifyTrainingEnd();
+            setIsTraining(false);
+            setCurrentTimeframe(null);
+            // Tell server to reload models from DB
+            try { await api.post('/api/ai-modules/timeseries/reload-models'); } catch(e) { console.warn('[NIA] Model reload:', e); }
+            fetchData();
+            return;
+          }
+          
+          if (jobStatus.status === 'failed') {
+            throw new Error(jobStatus.error || 'Training failed');
+          }
+          
+          if (jobStatus.status === 'cancelled') {
+            toast.info('Full Universe training was cancelled');
+            notifyTrainingEnd();
+            setIsTraining(false);
+            setCurrentTimeframe(null);
+            return;
+          }
+          
+          // Continue polling (slower for long-running job)
+          if (pollCount < maxPolls && (jobStatus.status === 'running' || jobStatus.status === 'pending')) {
+            const pollInterval = pollCount < 60 ? 1000 : 5000; // Fast for first minute, then every 5s
+            setTimeout(pollJob, pollInterval);
+          } else if (pollCount >= maxPolls) {
+            toast.warning('Training is taking very long. Check the Worker window.');
+          }
+          
+        } catch (pollError) {
+          console.error('[NIA] Poll error:', pollError);
+          if (pollCount < maxPolls) setTimeout(pollJob, 3000);
+        }
+      };
+      
+      // Start polling after a short delay
+      setTimeout(pollJob, 3000);
+      
     } catch (e) {
       console.error('[NIA] Full universe error:', e);
-      console.error('[NIA] Error details:', {
-        message: e.message,
-        code: e.code,
-        response: e.response?.data,
-        status: e.response?.status
-      });
-      if (e.message?.includes('timeout')) {
-        toast.warning('Request timed out but training may still be running. Check backend terminal.', {
-          duration: 10000
-        });
-      } else if (e.message?.includes('Network Error')) {
-        toast.error('Network Error - Backend may be down or not responding. Check backend terminal.', {
-          duration: 10000
-        });
-      } else {
-        toast.error(`Full universe error: ${e.message}`);
-      }
+      toast.error(`Full universe error: ${e.message}`);
     } finally {
       setIsTraining(false);
       setTrainingProgress({

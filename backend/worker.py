@@ -155,22 +155,44 @@ async def process_training_job(job: dict, db) -> dict:
         
         # Extract result info
         if result.get('success'):
-            accuracy = result.get('metrics', {}).get('accuracy', 0)
-            accuracy_pct = f"{accuracy * 100:.1f}%" if accuracy else 'N/A'
-            
-            await job_queue_manager.update_progress(
-                job_id, 
-                percent=100, 
-                message=f'Training complete! {accuracy_pct} accuracy'
-            )
-            
-            return {
-                'success': True,
-                'accuracy': accuracy,
-                'accuracy_percent': accuracy_pct,
-                'training_samples': result.get('training_samples', 0),
-                'details': result
-            }
+            # Handle both single-timeframe and full-universe-all results
+            if 'results' in result and all_timeframes:
+                # Full universe all timeframes result
+                trained = result.get('timeframes_trained', 0)
+                total = result.get('total_timeframes', 0)
+                elapsed = result.get('total_elapsed_seconds', 0)
+                
+                await job_queue_manager.update_progress(
+                    job_id, 
+                    percent=100, 
+                    message=f'Full universe complete! {trained}/{total} timeframes in {elapsed/60:.1f} min'
+                )
+                
+                return {
+                    'success': True,
+                    'timeframes_trained': trained,
+                    'total_timeframes': total,
+                    'total_elapsed_seconds': elapsed,
+                    'results': result.get('results', {})
+                }
+            else:
+                # Single timeframe result
+                accuracy = result.get('accuracy', 0) or result.get('metrics', {}).get('accuracy', 0)
+                accuracy_pct = f"{accuracy * 100:.1f}%" if accuracy else 'N/A'
+                
+                await job_queue_manager.update_progress(
+                    job_id, 
+                    percent=100, 
+                    message=f'Training complete! {accuracy_pct} accuracy'
+                )
+                
+                return {
+                    'success': True,
+                    'accuracy': accuracy,
+                    'accuracy_percent': accuracy_pct,
+                    'training_samples': result.get('training_samples', 0),
+                    'details': result
+                }
         else:
             return {
                 'success': False,
