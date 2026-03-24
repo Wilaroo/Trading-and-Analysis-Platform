@@ -86,7 +86,7 @@ class TimeSeriesGBM:
     MODEL_ARCHIVE_COLLECTION = "timeseries_model_archive"
     PREDICTIONS_COLLECTION = "timeseries_predictions"
     
-    # Check for GPU availability (for future PyTorch integration)
+    # Check for GPU availability
     GPU_AVAILABLE = False
     try:
         import torch
@@ -97,28 +97,44 @@ class TimeSeriesGBM:
     except ImportError:
         pass
     
+    # Auto-detect LightGBM GPU support
+    LGBM_GPU_AVAILABLE = False
+    try:
+        import lightgbm as _lgbm
+        # Try creating a small GPU booster to test support
+        _test_params = {"device": "gpu", "gpu_platform_id": 0, "gpu_device_id": 0, "verbose": -1}
+        _lgbm.Booster(_test_params)
+        LGBM_GPU_AVAILABLE = True
+        logger.info("LightGBM GPU support detected")
+    except Exception:
+        pass  # GPU not available or LightGBM not compiled with GPU support
+    
     # Default model parameters - optimized for imbalanced classification
-    # LightGBM uses CPU by default (very efficient), GPU mode available for large datasets
     DEFAULT_PARAMS = {
         "objective": "binary",
         "metric": "auc",
         "boosting_type": "gbdt",
-        "num_leaves": 63,  # Increased for more complexity
-        "learning_rate": 0.03,  # Lower for better generalization
+        "num_leaves": 63,
+        "learning_rate": 0.03,
         "feature_fraction": 0.7,
         "bagging_fraction": 0.7,
         "bagging_freq": 5,
-        "min_data_in_leaf": 50,  # Prevent overfitting
-        "max_depth": 8,  # Limit tree depth
-        "is_unbalance": True,  # Handle class imbalance automatically
+        "min_data_in_leaf": 50,
+        "max_depth": 8,
+        "is_unbalance": True,
         "verbose": -1,
-        "n_jobs": -1,  # Use all CPU cores
+        "n_jobs": -1,
         "seed": 42,
-        # GPU acceleration (uncomment if you have LightGBM compiled with GPU support)
-        # "device": "gpu",
-        # "gpu_platform_id": 0,
-        # "gpu_device_id": 0,
     }
+    
+    # GPU acceleration (auto-enabled if available)
+    # To enable manually: reinstall lightgbm with GPU support:
+    #   pip install lightgbm --config-settings=cmake.define.USE_GPU=ON
+    if LGBM_GPU_AVAILABLE:
+        DEFAULT_PARAMS["device"] = "gpu"
+        DEFAULT_PARAMS["gpu_platform_id"] = 0
+        DEFAULT_PARAMS["gpu_device_id"] = 0
+        logger.info("LightGBM will use GPU acceleration")
     
     # Prediction threshold for "up" classification
     # Higher threshold = more precise but lower recall

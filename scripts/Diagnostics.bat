@@ -7,7 +7,7 @@ echo    TradeCommand Diagnostics
 echo ============================================
 echo.
 
-set CLOUD_URL=https://thread-pool-hero.preview.emergentagent.com
+set CLOUD_URL=https://refactor-routers.preview.emergentagent.com
 
 echo [1] Checking Local Ollama...
 curl -s http://localhost:11434/api/tags > "%TEMP%\ollama_check.tmp" 2>&1
