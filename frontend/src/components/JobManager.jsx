@@ -509,10 +509,12 @@ const JobManager = ({ compact = false }) => {
   return (
     <div className="glass-panel" data-testid="job-manager">
       {/* Header */}
-      <button
+      <div
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between p-4"
+        className="w-full flex items-center justify-between p-4 cursor-pointer"
         data-testid="job-manager-toggle"
+        role="button"
+        tabIndex={0}
       >
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg bg-gradient-to-br from-blue-500/20 to-cyan-500/20">
@@ -561,7 +563,7 @@ const JobManager = ({ compact = false }) => {
             <ChevronDown className="w-5 h-5 text-zinc-400" />
           )}
         </div>
-      </button>
+      </div>
       
       <AnimatePresence>
         {isExpanded && (
