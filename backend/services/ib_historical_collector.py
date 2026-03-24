@@ -1395,79 +1395,95 @@ class IBHistoricalCollector:
         if self._db is None:
             return {"success": False, "error": "Database not initialized. Call init_ib_collector first."}
         
-        # Get ADV data for symbols
-        adv_col = self._db["symbol_adv_cache"]  # Fixed: was "adv_cache"
+        # Run all heavy DB queries in a thread to avoid blocking the event loop
+        adv_col = self._db["symbol_adv_cache"]
+        data_col = self._data_col
+        thresholds = self.ADV_THRESHOLDS
+        tier_timeframes = self.TIER_TIMEFRAMES
+        get_tier = self.get_symbol_tier
+        get_max_dur = self.get_max_duration_for_bar_size
+        get_safe_dur = self.get_safe_duration
         
-        # If specific_symbols provided, only get those; otherwise get all with sufficient ADV
-        if specific_symbols:
-            symbols_with_adv = list(adv_col.find(
-                {"symbol": {"$in": list(specific_symbols)}, "avg_volume": {"$gte": self.ADV_THRESHOLDS["investment"]}},
-                {"symbol": 1, "avg_volume": 1}
-            ).sort("avg_volume", -1))
-            logger.info(f"Using specific symbols list: {len(specific_symbols)} provided, {len(symbols_with_adv)} found with ADV data")
-        else:
-            symbols_with_adv = list(adv_col.find(
-                {"avg_volume": {"$gte": self.ADV_THRESHOLDS["investment"]}},
-                {"symbol": 1, "avg_volume": 1}
-            ).sort("avg_volume", -1))
+        def _build_queue():
+            """Sync function to build the collection queue — runs in thread"""
+            # If specific_symbols provided, only get those
+            if specific_symbols:
+                symbols_with_adv = list(adv_col.find(
+                    {"symbol": {"$in": list(specific_symbols)}, "avg_volume": {"$gte": thresholds["investment"]}},
+                    {"symbol": 1, "avg_volume": 1}
+                ).sort("avg_volume", -1))
+            else:
+                symbols_with_adv = list(adv_col.find(
+                    {"avg_volume": {"$gte": thresholds["investment"]}},
+                    {"symbol": 1, "avg_volume": 1}
+                ).sort("avg_volume", -1))
+            
+            if not symbols_with_adv:
+                return None, None, None
+            
+            if max_symbols:
+                symbols_with_adv_limited = symbols_with_adv[:max_symbols]
+            else:
+                symbols_with_adv_limited = symbols_with_adv
+            
+            # Count by tier
+            tier_counts = {"intraday": 0, "swing": 0, "investment": 0}
+            for sym_data in symbols_with_adv_limited:
+                tier = get_tier(sym_data.get("avg_volume", 0))
+                if tier in tier_counts:
+                    tier_counts[tier] += 1
+            
+            # Build queue entries
+            queue_entries = []
+            for sym_data in symbols_with_adv_limited:
+                symbol = sym_data["symbol"]
+                avg_volume = sym_data.get("avg_volume", 0)
+                tier = get_tier(avg_volume)
+                
+                if tier == "skip":
+                    continue
+                
+                timeframes = tier_timeframes.get(tier, ["1 day"])
+                
+                for bar_size in timeframes:
+                    if use_max_lookback:
+                        duration = get_max_dur(bar_size)
+                    else:
+                        duration = get_safe_dur(bar_size, lookback_days)
+                    
+                    if skip_recent and data_col is not None:
+                        existing = data_col.find_one({
+                            "symbol": symbol,
+                            "bar_size": bar_size,
+                            "collected_at": {"$gte": (datetime.now(timezone.utc) - timedelta(days=recent_days_threshold)).isoformat()}
+                        })
+                        if existing:
+                            continue
+                    
+                    queue_entries.append((symbol, bar_size, duration))
+            
+            return symbols_with_adv_limited, tier_counts, queue_entries
         
-        if not symbols_with_adv:
+        symbols_with_adv, tier_counts, queue_entries = await asyncio.to_thread(_build_queue)
+        
+        if symbols_with_adv is None:
             return {"success": False, "error": "No symbols found with sufficient ADV. Run ADV cache refresh first."}
         
-        if max_symbols:
-            symbols_with_adv = symbols_with_adv[:max_symbols]
-        
         logger.info(f"Found {len(symbols_with_adv)} symbols to process")
-        
-        # Count by tier
-        tier_counts = {"intraday": 0, "swing": 0, "investment": 0}
-        for sym_data in symbols_with_adv:
-            tier = self.get_symbol_tier(sym_data.get("avg_volume", 0))
-            if tier in tier_counts:
-                tier_counts[tier] += 1
-        
         logger.info(f"Tier breakdown: {tier_counts}")
         
-        # Queue all requests per-stock
+        # Queue all requests
         from services.historical_data_queue_service import get_historical_data_queue_service
         queue_service = get_historical_data_queue_service()
         total_queued = 0
         
-        for sym_data in symbols_with_adv:
-            symbol = sym_data["symbol"]
-            avg_volume = sym_data.get("avg_volume", 0)
-            tier = self.get_symbol_tier(avg_volume)
-            
-            if tier == "skip":
-                continue
-            
-            timeframes = self.TIER_TIMEFRAMES.get(tier, ["1 day"])
-            
-            # Queue each timeframe for this symbol
-            for bar_size in timeframes:
-                # Use maximum IB lookback if requested, otherwise use specified lookback
-                if use_max_lookback:
-                    duration = self.get_max_duration_for_bar_size(bar_size)
-                else:
-                    duration = self.get_safe_duration(bar_size, lookback_days)
-                
-                # Check if we should skip (already have recent data)
-                if skip_recent:
-                    existing = self._data_col.find_one({
-                        "symbol": symbol,
-                        "bar_size": bar_size,
-                        "collected_at": {"$gte": (datetime.now(timezone.utc) - timedelta(days=recent_days_threshold)).isoformat()}
-                    })
-                    if existing:
-                        continue
-                
-                # Queue this request
-                queue_service.create_request(
-                    symbol=symbol,
-                    bar_size=bar_size,
-                    duration=duration
-                )
-                total_queued += 1
+        for symbol, bar_size, duration in queue_entries:
+            queue_service.create_request(
+                symbol=symbol,
+                bar_size=bar_size,
+                duration=duration
+            )
+            total_queued += 1
         
         logger.info(f"Queued {total_queued} requests across {len(symbols_with_adv)} symbols")
         

@@ -13,6 +13,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 import math
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +137,9 @@ class RealTimeTechnicalService:
         return self._alpaca_service
     
     def _get_daily_bars_from_db(self, symbol: str, limit: int = 50) -> Optional[List[Dict]]:
-        """Get daily bars from ib_historical_data (fast, no API call)"""
+        """Get daily bars from ib_historical_data (fast, no API call).
+        NOTE: This is a sync function called from async context.
+        The caller should use asyncio.to_thread() if needed."""
         if self._db is None:
             return None
         try:
@@ -231,7 +234,8 @@ class RealTimeTechnicalService:
             
             # Get daily bars for ATR, average volume, daily levels
             # Priority: ib_historical_data (MongoDB) -> Alpaca API
-            daily_bars = self._get_daily_bars_from_db(symbol, limit=50)
+            # Wrap sync pymongo call in to_thread to avoid blocking event loop
+            daily_bars = await asyncio.to_thread(self._get_daily_bars_from_db, symbol, 50)
             if not daily_bars or len(daily_bars) < 10:
                 # Fallback to Alpaca
                 daily_bars = await self.alpaca.get_bars(symbol, "1Day", 50)

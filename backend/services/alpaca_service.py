@@ -109,13 +109,13 @@ class AlpacaService:
         try:
             from alpaca.data.requests import StockLatestQuoteRequest, StockLatestTradeRequest
             
-            # Get latest quote (bid/ask)
+            # Get latest quote (bid/ask) — run sync SDK call in thread to avoid blocking event loop
             quote_request = StockLatestQuoteRequest(symbol_or_symbols=symbol.upper())
-            quotes = _data_client.get_stock_latest_quote(quote_request)
+            quotes = await asyncio.to_thread(_data_client.get_stock_latest_quote, quote_request)
             
-            # Get latest trade (last price)
+            # Get latest trade (last price) — run sync SDK call in thread
             trade_request = StockLatestTradeRequest(symbol_or_symbols=symbol.upper())
-            trades = _data_client.get_stock_latest_trade(trade_request)
+            trades = await asyncio.to_thread(_data_client.get_stock_latest_trade, trade_request)
             
             if symbol.upper() in quotes:
                 quote = quotes[symbol.upper()]
@@ -164,13 +164,13 @@ class AlpacaService:
             
             symbols_upper = [s.upper() for s in symbols]
             
-            # Batch request for quotes
+            # Batch request for quotes — run sync SDK call in thread
             quote_request = StockLatestQuoteRequest(symbol_or_symbols=symbols_upper)
-            quotes = _data_client.get_stock_latest_quote(quote_request)
+            quotes = await asyncio.to_thread(_data_client.get_stock_latest_quote, quote_request)
             
-            # Batch request for trades
+            # Batch request for trades — run sync SDK call in thread
             trade_request = StockLatestTradeRequest(symbol_or_symbols=symbols_upper)
-            trades = _data_client.get_stock_latest_trade(trade_request)
+            trades = await asyncio.to_thread(_data_client.get_stock_latest_trade, trade_request)
             
             results = {}
             now = datetime.now(timezone.utc)
@@ -343,7 +343,7 @@ class AlpacaService:
             else:
                 start = end - timedelta(minutes=limit * 5 + 60)
             
-            # Use IEX feed for free tier
+            # Use IEX feed for free tier — run sync SDK call in thread to avoid blocking event loop
             request = StockBarsRequest(
                 symbol_or_symbols=symbol.upper(),
                 timeframe=tf,
@@ -353,7 +353,7 @@ class AlpacaService:
                 feed="iex"  # Use IEX for free tier
             )
             
-            bars = _data_client.get_stock_bars(request)
+            bars = await asyncio.to_thread(_data_client.get_stock_bars, request)
             
             result = []
             # Access bars through .data attribute for BarSet
@@ -387,7 +387,7 @@ class AlpacaService:
             return None
             
         try:
-            account = _trading_client.get_account()
+            account = await asyncio.to_thread(_trading_client.get_account)
             
             return {
                 "account_id": account.id,

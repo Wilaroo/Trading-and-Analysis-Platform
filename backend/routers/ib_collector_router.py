@@ -256,14 +256,15 @@ async def fill_gaps(
     - Priority collection status
     """
     try:
+        import asyncio
         collector = get_ib_collector()
         db = collector._db
         
         if db is None:
             return {"success": False, "error": "Database not initialized"}
         
-        adv_col = db["symbol_adv_cache"]  # Fixed: match get_adv_cache_stats()
-        data_col = db["ib_historical_data"]  # Fixed: matches COLLECTION_NAME
+        adv_col = db["symbol_adv_cache"]
+        data_col = db["ib_historical_data"]
         
         # Define tiers and their timeframes (same as coverage endpoint)
         tiers = {
@@ -290,45 +291,47 @@ async def fill_gaps(
         if tier_filter and tier_filter in tiers:
             tiers = {tier_filter: tiers[tier_filter]}
         
-        gaps_found = []
-        symbols_to_collect = {}  # {tier: {timeframe: [symbols]}}
+        # Run all heavy DB queries in a thread to avoid blocking the event loop
+        def _scan_gaps():
+            gaps_found = []
+            symbols_to_collect = {}
+            
+            for tier_name, tier_config in tiers.items():
+                adv_query = {"avg_volume": {"$gte": tier_config["min_adv"]}}
+                if "max_adv" in tier_config:
+                    adv_query["avg_volume"]["$lt"] = tier_config["max_adv"]
+                
+                cursor = adv_col.find(adv_query, {"symbol": 1})
+                if max_symbols:
+                    cursor = cursor.limit(max_symbols)
+                tier_symbols = [doc["symbol"] for doc in cursor]
+                
+                if not tier_symbols:
+                    continue
+                
+                symbols_to_collect[tier_name] = {}
+                
+                for tf in tier_config["timeframes"]:
+                    symbols_with_data = set(data_col.distinct("symbol", {
+                        "symbol": {"$in": tier_symbols},
+                        "bar_size": tf
+                    }))
+                    
+                    missing_symbols = [s for s in tier_symbols if s not in symbols_with_data]
+                    
+                    if missing_symbols:
+                        symbols_to_queue = missing_symbols[:max_symbols] if max_symbols else missing_symbols
+                        symbols_to_collect[tier_name][tf] = symbols_to_queue
+                        gaps_found.append({
+                            "tier": tier_name,
+                            "timeframe": tf,
+                            "missing_count": len(missing_symbols),
+                            "will_collect": len(symbols_to_queue)
+                        })
+            
+            return gaps_found, symbols_to_collect
         
-        for tier_name, tier_config in tiers.items():
-            # Get symbols in this ADV tier
-            adv_query = {"avg_volume": {"$gte": tier_config["min_adv"]}}
-            if "max_adv" in tier_config:
-                adv_query["avg_volume"]["$lt"] = tier_config["max_adv"]
-            
-            # Get all symbols in tier, or limit if specified
-            cursor = adv_col.find(adv_query, {"symbol": 1})
-            if max_symbols:
-                cursor = cursor.limit(max_symbols)
-            tier_symbols = [doc["symbol"] for doc in cursor]
-            
-            if not tier_symbols:
-                continue
-            
-            symbols_to_collect[tier_name] = {}
-            
-            for tf in tier_config["timeframes"]:
-                # Find symbols that DON'T have data for this timeframe
-                symbols_with_data = set(data_col.distinct("symbol", {
-                    "symbol": {"$in": tier_symbols},
-                    "bar_size": tf
-                }))
-                
-                missing_symbols = [s for s in tier_symbols if s not in symbols_with_data]
-                
-                if missing_symbols:
-                    # If max_symbols set, limit per timeframe; otherwise collect all
-                    symbols_to_queue = missing_symbols[:max_symbols] if max_symbols else missing_symbols
-                    symbols_to_collect[tier_name][tf] = symbols_to_queue
-                    gaps_found.append({
-                        "tier": tier_name,
-                        "timeframe": tf,
-                        "missing_count": len(missing_symbols),
-                        "will_collect": len(symbols_to_queue)
-                    })
+        gaps_found, symbols_to_collect = await asyncio.to_thread(_scan_gaps)
         
         if not gaps_found:
             return {
@@ -340,7 +343,6 @@ async def fill_gaps(
             }
         
         # Start collection for each gap
-        # We'll use the per-stock collection approach for efficiency
         total_symbols = set()
         for tier_name, timeframes in symbols_to_collect.items():
             for tf, symbols in timeframes.items():
@@ -348,17 +350,16 @@ async def fill_gaps(
         
         # Start a per-stock collection with ONLY the missing symbols and MAX lookback
         job_result = await collector.run_per_stock_collection(
-            skip_recent=False,  # We already filtered to missing only
+            skip_recent=False,
             max_symbols=len(total_symbols) if max_symbols else None,
             specific_symbols=list(total_symbols),
-            use_max_lookback=use_max_lookback  # Use maximum IB lookback per timeframe
+            use_max_lookback=use_max_lookback
         )
         
         # Enable priority collection if requested (default True)
         priority_enabled = False
         if enable_priority and len(total_symbols) > 0:
             try:
-                # Import the priority collection flag from ib router
                 from routers.ib import _priority_collection
                 from datetime import datetime, timezone
                 
