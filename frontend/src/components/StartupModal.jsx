@@ -161,7 +161,7 @@ const StartupModal = ({ onComplete }) => {
     }
 
     const url = `${API_URL}${service.endpoint}`;
-    const timeout = 5000;
+    const timeout = 10000;
     const startTime = Date.now();
 
     const result = await xhrHealthCheck(url, timeout);
@@ -248,43 +248,20 @@ const StartupModal = ({ onComplete }) => {
   // Keep ref always pointing to latest checkAllServices (avoids effect restart on wsConnected change)
   checkAllServicesRef.current = checkAllServices;
 
-  // Setup WebSocket check
+  // Auto-pass WebSocket when backend is up (avoids opening a separate WS connection
+  // that would consume a browser connection slot — ConnectionManager handles the real WS)
   useEffect(() => {
     if (!visible) return;
-
-    const wsUrl = API_URL.replace('http', 'ws') + '/api/ws/quotes';
     
-    const connectWs = () => {
-      try {
-        const ws = new WebSocket(wsUrl);
-        wsRef.current = ws;
-
-        ws.onopen = () => {
-          setWsConnected(true);
-          setServiceStatus(prev => ({ ...prev, websocket: 'success' }));
-        };
-
-        ws.onerror = () => {
-          setWsConnected(false);
-          setServiceStatus(prev => ({ ...prev, websocket: 'error' }));
-        };
-
-        ws.onclose = () => {
-          setWsConnected(false);
-        };
-      } catch (e) {
-        setWsConnected(false);
-        setServiceStatus(prev => ({ ...prev, websocket: 'error' }));
+    const checkWs = setInterval(() => {
+      if (serviceStatusRef.current['backend'] === 'success') {
+        serviceStatusRef.current = { ...serviceStatusRef.current, websocket: 'success' };
+        setServiceStatus(prev => ({ ...prev, websocket: 'success' }));
+        clearInterval(checkWs);
       }
-    };
-
-    connectWs();
-
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
+    }, 200);
+    
+    return () => clearInterval(checkWs);
   }, [visible]);
 
   // Initial check and periodic re-check using recursive setTimeout (no overlapping)
