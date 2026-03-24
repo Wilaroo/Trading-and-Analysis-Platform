@@ -9,13 +9,12 @@
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import api, { safeGet, safePost } from '../utils/api';
 import { 
   Shield, ShieldAlert, ShieldCheck, Target, TrendingDown,
   Layers, Activity, ChevronDown, ChevronUp, Info, Zap,
   AlertTriangle, CheckCircle
 } from 'lucide-react';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
 // Stop mode icons and colors
 const MODE_CONFIG = {
@@ -147,7 +146,7 @@ const SmartStopSelector = ({
   useEffect(() => {
     const fetchModes = async () => {
       try {
-        const response = await fetch(`${API_URL}/api/smart-stops/modes`);
+        const response = await safeGet('/api/smart-stops/modes');
         if (response.ok) {
           const data = await response.json();
           if (data.success) {
@@ -175,7 +174,7 @@ const SmartStopSelector = ({
         ...(resistance && { resistance: resistance.toString() })
       });
       
-      const response = await fetch(`${API_URL}/api/smart-stops/compare?${params}`);
+      const response = await safeGet('/api/smart-stops/compare?${params}');
       if (response.ok) {
         const data = await response.json();
         if (data.success) {
@@ -200,7 +199,7 @@ const SmartStopSelector = ({
         volatility_regime: volatilityRegime
       });
       
-      const response = await fetch(`${API_URL}/api/smart-stops/recommend/${symbol}?${params}`);
+      const response = await safeGet('/api/smart-stops/recommend/${symbol}?${params}');
       if (response.ok) {
         const data = await response.json();
         if (data.success) {

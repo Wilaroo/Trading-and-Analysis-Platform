@@ -37,8 +37,7 @@ import {
 } from 'lucide-react';
 import SimulatorControl from './SimulatorControl';
 import { Tip, TipIcon, CustomTip } from './shared/Tooltip';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL || '';
+import api, { safeGet, safePost } from '../utils/api';
 
 // Priority colors and icons
 const PRIORITY_CONFIG = {
@@ -565,7 +564,7 @@ const LiveAlertsPanel = ({
       eventSourceRef.current.close();
     }
     
-    const eventSource = new EventSource(`${API_URL}/api/live-scanner/stream`);
+    const eventSource = new EventSource('/api/live-scanner/stream');
     eventSourceRef.current = eventSource;
     
     eventSource.onopen = () => {
@@ -628,8 +627,7 @@ const LiveAlertsPanel = ({
   // Fetch scanner status
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/live-scanner/status`);
-      const data = await res.json();
+      const data = await safeGet('/api/live-scanner/status');
       setStatus(data);
     } catch (err) {
       console.error('Failed to fetch scanner status:', err);
@@ -639,8 +637,7 @@ const LiveAlertsPanel = ({
   // Fetch watchlist
   const fetchWatchlist = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/live-scanner/watchlist`);
-      const data = await res.json();
+      const data = await safeGet('/api/live-scanner/watchlist');
       setWatchlist(data.watchlist || []);
     } catch (err) {
       console.error('Failed to fetch watchlist:', err);
@@ -650,8 +647,7 @@ const LiveAlertsPanel = ({
   // Fetch existing alerts
   const fetchAlerts = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/live-scanner/alerts`);
-      const data = await res.json();
+      const data = await safeGet('/api/live-scanner/alerts');
       if (data.alerts) {
         setAlerts(data.alerts);
       }
@@ -663,11 +659,7 @@ const LiveAlertsPanel = ({
   // Update watchlist
   const updateWatchlist = useCallback(async (symbols) => {
     try {
-      await fetch(`${API_URL}/api/live-scanner/watchlist`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbols })
-      });
+      await api.post('/api/live-scanner/watchlist', { symbols });
       setWatchlist(symbols);
       fetchStatus(); // Refresh status
     } catch (err) {
@@ -679,14 +671,10 @@ const LiveAlertsPanel = ({
   // Update scan interval and setups
   const updateConfig = useCallback(async (interval, setups) => {
     try {
-      await fetch(`${API_URL}/api/live-scanner/config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+      await api.post('/api/live-scanner/config', { 
           scan_interval: interval,
           enabled_setups: setups
-        })
-      });
+        });
       fetchStatus(); // Refresh status
     } catch (err) {
       console.error('Failed to update config:', err);
@@ -697,9 +685,7 @@ const LiveAlertsPanel = ({
   // Dismiss alert
   const dismissAlert = useCallback(async (alertId) => {
     try {
-      await fetch(`${API_URL}/api/live-scanner/alerts/${alertId}/dismiss`, {
-        method: 'POST'
-      });
+      await api.post(`/api/live-scanner/alerts/${alertId}/dismiss`);
       setAlerts(prev => prev.filter(a => a.id !== alertId));
     } catch (err) {
       console.error('Failed to dismiss alert:', err);
@@ -712,7 +698,7 @@ const LiveAlertsPanel = ({
   const toggleScanner = useCallback(async () => {
     try {
       const endpoint = status?.running ? 'stop' : 'start';
-      await fetch(`${API_URL}/api/live-scanner/${endpoint}`, { method: 'POST' });
+      await api.post('/api/live-scanner/${endpoint}');
       fetchStatus();
     } catch (err) {
       console.error('Failed to toggle scanner:', err);

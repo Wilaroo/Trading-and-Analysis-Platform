@@ -30,8 +30,7 @@ import { DynamicRiskBadge, DynamicRiskPanel } from './DynamicRiskPanel';
 import StreamOfConsciousness from './StreamOfConsciousness';
 import ConversationPanel from './ConversationPanel';
 import StatusDot from './StatusDot';
-
-const API_BASE = process.env.REACT_APP_BACKEND_URL;
+import api, { safeGet, safePost } from '../utils/api';
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -596,12 +595,7 @@ const StopFixPanel = ({ thoughts = [], onRefresh }) => {
     setFixResult(null);
     
     try {
-      const response = await fetch(`${API_BASE}/api/trading-bot/fix-all-risky-stops`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      
-      const data = await response.json();
+      const { data } = await api.post('/api/trading-bot/fix-all-risky-stops');
       
       if (data.success) {
         setFixResult({
@@ -1051,11 +1045,11 @@ const useAIInsights = (pollInterval = 60000) => {  // Increased to 60s to avoid 
   const fetchInsights = useCallback(async () => {
     try {
       const [decisionsRes, performanceRes, timeseriesRes, accuracyRes, predictionsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/ai-modules/shadow/decisions?limit=10`),
-        fetch(`${API_BASE}/api/ai-modules/shadow/performance?days=7`),
-        fetch(`${API_BASE}/api/ai-modules/timeseries/status`),
-        fetch(`${API_BASE}/api/ai-modules/timeseries/prediction-accuracy?days=30`),
-        fetch(`${API_BASE}/api/ai-modules/timeseries/predictions?limit=10`)
+        safeGet('/api/ai-modules/shadow/decisions?limit=10'),
+        safeGet('/api/ai-modules/shadow/performance?days=7'),
+        safeGet('/api/ai-modules/timeseries/status'),
+        safeGet('/api/ai-modules/timeseries/prediction-accuracy?days=30'),
+        safeGet('/api/ai-modules/timeseries/predictions?limit=10')
       ]);
 
       // Handle rate limiting gracefully - skip parsing if any request was rate limited
@@ -1106,12 +1100,7 @@ const AIInsightsDashboard = ({ onClose }) => {
     setForecastLoading(true);
     try {
       // Call forecast API - it will fetch bars from MongoDB if not provided
-      const forecastRes = await fetch(`${API_BASE}/api/ai-modules/timeseries/forecast`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol: forecastSymbol.toUpperCase() })
-      });
-      const forecastData = await forecastRes.json();
+      const { data: forecastData } = await api.post('/api/ai-modules/timeseries/forecast', { symbol: forecastSymbol.toUpperCase() });
       
       if (forecastData.success) {
         setForecastResult(forecastData.forecast);
@@ -1412,10 +1401,7 @@ const AIInsightsDashboard = ({ onClose }) => {
                     onClick={async () => {
                       setVerifying(true);
                       try {
-                        const res = await fetch(`${API_BASE}/api/ai-modules/timeseries/verify-predictions`, {
-                          method: 'POST'
-                        });
-                        const data = await res.json();
+                        const { data } = await api.post('/api/ai-modules/timeseries/verify-predictions');
                         if (data.success) {
                           toast.success(`Verified ${data.result.verified} predictions`);
                           refresh();
@@ -1633,8 +1619,7 @@ const useMarketSession = (pollInterval = 30000) => {
 
   const fetchSession = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/market-context/session/status`);
-      const data = await res.json();
+      const data = await safeGet('/api/market-context/session/status');
       if (data.success && data.session) {
         setSession(data.session);
       }
@@ -1664,8 +1649,7 @@ const useSentComStatus = (pollInterval = 60000) => {  // Increased to 60s to avo
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/sentcom/status`);
-      const data = await res.json();
+      const data = await safeGet('/api/sentcom/status');
       if (data.success) {
         setStatus(data.status);
         setCached('sentcomStatus', data.status, 30000); // 30 second TTL
@@ -1710,7 +1694,7 @@ const useSentComStream = (pollInterval = 45000) => {  // Increased to 45s to avo
 
   const fetchStream = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/sentcom/stream?limit=20`);
+      const res = await safeGet('/api/sentcom/stream?limit=20');
       
       // Handle rate limiting gracefully
       if (res.status === 429) {
@@ -1782,8 +1766,7 @@ const useSentComPositions = (pollInterval = 30000) => {  // Increased to 30s to 
 
   const fetchPositions = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/sentcom/positions`);
-      const data = await res.json();
+      const data = await safeGet('/api/sentcom/positions');
       if (data.success) {
         setPositions(data.positions || []);
         setTotalPnl(data.total_pnl || 0);
@@ -1828,8 +1811,7 @@ const useSentComSetups = (pollInterval = 30000) => {
 
   const fetchSetups = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/sentcom/setups`);
-      const data = await res.json();
+      const data = await safeGet('/api/sentcom/setups');
       if (data.success) {
         setSetups(data.setups || []);
         setCached('sentcomSetups', data.setups || [], 30000); // 30 second TTL
@@ -1872,8 +1854,7 @@ const useSentComContext = (pollInterval = 30000) => {
 
   const fetchContext = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/sentcom/context`);
-      const data = await res.json();
+      const data = await safeGet('/api/sentcom/context');
       if (data.success) {
         setContext(data.context);
         setCached('sentcomContext', data.context, 60000); // 60 second TTL (context changes slowly)
@@ -1916,8 +1897,7 @@ const useSentComAlerts = (pollInterval = 5000) => {
 
   const fetchAlerts = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/sentcom/alerts?limit=5`);
-      const data = await res.json();
+      const data = await safeGet('/api/sentcom/alerts?limit=5');
       if (data.success) {
         setAlerts(data.alerts || []);
         setCached('sentcomAlerts', data.alerts || [], 15000); // 15 second TTL (alerts update frequently)
@@ -1959,8 +1939,7 @@ const useChatHistory = () => {
     if (loaded) return; // Only load once
     
     try {
-      const res = await fetch(`${API_BASE}/api/sentcom/chat/history?limit=50`);
-      const data = await res.json();
+      const data = await safeGet('/api/sentcom/chat/history?limit=50');
       if (data.success && data.messages) {
         // Convert to local message format and reverse for newest-first display
         const formattedMessages = data.messages.map((msg, idx) => ({
@@ -2002,8 +1981,7 @@ const useTradingBotControl = (pollInterval = 5000) => {
 
   const fetchBotStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/trading-bot/status`);
-      const data = await res.json();
+      const data = await safeGet('/api/trading-bot/status');
       if (data.success) {
         setBotStatus(data);
         setCached('botStatus', data, 15000); // 15 second TTL
@@ -2019,7 +1997,7 @@ const useTradingBotControl = (pollInterval = 5000) => {
     setActionLoading('toggle');
     try {
       const endpoint = botStatus?.running ? 'stop' : 'start';
-      await fetch(`${API_BASE}/api/trading-bot/${endpoint}`, { method: 'POST' });
+      await api.post('/api/trading-bot/${endpoint}');
       await fetchBotStatus();
       toast.success(botStatus?.running ? 'Bot stopped' : 'Bot started');
     } catch (err) {
@@ -2032,7 +2010,7 @@ const useTradingBotControl = (pollInterval = 5000) => {
   const changeMode = useCallback(async (mode) => {
     setActionLoading('mode');
     try {
-      await fetch(`${API_BASE}/api/trading-bot/mode/${mode}`, { method: 'POST' });
+      await api.post('/api/trading-bot/mode/${mode}');
       await fetchBotStatus();
       toast.success(`Mode changed to ${mode}`);
     } catch (err) {
@@ -2045,12 +2023,7 @@ const useTradingBotControl = (pollInterval = 5000) => {
   const updateRiskParams = useCallback(async (params) => {
     setActionLoading('risk');
     try {
-      const res = await fetch(`${API_BASE}/api/trading-bot/risk-params`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params)
-      });
-      const data = await res.json();
+      const { data } = await api.post('/api/trading-bot/risk-params', params);
       if (data.success) {
         await fetchBotStatus();
         toast.success('Risk parameters updated');
@@ -2095,8 +2068,7 @@ const useIBConnectionStatus = (pollInterval = 3000) => {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/ib/pushed-data`);
-      const data = await res.json();
+      const data = await safeGet('/api/ib/pushed-data');
       setIbConnected(data.connected || false);
     } catch (err) {
       setIbConnected(false);
@@ -2120,8 +2092,7 @@ const useAIModules = (pollInterval = 10000) => {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/ai-modules/status`);
-      const data = await res.json();
+      const data = await safeGet('/api/ai-modules/status');
       if (data.success) {
         setStatus(data.status);
       }
@@ -2135,12 +2106,7 @@ const useAIModules = (pollInterval = 10000) => {
   const toggleModule = useCallback(async (moduleName, enabled) => {
     setActionLoading(moduleName);
     try {
-      const res = await fetch(`${API_BASE}/api/ai-modules/toggle/${moduleName}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled })
-      });
-      const data = await res.json();
+      const { data } = await api.post('/api/ai-modules/toggle/${moduleName}', { enabled });
       if (data.success) {
         await fetchStatus();
         toast.success(`${moduleName.replace('_', ' ')} ${enabled ? 'enabled' : 'disabled'}`);
@@ -2156,12 +2122,7 @@ const useAIModules = (pollInterval = 10000) => {
   const setGlobalShadowMode = useCallback(async (shadowMode) => {
     setActionLoading('shadow');
     try {
-      const res = await fetch(`${API_BASE}/api/ai-modules/shadow-mode`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shadow_mode: shadowMode })
-      });
-      const data = await res.json();
+      const { data } = await api.post('/api/ai-modules/shadow-mode', { shadow_mode: shadowMode });
       if (data.success) {
         await fetchStatus();
         toast.success(`Shadow mode ${shadowMode ? 'enabled' : 'disabled'}`);
@@ -2843,58 +2804,20 @@ const SentCom = ({ compact = false, embedded = false }) => {
     setLocalMessages(prev => [...prev, userMsg]);
     
     try {
-      const res = await fetch(`${API_BASE}/api/sentcom/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message })
-      });
-      
-      // Handle rate limiting (429) gracefully
-      if (res.status === 429) {
-        const errorMsg = {
-          id: `error_${Date.now()}`,
-          type: 'chat',
-          content: "Too many requests - please wait a moment and try again.",
-          timestamp: new Date().toISOString(),
-          action_type: 'chat_response',
-          metadata: { role: 'assistant', error: true }
-        };
-        setLocalMessages(prev => [...prev, errorMsg]);
-        return { success: false, error: 'Rate limited' };
-      }
-      
-      // Check if response is JSON before parsing
-      const contentType = res.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        console.error('Non-JSON response:', await res.text());
-        const errorMsg = {
-          id: `error_${Date.now()}`,
-          type: 'chat',
-          content: "Server is busy - please try again in a few seconds.",
-          timestamp: new Date().toISOString(),
-          action_type: 'chat_response',
-          metadata: { role: 'assistant', error: true }
-        };
-        setLocalMessages(prev => [...prev, errorMsg]);
-        return { success: false, error: 'Non-JSON response' };
-      }
-      
-      const data = await res.json();
+      const { data: chatData } = await api.post('/api/sentcom/chat', { message });
       
       // Add assistant response AFTER user message (slightly later timestamp)
       const assistantMsg = {
         id: `assistant_${Date.now()}`,
         type: 'chat',
-        content: data.response || "We're processing your request...",
-        timestamp: new Date().toISOString(), // Will be after userTimestamp
+        content: chatData.response || "We're processing your request...",
+        timestamp: new Date().toISOString(),
         action_type: 'chat_response',
-        metadata: { role: 'assistant', source: data.source }
+        metadata: { role: 'assistant', source: chatData.source }
       };
       setLocalMessages(prev => [...prev, assistantMsg]);
       
-      // DON'T refresh stream here - it causes duplicate/reordering issues
-      // The chat messages are already in localMessages
-      return data;
+      return chatData;
     } catch (err) {
       console.error('Chat error:', err);
       // Add error message
@@ -2932,17 +2855,11 @@ const SentCom = ({ compact = false, embedded = false }) => {
       
       if (action.endpoint) {
         // Call specific coaching endpoint
-        const res = await fetch(`${API_BASE}${action.endpoint}`);
-        const data = await res.json();
+        const data = await safeGet(action.endpoint);
         response = data.coaching || data.response || "We'll have that ready for you soon.";
       } else if (action.prompt) {
         // Send as chat message
-        const res = await fetch(`${API_BASE}/api/sentcom/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: action.prompt })
-        });
-        const data = await res.json();
+        const { data } = await api.post('/api/sentcom/chat', { message: action.prompt });
         response = data.response || "We're working on that analysis.";
       }
       
@@ -2990,16 +2907,8 @@ const SentCom = ({ compact = false, embedded = false }) => {
     try {
       // Call both endpoints in parallel
       const [rulesRes, sizingRes] = await Promise.all([
-        fetch(`${API_BASE}/api/assistant/coach/check-rules`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data)
-        }).then(r => r.json()).catch(() => ({})),
-        fetch(`${API_BASE}/api/assistant/coach/position-size`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data)
-        }).then(r => r.json()).catch(() => ({}))
+        safePost('/api/assistant/coach/check-rules', data),
+        safePost('/api/assistant/coach/position-size', data)
       ]);
       
       // Combine the responses

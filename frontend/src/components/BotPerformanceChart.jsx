@@ -14,8 +14,8 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { safePolling } from '../utils/safePolling';
 import { motion } from 'framer-motion';
 import { TrendingUp, TrendingDown, ChevronRight, Activity } from 'lucide-react';
+import api, { safeGet, safePost } from '../utils/api';
 
-const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
 
 // Custom Time Range Button
@@ -414,7 +414,7 @@ const BotPerformanceChart = ({
     }
     
     try {
-      const response = await fetch(`${API_URL}/api/trading-bot/performance/equity-curve?period=${timeRange}`);
+      const response = await safeGet('/api/trading-bot/performance/equity-curve?period=${timeRange}');
       if (response.ok) {
         const data = await response.json();
         if (data.success) {

@@ -8,8 +8,7 @@ import BriefMeModal from '../BriefMeModal';
 import SentCom from '../SentCom';
 import JobManager from '../JobManager';
 import { useTickerModal } from '../../hooks/useTickerModal';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL || '';
+import api, { safeGet, safePost } from '../../utils/api';
 
 const AICoachTab = ({
   setSelectedTicker,
@@ -51,7 +50,7 @@ const AICoachTab = ({
   // Fetch regime data
   const fetchRegimeData = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/market-regime/summary`);
+      const response = await safeGet('/api/market-regime/summary');
       if (response.ok) {
         const data = await response.json();
         if (data.success) {
@@ -69,7 +68,7 @@ const AICoachTab = ({
   // Fetch session data
   const fetchSessionData = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/context/session`);
+      const response = await safeGet('/api/context/session');
       if (response.ok) {
         const data = await response.json();
         if (data.success) {

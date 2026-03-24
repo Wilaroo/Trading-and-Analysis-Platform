@@ -21,8 +21,7 @@ import {
   XCircle
 } from 'lucide-react';
 import { useTrainingMode } from '../contexts';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL || '';
+import api, { safeGet, safePost } from '../utils/api';
 
 // Scenario configurations with icons and colors
 const SCENARIO_CONFIG = {
@@ -85,7 +84,7 @@ const SimulatorControl = ({ onAlertGenerated, onAlertsUpdated, className = '' })
   // Fetch simulator status
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/simulator/status`);
+      const res = await safeGet('/api/simulator/status');
       if (res.ok) {
         const data = await res.json();
         setStatus(data);
@@ -101,7 +100,7 @@ const SimulatorControl = ({ onAlertGenerated, onAlertsUpdated, className = '' })
   // Fetch simulator alerts and update parent
   const fetchAlerts = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/simulator/alerts`);
+      const res = await safeGet('/api/simulator/alerts');
       if (res.ok) {
         const data = await res.json();
         const alerts = data.alerts || [];
@@ -122,7 +121,7 @@ const SimulatorControl = ({ onAlertGenerated, onAlertsUpdated, className = '' })
     setError(null);
     try {
       const res = await fetch(
-        `${API_URL}/api/simulator/start?scenario=${selectedScenario}&interval=${selectedInterval}`,
+        '/api/simulator/start?scenario=${selectedScenario}&interval=${selectedInterval}',
         { method: 'POST' }
       );
       if (res.ok) {
@@ -144,7 +143,7 @@ const SimulatorControl = ({ onAlertGenerated, onAlertsUpdated, className = '' })
   const stopSimulator = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/simulator/stop`, { method: 'POST' });
+      const res = await api.post('/api/simulator/stop');
       if (res.ok) {
         await fetchStatus();
       }
@@ -158,7 +157,7 @@ const SimulatorControl = ({ onAlertGenerated, onAlertsUpdated, className = '' })
   const generateAlert = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/simulator/generate`, { method: 'POST' });
+      const res = await api.post('/api/simulator/generate');
       if (res.ok) {
         const data = await res.json();
         if (data.success && data.alert) {

@@ -24,8 +24,9 @@ import BotPerformanceChart from './BotPerformanceChart';
 import SentCom from './SentCom';
 import { useTickerModal } from '../hooks/useTickerModal';
 import SystemStatusBar from './SystemStatusBar';
+import api, { safeGet, safePost } from '../utils/api';
+const API_URL = process.env.REACT_APP_BACKEND_URL || ''; // For EventSource URLs
 
-const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 const DASHBOARD_REFRESH_INTERVAL = 15000; // 15 seconds for dashboard data
 const ACCOUNT_REFRESH_INTERVAL = 15000; // 15 seconds for account data
 
@@ -46,8 +47,7 @@ const DashboardHeader = ({
   useEffect(() => {
     const fetchSession = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/market-context/session/status`);
-        const data = await res.json();
+        const data = await safeGet('/api/market-context/session/status');
         if (data.success && data.session) {
           setMarketSession(data.session);
         }
@@ -333,14 +333,12 @@ const WatchingSetupsCard = ({ setups = [] }) => {
 const ScannerAlertsStrip = ({ alerts: propAlerts = [], onViewAll }) => {
   const { openTickerModal } = useTickerModal();
   const [fetchedAlerts, setFetchedAlerts] = useState([]);
-  const API_URL = process.env.REACT_APP_BACKEND_URL || '';
-  
-  // Fetch alerts via REST if not provided via WebSocket prop
+    // Fetch alerts via REST if not provided via WebSocket prop
   useEffect(() => {
     if (propAlerts.length > 0) return; // WebSocket is providing data
     const fetchAlerts = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/live-scanner/alerts`);
+        const res = await safeGet('/api/live-scanner/alerts');
         if (res.ok) {
           const data = await res.json();
           if (data.alerts?.length > 0) setFetchedAlerts(data.alerts);
@@ -478,7 +476,7 @@ const NewDashboard = ({
   const fetchDashboardData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/trading-bot/dashboard-data`);
+      const response = await safeGet('/api/trading-bot/dashboard-data');
       if (response.ok) {
         const data = await response.json();
         if (data.success) {
@@ -498,8 +496,8 @@ const NewDashboard = ({
   const fetchAccountData = useCallback(async () => {
     try {
       const [accountRes, ibDataRes] = await Promise.all([
-        fetch(`${API_URL}/api/ib/account/summary`),
-        fetch(`${API_URL}/api/ib/pushed-data`)
+        safeGet('/api/ib/account/summary'),
+        safeGet('/api/ib/pushed-data')
       ]);
       
       if (accountRes.ok) {
@@ -532,7 +530,7 @@ const NewDashboard = ({
   // Fetch order queue status
   const fetchOrderQueue = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/ib/orders/queue/status`);
+      const response = await safeGet('/api/ib/orders/queue/status');
       if (response.ok) {
         const data = await response.json();
         if (data.success) {

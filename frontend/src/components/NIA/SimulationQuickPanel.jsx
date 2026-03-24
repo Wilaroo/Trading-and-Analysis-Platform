@@ -7,8 +7,6 @@ import {
 import { toast } from 'sonner';
 import api from '../../utils/api';
 
-const API_BASE = process.env.REACT_APP_BACKEND_URL;
-
 const SimulationQuickPanel = memo(({ jobs, loading, onRefresh }) => {
   const [expanded, setExpanded] = useState(false);
   const [starting, setStarting] = useState(null);
@@ -37,7 +35,7 @@ const SimulationQuickPanel = memo(({ jobs, loading, onRefresh }) => {
   const handleQuickTest = async () => {
     setStarting('quick');
     try {
-      const res = await fetch(`${API_BASE}/api/simulation/quick-test?bar_size=${encodeURIComponent(simBarSize)}`, { method: 'POST' });
+      const res = await api.post('/api/simulation/quick-test?bar_size=${encodeURIComponent(simBarSize)}');
       const data = await res.json();
       if (data.success) {
         toast.success(`Smart Test started: ${data.symbols_count} symbols on ${simBarSize} bars`);

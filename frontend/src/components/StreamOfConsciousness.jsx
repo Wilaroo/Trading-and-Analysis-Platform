@@ -6,6 +6,7 @@
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import api, { safeGet, safePost } from '../utils/api';
 import { 
   Search, TrendingUp, TrendingDown, AlertTriangle, Activity, 
   Target, Eye, Zap, Brain, RefreshCw, Filter, CheckCircle,
@@ -14,8 +15,6 @@ import {
   BarChart2, PieChart, Percent, Hash, AlertCircle, Play, 
   StopCircle, ShoppingCart, Ban, ThumbsUp, ThumbsDown
 } from 'lucide-react';
-
-const API_BASE = process.env.REACT_APP_BACKEND_URL;
 
 // Format timestamp
 const formatTime = (timestamp) => {
@@ -39,8 +38,7 @@ export const useSOCStream = (pollInterval = 3000) => {
 
   const fetchThoughts = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/sentcom/stream?limit=30`);
-      const data = await res.json();
+      const data = await safeGet('/api/sentcom/stream?limit=30');
       
       if (data.success && data.messages) {
         const socMessages = data.messages.filter(m => 

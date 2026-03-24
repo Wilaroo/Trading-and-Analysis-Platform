@@ -11,6 +11,8 @@
  */
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import api, { safeGet, safePost } from '../utils/api';
+const API_URL = process.env.REACT_APP_BACKEND_URL || ''; // For service health checks
 
 const SystemStatusContext = createContext(null);
 
@@ -68,8 +70,6 @@ const STATUS = {
   ERROR: 'error',
   UNKNOWN: 'unknown',
 };
-
-const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
 export const SystemStatusProvider = ({ children }) => {
   // Individual service statuses
@@ -169,7 +169,7 @@ export const SystemStatusProvider = ({ children }) => {
     
     // Check backend first (if backend is down, others will fail)
     try {
-      const healthResponse = await fetch(`${API_URL}/api/health`);
+      const healthResponse = await safeGet('/api/health');
       if (healthResponse.ok) {
         updateStatus('backend', STATUS.CONNECTED);
         updateStatus('mongodb', STATUS.CONNECTED); // If backend is up, DB is connected

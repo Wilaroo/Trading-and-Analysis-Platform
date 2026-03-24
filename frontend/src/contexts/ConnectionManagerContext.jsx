@@ -12,16 +12,18 @@
 
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { useAppState } from './AppStateContext';
+import api, { safeGet, safePost } from '../utils/api';
 
 const ConnectionManagerContext = createContext(null);
+
+// WebSocket URL construction
+const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
 // Reconnect settings
 const RECONNECT_BASE_DELAY = 1000;  // 1 second
 const RECONNECT_MAX_DELAY = 30000;  // 30 seconds max
 const RECONNECT_MAX_ATTEMPTS = 10;
 const HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
-
-const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
 export const ConnectionManagerProvider = ({ children }) => {
   const { updateConnection } = useAppState();
@@ -141,11 +143,8 @@ export const ConnectionManagerProvider = ({ children }) => {
    */
   const checkBackendHealth = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/health`, {
-        method: 'GET',
-        timeout: 5000
-      });
-      const healthy = response.ok;
+      const { status } = await api.get('/api/health', { timeout: 5000 });
+      const healthy = status === 200;
       setBackendConnected(healthy);
       updateConnection('mongodb', { connected: healthy });
       return healthy;
@@ -162,8 +161,7 @@ export const ConnectionManagerProvider = ({ children }) => {
    */
   const checkIBConnection = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/ib/status`);
-      const data = await response.json();
+      const data = await safeGet('/api/ib/status');
       const connected = data.connected || false;
       setIbConnected(connected);
       updateConnection('ib', { connected });

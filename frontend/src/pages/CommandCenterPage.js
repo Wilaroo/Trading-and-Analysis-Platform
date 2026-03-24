@@ -6,8 +6,7 @@ import HeaderBar from '../components/layout/HeaderBar';
 import AICoachTab from '../components/tabs/AICoachTab';
 import ChartsTab from '../components/tabs/ChartsTab';
 import { useCommandCenterData } from '../hooks/useCommandCenterData';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL || '';
+import api, { safeGet, safePost } from '../utils/api';
 
 const CommandCenterPage = ({ 
   ibConnected, 
@@ -39,16 +38,8 @@ const CommandCenterPage = ({
   useEffect(() => {
     const checkOllama = async () => {
       try {
-        const response = await fetch(`${API_URL}/api/assistant/check-ollama`, { 
-          method: 'GET',
-          headers: { 'Content-Type': 'application/json' }
-        });
-        if (response.ok) {
-          const data = await response.json();
+        const data = await safeGet('/api/assistant/check-ollama');
           setOllamaStatus(data.available ? 'online' : 'offline');
-        } else {
-          setOllamaStatus('offline');
-        }
       } catch (e) {
         setOllamaStatus('offline');
       }
@@ -56,14 +47,10 @@ const CommandCenterPage = ({
     
     const fetchOllamaUsage = async () => {
       try {
-        const response = await fetch(`${API_URL}/api/ollama-usage`, {
-          method: 'GET',
-          headers: { 'Content-Type': 'application/json' }
-        });
-        if (response.ok) {
-          const data = await response.json();
-          setOllamaUsage(data);
-        }
+        const data = await safeGet('/api/ollama-usage');
+          if (data && Object.keys(data).length) {
+            setOllamaUsage(data);
+          }
       } catch (e) {
         // Ollama usage fetch failed - non-critical
       }

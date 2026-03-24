@@ -13,8 +13,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useDataCache } from '../contexts';
-
-const API_BASE = process.env.REACT_APP_BACKEND_URL;
+import api, { safeGet, safePost, safeDelete } from '../utils/api';
 
 // Risk level colors
 const RISK_COLORS = {
@@ -44,8 +43,7 @@ const useDynamicRisk = (pollInterval = 30000) => {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/dynamic-risk/status`);
-      const data = await res.json();
+      const data = await safeGet('/api/dynamic-risk/status');
       if (data.success) {
         setStatus(data);
         setCached('dynamicRiskStatus', data, 30000);
@@ -128,7 +126,7 @@ export const DynamicRiskPanel = ({ expanded = false, onToggleExpand }) => {
   const handleToggle = async () => {
     setActionLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/dynamic-risk/toggle`, { method: 'POST' });
+      const res = await api.post('/api/dynamic-risk/toggle');
       const data = await res.json();
       if (data.success) {
         toast.success(data.enabled ? 'Dynamic risk enabled' : 'Dynamic risk disabled');
@@ -143,16 +141,11 @@ export const DynamicRiskPanel = ({ expanded = false, onToggleExpand }) => {
   const handleSetOverride = async () => {
     setActionLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/dynamic-risk/override`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const { data: data } = await api.post('/api/dynamic-risk/override', {
           multiplier: overrideValue,
           duration_minutes: overrideDuration,
           reason: overrideReason
-        })
-      });
-      const data = await res.json();
+        });
       if (data.success) {
         toast.success(`Override set: ${overrideValue}x for ${overrideDuration} mins`);
         setShowOverride(false);
@@ -167,8 +160,7 @@ export const DynamicRiskPanel = ({ expanded = false, onToggleExpand }) => {
   const handleClearOverride = async () => {
     setActionLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/dynamic-risk/override`, { method: 'DELETE' });
-      const data = await res.json();
+      const data = await safeDelete('/api/dynamic-risk/override');
       if (data.success) {
         toast.success('Override cleared');
         refresh();

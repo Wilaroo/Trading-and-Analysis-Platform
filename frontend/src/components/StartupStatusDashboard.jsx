@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { safePolling } from '../utils/safePolling';
+import api, { safeGet, safePost } from '../utils/api';
 import { 
   CheckCircle, 
   XCircle, 
@@ -176,15 +177,11 @@ const StartupStatusDashboard = ({ onClose, minimized = false, onMinimize }) => {
     }
     
     try {
-      const API_URL = process.env.REACT_APP_BACKEND_URL || '';
-      console.log('Fetching startup status from:', `${API_URL}/api/startup-status`);
+            console.log('Fetching startup status from:', '/api/startup-status');
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
-      const response = await fetch(`${API_URL}/api/startup-status`, { signal: controller.signal });
+      const { data } = await api.get('/api/startup-status', { signal: controller.signal });
       clearTimeout(timeoutId);
-      console.log('Response status:', response.status);
-      if (!response.ok) throw new Error(`Failed to fetch status: ${response.status}`);
-      const data = await response.json();
       console.log('Startup status data:', data);
       setStatus(data);
       setError(null);

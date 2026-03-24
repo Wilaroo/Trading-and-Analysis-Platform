@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { Tip, TipIcon, CustomTip } from './shared/Tooltip';
 
-const API_URL = process.env.REACT_APP_BACKEND_URL || '';
+const API_URL = process.env.REACT_APP_BACKEND_URL || ''; // For EventSource URLs
 
 // Trade status colors
 const STATUS_CONFIG = {
@@ -69,10 +69,7 @@ const Reasons2SellMonitor = ({ trade }) => {
     
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/smb/reasons-to-sell/check`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const { data } = await api.post('/api/smb/reasons-to-sell/check', {
           entry_price: trade.fill_price,
           current_price: trade.current_price,
           target: trade.target_prices?.[0] || trade.fill_price * 1.02,
@@ -82,9 +79,7 @@ const Reasons2SellMonitor = ({ trade }) => {
           ema_9: trade.ema_9 || 0,
           vwap: trade.vwap || 0,
           trade_style: trade.trade_style || 'trade_2_hold'
-        })
-      });
-      const data = await response.json();
+        });
       setReasons(data);
       setLastCheck(new Date());
     } catch (err) {
@@ -652,8 +647,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   // Fetch bot status
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/trading-bot/status`);
-      const data = await res.json();
+      const data = await safeGet('/api/trading-bot/status');
       if (data.success) {
         setStatus(data);
       }
@@ -665,8 +659,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   // Fetch order queue status (IB execution queue)
   const fetchOrderQueue = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/ib/orders/queue/status`);
-      const data = await res.json();
+      const data = await safeGet('/api/ib/orders/queue/status');
       if (data.success) {
         setOrderQueue({
           pending: data.pending_count || 0,
@@ -685,9 +678,9 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const fetchTrades = useCallback(async () => {
     try {
       const [pendingRes, openRes, closedRes] = await Promise.all([
-        fetch(`${API_URL}/api/trading-bot/trades/pending`),
-        fetch(`${API_URL}/api/trading-bot/trades/open`),
-        fetch(`${API_URL}/api/trading-bot/trades/closed?limit=20`)
+        safeGet('/api/trading-bot/trades/pending'),
+        safeGet('/api/trading-bot/trades/open'),
+        safeGet('/api/trading-bot/trades/closed?limit=20')
       ]);
       
       const pendingData = await pendingRes.json();
@@ -716,7 +709,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
     setActionLoading('toggle');
     try {
       const endpoint = status?.running ? 'stop' : 'start';
-      await fetch(`${API_URL}/api/trading-bot/${endpoint}`, { method: 'POST' });
+      await api.post('/api/trading-bot/${endpoint}');
       await fetchStatus();
     } catch (err) {
       console.error('Failed to toggle bot:', err);
@@ -728,7 +721,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const changeMode = async (mode) => {
     setActionLoading('mode');
     try {
-      await fetch(`${API_URL}/api/trading-bot/mode/${mode}`, { method: 'POST' });
+      await api.post('/api/trading-bot/mode/${mode}');
       await fetchStatus();
     } catch (err) {
       console.error('Failed to change mode:', err);
@@ -740,7 +733,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const confirmTrade = async (tradeId) => {
     setActionLoading(tradeId);
     try {
-      const res = await fetch(`${API_URL}/api/trading-bot/trades/${tradeId}/confirm`, { method: 'POST' });
+      const res = await api.post('/api/trading-bot/trades/${tradeId}/confirm');
       const data = await res.json();
       if (data.success) {
         await fetchTrades();
@@ -756,7 +749,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const rejectTrade = async (tradeId) => {
     setActionLoading(tradeId);
     try {
-      const res = await fetch(`${API_URL}/api/trading-bot/trades/${tradeId}/reject`, { method: 'POST' });
+      const res = await api.post('/api/trading-bot/trades/${tradeId}/reject');
       const data = await res.json();
       if (data.success) {
         await fetchTrades();
@@ -773,7 +766,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
     
     setActionLoading(tradeId);
     try {
-      const res = await fetch(`${API_URL}/api/trading-bot/trades/${tradeId}/close`, { method: 'POST' });
+      const res = await api.post('/api/trading-bot/trades/${tradeId}/close');
       const data = await res.json();
       if (data.success) {
         await fetchTrades();
@@ -789,12 +782,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const saveStrategyConfig = async (strategy) => {
     setActionLoading(`strategy-${strategy}`);
     try {
-      const res = await fetch(`${API_URL}/api/trading-bot/strategy-configs/${strategy}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(strategyForm)
-      });
-      const data = await res.json();
+      const { data } = await api.post('/api/trading-bot/strategy-configs/${strategy}', strategyForm);
       if (data.success) {
         await fetchStatus();
         setEditingStrategy(null);
@@ -856,8 +844,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
     // Fetch live scanner signals
     const fetchSignals = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/live-scanner/alerts`);
-        const data = await res.json();
+        const data = await safeGet('/api/live-scanner/alerts');
         if (data.alerts) {
           setLiveSignals(data.alerts.slice(0, 8));
         }

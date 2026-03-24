@@ -9,13 +9,12 @@
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import api, { safeGet, safePost } from '../utils/api';
 import { 
   X, Sparkles, TrendingUp, TrendingDown, Bot, Brain, 
   Target, AlertTriangle, ChevronDown, ChevronUp, 
   RefreshCw, Clock, Zap, BarChart3
 } from 'lucide-react';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
 const BriefMeModal = ({ isOpen, onClose }) => {
   const [detailLevel, setDetailLevel] = useState('quick'); // 'quick' or 'detailed'
@@ -33,20 +32,12 @@ const BriefMeModal = ({ isOpen, onClose }) => {
     const timeoutId = setTimeout(() => controller.abort(), 60000);
     
     try {
-      const response = await fetch(`${API_URL}/api/agents/brief-me`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ detail_level: level }),
-        signal: controller.signal
-      });
+      const { data } = await api.post('/api/agents/brief-me', 
+        { detail_level: level },
+        { signal: controller.signal, timeout: 60000 }
+      );
       
       clearTimeout(timeoutId);
-      
-      if (!response.ok) {
-        throw new Error('Failed to generate briefing');
-      }
-      
-      const data = await response.json();
       
       if (data.success) {
         setBriefData(data);

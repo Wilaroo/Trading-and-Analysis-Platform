@@ -6,8 +6,7 @@
  */
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import EnhancedTickerModal from '../components/EnhancedTickerModal';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL || '';
+import api, { safeGet, safePost } from '../utils/api';
 
 const TickerModalContext = createContext(null);
 
@@ -27,7 +26,7 @@ export const TickerModalProvider = ({ children, onTrade, onAskAI }) => {
   // Fetch bot's open trades to check if we have a position
   const fetchBotTrades = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/trading-bot/trades/open`);
+      const response = await safeGet('/api/trading-bot/trades/open');
       if (response.ok) {
         const data = await response.json();
         setBotTrades(data.trades || []);

@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Search, Filter, Play, Square, Clock, TrendingUp, BarChart3, Zap, RefreshCw, ChevronRight, Target, AlertTriangle, Brain, CheckCircle } from 'lucide-react';
 import { Tip, CustomTip } from './shared/Tooltip';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+import api, { safeGet, safePost } from '../utils/api';
 
 // Trade style presets
 const TRADE_STYLES = {
@@ -71,7 +70,7 @@ export default function MarketScannerPanel() {
 
   // Fetch symbol count on mount
   useEffect(() => {
-    fetch(`${API_URL}/api/market-scanner/symbols`)
+    safeGet('/api/market-scanner/symbols')
       .then(res => res.json())
       .then(data => {
         if (data.success) {
@@ -91,7 +90,7 @@ export default function MarketScannerPanel() {
     }
 
     const interval = setInterval(() => {
-      fetch(`${API_URL}/api/market-scanner/scan/${activeScan.id}`)
+      safeGet('/api/market-scanner/scan/${activeScan.id}')
         .then(res => res.json())
         .then(data => {
           if (data.success && data.scan) {
@@ -109,7 +108,7 @@ export default function MarketScannerPanel() {
   }, [activeScan]);
 
   const loadRecentScans = useCallback(() => {
-    fetch(`${API_URL}/api/market-scanner/scans?limit=10`)
+    safeGet('/api/market-scanner/scans?limit=10')
       .then(res => res.json())
       .then(data => {
         if (data.success) {
@@ -123,10 +122,7 @@ export default function MarketScannerPanel() {
     setIsScanning(true);
     
     try {
-      const response = await fetch(`${API_URL}/api/market-scanner/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const { data: data } = await api.post('/api/market-scanner/start', {
           name: scanName || `${TRADE_STYLES[selectedStyle].label} Market Scan`,
           trade_style: selectedStyle,
           filters: {
@@ -137,10 +133,7 @@ export default function MarketScannerPanel() {
             exclude_penny_stocks: filters.excludePenny
           },
           run_in_background: true
-        })
-      });
-      
-      const data = await response.json();
+        });
       
       if (data.success) {
         setActiveScan({
@@ -159,9 +152,7 @@ export default function MarketScannerPanel() {
     if (!activeScan) return;
     
     try {
-      await fetch(`${API_URL}/api/market-scanner/scan/${activeScan.id}`, {
-        method: 'DELETE'
-      });
+      await api.delete(`/api/market-scanner/scan/${activeScan.id}`);
       setIsScanning(false);
       setActiveScan(null);
     } catch (error) {
@@ -174,8 +165,7 @@ export default function MarketScannerPanel() {
     
     // Fetch signals for this scan
     try {
-      const response = await fetch(`${API_URL}/api/market-scanner/scan/${scan.id}/signals?limit=50`);
-      const data = await response.json();
+      const data = await safeGet('/api/market-scanner/scan/${scan.id}/signals?limit=50');
       if (data.success) {
         setScanSignals(data.signals || []);
       }

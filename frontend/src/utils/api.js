@@ -56,4 +56,34 @@ export const getWebSocketUrl = () => {
 // Export throttler for monitoring
 export { requestThrottler };
 
+// Safe API wrappers - return empty object on error (matches common fetch pattern)
+export const safeGet = async (url) => {
+  try {
+    const { data } = await api.get(url);
+    return data;
+  } catch (err) {
+    if (err?.response?.status === 429) return null; // Rate limited
+    return {};
+  }
+};
+
+export const safePost = async (url, body) => {
+  try {
+    const { data } = await api.post(url, body);
+    return data;
+  } catch (err) {
+    if (err?.response?.status === 429) return null;
+    return {};
+  }
+};
+
+export const safeDelete = async (url) => {
+  try {
+    const { data } = await api.delete(url);
+    return data;
+  } catch (err) {
+    return {};
+  }
+};
+
 export default api;

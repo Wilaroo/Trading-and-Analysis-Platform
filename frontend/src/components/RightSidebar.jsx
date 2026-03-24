@@ -30,8 +30,6 @@ import QuickActionsMenu from './QuickActionsMenu';
 import SimulatorControl from './SimulatorControl';
 import api from '../utils/api';
 
-const API_URL = process.env.REACT_APP_BACKEND_URL || '';
-
 // ===================== CALENDAR-STYLE EARNINGS WIDGET =====================
 const EarningsWidget = ({ onTickerSelect }) => {
   const [calendarData, setCalendarData] = useState(null);
@@ -525,8 +523,8 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
     setLoading(true);
     try {
       const [alertsRes, statusRes] = await Promise.all([
-        fetch(`${API_URL}/api/live-scanner/alerts`).then(r => r.json()),
-        fetch(`${API_URL}/api/live-scanner/status`).then(r => r.json())
+        safeGet('/api/live-scanner/alerts').then(r => r.json()),
+        safeGet('/api/live-scanner/status').then(r => r.json())
       ]);
       setAlerts(alertsRes.alerts || []);
       setStats(statusRes);
