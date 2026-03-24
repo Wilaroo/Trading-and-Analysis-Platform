@@ -55,6 +55,13 @@ class RequestThrottler {
     };
   }
 
+  // Clear all queued (not yet started) requests to prevent stale buildup
+  clearQueue() {
+    const dropped = this.queue.length;
+    this.queue = [];
+    return dropped;
+  }
+
   setMaxConcurrent(max) {
     this.maxConcurrent = max;
     this.processQueue();
@@ -69,7 +76,7 @@ class RequestThrottler {
   }
 }
 
-// Global throttler instance - limit to 4 concurrent requests
-export const requestThrottler = new RequestThrottler(8);
+// Global throttler instance - limit to 16 concurrent requests
+export const requestThrottler = new RequestThrottler(16);
 
 export default RequestThrottler;
