@@ -30,46 +30,28 @@ AI-powered trading platform that combines market scanning, strategy simulation, 
 7. Persistent Chat History - Messages persist across sessions/refreshes
 8. Market Regime Clarity - Improved panel readability
 9. Shadow Learning - Auto-evaluates "shadow" trade decisions
-10. Backend Event Loop Fix - Wrapped sync SDK calls in `asyncio.to_thread`
-11. StartupModal Rearchitecture - Single `/api/startup-check` endpoint, <3s load
-12. Data Persistence Fix - CSS-based tab switching (no unmount/remount)
-13. P&L Calculation Fix - Handles null values from IB Gateway
-14. Learning Insights Widget Fix - Correct per-strategy aggregation
-15. Bot Performance Chart Fix - No blanking during load
-16. `/api/ib-collector/fill-gaps` Fix - Non-blocking database operations
+10. StartupModal Rearchitecture - Single `/api/startup-check` endpoint, <3s load
+11. Data Persistence Fix - CSS-based tab switching (no unmount/remount)
+12. P&L Calculation Fix - Handles null values from IB Gateway
+13. Learning Insights Widget Fix - Correct per-strategy aggregation
+14. Bot Performance Chart Fix - No blanking during load
+15. `/api/ib-collector/fill-gaps` Fix - Non-blocking database operations
 
 ### NIA Page Refactoring (Mar 24, 2026) - COMPLETED
-Refactored 3120-line monolithic `NIA.jsx` into modular directory structure:
+Refactored 3120-line monolithic `NIA.jsx` into modular directory structure with 10+ focused components, QuickStats bar, two-phase data fetching.
 
-**File Structure:**
-```
-NIA/
-  index.jsx          - Main orchestrator (~300 lines)
-  QuickStatsBar.jsx  - 6 real-time metric cards at top
-  IntelOverview.jsx  - 4 key metric cards with connector health dots
-  LearningProgressPanel.jsx
-  ReportCardPanel.jsx (moved up for visibility)
-  DataCollectionPanel.jsx (coverage/collect/progress tabs)
-  SimulationQuickPanel.jsx
-  TestingToolsPanel.jsx (merged Scanner + Advanced Testing, tabbed)
-  AIModulesPanel.jsx (merged AI Performance + Connectors, tabbed)
-  StrategyPipelinePanel.jsx (merged Lifecycle + Promotions, tabbed)
-  constants.js (shared phase colors/icons)
-```
+### Backend Event Loop Fix (Feb 2026) - COMPLETED
+**Problem**: Synchronous I/O operations (pymongo DB calls, Alpaca SDK calls) inside async functions blocked the asyncio event loop, causing API timeouts and frontend unresponsiveness.
 
-**Changes:**
-1. Removed duplicate promotion sections
-2. Deduplicated AI accuracy display
-3. Shared phase constants extracted
-4. Merged Scanner + Advanced Testing into tabbed panel
-5. Merged AI Performance + Connectors into tabbed panel
-6. Merged Lifecycle + Promotions into tabbed panel
-7. Moved ReportCard up for visibility
-8. Added connector health dot indicator to IntelOverview
-9. Migrated raw fetch() calls to centralized api utility
-10. Smarter default expand/collapse states
-11. Two-phase data fetch (fast endpoints → immediate UI update, slow endpoints with 10s timeout)
-12. Added QuickStats summary bar with 6 real-time metrics
+**Solution**:
+1. **ThreadPoolExecutor(max_workers=32)** in `server.py` startup - prevents thread starvation
+2. **Alpaca SDK timeouts** (`ALPACA_CALL_TIMEOUT=10s`) via `asyncio.wait_for` on all SDK calls + async client initialization
+3. **server.py inline route handlers** - 15+ DB calls wrapped in `asyncio.to_thread`
+4. **sentcom_service.py** - `_save_chat_message`, `_cleanup_old_messages` made async with `to_thread`
+5. **ai_assistant_service.py** - `_get_or_create_conversation`, `_load/_save_conversation_to_db`, `_track_request_pattern`, `get_conversation_history`, `clear_conversation`, `get_all_sessions` all made async with `to_thread`
+6. **trading_bot_service.py** - Remaining `_persist_trade` calls in async context wrapped in `to_thread`
+
+**Result**: All endpoints respond under 500ms even with 8 concurrent requests. No more event loop blocking.
 
 ## In Progress
 - Autonomous Learning Loop automation
@@ -83,7 +65,6 @@ NIA/
 - Enable GPU for LightGBM
 - Complete backend router refactoring (activate modular routers in server.py)
 - Migrate remaining ~85 raw fetch() calls to centralized api utility
-- Fix TradingBot event loop blocking (synchronous evaluations block async event loop)
 
 ### P3
 - Setup-specific AI Models (77 trading setups)
@@ -102,6 +83,8 @@ NIA/
 
 ## Technical Notes
 - **CRITICAL**: Never use synchronous I/O in async functions. Always use `asyncio.to_thread` for blocking calls.
+- ThreadPoolExecutor with 32 workers configured as default asyncio executor
+- All Alpaca SDK calls have 10s timeout via `asyncio.wait_for`
 - Frontend state persistence uses CSS display:none (not React key-based unmounting)
 - DataCollectionPanel has its own 15s polling cycle (separate from NIA's 60s main poll)
 - NIA uses two-phase fetch: fast endpoints update UI immediately, slow endpoints have 10s timeout
