@@ -187,59 +187,31 @@ const StartupModal = ({ onComplete }) => {
   }, [wsConnected]);
 
   // Check all services:
-  // 1. Backend first (sequential - most important)  
-  // 2. All remaining services in PARALLEL (one slow endpoint can't block the rest)
+  // Backend first, then remaining services ONE AT A TIME (sequential uses only 1 connection
+  // slot, avoiding browser connection pool competition with other contexts)
   const checkAllServices = useCallback(async () => {
     setIsChecking(true);
     setCheckCount(prev => prev + 1);
 
-    // Phase 1: Check backend first (if not already passed)
-    if (serviceStatusRef.current['backend'] !== 'success') {
-      const backendService = SERVICES.find(s => s.id === 'backend');
-      const status = await checkService(backendService);
-      setServiceStatus(prev => {
-        const next = { ...prev, backend: status };
-        serviceStatusRef.current = next;
-        return next;
-      });
-    }
+    for (const service of SERVICES) {
+      if (service.checkType === 'websocket') continue;
 
-    // Auto-pass database if backend is up
-    if (serviceStatusRef.current['backend'] === 'success' && serviceStatusRef.current['database'] !== 'success') {
-      setServiceStatus(prev => {
-        const next = { ...prev, database: 'success' };
-        serviceStatusRef.current = next;
-        return next;
-      });
-    }
+      // Skip services that already succeeded
+      if (serviceStatusRef.current[service.id] === 'success') continue;
 
-    // Phase 2: Check all remaining services in PARALLEL
-    const remaining = SERVICES.filter(s => {
-      if (s.checkType === 'websocket') return false;
-      if (s.id === 'backend' || s.id === 'database') return false;
-      if (serviceStatusRef.current[s.id] === 'success') return false;
-      return true;
-    });
+      // Auto-pass database when backend is up
+      if (service.id === 'database' && serviceStatusRef.current['backend'] === 'success') {
+        serviceStatusRef.current = { ...serviceStatusRef.current, database: 'success' };
+        setServiceStatus(prev => ({ ...prev, database: 'success' }));
+        continue;
+      }
 
-    if (remaining.length > 0) {
-      const results = await Promise.allSettled(
-        remaining.map(async (service) => {
-          const status = await checkService(service);
-          return { id: service.id, status };
-        })
-      );
+      const status = await checkService(service);
+      serviceStatusRef.current = { ...serviceStatusRef.current, [service.id]: status };
+      setServiceStatus(prev => ({ ...prev, [service.id]: status }));
 
-      // Apply all results in one state update
-      setServiceStatus(prev => {
-        const next = { ...prev };
-        for (const r of results) {
-          if (r.status === 'fulfilled') {
-            next[r.value.id] = r.value.status;
-            serviceStatusRef.current[r.value.id] = r.value.status;
-          }
-        }
-        return next;
-      });
+      // 200ms between checks
+      await new Promise(resolve => setTimeout(resolve, 200));
     }
 
     setIsChecking(false);
