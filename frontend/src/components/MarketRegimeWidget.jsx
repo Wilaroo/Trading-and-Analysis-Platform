@@ -73,7 +73,48 @@ const ScoreRing = ({ score, size = 56, label }) => {
 };
 
 // Progress Bar Component
-const ScoreBar = ({ label, value, tip }) => {
+// Score interpretation helper
+const getScoreLabel = (category, value) => {
+  if (value == null) return 'No data';
+  
+  const labels = {
+    trend: [
+      [80, 'Strong uptrend'],
+      [60, 'Uptrend'],
+      [40, 'Sideways'],
+      [20, 'Downtrend'],
+      [0,  'Strong downtrend']
+    ],
+    breadth: [
+      [80, 'Very broad rally'],
+      [60, 'Healthy breadth'],
+      [40, 'Narrowing'],
+      [20, 'Weak breadth'],
+      [0,  'Very narrow']
+    ],
+    volume_vix: [
+      [80, 'Low fear, calm'],
+      [60, 'Moderate fear'],
+      [40, 'Elevated fear'],
+      [20, 'High fear'],
+      [0,  'Extreme fear']
+    ],
+    ftd: [
+      [70, 'Confirmed trend'],
+      [45, 'Waiting for confirm'],
+      [20, 'No signal'],
+      [0,  'Failed signal']
+    ]
+  };
+  
+  const thresholds = labels[category] || [];
+  for (const [min, label] of thresholds) {
+    if (value >= min) return label;
+  }
+  return '--';
+};
+
+const ScoreBar = ({ label, value, tip, category }) => {
   const getColor = (v) => {
     if (v >= 70) return 'bg-emerald-500';
     if (v >= 40) return 'bg-yellow-500';
@@ -88,15 +129,15 @@ const ScoreBar = ({ label, value, tip }) => {
   
   const content = (
     <div className="flex items-center gap-2">
-      <span className="text-[10px] text-zinc-500 w-16 flex-shrink-0">{label}</span>
+      <span className="text-[10px] text-zinc-500 w-12 flex-shrink-0">{label}</span>
       <div className="flex-1 h-1.5 bg-black/40 rounded-full overflow-hidden">
         <div 
           className={`h-full rounded-full transition-all duration-500 ${getColor(value)}`}
           style={{ width: `${value || 0}%` }}
         />
       </div>
-      <span className={`font-mono text-[10px] w-6 text-right ${getTextColor(value)}`}>
-        {value?.toFixed(0) || '--'}
+      <span className={`text-[10px] w-24 text-right ${getTextColor(value)}`}>
+        {category ? getScoreLabel(category, value) : (value?.toFixed(0) || '--')}
       </span>
     </div>
   );
@@ -237,30 +278,40 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
       {/* Main Content */}
       <div className="p-3">
         <div className="flex items-center gap-4">
-          {/* Score Ring */}
-          <ScoreRing score={regime?.composite_score} size={56} />
+          {/* Score Ring + Overall Label */}
+          <div className="flex flex-col items-center">
+            <ScoreRing score={regime?.composite_score} size={56} />
+            <span className="text-[9px] text-zinc-500 mt-1">
+              {regime?.composite_score >= 70 ? 'Favorable' :
+               regime?.composite_score >= 40 ? 'Mixed' : 'Unfavorable'}
+            </span>
+          </div>
           
           {/* Score Bars */}
           <div className="flex-1 space-y-1.5">
             <ScoreBar 
               label="Trend" 
               value={scores.trend} 
+              category="trend"
               tip="SPY & QQQ price trend relative to key moving averages"
             />
             <ScoreBar 
               label="Breadth" 
               value={scores.breadth} 
-              tip="Market breadth - how many stocks are participating"
+              category="breadth"
+              tip="Market breadth - how many stocks are participating in the move"
             />
             <ScoreBar 
               label="Vol/VIX" 
               value={scores.volume_vix} 
-              tip="VIX fear gauge and volume analysis"
+              category="volume_vix"
+              tip="Fear gauge - higher score = lower fear = safer to trade"
             />
             <ScoreBar 
               label="FTD" 
               value={scores.ftd} 
-              tip="Follow-Through Day status for trend changes"
+              category="ftd"
+              tip="Follow-Through Day - confirms if a new trend has started"
             />
           </div>
         </div>

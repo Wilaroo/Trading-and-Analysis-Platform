@@ -17,7 +17,7 @@ import logging
 import asyncio
 import os
 from typing import Dict, Any, List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field
 from pymongo import MongoClient, DESCENDING
 
@@ -110,24 +110,28 @@ class SentComService:
         self._chat_history: List[Dict] = []
         self._max_history = 50
         self._message_counter = 0
-        self._session_id = "default"
+        self._session_id = f"session_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
         
-        # Load persisted chat history from MongoDB
-        self._load_chat_history()
-        logger.info(f"SentCom service initialized with {len(self._chat_history)} persisted messages")
+        # Load recent chat messages (current day only, for continuity)
+        self._load_recent_chat_history()
+        logger.info(f"SentCom session {self._session_id}: loaded {len(self._chat_history)} recent messages")
     
-    def _load_chat_history(self):
-        """Load chat history from MongoDB"""
+    def _load_recent_chat_history(self):
+        """Load recent chat messages from MongoDB (last 24 hours, any session).
+        
+        On startup, shows the most recent conversation for continuity.
+        All messages are still stored in MongoDB for AI learning.
+        """
         try:
             db = _get_db()
-            # Get the most recent messages for the session
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+            
             cursor = db[self.CHAT_COLLECTION].find(
-                {"session_id": self._session_id}
-            ).sort("timestamp", DESCENDING).limit(self._max_history)
+                {"created_at": {"$gte": cutoff}}
+            ).sort("created_at", -1).limit(self._max_history)
             
             messages = list(cursor)
-            # Reverse to get chronological order
-            messages.reverse()
+            messages.reverse()  # Chronological order
             
             self._chat_history = []
             for msg in messages:
@@ -137,7 +141,7 @@ class SentComService:
                     "timestamp": msg.get("timestamp")
                 })
             
-            logger.info(f"Loaded {len(self._chat_history)} chat messages from MongoDB")
+            logger.info(f"Loaded {len(self._chat_history)} recent chat messages (last 24h)")
         except Exception as e:
             logger.error(f"Error loading chat history: {e}")
             self._chat_history = []
