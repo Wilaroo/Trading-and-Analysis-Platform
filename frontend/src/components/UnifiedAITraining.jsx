@@ -866,7 +866,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
     } catch (e) {
       console.error('[NIA] Full universe error:', e);
       toast.error(`Full universe error: ${e.message}`);
-    } finally {
+      // Only reset on error — the polling loop handles success/completion
       setIsTraining(false);
       setTrainingProgress({
         phase: '',
@@ -878,7 +878,6 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
         elapsedTime: 0,
         message: ''
       });
-      // Notify components that training ended - they can resume normal polling
       notifyTrainingEnd();
       if (onTrainComplete) onTrainComplete();
     }
