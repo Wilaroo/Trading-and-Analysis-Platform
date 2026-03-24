@@ -221,13 +221,13 @@ export const ConnectionManagerProvider = ({ children }) => {
    * Initialize connections on mount
    */
   useEffect(() => {
-    // Initial WebSocket connection
+    // Initial WebSocket connection (lightweight, doesn't block HTTP pool)
     connectWebSocket();
     
-    // Delay initial health checks to let the StartupModal go first
+    // Delay initial health checks to let the StartupModal finish first
     const initialDelay = setTimeout(() => {
       runHealthChecks();
-    }, 5000);
+    }, 20000);
     
     // Periodic health checks - use recursive setTimeout to prevent overlap
     let healthTimer = null;
@@ -240,7 +240,7 @@ export const ConnectionManagerProvider = ({ children }) => {
       }, HEALTH_CHECK_INTERVAL);
     };
     // Start the periodic loop after initial delay
-    const periodicDelay = setTimeout(scheduleHealthCheck, 10000);
+    const periodicDelay = setTimeout(scheduleHealthCheck, 25000);
     
     return () => {
       // Cleanup
