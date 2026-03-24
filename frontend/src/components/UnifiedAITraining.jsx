@@ -467,6 +467,107 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
     }
   }, []);
 
+  // Check for running training jobs on mount (survives page refresh)
+  useEffect(() => {
+    const checkRunningJobs = async () => {
+      try {
+        const res = await apiLongRunning.get('/api/jobs/running');
+        const runningJobs = res.data?.running_jobs || [];
+        const trainingJob = runningJobs.find(j => j.job_type === 'training');
+        
+        if (trainingJob) {
+          const jobId = trainingJob.job_id;
+          const params = trainingJob.params || {};
+          const progress = trainingJob.progress || {};
+          
+          console.log('[NIA] Found running training job on mount:', jobId, params);
+          
+          setIsTraining(true);
+          setTrainingStartTime(new Date(trainingJob.started_at).getTime());
+          setTrainingProgress({
+            phase: params.all_timeframes ? 'full_universe' : 'training',
+            currentStep: Math.ceil((progress.percent || 0) / 100 * 5),
+            totalSteps: 5,
+            message: progress.message || 'Training in progress...',
+            details: { jobId }
+          });
+          
+          if (params.all_timeframes) {
+            setCurrentTimeframe('full-universe');
+          } else {
+            setCurrentTimeframe(params.bar_size || params.timeframe);
+          }
+          
+          // Resume polling this job
+          let pollCount = 0;
+          const maxPolls = 14400;
+          
+          const pollJob = async () => {
+            pollCount++;
+            try {
+              const statusRes = await apiLongRunning.get(`/api/jobs/${jobId}`);
+              const jobStatus = statusRes.data?.job;
+              
+              if (!jobStatus) {
+                if (pollCount < maxPolls) setTimeout(pollJob, 5000);
+                return;
+              }
+              
+              if (jobStatus.progress) {
+                setTrainingProgress(prev => ({
+                  ...prev,
+                  phase: jobStatus.status,
+                  currentStep: Math.ceil((jobStatus.progress.percent / 100) * 5),
+                  message: jobStatus.progress.message || 'Processing...',
+                }));
+              }
+              
+              if (jobStatus.status === 'completed') {
+                const result = jobStatus.result || {};
+                if (result.results) {
+                  const newStatus = {};
+                  for (const [tf, tfResult] of Object.entries(result.results)) {
+                    if (tfResult.success) {
+                      const accuracy = tfResult.accuracy ? (tfResult.accuracy * 100).toFixed(1) : '?';
+                      newStatus[tf] = { status: 'completed', message: `${accuracy}% accuracy (full universe)` };
+                    } else {
+                      newStatus[tf] = { status: 'error', message: tfResult.error || 'Failed' };
+                    }
+                  }
+                  setModelStatus(newStatus);
+                  localStorage.setItem(STORAGE_KEYS.modelStatus, JSON.stringify(newStatus));
+                }
+                toast.success('Training complete!');
+                setIsTraining(false);
+                setCurrentTimeframe(null);
+                try { await apiLongRunning.post('/api/ai-modules/timeseries/reload-models'); } catch(e) {}
+                fetchData();
+                return;
+              }
+              
+              if (jobStatus.status === 'failed' || jobStatus.status === 'cancelled') {
+                toast.error(`Training ${jobStatus.status}: ${jobStatus.error || ''}`);
+                setIsTraining(false);
+                setCurrentTimeframe(null);
+                return;
+              }
+              
+              if (pollCount < maxPolls) setTimeout(pollJob, 5000);
+            } catch (e) {
+              if (pollCount < maxPolls) setTimeout(pollJob, 5000);
+            }
+          };
+          
+          setTimeout(pollJob, 3000);
+        }
+      } catch (e) {
+        console.warn('[NIA] Could not check for running jobs:', e);
+      }
+    };
+    
+    checkRunningJobs();
+  }, []);
+
   // Fetch all data
   const fetchData = useCallback(async () => {
     setLoadError(null); // Reset error state
