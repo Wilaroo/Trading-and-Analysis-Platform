@@ -53,6 +53,7 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
 - **(P3)** Setup-Specific AI Models (train per trading setup)
 - **(P3)** Backtesting Workflow Automation (auto-run on model train)
 - **(P3)** Auto-Optimize AI Settings (saved enhancement idea)
+- **(P3)** API Route Profiling Dashboard — track response times per route group to surface slow endpoints for production optimization
 
 ## Key API Endpoints
 - `/api/health` — System health check
