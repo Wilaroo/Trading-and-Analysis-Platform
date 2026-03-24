@@ -12,7 +12,7 @@ AI-powered trading platform that combines market scanning, strategy simulation, 
 
 ## Core Tabs
 1. **Command Center** - Main dashboard with positions, P&L, bot performance, market regime
-2. **NIA (Neural Intelligence Agency)** - AI performance, strategy lifecycle, learning, data collection
+2. **NIA (Neural Intelligence Agency)** - AI performance, strategy lifecycle, learning, data collection, backtesting
 3. **Trade Journal** - Trade logging and analysis
 4. **Charts** - Technical analysis
 5. **Glossary & Logic** - Reference documentation
@@ -21,7 +21,7 @@ AI-powered trading platform that combines market scanning, strategy simulation, 
 ## What's Been Implemented
 
 ### Completed Features
-1. Robust Data Pipeline - Historical data collection for all timeframes
+1. Robust Data Pipeline - Historical data collection for all timeframes (33,387 completed jobs, ~39M bars)
 2. Startup Status Dashboard - Fast `/api/startup-check` endpoint, responsive modal
 3. Comprehensive User Guide - Detailed, visual, downloadable guide
 4. Resource Prioritization System ("Focus Mode")
@@ -30,63 +30,96 @@ AI-powered trading platform that combines market scanning, strategy simulation, 
 7. Persistent Chat History - Messages persist across sessions/refreshes
 8. Market Regime Clarity - Improved panel readability
 9. Shadow Learning - Auto-evaluates "shadow" trade decisions
-10. StartupModal Rearchitecture - Single `/api/startup-check` endpoint, <3s load
-11. Data Persistence Fix - CSS-based tab switching (no unmount/remount)
-12. P&L Calculation Fix - Handles null values from IB Gateway
-13. Learning Insights Widget Fix - Correct per-strategy aggregation
-14. Bot Performance Chart Fix - No blanking during load
-15. `/api/ib-collector/fill-gaps` Fix - Non-blocking database operations
-
-### NIA Page Refactoring (Mar 24, 2026) - COMPLETED
-Refactored 3120-line monolithic `NIA.jsx` into modular directory structure with 10+ focused components, QuickStats bar, two-phase data fetching.
+10. NIA Page Refactoring - Modular component architecture
+11. QuickStats Bar Enhancement
+12. Frontend Performance Optimization - Two-phase data fetching
 
 ### Backend Event Loop Fix (Feb 2026) - COMPLETED
-**Problem**: Synchronous I/O operations (pymongo DB calls, Alpaca SDK calls) inside async functions blocked the asyncio event loop, causing API timeouts and frontend unresponsiveness.
+- ThreadPoolExecutor(max_workers=32) in server.py startup
+- Alpaca SDK timeouts (10s) via asyncio.wait_for on all SDK calls + async client initialization
+- 20+ synchronous DB calls wrapped in asyncio.to_thread across server.py, sentcom_service.py, ai_assistant_service.py, trading_bot_service.py
+- Result: All endpoints respond under 500ms with 8 concurrent requests
 
-**Solution**:
-1. **ThreadPoolExecutor(max_workers=32)** in `server.py` startup - prevents thread starvation
-2. **Alpaca SDK timeouts** (`ALPACA_CALL_TIMEOUT=10s`) via `asyncio.wait_for` on all SDK calls + async client initialization
-3. **server.py inline route handlers** - 15+ DB calls wrapped in `asyncio.to_thread`
-4. **sentcom_service.py** - `_save_chat_message`, `_cleanup_old_messages` made async with `to_thread`
-5. **ai_assistant_service.py** - `_get_or_create_conversation`, `_load/_save_conversation_to_db`, `_track_request_pattern`, `get_conversation_history`, `clear_conversation`, `get_all_sessions` all made async with `to_thread`
-6. **trading_bot_service.py** - Remaining `_persist_trade` calls in async context wrapped in `to_thread`
+### AI Comparison Backtesting (Mar 2026) - COMPLETED
+**Problem**: User wanted to know if their trained AI model (LightGBM time-series predictor) actually improves trading results.
 
-**Result**: All endpoints respond under 500ms even with 8 concurrent requests. No more event loop blocking.
+**Solution**: Built a three-way comparison backtest system:
+1. **Setup-only**: Traditional entry signals (no AI)
+2. **AI+Setup (filtered)**: Entry requires both setup signal AND AI confirmation
+3. **AI-only**: Only enter when AI predicts "up" movement
 
-## In Progress
-- Autonomous Learning Loop automation
+**Implementation**:
+- `advanced_backtest_engine.py` — Added `run_ai_comparison_backtest()`, `_simulate_strategy_with_ai()`, `_get_ai_prediction()`, `_compute_mode_metrics()`, `AIComparisonResult` dataclass
+- `advanced_backtest_router.py` — Added `POST /api/backtest/ai-comparison` (sync + background job modes), `GET /api/backtest/ai-comparison/status`
+- `server.py` — Wired timeseries model into backtest engine via `set_timeseries_model()`
+- `AdvancedBacktestPanel.jsx` — New "AI Comparison" tab with full config form and results display
+
+**Results** (AAPL/MSFT/NVDA, ORB strategy, 9 months):
+- Setup-only: 96 trades, 39.6% win rate, $684 profit, Sharpe 0.48
+- AI+Setup: 28 trades, **50% win rate**, $1,518 profit, Sharpe 3.4
+- AI-only: 92 trades, 42.4% win rate, $783 profit
+- AI filtered 71% of trades, keeping only high-confidence entries
+
+### Infrastructure Cleanup (Mar 2026) - COMPLETED
+- Fixed `/api/scanner` prefix conflict between predictive scanner and market scanner
+- Market scanner moved to `/api/market-scanner`
+- Fixed MongoDB ObjectId serialization in market_scanner_service.py
+
+## Service Architecture Audit
+
+### Scanners (Keep/Phase Out)
+| Service | Lines | Status |
+|---------|-------|--------|
+| `enhanced_scanner.py` | 4,044 | **PRIMARY** — 15+ setup checks, tape reading, market regime |
+| `background_scanner.py` | 921 | **DEAD CODE** — Variable aliased to enhanced_scanner in server.py |
+| `predictive_scanner.py` | 1,105 | **ACTIVE** — On-demand "forming setups" for scanner UI |
+| `market_scanner_service.py` | 973 | **ACTIVE** — Market-wide scanning with filters |
+
+### Backtesting (Keep/Phase Out)
+| Service | Lines | Status |
+|---------|-------|--------|
+| `advanced_backtest_engine.py` | 2,200+ | **PRIMARY** — Multi-strategy, walk-forward, Monte Carlo, AI comparison |
+| `backtest_engine.py` | 635 | **SUPERSEDED** — Basic single-strategy, replaced by advanced |
+| `historical_simulation_engine.py` | 1,633 | **ACTIVE** — Full AI pipeline replay for simulations |
+
+### Shadow Tracking (Both Active)
+| Service | Lines | Status |
+|---------|-------|--------|
+| `shadow_tracker.py` | 459 | AI decision logging (debate, risk, timeseries) |
+| `shadow_mode_service.py` | 574 | Trade signal validation against real outcomes |
 
 ## Prioritized Backlog
 
 ### P1
-- Implement Best Model Protection - Only save new models if accuracy > current active model
+- Implement Best Model Protection — only save new models if accuracy > current active model
+- Consolidate `predictive_scanner.py` to delegate setup checks to `enhanced_scanner`
+- Phase out `background_scanner.py` (dead code) and `backtest_engine.py` (superseded)
 
 ### P2
 - Enable GPU for LightGBM
 - Complete backend router refactoring (activate modular routers in server.py)
 - Migrate remaining ~85 raw fetch() calls to centralized api utility
+- Merge `historical_simulation_engine` AI pipeline into `advanced_backtest_engine` as "AI Simulation" mode
 
 ### P3
 - Setup-specific AI Models (77 trading setups)
-- Backtesting Workflow Automation
+- Backtesting Workflow Automation — auto-run backtests on model retraining
 
 ## Key API Endpoints
 - `/api/startup-check` - Fast consolidated status check
+- `/api/backtest/ai-comparison` - POST: Run AI comparison backtest
+- `/api/backtest/ai-comparison/status` - GET: Check AI model availability
+- `/api/backtest/jobs` - GET: List backtest jobs
+- `/api/market-scanner/symbols` - GET: List scannable symbols (was /api/scanner)
+- `/api/live-scanner/alerts` - GET: Live trading alerts
+- `/api/scanner/scan` - POST: On-demand setup scanning
 - `/api/sentcom/positions` - User positions with P&L
-- `/api/ib-collector/fill-gaps` - Non-blocking historical data backfill
-- `/api/learning/strategy-stats` - Aggregated performance data
-- `/api/scanner/alerts` - Live trading alerts
-- `/api/strategy-promotion/phases` - Strategy lifecycle phases
-- `/api/strategy-promotion/candidates` - Promotion candidates
 - `/api/ai-modules/timeseries/status` - AI model status
-- `/api/learning-connectors/status` - Connector health
 
 ## Technical Notes
 - **CRITICAL**: Never use synchronous I/O in async functions. Always use `asyncio.to_thread` for blocking calls.
 - ThreadPoolExecutor with 32 workers configured as default asyncio executor
 - All Alpaca SDK calls have 10s timeout via `asyncio.wait_for`
-- Frontend state persistence uses CSS display:none (not React key-based unmounting)
-- DataCollectionPanel has its own 15s polling cycle (separate from NIA's 60s main poll)
-- NIA uses two-phase fetch: fast endpoints update UI immediately, slow endpoints have 10s timeout
-- All backend routes must be prefixed with `/api`
-- Connector data from API may be array or object; AIModulesPanel normalizes it
+- AI backtest uses `_get_ai_prediction()` which calls the LightGBM model's `predict()` with reversed bars (most-recent-first)
+- Model UP_THRESHOLD = 0.52, confidence formula: `(prob_up - 0.52) / (1 - 0.52)`, typical values 0.0-0.2
+- Default `ai_confidence_threshold` = 0.0 (any "up" direction counts as confirmation)
