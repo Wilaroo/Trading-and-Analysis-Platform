@@ -129,7 +129,7 @@ const ScoreBar = ({ label, value, tip, category }) => {
   
   const content = (
     <div className="flex items-center gap-2">
-      <span className="text-[10px] text-zinc-500 w-12 flex-shrink-0">{label}</span>
+      <span className="text-[10px] text-zinc-500 w-16 flex-shrink-0">{label}</span>
       <div className="flex-1 h-1.5 bg-black/40 rounded-full overflow-hidden">
         <div 
           className={`h-full rounded-full transition-all duration-500 ${getColor(value)}`}
@@ -290,28 +290,28 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
           {/* Score Bars */}
           <div className="flex-1 space-y-1.5">
             <ScoreBar 
-              label="Trend" 
+              label="Trend (LT)" 
               value={scores.trend} 
               category="trend"
-              tip="SPY & QQQ price trend relative to key moving averages"
+              tip="Long-term trend: Measures SPY & QQQ price position relative to their 50-day and 200-day moving averages. Above 60 = bullish trend intact. Below 40 = trend is breaking down. Use this to decide if you should be aggressive or defensive with new positions."
             />
             <ScoreBar 
               label="Breadth" 
               value={scores.breadth} 
               category="breadth"
-              tip="Market breadth - how many stocks are participating in the move"
+              tip="Market breadth: Measures how many stocks are participating in the current move. A rally with high breadth (60+) is healthy and sustainable. Narrowing breadth (below 40) warns that fewer stocks are holding up the market — rallies are fragile and reversals more likely."
             />
             <ScoreBar 
-              label="Vol/VIX" 
+              label="Volatility" 
               value={scores.volume_vix} 
               category="volume_vix"
-              tip="Fear gauge - higher score = lower fear = safer to trade"
+              tip="Fear & volatility gauge: Based on VIX and volume patterns. Higher score = lower fear = calmer market conditions for trading. Below 40 means elevated fear (VIX is high) — expect wider swings, use smaller positions, and tighter stops. Above 70 = low fear, good conditions for normal position sizing."
             />
             <ScoreBar 
-              label="FTD" 
+              label="Follow Thru" 
               value={scores.ftd} 
               category="ftd"
-              tip="Follow-Through Day - confirms if a new trend has started"
+              tip="Follow-Through Day: Detects if a new market trend has been confirmed by institutional buying. Above 70 = trend change confirmed, safe to add exposure. 45-70 = waiting for confirmation, be patient. Below 45 = no follow-through yet, stay cautious with new entries."
             />
           </div>
         </div>

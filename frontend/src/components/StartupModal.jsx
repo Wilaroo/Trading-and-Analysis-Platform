@@ -167,40 +167,47 @@ const StartupModal = ({ onComplete }) => {
     }
   }, [wsConnected]);
 
-  // Check all services - ONE AT A TIME, skipping already-passed services
+  // Check all services IN PARALLEL, skipping already-passed services
   // Uses recursive setTimeout instead of setInterval to prevent overlapping rounds
   const checkAllServices = useCallback(async () => {
     setIsChecking(true);
     setCheckCount(prev => prev + 1);
 
-    for (const service of SERVICES) {
-      if (service.checkType === 'websocket') continue;
-
-      // Skip services that already succeeded - no need to re-check
-      const currentStatus = serviceStatusRef.current[service.id];
-      if (currentStatus === 'success') continue;
-
-      // If backend passed, auto-pass database (same /api/health endpoint)
+    // Build list of services that still need checking
+    const toCheck = SERVICES.filter(service => {
+      if (service.checkType === 'websocket') return false;
+      if (serviceStatusRef.current[service.id] === 'success') return false;
+      // If backend passed, auto-pass database
       if (service.id === 'database' && serviceStatusRef.current['backend'] === 'success') {
         setServiceStatus(prev => {
           const next = { ...prev, database: 'success' };
           serviceStatusRef.current = next;
           return next;
         });
-        continue;
+        return false;
       }
+      return true;
+    });
 
-      const status = await checkService(service);
+    // Fire all checks in parallel — much faster than sequential on cold start
+    const results = await Promise.allSettled(
+      toCheck.map(async (service) => {
+        const status = await checkService(service);
+        return { id: service.id, status };
+      })
+    );
 
-      setServiceStatus(prev => {
-        const next = { ...prev, [service.id]: status };
-        serviceStatusRef.current = next;
-        return next;
-      });
-
-      // 200ms between each check (backend is local, no need for 750ms)
-      await new Promise(resolve => setTimeout(resolve, 200));
-    }
+    // Apply all results in a single state update
+    setServiceStatus(prev => {
+      const next = { ...prev };
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          next[result.value.id] = result.value.status;
+        }
+      }
+      serviceStatusRef.current = next;
+      return next;
+    });
 
     setIsChecking(false);
   }, [checkService]);
@@ -253,13 +260,14 @@ const StartupModal = ({ onComplete }) => {
       if (!mountedRef.current) return;
       await checkAllServices();
       // Schedule next round AFTER current round finishes (no overlap)
+      // 800ms between rounds — parallel checks are fast, so this is responsive enough
       if (mountedRef.current) {
-        checkIntervalRef.current = setTimeout(runCheck, 1500);
+        checkIntervalRef.current = setTimeout(runCheck, 800);
       }
     };
 
     // Initial check after short delay
-    // Fast-path: if backend health responds instantly, skip full check cycle
+    // Fast-path: if backend health responds instantly, mark required services and kick off one parallel check
     const fastCheck = async () => {
       try {
         const directFetch = window.__originalFetch || window.fetch;
@@ -269,13 +277,14 @@ const StartupModal = ({ onComplete }) => {
         clearTimeout(timeoutId);
         
         if (res.ok) {
-          // Backend is already running — mark everything as success and dismiss
-          const allSuccess = {};
-          SERVICES.forEach(s => { allSuccess[s.id] = 'success'; });
-          setServiceStatus(allSuccess);
-          serviceStatusRef.current = allSuccess;
+          // Backend is running — mark core services immediately
+          const coreSuccess = { backend: 'success', database: 'success', websocket: 'loading' };
+          setServiceStatus(coreSuccess);
+          serviceStatusRef.current = coreSuccess;
           setCheckCount(1);
-          return; // Don't start the slow check cycle
+          // Still run one full parallel round to check optional services
+          checkIntervalRef.current = setTimeout(runCheck, 100);
+          return;
         }
       } catch (e) {
         // Backend not ready yet — fall through to normal check cycle
@@ -295,20 +304,21 @@ const StartupModal = ({ onComplete }) => {
   }, [visible, checkAllServices]);
 
   // Calculate if ready to proceed
+  // Ready = all REQUIRED services are up. Non-required services can still be loading/failed.
   const requiredServices = SERVICES.filter(s => s.required);
   const requiredReady = requiredServices.every(s => serviceStatus[s.id] === 'success');
   const allServicesChecked = Object.keys(serviceStatus).length >= SERVICES.length;
-  const isReady = requiredReady && allServicesChecked;
-  const canForceStart = checkCount >= 5; // Allow force-start after 5 attempts
+  const isReady = requiredReady;
+  const canForceStart = checkCount >= 3; // Allow force-start after 3 attempts (faster)
 
-  // Stop checking once ready
+  // Stop checking once all services have been checked at least once and required are ready
   useEffect(() => {
-    if (isReady && checkIntervalRef.current) {
+    if (isReady && allServicesChecked && checkIntervalRef.current) {
       clearTimeout(checkIntervalRef.current);
       mountedRef.current = false;
       checkIntervalRef.current = null;
     }
-  }, [isReady]);
+  }, [isReady, allServicesChecked]);
 
   // Calculate progress
   const successCount = Object.values(serviceStatus).filter(s => s === 'success').length;
