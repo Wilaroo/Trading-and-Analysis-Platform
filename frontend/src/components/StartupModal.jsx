@@ -30,6 +30,30 @@ import {
 // Use direct backend URL — other contexts are delayed 20s, so connection pool is clear
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
+// XMLHttpRequest-based health check — completely bypasses fetch API, throttler, and any fetch patching.
+// XHR's .timeout is browser-native and works even in background tabs.
+function xhrHealthCheck(url, timeout) {
+  return new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.timeout = timeout;
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve({ ok: true, data: JSON.parse(xhr.responseText) });
+        } catch {
+          resolve({ ok: true, data: {} });
+        }
+      } else {
+        resolve({ ok: false, status: xhr.status });
+      }
+    };
+    xhr.ontimeout = () => resolve({ ok: false, timedOut: true });
+    xhr.onerror = () => resolve({ ok: false, errored: true });
+    xhr.open('GET', url);
+    xhr.send();
+  });
+}
+
 // Service definitions with their health check endpoints
 const SERVICES = [
   {
@@ -130,56 +154,36 @@ const StartupModal = ({ onComplete }) => {
     }
   }, [onComplete]);
 
-  // Check a single service - uses un-throttled fetch to bypass the request queue
-  // Timeout adapts: 5s normally, 2s after backend is confirmed up (services should respond fast)
+  // Check a single service using XMLHttpRequest (bypasses all fetch patching/throttling)
   const checkService = useCallback(async (service) => {
     if (service.checkType === 'websocket') {
       return wsConnected ? 'success' : 'loading';
     }
 
-    // Use original fetch to bypass the request throttler
-    // Health checks must not compete with other queued requests
-    const directFetch = window.__originalFetch || window.fetch;
     const url = `${API_URL}${service.endpoint}`;
-    const startTime = Date.now();
-    // Shorter timeout once backend is confirmed up — other services should be fast too
     const timeout = serviceStatusRef.current['backend'] === 'success' ? 2000 : 5000;
+    const startTime = Date.now();
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeout);
+    const result = await xhrHealthCheck(url, timeout);
+    const elapsed = Date.now() - startTime;
 
-      const response = await directFetch(url, {
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      const elapsed = Date.now() - startTime;
-
-      if (!response.ok) {
-        console.log(`[StartupModal] ${service.id}: HTTP ${response.status} (${elapsed}ms) url=${url}`);
-        return 'error';
-      }
-
-      const data = await response.json().catch(() => ({}));
-
-      // Custom response validation if provided
+    if (result.ok) {
       if (service.responseCheck) {
-        const passed = service.responseCheck(data);
+        const passed = service.responseCheck(result.data);
         console.log(`[StartupModal] ${service.id}: ${passed ? 'SUCCESS' : 'WARNING'} (${elapsed}ms)`);
         return passed ? 'success' : 'warning';
       }
-
       console.log(`[StartupModal] ${service.id}: SUCCESS (${elapsed}ms)`);
       return 'success';
-    } catch (e) {
-      const elapsed = Date.now() - startTime;
-      if (e.name === 'AbortError') {
-        console.log(`[StartupModal] ${service.id}: TIMEOUT after ${elapsed}ms url=${url}`);
-        return 'timeout';
-      }
-      console.log(`[StartupModal] ${service.id}: ERROR ${e.message} (${elapsed}ms) url=${url}`);
-      return 'error';
     }
+
+    if (result.timedOut) {
+      console.log(`[StartupModal] ${service.id}: TIMEOUT after ${elapsed}ms url=${url}`);
+      return 'timeout';
+    }
+
+    console.log(`[StartupModal] ${service.id}: ERROR status=${result.status} (${elapsed}ms) url=${url}`);
+    return 'error';
   }, [wsConnected]);
 
   // Check all services:
