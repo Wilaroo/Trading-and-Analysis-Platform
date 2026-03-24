@@ -5,7 +5,7 @@
  * Compact, dark theme with progress bars and score rings.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { safePolling } from '../utils/safePolling';
 import { 
   TrendingUp, 
@@ -153,13 +153,13 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [expanded, setExpanded] = useState(false);
-  const [lastState, setLastState] = useState(null);
+  const lastStateRef = useRef(null);
 
   const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
   const fetchRegime = useCallback(async (showToast = false) => {
     try {
-      setLoading(true);
+      if (!regime) setLoading(true); // Only show loading spinner on initial load
       const response = await fetch(`${API_URL}/api/market-regime/summary`);
       
       if (!response.ok) throw new Error('Failed to fetch market regime');
@@ -168,23 +168,23 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
       setRegime(data);
       setError(null);
       
-      if (lastState && lastState !== data.state) {
+      if (lastStateRef.current && lastStateRef.current !== data.state) {
         const stateConfig = getStateConfig(data.state);
         toast.info(`Market Regime: ${stateConfig.label}`, {
           description: data.recommendation,
           duration: 6000,
         });
-        if (onStateChange) onStateChange(data.state, lastState);
+        if (onStateChange) onStateChange(data.state, lastStateRef.current);
       }
       
-      setLastState(data.state);
+      lastStateRef.current = data.state;
       if (showToast) toast.success('Market regime updated');
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [API_URL, lastState, onStateChange]);
+  }, [API_URL, onStateChange]);
 
   useEffect(() => {
     fetchRegime();

@@ -315,6 +315,22 @@ function App() {
 
   useEffect(() => { if (appReady) loadDashboardData(); }, [loadDashboardData, appReady]);
   
+  // Fetch initial scanner alerts via REST (don't wait for WebSocket stream)
+  useEffect(() => {
+    if (!appReady) return;
+    const fetchInitialAlerts = async () => {
+      try {
+        const res = await api.get('/api/live-scanner/alerts');
+        if (res.data?.alerts?.length > 0) {
+          setWsScannerAlerts(res.data.alerts);
+        }
+      } catch (err) {
+        // Non-critical, WebSocket will push alerts later
+      }
+    };
+    fetchInitialAlerts();
+  }, [appReady]);
+  
   // Initialize audio on first user interaction
   useEffect(() => {
     const handleFirstInteraction = () => {

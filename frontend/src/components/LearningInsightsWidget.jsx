@@ -30,14 +30,47 @@ const LearningInsightsWidget = ({ onNavigateToHub, className = '' }) => {
         api.get('/api/medium-learning/edge-decay/alerts')
       ]);
 
-      const newData = { ...data };
+      const newData = { winRate: null, todayPnl: null, avgR: null, edgeScore: null, alerts: [] };
 
       if (statsRes.status === 'fulfilled' && statsRes.value.data?.success) {
-        const stats = statsRes.value.data.stats;
-        newData.winRate = stats.win_rate ? (stats.win_rate * 100).toFixed(0) : null;
-        newData.todayPnl = stats.today_pnl;
-        newData.avgR = stats.avg_r_multiple?.toFixed(1);
-        newData.edgeScore = stats.edge_score || stats.overall_score;
+        const strategies = statsRes.value.data.stats;
+        
+        // Aggregate across all strategies (exclude imported_from_ib which is manual trades)
+        let totalTrades = 0;
+        let totalWins = 0;
+        let totalPnl = 0;
+        let totalRR = 0;
+        let rrCount = 0;
+        
+        Object.entries(strategies || {}).forEach(([name, s]) => {
+          if (name === 'imported_from_ib') return; // Skip manual imports
+          const trades = s.total_trades || 0;
+          const wins = s.wins || 0;
+          totalTrades += trades;
+          totalWins += wins;
+          totalPnl += s.total_pnl || 0;
+          if (s.avg_rr_achieved && trades > 0) {
+            totalRR += s.avg_rr_achieved * trades;
+            rrCount += trades;
+          }
+        });
+        
+        if (totalTrades > 0) {
+          newData.winRate = ((totalWins / totalTrades) * 100).toFixed(0);
+          newData.todayPnl = totalPnl;
+          newData.avgR = rrCount > 0 ? (totalRR / rrCount).toFixed(1) : null;
+        }
+        
+        // Edge score from best-performing strategy with enough trades
+        const viableStrategies = Object.entries(strategies || {})
+          .filter(([name, s]) => name !== 'imported_from_ib' && (s.total_trades || 0) >= 3)
+          .sort((a, b) => (b[1].win_rate || 0) - (a[1].win_rate || 0));
+        
+        if (viableStrategies.length > 0) {
+          // Weighted edge: average win rate of viable strategies
+          const avgWinRate = viableStrategies.reduce((sum, [, s]) => sum + (s.win_rate || 0), 0) / viableStrategies.length;
+          newData.edgeScore = Math.round(avgWinRate);
+        }
       }
 
       if (alertsRes.status === 'fulfilled' && alertsRes.value.data?.success) {

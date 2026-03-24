@@ -4554,6 +4554,30 @@ async def websocket_quotes(websocket: WebSocket):
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }, websocket)
                 print(f"Sent {len(initial_quotes)} initial quotes")
+            
+            # Also send current scanner alerts immediately (don't wait for stream_scanner_alerts)
+            try:
+                alerts = background_scanner.get_live_alerts()
+                if alerts and websocket in manager.active_connections:
+                    alerts_data = []
+                    for alert in alerts[:20]:
+                        if hasattr(alert, 'to_dict'):
+                            alerts_data.append(alert.to_dict())
+                        elif hasattr(alert, '__dict__'):
+                            alerts_data.append(dict(alert.__dict__))
+                        else:
+                            alerts_data.append(alert)
+                    if alerts_data:
+                        await manager.send_personal_message({
+                            "type": "scanner_alerts",
+                            "data": alerts_data,
+                            "count": len(alerts_data),
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }, websocket)
+                        print(f"Sent {len(alerts_data)} initial scanner alerts")
+            except Exception as e:
+                print(f"Error sending initial scanner alerts: {e}")
+
         except Exception as e:
             print(f"Error sending initial data: {e}")
     

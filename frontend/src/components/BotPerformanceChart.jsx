@@ -10,7 +10,7 @@
  * - Hover tooltips showing trade details
  * - Auto-refresh every 30 seconds
  */
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { safePolling } from '../utils/safePolling';
 import { motion } from 'framer-motion';
 import { TrendingUp, TrendingDown, ChevronRight, Activity } from 'lucide-react';
@@ -402,27 +402,30 @@ const BotPerformanceChart = ({
     openPositions: 0,
   });
   const [isLoading, setIsLoading] = useState(false);
+  const cacheRef = useRef({}); // Cache per time range for instant switching
 
   // Fetch equity curve data from API
   const fetchEquityCurve = useCallback(async () => {
-    setIsLoading(true);
+    // If cached, use cache immediately for instant visual switch
+    if (cacheRef.current[timeRange]) {
+      const cached = cacheRef.current[timeRange];
+      setChartData(cached.chartData);
+      setStats(cached.stats);
+    }
+    
     try {
       const response = await fetch(`${API_URL}/api/trading-bot/performance/equity-curve?period=${timeRange}`);
       if (response.ok) {
         const data = await response.json();
         if (data.success) {
-          // Transform API data to chart format
           const equityData = data.equity_curve.map(point => ({
             time: Math.floor(point.time / 1000),
             value: point.value,
             pnl: point.pnl || 0,
           }));
           
-          setChartData(equityData);
-          
-          // Update stats from API summary
           const summary = data.summary || {};
-          setStats({
+          const newStats = {
             totalTrades: summary.trades_count || 0,
             winRate: summary.win_rate || 0,
             avgR: summary.avg_r || 0,
@@ -431,12 +434,20 @@ const BotPerformanceChart = ({
             realizedPnl: summary.realized_pnl || 0,
             unrealizedPnl: summary.unrealized_pnl || 0,
             openPositions: summary.open_positions || 0,
-          });
+          };
+          
+          // Cache for this time range
+          cacheRef.current[timeRange] = { chartData: equityData, stats: newStats };
+          
+          setChartData(equityData);
+          setStats(newStats);
         }
       }
     } catch (err) {
       console.error('Failed to fetch equity curve:', err);
-      generateDemoData();
+      if (chartData.length === 0) {
+        generateDemoData();
+      }
     } finally {
       setIsLoading(false);
     }
@@ -444,6 +455,8 @@ const BotPerformanceChart = ({
 
   // Initial fetch and auto-refresh
   useEffect(() => {
+    // Show loading briefly for visual feedback on time range switch
+    setIsLoading(true);
     fetchEquityCurve();
     
     if (autoRefresh) {

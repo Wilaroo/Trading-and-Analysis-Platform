@@ -155,7 +155,7 @@ const StartupModal = ({ onComplete }) => {
   const allChecked = Object.keys(serviceStatus).length >= SERVICES.length;
   const allGreen = SERVICES.every(s => serviceStatus[s.id] === 'success' || serviceStatus[s.id] === 'warning');
   const isReady = requiredReady && allChecked;
-  const canForceStart = checkCount >= 4;
+  const canForceStart = checkCount >= 2;
 
   // Stop polling when all done
   useEffect(() => {
