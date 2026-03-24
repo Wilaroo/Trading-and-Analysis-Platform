@@ -4341,7 +4341,7 @@ async def stream_coaching_notifications():
 async def startup_event():
     """Start background streaming task and background scanner"""
     
-    # Start WebSocket streaming tasks
+    # Start WebSocket streaming tasks (lightweight, non-blocking)
     asyncio.create_task(stream_quotes())
     asyncio.create_task(stream_system_status())
     asyncio.create_task(stream_bot_trades())
@@ -4367,17 +4367,11 @@ async def startup_event():
     asyncio.create_task(market_intel_service.start_scheduler())
     print("Market intel scheduler started")
     
-    # Heavy services run as background tasks — server starts accepting requests IMMEDIATELY
-    asyncio.create_task(_deferred_startup())
-    print("Server ready — heavy services starting in background...")
-
-
-async def _deferred_startup():
-    """Heavy initialization that runs AFTER server is accepting connections."""
-    # Give services time to initialize before starting heavy background tasks
-    await asyncio.sleep(3)
+    # --- Heavy initialization (blocks server until complete) ---
+    # This ensures ALL services are ready when the server starts accepting connections.
+    # The StartupModal's first check may timeout during this, but check #2 will see all green.
     
-    # Attempt auto-connect to IB Gateway if it's running
+    # Attempt auto-connect to IB Gateway
     try:
         ib_service = get_ib_service()
         status = ib_service.get_connection_status()
@@ -4393,8 +4387,6 @@ async def _deferred_startup():
     except Exception as e:
         print(f"IB auto-connect skipped: {e}")
     
-    await asyncio.sleep(2)
-    
     # Start background scanner for live alerts
     await background_scanner.start()
     print("Background scanner started - Live alerts active")
@@ -4408,6 +4400,7 @@ async def _deferred_startup():
         print(f"   Max daily loss: {trading_bot.risk_params.max_daily_loss_pct}% of account")
     except Exception as e:
         print(f"Trading bot auto-start failed: {e}")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
