@@ -188,20 +188,21 @@ function App() {
     }
   }, [checkIbConnection]);
   
-  // Check connection on app load
+  // Check connection on app load - only after startup modal completes
   useEffect(() => {
-    checkIbConnection();
-  }, [checkIbConnection]);
+    if (appReady) checkIbConnection();
+  }, [checkIbConnection, appReady]);
   
   // Periodic connection check as FALLBACK only (60 seconds)
   // Primary IB status comes via WebSocket now
   useEffect(() => {
+    if (!appReady) return;
     const interval = setInterval(async () => {
       // Only poll if not getting WebSocket updates
       await checkIbConnection();
     }, 60000);  // Reduced to 60s - WebSocket handles real-time updates
     return () => clearInterval(interval);
-  }, [checkIbConnection, ibConnectionChecked]);
+  }, [checkIbConnection, ibConnectionChecked, appReady]);
 
   // WebSocket handler for real-time updates (quotes + system status)
   const handleWebSocketMessage = useCallback((message) => {
@@ -312,7 +313,7 @@ function App() {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { loadDashboardData(); }, [loadDashboardData]);
+  useEffect(() => { if (appReady) loadDashboardData(); }, [loadDashboardData, appReady]);
   
   // Initialize audio on first user interaction
   useEffect(() => {

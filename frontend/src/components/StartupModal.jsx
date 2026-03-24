@@ -27,9 +27,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 
-// Use empty string to go through CRA proxy, matching api.js behavior
-// This avoids cross-origin issues when REACT_APP_BACKEND_URL points to localhost:8001
-const API_URL = '';
+const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
 // Service definitions with their health check endpoints
 const SERVICES = [
