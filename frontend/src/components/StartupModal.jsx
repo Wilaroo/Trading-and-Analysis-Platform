@@ -27,7 +27,9 @@ import {
   RefreshCw
 } from 'lucide-react';
 
-const API_URL = process.env.REACT_APP_BACKEND_URL || '';
+// Use empty string to go through CRA proxy, matching api.js behavior
+// This avoids cross-origin issues when REACT_APP_BACKEND_URL points to localhost:8001
+const API_URL = '';
 
 // Service definitions with their health check endpoints
 const SERVICES = [
@@ -137,17 +139,21 @@ const StartupModal = ({ onComplete }) => {
     // Use original fetch to bypass the request throttler
     // Health checks must not compete with other queued requests
     const directFetch = window.__originalFetch || window.fetch;
+    const url = `${API_URL}${service.endpoint}`;
+    const startTime = Date.now();
 
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
 
-      const response = await directFetch(`${API_URL}${service.endpoint}`, {
+      const response = await directFetch(url, {
         signal: controller.signal
       });
       clearTimeout(timeoutId);
+      const elapsed = Date.now() - startTime;
 
       if (!response.ok) {
+        console.log(`[StartupModal] ${service.id}: HTTP ${response.status} (${elapsed}ms) url=${url}`);
         return 'error';
       }
 
@@ -155,14 +161,20 @@ const StartupModal = ({ onComplete }) => {
 
       // Custom response validation if provided
       if (service.responseCheck) {
-        return service.responseCheck(data) ? 'success' : 'warning';
+        const passed = service.responseCheck(data);
+        console.log(`[StartupModal] ${service.id}: ${passed ? 'SUCCESS' : 'WARNING'} (${elapsed}ms)`);
+        return passed ? 'success' : 'warning';
       }
 
+      console.log(`[StartupModal] ${service.id}: SUCCESS (${elapsed}ms)`);
       return 'success';
     } catch (e) {
+      const elapsed = Date.now() - startTime;
       if (e.name === 'AbortError') {
+        console.log(`[StartupModal] ${service.id}: TIMEOUT after ${elapsed}ms url=${url}`);
         return 'timeout';
       }
+      console.log(`[StartupModal] ${service.id}: ERROR ${e.message} (${elapsed}ms) url=${url}`);
       return 'error';
     }
   }, [wsConnected]);
