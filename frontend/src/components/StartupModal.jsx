@@ -119,6 +119,7 @@ const StartupModal = ({ onComplete }) => {
   const checkIntervalRef = useRef(null);
   const serviceStatusRef = useRef({});
   const mountedRef = useRef(true);
+  const checkAllServicesRef = useRef(null);
 
   // Check if user has opted out
   useEffect(() => {
@@ -219,6 +220,9 @@ const StartupModal = ({ onComplete }) => {
     setIsChecking(false);
   }, [checkService]);
 
+  // Keep ref always pointing to latest checkAllServices (avoids effect restart on wsConnected change)
+  checkAllServicesRef.current = checkAllServices;
+
   // Setup WebSocket check
   useEffect(() => {
     if (!visible) return;
@@ -259,13 +263,14 @@ const StartupModal = ({ onComplete }) => {
   }, [visible]);
 
   // Initial check and periodic re-check using recursive setTimeout (no overlapping)
+  // Uses ref for checkAllServices to prevent effect restart when wsConnected changes
   useEffect(() => {
     if (!visible) return;
     mountedRef.current = true;
 
     const runCheck = async () => {
       if (!mountedRef.current) return;
-      await checkAllServices();
+      await checkAllServicesRef.current();
       // Schedule next round AFTER current round finishes (no overlap)
       if (mountedRef.current) {
         checkIntervalRef.current = setTimeout(runCheck, 1000);
@@ -281,7 +286,8 @@ const StartupModal = ({ onComplete }) => {
         clearTimeout(checkIntervalRef.current);
       }
     };
-  }, [visible, checkAllServices]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]); // Only depends on visible — checkAllServices accessed via ref
 
   // Calculate if ready to proceed
   const requiredServices = SERVICES.filter(s => s.required);
