@@ -516,7 +516,6 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
               if (jobStatus.progress) {
                 setTrainingProgress(prev => ({
                   ...prev,
-                  phase: jobStatus.status,
                   currentStep: Math.ceil((jobStatus.progress.percent / 100) * 5),
                   message: jobStatus.progress.message || 'Processing...',
                 }));
@@ -893,7 +892,6 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
           if (jobStatus.progress) {
             setTrainingProgress(prev => ({
               ...prev,
-              phase: jobStatus.status,
               currentStep: Math.ceil((jobStatus.progress.percent / 100) * 5),
               message: jobStatus.progress.message || 'Processing...',
               details: { ...prev.details, ...jobStatus.progress.details }
