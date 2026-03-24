@@ -4355,16 +4355,29 @@ async def startup_event():
         from services.web_research_service import get_web_research_service
         research_service = get_web_research_service(db)
         budget = research_service.get_credit_budget_status()
-        print(f"✅ Web research service initialized - Tavily credits: {budget['credits_used']}/{budget['monthly_limit']} ({budget['usage_percent']}%)")
+        print(f"Web research service initialized - Tavily credits: {budget['credits_used']}/{budget['monthly_limit']} ({budget['usage_percent']}%)")
     except Exception as e:
-        print(f"⚠️ Web research service init: {e}")
+        print(f"Web research service init: {e}")
     
+    # Start learning loop scheduler (auto-analysis at 4:15 PM ET)
+    asyncio.create_task(perf_service.start_scheduler())
+    print("Learning loop scheduler started")
+    
+    # Start market intel scheduler (auto-generates reports at scheduled times)
+    asyncio.create_task(market_intel_service.start_scheduler())
+    print("Market intel scheduler started")
+    
+    # Heavy services run as background tasks — server starts accepting requests IMMEDIATELY
+    asyncio.create_task(_deferred_startup())
+    print("Server ready — heavy services starting in background...")
+
+
+async def _deferred_startup():
+    """Heavy initialization that runs AFTER server is accepting connections."""
     # Give services time to initialize before starting heavy background tasks
-    # This prevents overwhelming IB Gateway on startup
     await asyncio.sleep(3)
     
     # Attempt auto-connect to IB Gateway if it's running
-    # ib_service.connect() now uses asyncio.to_thread internally, so it won't block the event loop
     try:
         ib_service = get_ib_service()
         status = ib_service.get_connection_status()
@@ -4380,30 +4393,21 @@ async def startup_event():
     except Exception as e:
         print(f"IB auto-connect skipped: {e}")
     
-    # Wait a bit more after IB connection attempt
     await asyncio.sleep(2)
     
     # Start background scanner for live alerts
     await background_scanner.start()
     print("Background scanner started - Live alerts active")
     
-    # Start learning loop scheduler (auto-analysis at 4:15 PM ET)
-    asyncio.create_task(perf_service.start_scheduler())
-    print("Learning loop scheduler started")
-    
-    # Start market intel scheduler (auto-generates reports at scheduled times)
-    asyncio.create_task(market_intel_service.start_scheduler())
-    print("Market intel scheduler started")
-    
     # Auto-start trading bot in autonomous mode
     try:
         await trading_bot.start()
-        print(f"🤖 Trading bot auto-started in {trading_bot.get_mode().value.upper()} mode")
+        print(f"Trading bot auto-started in {trading_bot.get_mode().value.upper()} mode")
         print("   Trading hours: 7:30 AM - 5:00 PM ET")
         print(f"   Max position: {trading_bot.risk_params.max_position_pct}% of account")
         print(f"   Max daily loss: {trading_bot.risk_params.max_daily_loss_pct}% of account")
     except Exception as e:
-        print(f"⚠️ Trading bot auto-start failed: {e}")
+        print(f"Trading bot auto-start failed: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
