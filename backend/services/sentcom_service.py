@@ -1239,9 +1239,9 @@ class SentComService:
                         if symbol:
                             seen_symbols.add(symbol)
                         
-                        entry = trade.get("fill_price") or trade.get("entry_price", 0)
-                        current = trade.get("current_price", entry)
-                        shares = trade.get("shares") or trade.get("quantity", 0)
+                        entry = trade.get("fill_price") or trade.get("entry_price", 0) or 0
+                        current = trade.get("current_price") or entry
+                        shares = trade.get("shares") or trade.get("quantity", 0) or 0
                         direction = trade.get("direction", "long")
                         
                         # Calculate P&L based on direction
@@ -1283,12 +1283,22 @@ class SentComService:
                 if symbol and symbol not in seen_symbols:
                     shares = pos.get("position", 0)
                     avg_cost = pos.get("avgCost", 0)
-                    market_price = pos.get("marketPrice", avg_cost)
-                    unrealized_pnl = pos.get("unrealizedPnL", pos.get("unrealizedPNL", 0))
+                    market_price = pos.get("marketPrice", 0) or pos.get("market_price", 0)
+                    unrealized_pnl = pos.get("unrealizedPnL") or pos.get("unrealizedPNL") or pos.get("unrealized_pnl")
+                    
+                    # Calculate P&L from prices if unrealized_pnl not available
+                    if unrealized_pnl is None and market_price and avg_cost and shares:
+                        unrealized_pnl = (market_price - avg_cost) * shares
+                    unrealized_pnl = unrealized_pnl or 0
                     
                     # Calculate P&L percent
                     total_cost = abs(shares * avg_cost) if shares and avg_cost else 0
-                    pnl_pct = (unrealized_pnl / total_cost * 100) if total_cost > 0 else 0
+                    if total_cost > 0:
+                        pnl_pct = (unrealized_pnl / total_cost * 100)
+                    elif market_price and avg_cost and avg_cost > 0:
+                        pnl_pct = ((market_price - avg_cost) / avg_cost * 100)
+                    else:
+                        pnl_pct = 0
                     
                     # Determine if long or short
                     position_type = "long" if shares > 0 else "short"
@@ -1296,7 +1306,7 @@ class SentComService:
                     positions.append({
                         "symbol": symbol,
                         "shares": abs(shares),
-                        "position_type": position_type,
+                        "direction": position_type,
                         "entry_price": avg_cost,
                         "current_price": market_price if market_price else avg_cost,
                         "pnl": round(unrealized_pnl, 2),

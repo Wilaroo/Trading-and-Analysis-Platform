@@ -180,10 +180,18 @@ const ActivePositionsCard = ({ positions = [], onPositionClick }) => {
       ) : (
         <div className="space-y-1.5">
           {positions.map((pos, i) => {
+            // Handle all possible field name variants from IB Pusher / Alpaca / Trading Bot
             const pnl = pos.unrealized_pnl || pos.pnl || 0;
-            const pnlPct = pos.pnl_percent || (pos.current_price && pos.entry_price 
-              ? ((pos.current_price - pos.entry_price) / pos.entry_price * 100) 
-              : 0);
+            const pnlPct = pos.pnl_percent || pos.unrealized_pnl_percent || pos.unrealizedPnlPercent || (
+              (pos.current_price || pos.market_price || pos.marketPrice) && (pos.entry_price || pos.avg_entry_price || pos.avgCost || pos.averageCost)
+              ? (((pos.current_price || pos.market_price || pos.marketPrice) - (pos.entry_price || pos.avg_entry_price || pos.avgCost || pos.averageCost)) / (pos.entry_price || pos.avg_entry_price || pos.avgCost || pos.averageCost) * 100) 
+              : 0
+            );
+            const entryPrice = pos.entry_price || pos.avg_entry_price || pos.avgCost || pos.averageCost || 0;
+            const shares = pos.shares || pos.quantity || pos.qty || pos.position || 0;
+            const direction = pos.direction || pos.side || (shares >= 0 ? 'long' : 'short');
+            const stopPrice = pos.stop_price || pos.stop_loss || pos.stopPrice;
+            const targetPrice = pos.target_prices?.[0] || pos.target_price || pos.targetPrice;
             const isPositive = pnl >= 0;
             
             return (
@@ -203,21 +211,21 @@ const ActivePositionsCard = ({ positions = [], onPositionClick }) => {
                       {pos.symbol}
                     </span>
                     <span className={`px-1 py-0.5 rounded text-[10px] ${
-                      pos.direction === 'long' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                      direction === 'long' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
                     }`}>
-                      {pos.direction?.toUpperCase() || 'L'}
+                      {direction?.toUpperCase() || 'L'}
                     </span>
                   </div>
                   
                   {/* Compact Stats */}
                   <div className="flex items-center gap-3 text-[10px]">
                     <div className="text-zinc-500">
-                      <span className="font-mono">{pos.shares || pos.quantity}</span> @ <span className="font-mono">${pos.entry_price?.toFixed(2)}</span>
+                      <span className="font-mono">{Math.abs(shares)}</span> @ <span className="font-mono">${entryPrice?.toFixed(2)}</span>
                     </div>
                     <div className="text-zinc-500">
-                      <span className="text-red-400 font-mono">${pos.stop_price?.toFixed(2) || '--'}</span>
-                      <span className="mx-1">→</span>
-                      <span className="text-emerald-400 font-mono">${pos.target_prices?.[0]?.toFixed(2) || pos.target_price?.toFixed(2) || '--'}</span>
+                      <span className="text-red-400 font-mono">${stopPrice?.toFixed(2) || '--'}</span>
+                      <span className="mx-1">&rarr;</span>
+                      <span className="text-emerald-400 font-mono">${targetPrice?.toFixed(2) || '--'}</span>
                     </div>
                   </div>
                   
@@ -321,9 +329,30 @@ const WatchingSetupsCard = ({ setups = [] }) => {
   );
 };
 
-// Scanner Alerts Strip
-const ScannerAlertsStrip = ({ alerts = [], onViewAll }) => {
+// Scanner Alerts Strip — self-sufficient: fetches own data if prop is empty
+const ScannerAlertsStrip = ({ alerts: propAlerts = [], onViewAll }) => {
   const { openTickerModal } = useTickerModal();
+  const [fetchedAlerts, setFetchedAlerts] = useState([]);
+  const API_URL = process.env.REACT_APP_BACKEND_URL || '';
+  
+  // Fetch alerts via REST if not provided via WebSocket prop
+  useEffect(() => {
+    if (propAlerts.length > 0) return; // WebSocket is providing data
+    const fetchAlerts = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/live-scanner/alerts`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.alerts?.length > 0) setFetchedAlerts(data.alerts);
+        }
+      } catch (e) { /* silent */ }
+    };
+    fetchAlerts();
+    const interval = setInterval(fetchAlerts, 30000); // Re-fetch every 30s
+    return () => clearInterval(interval);
+  }, [propAlerts.length, API_URL]);
+  
+  const alerts = propAlerts.length > 0 ? propAlerts : fetchedAlerts;
   
   return (
     <div className="bg-zinc-900/50 border border-white/10 rounded-xl p-4 mt-4">
