@@ -27,10 +27,8 @@ import {
   RefreshCw
 } from 'lucide-react';
 
-// Use proxy path (empty string) to avoid competing with other contexts
-// that make direct requests to REACT_APP_BACKEND_URL (localhost:8001).
-// The CRA proxy has its own browser connection pool, keeping it clear for health checks.
-const API_URL = '';
+// Use direct backend URL — other contexts are delayed 20s, so connection pool is clear
+const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
 // Service definitions with their health check endpoints
 const SERVICES = [
