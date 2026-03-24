@@ -60,10 +60,18 @@ AI-powered trading platform that combines market scanning, strategy simulation, 
 - AI-only: 92 trades, 42.4% win rate, $783 profit
 - AI filtered 71% of trades, keeping only high-confidence entries
 
+### Best Model Protection (Mar 2026) - COMPLETED
+- `_save_model()` now archives ALL trained models to `timeseries_model_archive` collection
+- Only promotes to active if `new_accuracy >= current_accuracy`
+- If worse, logs warning and keeps existing active model; reloads it
+- New `GET /api/ai-modules/timeseries/model-history` endpoint for querying model training history
+- Old models preserved for future learning and comparison
+
 ### Infrastructure Cleanup (Mar 2026) - COMPLETED
-- Fixed `/api/scanner` prefix conflict between predictive scanner and market scanner
-- Market scanner moved to `/api/market-scanner`
-- Fixed MongoDB ObjectId serialization in market_scanner_service.py
+- Deleted `background_scanner.py` (dead code — variable was aliased to `enhanced_scanner`)
+- Deprecated `backtest_engine.py` (superseded by `advanced_backtest_engine`) with notice
+- Fixed `/api/scanner` prefix conflict: market scanner → `/api/market-scanner`
+- Consolidated `predictive_scanner.py`: wired to enhanced scanner via `set_enhanced_scanner()` for shared real market data (actual VWAP, EMA, RSI, RVOL) instead of hardcoded estimates
 
 ## Service Architecture Audit
 
@@ -91,9 +99,9 @@ AI-powered trading platform that combines market scanning, strategy simulation, 
 ## Prioritized Backlog
 
 ### P1
-- Implement Best Model Protection — only save new models if accuracy > current active model
-- Consolidate `predictive_scanner.py` to delegate setup checks to `enhanced_scanner`
-- Phase out `background_scanner.py` (dead code) and `backtest_engine.py` (superseded)
+- ~~Implement Best Model Protection~~ — DONE
+- ~~Phase out dead code~~ — DONE (background_scanner deleted, backtest_engine deprecated)
+- ~~Consolidate predictive_scanner~~ — DONE (wired to enhanced_scanner)
 
 ### P1.5
 - **AI Parameter Auto-Optimizer** — Sweep AI confidence thresholds (0.0→0.5) and lookback windows (20→200) across strategies to find the optimal settings per strategy. Runs as a background job and surfaces the best parameter combination automatically.
