@@ -1,9 +1,13 @@
 /**
  * StartupModal - REAL Service Health Verification
  * 
- * This modal performs ACTUAL health checks on all services.
- * Green checkmark = service actually responded successfully
- * Only enables "Get Started" when core services are verified working.
+ * Two-speed approach:
+ * - COLD START: Patient checking with 2s timeouts, 1.5s intervals. Shows real progress.
+ * - REFRESH: Backend detected as already running → switches to fast mode (500ms timeouts, 200ms intervals)
+ *   so green checkmarks populate rapidly.
+ * 
+ * Green checkmark = service actually responded successfully.
+ * "Get Started" enabled when ALL required services are verified.
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -16,7 +20,6 @@ import {
   XCircle,
   Bot,
   LineChart,
-  Shield,
   Brain,
   TrendingUp,
   Zap,
@@ -114,76 +117,33 @@ const StartupModal = ({ onComplete }) => {
   const [isChecking, setIsChecking] = useState(true);
   const [checkCount, setCheckCount] = useState(0);
   const [wsConnected, setWsConnected] = useState(false);
-  const [countdown, setCountdown] = useState(8);
+  // Two-speed mode: 'cold' = patient checking, 'fast' = backend already up
+  const [checkMode, setCheckMode] = useState('cold');
   const wsRef = useRef(null);
   const checkIntervalRef = useRef(null);
   const serviceStatusRef = useRef({});
   const mountedRef = useRef(true);
-  const autoDismissRef = useRef(null);
-  const dismissedRef = useRef(false);
 
   // Check if user has opted out
   useEffect(() => {
     const skipStartup = localStorage.getItem('tradecommand_skip_startup');
     if (skipStartup === 'true') {
       setVisible(false);
-      dismissedRef.current = true;
       onComplete?.();
     }
   }, [onComplete]);
 
-  // AUTO-DISMISS: If backend hasn't responded within 8 seconds, let the user in anyway
-  // This prevents the modal from blocking the entire app on cold starts
-  useEffect(() => {
-    if (!visible || dismissedRef.current) return;
-    
-    // Countdown ticker
-    const countdownInterval = setInterval(() => {
-      setCountdown(prev => {
-        if (prev <= 1) {
-          clearInterval(countdownInterval);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    
-    autoDismissRef.current = setTimeout(() => {
-      if (!dismissedRef.current) {
-        dismissedRef.current = true;
-        mountedRef.current = false;
-        if (checkIntervalRef.current) {
-          clearTimeout(checkIntervalRef.current);
-        }
-        if (wsRef.current) {
-          wsRef.current.close();
-        }
-        setVisible(false);
-        onComplete?.();
-      }
-    }, 8000);
-    
-    return () => {
-      clearInterval(countdownInterval);
-      if (autoDismissRef.current) {
-        clearTimeout(autoDismissRef.current);
-      }
-    };
-  }, [visible, onComplete]);
-
-  // Check a single service - uses un-throttled fetch to bypass the request queue
-  const checkService = useCallback(async (service) => {
+  // Check a single service - timeout depends on mode
+  const checkService = useCallback(async (service, timeout) => {
     if (service.checkType === 'websocket') {
       return wsConnected ? 'success' : 'loading';
     }
 
-    // Use original fetch to bypass the request throttler
-    // Health checks must not compete with other queued requests
     const directFetch = window.__originalFetch || window.fetch;
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000); // 2s timeout
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
 
       const response = await directFetch(`${API_URL}${service.endpoint}`, {
         signal: controller.signal
@@ -196,7 +156,6 @@ const StartupModal = ({ onComplete }) => {
 
       const data = await response.json().catch(() => ({}));
 
-      // Custom response validation if provided
       if (service.responseCheck) {
         return service.responseCheck(data) ? 'success' : 'warning';
       }
@@ -210,11 +169,12 @@ const StartupModal = ({ onComplete }) => {
     }
   }, [wsConnected]);
 
-  // Check all services IN PARALLEL, skipping already-passed services
-  // Uses recursive setTimeout instead of setInterval to prevent overlapping rounds
-  const checkAllServices = useCallback(async () => {
+  // Check all services in parallel, skipping already-passed ones
+  const checkAllServices = useCallback(async (mode) => {
     setIsChecking(true);
     setCheckCount(prev => prev + 1);
+
+    const timeout = mode === 'fast' ? 500 : 2000;
 
     // Build list of services that still need checking
     const toCheck = SERVICES.filter(service => {
@@ -232,10 +192,15 @@ const StartupModal = ({ onComplete }) => {
       return true;
     });
 
-    // Fire all checks in parallel — much faster than sequential on cold start
+    if (toCheck.length === 0) {
+      setIsChecking(false);
+      return;
+    }
+
+    // Fire all checks in parallel
     const results = await Promise.allSettled(
       toCheck.map(async (service) => {
-        const status = await checkService(service);
+        const status = await checkService(service, timeout);
         return { id: service.id, status };
       })
     );
@@ -251,6 +216,14 @@ const StartupModal = ({ onComplete }) => {
       serviceStatusRef.current = next;
       return next;
     });
+
+    // If backend just came up in cold mode, switch to fast mode for remaining services
+    const backendJustPassed = results.some(
+      r => r.status === 'fulfilled' && r.value.id === 'backend' && r.value.status === 'success'
+    );
+    if (backendJustPassed && mode === 'cold') {
+      setCheckMode('fast');
+    }
 
     setIsChecking(false);
   }, [checkService]);
@@ -268,12 +241,20 @@ const StartupModal = ({ onComplete }) => {
 
         ws.onopen = () => {
           setWsConnected(true);
-          setServiceStatus(prev => ({ ...prev, websocket: 'success' }));
+          setServiceStatus(prev => {
+            const next = { ...prev, websocket: 'success' };
+            serviceStatusRef.current = next;
+            return next;
+          });
         };
 
         ws.onerror = () => {
           setWsConnected(false);
-          setServiceStatus(prev => ({ ...prev, websocket: 'error' }));
+          setServiceStatus(prev => {
+            const next = { ...prev, websocket: 'error' };
+            serviceStatusRef.current = next;
+            return next;
+          });
         };
 
         ws.onclose = () => {
@@ -281,7 +262,11 @@ const StartupModal = ({ onComplete }) => {
         };
       } catch (e) {
         setWsConnected(false);
-        setServiceStatus(prev => ({ ...prev, websocket: 'error' }));
+        setServiceStatus(prev => {
+          const next = { ...prev, websocket: 'error' };
+          serviceStatusRef.current = next;
+          return next;
+        });
       }
     };
 
@@ -294,53 +279,56 @@ const StartupModal = ({ onComplete }) => {
     };
   }, [visible]);
 
-  // Initial check and periodic re-check using recursive setTimeout (no overlapping)
+  // Main check loop with two-speed approach
   useEffect(() => {
     if (!visible) return;
     mountedRef.current = true;
 
-    const runCheck = async () => {
-      if (!mountedRef.current) return;
-      await checkAllServices();
-      // Schedule next round AFTER current round finishes (no overlap)
-      // 800ms between rounds — parallel checks are fast, so this is responsive enough
-      if (mountedRef.current) {
-        checkIntervalRef.current = setTimeout(runCheck, 800);
+    const startChecking = async () => {
+      const directFetch = window.__originalFetch || window.fetch;
+
+      // Probe: Is backend already running? (refresh vs cold start)
+      let backendAlreadyUp = false;
+      try {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), 1500);
+        const res = await directFetch(`${API_URL}/api/health`, { signal: controller.signal });
+        clearTimeout(tid);
+        if (res.ok) backendAlreadyUp = true;
+      } catch (e) {
+        // Not ready — cold start
       }
+
+      const mode = backendAlreadyUp ? 'fast' : 'cold';
+      setCheckMode(mode);
+
+      if (backendAlreadyUp) {
+        // Mark backend + database immediately since we just verified
+        setServiceStatus(prev => {
+          const next = { ...prev, backend: 'success', database: 'success' };
+          serviceStatusRef.current = next;
+          return next;
+        });
+      }
+
+      // Recursive check loop
+      const runCheck = async () => {
+        if (!mountedRef.current) return;
+        // Use current mode — may have been upgraded from cold → fast
+        const currentMode = serviceStatusRef.current['backend'] === 'success' ? 'fast' : 'cold';
+        await checkAllServices(currentMode);
+
+        if (!mountedRef.current) return;
+        // Fast mode: 300ms between rounds. Cold mode: 1.5s between rounds.
+        const interval = currentMode === 'fast' ? 300 : 1500;
+        checkIntervalRef.current = setTimeout(runCheck, interval);
+      };
+
+      // Start first round immediately (or after tiny delay in fast mode to let state settle)
+      checkIntervalRef.current = setTimeout(runCheck, backendAlreadyUp ? 50 : 500);
     };
 
-    // Initial check after short delay
-    // Fast-path: if backend health responds instantly, mark required services and kick off one parallel check
-    const fastCheck = async () => {
-      try {
-        const directFetch = window.__originalFetch || window.fetch;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2000);
-        const res = await directFetch(`${API_URL}/api/health`, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        
-        if (res.ok && !dismissedRef.current) {
-          // Backend is running — dismiss immediately (instant on refresh)
-          dismissedRef.current = true;
-          if (autoDismissRef.current) {
-            clearTimeout(autoDismissRef.current);
-          }
-          mountedRef.current = false;
-          if (wsRef.current) {
-            wsRef.current.close();
-          }
-          setVisible(false);
-          onComplete?.();
-          return;
-        }
-      } catch (e) {
-        // Backend not ready yet — fall through to normal check cycle
-      }
-      
-      checkIntervalRef.current = setTimeout(runCheck, 500);
-    };
-    
-    fastCheck();
+    startChecking();
 
     return () => {
       mountedRef.current = false;
@@ -350,60 +338,35 @@ const StartupModal = ({ onComplete }) => {
     };
   }, [visible, checkAllServices]);
 
-  // Calculate if ready to proceed
-  // Ready = all REQUIRED services are up. Non-required services can still be loading/failed.
+  // Calculate readiness
   const requiredServices = SERVICES.filter(s => s.required);
   const requiredReady = requiredServices.every(s => serviceStatus[s.id] === 'success');
   const allServicesChecked = Object.keys(serviceStatus).length >= SERVICES.length;
-  const isReady = requiredReady;
-  const canForceStart = checkCount >= 3; // Allow force-start after 3 attempts (faster)
+  const isReady = requiredReady && allServicesChecked;
+  const canForceStart = checkCount >= 5;
 
-  // Auto-proceed when required services are ready (mid-check)
+  // Stop polling once fully ready
   useEffect(() => {
-    if (isReady && !dismissedRef.current) {
-      dismissedRef.current = true;
-      if (autoDismissRef.current) {
-        clearTimeout(autoDismissRef.current);
-      }
-      // Small delay so user sees the green checkmarks
-      setTimeout(() => {
-        mountedRef.current = false;
-        if (checkIntervalRef.current) {
-          clearTimeout(checkIntervalRef.current);
-        }
-        if (wsRef.current) {
-          wsRef.current.close();
-        }
-        setVisible(false);
-        onComplete?.();
-      }, 600);
+    if (isReady && checkIntervalRef.current) {
+      clearTimeout(checkIntervalRef.current);
+      mountedRef.current = false;
+      checkIntervalRef.current = null;
     }
-  }, [isReady, onComplete]);
+  }, [isReady]);
 
   // Calculate progress
   const successCount = Object.values(serviceStatus).filter(s => s === 'success').length;
   const progress = Math.round((successCount / SERVICES.length) * 100);
 
   const handleGetStarted = () => {
-    if (dismissedRef.current) return;
-    dismissedRef.current = true;
-    
     if (dontShowAgain) {
       localStorage.setItem('tradecommand_skip_startup', 'true');
     }
     
-    // Cancel auto-dismiss timer
-    if (autoDismissRef.current) {
-      clearTimeout(autoDismissRef.current);
-    }
-    
-    // Stop checking
     mountedRef.current = false;
     if (checkIntervalRef.current) {
       clearTimeout(checkIntervalRef.current);
     }
-    
-    // Close WebSocket used for checking
     if (wsRef.current) {
       wsRef.current.close();
     }
@@ -416,7 +379,7 @@ const StartupModal = ({ onComplete }) => {
     setServiceStatus({});
     serviceStatusRef.current = {};
     setCheckCount(0);
-    // The recursive setTimeout loop will pick up the reset state
+    setCheckMode('cold');
   };
 
   const getStatusIcon = (status) => {
@@ -484,7 +447,11 @@ const StartupModal = ({ onComplete }) => {
                 <div>
                   <h1 className="text-lg font-bold text-white">TradeCommand</h1>
                   <p className="text-zinc-400 text-xs">
-                    {isReady ? 'All systems ready!' : `Auto-continuing in ${countdown}s...`}
+                    {isReady
+                      ? 'All systems ready!'
+                      : checkMode === 'fast'
+                        ? 'Verifying services...'
+                        : 'Waiting for services to start...'}
                   </p>
                 </div>
               </div>
@@ -602,6 +569,7 @@ const StartupModal = ({ onComplete }) => {
               <span><span className="text-red-400">*</span> Required for startup</span>
               <span>•</span>
               <span>Check #{checkCount}</span>
+              {checkMode === 'fast' && <span className="text-cyan-400">FAST</span>}
               {isChecking && <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />}
             </div>
           </div>
@@ -632,15 +600,32 @@ const StartupModal = ({ onComplete }) => {
 
             <button
               onClick={handleGetStarted}
+              disabled={!isReady && !canForceStart}
               className={`px-5 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
                 isReady
                   ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white hover:shadow-lg hover:shadow-green-500/25'
-                  : 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:shadow-lg hover:shadow-cyan-500/25'
+                  : canForceStart
+                    ? 'bg-gradient-to-r from-amber-600 to-orange-600 text-white hover:shadow-lg hover:shadow-amber-500/25'
+                    : 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
               }`}
               data-testid="get-started-btn"
             >
-              <Zap className="w-4 h-4" />
-              {isReady ? 'Get Started' : 'Enter App'}
+              {isReady ? (
+                <>
+                  <Zap className="w-4 h-4" />
+                  Get Started
+                </>
+              ) : canForceStart ? (
+                <>
+                  <Zap className="w-4 h-4" />
+                  Start Anyway
+                </>
+              ) : (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Waiting for services...
+                </>
+              )}
             </button>
           </div>
         </motion.div>
