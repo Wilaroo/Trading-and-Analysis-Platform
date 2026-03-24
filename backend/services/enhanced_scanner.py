@@ -1889,46 +1889,36 @@ class EnhancedBackgroundScanner:
         """
         Get ADV from our collected IB historical data in MongoDB.
         This uses data we've already collected from IB Gateway.
+        Runs in a thread to avoid blocking the event loop.
         """
-        adv_data = {}
-        
-        try:
-            from database import get_database
-            db = get_database()
-            if db is None:
-                return adv_data
-            
-            # Use unified ib_historical_data collection
-            bars_col = db.get('ib_historical_data')
-            if bars_col is None:
-                return adv_data
-            
-            # Look for daily bars from last 30 days
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
-            
-            for symbol in symbols:
-                try:
-                    # Find daily bars for this symbol from unified collection
-                    bars = list(bars_col.find(
-                        {
-                            "symbol": symbol,
-                            "bar_size": "1 day",
-                            "date": {"$gte": cutoff}
-                        },
-                        {"volume": 1}
-                    ).limit(20))
-                    
-                    if bars and len(bars) >= 5:
-                        volumes = [b.get("volume", 0) for b in bars if b.get("volume", 0) > 0]
-                        if volumes:
-                            adv_data[symbol] = int(sum(volumes) / len(volumes))
-                except Exception:
-                    continue
-                    
-        except Exception as e:
-            logger.debug(f"Error accessing ib_historical_data: {e}")
-        
-        return adv_data
+        def _sync_lookup():
+            adv_data = {}
+            try:
+                from database import get_database
+                db = get_database()
+                if db is None:
+                    return adv_data
+                bars_col = db.get('ib_historical_data')
+                if bars_col is None:
+                    return adv_data
+                cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
+                for symbol in symbols:
+                    try:
+                        bars = list(bars_col.find(
+                            {"symbol": symbol, "bar_size": "1 day", "date": {"$gte": cutoff}},
+                            {"volume": 1}
+                        ).limit(20))
+                        if bars and len(bars) >= 5:
+                            volumes = [b.get("volume", 0) for b in bars if b.get("volume", 0) > 0]
+                            if volumes:
+                                adv_data[symbol] = int(sum(volumes) / len(volumes))
+                    except Exception:
+                        continue
+            except Exception as e:
+                logger.debug(f"Error accessing ib_historical_data: {e}")
+            return adv_data
+
+        return await asyncio.to_thread(_sync_lookup)
     
     def _get_adv_from_ib_realtime(self, symbols: List[str]) -> Dict[str, int]:
         """

@@ -416,7 +416,7 @@ class AlpacaService:
             return []
         
         try:
-            positions = _trading_client.get_all_positions()
+            positions = await asyncio.to_thread(_trading_client.get_all_positions)
             
             result = []
             for pos in positions:
@@ -476,7 +476,7 @@ class AlpacaService:
                 by=MostActivesBy.VOLUME
             )
             
-            most_actives = _data_client.get_stock_most_actives(request)
+            most_actives = await asyncio.to_thread(_data_client.get_stock_most_actives, request)
             
             result = []
             for stock in most_actives.most_actives:

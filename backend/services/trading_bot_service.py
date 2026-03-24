@@ -908,7 +908,7 @@ class TradingBotService:
                 return
             
             # === 1. RESTORE BOT STATE ===
-            state = self._db.bot_state.find_one({"_id": "bot_state"})
+            state = await asyncio.to_thread(self._db.bot_state.find_one, {"_id": "bot_state"})
             if state:
                 was_running = state.get("running", False)
                 saved_mode = state.get("mode", "confirmation")
@@ -951,7 +951,7 @@ class TradingBotService:
                     logger.info(f"💰 Restored risk params: max_risk=${self.risk_params.max_risk_per_trade:,.0f}, max_positions={self.risk_params.max_open_positions}, min_rr={self.risk_params.min_risk_reward}")
             
             # === 2. RESTORE EOD CONFIG ===
-            eod_config = self._db.bot_config.find_one({"_id": "eod_config"})
+            eod_config = await asyncio.to_thread(self._db.bot_config.find_one, {"_id": "eod_config"})
             if eod_config:
                 self._eod_close_enabled = eod_config.get("enabled", True)
                 self._eod_close_hour = eod_config.get("close_hour", 15)
@@ -960,7 +960,7 @@ class TradingBotService:
             
             # === 3. RESTORE DAILY STATS ===
             today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            daily_stats = self._db.daily_stats.find_one({"date": today_str})
+            daily_stats = await asyncio.to_thread(self._db.daily_stats.find_one, {"date": today_str})
             if daily_stats:
                 self._daily_stats = DailyStats(
                     date=today_str,
@@ -1001,9 +1001,9 @@ class TradingBotService:
                 return
             
             # Restore last 100 closed trades
-            closed_trades = list(self._db.bot_trades.find({
-                "status": "closed"
-            }).sort("closed_at", -1).limit(100))
+            closed_trades = await asyncio.to_thread(
+                lambda: list(self._db.bot_trades.find({"status": "closed"}).sort("closed_at", -1).limit(100))
+            )
             
             for trade_doc in closed_trades:
                 try:
@@ -1053,9 +1053,9 @@ class TradingBotService:
                 return
             
             # Find all trades with open or pending status
-            open_trades = list(self._db.bot_trades.find({
-                "status": {"$in": ["open", "pending", "filled"]}
-            }))
+            open_trades = await asyncio.to_thread(
+                lambda: list(self._db.bot_trades.find({"status": {"$in": ["open", "pending", "filled"]}}))
+            )
             
             restored_count = 0
             for trade_doc in open_trades:
@@ -1171,48 +1171,48 @@ class TradingBotService:
             if self._db is None:
                 return
             
-            # === 1. SAVE BOT STATE (including risk params) ===
-            self._db.bot_state.update_one(
-                {"_id": "bot_state"},
-                {"$set": {
-                    "running": self._running,
-                    "mode": self._mode.value,
-                    "watchlist": self._watchlist,
-                    "enabled_setups": self._enabled_setups,
-                    "risk_params": {
-                        "max_risk_per_trade": self.risk_params.max_risk_per_trade,
-                        "max_daily_loss": self.risk_params.max_daily_loss,
-                        "max_daily_loss_pct": self.risk_params.max_daily_loss_pct,
-                        "max_open_positions": self.risk_params.max_open_positions,
-                        "max_position_pct": self.risk_params.max_position_pct,
-                        "min_risk_reward": self.risk_params.min_risk_reward,
-                        "starting_capital": self.risk_params.starting_capital
-                    },
-                    "last_updated": datetime.now(timezone.utc).isoformat()
-                }},
-                upsert=True
-            )
-            
-            # === 2. SAVE DAILY STATS ===
-            self._db.daily_stats.update_one(
-                {"date": self._daily_stats.date},
-                {"$set": {
-                    "trades_executed": self._daily_stats.trades_executed,
-                    "trades_won": self._daily_stats.trades_won,
-                    "trades_lost": self._daily_stats.trades_lost,
-                    "gross_pnl": self._daily_stats.gross_pnl,
-                    "net_pnl": self._daily_stats.net_pnl,
-                    "largest_win": self._daily_stats.largest_win,
-                    "largest_loss": self._daily_stats.largest_loss,
-                    "win_rate": self._daily_stats.win_rate,
-                    "daily_limit_hit": self._daily_stats.daily_limit_hit,
-                    "last_updated": datetime.now(timezone.utc).isoformat()
-                }},
-                upsert=True
-            )
-            
-            # === 3. PERSIST ALL OPEN TRADES ===
-            self._persist_all_open_trades()
+            # Build state and stats documents first (lightweight, no IO)
+            state_doc = {
+                "running": self._running,
+                "mode": self._mode.value,
+                "watchlist": self._watchlist,
+                "enabled_setups": self._enabled_setups,
+                "risk_params": {
+                    "max_risk_per_trade": self.risk_params.max_risk_per_trade,
+                    "max_daily_loss": self.risk_params.max_daily_loss,
+                    "max_daily_loss_pct": self.risk_params.max_daily_loss_pct,
+                    "max_open_positions": self.risk_params.max_open_positions,
+                    "max_position_pct": self.risk_params.max_position_pct,
+                    "min_risk_reward": self.risk_params.min_risk_reward,
+                    "starting_capital": self.risk_params.starting_capital
+                },
+                "last_updated": datetime.now(timezone.utc).isoformat()
+            }
+            stats_doc = {
+                "trades_executed": self._daily_stats.trades_executed,
+                "trades_won": self._daily_stats.trades_won,
+                "trades_lost": self._daily_stats.trades_lost,
+                "gross_pnl": self._daily_stats.gross_pnl,
+                "net_pnl": self._daily_stats.net_pnl,
+                "largest_win": self._daily_stats.largest_win,
+                "largest_loss": self._daily_stats.largest_loss,
+                "win_rate": self._daily_stats.win_rate,
+                "daily_limit_hit": self._daily_stats.daily_limit_hit,
+                "last_updated": datetime.now(timezone.utc).isoformat()
+            }
+            stats_date = self._daily_stats.date
+
+            # Run all DB writes in a thread to avoid blocking
+            def _sync_save():
+                self._db.bot_state.update_one(
+                    {"_id": "bot_state"}, {"$set": state_doc}, upsert=True
+                )
+                self._db.daily_stats.update_one(
+                    {"date": stats_date}, {"$set": stats_doc}, upsert=True
+                )
+                self._persist_all_open_trades()
+
+            await asyncio.to_thread(_sync_save)
             
             logger.info(f"💾 Session saved: running={self._running}, P&L=${self._daily_stats.net_pnl:+,.2f}, open_trades={len(self._open_trades)}")
         except Exception as e:
@@ -2996,14 +2996,15 @@ class TradingBotService:
         
         # Persist the EOD close event
         if self._db:
-            self._db.bot_events.insert_one({
+            eod_event = {
                 "event_type": "eod_auto_close",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "date": today_str,
                 "positions_closed": closed_count,
                 "total_pnl": total_pnl,
                 "close_time_et": now_et.strftime("%H:%M:%S")
-            })
+            }
+            await asyncio.to_thread(self._db.bot_events.insert_one, eod_event)
         
         logger.info(f"✅ EOD AUTO-CLOSE COMPLETE: Closed {closed_count} positions, Total P&L: ${total_pnl:+,.2f}")
 
@@ -3683,17 +3684,18 @@ class TradingBotService:
             self._closed_trades.append(trade)
             
             # Update MongoDB
-            self._db.bot_trades.update_one(
-                {"id": trade_id},
-                {"$set": {
-                    "status": TradeStatus.CLOSED.value,
-                    "exit_time": trade.exit_time.isoformat(),
-                    "exit_price": trade.exit_price,
-                    "exit_reason": trade.exit_reason,
-                    "realized_pnl": trade.realized_pnl,
-                    "unrealized_pnl": 0,
-                    "remaining_shares": 0
-                }}
+            update_doc = {
+                "status": TradeStatus.CLOSED.value,
+                "exit_time": trade.exit_time.isoformat(),
+                "exit_price": trade.exit_price,
+                "exit_reason": trade.exit_reason,
+                "realized_pnl": trade.realized_pnl,
+                "unrealized_pnl": 0,
+                "remaining_shares": 0
+            }
+            await asyncio.to_thread(
+                self._db.bot_trades.update_one,
+                {"id": trade_id}, {"$set": update_doc}
             )
             
             logger.info(f"Closed phantom trade {trade.symbol} ({trade_id}): reason={reason}, P&L=${trade.realized_pnl:.2f}")
@@ -3800,12 +3802,13 @@ class TradingBotService:
                                 trade.shares = abs(ib_qty)
                                 
                                 # Update MongoDB
-                                self._db.bot_trades.update_one(
-                                    {"id": trade_id},
-                                    {"$set": {
-                                        "remaining_shares": abs(ib_qty),
-                                        "shares": abs(ib_qty)
-                                    }}
+                                update_doc = {
+                                    "remaining_shares": abs(ib_qty),
+                                    "shares": abs(ib_qty)
+                                }
+                                await asyncio.to_thread(
+                                    self._db.bot_trades.update_one,
+                                    {"id": trade_id}, {"$set": update_doc}
                                 )
                                 
                                 report["updated"].append({
@@ -3899,12 +3902,12 @@ class TradingBotService:
             return
         
         try:
-            trades_col = self._db["bot_trades"]
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            
-            # Load open trades
-            cursor = trades_col.find({"status": "open"})
-            for doc in cursor:
+            def _sync_load():
+                trades_col = self._db["bot_trades"]
+                return list(trades_col.find({"status": "open"}))
+
+            docs = await asyncio.to_thread(_sync_load)
+            for doc in docs:
                 doc.pop('_id', None)
                 trade = self._dict_to_trade(doc)
                 if trade:
@@ -4061,9 +4064,10 @@ class TradingBotService:
                 # For exits, we update the existing trade entry if possible
                 # First try to find the existing journal entry by bot_trade_id
                 try:
-                    existing = await self._trade_journal.db.trades.find_one({
-                        "bot_trade_id": trade.id
-                    })
+                    existing = await asyncio.to_thread(
+                        self._trade_journal.db.trades.find_one,
+                        {"bot_trade_id": trade.id}
+                    )
                     
                     if existing:
                         # Update the existing entry with exit data
@@ -4077,9 +4081,9 @@ class TradingBotService:
                             "notes": existing.get("notes", "") + f"\n\n[EXIT] Reason: {trade.close_reason or 'closed'}, P&L: ${trade.realized_pnl:+,.2f}",
                         }
                         
-                        await self._trade_journal.db.trades.update_one(
-                            {"_id": existing["_id"]},
-                            {"$set": update_data}
+                        await asyncio.to_thread(
+                            self._trade_journal.db.trades.update_one,
+                            {"_id": existing["_id"]}, {"$set": update_data}
                         )
                         logger.info(f"📓 Auto-recorded EXIT to journal: {trade.symbol} P&L: ${trade.realized_pnl:+,.2f}")
                     else:
