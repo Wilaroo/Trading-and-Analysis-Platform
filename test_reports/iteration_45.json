@@ -66,5 +66,5 @@
   },
   "retest_needed": false,
   "should_main_agent_self_test": false,
-  "context_for_next_testing_agent": "Portfolio Insights widget shows compact cards with single-line truncated messages, priority badges, and ticker buttons. Chat Enter key no longer scrolls the page - uses container scrollTop instead of scrollIntoView. Both fixes verified working on https://sentcom-modal-perf.preview.emergentagent.com"
+  "context_for_next_testing_agent": "Portfolio Insights widget shows compact cards with single-line truncated messages, priority badges, and ticker buttons. Chat Enter key no longer scrolls the page - uses container scrollTop instead of scrollIntoView. Both fixes verified working on https://screen-space-study.preview.emergentagent.com"
 }

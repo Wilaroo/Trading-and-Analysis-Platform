@@ -273,7 +273,7 @@ class TestRegimePerformanceAPI:
         import httpx
         
         # Get the API URL from env
-        api_url = "https://sentcom-modal-perf.preview.emergentagent.com"
+        api_url = "https://screen-space-study.preview.emergentagent.com"
         
         endpoints = [
             "/api/regime-performance/summary",

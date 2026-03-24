@@ -20,7 +20,7 @@ echo.
 :: =====================================================
 :: CONFIGURATION
 :: =====================================================
-set CLOUD_URL=https://sentcom-modal-perf.preview.emergentagent.com
+set CLOUD_URL=https://screen-space-study.preview.emergentagent.com
 set GITHUB_RAW=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents
 set SCRIPT_DIR=%~dp0
 set IB_GATEWAY_PATH=C:\Jts\ibgateway\1037\ibgateway.exe
