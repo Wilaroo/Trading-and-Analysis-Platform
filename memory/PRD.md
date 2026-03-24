@@ -40,28 +40,36 @@ AI-powered trading platform that combines market scanning, strategy simulation, 
 
 ### NIA Page Refactoring (Mar 24, 2026) - COMPLETED
 Refactored 3120-line monolithic `NIA.jsx` into modular directory structure:
-- **IntelOverview.jsx** - 4 key metric cards with connector health dots
-- **LearningProgressPanel.jsx** - System intelligence progress bars
-- **ReportCardPanel.jsx** - Personal trading performance (moved up for visibility)
-- **DataCollectionPanel.jsx** - Historical data collection with coverage/collect/progress tabs
-- **SimulationQuickPanel.jsx** - Backtesting and simulations
-- **TestingToolsPanel.jsx** - Merged Market Scanner + Advanced Testing (tabbed)
-- **AIModulesPanel.jsx** - Merged AI Performance + Learning Connectors (tabbed)
-- **StrategyPipelinePanel.jsx** - Merged Lifecycle + Promotions (tabbed, deduplicated)
-- **constants.js** - Shared phase colors, icons
-- **index.jsx** - Main orchestrator (~300 lines)
 
-Changes made:
-1. Removed duplicate promotion sections (was in both StrategyLifecycle and PromotionWizard)
-2. Deduplicated AI accuracy display (summary in IntelOverview, detail in AIModulesPanel)
-3. Shared phase constants extracted to constants.js
-4. Merged Scanner + Advanced Testing into TestingToolsPanel with tabs
-5. Merged AI Performance + Connectors into AIModulesPanel with tabs
-6. Merged Lifecycle + Promotions into StrategyPipelinePanel with tabs
-7. Moved ReportCard up in page order for better visibility
+**File Structure:**
+```
+NIA/
+  index.jsx          - Main orchestrator (~300 lines)
+  QuickStatsBar.jsx  - 6 real-time metric cards at top
+  IntelOverview.jsx  - 4 key metric cards with connector health dots
+  LearningProgressPanel.jsx
+  ReportCardPanel.jsx (moved up for visibility)
+  DataCollectionPanel.jsx (coverage/collect/progress tabs)
+  SimulationQuickPanel.jsx
+  TestingToolsPanel.jsx (merged Scanner + Advanced Testing, tabbed)
+  AIModulesPanel.jsx (merged AI Performance + Connectors, tabbed)
+  StrategyPipelinePanel.jsx (merged Lifecycle + Promotions, tabbed)
+  constants.js (shared phase colors/icons)
+```
+
+**Changes:**
+1. Removed duplicate promotion sections
+2. Deduplicated AI accuracy display
+3. Shared phase constants extracted
+4. Merged Scanner + Advanced Testing into tabbed panel
+5. Merged AI Performance + Connectors into tabbed panel
+6. Merged Lifecycle + Promotions into tabbed panel
+7. Moved ReportCard up for visibility
 8. Added connector health dot indicator to IntelOverview
 9. Migrated raw fetch() calls to centralized api utility
 10. Smarter default expand/collapse states
+11. Two-phase data fetch (fast endpoints → immediate UI update, slow endpoints with 10s timeout)
+12. Added QuickStats summary bar with 6 real-time metrics
 
 ## In Progress
 - Autonomous Learning Loop automation
@@ -75,6 +83,7 @@ Changes made:
 - Enable GPU for LightGBM
 - Complete backend router refactoring (activate modular routers in server.py)
 - Migrate remaining ~85 raw fetch() calls to centralized api utility
+- Fix TradingBot event loop blocking (synchronous evaluations block async event loop)
 
 ### P3
 - Setup-specific AI Models (77 trading setups)
@@ -95,4 +104,6 @@ Changes made:
 - **CRITICAL**: Never use synchronous I/O in async functions. Always use `asyncio.to_thread` for blocking calls.
 - Frontend state persistence uses CSS display:none (not React key-based unmounting)
 - DataCollectionPanel has its own 15s polling cycle (separate from NIA's 60s main poll)
+- NIA uses two-phase fetch: fast endpoints update UI immediately, slow endpoints have 10s timeout
 - All backend routes must be prefixed with `/api`
+- Connector data from API may be array or object; AIModulesPanel normalizes it
