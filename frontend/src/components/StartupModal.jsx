@@ -1,17 +1,12 @@
 /**
  * StartupModal - REAL Service Health Verification
  * 
- * Two behaviors:
- * - REFRESH (backend already up): Backend probe succeeds → all services checked in parallel
- *   with short 2s timeouts → completes in ~1 check round.
- * - COLD START (backend booting): Sequential checks with 10s timeouts, 750ms between each.
- *   Shows real progress as each service comes online. Completes in 1-2 rounds once backend is up.
- * 
- * Green checkmark = service actually responded successfully.
- * "Get Started" enabled when all required services verified AND all services checked once.
+ * This modal performs ACTUAL health checks on all services.
+ * Green checkmark = service actually responded successfully
+ * Only enables "Get Started" when core services are verified working.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Rocket,
@@ -21,6 +16,7 @@ import {
   XCircle,
   Bot,
   LineChart,
+  Shield,
   Brain,
   TrendingUp,
   Zap,
@@ -55,7 +51,7 @@ const SERVICES = [
     id: 'database',
     label: 'Database',
     icon: Database,
-    endpoint: '/api/health',
+    endpoint: '/api/health', // Backend health implies DB is connected
     required: true,
     category: 'core'
   },
@@ -103,6 +99,7 @@ const SERVICES = [
   }
 ];
 
+// Group services by category
 const CATEGORIES = {
   core: { label: 'Core Systems', color: 'cyan', required: true },
   trading: { label: 'Trading', color: 'blue', required: false },
@@ -110,39 +107,17 @@ const CATEGORIES = {
   analytics: { label: 'Analytics', color: 'amber', required: false }
 };
 
-// Helper: check a single HTTP service
-async function checkOneService(service, timeout) {
-  const directFetch = window.__originalFetch || window.fetch;
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-    const response = await directFetch(`${API_URL}${service.endpoint}`, {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-
-    if (!response.ok) return 'error';
-
-    const data = await response.json().catch(() => ({}));
-    if (service.responseCheck) {
-      return service.responseCheck(data) ? 'success' : 'warning';
-    }
-    return 'success';
-  } catch (e) {
-    return e.name === 'AbortError' ? 'timeout' : 'error';
-  }
-}
-
 const StartupModal = ({ onComplete }) => {
   const [visible, setVisible] = useState(true);
   const [dontShowAgain, setDontShowAgain] = useState(false);
   const [serviceStatus, setServiceStatus] = useState({});
   const [isChecking, setIsChecking] = useState(true);
   const [checkCount, setCheckCount] = useState(0);
-  const [checkMode, setCheckMode] = useState(null); // 'fast' or 'cold'
+  const [wsConnected, setWsConnected] = useState(false);
   const wsRef = useRef(null);
+  const checkIntervalRef = useRef(null);
+  const serviceStatusRef = useRef({});
   const mountedRef = useRef(true);
-  const statusRef = useRef({});
 
   // Check if user has opted out
   useEffect(() => {
@@ -153,164 +128,164 @@ const StartupModal = ({ onComplete }) => {
     }
   }, [onComplete]);
 
-  // Helper to update a single service status
-  const updateStatus = (id, status) => {
-    statusRef.current = { ...statusRef.current, [id]: status };
-    setServiceStatus(prev => ({ ...prev, [id]: status }));
-  };
-
-  // WebSocket check — runs independently, updates status via ref
-  useEffect(() => {
-    if (!visible) return;
-    const wsUrl = API_URL.replace('http', 'ws') + '/api/ws/quotes';
-
-    try {
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-      ws.onopen = () => updateStatus('websocket', 'success');
-      ws.onerror = () => updateStatus('websocket', 'error');
-      ws.onclose = () => {}; // Don't update — might close after dismiss
-    } catch (e) {
-      updateStatus('websocket', 'error');
+  // Check a single service - uses un-throttled fetch to bypass the request queue
+  const checkService = useCallback(async (service) => {
+    if (service.checkType === 'websocket') {
+      return wsConnected ? 'success' : 'loading';
     }
 
+    // Use original fetch to bypass the request throttler
+    // Health checks must not compete with other queued requests
+    const directFetch = window.__originalFetch || window.fetch;
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+
+      const response = await directFetch(`${API_URL}${service.endpoint}`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        return 'error';
+      }
+
+      const data = await response.json().catch(() => ({}));
+
+      // Custom response validation if provided
+      if (service.responseCheck) {
+        return service.responseCheck(data) ? 'success' : 'warning';
+      }
+
+      return 'success';
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        return 'timeout';
+      }
+      return 'error';
+    }
+  }, [wsConnected]);
+
+  // Check all services - ONE AT A TIME, skipping already-passed services
+  // Uses recursive setTimeout instead of setInterval to prevent overlapping rounds
+  const checkAllServices = useCallback(async () => {
+    setIsChecking(true);
+    setCheckCount(prev => prev + 1);
+
+    for (const service of SERVICES) {
+      if (service.checkType === 'websocket') continue;
+
+      // Skip services that already succeeded - no need to re-check
+      const currentStatus = serviceStatusRef.current[service.id];
+      if (currentStatus === 'success') continue;
+
+      // If backend passed, auto-pass database (same /api/health endpoint)
+      if (service.id === 'database' && serviceStatusRef.current['backend'] === 'success') {
+        setServiceStatus(prev => {
+          const next = { ...prev, database: 'success' };
+          serviceStatusRef.current = next;
+          return next;
+        });
+        continue;
+      }
+
+      const status = await checkService(service);
+
+      setServiceStatus(prev => {
+        const next = { ...prev, [service.id]: status };
+        serviceStatusRef.current = next;
+        return next;
+      });
+
+      // 750ms between each check to give backend breathing room
+      await new Promise(resolve => setTimeout(resolve, 750));
+    }
+
+    setIsChecking(false);
+  }, [checkService]);
+
+  // Setup WebSocket check
+  useEffect(() => {
+    if (!visible) return;
+
+    const wsUrl = API_URL.replace('http', 'ws') + '/api/ws/quotes';
+    
+    const connectWs = () => {
+      try {
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          setWsConnected(true);
+          setServiceStatus(prev => ({ ...prev, websocket: 'success' }));
+        };
+
+        ws.onerror = () => {
+          setWsConnected(false);
+          setServiceStatus(prev => ({ ...prev, websocket: 'error' }));
+        };
+
+        ws.onclose = () => {
+          setWsConnected(false);
+        };
+      } catch (e) {
+        setWsConnected(false);
+        setServiceStatus(prev => ({ ...prev, websocket: 'error' }));
+      }
+    };
+
+    connectWs();
+
     return () => {
-      if (wsRef.current) wsRef.current.close();
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
     };
   }, [visible]);
 
-  // Main check loop — NO callback dependencies, uses refs to avoid restarts
+  // Initial check and periodic re-check using recursive setTimeout (no overlapping)
   useEffect(() => {
     if (!visible) return;
     mountedRef.current = true;
-    let timerRef = null;
 
-    const run = async () => {
-      // Step 1: Probe — is backend already running?
-      let backendUp = false;
-      try {
-        const directFetch = window.__originalFetch || window.fetch;
-        const ctrl = new AbortController();
-        const tid = setTimeout(() => ctrl.abort(), 3000);
-        const res = await directFetch(`${API_URL}/api/health`, { signal: ctrl.signal });
-        clearTimeout(tid);
-        if (res.ok) backendUp = true;
-      } catch (e) { /* not ready */ }
-
-      const mode = backendUp ? 'fast' : 'cold';
-      setCheckMode(mode);
-
-      if (backendUp) {
-        // Mark backend + database immediately
-        updateStatus('backend', 'success');
-        updateStatus('database', 'success');
-      }
-
-      // Step 2: Check loop
-      const doRound = async () => {
-        if (!mountedRef.current) return;
-        setIsChecking(true);
-        setCheckCount(prev => prev + 1);
-
-        const currentMode = statusRef.current['backend'] === 'success' ? 'fast' : 'cold';
-        if (currentMode === 'fast') setCheckMode('fast');
-
-        // Get services that still need checking (skip websocket, skip already-passed)
-        const toCheck = SERVICES.filter(s => {
-          if (s.checkType === 'websocket') return false;
-          if (statusRef.current[s.id] === 'success') return false;
-          if (s.id === 'database' && statusRef.current['backend'] === 'success') {
-            updateStatus('database', 'success');
-            return false;
-          }
-          return true;
-        });
-
-        if (currentMode === 'fast') {
-          // FAST MODE: parallel checks, short timeout
-          const results = await Promise.allSettled(
-            toCheck.map(async (s) => {
-              const status = await checkOneService(s, 2000);
-              return { id: s.id, status };
-            })
-          );
-          for (const r of results) {
-            if (r.status === 'fulfilled') {
-              updateStatus(r.value.id, r.value.status);
-            }
-          }
-        } else {
-          // COLD MODE: sequential checks, long timeout, gaps between each
-          // This is the original behavior that worked reliably
-          for (const service of toCheck) {
-            if (!mountedRef.current) return;
-            const status = await checkOneService(service, 10000);
-            updateStatus(service.id, status);
-            // If backend just came up, switch to fast for remaining services
-            if (service.id === 'backend' && status === 'success') {
-              updateStatus('database', 'success');
-              setCheckMode('fast');
-              // Remaining services in parallel with short timeout
-              const remaining = toCheck.filter(s => 
-                s.id !== 'backend' && s.id !== 'database' && statusRef.current[s.id] !== 'success'
-              );
-              const results = await Promise.allSettled(
-                remaining.map(async (s) => {
-                  const st = await checkOneService(s, 2000);
-                  return { id: s.id, status: st };
-                })
-              );
-              for (const r of results) {
-                if (r.status === 'fulfilled') {
-                  updateStatus(r.value.id, r.value.status);
-                }
-              }
-              break; // Done with sequential loop
-            }
-            // 750ms between each check in cold mode
-            await new Promise(resolve => setTimeout(resolve, 750));
-          }
-        }
-
-        setIsChecking(false);
-
-        // Check if we should stop
-        const allChecked = Object.keys(statusRef.current).length >= SERVICES.length;
-        const reqReady = SERVICES.filter(s => s.required).every(s => statusRef.current[s.id] === 'success');
-
-        if (allChecked && reqReady) {
-          return; // Done — don't schedule next round
-        }
-
-        // Schedule next round
-        if (mountedRef.current) {
-          const interval = statusRef.current['backend'] === 'success' ? 500 : 3000;
-          timerRef = setTimeout(doRound, interval);
-        }
-      };
-
-      // Start first round
+    const runCheck = async () => {
+      if (!mountedRef.current) return;
+      await checkAllServices();
+      // Schedule next round AFTER current round finishes (no overlap)
       if (mountedRef.current) {
-        timerRef = setTimeout(doRound, backendUp ? 50 : 500);
+        checkIntervalRef.current = setTimeout(runCheck, 3000);
       }
     };
 
-    run();
+    // Initial check after short delay
+    checkIntervalRef.current = setTimeout(runCheck, 500);
 
     return () => {
       mountedRef.current = false;
-      if (timerRef) clearTimeout(timerRef);
+      if (checkIntervalRef.current) {
+        clearTimeout(checkIntervalRef.current);
+      }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]); // Only depend on visible — all state access via refs
+  }, [visible, checkAllServices]);
 
-  // Calculate readiness
+  // Calculate if ready to proceed
   const requiredServices = SERVICES.filter(s => s.required);
   const requiredReady = requiredServices.every(s => serviceStatus[s.id] === 'success');
   const allServicesChecked = Object.keys(serviceStatus).length >= SERVICES.length;
   const isReady = requiredReady && allServicesChecked;
-  const canForceStart = checkCount >= 5;
+  const canForceStart = checkCount >= 5; // Allow force-start after 5 attempts
 
+  // Stop checking once ready
+  useEffect(() => {
+    if (isReady && checkIntervalRef.current) {
+      clearTimeout(checkIntervalRef.current);
+      mountedRef.current = false;
+      checkIntervalRef.current = null;
+    }
+  }, [isReady]);
+
+  // Calculate progress
   const successCount = Object.values(serviceStatus).filter(s => s === 'success').length;
   const progress = Math.round((successCount / SERVICES.length) * 100);
 
@@ -318,17 +293,21 @@ const StartupModal = ({ onComplete }) => {
     if (dontShowAgain) {
       localStorage.setItem('tradecommand_skip_startup', 'true');
     }
-    mountedRef.current = false;
-    if (wsRef.current) wsRef.current.close();
+    
+    // Close WebSocket used for checking
+    if (wsRef.current) {
+      wsRef.current.close();
+    }
+    
     setVisible(false);
     onComplete?.();
   };
 
   const handleRetry = () => {
-    statusRef.current = {};
     setServiceStatus({});
+    serviceStatusRef.current = {};
     setCheckCount(0);
-    setCheckMode(null);
+    // The recursive setTimeout loop will pick up the reset state
   };
 
   const getStatusIcon = (status) => {
@@ -361,6 +340,7 @@ const StartupModal = ({ onComplete }) => {
 
   if (!visible) return null;
 
+  // Group services by category
   const servicesByCategory = {};
   SERVICES.forEach(service => {
     if (!servicesByCategory[service.category]) {
@@ -395,15 +375,12 @@ const StartupModal = ({ onComplete }) => {
                 <div>
                   <h1 className="text-lg font-bold text-white">TradeCommand</h1>
                   <p className="text-zinc-400 text-xs">
-                    {isReady
-                      ? 'All systems ready!'
-                      : checkMode === 'fast'
-                        ? 'Verifying services...'
-                        : 'Waiting for services to start...'}
+                    {isReady ? 'All systems ready!' : 'Verifying systems...'}
                   </p>
                 </div>
               </div>
               
+              {/* Progress indicator */}
               <div className="text-right">
                 <div className={`text-2xl font-bold ${isReady ? 'text-green-400' : 'text-cyan-400'}`}>
                   {progress}%
@@ -414,6 +391,7 @@ const StartupModal = ({ onComplete }) => {
               </div>
             </div>
             
+            {/* Progress bar */}
             <div className="mt-3 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
               <motion.div
                 className={`h-full ${isReady ? 'bg-green-500' : 'bg-gradient-to-r from-cyan-500 to-purple-500'}`}
@@ -445,6 +423,7 @@ const StartupModal = ({ onComplete }) => {
                           : 'bg-zinc-800/50 border-zinc-700'
                   }`}
                 >
+                  {/* Category header */}
                   <div className="flex items-center justify-between mb-2">
                     <span className={`text-xs font-semibold ${
                       categoryReady ? 'text-green-400' : 'text-white'
@@ -459,6 +438,7 @@ const StartupModal = ({ onComplete }) => {
                     )}
                   </div>
                   
+                  {/* Services in category */}
                   <div className="space-y-1.5">
                     {services.map((service) => {
                       const status = serviceStatus[service.id];
@@ -513,7 +493,6 @@ const StartupModal = ({ onComplete }) => {
               <span><span className="text-red-400">*</span> Required for startup</span>
               <span>•</span>
               <span>Check #{checkCount}</span>
-              {checkMode === 'fast' && <span className="text-cyan-400">FAST</span>}
               {isChecking && <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />}
             </div>
           </div>
