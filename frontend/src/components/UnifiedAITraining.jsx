@@ -483,7 +483,9 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
           console.log('[NIA] Found running training job on mount:', jobId, params);
           
           setIsTraining(true);
-          setTrainingStartTime(new Date(trainingJob.started_at).getTime());
+          // Append Z to ensure UTC parsing (MongoDB stores UTC without suffix)
+          const startedAt = new Date(trainingJob.started_at + 'Z').getTime();
+          setTrainingStartTime(startedAt);
           setTrainingProgress({
             phase: params.all_timeframes ? 'full_universe' : 'training',
             currentStep: Math.ceil((progress.percent || 0) / 100 * 5),
