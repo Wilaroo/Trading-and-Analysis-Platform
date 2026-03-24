@@ -111,6 +111,18 @@ class MarketWideBacktestRequest(BaseModel):
     use_multi_timeframe: bool = Field(False, description="Enable multi-timeframe analysis (higher TF trend + lower TF entry)")
 
 
+class AIComparisonRequest(BaseModel):
+    """Request for AI vs Setup comparison backtest"""
+    symbols: List[str] = Field(..., description="Stock symbols to backtest")
+    strategy: StrategyConfigModel = Field(..., description="Strategy configuration")
+    start_date: Optional[str] = Field(None, description="Start date (YYYY-MM-DD). Default: 1 year ago")
+    end_date: Optional[str] = Field(None, description="End date (YYYY-MM-DD). Default: today")
+    starting_capital: float = Field(100000.0, description="Starting capital")
+    ai_confidence_threshold: float = Field(0.0, ge=0.0, le=1.0, description="Minimum AI confidence to confirm entry (0.0 = any 'up' prediction)")
+    ai_lookback_bars: int = Field(50, ge=20, le=200, description="Number of historical bars for AI prediction")
+    run_in_background: bool = Field(True, description="Run as background job (recommended)")
+
+
 # ============================================================================
 # Multi-Strategy Endpoints
 # ============================================================================
@@ -578,6 +590,142 @@ async def _run_market_wide_job(
     except Exception as e:
         _advanced_engine._running_jobs[job_id].status = "failed"
         _advanced_engine._running_jobs[job_id].error = str(e)
+
+
+# ============================================================================
+# AI Comparison Backtest
+# ============================================================================
+
+@router.post("/ai-comparison")
+async def run_ai_comparison_backtest(
+    request: AIComparisonRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Run a three-way AI comparison backtest:
+    1. Setup-only: Traditional entry signals
+    2. AI+Setup: Entry requires both setup AND AI confirmation
+    3. AI-only: Only enter when AI predicts upward movement
+    
+    Returns detailed comparison metrics showing whether the AI model
+    improves, hurts, or has no effect on trading results.
+    """
+    if not _advanced_engine:
+        raise HTTPException(503, "Advanced backtest engine not initialized")
+    
+    from services.slow_learning.advanced_backtest_engine import (
+        StrategyConfig, BacktestFilters
+    )
+    
+    strategy = StrategyConfig(
+        name=request.strategy.name,
+        setup_type=request.strategy.setup_type,
+        min_tqs_score=request.strategy.min_tqs_score,
+        stop_pct=request.strategy.stop_pct,
+        target_pct=request.strategy.target_pct,
+        use_trailing_stop=request.strategy.use_trailing_stop,
+        trailing_stop_pct=request.strategy.trailing_stop_pct,
+        max_bars_to_hold=request.strategy.max_bars_to_hold,
+        position_size_pct=request.strategy.position_size_pct
+    )
+    
+    filters = BacktestFilters(
+        start_date=request.start_date,
+        end_date=request.end_date
+    )
+    
+    if request.run_in_background:
+        job = await _advanced_engine.create_background_job(
+            "ai_comparison",
+            {
+                "symbols": request.symbols,
+                "strategy": strategy.to_dict() if hasattr(strategy, 'to_dict') else request.strategy.dict(),
+                "ai_confidence_threshold": request.ai_confidence_threshold,
+                "ai_lookback_bars": request.ai_lookback_bars
+            }
+        )
+        
+        background_tasks.add_task(
+            _run_ai_comparison_job,
+            job.id,
+            request.symbols,
+            strategy,
+            filters,
+            request.starting_capital,
+            request.ai_confidence_threshold,
+            request.ai_lookback_bars
+        )
+        
+        return {
+            "success": True,
+            "job_id": job.id,
+            "message": "AI comparison backtest started in background",
+            "status": "running"
+        }
+    
+    # Run synchronously
+    result = await _advanced_engine.run_ai_comparison_backtest(
+        symbols=request.symbols,
+        strategy=strategy,
+        filters=filters,
+        starting_capital=request.starting_capital,
+        ai_confidence_threshold=request.ai_confidence_threshold,
+        ai_lookback_bars=request.ai_lookback_bars
+    )
+    
+    return {"success": True, "result": result.to_dict()}
+
+
+async def _run_ai_comparison_job(
+    job_id: str,
+    symbols: list,
+    strategy,
+    filters,
+    starting_capital: float,
+    ai_confidence_threshold: float,
+    ai_lookback_bars: int
+):
+    """Background task for AI comparison backtest"""
+    try:
+        _advanced_engine._running_jobs[job_id].status = "running"
+        _advanced_engine._running_jobs[job_id].started_at = datetime.utcnow().isoformat()
+        
+        result = await _advanced_engine.run_ai_comparison_backtest(
+            symbols=symbols,
+            strategy=strategy,
+            filters=filters,
+            starting_capital=starting_capital,
+            ai_confidence_threshold=ai_confidence_threshold,
+            ai_lookback_bars=ai_lookback_bars,
+            job_id=job_id
+        )
+        
+        _advanced_engine._running_jobs[job_id].status = "completed"
+        _advanced_engine._running_jobs[job_id].result_id = result.id
+        _advanced_engine._running_jobs[job_id].result = result.to_dict()
+        _advanced_engine._running_jobs[job_id].completed_at = datetime.utcnow().isoformat()
+        
+    except Exception as e:
+        logger.error(f"AI comparison backtest failed: {e}")
+        _advanced_engine._running_jobs[job_id].status = "failed"
+        _advanced_engine._running_jobs[job_id].error = str(e)
+
+
+@router.get("/ai-comparison/status")
+async def get_ai_model_status():
+    """Check if the AI model is available for comparison backtesting"""
+    if not _advanced_engine:
+        raise HTTPException(503, "Advanced backtest engine not initialized")
+    
+    model = _advanced_engine._timeseries_model
+    has_model = model is not None and getattr(model, '_model', None) is not None
+    
+    return {
+        "ai_available": has_model,
+        "model_version": getattr(model, '_version', 'none') if model else 'none',
+        "model_accuracy": getattr(model, '_metrics', None).accuracy if model and getattr(model, '_metrics', None) else 0,
+        "feature_count": len(getattr(model, '_feature_names', [])) if model else 0
+    }
 
 
 # ============================================================================

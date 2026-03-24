@@ -71,7 +71,7 @@ export default function MarketScannerPanel() {
 
   // Fetch symbol count on mount
   useEffect(() => {
-    fetch(`${API_URL}/api/scanner/symbols`)
+    fetch(`${API_URL}/api/market-scanner/symbols`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {
@@ -91,7 +91,7 @@ export default function MarketScannerPanel() {
     }
 
     const interval = setInterval(() => {
-      fetch(`${API_URL}/api/scanner/scan/${activeScan.id}`)
+      fetch(`${API_URL}/api/market-scanner/scan/${activeScan.id}`)
         .then(res => res.json())
         .then(data => {
           if (data.success && data.scan) {
@@ -109,7 +109,7 @@ export default function MarketScannerPanel() {
   }, [activeScan]);
 
   const loadRecentScans = useCallback(() => {
-    fetch(`${API_URL}/api/scanner/scans?limit=10`)
+    fetch(`${API_URL}/api/market-scanner/scans?limit=10`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {
@@ -123,7 +123,7 @@ export default function MarketScannerPanel() {
     setIsScanning(true);
     
     try {
-      const response = await fetch(`${API_URL}/api/scanner/start`, {
+      const response = await fetch(`${API_URL}/api/market-scanner/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -159,7 +159,7 @@ export default function MarketScannerPanel() {
     if (!activeScan) return;
     
     try {
-      await fetch(`${API_URL}/api/scanner/scan/${activeScan.id}`, {
+      await fetch(`${API_URL}/api/market-scanner/scan/${activeScan.id}`, {
         method: 'DELETE'
       });
       setIsScanning(false);
@@ -174,7 +174,7 @@ export default function MarketScannerPanel() {
     
     // Fetch signals for this scan
     try {
-      const response = await fetch(`${API_URL}/api/scanner/scan/${scan.id}/signals?limit=50`);
+      const response = await fetch(`${API_URL}/api/market-scanner/scan/${scan.id}/signals?limit=50`);
       const data = await response.json();
       if (data.success) {
         setScanSignals(data.signals || []);

@@ -12,7 +12,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/scanner", tags=["Market Scanner"])
+router = APIRouter(prefix="/api/market-scanner", tags=["Market Scanner"])
 
 # Service instance (will be injected)
 _market_scanner_service = None

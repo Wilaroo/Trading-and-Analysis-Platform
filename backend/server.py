@@ -893,6 +893,14 @@ try:
     register_service('timeseries_ai', timeseries_ai)
     register_service('agent_data_service', agent_data_service)  # NEW
     
+    # Wire Time-Series AI model into Advanced Backtest Engine for AI comparison backtesting
+    if timeseries_ai is not None:
+        from services.ai_modules.timeseries_gbm import get_timeseries_model
+        ts_model = get_timeseries_model()
+        if ts_model is not None:
+            advanced_backtest_engine.set_timeseries_model(ts_model)
+            print("Time-Series AI model wired into Advanced Backtest Engine for AI comparison")
+    
     print("AI Modules (Institutional-Grade) initialized")
     print("  - Module Config: Toggle individual AI modules on/off")
     print("  - Shadow Tracker: Logs all AI decisions without execution")

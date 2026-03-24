@@ -304,6 +304,46 @@ class BacktestJob:
         return asdict(self)
 
 
+@dataclass
+class AIComparisonResult:
+    """Result of an AI vs Setup comparison backtest"""
+    id: str = ""
+    created_at: str = ""
+    duration_seconds: float = 0.0
+    
+    # Configuration
+    symbols: List[str] = field(default_factory=list)
+    strategy_name: str = ""
+    setup_type: str = ""
+    date_range: str = ""
+    ai_model_version: str = ""
+    ai_confidence_threshold: float = 0.5
+    
+    # Mode results
+    setup_only: Dict = field(default_factory=dict)     # Traditional setup signals
+    ai_filtered: Dict = field(default_factory=dict)    # Setup + AI confirmation
+    ai_only: Dict = field(default_factory=dict)        # AI predictions only
+    
+    # Comparison metrics
+    ai_trades_filtered: int = 0           # How many setup trades AI blocked
+    ai_filter_rate: float = 0.0           # % of setup trades AI filtered out
+    ai_win_rate_improvement: float = 0.0  # Win rate delta: AI+Setup vs Setup-only
+    ai_pnl_improvement: float = 0.0       # PnL delta: AI+Setup vs Setup-only
+    ai_sharpe_improvement: float = 0.0    # Sharpe delta
+    
+    # Per-symbol breakdown
+    symbol_results: List[Dict] = field(default_factory=list)
+    
+    # AI signal analysis
+    ai_signal_accuracy: float = 0.0       # % of AI "up" signals that were correct
+    ai_rejection_accuracy: float = 0.0    # % of AI "skip" signals that avoided losses
+    
+    recommendation: str = ""
+    
+    def to_dict(self) -> Dict:
+        return asdict(self)
+
+
 # ============================================================================
 # Advanced Backtest Engine
 # ============================================================================
@@ -311,7 +351,7 @@ class BacktestJob:
 class AdvancedBacktestEngine:
     """
     Advanced backtesting engine with multi-strategy, walk-forward,
-    Monte Carlo, and custom date range capabilities.
+    Monte Carlo, AI comparison, and custom date range capabilities.
     """
     
     def __init__(self):
@@ -323,6 +363,7 @@ class AdvancedBacktestEngine:
         self._alpaca_service = None
         self._tqs_engine = None
         self._hybrid_data_service = None  # IB + Alpaca hybrid data
+        self._timeseries_model = None     # LightGBM time-series predictor
         
         # Background jobs
         self._running_jobs: Dict[str, BacktestJob] = {}
@@ -348,6 +389,11 @@ class AdvancedBacktestEngine:
         """Set hybrid data service (IB + Alpaca fallback)"""
         self._hybrid_data_service = hybrid_data_service
         logger.info("Advanced Backtest Engine: Hybrid data service connected")
+    
+    def set_timeseries_model(self, model):
+        """Set the LightGBM time-series model for AI-enhanced backtesting"""
+        self._timeseries_model = model
+        logger.info("Advanced Backtest Engine: Time-series AI model connected")
 
     # ========================================================================
     # Multi-Strategy Backtesting
@@ -837,6 +883,376 @@ class AdvancedBacktestEngine:
             percentile_key = str(int(level * 100))
             result[percentile_key] = round(values[idx], 2)
         return result
+
+    # ========================================================================
+    # AI Comparison Backtest
+    # ========================================================================
+    
+    async def run_ai_comparison_backtest(
+        self,
+        symbols: List[str],
+        strategy: StrategyConfig,
+        filters: BacktestFilters = None,
+        starting_capital: float = 100000.0,
+        ai_confidence_threshold: float = 0.5,
+        ai_lookback_bars: int = 50,
+        job_id: str = None
+    ) -> AIComparisonResult:
+        """
+        Run a three-way comparison backtest:
+        1. Setup-only: Traditional entry signals (no AI)
+        2. AI+Setup: Entry requires both setup signal AND AI confirmation
+        3. AI-only: Only enter when AI predicts "up" (ignore setup signals)
+        
+        This answers: "Does the AI actually improve trading results?"
+        """
+        start_time = datetime.now(timezone.utc)
+        
+        if filters is None:
+            filters = BacktestFilters(
+                start_date=(datetime.now(timezone.utc) - timedelta(days=365)).strftime("%Y-%m-%d"),
+                end_date=datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            )
+        
+        result = AIComparisonResult(
+            id=f"ai_cmp_{uuid.uuid4().hex[:12]}",
+            created_at=start_time.isoformat(),
+            symbols=symbols,
+            strategy_name=strategy.name,
+            setup_type=strategy.setup_type,
+            date_range=f"{filters.start_date} to {filters.end_date}",
+            ai_model_version=getattr(self._timeseries_model, '_version', 'unknown') if self._timeseries_model else 'none',
+            ai_confidence_threshold=ai_confidence_threshold
+        )
+        
+        has_ai = self._timeseries_model is not None and getattr(self._timeseries_model, '_model', None) is not None
+        
+        # Aggregate trades across all symbols for each mode
+        all_setup_trades = []
+        all_ai_filtered_trades = []
+        all_ai_only_trades = []
+        all_setup_equity = []
+        all_ai_filtered_equity = []
+        all_ai_only_equity = []
+        symbol_details = []
+        
+        total_ai_signals_correct = 0
+        total_ai_signals = 0
+        total_ai_rejections_correct = 0
+        total_ai_rejections = 0
+        
+        for sym_idx, symbol in enumerate(symbols):
+            if job_id:
+                self._update_job_progress(
+                    job_id,
+                    (sym_idx / len(symbols)) * 100,
+                    f"Processing {symbol} ({sym_idx + 1}/{len(symbols)})..."
+                )
+            
+            # Get historical bars
+            bars = await self._get_cached_bars(
+                symbol, "1Day",
+                filters.start_date,
+                filters.end_date
+            )
+            
+            if not bars or len(bars) < ai_lookback_bars + 10:
+                continue
+            
+            filtered_bars = self._apply_filters(bars, filters)
+            if not filtered_bars or len(filtered_bars) < ai_lookback_bars + 10:
+                continue
+            
+            # --- MODE 1: Setup-only ---
+            setup_trades, setup_equity = await self._simulate_strategy(
+                symbol, filtered_bars, strategy, starting_capital
+            )
+            
+            # --- MODE 2: AI+Setup (AI filters setup signals) ---
+            ai_filtered_trades = []
+            ai_only_trades = []
+            
+            if has_ai:
+                ai_filtered_trades, ai_filtered_equity_curve = await self._simulate_strategy_with_ai(
+                    symbol, filtered_bars, strategy, starting_capital,
+                    ai_mode="filter",
+                    confidence_threshold=ai_confidence_threshold,
+                    lookback_bars=ai_lookback_bars
+                )
+                
+                # --- MODE 3: AI-only (ignore setup, use AI predictions) ---
+                ai_only_trades, ai_only_equity_curve = await self._simulate_strategy_with_ai(
+                    symbol, filtered_bars, strategy, starting_capital,
+                    ai_mode="standalone",
+                    confidence_threshold=ai_confidence_threshold,
+                    lookback_bars=ai_lookback_bars
+                )
+            else:
+                ai_filtered_trades = setup_trades  # Same as setup if no AI
+                ai_filtered_equity_curve = setup_equity
+                ai_only_trades = []
+                ai_only_equity_curve = []
+            
+            # Track per-symbol results
+            setup_pnl = sum(t.pnl for t in setup_trades)
+            ai_filt_pnl = sum(t.pnl for t in ai_filtered_trades)
+            ai_only_pnl = sum(t.pnl for t in ai_only_trades)
+            
+            setup_wr = (len([t for t in setup_trades if t.pnl > 0]) / len(setup_trades) * 100) if setup_trades else 0
+            ai_filt_wr = (len([t for t in ai_filtered_trades if t.pnl > 0]) / len(ai_filtered_trades) * 100) if ai_filtered_trades else 0
+            ai_only_wr = (len([t for t in ai_only_trades if t.pnl > 0]) / len(ai_only_trades) * 100) if ai_only_trades else 0
+            
+            symbol_details.append({
+                "symbol": symbol,
+                "setup_only": {"trades": len(setup_trades), "pnl": round(setup_pnl, 2), "win_rate": round(setup_wr, 1)},
+                "ai_filtered": {"trades": len(ai_filtered_trades), "pnl": round(ai_filt_pnl, 2), "win_rate": round(ai_filt_wr, 1)},
+                "ai_only": {"trades": len(ai_only_trades), "pnl": round(ai_only_pnl, 2), "win_rate": round(ai_only_wr, 1)}
+            })
+            
+            all_setup_trades.extend(setup_trades)
+            all_ai_filtered_trades.extend(ai_filtered_trades)
+            all_ai_only_trades.extend(ai_only_trades)
+            all_setup_equity.extend(setup_equity)
+            all_ai_filtered_equity.extend(ai_filtered_equity_curve if has_ai else setup_equity)
+            all_ai_only_equity.extend(ai_only_equity_curve if has_ai else [])
+        
+        # Calculate aggregate metrics for each mode
+        result.setup_only = self._compute_mode_metrics(all_setup_trades, starting_capital)
+        result.ai_filtered = self._compute_mode_metrics(all_ai_filtered_trades, starting_capital) if has_ai else result.setup_only
+        result.ai_only = self._compute_mode_metrics(all_ai_only_trades, starting_capital) if has_ai else {}
+        
+        # Comparison metrics
+        if has_ai and all_setup_trades:
+            result.ai_trades_filtered = len(all_setup_trades) - len(all_ai_filtered_trades)
+            result.ai_filter_rate = round(result.ai_trades_filtered / len(all_setup_trades) * 100, 1) if all_setup_trades else 0
+            result.ai_win_rate_improvement = round(
+                result.ai_filtered.get("win_rate", 0) - result.setup_only.get("win_rate", 0), 2
+            )
+            result.ai_pnl_improvement = round(
+                result.ai_filtered.get("total_pnl", 0) - result.setup_only.get("total_pnl", 0), 2
+            )
+            result.ai_sharpe_improvement = round(
+                result.ai_filtered.get("sharpe_ratio", 0) - result.setup_only.get("sharpe_ratio", 0), 3
+            )
+        
+        result.symbol_results = symbol_details
+        result.duration_seconds = (datetime.now(timezone.utc) - start_time).total_seconds()
+        
+        # Generate recommendation
+        if not has_ai:
+            result.recommendation = "No AI model available. Train the time-series model first to enable AI comparison."
+        elif result.ai_win_rate_improvement > 5:
+            result.recommendation = f"AI filter significantly improves results (+{result.ai_win_rate_improvement:.1f}% win rate). Consider enabling AI confirmation for live trading."
+        elif result.ai_win_rate_improvement > 0:
+            result.recommendation = f"AI filter shows modest improvement (+{result.ai_win_rate_improvement:.1f}% win rate). AI adds marginal edge."
+        elif result.ai_win_rate_improvement > -3:
+            result.recommendation = f"AI filter has minimal impact ({result.ai_win_rate_improvement:+.1f}% win rate). Setup signals are already well-calibrated."
+        else:
+            result.recommendation = f"AI filter reduces performance ({result.ai_win_rate_improvement:+.1f}% win rate). The model may need retraining or the threshold should be adjusted."
+        
+        # Store result
+        if self._backtest_results_col is not None:
+            await asyncio.to_thread(self._backtest_results_col.insert_one, result.to_dict())
+        
+        if job_id:
+            self._update_job_progress(job_id, 100, "AI comparison complete")
+        
+        return result
+    
+    async def _simulate_strategy_with_ai(
+        self,
+        symbol: str,
+        bars: List[Dict],
+        strategy: StrategyConfig,
+        starting_capital: float,
+        ai_mode: str = "filter",
+        confidence_threshold: float = 0.5,
+        lookback_bars: int = 50
+    ) -> Tuple[List[BacktestTrade], List[Dict]]:
+        """
+        Simulate a strategy with AI predictions integrated.
+        
+        ai_mode:
+          "filter"     - Only enter when BOTH setup signal AND AI agrees (direction=up)
+          "standalone" - Enter whenever AI predicts "up" with sufficient confidence
+        """
+        trades: List[BacktestTrade] = []
+        equity_curve: List[Dict] = []
+        
+        capital = starting_capital
+        in_position = False
+        current_trade: BacktestTrade = None
+        
+        for i, bar in enumerate(bars):
+            current_price = bar.get("close", bar.get("c", 0))
+            timestamp = bar.get("timestamp", "")
+            high = bar.get("high", bar.get("h", current_price))
+            low = bar.get("low", bar.get("l", current_price))
+            
+            # Track equity
+            equity = capital
+            if in_position and current_trade:
+                unrealized_pnl = (current_price - current_trade.entry_price) * current_trade.shares
+                equity = capital + unrealized_pnl
+                
+                if unrealized_pnl > current_trade.max_favorable_excursion:
+                    current_trade.max_favorable_excursion = unrealized_pnl
+                if unrealized_pnl < current_trade.max_adverse_excursion:
+                    current_trade.max_adverse_excursion = unrealized_pnl
+            
+            equity_curve.append({"timestamp": timestamp, "equity": equity, "price": current_price})
+            
+            if in_position and current_trade:
+                current_trade.bars_held += 1
+                
+                # Same exit logic as standard simulation
+                exit_price = None
+                exit_reason = ""
+                
+                if low <= current_trade.stop_price:
+                    exit_price = current_trade.stop_price
+                    exit_reason = "stop"
+                elif high >= current_trade.target_price:
+                    exit_price = current_trade.target_price
+                    exit_reason = "target"
+                elif current_trade.bars_held >= strategy.max_bars_to_hold:
+                    exit_price = current_price
+                    exit_reason = "time"
+                elif i == len(bars) - 1:
+                    exit_price = current_price
+                    exit_reason = "end_of_data"
+                
+                if exit_price:
+                    current_trade.exit_price = exit_price
+                    current_trade.exit_date = timestamp[:10]
+                    current_trade.exit_time = timestamp[11:19] if len(timestamp) > 10 else ""
+                    current_trade.exit_reason = exit_reason
+                    current_trade.pnl = (exit_price - current_trade.entry_price) * current_trade.shares
+                    current_trade.pnl_percent = (exit_price / current_trade.entry_price - 1) * 100
+                    
+                    risk = current_trade.entry_price - current_trade.stop_price
+                    if risk > 0:
+                        current_trade.r_multiple = current_trade.pnl / (risk * current_trade.shares)
+                    
+                    trades.append(current_trade)
+                    capital += current_trade.pnl
+                    in_position = False
+                    current_trade = None
+            
+            else:
+                # Entry decision depends on mode
+                enter = False
+                
+                if ai_mode == "filter":
+                    # Require setup signal AND AI confirmation
+                    setup_signal = self._check_entry_signal(bar, strategy, bars[:i+1])
+                    if setup_signal and i >= lookback_bars:
+                        ai_prediction = self._get_ai_prediction(bars[:i+1], symbol, lookback_bars)
+                        if ai_prediction and ai_prediction.direction == "up" and ai_prediction.confidence >= confidence_threshold:
+                            enter = True
+                
+                elif ai_mode == "standalone":
+                    # Only use AI prediction (ignore setup signals)
+                    if i >= lookback_bars:
+                        ai_prediction = self._get_ai_prediction(bars[:i+1], symbol, lookback_bars)
+                        if ai_prediction and ai_prediction.direction == "up" and ai_prediction.confidence >= confidence_threshold:
+                            # Basic price/volume filters still apply
+                            volume = bar.get("volume", bar.get("v", 0))
+                            if volume >= 100000 and 5.0 <= current_price <= 500.0:
+                                enter = True
+                
+                if enter:
+                    position_value = capital * (strategy.position_size_pct / 100)
+                    shares = int(position_value / current_price)
+                    
+                    if shares > 0:
+                        stop_price = current_price * (1 - strategy.stop_pct / 100)
+                        target_price = current_price * (1 + strategy.target_pct / 100)
+                        
+                        current_trade = BacktestTrade(
+                            id=f"t_{uuid.uuid4().hex[:8]}",
+                            symbol=symbol,
+                            strategy_name=strategy.name,
+                            setup_type=strategy.setup_type,
+                            direction="long",
+                            entry_date=timestamp[:10],
+                            entry_time=timestamp[11:19] if len(timestamp) > 10 else "",
+                            entry_price=current_price,
+                            shares=shares,
+                            stop_price=stop_price,
+                            target_price=target_price,
+                            bars_held=0
+                        )
+                        in_position = True
+        
+        return trades, equity_curve
+    
+    def _get_ai_prediction(self, bars_up_to_now: List[Dict], symbol: str, lookback: int):
+        """Get AI prediction for the current bar using lookback window of historical bars"""
+        if self._timeseries_model is None:
+            return None
+        
+        try:
+            # The model expects bars in most-recent-first order
+            recent_bars = list(reversed(bars_up_to_now[-lookback:]))
+            prediction = self._timeseries_model.predict(recent_bars, symbol=symbol)
+            return prediction
+        except Exception as e:
+            logger.debug(f"AI prediction error for {symbol}: {e}")
+            return None
+    
+    def _compute_mode_metrics(self, trades: List[BacktestTrade], starting_capital: float) -> Dict:
+        """Compute aggregate metrics for a set of trades"""
+        if not trades:
+            return {
+                "total_trades": 0, "winning_trades": 0, "losing_trades": 0,
+                "win_rate": 0, "total_pnl": 0, "avg_pnl": 0,
+                "avg_winner": 0, "avg_loser": 0, "profit_factor": 0,
+                "total_r": 0, "avg_r": 0, "sharpe_ratio": 0,
+                "max_drawdown_pct": 0
+            }
+        
+        winning = [t for t in trades if t.pnl > 0]
+        losing = [t for t in trades if t.pnl < 0]
+        
+        gross_profit = sum(t.pnl for t in winning) if winning else 0
+        gross_loss = abs(sum(t.pnl for t in losing)) if losing else 0
+        
+        r_values = [t.r_multiple for t in trades if t.r_multiple != 0]
+        
+        # Sharpe
+        returns = [t.pnl_percent for t in trades]
+        sharpe = 0
+        if len(returns) > 1:
+            avg_r = statistics.mean(returns)
+            std_r = statistics.stdev(returns)
+            sharpe = (avg_r / std_r) * math.sqrt(252) if std_r > 0 else 0
+        
+        # Max drawdown
+        equity = starting_capital
+        peak = equity
+        max_dd = 0
+        for t in trades:
+            equity += t.pnl
+            peak = max(peak, equity)
+            dd = (peak - equity) / peak * 100
+            max_dd = max(max_dd, dd)
+        
+        return {
+            "total_trades": len(trades),
+            "winning_trades": len(winning),
+            "losing_trades": len(losing),
+            "win_rate": round(len(winning) / len(trades) * 100, 2),
+            "total_pnl": round(sum(t.pnl for t in trades), 2),
+            "avg_pnl": round(sum(t.pnl for t in trades) / len(trades), 2),
+            "avg_winner": round(gross_profit / len(winning), 2) if winning else 0,
+            "avg_loser": round(-gross_loss / len(losing), 2) if losing else 0,
+            "profit_factor": round(gross_profit / gross_loss, 3) if gross_loss > 0 else 0,
+            "total_r": round(sum(r_values), 2),
+            "avg_r": round(statistics.mean(r_values), 3) if r_values else 0,
+            "sharpe_ratio": round(sharpe, 3),
+            "max_drawdown_pct": round(max_dd, 2)
+        }
 
     # ========================================================================
     # Market-Wide Backtest (Full US Market Scanning)

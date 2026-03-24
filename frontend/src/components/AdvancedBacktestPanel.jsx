@@ -106,6 +106,7 @@ const AdvancedBacktestPanel = () => {
 
   const tabs = [
     { id: 'quick', label: 'Quick Test', icon: Zap, tip: 'Fast single-strategy test on one symbol. Great for validating ideas.' },
+    { id: 'ai', label: 'AI Comparison', icon: Target, tip: 'Compare setup-only vs AI+setup vs AI-only. Does your AI model actually improve results?' },
     { id: 'market', label: 'Market-Wide', icon: Globe, tip: 'Scan entire US market with a strategy. Find all historical setups across thousands of stocks.' },
     { id: 'multi', label: 'Multi-Strategy', icon: Layers, tip: 'Test multiple strategies simultaneously to compare performance.' },
     { id: 'walkforward', label: 'Walk-Forward', icon: TrendingUp, tip: 'Advanced optimization: train on one period, test on next. Validates robustness.' },
@@ -148,6 +149,15 @@ const AdvancedBacktestPanel = () => {
         <QuickBacktestTab 
           templates={templates} 
           onResult={setResults}
+          setLoading={setLoading}
+          loading={loading}
+        />
+      )}
+      
+      {activeTab === 'ai' && (
+        <AIComparisonTab 
+          allStrategies={allStrategies}
+          onJobStarted={fetchJobs}
           setLoading={setLoading}
           loading={loading}
         />
@@ -1285,6 +1295,396 @@ const MonteCarloTab = ({ recentResults, onJobStarted, setLoading, loading }) => 
     </div>
   );
 };
+
+// ============================================================================
+// AI Comparison Tab
+// ============================================================================
+
+const AIComparisonTab = ({ allStrategies, onJobStarted, setLoading, loading }) => {
+  const [symbols, setSymbols] = useState('AAPL, MSFT, NVDA, GOOGL, AMZN');
+  const [selectedStrategy, setSelectedStrategy] = useState(null);
+  const [startDate, setStartDate] = useState(() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 1);
+    return d.toISOString().split('T')[0];
+  });
+  const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [confidenceThreshold, setConfidenceThreshold] = useState(0.0);
+  const [lookbackBars, setLookbackBars] = useState(50);
+  const [startingCapital, setStartingCapital] = useState(100000);
+  const [aiStatus, setAiStatus] = useState(null);
+  const [result, setResult] = useState(null);
+  const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    fetchAiStatus();
+  }, []);
+
+  const fetchAiStatus = async () => {
+    try {
+      const res = await api.get('/api/backtest/ai-comparison/status');
+      setAiStatus(res.data);
+    } catch { setAiStatus(null); }
+  };
+
+  const runComparison = async () => {
+    const symbolList = symbols.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+    if (!symbolList.length) return toast.error('Enter at least one symbol');
+    
+    const strategy = selectedStrategy || {
+      name: 'Default ORB',
+      setup_type: 'orb',
+      stop_pct: 2.0,
+      target_pct: 4.0,
+      max_bars_to_hold: 20,
+      position_size_pct: 10.0,
+      min_tqs_score: 0,
+      use_trailing_stop: false,
+      trailing_stop_pct: 1.0
+    };
+
+    setRunning(true);
+    setResult(null);
+    try {
+      const res = await api.post('/api/backtest/ai-comparison', {
+        symbols: symbolList,
+        strategy,
+        start_date: startDate,
+        end_date: endDate,
+        starting_capital: startingCapital,
+        ai_confidence_threshold: confidenceThreshold,
+        ai_lookback_bars: lookbackBars,
+        run_in_background: false
+      });
+      if (res.data?.result) {
+        setResult(res.data.result);
+        toast.success('AI comparison complete');
+      } else if (res.data?.job_id) {
+        toast.success('Backtest started in background');
+        onJobStarted?.();
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Backtest failed');
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4" data-testid="ai-comparison-tab">
+      {/* AI Status Banner */}
+      <div className={`p-3 rounded-lg border ${aiStatus?.ai_available 
+        ? 'bg-emerald-500/10 border-emerald-500/30' 
+        : 'bg-amber-500/10 border-amber-500/30'}`}>
+        <div className="flex items-center gap-2 text-sm">
+          {aiStatus?.ai_available ? (
+            <>
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <span className="text-emerald-300">AI Model Ready</span>
+              <span className="text-slate-400 ml-2">
+                {aiStatus.model_version} &middot; {(aiStatus.model_accuracy * 100).toFixed(1)}% accuracy &middot; {aiStatus.feature_count} features
+              </span>
+            </>
+          ) : (
+            <>
+              <AlertTriangle className="w-4 h-4 text-amber-400" />
+              <span className="text-amber-300">No AI model trained. Train the time-series model first.</span>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Configuration */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs text-slate-400 mb-1 block">Symbols (comma-separated)</label>
+            <input
+              data-testid="ai-comparison-symbols"
+              value={symbols}
+              onChange={e => setSymbols(e.target.value)}
+              className="w-full bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-white"
+              placeholder="AAPL, MSFT, NVDA..."
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs text-slate-400 mb-1 block">Start Date</label>
+              <input
+                data-testid="ai-comparison-start-date"
+                type="date"
+                value={startDate}
+                onChange={e => setStartDate(e.target.value)}
+                className="w-full bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-white"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 mb-1 block">End Date</label>
+              <input
+                data-testid="ai-comparison-end-date"
+                type="date"
+                value={endDate}
+                onChange={e => setEndDate(e.target.value)}
+                className="w-full bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-white"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-slate-400 mb-1 block">Strategy</label>
+            <select
+              data-testid="ai-comparison-strategy"
+              onChange={e => {
+                const s = allStrategies.find(s => s.name === e.target.value);
+                if (s) setSelectedStrategy({
+                  name: s.name,
+                  setup_type: s.setup_type || 'orb',
+                  stop_pct: s.default_stop || 2.0,
+                  target_pct: s.default_target || 4.0,
+                  max_bars_to_hold: 20,
+                  position_size_pct: 10.0,
+                  min_tqs_score: 0,
+                  use_trailing_stop: false,
+                  trailing_stop_pct: 1.0
+                });
+              }}
+              className="w-full bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-white"
+            >
+              <option value="">Default (ORB, 2% stop / 4% target)</option>
+              {allStrategies.map(s => (
+                <option key={s.name} value={s.name}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs text-slate-400 mb-1 block">
+              AI Confidence Threshold: {confidenceThreshold.toFixed(2)}
+            </label>
+            <input
+              data-testid="ai-comparison-threshold"
+              type="range"
+              min="0"
+              max="0.5"
+              step="0.01"
+              value={confidenceThreshold}
+              onChange={e => setConfidenceThreshold(parseFloat(e.target.value))}
+              className="w-full accent-cyan-500"
+            />
+            <div className="flex justify-between text-[10px] text-slate-500">
+              <span>0.0 (any "up")</span>
+              <span>0.5 (high conf.)</span>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs text-slate-400 mb-1 block">Lookback Bars</label>
+              <input
+                data-testid="ai-comparison-lookback"
+                type="number"
+                value={lookbackBars}
+                onChange={e => setLookbackBars(parseInt(e.target.value) || 50)}
+                min={20}
+                max={200}
+                className="w-full bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-white"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 mb-1 block">Starting Capital</label>
+              <input
+                data-testid="ai-comparison-capital"
+                type="number"
+                value={startingCapital}
+                onChange={e => setStartingCapital(parseInt(e.target.value) || 100000)}
+                className="w-full bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-white"
+              />
+            </div>
+          </div>
+          <button
+            data-testid="run-ai-comparison-btn"
+            onClick={runComparison}
+            disabled={running || !aiStatus?.ai_available}
+            className="w-full mt-2 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm
+              bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:from-cyan-500 hover:to-blue-500
+              disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+          >
+            {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+            {running ? 'Running AI Comparison...' : 'Run AI vs Setup Comparison'}
+          </button>
+        </div>
+      </div>
+
+      {/* Results */}
+      {result && <AIComparisonResults result={result} />}
+    </div>
+  );
+};
+
+
+// ============================================================================
+// AI Comparison Results Display
+// ============================================================================
+
+const MetricCard = ({ label, value, subtext, positive, testId }) => (
+  <div className="bg-slate-800/40 rounded-lg p-3 border border-slate-700/40" data-testid={testId}>
+    <div className="text-[11px] text-slate-400 mb-1">{label}</div>
+    <div className={`text-lg font-bold ${
+      positive === true ? 'text-emerald-400' : positive === false ? 'text-red-400' : 'text-white'
+    }`}>
+      {value}
+    </div>
+    {subtext && <div className="text-[10px] text-slate-500 mt-0.5">{subtext}</div>}
+  </div>
+);
+
+const ModeColumn = ({ title, color, data, testId }) => {
+  if (!data || !data.total_trades) return (
+    <div className={`flex-1 p-4 rounded-lg border border-${color}-500/20 bg-${color}-500/5`} data-testid={testId}>
+      <h4 className={`text-sm font-semibold text-${color}-400 mb-3`}>{title}</h4>
+      <div className="text-xs text-slate-500">No trades generated</div>
+    </div>
+  );
+  
+  return (
+    <div className={`flex-1 p-4 rounded-lg border`} style={{
+      borderColor: `var(--color-${color}, rgba(100,150,200,0.2))`,
+      background: `rgba(100,150,200,0.03)`
+    }} data-testid={testId}>
+      <h4 className="text-sm font-semibold mb-3" style={{color: color === 'slate' ? '#94a3b8' : color === 'cyan' ? '#22d3ee' : '#a78bfa'}}>{title}</h4>
+      <div className="space-y-2 text-xs">
+        <div className="flex justify-between"><span className="text-slate-400">Trades</span><span className="text-white font-mono">{data.total_trades}</span></div>
+        <div className="flex justify-between"><span className="text-slate-400">Win Rate</span><span className={data.win_rate >= 50 ? 'text-emerald-400' : 'text-red-400'}>{data.win_rate}%</span></div>
+        <div className="flex justify-between"><span className="text-slate-400">Total P&L</span><span className={data.total_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>${data.total_pnl?.toLocaleString()}</span></div>
+        <div className="flex justify-between"><span className="text-slate-400">Avg P&L</span><span className="text-white font-mono">${data.avg_pnl?.toFixed(2)}</span></div>
+        <div className="flex justify-between"><span className="text-slate-400">Profit Factor</span><span className="text-white font-mono">{data.profit_factor}</span></div>
+        <div className="flex justify-between"><span className="text-slate-400">Sharpe</span><span className="text-white font-mono">{data.sharpe_ratio}</span></div>
+        <div className="flex justify-between"><span className="text-slate-400">Max DD</span><span className="text-red-400">{data.max_drawdown_pct}%</span></div>
+        <div className="flex justify-between"><span className="text-slate-400">Avg R</span><span className="text-white font-mono">{data.avg_r}</span></div>
+      </div>
+    </div>
+  );
+};
+
+const AIComparisonResults = ({ result }) => {
+  const [showSymbols, setShowSymbols] = useState(false);
+  
+  const improvement = result.ai_win_rate_improvement;
+  const isPositive = improvement > 0;
+
+  return (
+    <div className="space-y-4" data-testid="ai-comparison-results">
+      {/* Headline */}
+      <div className={`p-4 rounded-lg border ${isPositive ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-amber-500/10 border-amber-500/30'}`}>
+        <div className="flex items-start gap-3">
+          {isPositive ? (
+            <TrendingUp className="w-5 h-5 text-emerald-400 mt-0.5 flex-shrink-0" />
+          ) : (
+            <AlertTriangle className="w-5 h-5 text-amber-400 mt-0.5 flex-shrink-0" />
+          )}
+          <div>
+            <p className={`text-sm font-medium ${isPositive ? 'text-emerald-300' : 'text-amber-300'}`}>
+              {result.recommendation}
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              {result.symbols?.length} symbols &middot; {result.strategy_name} &middot; {result.date_range} &middot; {result.duration_seconds?.toFixed(1)}s
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Key Comparison Metrics */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <MetricCard 
+          testId="metric-win-rate-delta"
+          label="Win Rate Delta"
+          value={`${improvement > 0 ? '+' : ''}${improvement?.toFixed(1)}%`}
+          subtext="AI+Setup vs Setup-only"
+          positive={improvement > 0}
+        />
+        <MetricCard
+          testId="metric-pnl-delta"
+          label="P&L Impact"
+          value={`${result.ai_pnl_improvement > 0 ? '+' : ''}$${result.ai_pnl_improvement?.toLocaleString()}`}
+          subtext="Additional profit from AI"
+          positive={result.ai_pnl_improvement > 0}
+        />
+        <MetricCard
+          testId="metric-filter-rate"
+          label="AI Filter Rate"
+          value={`${result.ai_filter_rate}%`}
+          subtext={`${result.ai_trades_filtered} trades blocked`}
+        />
+        <MetricCard
+          testId="metric-sharpe-delta"
+          label="Sharpe Delta"
+          value={`${result.ai_sharpe_improvement > 0 ? '+' : ''}${result.ai_sharpe_improvement?.toFixed(3)}`}
+          subtext="Risk-adjusted improvement"
+          positive={result.ai_sharpe_improvement > 0}
+        />
+      </div>
+
+      {/* Three-way Comparison */}
+      <div className="flex flex-col md:flex-row gap-3">
+        <ModeColumn title="Setup-Only" color="slate" data={result.setup_only} testId="mode-setup-only" />
+        <ModeColumn title="AI + Setup" color="cyan" data={result.ai_filtered} testId="mode-ai-filtered" />
+        <ModeColumn title="AI-Only" color="violet" data={result.ai_only} testId="mode-ai-only" />
+      </div>
+
+      {/* Per-Symbol Breakdown */}
+      {result.symbol_results?.length > 0 && (
+        <div>
+          <button
+            data-testid="toggle-symbol-breakdown"
+            onClick={() => setShowSymbols(!showSymbols)}
+            className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors"
+          >
+            {showSymbols ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+            Per-Symbol Breakdown ({result.symbol_results.length} symbols)
+          </button>
+          
+          {showSymbols && (
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full text-xs" data-testid="symbol-breakdown-table">
+                <thead>
+                  <tr className="text-slate-400 border-b border-slate-700/50">
+                    <th className="text-left py-2 px-2">Symbol</th>
+                    <th className="text-right py-2 px-2" colSpan="3">Setup-Only</th>
+                    <th className="text-right py-2 px-2" colSpan="3">AI+Setup</th>
+                    <th className="text-right py-2 px-2" colSpan="3">AI-Only</th>
+                  </tr>
+                  <tr className="text-[10px] text-slate-500 border-b border-slate-700/30">
+                    <th></th>
+                    <th className="text-right px-2">Trades</th><th className="text-right px-2">WR</th><th className="text-right px-2">P&L</th>
+                    <th className="text-right px-2">Trades</th><th className="text-right px-2">WR</th><th className="text-right px-2">P&L</th>
+                    <th className="text-right px-2">Trades</th><th className="text-right px-2">WR</th><th className="text-right px-2">P&L</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.symbol_results.map(s => (
+                    <tr key={s.symbol} className="border-b border-slate-800/50 hover:bg-slate-800/20">
+                      <td className="py-1.5 px-2 text-white font-mono font-medium">{s.symbol}</td>
+                      <td className="text-right px-2 text-slate-300">{s.setup_only?.trades}</td>
+                      <td className="text-right px-2">{s.setup_only?.win_rate}%</td>
+                      <td className={`text-right px-2 ${s.setup_only?.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>${s.setup_only?.pnl}</td>
+                      <td className="text-right px-2 text-slate-300">{s.ai_filtered?.trades}</td>
+                      <td className="text-right px-2">{s.ai_filtered?.win_rate}%</td>
+                      <td className={`text-right px-2 ${s.ai_filtered?.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>${s.ai_filtered?.pnl}</td>
+                      <td className="text-right px-2 text-slate-300">{s.ai_only?.trades}</td>
+                      <td className="text-right px-2">{s.ai_only?.win_rate}%</td>
+                      <td className={`text-right px-2 ${s.ai_only?.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>${s.ai_only?.pnl}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 
 // ============================================================================
 // Results Tab

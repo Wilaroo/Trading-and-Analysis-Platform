@@ -266,6 +266,10 @@ class MarketScannerService:
         # Try to load from database first
         if self._symbols_collection is not None:
             cached = list(self._symbols_collection.find({}, {"_id": 0}))
+            # Ensure no ObjectId fields remain (defensive)
+            for doc in cached:
+                if "_id" in doc:
+                    del doc["_id"]
             if cached and len(cached) > 1000:
                 cache_time = cached[0].get("cached_at") if cached else None
                 if cache_time:
