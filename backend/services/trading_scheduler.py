@@ -71,6 +71,7 @@ class TradingScheduler:
         self._medium_learning_services = {}
         self._weekly_report_service = None
         self._shadow_mode_service = None
+        self._shadow_tracker = None
         self._edge_decay_service = None
         
         # Task callbacks
@@ -90,7 +91,8 @@ class TradingScheduler:
         playbook_performance_service=None,
         edge_decay_service=None,
         weekly_report_service=None,
-        shadow_mode_service=None
+        shadow_mode_service=None,
+        shadow_tracker=None
     ):
         """Wire up all services needed for scheduled tasks"""
         if calibration_service is not None:
@@ -108,6 +110,8 @@ class TradingScheduler:
             self._weekly_report_service = weekly_report_service
         if shadow_mode_service is not None:
             self._shadow_mode_service = shadow_mode_service
+        if shadow_tracker is not None:
+            self._shadow_tracker = shadow_tracker
             
     def start(self):
         """Start the scheduler"""
@@ -342,7 +346,7 @@ class TradingScheduler:
             self._log_task_result(result)
             
     async def _run_shadow_update(self):
-        """Update shadow signal outcomes"""
+        """Update shadow signal outcomes and shadow tracker decisions"""
         # Only run during market hours
         if not self.is_market_hours():
             return
@@ -354,6 +358,15 @@ class TradingScheduler:
                     logger.info(f"Shadow signals updated: {result.get('updated')} outcomes resolved")
         except Exception as e:
             logger.warning(f"Shadow update error: {e}")
+        
+        # Also evaluate shadow tracker (AI consultation) pending decisions
+        try:
+            if self._shadow_tracker:
+                result = await self._shadow_tracker.track_pending_outcomes()
+                if result.get("updated", 0) > 0:
+                    logger.info(f"Shadow tracker: {result.get('updated')} decision outcomes resolved")
+        except Exception as e:
+            logger.warning(f"Shadow tracker outcome error: {e}")
             
     async def _run_edge_decay_check(self):
         """Check for edge decay"""
@@ -635,6 +648,7 @@ def init_trading_scheduler(
     edge_decay_service=None,
     weekly_report_service=None,
     shadow_mode_service=None,
+    shadow_tracker=None,
     start: bool = True
 ) -> TradingScheduler:
     scheduler = get_trading_scheduler()
@@ -647,7 +661,8 @@ def init_trading_scheduler(
         playbook_performance_service=playbook_performance_service,
         edge_decay_service=edge_decay_service,
         weekly_report_service=weekly_report_service,
-        shadow_mode_service=shadow_mode_service
+        shadow_mode_service=shadow_mode_service,
+        shadow_tracker=shadow_tracker
     )
     if start:
         scheduler.start()

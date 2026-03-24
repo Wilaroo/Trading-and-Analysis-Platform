@@ -1090,6 +1090,7 @@ try:
         edge_decay_service=get_service_optional('edge_decay_service'),
         weekly_report_service=weekly_report_svc,
         shadow_mode_service=get_service_optional('shadow_mode_service'),
+        shadow_tracker=shadow_tracker,
         start=True  # Auto-start scheduler
     )
     print("Trading Scheduler initialized")
