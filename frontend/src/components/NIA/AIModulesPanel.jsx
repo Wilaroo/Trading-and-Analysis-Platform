@@ -16,7 +16,11 @@ const AIModulesPanel = memo(({ data, connectors, thresholds, onRefresh, onRunCal
     { name: 'Risk Manager', interventions: data.riskInterventions, saved: data.riskSaved, icon: Shield }
   ], [data.timeseriesAccuracy, data.timeseriesPredictions, data.timeseriesLastTrained, data.bullWinRate, data.bullDebates, data.bearWinRate, data.bearDebates, data.riskInterventions, data.riskSaved]);
 
-  const connectionStatus = connectors?.connections || {};
+  // Normalize connections: API returns an array, convert to name-keyed object
+  const rawConnections = connectors?.connections || [];
+  const connectionStatus = Array.isArray(rawConnections)
+    ? rawConnections.reduce((acc, c) => { acc[c.name || c.source || 'unknown'] = c; return acc; }, {})
+    : rawConnections;
 
   return (
     <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }} data-testid="ai-modules-panel">

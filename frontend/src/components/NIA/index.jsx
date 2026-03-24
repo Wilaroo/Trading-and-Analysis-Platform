@@ -22,6 +22,7 @@ import api from '../../utils/api';
 import { useDataCache, useTrainingMode } from '../../contexts';
 import UnifiedAITraining from '../UnifiedAITraining';
 
+import QuickStatsBar from './QuickStatsBar';
 import IntelOverview from './IntelOverview';
 import LearningProgressPanel from './LearningProgressPanel';
 import ReportCardPanel from './ReportCardPanel';
@@ -70,16 +71,25 @@ const NIA = () => {
   const cachedData = getCached('niaData');
   const [data, setData] = useState(() => cachedData?.data || DEFAULT_DATA);
 
+  // Helper: merge new fields into state, only update if changed
+  const mergeData = useCallback((updates) => {
+    setData(prev => {
+      const merged = { ...prev, ...updates };
+      merged.modelTrained = merged.timeseriesTrained || merged.timeseriesAccuracy !== null;
+      merged.calibrationsApplied = merged.calibrationsToday || 0;
+      merged.predictionsTracked = merged.timeseriesPredictions || 0;
+      merged.alertsAnalyzed = merged.calibrationsApplied * 5;
+      return JSON.stringify(prev) === JSON.stringify(merged) ? prev : merged;
+    });
+  }, []);
+
   const fetchAllData = useCallback(async (showToast = false) => {
     try {
       if (showToast) setRefreshing(true);
       else setLoading(true);
 
-      const [
-        phasesRes, candidatesRes, connectorsRes, thresholdsRes,
-        timeseriesRes, aiAdvisorRes, shadowStatsRes, reportCardRes,
-        collectionStatsRes, collectionQueueRes, simulationJobsRes
-      ] = await Promise.allSettled([
+      // Phase 1: Fast endpoints (respond within 2-5s) → update state immediately
+      const fastResults = await Promise.allSettled([
         api.get('/api/strategy-promotion/phases'),
         api.get('/api/strategy-promotion/candidates'),
         api.get('/api/learning-connectors/status'),
@@ -87,90 +97,111 @@ const NIA = () => {
         api.get('/api/ai-modules/timeseries/status'),
         api.get('/api/ai-modules/debate/ai-advisor-status'),
         api.get('/api/ai-modules/shadow/stats'),
-        api.get('/api/ai-modules/report-card'),
-        api.get('/api/ib-collector/stats'),
-        api.get('/api/ib-collector/queue-progress'),
-        api.get('/api/simulation/jobs?limit=10')
+        api.get('/api/ai-modules/report-card')
       ]);
 
-      const newData = { ...data };
+      const [phasesRes, candidatesRes, connectorsRes, thresholdsRes,
+             timeseriesRes, aiAdvisorRes, shadowStatsRes, reportCardRes] = fastResults;
+
+      const fastUpdates = {};
 
       if (phasesRes.status === 'fulfilled' && phasesRes.value.data?.success) {
         const phases = phasesRes.value.data;
-        newData.phases = phases;
-        newData.liveStrategies = phases.by_phase?.live?.length || 0;
-        newData.paperStrategies = phases.by_phase?.paper?.length || 0;
+        fastUpdates.phases = phases;
+        fastUpdates.liveStrategies = phases.by_phase?.live?.length || 0;
+        fastUpdates.paperStrategies = phases.by_phase?.paper?.length || 0;
       }
 
       if (candidatesRes.status === 'fulfilled' && candidatesRes.value.data?.success) {
-        newData.candidates = candidatesRes.value.data.ready_for_promotion || [];
+        fastUpdates.candidates = candidatesRes.value.data.ready_for_promotion || [];
       }
 
       if (connectorsRes.status === 'fulfilled' && connectorsRes.value.data?.success) {
-        newData.connectors = connectorsRes.value.data;
+        fastUpdates.connectors = connectorsRes.value.data;
         const connections = connectorsRes.value.data.connections || {};
         const healthyCount = Object.values(connections).filter(c => c.health === 'healthy').length;
         const totalCount = Object.keys(connections).length;
-        newData.learningHealth = totalCount === 0 ? 'Unknown' :
+        fastUpdates.learningHealth = totalCount === 0 ? 'Unknown' :
           healthyCount === totalCount ? 'Healthy' :
           healthyCount >= totalCount / 2 ? 'Warning' : 'Critical';
-        newData.connectorSummary = { healthy: healthyCount, total: totalCount };
+        fastUpdates.connectorSummary = { healthy: healthyCount, total: totalCount };
       }
 
       if (thresholdsRes.status === 'fulfilled' && thresholdsRes.value.data?.success) {
-        newData.thresholds = thresholdsRes.value.data.thresholds || {};
-        newData.calibrationsToday = Object.keys(newData.thresholds).length;
+        fastUpdates.thresholds = thresholdsRes.value.data.thresholds || {};
+        fastUpdates.calibrationsToday = Object.keys(fastUpdates.thresholds).length;
       }
 
       if (timeseriesRes.status === 'fulfilled' && timeseriesRes.value.data?.success) {
         const ts = timeseriesRes.value.data.status;
-        newData.timeseriesAccuracy = ts?.model?.metrics?.accuracy || null;
-        newData.timeseriesTrained = ts?.model?.trained || false;
-        newData.timeseriesPredictions = ts?.model?.metrics?.training_samples || 0;
-        newData.aiAccuracy = ts?.model?.metrics?.accuracy || null;
-        newData.timeseriesLastTrained = ts?.model?.metrics?.last_trained || null;
+        fastUpdates.timeseriesAccuracy = ts?.model?.metrics?.accuracy || null;
+        fastUpdates.timeseriesTrained = ts?.model?.trained || false;
+        fastUpdates.timeseriesPredictions = ts?.model?.metrics?.training_samples || 0;
+        fastUpdates.aiAccuracy = ts?.model?.metrics?.accuracy || null;
+        fastUpdates.timeseriesLastTrained = ts?.model?.metrics?.last_trained || null;
       }
 
       if (aiAdvisorRes.status === 'fulfilled' && aiAdvisorRes.value.data?.success) {
-        newData.aiAdvisorWeight = aiAdvisorRes.value.data.ai_advisor?.current_weight || 0.15;
+        fastUpdates.aiAdvisorWeight = aiAdvisorRes.value.data.ai_advisor?.current_weight || 0.15;
       }
 
       if (shadowStatsRes.status === 'fulfilled' && shadowStatsRes.value.data?.success) {
         const stats = shadowStatsRes.value.data.stats;
-        newData.bullDebates = stats?.total_logged || 0;
-        newData.bearDebates = stats?.total_logged || 0;
+        fastUpdates.bullDebates = stats?.total_logged || 0;
+        fastUpdates.bearDebates = stats?.total_logged || 0;
       }
 
       if (reportCardRes.status === 'fulfilled' && reportCardRes.value.data?.success) {
-        newData.reportCard = reportCardRes.value.data;
+        fastUpdates.reportCard = reportCardRes.value.data;
       }
 
+      // Apply fast data immediately so UI updates within seconds
+      if (Object.keys(fastUpdates).length > 0) {
+        mergeData(fastUpdates);
+        setLoading(false);
+        setInitialLoadDone(true);
+      }
+
+      // Phase 2: Slow endpoints (may take 10-30s) → update state when ready
+      // Use per-request timeout to prevent indefinite waits
+      const withTimeout = (promise, ms) => Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('NIA fetch timeout')), ms))
+      ]);
+
+      const slowResults = await Promise.allSettled([
+        withTimeout(api.get('/api/ib-collector/stats'), 10000),
+        withTimeout(api.get('/api/ib-collector/queue-progress'), 10000),
+        withTimeout(api.get('/api/simulation/jobs?limit=10'), 10000)
+      ]);
+
+      const [collectionStatsRes, collectionQueueRes, simulationJobsRes] = slowResults;
+      const slowUpdates = {};
+
       if (collectionStatsRes.status === 'fulfilled' && collectionStatsRes.value.data?.success) {
-        newData.collectionStats = collectionStatsRes.value.data.stats;
-        newData.historicalBars = collectionStatsRes.value.data.stats?.total_bars || 0;
+        slowUpdates.collectionStats = collectionStatsRes.value.data.stats;
+        slowUpdates.historicalBars = collectionStatsRes.value.data.stats?.total_bars || 0;
       }
 
       if (collectionQueueRes.status === 'fulfilled' && collectionQueueRes.value.data?.success) {
-        newData.collectionQueue = collectionQueueRes.value.data;
+        slowUpdates.collectionQueue = collectionQueueRes.value.data;
       }
 
       if (simulationJobsRes.status === 'fulfilled' && simulationJobsRes.value.data?.success) {
-        newData.simulationJobs = simulationJobsRes.value.data.jobs || [];
-        newData.simulationsRun = (simulationJobsRes.value.data.jobs || []).filter(j => j.status === 'completed').length;
+        slowUpdates.simulationJobs = simulationJobsRes.value.data.jobs || [];
+        slowUpdates.simulationsRun = (simulationJobsRes.value.data.jobs || []).filter(j => j.status === 'completed').length;
       }
 
-      newData.modelTrained = newData.timeseriesTrained || newData.timeseriesAccuracy !== null;
-      newData.calibrationsApplied = newData.calibrationsToday || 0;
-      newData.predictionsTracked = newData.timeseriesPredictions || 0;
-      newData.alertsAnalyzed = newData.calibrationsApplied * 5;
+      // Apply slow data and cache the full dataset
+      if (Object.keys(slowUpdates).length > 0) {
+        mergeData(slowUpdates);
+      }
 
-      setData(prevData => {
-        const prevStr = JSON.stringify(prevData);
-        const newStr = JSON.stringify(newData);
-        return prevStr === newStr ? prevData : newData;
+      setData(current => {
+        setCached('niaData', current, 60000);
+        return current;
       });
 
-      setCached('niaData', newData, 60000);
       if (showToast) toast.success('NIA intel refreshed');
     } catch (err) {
       console.error('Error fetching NIA data:', err);
@@ -180,7 +211,7 @@ const NIA = () => {
       setRefreshing(false);
       setInitialLoadDone(true);
     }
-  }, [setCached]);
+  }, [setCached, mergeData]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -282,6 +313,16 @@ const NIA = () => {
     aiAdvisorWeight: data.aiAdvisorWeight
   }), [data.timeseriesAccuracy, data.timeseriesLastTrained, data.timeseriesPredictions, data.bullWinRate, data.bullDebates, data.bearWinRate, data.bearDebates, data.riskInterventions, data.riskSaved, data.aiAdvisorWeight]);
 
+  const quickStatsData = useMemo(() => ({
+    simulationJobs: data.simulationJobs,
+    collectionQueue: data.collectionQueue,
+    candidates: data.candidates,
+    historicalBars: data.historicalBars,
+    modelTrained: data.modelTrained,
+    aiAccuracy: data.aiAccuracy,
+    connectorSummary: data.connectorSummary
+  }), [data.simulationJobs, data.collectionQueue, data.candidates, data.historicalBars, data.modelTrained, data.aiAccuracy, data.connectorSummary]);
+
   const memoizedPhases = useMemo(() => data.phases, [data.phases]);
   const memoizedCandidates = useMemo(() => data.candidates, [data.candidates]);
   const memoizedSimulationJobs = useMemo(() => data.simulationJobs, [data.simulationJobs]);
@@ -321,6 +362,9 @@ const NIA = () => {
           {refreshing ? 'Refreshing...' : 'Refresh Intel'}
         </button>
       </div>
+
+      {/* 0. Quick Stats Bar - Real-time action items at a glance */}
+      <QuickStatsBar data={quickStatsData} />
 
       {/* 1. Unified AI Training & Calibration */}
       <UnifiedAITraining onTrainComplete={handleTrainComplete} />
