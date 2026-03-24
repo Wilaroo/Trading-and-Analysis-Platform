@@ -140,7 +140,7 @@ const StartupModal = ({ onComplete }) => {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+      const timeoutId = setTimeout(() => controller.abort(), 2000); // 2s timeout
 
       const response = await directFetch(`${API_URL}${service.endpoint}`, {
         signal: controller.signal
@@ -198,8 +198,8 @@ const StartupModal = ({ onComplete }) => {
         return next;
       });
 
-      // 750ms between each check to give backend breathing room
-      await new Promise(resolve => setTimeout(resolve, 750));
+      // 200ms between each check (backend is local, no need for 750ms)
+      await new Promise(resolve => setTimeout(resolve, 200));
     }
 
     setIsChecking(false);
@@ -254,7 +254,7 @@ const StartupModal = ({ onComplete }) => {
       await checkAllServices();
       // Schedule next round AFTER current round finishes (no overlap)
       if (mountedRef.current) {
-        checkIntervalRef.current = setTimeout(runCheck, 3000);
+        checkIntervalRef.current = setTimeout(runCheck, 1500);
       }
     };
 
