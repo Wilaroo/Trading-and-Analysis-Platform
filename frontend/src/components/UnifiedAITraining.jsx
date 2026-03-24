@@ -549,7 +549,8 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       console.log('[NIA] Creating training job for:', timeframe);
       
       // Create a job in the queue (auto_start will set focus mode)
-      const jobRes = await api.post('/api/jobs', {
+      // Use apiLongRunning to bypass request throttler
+      const jobRes = await apiLongRunning.post('/api/jobs', {
         job_type: 'training',
         params: {
           bar_size: timeframe,
@@ -586,7 +587,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
         pollCount++;
         
         try {
-          const statusRes = await api.get(`/api/jobs/${jobId}`);
+          const statusRes = await apiLongRunning.get(`/api/jobs/${jobId}`);
           const jobStatus = statusRes.data?.job;
           
           if (!jobStatus) {
@@ -638,7 +639,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
             setIsTraining(false);
             setCurrentTimeframe(null);
             // Tell the server to reload models from DB (worker saved them there)
-            try { await api.post('/api/ai-modules/timeseries/reload-models'); } catch(e) { console.warn('[NIA] Model reload:', e); }
+            try { await apiLongRunning.post('/api/ai-modules/timeseries/reload-models'); } catch(e) { console.warn('[NIA] Model reload:', e); }
             fetchData(); // Refresh history
             return; // Stop polling
           }
@@ -739,7 +740,8 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
     
     try {
       // Create a job in the queue — worker process handles the training
-      const jobRes = await api.post('/api/jobs', {
+      // Use apiLongRunning to bypass the request throttler
+      const jobRes = await apiLongRunning.post('/api/jobs', {
         job_type: 'training',
         params: {
           full_universe: true,
@@ -777,7 +779,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
         pollCount++;
         
         try {
-          const statusRes = await api.get(`/api/jobs/${jobId}`);
+          const statusRes = await apiLongRunning.get(`/api/jobs/${jobId}`);
           const jobStatus = statusRes.data?.job;
           
           if (!jobStatus) {
@@ -827,7 +829,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
             setIsTraining(false);
             setCurrentTimeframe(null);
             // Tell server to reload models from DB
-            try { await api.post('/api/ai-modules/timeseries/reload-models'); } catch(e) { console.warn('[NIA] Model reload:', e); }
+            try { await apiLongRunning.post('/api/ai-modules/timeseries/reload-models'); } catch(e) { console.warn('[NIA] Model reload:', e); }
             fetchData();
             return;
           }
