@@ -161,7 +161,7 @@ const StartupModal = ({ onComplete }) => {
     }
 
     const url = `${API_URL}${service.endpoint}`;
-    const timeout = serviceStatusRef.current['backend'] === 'success' ? 2000 : 5000;
+    const timeout = 5000;
     const startTime = Date.now();
 
     const result = await xhrHealthCheck(url, timeout);
@@ -318,17 +318,19 @@ const StartupModal = ({ onComplete }) => {
   const requiredServices = SERVICES.filter(s => s.required);
   const requiredReady = requiredServices.every(s => serviceStatus[s.id] === 'success');
   const allServicesChecked = Object.keys(serviceStatus).length >= SERVICES.length;
+  const allServicesGreen = SERVICES.every(s => serviceStatus[s.id] === 'success' || serviceStatus[s.id] === 'warning');
   const isReady = requiredReady && allServicesChecked;
+  const isFullyReady = allServicesGreen;
   const canForceStart = checkCount >= 5; // Allow force-start after 5 attempts
 
-  // Stop checking once ready
+  // Stop checking only when ALL services are green
   useEffect(() => {
-    if (isReady && checkIntervalRef.current) {
+    if (isFullyReady && checkIntervalRef.current) {
       clearTimeout(checkIntervalRef.current);
       mountedRef.current = false;
       checkIntervalRef.current = null;
     }
-  }, [isReady]);
+  }, [isFullyReady]);
 
   // Calculate progress
   const successCount = Object.values(serviceStatus).filter(s => s === 'success').length;
@@ -420,14 +422,14 @@ const StartupModal = ({ onComplete }) => {
                 <div>
                   <h1 className="text-lg font-bold text-white">TradeCommand</h1>
                   <p className="text-zinc-400 text-xs">
-                    {isReady ? 'All systems ready!' : 'Verifying systems...'}
+                    {isFullyReady ? 'All systems ready!' : isReady ? 'Core ready — starting remaining services...' : 'Verifying systems...'}
                   </p>
                 </div>
               </div>
               
               {/* Progress indicator */}
               <div className="text-right">
-                <div className={`text-2xl font-bold ${isReady ? 'text-green-400' : 'text-cyan-400'}`}>
+                <div className={`text-2xl font-bold ${isFullyReady ? 'text-green-400' : isReady ? 'text-emerald-400' : 'text-cyan-400'}`}>
                   {progress}%
                 </div>
                 <div className="text-[10px] text-zinc-500">
@@ -439,7 +441,7 @@ const StartupModal = ({ onComplete }) => {
             {/* Progress bar */}
             <div className="mt-3 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
               <motion.div
-                className={`h-full ${isReady ? 'bg-green-500' : 'bg-gradient-to-r from-cyan-500 to-purple-500'}`}
+                className={`h-full ${isFullyReady ? 'bg-green-500' : 'bg-gradient-to-r from-cyan-500 to-purple-500'}`}
                 initial={{ width: 0 }}
                 animate={{ width: `${progress}%` }}
                 transition={{ duration: 0.5 }}
