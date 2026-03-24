@@ -15,6 +15,8 @@ Note: Requires lightgbm to be installed. Will gracefully degrade if not availabl
 """
 
 import logging
+import pickle
+import base64
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone, timedelta
 import asyncio
@@ -122,6 +124,47 @@ class TimeSeriesAIService:
         self._db = db
         if self._model:
             self._model.set_db(db)
+    
+    def reload_models_from_db(self):
+        """Reload all trained models from MongoDB.
+        
+        Called after external training (worker process) saves new models,
+        so the server picks up the latest versions without a restart.
+        """
+        if self._db is None or not self._ml_available:
+            return {"reloaded": 0}
+        
+        reloaded = 0
+        for bar_size, config in self.SUPPORTED_TIMEFRAMES.items():
+            model_name = config["model_name"]
+            try:
+                doc = self._db["ai_models"].find_one({"name": model_name})
+                if doc and "model_data" in doc:
+                    model_bytes = base64.b64decode(doc["model_data"])
+                    loaded_model = pickle.loads(model_bytes)
+                    
+                    # Create or update the cached model
+                    from .timeseries_gbm import TimeSeriesGBM, ModelMetrics
+                    if bar_size not in self._models:
+                        self._models[bar_size] = TimeSeriesGBM(model_name=model_name)
+                        self._models[bar_size].set_db(self._db)
+                    
+                    self._models[bar_size]._model = loaded_model
+                    self._models[bar_size]._version = doc.get("version", "v0.0.0")
+                    self._models[bar_size]._metrics = ModelMetrics(**doc.get("metrics", {}))
+                    reloaded += 1
+                    logger.info(f"Reloaded model {model_name} {doc.get('version', '?')}")
+            except Exception as e:
+                logger.warning(f"Could not reload model {model_name}: {e}")
+        
+        # Also reload the default model
+        if self._model:
+            self._model._load_model()
+            reloaded += 1
+        
+        logger.info(f"Reloaded {reloaded} models from database")
+        return {"reloaded": reloaded}
+
         
     def set_historical_service(self, historical_service):
         """Set historical data service for training"""

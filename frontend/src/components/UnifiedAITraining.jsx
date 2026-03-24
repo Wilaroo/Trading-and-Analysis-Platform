@@ -637,6 +637,8 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
             notifyTrainingEnd();
             setIsTraining(false);
             setCurrentTimeframe(null);
+            // Tell the server to reload models from DB (worker saved them there)
+            try { await api.post('/api/ai-modules/timeseries/reload-models'); } catch(e) { console.warn('[NIA] Model reload:', e); }
             fetchData(); // Refresh history
             return; // Stop polling
           }

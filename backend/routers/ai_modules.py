@@ -1281,6 +1281,23 @@ async def get_timeseries_training_status():
     }
 
 
+@router.post("/timeseries/reload-models")
+async def reload_models():
+    """Reload all trained models from MongoDB.
+    
+    Call this after the worker process finishes training to pick up 
+    the latest model versions without restarting the server.
+    """
+    if not _timeseries_ai:
+        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
+    
+    result = _timeseries_ai.reload_models_from_db()
+    return {
+        "success": True,
+        **result
+    }
+
+
 @router.get("/training-mode/status")
 async def get_training_mode_status():
     """Get current training mode status (paused tasks, elapsed time, etc.)"""
