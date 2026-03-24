@@ -83,6 +83,7 @@ class TimeSeriesGBM:
     """
     
     MODEL_COLLECTION = "timeseries_models"
+    MODEL_ARCHIVE_COLLECTION = "timeseries_model_archive"
     PREDICTIONS_COLLECTION = "timeseries_predictions"
     
     # Check for GPU availability (for future PyTorch integration)
@@ -194,35 +195,98 @@ class TimeSeriesGBM:
             logger.warning(f"Could not load model: {e}")
             
     def _save_model(self):
-        """Save model to database"""
+        """Save model to database with best-model protection.
+        
+        Logic:
+        1. Always archive the new model (for learning/reference)
+        2. Only promote to active if accuracy >= current active model
+        3. If new model is worse, log it but keep the old active model
+        """
         if self._db is None or self._model is None:
             return False
             
         try:
             model_bytes = pickle.dumps(self._model)
             model_data = base64.b64encode(model_bytes).decode("utf-8")
+            new_accuracy = self._metrics.accuracy if self._metrics else 0
             
-            # Use model_name as model_id to satisfy the unique index
-            self._db[self.MODEL_COLLECTION].update_one(
+            model_doc = {
+                "name": self.model_name,
+                "model_id": self.model_name,
+                "model_data": model_data,
+                "version": self._version,
+                "metrics": self._metrics.to_dict(),
+                "params": self.params,
+                "feature_names": self._feature_names,
+                "forecast_horizon": self.forecast_horizon,
+                "saved_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            # Step 1: Always archive the new model for future reference
+            archive_doc = {**model_doc, "archived_at": datetime.now(timezone.utc).isoformat()}
+            archive_doc.pop("model_id", None)  # Archive doesn't need unique constraint
+            self._db[self.MODEL_ARCHIVE_COLLECTION].insert_one(archive_doc)
+            logger.info(f"Archived model {self.model_name} {self._version} (accuracy={new_accuracy:.4f})")
+            
+            # Step 2: Check current active model's accuracy
+            current_active = self._db[self.MODEL_COLLECTION].find_one(
                 {"name": self.model_name},
-                {"$set": {
-                    "name": self.model_name,
-                    "model_id": self.model_name,  # Required for unique index
-                    "model_data": model_data,
-                    "version": self._version,
-                    "metrics": self._metrics.to_dict(),
-                    "params": self.params,
-                    "feature_names": self._feature_names,
-                    "forecast_horizon": self.forecast_horizon,
-                    "updated_at": datetime.now(timezone.utc).isoformat()
-                }},
-                upsert=True
+                {"metrics": 1, "version": 1, "_id": 0}
             )
-            logger.info(f"Saved model {self.model_name} {self._version}")
-            return True
+            
+            should_promote = True
+            if current_active and "metrics" in current_active:
+                current_accuracy = current_active["metrics"].get("accuracy", 0)
+                current_version = current_active.get("version", "unknown")
+                
+                if new_accuracy < current_accuracy:
+                    should_promote = False
+                    logger.warning(
+                        f"Model protection: NEW {self._version} accuracy ({new_accuracy:.4f}) "
+                        f"< ACTIVE {current_version} accuracy ({current_accuracy:.4f}). "
+                        f"Keeping active model. New model archived for reference."
+                    )
+                elif new_accuracy == current_accuracy:
+                    logger.info(
+                        f"Model accuracy unchanged ({new_accuracy:.4f}). Updating active model."
+                    )
+                else:
+                    logger.info(
+                        f"Model improved: {current_accuracy:.4f} -> {new_accuracy:.4f} (+{new_accuracy - current_accuracy:.4f}). Promoting."
+                    )
+            
+            # Step 3: Promote to active if better (or first model)
+            if should_promote:
+                model_doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+                model_doc["promoted_at"] = datetime.now(timezone.utc).isoformat()
+                self._db[self.MODEL_COLLECTION].update_one(
+                    {"name": self.model_name},
+                    {"$set": model_doc},
+                    upsert=True
+                )
+                logger.info(f"Promoted model {self.model_name} {self._version} as active (accuracy={new_accuracy:.4f})")
+            else:
+                # Reload the active model since we didn't promote
+                self._load_model()
+                
+            return should_promote
         except Exception as e:
             logger.error(f"Could not save model: {e}")
             return False
+    
+    def get_model_history(self, limit: int = 20) -> List[Dict]:
+        """Get archived model history for analysis and comparison"""
+        if self._db is None:
+            return []
+        try:
+            docs = list(self._db[self.MODEL_ARCHIVE_COLLECTION].find(
+                {"name": self.model_name},
+                {"_id": 0, "model_data": 0}  # Exclude heavy binary data
+            ).sort("archived_at", -1).limit(limit))
+            return docs
+        except Exception as e:
+            logger.warning(f"Could not fetch model history: {e}")
+            return []
             
     def train(
         self,

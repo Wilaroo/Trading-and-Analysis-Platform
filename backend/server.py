@@ -266,6 +266,9 @@ background_scanner = get_enhanced_scanner()
 init_live_scanner_router(background_scanner)
 register_service('enhanced_scanner', background_scanner)  # Register for learning connectors
 
+# Wire enhanced scanner into predictive scanner for shared market data
+predictive_scanner.set_enhanced_scanner(background_scanner)
+
 # Initialize trading bot
 trading_bot = get_trading_bot_service()
 trade_executor = get_trade_executor()

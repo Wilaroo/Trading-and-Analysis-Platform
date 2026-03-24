@@ -242,10 +242,16 @@ class PredictiveScannerService:
         self._fundamental_service = None
         self._trading_intelligence = None
         self._news_service = None
+        self._enhanced_scanner = None  # Shares market data cache with enhanced scanner
         
         if db is not None:
             self.alerts_collection = db["predictive_alerts"]
             self.setups_collection = db["forming_setups"]
+    
+    def set_enhanced_scanner(self, scanner):
+        """Wire to enhanced scanner for shared market data (real technicals vs estimates)"""
+        self._enhanced_scanner = scanner
+        logger.info("Predictive scanner: wired to enhanced scanner for shared market data")
     
     # ==================== SERVICE GETTERS ====================
     
@@ -320,25 +326,62 @@ class PredictiveScannerService:
         return forming_setups
     
     async def _get_market_data(self, symbol: str) -> Optional[Dict]:
-        """Fetch comprehensive market data for a symbol"""
+        """Fetch comprehensive market data for a symbol.
+        
+        Uses enhanced scanner's real tape data when available (accurate VWAP, EMA, RSI, RVOL).
+        Falls back to Alpaca quotes with estimated technicals otherwise.
+        """
         try:
-            # Get real-time quote from Alpaca
+            # Try getting real tape data from the enhanced scanner first
+            if self._enhanced_scanner is not None:
+                try:
+                    tape = getattr(self._enhanced_scanner, '_latest_tapes', {}).get(symbol)
+                    snapshot = getattr(self._enhanced_scanner, '_latest_snapshots', {}).get(symbol)
+                    
+                    if tape and snapshot:
+                        current_price = getattr(snapshot, 'latest_trade', None)
+                        if current_price and hasattr(current_price, 'price'):
+                            current_price = float(current_price.price)
+                        elif hasattr(snapshot, 'daily_bar') and snapshot.daily_bar:
+                            current_price = float(snapshot.daily_bar.close)
+                        
+                        if current_price and current_price > 0:
+                            return {
+                                "symbol": symbol,
+                                "current_price": current_price,
+                                "bid": getattr(getattr(snapshot, 'latest_quote', None), 'bid_price', current_price * 0.999),
+                                "ask": getattr(getattr(snapshot, 'latest_quote', None), 'ask_price', current_price * 1.001),
+                                "volume": tape.volume if hasattr(tape, 'volume') else 0,
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "fundamentals": None,
+                                "technicals": {
+                                    "vwap": tape.vwap if hasattr(tape, 'vwap') else current_price,
+                                    "ema_9": tape.ema_9 if hasattr(tape, 'ema_9') else current_price,
+                                    "ema_20": tape.ema_20 if hasattr(tape, 'ema_20') else current_price,
+                                    "rsi_14": tape.rsi if hasattr(tape, 'rsi') else 50,
+                                    "rvol": tape.rvol if hasattr(tape, 'rvol') else 1.0,
+                                    "atr": tape.atr if hasattr(tape, 'atr') else current_price * 0.02,
+                                    "high": tape.high if hasattr(tape, 'high') else current_price * 1.02,
+                                    "low": tape.low if hasattr(tape, 'low') else current_price * 0.98,
+                                    "resistance": getattr(tape, 'resistance', current_price * 1.03),
+                                    "support": getattr(tape, 'support', current_price * 0.97),
+                                },
+                                "scores": {
+                                    "overall": tape.score if hasattr(tape, 'score') else 50,
+                                    "technical": 50,
+                                    "fundamental": 50,
+                                    "catalyst": 0
+                                },
+                            }
+                except Exception as e:
+                    logger.debug(f"Could not get enhanced scanner data for {symbol}: {e}")
+            
+            # Fallback: Get real-time quote from Alpaca
             quote = await self.alpaca_service.get_quote(symbol)
             if not quote or quote.get("price", 0) <= 0:
                 return None
             
             current_price = quote.get("price", 0)
-            
-            # Get fundamental data
-            fundamentals = None
-            try:
-                fundamentals = await self.fundamental_service.get_fundamentals(symbol)
-            except Exception as e:
-                logger.debug(f"Could not get fundamentals for {symbol}: {e}")
-            
-            # Build basic technical data from quote
-            # Note: For full technicals, we'd need historical bars
-            # For now, use approximations based on price
             atr_estimate = current_price * 0.02  # 2% of price as ATR estimate
             
             return {
@@ -348,13 +391,13 @@ class PredictiveScannerService:
                 "ask": quote.get("ask", current_price * 1.001),
                 "volume": quote.get("volume", 0),
                 "timestamp": quote.get("timestamp"),
-                "fundamentals": fundamentals,
+                "fundamentals": None,
                 "technicals": {
-                    "vwap": current_price * 0.995,  # Estimate VWAP slightly below current
-                    "ema_9": current_price * 0.99,   # Estimate 9 EMA
-                    "ema_20": current_price * 0.985, # Estimate 20 EMA
-                    "rsi_14": 50,  # Default neutral RSI
-                    "rvol": 1.5,   # Default moderate relative volume
+                    "vwap": current_price * 0.995,
+                    "ema_9": current_price * 0.99,
+                    "ema_20": current_price * 0.985,
+                    "rsi_14": 50,
+                    "rvol": 1.5,
                     "atr": atr_estimate,
                     "high": current_price * 1.02,
                     "low": current_price * 0.98,

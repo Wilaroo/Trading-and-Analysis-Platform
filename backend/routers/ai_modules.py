@@ -938,6 +938,36 @@ async def get_timeseries_status():
     }
 
 
+@router.get("/timeseries/model-history")
+async def get_model_history(limit: int = 20):
+    """Get archived model training history for analysis and comparison.
+    Shows all trained models (including ones that weren't promoted to active).
+    """
+    if not _timeseries_ai:
+        return {"success": False, "error": "Timeseries AI not initialized", "models": []}
+    
+    from services.ai_modules.timeseries_gbm import get_timeseries_model
+    model = get_timeseries_model()
+    if not model:
+        return {"success": False, "error": "No timeseries model", "models": []}
+    
+    history = await asyncio.to_thread(model.get_model_history, limit)
+    
+    # Get current active model info
+    active_version = model._version if model._model else "none"
+    active_accuracy = model._metrics.accuracy if model._metrics else 0
+    
+    return {
+        "success": True,
+        "active_model": {
+            "version": active_version,
+            "accuracy": active_accuracy
+        },
+        "archived_models": history,
+        "total_archived": len(history)
+    }
+
+
 class TrainRequest(BaseModel):
     symbols: Optional[List[str]] = Field(None, description="Symbols to train on")
     max_symbols: Optional[int] = Field(None, description="Maximum number of symbols (default: 1000)")

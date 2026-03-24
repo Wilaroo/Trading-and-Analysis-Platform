@@ -1,6 +1,13 @@
 """
 Backtest Engine - Phase 6 Slow Learning
 
+DEPRECATED: This basic engine is superseded by AdvancedBacktestEngine in
+advanced_backtest_engine.py, which supports multi-strategy comparison,
+walk-forward optimization, Monte Carlo simulation, AI comparison, and 
+market-wide backtesting. New features should use the advanced engine.
+
+This file is kept for backwards compatibility with /api/slow-learning/backtest/* endpoints.
+
 Runs trading strategies against historical data to validate performance.
 Supports multiple strategy types, position sizing, and detailed reporting.
 
