@@ -131,9 +131,7 @@ async def process_training_job(job: dict, db) -> dict:
             )
             
             if full_universe:
-                result = await timeseries_service.train_full_universe_all_timeframes(
-                    max_symbols=max_symbols
-                )
+                result = await timeseries_service.train_full_universe_all_timeframes()
             else:
                 result = await timeseries_service.train_all_timeframes(
                     max_symbols=max_symbols
@@ -147,8 +145,7 @@ async def process_training_job(job: dict, db) -> dict:
             
             if full_universe:
                 result = await timeseries_service.train_full_universe(
-                    bar_size=bar_size,
-                    max_symbols=max_symbols
+                    bar_size=bar_size
                 )
             else:
                 result = await timeseries_service.train_model(
@@ -207,9 +204,9 @@ async def process_data_collection_job(job: dict, db) -> dict:
     logger.info(f"Parameters: {params}")
     
     # Import collector service
-    from services.ib_historical_collector import get_collector_service
+    from services.ib_historical_collector import init_ib_collector
     
-    collector = get_collector_service(db)
+    collector = init_ib_collector(db=db)
     
     try:
         collection_type = params.get('collection_type', 'liquid')
@@ -427,9 +424,9 @@ async def process_calibration_job(job: dict, db) -> dict:
     logger.info(f"Processing calibration job {job_id}")
     
     try:
-        from services.learning_connectors_service import get_learning_connectors_service
+        from services.learning_connectors_service import init_learning_connectors
         
-        service = get_learning_connectors_service(db)
+        service = init_learning_connectors(db=db)
         
         await job_queue_manager.update_progress(
             job_id, percent=5, message='Starting calibration...'
