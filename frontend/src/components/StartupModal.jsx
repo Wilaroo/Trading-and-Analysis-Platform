@@ -182,39 +182,60 @@ const StartupModal = ({ onComplete }) => {
     }
   }, [wsConnected]);
 
-  // Check all services - ONE AT A TIME, skipping already-passed services
-  // Uses recursive setTimeout instead of setInterval to prevent overlapping rounds
+  // Check all services:
+  // 1. Backend first (sequential - most important)  
+  // 2. All remaining services in PARALLEL (one slow endpoint can't block the rest)
   const checkAllServices = useCallback(async () => {
     setIsChecking(true);
     setCheckCount(prev => prev + 1);
 
-    for (const service of SERVICES) {
-      if (service.checkType === 'websocket') continue;
-
-      // Skip services that already succeeded - no need to re-check
-      const currentStatus = serviceStatusRef.current[service.id];
-      if (currentStatus === 'success') continue;
-
-      // If backend passed, auto-pass database (same /api/health endpoint)
-      if (service.id === 'database' && serviceStatusRef.current['backend'] === 'success') {
-        setServiceStatus(prev => {
-          const next = { ...prev, database: 'success' };
-          serviceStatusRef.current = next;
-          return next;
-        });
-        continue;
-      }
-
-      const status = await checkService(service);
-
+    // Phase 1: Check backend first (if not already passed)
+    if (serviceStatusRef.current['backend'] !== 'success') {
+      const backendService = SERVICES.find(s => s.id === 'backend');
+      const status = await checkService(backendService);
       setServiceStatus(prev => {
-        const next = { ...prev, [service.id]: status };
+        const next = { ...prev, backend: status };
         serviceStatusRef.current = next;
         return next;
       });
+    }
 
-      // 200ms between each check (reduced from 750ms - backend handles this fine)
-      await new Promise(resolve => setTimeout(resolve, 200));
+    // Auto-pass database if backend is up
+    if (serviceStatusRef.current['backend'] === 'success' && serviceStatusRef.current['database'] !== 'success') {
+      setServiceStatus(prev => {
+        const next = { ...prev, database: 'success' };
+        serviceStatusRef.current = next;
+        return next;
+      });
+    }
+
+    // Phase 2: Check all remaining services in PARALLEL
+    const remaining = SERVICES.filter(s => {
+      if (s.checkType === 'websocket') return false;
+      if (s.id === 'backend' || s.id === 'database') return false;
+      if (serviceStatusRef.current[s.id] === 'success') return false;
+      return true;
+    });
+
+    if (remaining.length > 0) {
+      const results = await Promise.allSettled(
+        remaining.map(async (service) => {
+          const status = await checkService(service);
+          return { id: service.id, status };
+        })
+      );
+
+      // Apply all results in one state update
+      setServiceStatus(prev => {
+        const next = { ...prev };
+        for (const r of results) {
+          if (r.status === 'fulfilled') {
+            next[r.value.id] = r.value.status;
+            serviceStatusRef.current[r.value.id] = r.value.status;
+          }
+        }
+        return next;
+      });
     }
 
     setIsChecking(false);
