@@ -41,13 +41,14 @@ def _init_clients():
         _trading_client = TradingClient(
             api_key=ALPACA_API_KEY,
             secret_key=ALPACA_SECRET_KEY,
-            paper=True
+            paper=True,
+            raw_data=False
         )
         
-        # Use IEX feed for free tier (SIP requires paid subscription)
         _data_client = StockHistoricalDataClient(
             api_key=ALPACA_API_KEY,
-            secret_key=ALPACA_SECRET_KEY
+            secret_key=ALPACA_SECRET_KEY,
+            raw_data=False
         )
         
         logger.info("Alpaca clients initialized successfully (using IEX feed for free tier)")
@@ -56,6 +57,10 @@ def _init_clients():
     except Exception as e:
         logger.error(f"Failed to initialize Alpaca clients: {e}")
         return False
+
+
+# Default timeout for Alpaca SDK calls (seconds)
+ALPACA_CALL_TIMEOUT = 10
 
 
 class AlpacaService:
@@ -68,8 +73,21 @@ class AlpacaService:
         self._cache_ttl = 10  # seconds for quotes (reduced from 15)
         self._bars_cache_ttl = 60  # seconds for bars (reduced from 120)
         
+    async def _ensure_initialized_async(self) -> bool:
+        """Ensure clients are initialized (non-blocking)"""
+        if not self._initialized:
+            try:
+                self._initialized = await asyncio.wait_for(
+                    asyncio.to_thread(_init_clients),
+                    timeout=ALPACA_CALL_TIMEOUT
+                )
+            except asyncio.TimeoutError:
+                logger.error("Alpaca client initialization timed out")
+                return False
+        return self._initialized
+    
     def _ensure_initialized(self) -> bool:
-        """Ensure clients are initialized"""
+        """Sync fallback for non-async contexts"""
         if not self._initialized:
             self._initialized = _init_clients()
         return self._initialized
@@ -85,7 +103,7 @@ class AlpacaService:
         
         Note: Alpaca only supports stocks, not indices like VIX.
         """
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized_async():
             return None
         
         # Alpaca doesn't support indices - skip them
@@ -109,13 +127,19 @@ class AlpacaService:
         try:
             from alpaca.data.requests import StockLatestQuoteRequest, StockLatestTradeRequest
             
-            # Get latest quote (bid/ask) — run sync SDK call in thread to avoid blocking event loop
+            # Get latest quote (bid/ask) — run sync SDK call in thread with timeout
             quote_request = StockLatestQuoteRequest(symbol_or_symbols=symbol.upper())
-            quotes = await asyncio.to_thread(_data_client.get_stock_latest_quote, quote_request)
+            quotes = await asyncio.wait_for(
+                asyncio.to_thread(_data_client.get_stock_latest_quote, quote_request),
+                timeout=ALPACA_CALL_TIMEOUT
+            )
             
-            # Get latest trade (last price) — run sync SDK call in thread
+            # Get latest trade (last price) — run sync SDK call in thread with timeout
             trade_request = StockLatestTradeRequest(symbol_or_symbols=symbol.upper())
-            trades = await asyncio.to_thread(_data_client.get_stock_latest_trade, trade_request)
+            trades = await asyncio.wait_for(
+                asyncio.to_thread(_data_client.get_stock_latest_trade, trade_request),
+                timeout=ALPACA_CALL_TIMEOUT
+            )
             
             if symbol.upper() in quotes:
                 quote = quotes[symbol.upper()]
@@ -153,7 +177,7 @@ class AlpacaService:
         Get quotes for multiple symbols in a single request.
         More efficient than calling get_quote() multiple times.
         """
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized_async():
             return {}
             
         if not symbols:
@@ -164,13 +188,19 @@ class AlpacaService:
             
             symbols_upper = [s.upper() for s in symbols]
             
-            # Batch request for quotes — run sync SDK call in thread
+            # Batch request for quotes — run sync SDK call in thread with timeout
             quote_request = StockLatestQuoteRequest(symbol_or_symbols=symbols_upper)
-            quotes = await asyncio.to_thread(_data_client.get_stock_latest_quote, quote_request)
+            quotes = await asyncio.wait_for(
+                asyncio.to_thread(_data_client.get_stock_latest_quote, quote_request),
+                timeout=ALPACA_CALL_TIMEOUT
+            )
             
-            # Batch request for trades — run sync SDK call in thread
+            # Batch request for trades — run sync SDK call in thread with timeout
             trade_request = StockLatestTradeRequest(symbol_or_symbols=symbols_upper)
-            trades = await asyncio.to_thread(_data_client.get_stock_latest_trade, trade_request)
+            trades = await asyncio.wait_for(
+                asyncio.to_thread(_data_client.get_stock_latest_trade, trade_request),
+                timeout=ALPACA_CALL_TIMEOUT
+            )
             
             results = {}
             now = datetime.now(timezone.utc)
@@ -303,7 +333,7 @@ class AlpacaService:
             limit: Number of bars to fetch
             force_refresh: If True, bypass cache and fetch fresh data
         """
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized_async():
             return []
         
         # Check bars cache (unless force_refresh)
@@ -343,7 +373,7 @@ class AlpacaService:
             else:
                 start = end - timedelta(minutes=limit * 5 + 60)
             
-            # Use IEX feed for free tier — run sync SDK call in thread to avoid blocking event loop
+            # Use IEX feed for free tier — run sync SDK call in thread with timeout
             request = StockBarsRequest(
                 symbol_or_symbols=symbol.upper(),
                 timeframe=tf,
@@ -353,7 +383,10 @@ class AlpacaService:
                 feed="iex"  # Use IEX for free tier
             )
             
-            bars = await asyncio.to_thread(_data_client.get_stock_bars, request)
+            bars = await asyncio.wait_for(
+                asyncio.to_thread(_data_client.get_stock_bars, request),
+                timeout=ALPACA_CALL_TIMEOUT
+            )
             
             result = []
             # Access bars through .data attribute for BarSet
@@ -383,11 +416,14 @@ class AlpacaService:
     
     async def get_account(self) -> Optional[Dict[str, Any]]:
         """Get Alpaca account information"""
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized_async():
             return None
             
         try:
-            account = await asyncio.to_thread(_trading_client.get_account)
+            account = await asyncio.wait_for(
+                asyncio.to_thread(_trading_client.get_account),
+                timeout=ALPACA_CALL_TIMEOUT
+            )
             
             return {
                 "account_id": account.id,
@@ -412,11 +448,14 @@ class AlpacaService:
     
     async def get_positions(self) -> List[Dict[str, Any]]:
         """Get current open positions from Alpaca paper trading account"""
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized_async():
             return []
         
         try:
-            positions = await asyncio.to_thread(_trading_client.get_all_positions)
+            positions = await asyncio.wait_for(
+                asyncio.to_thread(_trading_client.get_all_positions),
+                timeout=ALPACA_CALL_TIMEOUT
+            )
             
             result = []
             for pos in positions:
@@ -463,7 +502,7 @@ class AlpacaService:
         Uses Alpaca's most active screener endpoint.
         Falls back to a default watchlist of popular stocks if screener unavailable.
         """
-        if not self._ensure_initialized():
+        if not await self._ensure_initialized_async():
             return self._get_default_watchlist()
         
         try:
@@ -476,7 +515,10 @@ class AlpacaService:
                 by=MostActivesBy.VOLUME
             )
             
-            most_actives = await asyncio.to_thread(_data_client.get_stock_most_actives, request)
+            most_actives = await asyncio.wait_for(
+                asyncio.to_thread(_data_client.get_stock_most_actives, request),
+                timeout=ALPACA_CALL_TIMEOUT
+            )
             
             result = []
             for stock in most_actives.most_actives:

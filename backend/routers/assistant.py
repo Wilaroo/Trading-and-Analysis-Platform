@@ -396,7 +396,7 @@ async def get_conversation_history(session_id: str):
     if not _assistant_service:
         raise HTTPException(status_code=500, detail="Assistant service not initialized")
     
-    history = _assistant_service.get_conversation_history(session_id)
+    history = await _assistant_service.get_conversation_history(session_id)
     
     return {
         "session_id": session_id,
@@ -411,7 +411,7 @@ async def clear_conversation(session_id: str):
     if not _assistant_service:
         raise HTTPException(status_code=500, detail="Assistant service not initialized")
     
-    _assistant_service.clear_conversation(session_id)
+    await _assistant_service.clear_conversation(session_id)
     
     return {"success": True, "message": f"Conversation {session_id} cleared"}
 
@@ -422,7 +422,7 @@ async def get_sessions(user_id: str = "default"):
     if not _assistant_service:
         raise HTTPException(status_code=500, detail="Assistant service not initialized")
     
-    sessions = _assistant_service.get_all_sessions(user_id)
+    sessions = await _assistant_service.get_all_sessions(user_id)
     
     return {
         "sessions": sessions,

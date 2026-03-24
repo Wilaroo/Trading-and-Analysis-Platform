@@ -15,6 +15,7 @@ import httpx
 import asyncio
 import random
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pymongo import MongoClient
 
 # Load environment variables
@@ -3053,7 +3054,7 @@ async def run_scanner(
         "results_count": len(results),
         "created_at": datetime.now(timezone.utc).isoformat()
     }
-    scans_col.insert_one(scan_doc)
+    await asyncio.to_thread(scans_col.insert_one, scan_doc)
     
     return {
         "results": results[:20], 
@@ -3078,7 +3079,7 @@ async def get_scanner_presets():
 @app.get("/api/watchlist")
 async def get_watchlist():
     """Get current watchlist"""
-    watchlist = list(watchlists_col.find({}, {"_id": 0}).sort("score", -1).limit(10))
+    watchlist = await asyncio.to_thread(lambda: list(watchlists_col.find({}, {"_id": 0}).sort("score", -1).limit(10)))
     return {"watchlist": watchlist, "count": len(watchlist)}
 
 @app.post("/api/watchlist/generate")
@@ -3101,11 +3102,13 @@ async def generate_morning_watchlist():
     scored_stocks.sort(key=lambda x: x["score"], reverse=True)
     top_10 = scored_stocks[:10]
     
-    watchlists_col.delete_many({})
-    for item in top_10:
-        item["created_at"] = datetime.now(timezone.utc).isoformat()
-        doc = item.copy()
-        watchlists_col.insert_one(doc)
+    def _sync_save_watchlist():
+        watchlists_col.delete_many({})
+        for item in top_10:
+            item["created_at"] = datetime.now(timezone.utc).isoformat()
+            doc = item.copy()
+            watchlists_col.insert_one(doc)
+    await asyncio.to_thread(_sync_save_watchlist)
     
     symbols_str = ", ".join([s["symbol"] for s in top_10[:5]])
     ai_insight = await generate_ai_analysis(
@@ -3133,7 +3136,7 @@ async def add_to_watchlist(data: dict):
         raise HTTPException(status_code=400, detail="Symbol is required")
     
     # Check if already exists
-    existing = watchlists_col.find_one({"symbol": symbol})
+    existing = await asyncio.to_thread(watchlists_col.find_one, {"symbol": symbol})
     if existing:
         return {"message": f"{symbol} already in watchlist", "symbol": symbol}
     
@@ -3145,14 +3148,14 @@ async def add_to_watchlist(data: dict):
         "manual": True
     }
     
-    watchlists_col.insert_one(doc)
+    await asyncio.to_thread(watchlists_col.insert_one, doc)
     
     return {"message": f"{symbol} added to watchlist", "symbol": symbol}
 
 @app.delete("/api/watchlist/{symbol}")
 async def remove_from_watchlist(symbol: str):
     """Remove a symbol from watchlist"""
-    result = watchlists_col.delete_one({"symbol": symbol.upper()})
+    result = await asyncio.to_thread(watchlists_col.delete_one, {"symbol": symbol.upper()})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail=f"{symbol} not found in watchlist")
     return {"message": f"{symbol} removed from watchlist", "symbol": symbol.upper()}
@@ -3335,7 +3338,7 @@ async def get_portfolio(source: str = "auto"):
             logger.debug(f"IB portfolio fetch failed, falling back to manual: {e}")
     
     # Fallback to manual MongoDB positions
-    positions = list(portfolios_col.find({}, {"_id": 0}))
+    positions = await asyncio.to_thread(lambda: list(portfolios_col.find({}, {"_id": 0})))
     
     if positions:
         symbols = [p["symbol"] for p in positions]
@@ -3398,10 +3401,11 @@ async def add_position(data: dict):
         "added_at": datetime.now(timezone.utc).isoformat()
     }
     
-    portfolios_col.update_one(
+    await asyncio.to_thread(
+        portfolios_col.update_one,
         {"symbol": symbol},
         {"$set": position},
-        upsert=True
+        True  # upsert
     )
     
     return {"message": "Position added", "position": position}
@@ -3409,7 +3413,7 @@ async def add_position(data: dict):
 @app.delete("/api/portfolio/{symbol}")
 async def remove_position(symbol: str):
     """Remove position from portfolio"""
-    result = portfolios_col.delete_one({"symbol": symbol.upper()})
+    result = await asyncio.to_thread(portfolios_col.delete_one, {"symbol": symbol.upper()})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Position not found")
     return {"message": "Position removed"}
@@ -3419,8 +3423,9 @@ async def remove_position(symbol: str):
 async def get_alerts(unread_only: bool = False):
     """Get all alerts"""
     query = {"read": False} if unread_only else {}
-    alerts = list(alerts_col.find(query, {"_id": 0}).sort("timestamp", -1).limit(50))
-    return {"alerts": alerts, "unread_count": alerts_col.count_documents({"read": False})}
+    alerts = await asyncio.to_thread(lambda: list(alerts_col.find(query, {"_id": 0}).sort("timestamp", -1).limit(50)))
+    unread_count = await asyncio.to_thread(alerts_col.count_documents, {"read": False})
+    return {"alerts": alerts, "unread_count": unread_count}
 
 @app.post("/api/alerts/generate")
 async def generate_alerts():
@@ -3449,7 +3454,7 @@ async def generate_alerts():
                         "change_percent": quote["change_percent"]
                     }
                     alert_doc = alert.copy()
-                    alerts_col.insert_one(alert_doc)
+                    await asyncio.to_thread(alerts_col.insert_one, alert_doc)
                     new_alerts.append(alert)
     
     return {"alerts_generated": len(new_alerts), "alerts": new_alerts}
@@ -3457,7 +3462,7 @@ async def generate_alerts():
 @app.delete("/api/alerts/clear")
 async def clear_alerts():
     """Clear all alerts"""
-    result = alerts_col.delete_many({})
+    result = await asyncio.to_thread(alerts_col.delete_many, {})
     return {"deleted": result.deleted_count}
 
 # ----- Earnings Calendar -----
@@ -4421,6 +4426,10 @@ async def stream_coaching_notifications():
 @app.on_event("startup")
 async def startup_event():
     """Start background streaming task and background scanner"""
+    
+    # Expand the default thread pool to prevent starvation from blocking I/O
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=32))
     
     # Start WebSocket streaming tasks (lightweight, non-blocking)
     asyncio.create_task(stream_quotes())

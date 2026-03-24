@@ -994,7 +994,7 @@ DECISION: {score_result['trade_or_skip']}
             logger.warning(f"Error getting trading intelligence context: {e}")
             return ""
     
-    def _get_or_create_conversation(self, session_id: str, user_id: str = "default") -> ConversationContext:
+    async def _get_or_create_conversation(self, session_id: str, user_id: str = "default") -> ConversationContext:
         """Get existing conversation or create new one"""
         if session_id not in self.conversations:
             self.conversations[session_id] = ConversationContext(
@@ -1003,18 +1003,18 @@ DECISION: {score_result['trade_or_skip']}
             )
             # Load from DB if available
             if self.db is not None:
-                self._load_conversation_from_db(session_id)
+                await self._load_conversation_from_db(session_id)
         
         return self.conversations[session_id]
     
-    def _load_conversation_from_db(self, session_id: str):
+    async def _load_conversation_from_db(self, session_id: str):
         """Load conversation history from MongoDB"""
         if self.db is None:
             return
         
         try:
             collection = self.db["assistant_conversations"]
-            doc = collection.find_one({"session_id": session_id})
+            doc = await asyncio.to_thread(collection.find_one, {"session_id": session_id})
             if doc:
                 self.conversations[session_id] = ConversationContext(
                     messages=[AssistantMessage(**m) for m in doc.get("messages", [])],
@@ -1026,7 +1026,7 @@ DECISION: {score_result['trade_or_skip']}
         except Exception as e:
             logger.warning(f"Error loading conversation: {e}")
     
-    def _save_conversation_to_db(self, session_id: str):
+    async def _save_conversation_to_db(self, session_id: str):
         """Save conversation to MongoDB"""
         if self.db is None:
             return
@@ -1041,7 +1041,8 @@ DECISION: {score_result['trade_or_skip']}
             # Limit stored messages to last 50 to manage memory
             messages_to_save = conv.messages[-50:] if len(conv.messages) > 50 else conv.messages
             
-            collection.update_one(
+            await asyncio.to_thread(
+                collection.update_one,
                 {"session_id": session_id},
                 {"$set": {
                     "session_id": session_id,
@@ -1050,12 +1051,12 @@ DECISION: {score_result['trade_or_skip']}
                     "created_at": conv.created_at,
                     "last_activity": datetime.now(timezone.utc).isoformat()
                 }},
-                upsert=True
+                True  # upsert
             )
         except Exception as e:
             logger.warning(f"Error saving conversation: {e}")
     
-    def _track_request_pattern(self, user_message: str):
+    async def _track_request_pattern(self, user_message: str):
         """Track frequently asked requests"""
         # Normalize the message
         normalized = user_message.lower().strip()
@@ -1083,10 +1084,11 @@ DECISION: {score_result['trade_or_skip']}
         # Save patterns to DB
         if self.db is not None:
             try:
-                self.db["assistant_patterns"].update_one(
+                await asyncio.to_thread(
+                    self.db["assistant_patterns"].update_one,
                     {"type": "request_patterns"},
                     {"$set": {"patterns": self.request_patterns, "updated_at": datetime.now(timezone.utc).isoformat()}},
-                    upsert=True
+                    True  # upsert
                 )
             except Exception as e:
                 logger.warning(f"Error saving patterns: {e}")
@@ -1231,7 +1233,8 @@ DECISION: {score_result['trade_or_skip']}
                     cutoff_time = datetime.now(timezone.utc) - timedelta(hours=1)
                     
                     # Search in live_alerts collection
-                    db_alert = self.db["live_alerts"].find_one(
+                    db_alert = await asyncio.to_thread(
+                        self.db["live_alerts"].find_one,
                         {
                             "symbol": target_symbol,
                             "timestamp": {"$gte": cutoff_time.isoformat()}
@@ -2447,10 +2450,10 @@ REMEMBER: Use ONLY the exact data above. Any invented numbers will be WRONG."""
         Now with web research capabilities!
         """
         # Track request pattern
-        self._track_request_pattern(user_message)
+        await self._track_request_pattern(user_message)
         
         # Get or create conversation
-        conv = self._get_or_create_conversation(session_id, user_id)
+        conv = await self._get_or_create_conversation(session_id, user_id)
         
         # Add user message
         user_msg = AssistantMessage(role="user", content=user_message)
@@ -2645,7 +2648,7 @@ REMEMBER: Use ONLY the exact data above. Any invented numbers will be WRONG."""
             conv.messages.append(assistant_msg)
             
             # Save to DB
-            self._save_conversation_to_db(session_id)
+            await self._save_conversation_to_db(session_id)
             
             # ===== ACCURACY TRACKING =====
             # Record validation result for historical accuracy analysis
@@ -2731,7 +2734,7 @@ Be analytical and specific."""
         journal_context = ""
         if self.db is not None:
             try:
-                trades = list(self.db["trades"].find().sort("entry_date", -1).limit(20))
+                trades = await asyncio.to_thread(lambda: list(self.db["trades"].find().sort("entry_date", -1).limit(20)))
                 if trades:
                     journal_context = f"\nRecent trades from journal: {len(trades)} trades found."
                     wins = len([t for t in trades if t.get("pnl", 0) > 0])
@@ -3284,9 +3287,9 @@ Be specific and reference my actual rules/strategies when applicable."""
         if self.db is not None:
             try:
                 today = datetime.now(timezone.utc).date()
-                trades = list(self.db["trades"].find({
+                trades = await asyncio.to_thread(lambda: list(self.db["trades"].find({
                     "entry_date": {"$gte": today.isoformat()}
-                }))
+                })))
                 
                 if trades:
                     wins = len([t for t in trades if t.get("pnl", 0) > 0])
@@ -3420,46 +3423,53 @@ Be specific with price levels when possible."""
     
     # ===================== END COACHING FEATURES =====================
     
-    def get_conversation_history(self, session_id: str) -> List[Dict]:
+    async def get_conversation_history(self, session_id: str) -> List[Dict]:
         """Get conversation history for a session"""
         conv = self.conversations.get(session_id)
         if not conv:
             # Try loading from DB
-            self._load_conversation_from_db(session_id)
+            await self._load_conversation_from_db(session_id)
             conv = self.conversations.get(session_id)
         
         if conv:
             return [{"role": m.role, "content": m.content, "timestamp": m.timestamp} for m in conv.messages]
         return []
     
-    def clear_conversation(self, session_id: str):
+    async def clear_conversation(self, session_id: str):
         """Clear conversation history"""
         if session_id in self.conversations:
             del self.conversations[session_id]
         
         if self.db is not None:
             try:
-                self.db["assistant_conversations"].delete_one({"session_id": session_id})
+                await asyncio.to_thread(
+                    self.db["assistant_conversations"].delete_one,
+                    {"session_id": session_id}
+                )
             except Exception as e:
                 logger.warning(f"Error deleting conversation: {e}")
     
-    def get_all_sessions(self, user_id: str = "default") -> List[Dict]:
+    async def get_all_sessions(self, user_id: str = "default") -> List[Dict]:
         """Get all conversation sessions for a user"""
         sessions = []
         
         if self.db is not None:
             try:
-                docs = self.db["assistant_conversations"].find(
-                    {"user_id": user_id}
-                ).sort("last_activity", -1).limit(20)
+                def _sync_get_sessions():
+                    docs = self.db["assistant_conversations"].find(
+                        {"user_id": user_id}
+                    ).sort("last_activity", -1).limit(20)
+                    result = []
+                    for doc in docs:
+                        result.append({
+                            "session_id": doc.get("session_id"),
+                            "created_at": doc.get("created_at"),
+                            "last_activity": doc.get("last_activity"),
+                            "message_count": len(doc.get("messages", []))
+                        })
+                    return result
                 
-                for doc in docs:
-                    sessions.append({
-                        "session_id": doc.get("session_id"),
-                        "created_at": doc.get("created_at"),
-                        "last_activity": doc.get("last_activity"),
-                        "message_count": len(doc.get("messages", []))
-                    })
+                sessions = await asyncio.to_thread(_sync_get_sessions)
             except Exception as e:
                 logger.warning(f"Error getting sessions: {e}")
         

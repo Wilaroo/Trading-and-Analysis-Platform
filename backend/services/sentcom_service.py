@@ -121,6 +121,7 @@ class SentComService:
         
         On startup, shows the most recent conversation for continuity.
         All messages are still stored in MongoDB for AI learning.
+        Note: This runs synchronously at init time only (one-time cost).
         """
         try:
             db = _get_db()
@@ -129,7 +130,6 @@ class SentComService:
             cursor = db[self.CHAT_COLLECTION].find(
                 {"created_at": {"$gte": cutoff}}
             ).sort("created_at", -1).limit(self._max_history)
-            
             messages = list(cursor)
             messages.reverse()  # Chronological order
             
@@ -146,11 +146,11 @@ class SentComService:
             logger.error(f"Error loading chat history: {e}")
             self._chat_history = []
     
-    def _save_chat_message(self, role: str, content: str, timestamp: str):
+    async def _save_chat_message(self, role: str, content: str, timestamp: str):
         """Save a chat message to MongoDB"""
         try:
             db = _get_db()
-            db[self.CHAT_COLLECTION].insert_one({
+            await asyncio.to_thread(db[self.CHAT_COLLECTION].insert_one, {
                 "session_id": self._session_id,
                 "role": role,
                 "content": content,
@@ -160,28 +160,26 @@ class SentComService:
         except Exception as e:
             logger.error(f"Error saving chat message: {e}")
     
-    def _cleanup_old_messages(self):
+    async def _cleanup_old_messages(self):
         """Remove old messages beyond max_history from MongoDB"""
         try:
             db = _get_db()
-            # Count messages
-            count = db[self.CHAT_COLLECTION].count_documents({"session_id": self._session_id})
             
-            if count > self._max_history * 2:  # Clean up when we have 2x max
-                # Get IDs of messages to keep (most recent max_history)
-                keep_cursor = db[self.CHAT_COLLECTION].find(
-                    {"session_id": self._session_id},
-                    {"_id": 1}
-                ).sort("timestamp", DESCENDING).limit(self._max_history)
-                
-                keep_ids = [doc["_id"] for doc in keep_cursor]
-                
-                # Delete older messages
-                result = db[self.CHAT_COLLECTION].delete_many({
-                    "session_id": self._session_id,
-                    "_id": {"$nin": keep_ids}
-                })
-                logger.info(f"Cleaned up {result.deleted_count} old chat messages")
+            def _sync_cleanup():
+                count = db[self.CHAT_COLLECTION].count_documents({"session_id": self._session_id})
+                if count > self._max_history * 2:
+                    keep_cursor = db[self.CHAT_COLLECTION].find(
+                        {"session_id": self._session_id},
+                        {"_id": 1}
+                    ).sort("timestamp", DESCENDING).limit(self._max_history)
+                    keep_ids = [doc["_id"] for doc in keep_cursor]
+                    result = db[self.CHAT_COLLECTION].delete_many({
+                        "session_id": self._session_id,
+                        "_id": {"$nin": keep_ids}
+                    })
+                    logger.info(f"Cleaned up {result.deleted_count} old chat messages")
+            
+            await asyncio.to_thread(_sync_cleanup)
         except Exception as e:
             logger.error(f"Error cleaning up old messages: {e}")
     
@@ -1105,15 +1103,15 @@ class SentComService:
             self._chat_history.append(assistant_msg)
             
             # Persist to MongoDB
-            self._save_chat_message("user", message, user_msg["timestamp"])
-            self._save_chat_message("assistant", response_text, assistant_msg["timestamp"])
+            await self._save_chat_message("user", message, user_msg["timestamp"])
+            await self._save_chat_message("assistant", response_text, assistant_msg["timestamp"])
             
             # Trim in-memory history
             if len(self._chat_history) > self._max_history:
                 self._chat_history = self._chat_history[-self._max_history:]
             
             # Periodically clean up old DB messages
-            self._cleanup_old_messages()
+            await self._cleanup_old_messages()
             
             return {
                 "success": result.success,

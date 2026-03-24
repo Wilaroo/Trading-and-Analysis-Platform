@@ -3623,7 +3623,7 @@ class TradingBotService:
                 self._open_trades[trade.id] = trade
                 
                 # Save to MongoDB using the persist method (handles enum serialization)
-                self._persist_trade(trade)
+                await asyncio.to_thread(self._persist_trade, trade)
                 
                 logger.info(f"Created new trade for imported position: {symbol} {int(abs(qty))} shares @ ${avg_cost:.2f}")
                 return {
