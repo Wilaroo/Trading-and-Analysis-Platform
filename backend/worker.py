@@ -120,22 +120,73 @@ async def process_training_job(job: dict, db) -> dict:
     try:
         # Update progress
         await job_queue_manager.update_progress(
-            job_id, percent=5, message=f'Starting training for {bar_size}...'
+            job_id, percent=5, message=f'Starting training...'
         )
         
         if all_timeframes:
-            # Train all timeframes
-            logger.info("Training ALL timeframes...")
+            # Train all timeframes with per-timeframe progress updates
+            timeframes = ["1 day", "1 hour", "5 mins", "15 mins", "30 mins", "1 min", "1 week"]
+            logger.info(f"Training ALL {len(timeframes)} timeframes...")
+            
+            results = {}
+            completed_count = 0
+            total_elapsed = 0
+            
+            for idx, tf in enumerate(timeframes):
+                tf_num = idx + 1
+                pct = int(5 + (idx / len(timeframes)) * 90)  # 5% to 95%
+                
+                await job_queue_manager.update_progress(
+                    job_id, percent=pct, 
+                    message=f'Training timeframe {tf_num}/{len(timeframes)}: {tf}...'
+                )
+                
+                logger.info(f"")
+                logger.info(f">>> Timeframe {tf_num}/{len(timeframes)}: {tf}")
+                
+                try:
+                    if full_universe:
+                        tf_result = await timeseries_service.train_full_universe(bar_size=tf)
+                    else:
+                        tf_result = await timeseries_service.train_model(
+                            bar_size=tf, max_symbols=max_symbols
+                        )
+                    
+                    results[tf] = tf_result
+                    
+                    if tf_result.get('success'):
+                        completed_count += 1
+                        elapsed = tf_result.get('elapsed_seconds', 0)
+                        total_elapsed += elapsed
+                        acc = tf_result.get('accuracy', 0)
+                        acc_pct = f"{acc * 100:.1f}%" if acc else 'N/A'
+                        
+                        await job_queue_manager.update_progress(
+                            job_id, percent=pct + 5,
+                            message=f'{tf} done ({acc_pct}) - {completed_count}/{len(timeframes)} complete'
+                        )
+                        logger.info(f">>> {tf} complete: {acc_pct} accuracy in {elapsed:.0f}s")
+                    else:
+                        logger.error(f">>> {tf} failed: {tf_result.get('error', 'Unknown')}")
+                        results[tf] = tf_result
+                
+                except Exception as tf_err:
+                    logger.error(f">>> {tf} exception: {tf_err}")
+                    results[tf] = {'success': False, 'error': str(tf_err)}
+            
+            # Final result
             await job_queue_manager.update_progress(
-                job_id, percent=10, message='Training all timeframes...'
+                job_id, percent=100,
+                message=f'Full universe complete! {completed_count}/{len(timeframes)} timeframes in {total_elapsed/60:.1f} min'
             )
             
-            if full_universe:
-                result = await timeseries_service.train_full_universe_all_timeframes()
-            else:
-                result = await timeseries_service.train_all_timeframes(
-                    max_symbols=max_symbols
-                )
+            result = {
+                'success': completed_count > 0,
+                'timeframes_trained': completed_count,
+                'total_timeframes': len(timeframes),
+                'total_elapsed_seconds': total_elapsed,
+                'results': results
+            }
         else:
             # Train single timeframe
             logger.info(f"Training single timeframe: {bar_size}")
@@ -157,24 +208,7 @@ async def process_training_job(job: dict, db) -> dict:
         if result.get('success'):
             # Handle both single-timeframe and full-universe-all results
             if 'results' in result and all_timeframes:
-                # Full universe all timeframes result
-                trained = result.get('timeframes_trained', 0)
-                total = result.get('total_timeframes', 0)
-                elapsed = result.get('total_elapsed_seconds', 0)
-                
-                await job_queue_manager.update_progress(
-                    job_id, 
-                    percent=100, 
-                    message=f'Full universe complete! {trained}/{total} timeframes in {elapsed/60:.1f} min'
-                )
-                
-                return {
-                    'success': True,
-                    'timeframes_trained': trained,
-                    'total_timeframes': total,
-                    'total_elapsed_seconds': elapsed,
-                    'results': result.get('results', {})
-                }
+                return result  # Already formatted above
             else:
                 # Single timeframe result
                 accuracy = result.get('accuracy', 0) or result.get('metrics', {}).get('accuracy', 0)
