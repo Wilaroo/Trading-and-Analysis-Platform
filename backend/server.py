@@ -149,6 +149,7 @@ from services.scoring_engine import get_scoring_engine
 from services.feature_engine import get_feature_engine
 from services.quality_service import init_quality_service
 from services.ai_assistant_service import init_assistant_service
+from services.ai_assistant_service import LLMProvider
 from services.scheduler_service import init_scheduler_service
 from services.alpaca_service import init_alpaca_service
 from services.predictive_scanner import get_predictive_scanner
@@ -2430,20 +2431,29 @@ async def startup_check():
     except Exception:
         pass
 
-    # Ollama/AI Assistant - check if ANY LLM provider is available (Ollama OR Emergent)
+    # Ollama/AI Assistant - check the actual LLM routing priority:
+    # 1. HTTP Ollama Proxy (gpt-oss:120b-cloud) - PRIMARY, free
+    # 2. WebSocket Ollama Proxy - fallback 
+    # 3. Direct Ollama via ngrok URL - fallback
+    # 4. Emergent GPT-4o - PAID last resort
+    # Show green only when Ollama (primary) is available, yellow for Emergent-only
     ollama_available = False
+    ai_fallback_only = False
     try:
-        # Check all registered providers in assistant service
-        for provider, cfg in assistant_service.llm_clients.items():
-            if cfg.get("available", False):
-                ollama_available = True
-                break
+        # Check if HTTP Ollama proxy is connected (primary path)
+        if is_http_ollama_proxy_connected():
+            ollama_available = True
+        # Check if WebSocket proxy is connected
+        elif ollama_proxy_manager and ollama_proxy_manager.is_connected:
+            ollama_available = True
+        # Check if direct Ollama URL is configured
+        elif LLMProvider.OLLAMA in assistant_service.llm_clients:
+            ollama_available = True  # URL configured, may or may not be reachable
+        # Only Emergent available = fallback mode
+        elif LLMProvider.EMERGENT in assistant_service.llm_clients and assistant_service.llm_clients[LLMProvider.EMERGENT].get("available"):
+            ai_fallback_only = True
     except Exception:
-        # Fallback: check HTTP proxy
-        try:
-            ollama_available = is_http_ollama_proxy_connected()
-        except Exception:
-            pass
+        pass
 
     # AI Predictions (timeseries) - check if service object exists
     timeseries_available = False
@@ -2474,6 +2484,7 @@ async def startup_check():
         "websocket": backend_ok,  # WebSocket available when backend is up
         "ib": ib_connected,
         "ollama": ollama_available,
+        "ai_fallback_only": ai_fallback_only,  # True when only Emergent is available
         "timeseries": timeseries_available,
         "scanner": scanner_running,
         "learning": learning_available,

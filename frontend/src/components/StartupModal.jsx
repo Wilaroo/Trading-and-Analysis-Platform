@@ -74,6 +74,7 @@ const StartupModal = ({ onComplete }) => {
   const [visible, setVisible] = useState(true);
   const [dontShowAgain, setDontShowAgain] = useState(false);
   const [serviceStatus, setServiceStatus] = useState({});
+  const [lastResponseData, setLastResponseData] = useState(null);
   const [isChecking, setIsChecking] = useState(true);
   const [checkCount, setCheckCount] = useState(0);
   const mountedRef = useRef(true);
@@ -95,7 +96,7 @@ const StartupModal = ({ onComplete }) => {
     setCheckCount(prev => prev + 1);
 
     const url = `${API_URL}/api/startup-check`;
-    const result = await xhrGet(url, 4000); // 4s timeout
+    const result = await xhrGet(url, 8000); // 8s timeout for slower networks
 
     if (!mountedRef.current) return;
 
@@ -109,12 +110,14 @@ const StartupModal = ({ onComplete }) => {
       newStatus.websocket = d.websocket ? 'success' : 'error';
       newStatus.ib        = d.ib        ? 'success' : 'warning';
       newStatus.scanner   = d.scanner   ? 'success' : 'warning';
-      newStatus.ollama    = d.ollama    ? 'success' : 'warning';
+      // AI Assistant: green if Ollama connected, yellow if only Emergent fallback
+      newStatus.ollama    = d.ollama    ? 'success' : d.ai_fallback_only ? 'warning' : 'warning';
       newStatus.timeseries = d.timeseries ? 'success' : 'warning';
       newStatus.learning  = d.learning  ? 'success' : 'warning';
 
-      console.log(`[StartupModal] Check #${checkCount + 1}: backend=${d.backend} ib=${d.ib} ollama=${d.ollama} scanner=${d.scanner}`);
+      console.log(`[StartupModal] Check #${checkCount + 1}: backend=${d.backend} ib=${d.ib} ollama=${d.ollama} ai_fallback=${d.ai_fallback_only} scanner=${d.scanner}`);
       setServiceStatus(newStatus);
+      setLastResponseData(d);
     } else {
       // Backend not reachable yet — all services loading
       console.log(`[StartupModal] Check #${checkCount + 1}: Backend not reachable (timeout=${result.timedOut})`);
@@ -193,7 +196,10 @@ const StartupModal = ({ onComplete }) => {
     }
   };
 
-  const getStatusText = (status) => {
+  const getStatusText = (status, serviceId, data) => {
+    if (serviceId === 'ollama' && status === 'warning' && data?.ai_fallback_only) {
+      return 'Fallback Only';
+    }
     switch (status) {
       case 'success': return 'Ready';
       case 'warning': return 'Unavailable';
@@ -319,7 +325,7 @@ const StartupModal = ({ onComplete }) => {
                               status === 'warning' ? 'text-yellow-400' :
                               'text-zinc-500'
                             }`}>
-                              {getStatusText(status)}
+                              {getStatusText(status, service.id, lastResponseData)}
                             </span>
                             {getStatusIcon(status)}
                           </div>

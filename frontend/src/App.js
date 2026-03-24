@@ -325,36 +325,37 @@ function App() {
     return () => document.removeEventListener('click', handleFirstInteraction);
   }, [initializeAudio]);
 
+  // IB connection props to pass to pages that need it
+  const ibProps = {
+    ibConnected,
+    ibConnectionChecked,
+    connectToIb,
+    checkIbConnection,
+    ibBusy,
+    ibBusyOperation,
+    ibPusherStatus,
+    // WebSocket status for quotes streaming
+    wsConnected: isConnected,
+    wsLastUpdate: lastUpdate,
+    // WebSocket-pushed data (replaces polling in child components)
+    wsBotStatus,
+    wsBotTrades,
+    wsScannerAlerts,
+    wsScannerStatus,
+    wsSmartWatchlist,
+    wsCoachingNotifications,
+  };
+
   const renderPage = () => {
-    // IB connection props to pass to pages that need it
-    const ibProps = {
-      ibConnected,
-      ibConnectionChecked,
-      connectToIb,
-      checkIbConnection,
-      ibBusy,
-      ibBusyOperation,
-      ibPusherStatus,
-      // WebSocket status for quotes streaming
-      wsConnected: isConnected,
-      wsLastUpdate: lastUpdate,
-      // WebSocket-pushed data (replaces polling in child components)
-      wsBotStatus,
-      wsBotTrades,
-      wsScannerAlerts,
-      wsScannerStatus,
-      wsSmartWatchlist,
-      wsCoachingNotifications,
-    };
-    
+    // Command Center and NIA are rendered separately (always mounted)
     switch (activeTab) {
-      case 'command-center': return <CommandCenterPage {...ibProps} isActiveTab={true} />;
-      case 'nia': return <ErrorBoundary name="NIA"><NIA /></ErrorBoundary>;
+      case 'command-center': return null;
+      case 'nia': return null;
       case 'chart': return <ErrorBoundary name="Charts"><ChartsPage {...ibProps} /></ErrorBoundary>;
       case 'trade-journal': return <ErrorBoundary name="Trade Journal"><TradeJournalPage /></ErrorBoundary>;
       case 'glossary': return <ErrorBoundary name="Glossary"><GlossaryPage /></ErrorBoundary>;
       case 'settings': return <ErrorBoundary name="Settings"><SettingsPage /></ErrorBoundary>;
-      default: return <CommandCenterPage {...ibProps} isActiveTab={activeTab === 'command-center'} />;
+      default: return null;
     }
   };
 
@@ -483,15 +484,28 @@ function App() {
           <TickerTape indices={dashboardData.overview?.indices} isConnected={isConnected} lastUpdate={lastUpdate} />
         </div>
         
-        {/* Main Content Area */}
+        {/* Main Content Area - Tabs stay mounted to preserve state */}
         <div className="p-6">
-          <AnimatePresence mode="wait">
-            <motion.div key={activeTab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
-              <ErrorBoundary name={activeTab}>
-                {renderPage()}
-              </ErrorBoundary>
-            </motion.div>
-          </AnimatePresence>
+          {/* Command Center - always mounted, hidden when not active */}
+          <div style={{ display: activeTab === 'command-center' ? 'block' : 'none' }}>
+            <ErrorBoundary name="command-center">
+              <CommandCenterPage {...ibProps} isActiveTab={activeTab === 'command-center'} />
+            </ErrorBoundary>
+          </div>
+          
+          {/* NIA - always mounted, hidden when not active */}
+          <div style={{ display: activeTab === 'nia' ? 'block' : 'none' }}>
+            <ErrorBoundary name="NIA">
+              <NIA />
+            </ErrorBoundary>
+          </div>
+          
+          {/* Other tabs - render on demand (less frequently used) */}
+          {activeTab !== 'command-center' && activeTab !== 'nia' && (
+            <ErrorBoundary name={activeTab}>
+              {renderPage()}
+            </ErrorBoundary>
+          )}
         </div>
       </main>
       
