@@ -130,6 +130,7 @@ const StartupModal = ({ onComplete }) => {
   }, [onComplete]);
 
   // Check a single service - uses un-throttled fetch to bypass the request queue
+  // Timeout adapts: 5s normally, 2s after backend is confirmed up (services should respond fast)
   const checkService = useCallback(async (service) => {
     if (service.checkType === 'websocket') {
       return wsConnected ? 'success' : 'loading';
@@ -140,10 +141,12 @@ const StartupModal = ({ onComplete }) => {
     const directFetch = window.__originalFetch || window.fetch;
     const url = `${API_URL}${service.endpoint}`;
     const startTime = Date.now();
+    // Shorter timeout once backend is confirmed up — other services should be fast too
+    const timeout = serviceStatusRef.current['backend'] === 'success' ? 2000 : 5000;
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
 
       const response = await directFetch(url, {
         signal: controller.signal
@@ -209,8 +212,8 @@ const StartupModal = ({ onComplete }) => {
         return next;
       });
 
-      // 750ms between each check to give backend breathing room
-      await new Promise(resolve => setTimeout(resolve, 750));
+      // 200ms between each check (reduced from 750ms - backend handles this fine)
+      await new Promise(resolve => setTimeout(resolve, 200));
     }
 
     setIsChecking(false);
@@ -265,12 +268,12 @@ const StartupModal = ({ onComplete }) => {
       await checkAllServices();
       // Schedule next round AFTER current round finishes (no overlap)
       if (mountedRef.current) {
-        checkIntervalRef.current = setTimeout(runCheck, 3000);
+        checkIntervalRef.current = setTimeout(runCheck, 1000);
       }
     };
 
-    // Initial check after short delay
-    checkIntervalRef.current = setTimeout(runCheck, 500);
+    // Initial check after minimal delay
+    checkIntervalRef.current = setTimeout(runCheck, 100);
 
     return () => {
       mountedRef.current = false;
