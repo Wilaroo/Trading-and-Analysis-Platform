@@ -19,16 +19,11 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Create throttled versions of api methods
+// Throttle only GET requests (background polling).
+// POST/PUT/DELETE are user-initiated actions — never queue them behind polling.
 const originalGet = api.get.bind(api);
-const originalPost = api.post.bind(api);
-const originalPut = api.put.bind(api);
-const originalDelete = api.delete.bind(api);
 
 api.get = (url, config) => requestThrottler.throttle(() => originalGet(url, config));
-api.post = (url, data, config) => requestThrottler.throttle(() => originalPost(url, data, config));
-api.put = (url, data, config) => requestThrottler.throttle(() => originalPut(url, data, config));
-api.delete = (url, config) => requestThrottler.throttle(() => originalDelete(url, config));
 
 // Create a separate instance for long-running operations (Market Intelligence, Scans, etc.)
 // This one is NOT throttled since these are intentional long requests

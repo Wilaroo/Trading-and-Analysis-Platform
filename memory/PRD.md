@@ -36,6 +36,9 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
 16. **Fix: AI Model "Untrained" Display on First Load (Mar 25, 2026)** - COMPLETED
     - Added `modelTrained: null` and `timeseriesTrained: null` to DEFAULT_DATA
     - QuickStatsBar now shows `--` / `loading...` instead of false "Untrained" during API fetch
+17. **Fix: Setup Training POST Blocked by Request Throttler (Mar 25, 2026)** - COMPLETED
+    - Root cause: 19+ polling GETs per cycle exceeded the 16-concurrent throttler limit, starving POST/PUT/DELETE requests
+    - Fix: Only throttle GET requests; POST/PUT/DELETE (user-initiated actions) bypass the throttler entirely
 
 ## Key API Endpoints
 
