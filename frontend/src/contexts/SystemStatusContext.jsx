@@ -11,8 +11,7 @@
  */
 
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
-import api, { safeGet, safePost } from '../utils/api';
-const API_URL = process.env.REACT_APP_BACKEND_URL || ''; // For service health checks
+import { safeGet } from '../utils/api';
 
 const SystemStatusContext = createContext(null);
 
@@ -120,14 +119,11 @@ export const SystemStatusProvider = ({ children }) => {
     if (!service?.checkEndpoint) return;
     
     try {
-      const response = await fetch(`${API_URL}${service.checkEndpoint}`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      // Use safeGet (axios-based, goes through CRA proxy) for consistent behavior
+      const response = await safeGet(service.checkEndpoint);
+      const data = response?.data;
       
-      if (response.ok) {
-        const data = await response.json();
-        // Different services have different response formats
+      if (data && response?.status === 200) {
         let connected = false;
         let message = null;
         
@@ -135,20 +131,17 @@ export const SystemStatusProvider = ({ children }) => {
           connected = data.connected === true;
           message = data.account_id ? `Account: ${data.account_id}` : null;
         } else if (serviceId === 'ollama') {
-          // /api/assistant/check-ollama returns { available: true/false }
           connected = data.available === true;
           message = data.model ? `Model: ${data.model}` : null;
         } else if (serviceId === 'ibDataPusher') {
-          // /api/ib/pushed-data returns { connected: true/false, last_update: ... }
           connected = data.connected === true;
           if (data.last_update) {
             const lastUpdate = new Date(data.last_update);
             const ageSeconds = (Date.now() - lastUpdate.getTime()) / 1000;
-            // Consider stale if no update in 60 seconds
             connected = connected && ageSeconds < 60;
           }
         } else {
-          connected = data.status === 'healthy' || data.status === 'ok' || data.healthy || response.ok;
+          connected = data.status === 'healthy' || data.status === 'ok' || data.healthy || true;
         }
         
         updateStatus(serviceId, connected ? STATUS.CONNECTED : STATUS.DISCONNECTED, message);
@@ -170,7 +163,9 @@ export const SystemStatusProvider = ({ children }) => {
     // Check backend first (if backend is down, others will fail)
     try {
       const healthResponse = await safeGet('/api/health');
-      if (healthResponse.ok) {
+      // safeGet returns an axios response (.status, .data) — NOT a fetch Response (.ok)
+      const isHealthy = healthResponse?.status === 200 || healthResponse?.data?.status === 'healthy';
+      if (isHealthy) {
         updateStatus('backend', STATUS.CONNECTED);
         updateStatus('mongodb', STATUS.CONNECTED); // If backend is up, DB is connected
         
