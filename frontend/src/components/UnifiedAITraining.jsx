@@ -1070,6 +1070,41 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       }
     } catch (e) {
       console.error('Train-all error:', e);
+      // POST may have succeeded even if frontend timed out — check for running jobs
+      try {
+        const check = await api.get('/api/jobs/running');
+        const running = check?.data?.jobs || [];
+        const match = running.find(j => j.job_type === 'training');
+        if (match) {
+          toast.success(`Training is running (job ${match.job_id})`);
+          // Start polling the found job
+          const pollFoundJob = async () => {
+            try {
+              const statusRes = await api.get(`/api/jobs/${match.job_id}`);
+              const jobStatus = statusRes.data?.job;
+              if (jobStatus?.status === 'completed') {
+                toast.success('Training complete!');
+                setIsTraining(false);
+                notifyTrainingEnd();
+                if (onTrainComplete) onTrainComplete();
+                return;
+              }
+              if (jobStatus?.status === 'failed') {
+                toast.error(jobStatus.error || 'Training failed');
+                setIsTraining(false);
+                notifyTrainingEnd();
+                return;
+              }
+              if (jobStatus?.progress?.message) {
+                setModelStatus(prev => ({ ...prev, _all: { status: 'running', message: jobStatus.progress.message } }));
+              }
+              setTimeout(pollFoundJob, 3000);
+            } catch { setTimeout(pollFoundJob, 5000); }
+          };
+          setTimeout(pollFoundJob, 3000);
+          return;
+        }
+      } catch { /* check failed too */ }
       toast.error(`Training error: ${e.message}`);
       setIsTraining(false);
       notifyTrainingEnd();

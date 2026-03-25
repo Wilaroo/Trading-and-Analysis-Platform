@@ -213,6 +213,19 @@ const SetupModelsPanel = memo(() => {
         setLocalTraining(prev => { const n = { ...prev }; delete n[setupType]; return n; });
       }
     } catch (err) {
+      // POST may have succeeded on backend even if frontend timed out.
+      // Check for running jobs before showing error.
+      try {
+        const check = await api.get('/api/jobs/running');
+        const running = check?.data?.jobs || [];
+        const match = running.find(j => j.params?.setup_type === setupType);
+        if (match) {
+          setActiveJobs(prev => ({ ...prev, [setupType]: match.job_id }));
+          setLocalTraining(prev => ({ ...prev, [setupType]: { status: 'running', message: 'Training in progress...' } }));
+          toast.success(`${setupType.replace(/_/g, ' ')} training is running`);
+          return;
+        }
+      } catch { /* polling check failed too */ }
       toast.error(`Error: ${err.message}`);
       setLocalTraining(prev => { const n = { ...prev }; delete n[setupType]; return n; });
     }
@@ -232,6 +245,18 @@ const SetupModelsPanel = memo(() => {
         setTrainingAll(false);
       }
     } catch (err) {
+      // POST may have succeeded — check for running jobs
+      try {
+        const check = await api.get('/api/jobs/running');
+        const running = check?.data?.jobs || [];
+        const match = running.find(j => j.job_type === 'setup_training');
+        if (match) {
+          setActiveJobs(prev => ({ ...prev, _ALL: match.job_id }));
+          setLocalTraining(prev => ({ ...prev, _ALL: { status: 'running', message: 'Training in progress...' } }));
+          toast.success('Setup training is running');
+          return;
+        }
+      } catch { /* polling check failed too */ }
       toast.error(`Error: ${err.message}`);
       setTrainingAll(false);
     }

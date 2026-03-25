@@ -46,35 +46,37 @@ api.get = (url, config) => requestThrottler.throttle(() =>
 // POST/PUT/DELETE are NOT throttled — user-initiated, must go through immediately
 
 // ---- Direct XHR POST for critical user actions ----
-// Aborts all in-flight polling, pauses the throttler, waits for connections to
-// free up, then fires the POST with a guaranteed free browser connection slot.
+// Posts directly to the backend (port 8001) to bypass the React dev proxy
+// and avoid competing with polling GETs for browser connection slots.
+// In production (same origin), posts to the normal URL.
 export const xhrPost = (url, body, timeout = 30000) => {
-  // 1. Abort all in-flight polling GETs → frees browser connections
-  abortPolling();
-  // 2. Pause throttler → no new polling GETs will start for 8s
-  requestThrottler.pause(8000);
+  // Determine the target URL:
+  // - Dev (localhost:3000 proxying to :8001): POST directly to :8001
+  // - Production / preview: POST to same origin
+  let fullUrl;
+  const loc = window.location;
+  if (loc.hostname === 'localhost' && loc.port === '3000') {
+    fullUrl = `http://localhost:8001${url}`;
+  } else {
+    fullUrl = `${loc.origin}${url}`;
+  }
 
-  const fullUrl = `${window.location.origin}${url}`;
-
-  // 3. Small delay to let browser release aborted connections
   return new Promise((resolve, reject) => {
-    setTimeout(() => {
-      const xhr = new XMLHttpRequest();
-      xhr.timeout = timeout;
-      xhr.onload = () => {
-        try {
-          const data = JSON.parse(xhr.responseText);
-          resolve({ data, status: xhr.status });
-        } catch {
-          resolve({ data: {}, status: xhr.status });
-        }
-      };
-      xhr.ontimeout = () => reject(new Error('Request timed out'));
-      xhr.onerror = () => reject(new Error('Network error'));
-      xhr.open('POST', fullUrl);
-      xhr.setRequestHeader('Content-Type', 'application/json');
-      xhr.send(JSON.stringify(body));
-    }, 200); // 200ms for browser to release aborted connections
+    const xhr = new XMLHttpRequest();
+    xhr.timeout = timeout;
+    xhr.onload = () => {
+      try {
+        const data = JSON.parse(xhr.responseText);
+        resolve({ data, status: xhr.status });
+      } catch {
+        resolve({ data: {}, status: xhr.status });
+      }
+    };
+    xhr.ontimeout = () => reject(new Error('Request timed out'));
+    xhr.onerror = () => reject(new Error('Network error'));
+    xhr.open('POST', fullUrl);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.send(JSON.stringify(body));
   });
 };
 
