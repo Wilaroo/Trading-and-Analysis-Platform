@@ -9,104 +9,135 @@ export const api = axios.create({
   timeout: 30000  // 30 seconds default timeout
 });
 
-// Add request interceptor to throttle concurrent requests
-api.interceptors.request.use(
-  async (config) => {
-    // Wrap the request in the throttler
-    // This doesn't actually throttle here, but we track it
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-// Throttle only GET requests (background polling).
-// POST/PUT/DELETE are user-initiated actions — never queue them behind polling.
-const originalGet = api.get.bind(api);
-
-api.get = (url, config) => requestThrottler.throttle(() => originalGet(url, config));
-
-// Create a separate instance for long-running operations (Market Intelligence, Scans, etc.)
-// This one is NOT throttled since these are intentional long requests
+// Long-running requests get 10min timeout
 export const apiLongRunning = axios.create({
   baseURL: API_URL,
-  timeout: 300000  // 5 minutes for comprehensive scans (they can take a while)
+  timeout: 600000
 });
 
-// Throttled fetch wrapper for components using native fetch
-export const throttledFetch = (url, options = {}) => {
-  return requestThrottler.throttle(() => fetch(url, options));
-};
+// ---- Polling abort controller ----
+// All throttled GETs use this signal so we can abort them before user actions.
+let _pollingController = new AbortController();
 
-// WebSocket URL - detect protocol and construct WS URL
-export const getWebSocketUrl = () => {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = window.location.host;
-  // For development with proxy, connect to backend directly
-  if (host.includes('localhost:3000')) {
-    return 'ws://localhost:8001/api/ws/quotes';
-  }
-  return `${protocol}//${host}/api/ws/quotes`;
-};
+function getPollingSignal() {
+  return _pollingController.signal;
+}
 
-// Export throttler for monitoring
-export { requestThrottler };
+// Abort all in-flight polling GETs and reset the controller
+function abortPolling() {
+  _pollingController.abort();
+  _pollingController = new AbortController();
+}
 
-// Safe API wrappers - return empty object on error (matches common fetch pattern)
-export const safeGet = async (url) => {
-  try {
-    const { data } = await api.get(url);
-    return data;
-  } catch (err) {
-    if (err?.response?.status === 429) return null; // Rate limited
-    return {};
-  }
-};
+// ---- Throttled GET (background polling only) ----
+const originalGet = api.get.bind(api);
 
-export const safePost = async (url, body) => {
-  try {
-    const { data } = await api.post(url, body);
-    return data;
-  } catch (err) {
-    if (err?.response?.status === 429) return null;
-    return {};
-  }
-};
+api.get = (url, config) => requestThrottler.throttle(() =>
+  originalGet(url, { ...config, signal: getPollingSignal() })
+    .catch(err => {
+      // Silently swallow AbortError from our intentional abort
+      if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError') {
+        return { data: null };
+      }
+      throw err;
+    })
+);
 
-export const safeDelete = async (url) => {
-  try {
-    const { data } = await api.delete(url);
-    return data;
-  } catch (err) {
-    return {};
-  }
-};
+// POST/PUT/DELETE are NOT throttled — user-initiated, must go through immediately
 
-// Direct XHR POST — bypasses axios interceptors and connection pool contention.
-// Use for critical user-initiated actions (training, job creation) that must not
-// be delayed by background polling.
-// Pauses the throttler first to free browser connection slots.
+// ---- Direct XHR POST for critical user actions ----
+// Aborts all in-flight polling, pauses the throttler, waits for connections to
+// free up, then fires the POST with a guaranteed free browser connection slot.
 export const xhrPost = (url, body, timeout = 30000) => {
-  // Pause polling to free connection slots for this POST
-  requestThrottler.pause(5000);
+  // 1. Abort all in-flight polling GETs → frees browser connections
+  abortPolling();
+  // 2. Pause throttler → no new polling GETs will start for 8s
+  requestThrottler.pause(8000);
 
   const fullUrl = `${window.location.origin}${url}`;
+
+  // 3. Small delay to let browser release aborted connections
   return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.timeout = timeout;
-    xhr.onload = () => {
-      try {
-        const data = JSON.parse(xhr.responseText);
-        resolve({ data, status: xhr.status });
-      } catch {
-        resolve({ data: {}, status: xhr.status });
-      }
-    };
-    xhr.ontimeout = () => reject(new Error('Request timed out'));
-    xhr.onerror = () => reject(new Error('Network error'));
-    xhr.open('POST', fullUrl);
-    xhr.setRequestHeader('Content-Type', 'application/json');
-    xhr.send(JSON.stringify(body));
+    setTimeout(() => {
+      const xhr = new XMLHttpRequest();
+      xhr.timeout = timeout;
+      xhr.onload = () => {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          resolve({ data, status: xhr.status });
+        } catch {
+          resolve({ data: {}, status: xhr.status });
+        }
+      };
+      xhr.ontimeout = () => reject(new Error('Request timed out'));
+      xhr.onerror = () => reject(new Error('Network error'));
+      xhr.open('POST', fullUrl);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.send(JSON.stringify(body));
+    }, 200); // 200ms for browser to release aborted connections
   });
+};
+
+// ---- Safe wrappers (catch errors, return null) ----
+
+export const safeGet = async (url, config) => {
+  try {
+    const res = await api.get(url, config);
+    return res;
+  } catch {
+    return { data: null };
+  }
+};
+
+export const safePost = async (url, data, config) => {
+  try {
+    const res = await api.post(url, data, config);
+    return res;
+  } catch {
+    return { data: null };
+  }
+};
+
+export const safeDelete = async (url, config) => {
+  try {
+    const res = await api.delete(url, config);
+    return res;
+  } catch {
+    return { data: null };
+  }
+};
+
+// ---- Helpers ----
+
+// Cache helper with TTL
+const _cache = {};
+export const getCached = (key) => {
+  const entry = _cache[key];
+  if (!entry) return null;
+  if (Date.now() - entry.ts > entry.ttl) {
+    delete _cache[key];
+    return null;
+  }
+  return entry;
+};
+
+export const setCache = (key, data, ttl = 10000) => {
+  _cache[key] = { data, ts: Date.now(), ttl };
+};
+
+export const getApiHealth = async () => {
+  try {
+    const response = await api.get('/api/health');
+    return response?.data || {};
+  } catch {
+    return {};
+  }
+};
+
+// ---- WebSocket URL helper ----
+export const getWebSocketUrl = () => {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}`;
 };
 
 export default api;
