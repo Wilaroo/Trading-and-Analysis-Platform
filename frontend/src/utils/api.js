@@ -139,7 +139,7 @@ export const getApiHealth = async () => {
 // ---- WebSocket URL helper ----
 export const getWebSocketUrl = () => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}`;
+  return `${protocol}//${window.location.host}/api/ws/quotes`;
 };
 
 export default api;

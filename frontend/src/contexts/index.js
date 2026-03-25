@@ -5,3 +5,5 @@ export { ConnectionManagerProvider, useConnectionManager } from './ConnectionMan
 export { SystemStatusProvider, useSystemStatus, useIBConnected, useAIAvailable } from './SystemStatusContext';
 export { FocusModeProvider, useFocusMode, useFocusAwarePolling, FOCUS_MODES } from './FocusModeContext';
 export { StartupManagerProvider, useStartupManager, useFeatureGate, POLLING_INTERVALS, FEATURE_POLLING } from './StartupManagerContext';
+export { TrainCommandProvider, useTrainCommand } from './TrainCommandContext';
+

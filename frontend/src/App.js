@@ -15,7 +15,8 @@ import {
   SystemStatusProvider,
   FocusModeProvider,
   StartupManagerProvider,
-  useSystemStatus
+  useSystemStatus,
+  TrainCommandProvider
 } from './contexts';
 import api from './utils/api';
 import { resetStaggerCounter } from './utils/safePolling';
@@ -281,7 +282,7 @@ function App() {
     }
   }, []);
 
-  const { isConnected, lastUpdate } = useWebSocket(handleWebSocketMessage);
+  const { isConnected, lastUpdate, sendTrainCommand } = useWebSocket(handleWebSocketMessage);
   
   // Price Alerts Integration
   const {
@@ -382,6 +383,7 @@ function App() {
     <ConnectionManagerProvider>
     <FocusModeProvider>
     <TrainingModeProvider>
+    <TrainCommandProvider value={sendTrainCommand}>
     <DataCacheProvider>
     <TickerModalProvider>
       {/* Sync WebSocket status to SystemStatusContext */}
@@ -531,6 +533,7 @@ function App() {
       </div>
     </TickerModalProvider>
     </DataCacheProvider>
+    </TrainCommandProvider>
     </TrainingModeProvider>
     </FocusModeProvider>
     </ConnectionManagerProvider>

@@ -3020,16 +3020,17 @@ async def websocket_quotes(websocket: WebSocket):
                 await manager.send_personal_message({"type": "pong"}, websocket)
             
             elif data.get("action") == "train_setup":
-                # Handle training request via WebSocket (bypasses HTTP connection pool)
+                # Handle setup-specific training via WebSocket (bypasses HTTP connection pool)
                 setup_type = data.get("setup_type")
                 bar_size = data.get("bar_size", "1 day")
                 try:
-                    from services.job_queue_manager import JobQueueManager
-                    jqm = JobQueueManager()
-                    job_id = jqm.create_job(
+                    result = await job_queue_manager.create_job(
                         job_type="setup_training",
                         params={"setup_type": setup_type, "bar_size": bar_size, "max_symbols": None, "max_bars_per_symbol": None}
                     )
+                    if not result.get("success"):
+                        raise Exception(result.get("error", "Failed to create job"))
+                    job_id = result["job"]["job_id"]
                     await manager.send_personal_message({
                         "type": "train_queued",
                         "job_id": job_id,
@@ -3038,6 +3039,8 @@ async def websocket_quotes(websocket: WebSocket):
                     }, websocket)
                     print(f"[WS] Created setup_training job {job_id} for {setup_type}")
                 except Exception as train_err:
+                    import traceback
+                    traceback.print_exc()
                     await manager.send_personal_message({
                         "type": "train_error",
                         "error": str(train_err),
@@ -3045,17 +3048,52 @@ async def websocket_quotes(websocket: WebSocket):
                         "success": False
                     }, websocket)
             
-            elif data.get("action") == "train_general":
-                # Handle general training request via WebSocket
+            elif data.get("action") == "train_setup_all":
+                # Handle train-all setup models via WebSocket
                 bar_size = data.get("bar_size", "1 day")
-                train_type = data.get("train_type", "train-all")
                 try:
-                    from services.job_queue_manager import JobQueueManager
-                    jqm = JobQueueManager()
-                    job_id = jqm.create_job(
-                        job_type="training",
-                        params={"bar_size": bar_size, "train_type": train_type}
+                    result = await job_queue_manager.create_job(
+                        job_type="setup_training_all",
+                        params={"bar_size": bar_size}
                     )
+                    if not result.get("success"):
+                        raise Exception(result.get("error", "Failed to create job"))
+                    job_id = result["job"]["job_id"]
+                    await manager.send_personal_message({
+                        "type": "train_queued",
+                        "job_id": job_id,
+                        "train_type": "setup_all",
+                        "success": True
+                    }, websocket)
+                    print(f"[WS] Created setup_training_all job {job_id}")
+                except Exception as train_err:
+                    import traceback
+                    traceback.print_exc()
+                    await manager.send_personal_message({
+                        "type": "train_error",
+                        "error": str(train_err),
+                        "success": False
+                    }, websocket)
+            
+            elif data.get("action") == "train_general":
+                # Handle general model training via WebSocket
+                bar_size = data.get("bar_size", "1 day")
+                train_type = data.get("train_type", "single")
+                full_universe = data.get("full_universe", False)
+                all_timeframes = data.get("all_timeframes", False)
+                try:
+                    params = {"bar_size": bar_size}
+                    if full_universe:
+                        params["full_universe"] = True
+                        params["all_timeframes"] = all_timeframes
+                    result = await job_queue_manager.create_job(
+                        job_type="training",
+                        params=params,
+                        priority=8 if not full_universe else 10
+                    )
+                    if not result.get("success"):
+                        raise Exception(result.get("error", "Failed to create job"))
+                    job_id = result["job"]["job_id"]
                     await manager.send_personal_message({
                         "type": "train_queued",
                         "job_id": job_id,
@@ -3064,6 +3102,8 @@ async def websocket_quotes(websocket: WebSocket):
                     }, websocket)
                     print(f"[WS] Created training job {job_id} ({train_type})")
                 except Exception as train_err:
+                    import traceback
+                    traceback.print_exc()
                     await manager.send_personal_message({
                         "type": "train_error",
                         "error": str(train_err),

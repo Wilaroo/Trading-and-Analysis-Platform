@@ -7,7 +7,8 @@ import {
   XCircle, RefreshCw, Layers
 } from 'lucide-react';
 import { toast } from 'sonner';
-import api, { xhrPost } from '../../utils/api';
+import api from '../../utils/api';
+import { useTrainCommand } from '../../contexts';
 
 const SETUP_CONFIG = {
   MOMENTUM:           { icon: TrendingUp, color: 'text-cyan-400',   bg: 'bg-cyan-500/15',   border: 'border-cyan-500/25' },
@@ -114,6 +115,7 @@ const SetupModelsPanel = memo(() => {
   const [localTraining, setLocalTraining] = useState({});  // track per-type training locally
 
   const [activeJobs, setActiveJobs] = useState({});  // { setupType: job_id }
+  const sendTrainCommand = useTrainCommand();
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -201,20 +203,20 @@ const SetupModelsPanel = memo(() => {
     toast.info(`Training ${setupType.replace(/_/g, ' ')} model...`);
 
     try {
-      const res = await xhrPost('/api/ai-modules/timeseries/setups/train', {
-        setup_type: setupType,
-        bar_size: '1 day',
-      });
-      if (res.data?.success && res.data.job_id) {
-        setActiveJobs(prev => ({ ...prev, [setupType]: res.data.job_id }));
+      // Send training command via WebSocket (bypasses HTTP connection pool)
+      const res = await sendTrainCommand(
+        { action: 'train_setup', setup_type: setupType, bar_size: '1 day' },
+        setupType
+      );
+      if (res.success && res.job_id) {
+        setActiveJobs(prev => ({ ...prev, [setupType]: res.job_id }));
         setLocalTraining(prev => ({ ...prev, [setupType]: { status: 'running', message: 'Waiting for worker...' } }));
       } else {
-        toast.error(res.data?.error || `Failed to queue ${setupType}`);
+        toast.error(res.error || `Failed to queue ${setupType}`);
         setLocalTraining(prev => { const n = { ...prev }; delete n[setupType]; return n; });
       }
     } catch (err) {
-      // POST may have succeeded on backend even if frontend timed out.
-      // Check for running jobs before showing error.
+      // Fallback: check if a job is already running for this setup type
       try {
         const check = await api.get('/api/jobs/running');
         const running = check?.data?.jobs || [];
@@ -225,27 +227,30 @@ const SetupModelsPanel = memo(() => {
           toast.success(`${setupType.replace(/_/g, ' ')} training is running`);
           return;
         }
-      } catch { /* polling check failed too */ }
+      } catch { /* fallback check failed */ }
       toast.error(`Error: ${err.message}`);
       setLocalTraining(prev => { const n = { ...prev }; delete n[setupType]; return n; });
     }
-  }, []);
+  }, [sendTrainCommand]);
 
   const handleTrainAll = useCallback(async () => {
     try {
       setTrainingAll(true);
       toast.info('Queuing all setup model training...');
-      const res = await xhrPost('/api/ai-modules/timeseries/setups/train-all', { bar_size: '1 day' });
-      if (res.data?.success && res.data.job_id) {
-        toast.success(`Training ${res.data.total_types} setup models queued`);
-        setActiveJobs(prev => ({ ...prev, _ALL: res.data.job_id }));
+      const res = await sendTrainCommand(
+        { action: 'train_setup_all', bar_size: '1 day' },
+        'setup_all'
+      );
+      if (res.success && res.job_id) {
+        toast.success('All setup models training queued');
+        setActiveJobs(prev => ({ ...prev, _ALL: res.job_id }));
         setLocalTraining(prev => ({ ...prev, _ALL: { status: 'running', message: 'Waiting for worker...' } }));
       } else {
-        toast.error(res.data?.error || 'Failed to queue training');
+        toast.error(res.error || 'Failed to queue training');
         setTrainingAll(false);
       }
     } catch (err) {
-      // POST may have succeeded — check for running jobs
+      // Fallback: check for running jobs
       try {
         const check = await api.get('/api/jobs/running');
         const running = check?.data?.jobs || [];
@@ -256,11 +261,11 @@ const SetupModelsPanel = memo(() => {
           toast.success('Setup training is running');
           return;
         }
-      } catch { /* polling check failed too */ }
+      } catch { /* check failed */ }
       toast.error(`Error: ${err.message}`);
       setTrainingAll(false);
     }
-  }, []);
+  }, [sendTrainCommand]);
 
   const models = status?.models || {};
   const trainedCount = status?.models_trained || 0;

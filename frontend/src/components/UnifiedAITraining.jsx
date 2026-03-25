@@ -40,8 +40,8 @@ import {
   Globe
 } from 'lucide-react';
 import { toast } from 'sonner';
-import api, { apiLongRunning, xhrPost } from '../utils/api';
-import { useTrainingMode } from '../contexts';
+import api, { apiLongRunning } from '../utils/api';
+import { useTrainingMode, useTrainCommand } from '../contexts';
 
 // Timeframe configurations
 const TIMEFRAME_CONFIG = {
@@ -384,6 +384,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
   
   // Training mode context - notifies other components to reduce polling
   const { startTraining: notifyTrainingStart, endTraining: notifyTrainingEnd, updateProgress: notifyProgress } = useTrainingMode();
+  const sendTrainCommand = useTrainCommand();
   
   // Data states
   const [availableData, setAvailableData] = useState(null);
@@ -987,34 +988,36 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
   // Train ALL timeframes
   const handleTrainAll = async () => {
     setIsTraining(true);
-    // Notify all components to reduce polling during training
     notifyTrainingStart('train-all');
     const timeframes = Object.keys(availableData?.timeframes || {});
     
     toast.info(`Queuing ${timeframes.length} timeframe models for training...`);
 
     try {
-      const res = await xhrPost('/api/ai-modules/timeseries/train-all');
+      // Send via WebSocket to bypass HTTP connection pool saturation
+      const res = await sendTrainCommand(
+        { action: 'train_general', bar_size: 'all', train_type: 'train-all', all_timeframes: true },
+        'train-all'
+      );
 
-      if (res.data?.success && res.data?.job_id) {
-        const jobId = res.data.job_id;
+      if (res.success && res.job_id) {
+        const jobId = res.job_id;
         toast.success(`Training all timeframes queued (job ${jobId})`);
         
         // Poll for job completion
         let pollCount = 0;
-        const maxPolls = 7200; // 2 hours at 1s intervals
+        const maxPolls = 7200;
         
         const pollJob = async () => {
           pollCount++;
           try {
-            const statusRes = await api.get(`/api/jobs/${jobId}`);
+            const statusRes = await apiLongRunning.get(`/api/jobs/${jobId}`);
             const jobStatus = statusRes.data?.job;
             if (!jobStatus) {
               if (pollCount < maxPolls) setTimeout(pollJob, 2000);
               return;
             }
             
-            // Update per-timeframe status from progress message
             if (jobStatus.progress?.message) {
               setModelStatus(prev => ({
                 ...prev,
@@ -1059,25 +1062,20 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
         
         setTimeout(pollJob, 3000);
         
-      } else if (res.data?.ml_not_available) {
-        toast.error('ML libraries not installed. Run: pip install lightgbm');
-        setIsTraining(false);
-        notifyTrainingEnd();
       } else {
-        toast.error(res.data?.error || 'Failed to queue training');
+        toast.error(res.error || 'Failed to queue training');
         setIsTraining(false);
         notifyTrainingEnd();
       }
     } catch (e) {
       console.error('Train-all error:', e);
-      // POST may have succeeded even if frontend timed out — check for running jobs
+      // Fallback: check for running jobs
       try {
         const check = await api.get('/api/jobs/running');
         const running = check?.data?.jobs || [];
         const match = running.find(j => j.job_type === 'training');
         if (match) {
           toast.success(`Training is running (job ${match.job_id})`);
-          // Start polling the found job
           const pollFoundJob = async () => {
             try {
               const statusRes = await api.get(`/api/jobs/${match.job_id}`);
@@ -1104,7 +1102,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
           setTimeout(pollFoundJob, 3000);
           return;
         }
-      } catch { /* check failed too */ }
+      } catch { /* check failed */ }
       toast.error(`Training error: ${e.message}`);
       setIsTraining(false);
       notifyTrainingEnd();
@@ -1156,13 +1154,14 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       
       toast.info('Quick Train: Training Daily model...');
       
-      // Enqueue training job via worker
-      const trainRes = await xhrPost('/api/ai-modules/timeseries/train', {
-        bar_size: '1 day'
-      });
+      // Enqueue training job via WebSocket (bypasses HTTP connection pool)
+      const trainRes = await sendTrainCommand(
+        { action: 'train_general', bar_size: '1 day', train_type: 'single' },
+        'single'
+      );
 
-      if (trainRes.data?.success && trainRes.data?.job_id) {
-        const jobId = trainRes.data.job_id;
+      if (trainRes.success && trainRes.job_id) {
+        const jobId = trainRes.job_id;
         
         setTrainingProgress(prev => ({
           ...prev,
@@ -1222,15 +1221,15 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
         
         try { await api.post('/api/ai-modules/timeseries/reload-models'); } catch(e) { console.warn('[NIA] Model reload:', e); }
         
-      } else if (trainRes.data?.ml_not_available) {
+      } else {
         setTrainingProgress(prev => ({
           ...prev,
           phase: 'error',
-          message: 'ML libraries not installed locally'
+          message: trainRes.error || 'Failed to queue training'
         }));
         setModelStatus(prev => ({
           ...prev,
-          '1 day': { status: 'error', message: 'ML not installed' }
+          '1 day': { status: 'error', message: trainRes.error || 'Failed' }
         }));
       }
 
