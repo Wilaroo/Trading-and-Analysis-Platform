@@ -1825,24 +1825,47 @@ class TimeSeriesAIService:
                 f"Training on {len(all_features):,} {effective_type} patterns..."
             )
             
-            # Train with enriched features
+            # Train with enriched features — skip GBM's internal save
+            # because _save_model() compares against the general model (wrong scope).
+            # We handle setup model saving ourselves via _save_setup_model_to_db().
             X = np.array(all_features)
             y = np.array(all_targets)
-            metrics = model.train_from_features(X, y, combined_feature_names)
+            metrics = model.train_from_features(X, y, combined_feature_names, skip_save=True)
             
-            # Store in setup models cache
-            self._setup_models[effective_type] = model
-            
-            # Save to DB
-            await self._save_setup_model_to_db(
-                effective_type, model, metrics, bar_size, loaded,
-                sum_bars=total_bars_scanned,
-                extra_meta={
-                    "patterns_found": total_matches,
-                    "setup_features": [f"setup_{n}" for n in setup_feature_names],
-                    "total_features": len(combined_feature_names),
-                }
+            # Setup model protection: compare against previous setup model of same type
+            should_promote = True
+            existing_doc = self._db["setup_type_models"].find_one(
+                {"setup_type": effective_type},
+                {"metrics": 1, "version": 1, "_id": 0}
             )
+            if existing_doc and existing_doc.get("metrics"):
+                existing_acc = existing_doc["metrics"].get("accuracy", 0)
+                new_acc = metrics.accuracy
+                if new_acc < existing_acc:
+                    should_promote = False
+                    logger.warning(
+                        f"Setup model protection: NEW {effective_type} accuracy ({new_acc:.4f}) "
+                        f"< EXISTING accuracy ({existing_acc:.4f}). Keeping existing setup model."
+                    )
+                else:
+                    logger.info(
+                        f"Setup model {effective_type}: {existing_acc:.4f} -> {new_acc:.4f}. Promoting."
+                    )
+            
+            if should_promote:
+                # Store in setup models cache
+                self._setup_models[effective_type] = model
+                
+                # Save to DB
+                await self._save_setup_model_to_db(
+                    effective_type, model, metrics, bar_size, loaded,
+                    sum_bars=total_bars_scanned,
+                    extra_meta={
+                        "patterns_found": total_matches,
+                        "setup_features": [f"setup_{n}" for n in setup_feature_names],
+                        "total_features": len(combined_feature_names),
+                    }
+                )
             
             self._training_status[status_key] = {
                 "status": "completed",
@@ -1951,7 +1974,11 @@ class TimeSeriesAIService:
         """
         Make a prediction using the setup-specific model if available,
         otherwise fall back to the general model.
+        
+        For setup models, we must extract BOTH base features AND setup-specific
+        features to match the training feature set.
         """
+        import numpy as np
         effective_type = setup_type.upper()
         if effective_type in ("VWAP_BOUNCE", "VWAP_FADE"):
             effective_type = "VWAP"
@@ -1960,22 +1987,76 @@ class TimeSeriesAIService:
         model = self._setup_models.get(effective_type)
         if model and model._model is not None:
             try:
-                prediction = model.predict(bars)
-                if prediction:
-                    prediction["model_used"] = f"{effective_type.lower()}_predictor"
-                    prediction["model_type"] = "setup_specific"
-                    return prediction
+                # Extract base features
+                feature_set = model._feature_engineer.extract_features(
+                    bars, symbol=symbol, include_target=False
+                )
+                if feature_set is None:
+                    logger.warning(f"Could not extract base features for {symbol}")
+                    # Fall through to general model
+                else:
+                    # Extract setup-specific features from the bar data
+                    from .setup_features import get_setup_features
+                    if len(bars) >= 20:
+                        opens = np.array([b.get("open", 0) for b in bars])
+                        highs = np.array([b.get("high", 0) for b in bars])
+                        lows = np.array([b.get("low", 0) for b in bars])
+                        closes = np.array([b.get("close", 0) for b in bars])
+                        volumes = np.array([b.get("volume", 0) for b in bars])
+                        setup_feats = get_setup_features(effective_type, opens, highs, lows, closes, volumes)
+                    else:
+                        setup_feats = {}
+                    
+                    # Combine base + setup features in training order
+                    combined = {}
+                    combined.update(feature_set.features)
+                    # Prefix setup features to match training naming
+                    for k, v in setup_feats.items():
+                        combined[f"setup_{k}"] = v
+                    
+                    # Build feature vector matching model's expected feature order
+                    feature_vector = np.array([[
+                        combined.get(f, 0.0) for f in model._feature_names
+                    ]])
+                    
+                    # Predict using the setup model directly
+                    prob_up = float(model._model.predict(feature_vector)[0])
+                    prob_down = 1 - prob_up
+                    
+                    if prob_up > model.UP_THRESHOLD:
+                        direction = "up"
+                        confidence = min((prob_up - model.UP_THRESHOLD) / (1 - model.UP_THRESHOLD), 1.0)
+                    elif prob_down > 0.55:
+                        direction = "down"
+                        confidence = (prob_down - 0.5) * 2
+                    else:
+                        direction = "flat"
+                        confidence = 0.2
+                    
+                    result = {
+                        "symbol": symbol,
+                        "direction": direction,
+                        "probability_up": prob_up,
+                        "probability_down": prob_down,
+                        "confidence": float(confidence),
+                        "model_version": model._version,
+                        "feature_count": len(model._feature_names),
+                        "model_used": f"{effective_type.lower()}_predictor",
+                        "model_type": "setup_specific",
+                    }
+                    return result
             except Exception as e:
                 logger.warning(f"Setup model {effective_type} prediction failed: {e}")
         
         # Fall back to general model
         if self._model and self._model._model is not None:
             try:
-                prediction = self._model.predict(bars)
+                prediction = self._model.predict(bars, symbol=symbol)
                 if prediction:
-                    prediction["model_used"] = "general"
-                    prediction["model_type"] = "general"
-                    return prediction
+                    result = prediction.to_dict() if hasattr(prediction, 'to_dict') else prediction
+                    result["model_used"] = "general"
+                    result["model_type"] = "general"
+                    return result
             except Exception as e:
                 logger.warning(f"General model prediction failed: {e}")
         

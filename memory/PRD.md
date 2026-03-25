@@ -23,22 +23,21 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
 12. P2 Refactoring (GPU for LightGBM, backend router refactoring, fetch migration, engine merge, code cleanup, server extraction)
 13. **Setup-Specific AI Models (Mar 25, 2026)** - COMPLETED
 14. **Worker-Based Job Queue for ALL Training (Mar 25, 2026)** - COMPLETED
-    - ALL training endpoints now return `job_id` immediately (non-blocking)
-    - Worker process handles: TRAINING, SETUP_TRAINING, DATA_COLLECTION, BACKTEST, CALIBRATION
-    - Frontend polls `/api/jobs/{job_id}` for real-time progress
-    - Endpoints wired: `/train`, `/train-all`, `/train-full-universe`, `/train-full-universe-all`, `/setups/train`, `/setups/train-all`
-    - Worker runs as supervisor process with auto-restart
 15. **Advanced Setup-Specific Models with Pattern Detection (Mar 25, 2026)** - COMPLETED
-    - Pattern detection (`setup_pattern_detector.py`) filters training data to setup-relevant bars only
-    - Setup-specific features (`setup_features.py`) add 6 extra features per setup type
-    - Training pipeline: scan bars → detect patterns → extract base+setup features → train enriched model
-    - Verified: BREAKOUT model trained on 1,438 patterns from 8,900 bars with 52 combined features
 16. **Fix: AI Model "Untrained" Display on First Load (Mar 25, 2026)** - COMPLETED
-    - Added `modelTrained: null` and `timeseriesTrained: null` to DEFAULT_DATA
-    - QuickStatsBar now shows `--` / `loading...` instead of false "Untrained" during API fetch
-17. **Fix: Setup Training POST Blocked by Request Throttler (Mar 25, 2026)** - COMPLETED
-    - Root cause: 19+ polling GETs per cycle exceeded the 16-concurrent throttler limit, starving POST/PUT/DELETE requests
-    - Fix: Only throttle GET requests; POST/PUT/DELETE (user-initiated actions) bypass the throttler entirely
+17. **Fix: POST Requests Blocked by Request Throttler (Mar 25, 2026)** - COMPLETED
+    - Reduced throttler concurrency from 16 to 4 (browser limit is 6)
+    - POST/PUT/DELETE bypass throttler entirely
+    - Added `xhrPost` utility for training actions (bypasses axios stack)
+18. **Fix: IB Gateway Startup Check Shows False Green (Mar 25, 2026)** - COMPLETED
+    - Now checks actual data flow, not just socket connection
+    - Shows "No Data" (yellow) when connected but farms are down
+19. **CRITICAL FIX: Setup Models Were Copies of General Model (Mar 25, 2026)** - COMPLETED
+    - **Root cause**: `train_from_features()` called `_save_model()` which compared against the general model, model protection rejected the setup model (lower accuracy), reloaded the general model, then `_save_setup_model_to_db()` saved the general model as the setup model
+    - **Fix 1**: Added `skip_save=True` parameter to `train_from_features()` — setup training skips GBM's internal save
+    - **Fix 2**: Setup model protection in `train_setup_model()` now compares against existing setup model of SAME TYPE (not the general model)
+    - **Fix 3**: `predict_for_setup()` now extracts both base features AND setup-specific features before prediction (previously only extracted base features, leaving setup features as zeros)
+    - **Verified**: MOMENTUM=47.3%, BREAKOUT=48.4% (each has its own accuracy, general model untouched at 76.8%)
 
 ## Key API Endpoints
 
@@ -56,19 +55,6 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
 - `GET /api/jobs/{job_id}` — Poll job status/progress
 - `GET /api/jobs` — List jobs
 - `DELETE /api/jobs/{job_id}` — Cancel job
-- `GET /api/jobs/running` — Running jobs
-- `GET /api/jobs/stats` — Queue statistics
-
-## Worker Process
-- Supervisor config: `/etc/supervisor/conf.d/worker.conf`
-- Handles: TRAINING, SETUP_TRAINING, DATA_COLLECTION, BACKTEST, CALIBRATION
-- Polls MongoDB `job_queue` every 5s for pending jobs
-- Progress tracking via `job_queue_manager.update_progress()`
-
-## Code Cleanup (Mar 25, 2026) — COMPLETED
-- Renamed `historical_simulation_engine.py` → `simulation_engine.py`
-- Updated all 3 import references (worker.py, server.py, advanced_backtest_router.py)
-- Deleted the old file
 
 ## Upcoming Tasks
 - **(P1) Backtesting Workflow Automation** — Auto-run backtests when a new model is trained
@@ -77,12 +63,10 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
 - (P3) Auto-Optimize AI Settings — Sweep confidence thresholds & lookback windows
 - (P3) API Route Profiling Dashboard
 - (P3) Compare Simulations side-by-side
+- (P2) Improve setup model accuracy — current models at ~47-48%, may need better pattern detection, more data, or feature engineering
 
 ## Known Minor Issues
 - None
 
 ## Testing
-- `/app/test_reports/iteration_107.json` (latest - General Training Job Queue, 20/20 passed)
-- `/app/test_reports/iteration_106.json` (Worker Job Queue for Setup Training, 12/12 passed)
-- `/app/test_reports/iteration_105.json` (Setup Models, 10/10 passed)
-- Backend tests: `/app/backend/tests/test_general_training_job_queue.py`, `/app/backend/tests/test_worker_job_queue.py`
+- `/app/test_reports/iteration_107.json` (General Training Job Queue, 20/20 passed)

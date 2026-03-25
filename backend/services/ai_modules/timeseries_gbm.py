@@ -462,7 +462,8 @@ class TimeSeriesGBM:
         feature_names: List[str],
         validation_split: float = 0.2,
         num_boost_round: int = 100,
-        early_stopping_rounds: int = 10
+        early_stopping_rounds: int = 10,
+        skip_save: bool = False
     ) -> 'ModelMetrics':
         """
         Train the model from pre-extracted features and targets.
@@ -477,6 +478,7 @@ class TimeSeriesGBM:
             validation_split: Fraction for validation
             num_boost_round: Boosting rounds
             early_stopping_rounds: Early stopping patience
+            skip_save: If True, skip saving to DB (caller will handle saving)
             
         Returns:
             ModelMetrics with training results
@@ -543,7 +545,9 @@ class TimeSeriesGBM:
         version_parts = self._version.replace("v", "").split(".")
         minor = int(version_parts[1]) + 1 if len(version_parts) > 1 else 1
         self._version = f"v0.{minor}.0"
-        self._save_model()
+        
+        if not skip_save:
+            self._save_model()
 
         logger.info(f"Setup training complete: accuracy={accuracy:.3f}, precision_up={precision_up:.3f}, f1_up={f1_up:.3f}")
         return self._metrics
