@@ -1880,7 +1880,7 @@ async def get_validation_history(
     limit: int = 50,
 ):
     """
-    Get model validation history showing train→backtest→promote/reject results.
+    Get model validation history showing 5-phase results per profile.
     """
     try:
         if not _timeseries_ai or _timeseries_ai._db is None:
@@ -1918,7 +1918,6 @@ async def get_validation_history(
 async def get_model_baselines():
     """
     Get current baseline metrics for all models.
-    These are the benchmarks that new models must beat to be promoted.
     """
     try:
         if not _timeseries_ai or _timeseries_ai._db is None:
@@ -1936,4 +1935,72 @@ async def get_model_baselines():
         raise
     except Exception as e:
         logger.error(f"Error getting model baselines: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/validation/latest")
+async def get_latest_validations():
+    """
+    Get the most recent validation for each (setup_type, bar_size) combo.
+    Used by the frontend to display per-card validation status.
+    """
+    try:
+        if not _timeseries_ai or _timeseries_ai._db is None:
+            raise HTTPException(status_code=503, detail="AI service not initialized")
+        
+        db = _timeseries_ai._db
+        
+        # Aggregate: group by (setup_type, bar_size), take the latest
+        pipeline = [
+            {"$sort": {"validated_at": -1}},
+            {"$group": {
+                "_id": {"setup_type": "$setup_type", "bar_size": "$bar_size"},
+                "latest": {"$first": "$$ROOT"},
+            }},
+            {"$replaceRoot": {"newRoot": "$latest"}},
+            {"$project": {"_id": 0}},
+        ]
+        records = list(db["model_validations"].aggregate(pipeline))
+        
+        # Index by "SETUP_TYPE/bar_size" for easy frontend lookup
+        indexed = {}
+        for r in records:
+            key = f"{r.get('setup_type', '')}/{r.get('bar_size', '')}"
+            indexed[key] = r
+        
+        return {
+            "success": True,
+            "total": len(records),
+            "validations": indexed,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting latest validations: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/validation/batch-history")
+async def get_batch_validation_history(limit: int = 10):
+    """
+    Get batch validation results (Phases 4-5: Multi-Strategy + Market-Wide).
+    """
+    try:
+        if not _timeseries_ai or _timeseries_ai._db is None:
+            raise HTTPException(status_code=503, detail="AI service not initialized")
+        
+        db = _timeseries_ai._db
+        records = list(db["batch_validations"].find(
+            {}, {"_id": 0}
+        ).sort("validated_at", -1).limit(limit))
+        
+        return {
+            "success": True,
+            "total": len(records),
+            "records": records,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting batch validation history: {e}")
         raise HTTPException(status_code=500, detail=str(e))

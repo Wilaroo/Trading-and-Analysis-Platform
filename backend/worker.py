@@ -530,7 +530,7 @@ async def process_setup_training_job(job: dict, db) -> dict:
     
     try:
         from services.ai_modules.post_training_validator import (
-            backup_current_model, validate_trained_model
+            backup_current_model, validate_trained_model, run_batch_validation
         )
         
         if setup_type == 'ALL':
@@ -554,7 +554,7 @@ async def process_setup_training_job(job: dict, db) -> dict:
                 for profile in profiles:
                     profile_idx += 1
                     pbar = profile["bar_size"]
-                    pct = int(5 + (profile_idx / total_profiles) * 80)
+                    pct = int(5 + (profile_idx / total_profiles) * 75)
                     
                     await job_queue_manager.update_progress(
                         job_id, percent=pct,
@@ -587,12 +587,13 @@ async def process_setup_training_job(job: dict, db) -> dict:
                 
                 results[st] = st_results
             
-            # Validation phase: backtest each successfully trained profile
+            # Per-profile validation (Phases 1-3)
             await job_queue_manager.update_progress(
-                job_id, percent=85,
-                message=f'Training done! Validating {completed} models...'
+                job_id, percent=80,
+                message=f'Training done! Running 5-phase validation on {completed} models...'
             )
             
+            backtest_engine = None
             try:
                 backtest_engine = _get_backtest_engine(db, timeseries_service)
                 val_idx = 0
@@ -600,10 +601,10 @@ async def process_setup_training_job(job: dict, db) -> dict:
                     for pbar, result in st_results.items():
                         if result.get('success'):
                             val_idx += 1
-                            vpct = int(85 + (val_idx / max(completed, 1)) * 14)
+                            base_pct = int(80 + (val_idx / max(completed, 1)) * 14)
                             
-                            async def _prog(p, m, _j=job_id, _p=vpct):
-                                await job_queue_manager.update_progress(_j, percent=_p, message=m)
+                            async def _prog(p, m, _j=job_id, _bp=base_pct):
+                                await job_queue_manager.update_progress(_j, percent=min(_bp + 1, 94), message=m)
                             
                             val = await validate_trained_model(
                                 db, timeseries_service, backtest_engine,
@@ -611,10 +612,29 @@ async def process_setup_training_job(job: dict, db) -> dict:
                             )
                             validation_results.append(val)
             except Exception as val_err:
-                logger.warning(f"Validation phase error (models still saved): {val_err}")
+                logger.warning(f"Per-profile validation error (models still saved): {val_err}")
             
             promoted = sum(1 for v in validation_results if v.get("status") == "promoted")
             rejected = sum(1 for v in validation_results if v.get("status") == "rejected")
+            
+            # Batch validation (Phases 4-5: Multi-Strategy + Market-Wide)
+            batch_result = None
+            trained_types = [st for st, sr in results.items() if any(r.get('success') for r in sr.values())]
+            if backtest_engine and len(trained_types) >= 2:
+                try:
+                    await job_queue_manager.update_progress(
+                        job_id, percent=95,
+                        message=f'Phases 4-5: Multi-Strategy + Market-Wide ({len(trained_types)} setups)...'
+                    )
+                    
+                    async def _batch_prog(p, m):
+                        await job_queue_manager.update_progress(job_id, percent=min(p, 99), message=m)
+                    
+                    batch_result = await run_batch_validation(
+                        db, backtest_engine, trained_types, job_id, _batch_prog
+                    )
+                except Exception as batch_err:
+                    logger.warning(f"Batch validation error: {batch_err}")
             
             await job_queue_manager.update_progress(
                 job_id, percent=100,
@@ -630,7 +650,8 @@ async def process_setup_training_job(job: dict, db) -> dict:
                     'promoted': promoted,
                     'rejected': rejected,
                     'details': validation_results,
-                }
+                },
+                'batch_validation': batch_result,
             }
         else:
             # Train one setup type (all profiles or specific bar_size)
@@ -673,16 +694,17 @@ async def process_setup_training_job(job: dict, db) -> dict:
             if result.get('success'):
                 acc = result.get('metrics', {}).get('accuracy', 0)
                 
-                # Validation phase
+                # Per-profile validation (Phases 1-3)
                 await job_queue_manager.update_progress(
-                    job_id, percent=85,
-                    message=f'{setup_type} trained! Running validation backtest...'
+                    job_id, percent=80,
+                    message=f'{setup_type} trained! Running 5-phase validation...'
                 )
                 
                 validation = None
                 try:
                     backtest_engine = _get_backtest_engine(db, timeseries_service)
-                    target_bar = bar_size or (get_setup_profiles(setup_type)[0]["bar_size"] if not bar_size else bar_size)
+                    from services.ai_modules.setup_training_config import get_setup_profiles as _gsp
+                    target_bar = bar_size or (_gsp(setup_type)[0]["bar_size"] if not bar_size else bar_size)
                     
                     async def _prog(p, m):
                         await job_queue_manager.update_progress(job_id, percent=p, message=m)
@@ -723,15 +745,11 @@ def _get_backtest_engine(db, timeseries_service):
     """Create a backtest engine instance for validation."""
     try:
         from services.slow_learning.advanced_backtest_engine import AdvancedBacktestEngine
-        from services.simulation_engine import SimulationEngine
-        
-        simulation_engine = SimulationEngine(db=db)
-        backtest_engine = AdvancedBacktestEngine(
-            db=db,
-            simulation_engine=simulation_engine,
-            timeseries_ai=timeseries_service,
-        )
-        return backtest_engine
+
+        engine = AdvancedBacktestEngine()
+        engine.set_db(db)
+        engine.set_timeseries_model(timeseries_service)
+        return engine
     except Exception as e:
         logger.error(f"Failed to create backtest engine: {e}")
         raise
