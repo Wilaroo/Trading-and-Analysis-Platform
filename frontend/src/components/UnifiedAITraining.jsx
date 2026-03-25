@@ -991,37 +991,86 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
     notifyTrainingStart('train-all');
     const timeframes = Object.keys(availableData?.timeframes || {});
     
-    toast.info(`Training ${timeframes.length} timeframe models...`);
+    toast.info(`Queuing ${timeframes.length} timeframe models for training...`);
 
     try {
-      const res = await apiLongRunning.post('/api/ai-modules/timeseries/train-all');
+      const res = await api.post('/api/ai-modules/timeseries/train-all');
 
-      if (res.data?.success) {
-        const result = res.data.result;
+      if (res.data?.success && res.data?.job_id) {
+        const jobId = res.data.job_id;
+        toast.success(`Training all timeframes queued (job ${jobId})`);
         
-        // Update status for all timeframes
-        const newStatus = {};
-        for (const [tf, tfResult] of Object.entries(result.results || {})) {
-          if (tfResult.success) {
-            const accuracy = tfResult.metrics?.accuracy ? (tfResult.metrics.accuracy * 100).toFixed(1) : '?';
-            newStatus[tf] = { status: 'completed', message: `${accuracy}% accuracy` };
-          } else {
-            newStatus[tf] = { status: 'error', message: tfResult.error || 'Failed' };
+        // Poll for job completion
+        let pollCount = 0;
+        const maxPolls = 7200; // 2 hours at 1s intervals
+        
+        const pollJob = async () => {
+          pollCount++;
+          try {
+            const statusRes = await api.get(`/api/jobs/${jobId}`);
+            const jobStatus = statusRes.data?.job;
+            if (!jobStatus) {
+              if (pollCount < maxPolls) setTimeout(pollJob, 2000);
+              return;
+            }
+            
+            // Update per-timeframe status from progress message
+            if (jobStatus.progress?.message) {
+              setModelStatus(prev => ({
+                ...prev,
+                _all: { status: 'running', message: jobStatus.progress.message }
+              }));
+            }
+            
+            if (jobStatus.status === 'completed') {
+              const result = jobStatus.result || {};
+              const newStatus = {};
+              for (const [tf, tfResult] of Object.entries(result.results || {})) {
+                if (tfResult.success) {
+                  const accuracy = tfResult.metrics?.accuracy ? (tfResult.metrics.accuracy * 100).toFixed(1) : (tfResult.accuracy ? (tfResult.accuracy * 100).toFixed(1) : '?');
+                  newStatus[tf] = { status: 'completed', message: `${accuracy}% accuracy` };
+                } else {
+                  newStatus[tf] = { status: 'error', message: tfResult.error || 'Failed' };
+                }
+              }
+              setModelStatus(newStatus);
+              toast.success(`Trained ${result.timeframes_trained || 0}/${result.total_timeframes || timeframes.length} models!`);
+              try { await api.post('/api/ai-modules/timeseries/reload-models'); } catch(e) { console.warn('[NIA] Model reload:', e); }
+              fetchData();
+              setIsTraining(false);
+              notifyTrainingEnd();
+              if (onTrainComplete) onTrainComplete();
+              return;
+            }
+            
+            if (jobStatus.status === 'failed') {
+              throw new Error(jobStatus.error || 'Training failed');
+            }
+            
+            if (pollCount < maxPolls && (jobStatus.status === 'running' || jobStatus.status === 'pending')) {
+              const interval = pollCount < 60 ? 1000 : 5000;
+              setTimeout(pollJob, interval);
+            }
+          } catch (pollErr) {
+            console.error('[NIA] Train-all poll error:', pollErr);
+            if (pollCount < maxPolls) setTimeout(pollJob, 3000);
           }
-        }
-        setModelStatus(newStatus);
+        };
         
-        toast.success(`Trained ${result.timeframes_trained}/${result.total_timeframes} models!`);
-        fetchData();
+        setTimeout(pollJob, 3000);
+        
       } else if (res.data?.ml_not_available) {
         toast.error('ML libraries not installed. Run: pip install lightgbm');
+        setIsTraining(false);
+        notifyTrainingEnd();
       } else {
-        toast.error('Training failed');
+        toast.error(res.data?.error || 'Failed to queue training');
+        setIsTraining(false);
+        notifyTrainingEnd();
       }
     } catch (e) {
       console.error('Train-all error:', e);
       toast.error(`Training error: ${e.message}`);
-    } finally {
       setIsTraining(false);
       notifyTrainingEnd();
       if (onTrainComplete) onTrainComplete();
@@ -1072,40 +1121,72 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       
       toast.info('Quick Train: Training Daily model...');
       
-      // Simulate progress update
-      setTimeout(() => {
+      // Enqueue training job via worker
+      const trainRes = await api.post('/api/ai-modules/timeseries/train', {
+        bar_size: '1 day'
+      });
+
+      if (trainRes.data?.success && trainRes.data?.job_id) {
+        const jobId = trainRes.data.job_id;
+        
         setTrainingProgress(prev => ({
           ...prev,
           phase: 'training',
           currentStep: 3,
-          message: 'Training LightGBM model on ~1M bars...',
-          symbolsLoaded: 500,
-          barsLoaded: 1000000
-        }));
-      }, 2000);
-      
-      const trainRes = await apiLongRunning.post('/api/ai-modules/timeseries/train', {
-        bar_size: '1 day'
-      });
-
-      if (trainRes.data?.success && trainRes.data?.result?.success) {
-        const result = trainRes.data.result;
-        const accuracy = result.metrics?.accuracy ? 
-          (result.metrics.accuracy * 100).toFixed(1) : '?';
-        const samples = result.training_samples || 0;
-        
-        setTrainingProgress(prev => ({
-          ...prev,
-          phase: 'saving',
-          currentStep: 4,
-          message: `Saving model... ${accuracy}% accuracy achieved!`,
-          barsLoaded: samples
+          message: `Job ${jobId} queued — worker training Daily model...`
         }));
         
-        setModelStatus(prev => ({
-          ...prev,
-          '1 day': { status: 'completed', message: `${accuracy}% accuracy, ${formatNumber(samples)} samples` }
-        }));
+        // Poll until training job completes
+        let trainComplete = false;
+        let pollCount = 0;
+        const maxPolls = 600;
+        
+        while (!trainComplete && pollCount < maxPolls) {
+          pollCount++;
+          await new Promise(r => setTimeout(r, pollCount < 30 ? 1000 : 3000));
+          
+          try {
+            const statusRes = await api.get(`/api/jobs/${jobId}`);
+            const jobStatus = statusRes.data?.job;
+            if (!jobStatus) continue;
+            
+            if (jobStatus.progress?.message) {
+              setTrainingProgress(prev => ({
+                ...prev,
+                message: jobStatus.progress.message,
+                currentStep: Math.ceil((jobStatus.progress.percent / 100) * 4) + 1,
+              }));
+            }
+            
+            if (jobStatus.status === 'completed') {
+              trainComplete = true;
+              const result = jobStatus.result || {};
+              const accuracy = result.accuracy_percent || (result.accuracy ? `${(result.accuracy * 100).toFixed(1)}%` : '?');
+              const samples = result.training_samples || 0;
+              
+              setTrainingProgress(prev => ({
+                ...prev,
+                phase: 'saving',
+                currentStep: 4,
+                message: `Model saved! ${accuracy} accuracy`,
+                barsLoaded: samples
+              }));
+              
+              setModelStatus(prev => ({
+                ...prev,
+                '1 day': { status: 'completed', message: `${accuracy} accuracy, ${formatNumber(samples)} samples` }
+              }));
+            } else if (jobStatus.status === 'failed') {
+              throw new Error(jobStatus.error || 'Training failed');
+            }
+          } catch (pollErr) {
+            if (pollErr.message?.includes('Training failed')) throw pollErr;
+            console.warn('[NIA] Quick train poll error:', pollErr);
+          }
+        }
+        
+        try { await api.post('/api/ai-modules/timeseries/reload-models'); } catch(e) { console.warn('[NIA] Model reload:', e); }
+        
       } else if (trainRes.data?.ml_not_available) {
         setTrainingProgress(prev => ({
           ...prev,

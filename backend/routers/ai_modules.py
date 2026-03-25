@@ -12,7 +12,7 @@ Provides endpoints for:
 - Agent historical context (NEW)
 """
 
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
 import logging
@@ -986,68 +986,8 @@ async def train_timeseries_model(request: Optional[TrainRequest] = None):
     """
     Train/update a time-series model for a specific timeframe.
     
-    Args (in request body):
-        symbols: Optional list of specific symbols to train on
-        max_symbols: Maximum number of symbols (default: 1000)
-        bar_size: Timeframe to train on (e.g., "1 min", "5 mins", "1 hour", "1 day")
-        max_bars_per_symbol: Max bars per symbol for memory management (default: 10000)
-    """
-    # Check if ML is available
-    from services.ai_modules import ML_AVAILABLE
-    if not ML_AVAILABLE:
-        return {
-            "success": False,
-            "ml_not_available": True,
-            "error": "ML libraries not installed",
-            "message": "To enable AI training, install lightgbm on your local machine:",
-            "install_command": "pip install lightgbm",
-            "instructions": [
-                "1. Open PowerShell or Command Prompt",
-                "2. Run: pip install lightgbm",
-                "3. Restart the backend (close and reopen StartLocal.bat)",
-                "4. Try Train All again"
-            ],
-            "note": "ML training only works locally - production servers don't have enough memory for ML libraries."
-        }
-    
-    if not _timeseries_ai:
-        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
-    
-    try:
-        symbols = request.symbols if request else None
-        max_symbols = request.max_symbols if request and request.max_symbols else None
-        bar_size = request.bar_size if request and request.bar_size else "1 day"
-        max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else None
-        
-        result = await _timeseries_ai.train_model(
-            symbols=symbols, 
-            max_symbols=max_symbols,
-            bar_size=bar_size,
-            max_bars_per_symbol=max_bars_per_symbol
-        )
-        
-        return {
-            "success": result.get("success", False),
-            "result": result
-        }
-        
-    except Exception as e:
-        logger.error(f"Training error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/timeseries/train-all")
-async def train_all_timeframe_models(request: Optional[TrainAllRequest] = None):
-    """
-    Train models for all timeframes sequentially.
-    
-    This is a long-running operation that trains separate models for each available timeframe.
-    Use this to fully utilize all your historical data across all bar sizes.
-    
-    Args (in request body):
-        max_symbols: Max symbols per timeframe (default: 1000)
-        max_bars_per_symbol: Max bars per symbol (default: 10000)
-        timeframes: Optional list of specific timeframes to train
+    Enqueues a background job via the worker process.
+    Returns a job_id for progress polling via GET /api/jobs/{job_id}.
     """
     from services.ai_modules import ML_AVAILABLE
     if not ML_AVAILABLE:
@@ -1062,20 +1002,88 @@ async def train_all_timeframe_models(request: Optional[TrainAllRequest] = None):
         raise HTTPException(status_code=503, detail="Time-series AI not initialized")
     
     try:
+        from services.job_queue_manager import job_queue_manager
+        
+        bar_size = request.bar_size if request and request.bar_size else "1 day"
+        max_symbols = request.max_symbols if request and request.max_symbols else None
+        max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else None
+        symbols = request.symbols if request and request.symbols else None
+        
+        result = await job_queue_manager.create_job(
+            job_type="training",
+            params={
+                "bar_size": bar_size,
+                "max_symbols": max_symbols,
+                "max_bars_per_symbol": max_bars_per_symbol,
+                "symbols": symbols,
+            },
+            priority=8,
+            metadata={"description": f"Train {bar_size} model"}
+        )
+        
+        if result.get("success"):
+            job = result["job"]
+            return {
+                "success": True,
+                "job_id": job["job_id"],
+                "message": f"Training {bar_size} model queued. Poll /api/jobs/{job['job_id']} for progress.",
+                "bar_size": bar_size,
+            }
+        else:
+            return {"success": False, "error": result.get("error", "Failed to enqueue job")}
+        
+    except Exception as e:
+        logger.error(f"Training error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/timeseries/train-all")
+async def train_all_timeframe_models(request: Optional[TrainAllRequest] = None):
+    """
+    Train models for all timeframes sequentially via the worker.
+    
+    Enqueues a background job. Returns a job_id for progress polling.
+    """
+    from services.ai_modules import ML_AVAILABLE
+    if not ML_AVAILABLE:
+        return {
+            "success": False,
+            "ml_not_available": True,
+            "error": "ML libraries not installed",
+            "install_command": "pip install lightgbm"
+        }
+    
+    if not _timeseries_ai:
+        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
+    
+    try:
+        from services.job_queue_manager import job_queue_manager
+        
         max_symbols = request.max_symbols if request and request.max_symbols else None
         max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else None
         timeframes = request.timeframes if request and request.timeframes else None
         
-        result = await _timeseries_ai.train_all_timeframes(
-            max_symbols=max_symbols,
-            max_bars_per_symbol=max_bars_per_symbol,
-            timeframes=timeframes
+        result = await job_queue_manager.create_job(
+            job_type="training",
+            params={
+                "all_timeframes": True,
+                "max_symbols": max_symbols,
+                "max_bars_per_symbol": max_bars_per_symbol,
+                "timeframes": timeframes,
+            },
+            priority=7,
+            metadata={"description": "Train all timeframes"}
         )
         
-        return {
-            "success": result.get("success", False),
-            "result": result
-        }
+        if result.get("success"):
+            job = result["job"]
+            return {
+                "success": True,
+                "job_id": job["job_id"],
+                "message": f"Training all timeframes queued. Poll /api/jobs/{job['job_id']} for progress.",
+            }
+        else:
+            return {"success": False, "error": result.get("error", "Failed to enqueue job")}
         
     except Exception as e:
         logger.error(f"Train-all error: {e}")
@@ -1100,17 +1108,9 @@ class FullUniverseAllRequest(BaseModel):
 @router.post("/timeseries/train-full-universe")
 async def train_full_universe_single(request: Optional[FullUniverseTrainRequest] = None):
     """
-    Train on the FULL UNIVERSE of symbols for a single timeframe.
+    Train on the FULL UNIVERSE of symbols for a single timeframe via the worker.
     
-    This uses chunked loading to process ALL symbols without memory overflow.
-    Expected runtime: 10-30 minutes per timeframe depending on data size.
-    
-    This endpoint returns immediately and runs training in the background.
-    
-    Args:
-        bar_size: Timeframe to train (default: "1 day")
-        symbol_batch_size: How many symbols to load at once (default: 100)
-        max_bars_per_symbol: Max historical bars per symbol (default: 2000)
+    Returns a job_id for progress polling.
     """
     from services.ai_modules import ML_AVAILABLE
     if not ML_AVAILABLE:
@@ -1118,45 +1118,42 @@ async def train_full_universe_single(request: Optional[FullUniverseTrainRequest]
             "success": False,
             "ml_not_available": True,
             "error": "ML libraries not installed",
-            "install_command": "pip install lightgbm scikit-learn"
+            "install_command": "pip install lightgbm"
         }
     
     if not _timeseries_ai:
         raise HTTPException(status_code=503, detail="Time-series AI not initialized")
     
     try:
+        from services.job_queue_manager import job_queue_manager
+        
         bar_size = request.bar_size if request and request.bar_size else "1 day"
-        symbol_batch_size = request.symbol_batch_size if request and request.symbol_batch_size else 100
         max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else 2000
         
-        logger.info(f"Full universe training requested: {bar_size}")
-        logger.info(f"Settings: batch={symbol_batch_size}, max_bars={max_bars_per_symbol}")
-        
-        # Run training in background so request doesn't timeout
-        async def run_single_universe_training():
-            try:
-                result = await _timeseries_ai.train_full_universe(
-                    bar_size=bar_size,
-                    symbol_batch_size=symbol_batch_size,
-                    max_bars_per_symbol=max_bars_per_symbol
-                )
-                logger.info(f"Full Universe ({bar_size}) training completed: {result}")
-            except Exception as e:
-                logger.error(f"Full Universe ({bar_size}) training error: {e}", exc_info=True)
-        
-        # Start the background task
-        asyncio.create_task(run_single_universe_training())
-        
-        return {
-            "success": True,
-            "message": f"Full Universe training started for {bar_size}",
-            "settings": {
+        result = await job_queue_manager.create_job(
+            job_type="training",
+            params={
                 "bar_size": bar_size,
-                "symbol_batch_size": symbol_batch_size,
-                "max_bars_per_symbol": max_bars_per_symbol
+                "full_universe": True,
+                "max_bars_per_symbol": max_bars_per_symbol,
             },
-            "monitor": "Watch backend terminal for [FULL UNIVERSE] logs"
-        }
+            priority=6,
+            metadata={"description": f"Full universe training ({bar_size})"}
+        )
+        
+        if result.get("success"):
+            job = result["job"]
+            return {
+                "success": True,
+                "job_id": job["job_id"],
+                "message": f"Full universe training queued for {bar_size}. Poll /api/jobs/{job['job_id']} for progress.",
+                "settings": {
+                    "bar_size": bar_size,
+                    "max_bars_per_symbol": max_bars_per_symbol
+                }
+            }
+        else:
+            return {"success": False, "error": result.get("error", "Failed to enqueue job")}
         
     except Exception as e:
         logger.error(f"Full universe training error: {e}", exc_info=True)
@@ -1165,124 +1162,57 @@ async def train_full_universe_single(request: Optional[FullUniverseTrainRequest]
 
 @router.post("/timeseries/train-full-universe-all")
 async def train_full_universe_all_timeframes(
-    request: Optional[FullUniverseAllRequest] = None,
-    background_tasks: BackgroundTasks = None
+    request: Optional[FullUniverseAllRequest] = None
 ):
     """
-    Train FULL UNIVERSE on ALL 7 timeframes.
+    Train FULL UNIVERSE on ALL 7 timeframes via the worker.
     
-    This is the comprehensive training that uses all 39M+ bars of historical data.
-    It processes each timeframe sequentially with chunked loading.
-    
-    **Expected runtime: 1-3 hours**
-    
-    This endpoint returns immediately and runs training in the background.
-    Monitor progress in your backend terminal or via /timeseries/training-status
-    
-    Args:
-        symbol_batch_size: Symbols per batch (default: 50 - reduced for stability)
-        max_bars_per_symbol: Max bars per symbol (default: 1000 - reduced for stability)
-        timeframes: Optional list of specific timeframes (default: all 7)
+    Returns a job_id for progress polling.
+    Expected runtime: 1-3 hours.
     """
-    import sys
-    import traceback
-    
     from services.ai_modules import ML_AVAILABLE
     if not ML_AVAILABLE:
         return {
             "success": False,
             "ml_not_available": True,
             "error": "ML libraries not installed",
-            "install_command": "pip install lightgbm scikit-learn"
+            "install_command": "pip install lightgbm"
         }
     
     if not _timeseries_ai:
         raise HTTPException(status_code=503, detail="Time-series AI not initialized")
     
     try:
-        # REDUCED DEFAULTS for stability - prevent memory crashes
-        symbol_batch_size = request.symbol_batch_size if request and request.symbol_batch_size else 50
+        from services.job_queue_manager import job_queue_manager
+        
         max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else 1000
         timeframes = request.timeframes if request and request.timeframes else None
         
-        logger.info("=" * 60)
-        logger.info("FULL UNIVERSE ALL TIMEFRAMES training requested!")
-        logger.info(f"Settings: batch={symbol_batch_size}, max_bars={max_bars_per_symbol}")
-        logger.info(f"Timeframes: {timeframes or 'ALL'}")
-        logger.info("Starting training in background...")
-        logger.info("=" * 60)
-        
-        # Flush logs immediately
-        sys.stdout.flush()
-        sys.stderr.flush()
-        
-        # Run training in background so request doesn't timeout
-        async def run_full_universe_training():
-            """Background task with aggressive error handling"""
-            import gc
-            
-            # IMMEDIATE logging to confirm task started
-            print("[BACKGROUND TASK] ===== TASK STARTED =====", flush=True)
-            logger.info("[BACKGROUND TASK] Full Universe task entered!")
-            sys.stdout.flush()
-            sys.stderr.flush()
-            
-            try:
-                # Force garbage collection before starting
-                gc.collect()
-                logger.info("[BACKGROUND TASK] GC completed, starting training...")
-                sys.stdout.flush()
-                
-                logger.info("[BACKGROUND TASK] Calling train_full_universe_all_timeframes...")
-                sys.stdout.flush()
-                
-                result = await _timeseries_ai.train_full_universe_all_timeframes(
-                    symbol_batch_size=symbol_batch_size,
-                    max_bars_per_symbol=max_bars_per_symbol,
-                    timeframes=timeframes
-                )
-                
-                logger.info(f"[BACKGROUND TASK] Full Universe training completed!")
-                logger.info(f"[BACKGROUND TASK] Result: {result}")
-                sys.stdout.flush()
-                
-            except MemoryError as me:
-                logger.error(f"[BACKGROUND TASK] MEMORY ERROR: {me}")
-                logger.error(f"[BACKGROUND TASK] System ran out of memory during training")
-                traceback.print_exc()
-                sys.stdout.flush()
-                sys.stderr.flush()
-                
-            except Exception as e:
-                logger.error(f"[BACKGROUND TASK] EXCEPTION: {type(e).__name__}: {e}")
-                logger.error(f"[BACKGROUND TASK] Full traceback:")
-                traceback.print_exc()
-                sys.stdout.flush()
-                sys.stderr.flush()
-                
-            finally:
-                logger.info("[BACKGROUND TASK] ===== TASK FINISHED =====")
-                sys.stdout.flush()
-                gc.collect()
-        
-        # Start the background task
-        logger.info("Creating background task...")
-        sys.stdout.flush()
-        
-        task = asyncio.create_task(run_full_universe_training())
-        logger.info(f"Background task created: {task}")
-        sys.stdout.flush()
-        
-        return {
-            "success": True,
-            "message": "Full Universe training started in background",
-            "settings": {
-                "symbol_batch_size": symbol_batch_size,
+        result = await job_queue_manager.create_job(
+            job_type="training",
+            params={
+                "full_universe": True,
+                "all_timeframes": True,
                 "max_bars_per_symbol": max_bars_per_symbol,
-                "timeframes": timeframes or "ALL"
+                "timeframes": timeframes,
             },
-            "monitor": "Watch backend terminal for [BACKGROUND TASK] and [FULL UNIVERSE] logs"
-        }
+            priority=5,
+            metadata={"description": "Full universe all timeframes training"}
+        )
+        
+        if result.get("success"):
+            job = result["job"]
+            return {
+                "success": True,
+                "job_id": job["job_id"],
+                "message": f"Full universe all-TF training queued. Poll /api/jobs/{job['job_id']} for progress.",
+                "settings": {
+                    "max_bars_per_symbol": max_bars_per_symbol,
+                    "timeframes": timeframes or "ALL"
+                }
+            }
+        else:
+            return {"success": False, "error": result.get("error", "Failed to enqueue job")}
         
     except Exception as e:
         logger.error(f"Full universe all-timeframes error: {e}", exc_info=True)
