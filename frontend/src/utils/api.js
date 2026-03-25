@@ -84,7 +84,11 @@ export const safeDelete = async (url) => {
 // Direct XHR POST — bypasses axios interceptors and connection pool contention.
 // Use for critical user-initiated actions (training, job creation) that must not
 // be delayed by background polling.
+// Pauses the throttler first to free browser connection slots.
 export const xhrPost = (url, body, timeout = 30000) => {
+  // Pause polling to free connection slots for this POST
+  requestThrottler.pause(5000);
+
   const fullUrl = `${window.location.origin}${url}`;
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();

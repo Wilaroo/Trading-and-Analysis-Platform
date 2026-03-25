@@ -3,18 +3,27 @@
  * 
  * Prevents ERR_INSUFFICIENT_RESOURCES by queuing requests
  * and only allowing a limited number to run at once.
+ * 
+ * Browser limits: 6 concurrent connections per domain.
+ * Reserve slots for: 2 WebSockets + 2 user actions = 4 reserved.
+ * Throttler gets: 2 concurrent slots for background polling.
  */
 
 class RequestThrottler {
-  constructor(maxConcurrent = 4) {
+  constructor(maxConcurrent = 2) {
     this.maxConcurrent = maxConcurrent;
     this.activeRequests = 0;
     this.queue = [];
     this.enabled = true;
+    this.paused = false;
   }
 
   async throttle(requestFn) {
-    if (!this.enabled) {
+    if (!this.enabled || this.paused) {
+      // When paused, drop polling requests silently
+      if (this.paused) {
+        return Promise.resolve({ data: null });
+      }
       return requestFn();
     }
 
@@ -28,7 +37,9 @@ class RequestThrottler {
           reject(error);
         } finally {
           this.activeRequests--;
-          this.processQueue();
+          if (!this.paused) {
+            this.processQueue();
+          }
         }
       };
 
@@ -41,7 +52,7 @@ class RequestThrottler {
   }
 
   processQueue() {
-    while (this.queue.length > 0 && this.activeRequests < this.maxConcurrent) {
+    while (this.queue.length > 0 && this.activeRequests < this.maxConcurrent && !this.paused) {
       const next = this.queue.shift();
       next();
     }
@@ -51,11 +62,29 @@ class RequestThrottler {
     return {
       active: this.activeRequests,
       queued: this.queue.length,
-      max: this.maxConcurrent
+      max: this.maxConcurrent,
+      paused: this.paused
     };
   }
 
-  // Clear all queued (not yet started) requests to prevent stale buildup
+  // Pause polling and flush queue — frees connection slots for user actions
+  pause(durationMs = 5000) {
+    this.paused = true;
+    const dropped = this.queue.length;
+    this.queue = [];
+    if (dropped > 0) {
+      console.log(`[Throttler] Paused: dropped ${dropped} queued requests`);
+    }
+    // Auto-resume after duration
+    setTimeout(() => this.resume(), durationMs);
+    return dropped;
+  }
+
+  resume() {
+    this.paused = false;
+    this.processQueue();
+  }
+
   clearQueue() {
     const dropped = this.queue.length;
     this.queue = [];
@@ -67,18 +96,11 @@ class RequestThrottler {
     this.processQueue();
   }
 
-  enable() {
-    this.enabled = true;
-  }
-
-  disable() {
-    this.enabled = false;
-  }
+  enable() { this.enabled = true; }
+  disable() { this.enabled = false; }
 }
 
-// Global throttler instance - limit to 16 concurrent requests
-export // Browser limits to 6 concurrent connections per domain.
-// Keep this below 6 so user-initiated actions (POST/PUT/DELETE) always have free slots.
-const requestThrottler = new RequestThrottler(4);
+// Browser: 6 connections. Reserve 2 for WebSockets + 2 for user POSTs = 2 for polling.
+export const requestThrottler = new RequestThrottler(2);
 
 export default RequestThrottler;
