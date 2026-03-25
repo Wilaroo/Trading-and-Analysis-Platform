@@ -177,9 +177,15 @@ const SetupModelsPanel = memo(() => {
     }
   }, [activeJobs, fetchStatus]);
 
+  // Fetch on mount so header badge shows correct count
   useEffect(() => {
-    if (expanded && !status) fetchStatus();
-  }, [expanded, status, fetchStatus]);
+    fetchStatus();
+  }, [fetchStatus]);
+
+  // Re-fetch when expanded if stale
+  useEffect(() => {
+    if (expanded) fetchStatus();
+  }, [expanded, fetchStatus]);
 
   // Poll while any jobs are active
   const hasActiveJobs = Object.keys(activeJobs).length > 0;
