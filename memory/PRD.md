@@ -20,74 +20,46 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
 9. AI Comparison Backtesting (setup-only, AI+setup, AI-only modes)
 10. Best Model Protection (new models must beat existing to be promoted)
 11. P0 Backend Performance Fix (asyncio event loop unblocking)
+12. P2 Refactoring (GPU for LightGBM, backend router refactoring, fetch migration, engine merge, code cleanup, server extraction)
+13. **Setup-Specific AI Models (Mar 25, 2026)** - COMPLETED
+    - Backend: 5 new API endpoints for setup model management
+    - Service: train_setup_model, train_all_setup_models, predict_for_setup, get_setup_models_status
+    - Frontend: SetupModelsPanel.jsx on NIA page with train/status/predict UI
+    - 10 setup types: MOMENTUM, SCALP, BREAKOUT, GAP_AND_GO, RANGE, REVERSAL, TREND_CONTINUATION, ORB, VWAP, MEAN_REVERSION
+    - Models stored in `setup_type_models` MongoDB collection
 
-## P2 Refactoring (Feb-Mar 2026)
+## Key API Endpoints
 
-### P2.1: GPU for LightGBM - COMPLETED
-### P2.2: Backend Router Refactoring - COMPLETED
-- **server.py reduced from 5,038 to 3,091 lines** (39% total reduction)
-- **Inline routes reduced from 56 to 4** (only WebSocket/SSE/scripts remain)
-- Extracted route groups: watchlist, portfolio, earnings, ollama_proxy, market_data, advanced_backtest, system_status, dashboard (includes alerts CRUD, scanner, wave-scanner, universe)
+### Setup-Specific Model Endpoints (ai_modules.py)
+- `GET /api/ai-modules/timeseries/setups/status` — Status of all 10 setup models
+- `POST /api/ai-modules/timeseries/setups/train` — Train model for specific setup type
+- `POST /api/ai-modules/timeseries/setups/train-all` — Train all setup models (background)
+- `POST /api/ai-modules/timeseries/setups/predict` — Predict using setup-specific model
+- `POST /api/ai-modules/timeseries/stop-training` — Stop any running training
 
-### P2.3: Migrate Raw fetch() Calls - COMPLETED
-### P2.4: Merge historical_simulation_engine - COMPLETED (Mar 25, 2026)
-- Full AI Sim tab with detailed results (Summary/Trades/Decisions)
-- Market-wide backtest now runs as background jobs with progress polling
+### Other Key Endpoints
+- `/api/health` — Health check
+- `/api/ai-modules/timeseries/*` — General timeseries AI endpoints
+- `/api/backtest/*` — Strategy backtesting
+- `/api/dashboard/*` — Dashboard stats
 
-### P2.5: Code Cleanup - COMPLETED (Mar 25, 2026)
-- Deleted `simulation_router.py` (superseded by advanced_backtest_router)
-- Deleted `TeamBrain.jsx` (unused component)
-- Removed all references from server.py
-- Fixed pre-existing bugs in consolidated-status (undefined variable names)
-- Fixed missing imports in RightSidebar.jsx and TradingBotPanel.jsx
-
-### P2.6: Final server.py Extraction - COMPLETED (Mar 25, 2026)
-- **Created `system_router.py`**: health, startup-check, consolidated-status, llm/status, system/monitor (5 routes)
-- **Created `dashboard_router.py`**: dashboard/stats, dashboard/init, alerts CRUD, scanner/scan, scanner/presets, wave-scanner/*, universe/* (12 routes)
-- All 17 REST routes extracted; only 4 routes remain (2 WebSocket, 1 SSE, 1 scripts)
-- Fixed consolidated-status to use get_service_optional correctly (was using undefined variable names)
-
-## Remaining in server.py
-- 4 inline routes: `/api/ws/quotes` (WebSocket), `/api/ws/ollama-proxy` (WebSocket), `/api/stream/status` (SSE), `/api/scripts/{script_name}` (static)
-- These are tightly coupled to ConnectionManager + background tasks and should remain
+## Database Collections
+- `setup_type_models` — Setup-specific AI model storage (NEW)
+- `timeseries_models`, `ai_models` — General timeframe model storage
+- `ib_historical_data` — Historical price data (39M+ bars)
+- `watchlists`, `portfolios`, `alerts` — User data
+- `sim_jobs`, `sim_trades`, `sim_decisions` — Simulation data
 
 ## Upcoming Tasks
-- **(P1.5)** AI Parameter Auto-Optimizer: sweep confidence thresholds & lookback windows
-- **(P3)** Setup-Specific AI Models (train per trading setup)
-- **(P3)** Backtesting Workflow Automation (auto-run on model train)
+- **(P1) Backtesting Workflow Automation** — Auto-run backtests when a new model is trained
+- **(P2) Code Cleanup** — Delete unused historical_simulation_engine.py (still has active references in worker.py, server.py, advanced_backtest_router.py)
 
 ## Future/Backlog
-- (P3) Auto-Optimize AI Settings
+- (P3) Auto-Optimize AI Settings — Sweep confidence thresholds & lookback windows
 - (P3) API Route Profiling Dashboard
 - (P3) Compare Simulations side-by-side
 
-## Key API Endpoints (by router)
-### system_router.py
-- `/api/health` — Health check
-- `/api/startup-check` — Ultra-lightweight service status
-- `/api/consolidated-status` — Combined service status
-- `/api/llm/status` — LLM provider status
-- `/api/system/monitor` — Comprehensive system health
-
-### dashboard_router.py
-- `/api/dashboard/stats` — Dashboard summary stats
-- `/api/dashboard/init` — Batch initial data load
-- `/api/alerts`, `/api/alerts/generate`, `/api/alerts/clear` — Alert CRUD
-- `/api/scanner/scan`, `/api/scanner/presets` — Market scanner
-- `/api/wave-scanner/*` — Wave scanner (batch/stats/config)
-- `/api/universe/*` — Index universe (stats/symbols)
-
-### advanced_backtest_router.py
-- `/api/backtest/*` — Strategy backtesting, AI comparison, full AI simulation
-
-### Other routers
-- watchlist, portfolio, earnings, ollama_proxy, market_data, ai_modules, etc.
-
-## Database Collections
-- `watchlists`, `portfolios`, `alerts` — User data
-- `timeseries_model_archive` — Historical AI model versions
-- `sentcom_chats` — Chat history
-- `sim_jobs`, `sim_trades`, `sim_decisions` — Full AI simulation data
-
 ## Testing
-- Test reports: `/app/test_reports/iteration_104.json` (latest)
+- Test reports: `/app/test_reports/iteration_105.json` (latest - Setup Models)
+- Test reports: `/app/test_reports/iteration_104.json` (Full AI Sim)
+- Backend tests: `/app/backend/tests/test_setup_models.py`
