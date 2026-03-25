@@ -39,7 +39,8 @@ class HistoricalDataQueueService:
     
     def create_request(self, symbol: str, duration: str = "1 M", 
                        bar_size: str = "1 day", callback_id: str = None,
-                       skip_if_pending: bool = True) -> str:
+                       skip_if_pending: bool = True,
+                       end_date: str = None) -> str:
         """
         Create a new historical data request.
         
@@ -49,20 +50,29 @@ class HistoricalDataQueueService:
             bar_size: Bar size string (e.g., "1 day", "1 hour", "5 mins")
             callback_id: Optional ID to associate with this request
             skip_if_pending: If True, don't create if there's already a pending/claimed request
+            end_date: Optional IB endDateTime string (e.g., "20260217 16:00:00").
+                      If None/empty, IB uses current time. Used for chaining
+                      requests backward in time to fetch max lookback.
             
         Returns:
             request_id for tracking (or existing request_id if skipping duplicate)
         """
-        # Check for existing pending/claimed request for same symbol+bar_size
+        # Check for existing pending/claimed request for same symbol+bar_size+end_date
         if skip_if_pending:
-            existing = self.collection.find_one({
+            dedup_query = {
                 "symbol": symbol.upper(),
                 "bar_size": bar_size,
                 "status": {"$in": ["pending", "claimed"]}
-            }, {"request_id": 1})
+            }
+            # When chaining with end_date, include it in dedup to allow
+            # multiple requests for the same symbol+bar_size at different dates
+            if end_date:
+                dedup_query["end_date"] = end_date
+            
+            existing = self.collection.find_one(dedup_query, {"request_id": 1})
             
             if existing:
-                logger.debug(f"Skipping duplicate request for {symbol} {bar_size} - already in queue")
+                logger.debug(f"Skipping duplicate request for {symbol} {bar_size} end_date={end_date or 'now'} - already in queue")
                 return existing["request_id"]
         
         request_id = f"hist_{uuid.uuid4().hex[:12]}"
@@ -72,6 +82,7 @@ class HistoricalDataQueueService:
             "symbol": symbol.upper(),
             "duration": duration,
             "bar_size": bar_size,
+            "end_date": end_date or "",
             "callback_id": callback_id,
             "status": "pending",
             "data": None,
@@ -82,7 +93,7 @@ class HistoricalDataQueueService:
         }
         
         self.collection.insert_one(request)
-        logger.info(f"Created historical data request: {request_id} for {symbol}")
+        logger.debug(f"Created historical data request: {request_id} for {symbol} {bar_size} end_date={end_date or 'now'}")
         
         return request_id
     

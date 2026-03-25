@@ -33,6 +33,16 @@ from pymongo import ASCENDING, DESCENDING
 logger = logging.getLogger(__name__)
 
 
+# Calendar days per IB duration string — used for chaining step calculations
+DURATION_TO_CALENDAR_DAYS = {
+    "1 D": 1, "2 D": 2, "3 D": 3, "5 D": 5,
+    "1 W": 7, "2 W": 14,
+    "1 M": 30, "2 M": 60, "3 M": 90, "6 M": 180,
+    "1 Y": 365, "2 Y": 730, "5 Y": 1825, "8 Y": 2920,
+    "10 Y": 3650, "20 Y": 7300,
+}
+
+
 class CollectionStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -1344,6 +1354,78 @@ class IBHistoricalCollector:
         bar_config = self.BAR_CONFIGS.get(bar_size, {})
         return bar_config.get("max_history_days", 365)
 
+    def generate_chain_requests(
+        self,
+        bar_size: str,
+        earliest_existing_date: str = None,
+    ) -> list:
+        """
+        Generate a list of chained (duration, end_date) pairs that cover
+        the maximum IB lookback for a given bar size.
+
+        If the symbol already has data starting at `earliest_existing_date`,
+        chains are generated ONLY for the missing window between that date
+        and the max lookback start — avoiding redundant fetches.
+
+        Returns:
+            List of dicts with keys: duration, end_date (IB format string)
+            Empty list if existing data already covers the full lookback.
+        """
+        config = self.BAR_CONFIGS.get(bar_size)
+        if not config:
+            return []
+
+        max_duration = config["max_duration"]
+        max_lookback_days = config["max_history_days"]
+        step_days = DURATION_TO_CALENDAR_DAYS.get(max_duration, 30)
+
+        now = datetime.now(timezone.utc)
+        max_lookback_start = now - timedelta(days=max_lookback_days)
+
+        # Determine where to start chaining backward from
+        if earliest_existing_date:
+            # Parse the earliest date we already have
+            if isinstance(earliest_existing_date, str):
+                try:
+                    chain_from = datetime.fromisoformat(
+                        earliest_existing_date.replace("Z", "+00:00")
+                    )
+                except ValueError:
+                    try:
+                        chain_from = datetime.strptime(
+                            earliest_existing_date[:10], "%Y-%m-%d"
+                        ).replace(tzinfo=timezone.utc)
+                    except ValueError:
+                        chain_from = now
+            elif isinstance(earliest_existing_date, datetime):
+                chain_from = earliest_existing_date
+            else:
+                chain_from = now
+
+            if chain_from.tzinfo is None:
+                chain_from = chain_from.replace(tzinfo=timezone.utc)
+        else:
+            # No existing data — chain backward from now
+            chain_from = now
+
+        # If existing data already goes back far enough, nothing to do
+        if chain_from <= max_lookback_start:
+            return []
+
+        chains = []
+        current_end = chain_from
+
+        while current_end > max_lookback_start:
+            # IB endDateTime format: "YYYYMMDD HH:MM:SS"
+            end_date_str = current_end.strftime("%Y%m%d %H:%M:%S")
+            chains.append({
+                "duration": max_duration,
+                "end_date": end_date_str,
+            })
+            current_end -= timedelta(days=step_days)
+
+        return chains
+
     
     def get_symbol_tier(self, avg_volume: float) -> str:
         """Determine which tier a symbol belongs to based on ADV."""
@@ -1401,7 +1483,6 @@ class IBHistoricalCollector:
         thresholds = self.ADV_THRESHOLDS
         tier_timeframes = self.TIER_TIMEFRAMES
         get_tier = self.get_symbol_tier
-        get_max_dur = self.get_max_duration_for_bar_size
         get_safe_dur = self.get_safe_duration
         
         def _build_queue():
@@ -1419,7 +1500,7 @@ class IBHistoricalCollector:
                 ).sort("avg_volume", -1))
             
             if not symbols_with_adv:
-                return None, None, None
+                return None, None, None, None
             
             if max_symbols:
                 symbols_with_adv_limited = symbols_with_adv[:max_symbols]
@@ -1433,8 +1514,28 @@ class IBHistoricalCollector:
                 if tier in tier_counts:
                     tier_counts[tier] += 1
             
-            # Build queue entries
+            # ── Pre-fetch earliest dates for chaining (one aggregation) ──
+            earliest_dates = {}  # (symbol, bar_size) -> earliest_date_str
+            if use_max_lookback and data_col is not None:
+                logger.info("Querying earliest bar dates for smart chaining ...")
+                pipeline = [
+                    {"$group": {
+                        "_id": {"symbol": "$symbol", "bar_size": "$bar_size"},
+                        "earliest": {"$min": "$date"},
+                    }}
+                ]
+                for doc in data_col.aggregate(pipeline, allowDiskUse=True):
+                    _id = doc.get("_id", {})
+                    sym = _id.get("symbol")
+                    bs = _id.get("bar_size")
+                    if sym and bs:
+                        earliest_dates[(sym, bs)] = doc["earliest"]
+                logger.info(f"Found existing data for {len(earliest_dates)} (symbol, bar_size) combos")
+            
+            # Build queue entries: each entry is (symbol, bar_size, duration, end_date)
             queue_entries = []
+            chain_stats = {"single_requests": 0, "chained_requests": 0, "skipped_full_coverage": 0}
+            
             for sym_data in symbols_with_adv_limited:
                 symbol = sym_data["symbol"]
                 avg_volume = sym_data.get("avg_volume", 0)
@@ -1447,52 +1548,76 @@ class IBHistoricalCollector:
                 
                 for bar_size in timeframes:
                     if use_max_lookback:
-                        duration = get_max_dur(bar_size)
-                    else:
-                        duration = get_safe_dur(bar_size, lookback_days)
-                    
-                    if skip_recent and data_col is not None:
-                        existing = data_col.find_one({
-                            "symbol": symbol,
-                            "bar_size": bar_size,
-                            "collected_at": {"$gte": (datetime.now(timezone.utc) - timedelta(days=recent_days_threshold)).isoformat()}
-                        })
-                        if existing:
+                        # ── CHAINING MODE: generate multiple requests to cover max lookback ──
+                        earliest = earliest_dates.get((symbol, bar_size))
+                        chains = generate_chains(bar_size, earliest)
+                        
+                        if not chains:
+                            chain_stats["skipped_full_coverage"] += 1
                             continue
-                    
-                    queue_entries.append((symbol, bar_size, duration))
+                        
+                        for chain in chains:
+                            queue_entries.append((symbol, bar_size, chain["duration"], chain["end_date"]))
+                        chain_stats["chained_requests"] += len(chains)
+                    else:
+                        # ── SINGLE REQUEST MODE (original behavior) ──
+                        duration = get_safe_dur(bar_size, lookback_days)
+                        
+                        if skip_recent and data_col is not None:
+                            existing = data_col.find_one({
+                                "symbol": symbol,
+                                "bar_size": bar_size,
+                                "collected_at": {"$gte": (datetime.now(timezone.utc) - timedelta(days=recent_days_threshold)).isoformat()}
+                            })
+                            if existing:
+                                continue
+                        
+                        queue_entries.append((symbol, bar_size, duration, None))
+                        chain_stats["single_requests"] += 1
             
-            return symbols_with_adv_limited, tier_counts, queue_entries
+            return symbols_with_adv_limited, tier_counts, queue_entries, chain_stats
         
-        symbols_with_adv, tier_counts, queue_entries = await asyncio.to_thread(_build_queue)
+        # Reference the chain generator from the class instance
+        generate_chains = self.generate_chain_requests
+        
+        symbols_with_adv, tier_counts, queue_entries, chain_stats = await asyncio.to_thread(_build_queue)
         
         if symbols_with_adv is None:
             return {"success": False, "error": "No symbols found with sufficient ADV. Run ADV cache refresh first."}
         
         logger.info(f"Found {len(symbols_with_adv)} symbols to process")
         logger.info(f"Tier breakdown: {tier_counts}")
+        if use_max_lookback:
+            logger.info(f"Chaining stats: {chain_stats}")
         
         # Queue all requests
         from services.historical_data_queue_service import get_historical_data_queue_service
         queue_service = get_historical_data_queue_service()
         total_queued = 0
         
-        for symbol, bar_size, duration in queue_entries:
+        for symbol, bar_size, duration, end_date in queue_entries:
             queue_service.create_request(
                 symbol=symbol,
                 bar_size=bar_size,
-                duration=duration
+                duration=duration,
+                end_date=end_date,
             )
             total_queued += 1
         
         logger.info(f"Queued {total_queued} requests across {len(symbols_with_adv)} symbols")
         
-        # Calculate estimated time at optimized 1 second per request
-        estimated_seconds = total_queued * self.REQUEST_DELAY_SECONDS
+        # Calculate estimated time (chained requests take ~3-4s each via pusher)
+        seconds_per_request = 3.5 if use_max_lookback else self.REQUEST_DELAY_SECONDS
+        estimated_seconds = total_queued * seconds_per_request
         estimated_hours = round(estimated_seconds / 3600, 1)
-        estimated_display = f"{estimated_hours} hours" if estimated_hours >= 1 else f"{int(estimated_seconds / 60)} minutes"
+        if estimated_hours >= 24:
+            estimated_display = f"{estimated_hours / 24:.1f} days ({estimated_hours} hours)"
+        elif estimated_hours >= 1:
+            estimated_display = f"{estimated_hours} hours"
+        else:
+            estimated_display = f"{int(estimated_seconds / 60)} minutes"
         
-        return {
+        result = {
             "success": True,
             "message": f"Per-stock collection queued: {total_queued} requests for {len(symbols_with_adv)} symbols",
             "symbols": len(symbols_with_adv),
@@ -1505,6 +1630,16 @@ class IBHistoricalCollector:
             "use_max_lookback": use_max_lookback,
             "note": "Collection processes queue in order - each stock gets all its timeframes before moving to next"
         }
+        
+        if use_max_lookback:
+            result["chaining"] = {
+                "enabled": True,
+                "chained_requests": chain_stats.get("chained_requests", 0),
+                "skipped_full_coverage": chain_stats.get("skipped_full_coverage", 0),
+                "explanation": "Requests are chained backward in time using end_date to cover the full IB lookback window",
+            }
+        
+        return result
     
     async def start_collection(
         self,

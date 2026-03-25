@@ -1337,6 +1337,7 @@ class IBDataPusher:
         symbol = request.get("symbol")
         bar_size = request.get("bar_size", "1 day")
         duration = request.get("duration", "1 Y")
+        end_date = request.get("end_date", "")  # IB endDateTime — empty = now
         
         try:
             from ib_insync import Stock
@@ -1359,7 +1360,7 @@ class IBDataPusher:
             # Fetch from IB
             bars = self.ib.reqHistoricalData(
                 contract,
-                endDateTime="",
+                endDateTime=end_date,
                 durationStr=duration,
                 barSizeSetting=bar_size,
                 whatToShow="TRADES",
@@ -1646,6 +1647,7 @@ class IBDataPusher:
         symbol = req.get("symbol")
         duration = req.get("duration", "1 M")
         bar_size = req.get("bar_size", "1 day")
+        end_date = req.get("end_date", "")  # IB endDateTime — empty = now
         
         try:
             # Claim the request
@@ -1674,7 +1676,7 @@ class IBDataPusher:
             # Fetch from IB
             bars = self.ib.reqHistoricalData(
                 contract,
-                endDateTime="",
+                endDateTime=end_date,
                 durationStr=duration,
                 barSizeSetting=bar_size,
                 whatToShow="TRADES",
@@ -1910,8 +1912,10 @@ class IBDataPusher:
         symbol = req.get("symbol")
         duration = req.get("duration", "1 M")
         bar_size = req.get("bar_size", "1 day")
+        end_date = req.get("end_date", "")  # IB endDateTime — empty = now, or "YYYYMMDD HH:MM:SS"
         
-        logger.info(f"[HistoricalData] Fetching: {symbol} ({duration}, {bar_size})")
+        end_label = f"ending {end_date}" if end_date else "ending now"
+        logger.info(f"[HistoricalData] Fetching: {symbol} ({duration}, {bar_size}) {end_label}")
         
         try:
             # Claim the request first (prevents duplicate fetching)
@@ -1943,7 +1947,7 @@ class IBDataPusher:
             # Request historical data from IB Gateway
             bars = self.ib.reqHistoricalData(
                 contract,
-                endDateTime="",
+                endDateTime=end_date,
                 durationStr=duration,
                 barSizeSetting=bar_size,
                 whatToShow="TRADES",

@@ -1,89 +1,91 @@
-# SentCom AI Trading Platform — PRD
+# SentCom AI Trading Platform - PRD
 
 ## Original Problem Statement
-Build a sophisticated AI-powered trading platform with real-time market intelligence, automated trading capabilities, and advanced AI model training/validation.
+AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System, and maximum IB historical data collection via request chaining.
 
-## Current Session Enhancement
-Implement a full 5-Phase Auto-Validation Pipeline that runs after AI model training, displaying results within each setup card and connecting validation data throughout the application.
+## Core Requirements
+1. **5-Phase Auto-Validation UI** - Display AI Comparison, Monte Carlo, Walk-Forward, and baseline results per setup model (**DONE**)
+2. **Data Inventory System** - Unified DB tracking data depth per symbol/timeframe vs expected minimums (**DONE**)
+3. **Max Lookback Data Chaining** - Auto-chunk and chain IB API requests to fetch maximum historical data (**DONE**)
+4. **Vendor Data Import** - Stream-import bulk ndjson/CSV OHLCV data from third-party vendors (**DONE**)
 
 ## Architecture
-```
-/app
-├── backend/
-│   ├── scripts/
-│   │   └── recalculate_adv_cache.py
-│   ├── services/
-│   │   ├── ai_modules/
-│   │   │   ├── timeseries_service.py
-│   │   │   ├── setup_training_config.py
-│   │   │   ├── regime_features.py
-│   │   │   ├── regime_confidence.py
-│   │   │   └── post_training_validator.py    # UPDATED: Full 5-phase pipeline
-│   │   ├── slow_learning/
-│   │   │   └── advanced_backtest_engine.py   # Hosts all 5 backtest methods
-│   │   ├── focus_mode_manager.py
-│   │   └── trading_bot_service.py
-│   ├── routers/
-│   │   └── ai_modules.py                    # UPDATED: 4 validation endpoints
-│   ├── server.py
-│   └── worker.py                             # UPDATED: Wired 5-phase + batch validation
-└── frontend/
-    └── src/
-        ├── components/
-        │   ├── FocusModeBadge.jsx
-        │   └── NIA/
-        │       ├── SetupModelsPanel.jsx      # REWRITTEN: Full validation UI
-        │       └── AICommandCenter.jsx
-        └── contexts/
-            └── FocusModeContext.jsx
-```
+- **Frontend**: React + Shadcn/UI
+- **Backend**: FastAPI + MongoDB Atlas (~39M+ historical bars)
+- **Local Scripts**: IB Data Pusher (connects to IB Gateway), Vendor Data Importer
 
-## Completed Features
+## What's Been Implemented
 
 ### Session 1 (Previous)
-- ADV Cache Recalculation & API endpoints
-- ADV-Filtered Training in timeseries_service
-- Market Regime Integration (Layer 1: 6 features + Layer 2: Confidence dampening)
-- Richer Trade Logging (MFE/MAE tracking)
-- Auto-Managed Focus Mode (dynamic resource throttling)
-- Train→Validate→Promote Pipeline (basic: AI comparison only)
-- Maximized Training Data Configs
+- 5-Phase Auto-Validation Pipeline UI in SetupModelsPanel.jsx
+- Backend worker.py and ai_modules.py routing for batch validations
+- Data inventory service (data_inventory_service.py) for gap analysis
+- Cleared 15 stale collection jobs
 
-### Session 2 (Current) — Feb 25, 2026
-- **Full 5-Phase Auto-Validation Pipeline** (DONE)
-  - Phase 1: AI Comparison (setup-only vs AI+setup vs AI-only)
-  - Phase 2: Monte Carlo (5K simulations, risk assessment)
-  - Phase 3: Walk-Forward (robustness/overfitting check, top 3 symbols)
-  - Phase 4: Multi-Strategy (compare all setup types head-to-head, batch only)
-  - Phase 5: Market-Wide (scan 200 liquid symbols, batch only)
-- **Smart pipeline ordering**: Per-profile (1-3) then batch (4-5)
-- **Composite promotion decision**: AI edge + MC risk + WF efficiency + baseline comparison
-- **Fixed _get_backtest_engine** in worker.py (was passing constructor args incorrectly)
-- **4 API endpoints**: /validation/latest, /validation/history, /validation/batch-history, /validation/baselines
-- **Richer SetupModelsPanel UI**: Per-profile validation badges, phase indicators, quick metrics, expandable details, batch validation panel
-- **Testing**: 100% backend (10/10), 100% frontend — verified by testing agent
+### Session 2 (Current - Mar 25, 2026)
+- **IB Request Chaining Logic**: `generate_chain_requests()` method in `ib_historical_collector.py`
+  - Calculates chains needed per (symbol, bar_size) based on existing data depth
+  - Steps backward in time using `end_date` field
+  - Anti-redundancy: queries earliest bar dates to only chain for missing windows
+  - Duration-to-calendar-days mapping for accurate step calculations
 
-## API Endpoints
-- `GET /api/ai-modules/validation/latest` — Latest validation per (setup_type, bar_size)
-- `GET /api/ai-modules/validation/history` — Full validation history
-- `GET /api/ai-modules/validation/batch-history` — Batch validation results (phases 4-5)
-- `GET /api/ai-modules/validation/baselines` — Current model baselines
-- `GET /api/ai-modules/timeseries/setups/status` — All setup types with profiles
+- **Queue Service `end_date` Support**: `historical_data_queue_service.py`
+  - Added `end_date` param to `create_request()`
+  - Updated dedup logic to include `end_date` for chain uniqueness
 
-## DB Collections
-- `model_validations` — Per-profile validation records (phases 1-3)
-- `batch_validations` — Batch-level results (phases 4-5)
-- `model_baselines` — Current baseline metrics for promotion comparison
-- `setup_type_models_backup` — Model snapshots for rollback on rejection
+- **IB Pusher Updates**: `ib_data_pusher.py`
+  - All 3 fetch methods read `end_date` from request
+  - Pass to IB's `reqHistoricalData(endDateTime=end_date)`
+  - Empty string = current time (backward compatible)
 
-## Backlog
+- **New API Endpoints**:
+  - `POST /api/ib-collector/max-lookback-collection` - Trigger full max lookback with chaining
+  - `GET /api/ib-collector/chain-preview?symbol=X&bar_size=Y` - Preview chains for any symbol
 
-### P2 — Upcoming
+- **Vendor Data Import Script**: `documents/scripts/import_vendor_data.py`
+  - Streaming ndjson/CSV parser (constant memory)
+  - Filters to qualifying symbols via ADV cache
+  - Skips overlapping date ranges
+  - bulk_write in batches of 5000
+  - Progress tracking, resume support, dry-run mode
+
+## Key Technical Details
+
+### IB Lookback Limits & Chaining
+| Bar Size | Max Lookback | Duration/Request | Chains/Symbol |
+|----------|-------------|-----------------|---------------|
+| 1 min    | 180 days    | 1 W             | ~26           |
+| 5 mins   | 730 days    | 1 M             | ~25           |
+| 15 mins  | 730 days    | 3 M             | ~9            |
+| 30 mins  | 730 days    | 6 M             | ~5            |
+| 1 hour   | 1825 days   | 1 Y             | ~5            |
+| 1 day    | 7300 days   | 8 Y             | ~3            |
+| 1 week   | 7300 days   | 20 Y            | ~1            |
+
+### Data Inventory Thresholds
+- MIN_BACKTEST_BARS: 1min=3900, 5min=780, 15min=260, 30min=130, 1hr=65, 1day=252, 1wk=52
+- Depth categories: Deep (10x min), Backtestable (>min), Moderate (50-100%), Shallow (<50%), Stub (<10%)
+
+## Prioritized Backlog
+
+### P1 - Next Up
+- IB Pusher / Gateway connection stability (localhost:8001 timeouts)
+- User to purchase vendor 1-min data and run import script
+
+### P2 - Upcoming
 - MFE/MAE Scatter Chart per setup type
+- Auto-Optimize AI Settings
 
-### P3 — Future
-- Auto-Optimize AI Settings (sweep confidence thresholds)
-- Compare Simulations Side-by-Side (equity curves)
+### P3 - Future
 - API Route Profiling Dashboard
-- Shift ~44 active polling intervals to WebSocket-based updates
-- Refactor trading_bot_service.py (4,300+ lines → discrete modules)
+- Compare Simulations Side-by-Side
+- Refactor active polling to WebSocket (~44 intervals)
+- Refactor trading_bot_service.py (4,300+ lines → modules)
+
+## Key Files
+- `/app/backend/services/ib_historical_collector.py` - Chaining logic
+- `/app/backend/services/data_inventory_service.py` - Gap analysis
+- `/app/backend/services/historical_data_queue_service.py` - Queue with end_date
+- `/app/backend/routers/ib_collector_router.py` - Collection endpoints
+- `/app/documents/scripts/ib_data_pusher.py` - Local IB fetcher (updated for end_date)
+- `/app/documents/scripts/import_vendor_data.py` - Vendor bulk import

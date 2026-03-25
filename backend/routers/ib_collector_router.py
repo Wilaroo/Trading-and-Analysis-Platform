@@ -1836,6 +1836,119 @@ async def per_stock_collection(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+# ==================== MAX LOOKBACK CHAINING ====================
+
+@router.post("/max-lookback-collection")
+async def max_lookback_collection(
+    background_tasks: BackgroundTasks,
+    max_symbols: int = None,
+    specific_symbols: str = None,
+    bar_sizes: str = None,
+):
+    """
+    Start MAX LOOKBACK collection with request chaining.
+
+    This is the deep-history backfill endpoint. For every qualifying symbol
+    and timeframe, it generates chained requests stepping backward in time
+    to hit the absolute maximum IB lookback limit:
+
+    | Bar Size | Max Lookback | Chains/Symbol |
+    |----------|-------------|---------------|
+    | 1 min    | 180 days    | ~26           |
+    | 5 mins   | 730 days    | ~25           |
+    | 15 mins  | 730 days    | ~9            |
+    | 30 mins  | 730 days    | ~5            |
+    | 1 hour   | 1825 days   | ~5            |
+    | 1 day    | 7300 days   | ~3            |
+    | 1 week   | 7300 days   | ~1            |
+
+    **Smart features:**
+    - Checks existing data per (symbol, bar_size) to avoid redundant fetches
+    - Only chains for the MISSING time window
+    - Each request has an `end_date` so the pusher fetches the correct time slice
+    - Dedup prevents duplicate queue entries
+
+    Args:
+        max_symbols: Limit number of symbols (default None = all qualifying)
+        specific_symbols: Comma-separated symbols to target (e.g., "AAPL,TSLA,MSFT")
+        bar_sizes: Comma-separated bar sizes to collect (e.g., "5 mins,1 hour").
+                   Default: all applicable bar sizes per tier.
+
+    Returns:
+        Collection job info with chaining breakdown and time estimates
+    """
+    try:
+        collector = get_ib_collector()
+
+        symbols_list = None
+        if specific_symbols:
+            symbols_list = [s.strip().upper() for s in specific_symbols.split(",") if s.strip()]
+
+        result = await collector.run_per_stock_collection(
+            lookback_days=365,  # Ignored when use_max_lookback=True
+            skip_recent=False,  # Don't skip — we want to fill gaps backward
+            max_symbols=max_symbols,
+            specific_symbols=symbols_list,
+            use_max_lookback=True,
+        )
+
+        return result
+
+    except Exception as e:
+        import traceback
+        logger.error(f"Error starting max lookback collection: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/chain-preview")
+async def chain_preview(
+    symbol: str = "AAPL",
+    bar_size: str = "1 min",
+):
+    """
+    Preview what chained requests would be generated for a symbol+bar_size.
+
+    Use this to understand the chaining logic before triggering a full collection.
+    Shows the exact end_dates and durations that would be queued.
+    """
+    try:
+        collector = get_ib_collector()
+
+        # Get earliest existing data for this symbol+bar_size
+        earliest = None
+        if collector._data_col is not None:
+            doc = collector._data_col.find_one(
+                {"symbol": symbol.upper(), "bar_size": bar_size},
+                {"date": 1, "_id": 0},
+                sort=[("date", 1)],
+            )
+            if doc:
+                earliest = doc.get("date")
+
+        chains = collector.generate_chain_requests(bar_size, earliest)
+
+        config = collector.BAR_CONFIGS.get(bar_size, {})
+
+        return {
+            "success": True,
+            "symbol": symbol.upper(),
+            "bar_size": bar_size,
+            "max_lookback_days": config.get("max_history_days", 0),
+            "max_duration_per_request": config.get("max_duration", "?"),
+            "earliest_existing_data": str(earliest) if earliest else None,
+            "chains_needed": len(chains),
+            "estimated_time": f"{len(chains) * 3.5 / 60:.1f} minutes" if chains else "0",
+            "chains": chains[:10],  # Show first 10
+            "note": f"Showing first 10 of {len(chains)} chains" if len(chains) > 10 else "All chains shown",
+        }
+
+    except Exception as e:
+        logger.error(f"Error previewing chains: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
 # ==================== MULTI-TIMEFRAME COLLECTION ====================
 
 @router.post("/multi-timeframe-collection")
