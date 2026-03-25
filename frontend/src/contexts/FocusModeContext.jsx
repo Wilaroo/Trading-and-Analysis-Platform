@@ -332,10 +332,11 @@ export const FocusModeProvider = ({ children }) => {
     };
     
     // Delay initial sync to let startup modal finish first
-    const initialDelay = setTimeout(syncWithBackend, 8000);
+    const initialDelay = setTimeout(syncWithBackend, 5000);
     
-    // Then sync every 30 seconds (reduced from 10s - focus mode doesn't change often)
-    const interval = setInterval(syncWithBackend, 30000);
+    // Sync every 5 seconds — focus mode is now auto-managed by backend
+    // (training/backtest/collection auto-activate, job completion auto-restores)
+    const interval = setInterval(syncWithBackend, 5000);
     return () => {
       clearTimeout(initialDelay);
       clearInterval(interval);

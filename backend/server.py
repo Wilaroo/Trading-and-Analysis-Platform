@@ -3031,13 +3031,20 @@ async def websocket_quotes(websocket: WebSocket):
                     if not result.get("success"):
                         raise Exception(result.get("error", "Failed to create job"))
                     job_id = result["job"]["job_id"]
+                    # Auto-activate TRAINING focus mode
+                    focus_mode_manager.set_mode(
+                        mode="training",
+                        context={"setup_type": setup_type, "bar_size": bar_size},
+                        job_id=job_id
+                    )
                     await manager.send_personal_message({
                         "type": "train_queued",
                         "job_id": job_id,
                         "setup_type": setup_type,
+                        "focus_mode": "training",
                         "success": True
                     }, websocket)
-                    print(f"[WS] Created setup_training job {job_id} for {setup_type}")
+                    print(f"[WS] Created setup_training job {job_id} for {setup_type} (TRAINING mode activated)")
                 except Exception as train_err:
                     import traceback
                     traceback.print_exc()
@@ -3058,13 +3065,20 @@ async def websocket_quotes(websocket: WebSocket):
                     if not result.get("success"):
                         raise Exception(result.get("error", "Failed to create job"))
                     job_id = result["job"]["job_id"]
+                    # Auto-activate TRAINING focus mode
+                    focus_mode_manager.set_mode(
+                        mode="training",
+                        context={"setup_type": "ALL"},
+                        job_id=job_id
+                    )
                     await manager.send_personal_message({
                         "type": "train_queued",
                         "job_id": job_id,
                         "train_type": "setup_all",
+                        "focus_mode": "training",
                         "success": True
                     }, websocket)
-                    print(f"[WS] Created setup_training_all job {job_id}")
+                    print(f"[WS] Created setup_training_all job {job_id} (TRAINING mode activated)")
                 except Exception as train_err:
                     import traceback
                     traceback.print_exc()
@@ -3093,13 +3107,20 @@ async def websocket_quotes(websocket: WebSocket):
                     if not result.get("success"):
                         raise Exception(result.get("error", "Failed to create job"))
                     job_id = result["job"]["job_id"]
+                    # Auto-activate TRAINING focus mode
+                    focus_mode_manager.set_mode(
+                        mode="training",
+                        context={"bar_size": bar_size, "train_type": train_type},
+                        job_id=job_id
+                    )
                     await manager.send_personal_message({
                         "type": "train_queued",
                         "job_id": job_id,
                         "train_type": train_type,
+                        "focus_mode": "training",
                         "success": True
                     }, websocket)
-                    print(f"[WS] Created training job {job_id} ({train_type})")
+                    print(f"[WS] Created training job {job_id} ({train_type}) (TRAINING mode activated)")
                 except Exception as train_err:
                     import traceback
                     traceback.print_exc()

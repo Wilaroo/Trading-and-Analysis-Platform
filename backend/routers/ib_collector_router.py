@@ -15,6 +15,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ib-collector", tags=["ib-collector"])
 
 
+def _activate_collecting_mode(context: dict = None):
+    """Auto-activate COLLECTING focus mode when data collection starts."""
+    try:
+        from services.focus_mode_manager import focus_mode_manager
+        focus_mode_manager.set_mode(mode="collecting", context=context or {})
+        logger.info("[FOCUS] Auto-activated COLLECTING mode")
+    except Exception as e:
+        logger.warning(f"Failed to auto-activate collecting mode: {e}")
+
+
+def _restore_live_mode():
+    """Restore to LIVE mode after collection completes."""
+    try:
+        from services.focus_mode_manager import focus_mode_manager
+        focus_mode_manager.reset_to_live()
+        logger.info("[FOCUS] Restored to LIVE mode after collection")
+    except Exception as e:
+        logger.warning(f"Failed to restore live mode: {e}")
+
+
 @router.get("/data-status")
 async def get_data_status(
     bar_size: str = "1 day",
@@ -881,6 +901,7 @@ async def start_collection(
     """
     try:
         collector = get_ib_collector()
+        _activate_collecting_mode({"bar_size": bar_size, "duration": duration})
         result = await collector.start_collection(
             symbols=symbols,
             bar_size=bar_size,
@@ -890,8 +911,10 @@ async def start_collection(
             recent_days_threshold=recent_days_threshold,
             force_refresh=force_refresh
         )
+        _restore_live_mode()
         return result
     except Exception as e:
+        _restore_live_mode()
         logger.error(f"Error starting collection: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -936,15 +959,18 @@ async def full_collection(days: int = 30):
             duration = f"{days // 7 + 1} W"
         else:
             duration = f"{days // 30 + 1} M"
-            
+        
+        _activate_collecting_mode({"type": "full_collection", "days": days})
         result = await collector.start_collection(
             symbols=None,  # Use defaults
             bar_size="5 mins",
             duration=duration,
             use_defaults=True
         )
+        _restore_live_mode()
         return result
     except Exception as e:
+        _restore_live_mode()
         logger.error(f"Error starting full collection: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -977,15 +1003,18 @@ async def full_market_collection(
             duration = f"{days // 7 + 1} W"
         else:
             duration = f"{days // 30 + 1} M"
-            
+        
+        _activate_collecting_mode({"type": "full_market", "bar_size": bar_size})
         result = await collector.start_full_market_collection(
             bar_size=bar_size,
             duration=duration,
             min_price=min_price,
             max_price=max_price
         )
+        _restore_live_mode()
         return result
     except Exception as e:
+        _restore_live_mode()
         logger.error(f"Error starting full market collection: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1019,14 +1048,17 @@ async def liquid_collection(
             duration = f"{days // 7 + 1} W"
         else:
             duration = f"{days // 30 + 1} M"
-            
+        
+        _activate_collecting_mode({"type": "liquid_collection", "bar_size": bar_size, "min_adv": min_adv})
         result = await collector.start_liquid_collection(
             bar_size=bar_size,
             duration=duration,
             min_adv=min_adv
         )
+        _restore_live_mode()
         return result
     except Exception as e:
+        _restore_live_mode()
         logger.error(f"Error starting liquid collection: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1037,6 +1069,7 @@ async def cancel_collection():
     try:
         collector = get_ib_collector()
         result = collector.cancel_collection()
+        _restore_live_mode()
         return result
     except Exception as e:
         logger.error(f"Error cancelling collection: {e}")

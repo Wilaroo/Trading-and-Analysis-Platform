@@ -710,6 +710,20 @@ async def worker_loop(job_types: Optional[List[str]] = None, once: bool = False)
                     await job_queue_manager.fail_job(job_id, result.get('error', 'Unknown error'))
                     logger.error(f"Job {job_id} failed: {result.get('error')}")
                 
+                # Auto-restore to LIVE mode after job completes
+                try:
+                    from services.focus_mode_manager import focus_mode_manager
+                    # Only reset if no other jobs are pending
+                    pending = await job_queue_manager.get_next_job()
+                    if not pending:
+                        focus_mode_manager.reset_to_live()
+                        logger.info("[FOCUS] Auto-restored to LIVE mode (no pending jobs)")
+                    else:
+                        # Put the pending job back
+                        logger.info(f"[FOCUS] Keeping current mode — {pending.get('job_type')} job pending")
+                except Exception as fm_err:
+                    logger.warning(f"Focus mode reset error: {fm_err}")
+                
                 jobs_processed += 1
                 
                 if once:

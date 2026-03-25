@@ -23,7 +23,7 @@ import {
   Upload,
   LineChart
 } from 'lucide-react';
-import FocusModeSelector from '../FocusModeSelector';
+import FocusModeBadge from '../FocusModeBadge';
 
 // Credit Budget Detail Modal Component
 const CreditBudgetModal = ({ isOpen, onClose, creditBudget }) => {
@@ -751,8 +751,8 @@ const HeaderBar = ({
             })}
           </div>
           
-          {/* Focus Mode Selector */}
-          <FocusModeSelector compact={true} />
+          {/* Focus Mode Status Badge (auto-managed, visible only when non-LIVE) */}
+          <FocusModeBadge />
           
           {/* Credit Budget Indicator - COMPACT */}
           {creditBudget && (

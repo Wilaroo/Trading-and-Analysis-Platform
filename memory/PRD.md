@@ -32,6 +32,14 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
     - **Enhanced Journal Logging**: Entry records include setup_variant + entry_context. Exit records include MFE/MAE data (price, %, R-multiples) in both update and notes fields.
     - **Trade Restoration**: MFE/MAE and entry_context restored from DB on server restart.
     - **WebSocket/API**: All new fields included in `to_dict()` serialization, automatically surfaced in trade updates and API responses.
+18. **Auto-Managed Focus Mode (Mar 25, 2026)** — COMPLETED
+    - Training, backtesting, and data collection now auto-activate their respective focus modes
+    - Worker auto-restores to LIVE mode when jobs complete (checks for pending jobs first)
+    - Removed manual FocusModeSelector toggle from HeaderBar
+    - Replaced with compact FocusModeBadge — invisible in LIVE mode, shows mode/progress/abort when active
+    - Frontend syncs with backend every 5s for fast mode change detection
+    - Priority matrix tuned: TRAINING zeroes IB streaming (not needed), COLLECTING zeroes bot scan
+    - Wired: WS train handlers, backtest background jobs, data collection endpoints, cancel endpoints
 
 ## Key Data Models
 

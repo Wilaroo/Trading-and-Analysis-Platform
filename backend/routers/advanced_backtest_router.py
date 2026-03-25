@@ -27,6 +27,26 @@ _advanced_engine = None
 _simulation_engine = None
 
 
+def _activate_backtest_mode(context: dict = None):
+    """Auto-activate BACKTESTING focus mode when a backtest starts."""
+    try:
+        from services.focus_mode_manager import focus_mode_manager
+        focus_mode_manager.set_mode(mode="backtesting", context=context or {})
+        logger.info("[FOCUS] Auto-activated BACKTESTING mode")
+    except Exception as e:
+        logger.warning(f"Failed to auto-activate backtesting mode: {e}")
+
+
+def _restore_live_mode():
+    """Restore to LIVE mode after backtest completes."""
+    try:
+        from services.focus_mode_manager import focus_mode_manager
+        focus_mode_manager.reset_to_live()
+        logger.info("[FOCUS] Restored to LIVE mode after backtest")
+    except Exception as e:
+        logger.warning(f"Failed to restore live mode: {e}")
+
+
 def init_advanced_backtest_router(engine, simulation_engine=None):
     """Initialize the router with the backtest engine and optional simulation engine"""
     global _advanced_engine, _simulation_engine
@@ -245,6 +265,7 @@ async def run_multi_strategy_backtest(
 
 async def _run_multi_strategy_job(job_id, symbols, strategies, filters, capital, name):
     """Background task for multi-strategy backtest"""
+    _activate_backtest_mode({"job_id": job_id, "type": "multi_strategy"})
     try:
         result = await _advanced_engine.run_multi_strategy_backtest(
             symbols=symbols,
@@ -264,6 +285,8 @@ async def _run_multi_strategy_job(job_id, symbols, strategies, filters, capital,
     except Exception as e:
         _advanced_engine._running_jobs[job_id].status = "failed"
         _advanced_engine._running_jobs[job_id].error = str(e)
+    finally:
+        _restore_live_mode()
 
 
 # ============================================================================
@@ -358,6 +381,7 @@ async def run_walk_forward_optimization(
 
 async def _run_walk_forward_job(job_id, symbol, strategy, wf_config, total_days, end_date):
     """Background task for walk-forward optimization"""
+    _activate_backtest_mode({"job_id": job_id, "type": "walk_forward"})
     try:
         result = await _advanced_engine.run_walk_forward(
             symbol=symbol,
@@ -376,6 +400,8 @@ async def _run_walk_forward_job(job_id, symbol, strategy, wf_config, total_days,
     except Exception as e:
         _advanced_engine._running_jobs[job_id].status = "failed"
         _advanced_engine._running_jobs[job_id].error = str(e)
+    finally:
+        _restore_live_mode()
 
 
 # ============================================================================
@@ -452,6 +478,7 @@ async def run_monte_carlo_simulation(
 
 async def _run_monte_carlo_job(job_id, backtest_id, mc_config, starting_capital):
     """Background task for Monte Carlo simulation"""
+    _activate_backtest_mode({"job_id": job_id, "type": "monte_carlo"})
     try:
         result = await _advanced_engine.run_monte_carlo(
             backtest_id=backtest_id,
@@ -468,6 +495,8 @@ async def _run_monte_carlo_job(job_id, backtest_id, mc_config, starting_capital)
     except Exception as e:
         _advanced_engine._running_jobs[job_id].status = "failed"
         _advanced_engine._running_jobs[job_id].error = str(e)
+    finally:
+        _restore_live_mode()
 
 
 # ============================================================================
@@ -591,6 +620,7 @@ async def _run_market_wide_job(
     use_multi_timeframe: bool = False
 ):
     """Background task for market-wide backtest"""
+    _activate_backtest_mode({"job_id": job_id, "type": "market_wide"})
     try:
         result = await _advanced_engine.run_market_wide_backtest(
             strategy=strategy,
@@ -612,6 +642,8 @@ async def _run_market_wide_job(
     except Exception as e:
         _advanced_engine._running_jobs[job_id].status = "failed"
         _advanced_engine._running_jobs[job_id].error = str(e)
+    finally:
+        _restore_live_mode()
 
 
 # ============================================================================
@@ -708,6 +740,7 @@ async def _run_ai_comparison_job(
     ai_lookback_bars: int
 ):
     """Background task for AI comparison backtest"""
+    _activate_backtest_mode({"job_id": job_id, "type": "ai_comparison"})
     try:
         _advanced_engine._running_jobs[job_id].status = "running"
         _advanced_engine._running_jobs[job_id].started_at = datetime.utcnow().isoformat()
@@ -731,6 +764,8 @@ async def _run_ai_comparison_job(
         logger.error(f"AI comparison backtest failed: {e}")
         _advanced_engine._running_jobs[job_id].status = "failed"
         _advanced_engine._running_jobs[job_id].error = str(e)
+    finally:
+        _restore_live_mode()
 
 
 @router.get("/ai-comparison/status")

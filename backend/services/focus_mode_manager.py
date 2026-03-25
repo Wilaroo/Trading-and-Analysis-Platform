@@ -66,8 +66,8 @@ TASK_PRIORITIES = {
     },
     FocusMode.COLLECTING: {
         # Data collection is priority
-        'trading_bot_scan': 2,  # Reduced
-        'ib_quote_streaming': 5,  # Reduced but needed for context
+        'trading_bot_scan': 0,  # Paused — no trading during collection
+        'ib_quote_streaming': 3,  # Reduced — less competition for IB connection
         'ib_push_processing': 3,
         'websocket_updates': 5,
         'background_scanner': 0,  # Paused
@@ -81,9 +81,9 @@ TASK_PRIORITIES = {
     FocusMode.TRAINING: {
         # Training is priority - minimize IB usage
         'trading_bot_scan': 0,  # Paused
-        'ib_quote_streaming': 2,  # Minimal
+        'ib_quote_streaming': 0,  # Paused — training reads from historical DB
         'ib_push_processing': 0,  # Paused
-        'websocket_updates': 3,  # Reduced
+        'websocket_updates': 3,  # Reduced — needed for progress UI
         'background_scanner': 0,  # Paused
         'learning_loop': 0,  # Paused
         'market_intel': 0,  # Paused
