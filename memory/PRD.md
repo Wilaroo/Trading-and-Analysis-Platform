@@ -54,16 +54,13 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
 - Polls MongoDB `job_queue` every 5s for pending jobs
 - Progress tracking via `job_queue_manager.update_progress()`
 
-## Code Cleanup Notes
-- `historical_simulation_engine.py` — **Cannot be deleted** yet. Still actively used by:
-  - Full AI Simulation endpoint in `advanced_backtest_router.py`
-  - `server.py` startup initialization
-  - `worker.py` backtest job processing
-  - Requires migration of SimulationConfig and HistoricalSimulationEngine to a new location before deletion
+## Code Cleanup (Mar 25, 2026) — COMPLETED
+- Renamed `historical_simulation_engine.py` → `simulation_engine.py`
+- Updated all 3 import references (worker.py, server.py, advanced_backtest_router.py)
+- Deleted the old file
 
 ## Upcoming Tasks
 - **(P1) Backtesting Workflow Automation** — Auto-run backtests when a new model is trained
-- **(P2) Code Cleanup** — Migrate `historical_simulation_engine.py` exports, then delete
 
 ## Future/Backlog
 - (P3) Auto-Optimize AI Settings — Sweep confidence thresholds & lookback windows

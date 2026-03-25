@@ -955,7 +955,7 @@ if ai_consultation is not None:
 # ===================== HISTORICAL SIMULATION ENGINE =====================
 # Full SentCom backtesting on historical data
 try:
-    from services.historical_simulation_engine import init_simulation_engine, get_simulation_engine
+    from services.simulation_engine import init_simulation_engine, get_simulation_engine
     from services.ai_modules.timeseries_gbm import get_timeseries_model
     
     simulation_engine = init_simulation_engine(

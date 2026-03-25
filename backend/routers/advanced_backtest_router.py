@@ -1125,7 +1125,7 @@ async def run_full_ai_simulation(
     if not _simulation_engine:
         raise HTTPException(503, "Simulation engine not initialized. Make sure the historical simulation engine is loaded.")
     
-    from services.historical_simulation_engine import SimulationConfig
+    from services.simulation_engine import SimulationConfig
     
     config = SimulationConfig(
         start_date=request.start_date,

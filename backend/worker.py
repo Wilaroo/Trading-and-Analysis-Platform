@@ -377,7 +377,7 @@ async def process_backtest_job(job: dict, db) -> dict:
     
     try:
         # Import simulation service
-        from services.historical_simulation_engine import HistoricalSimulationEngine, SimulationConfig
+        from services.simulation_engine import HistoricalSimulationEngine, SimulationConfig
         
         engine = HistoricalSimulationEngine(db)
         await engine.initialize()
