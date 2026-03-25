@@ -84,7 +84,6 @@ from routers.smart_stops import router as smart_stops_router, init_smart_stop_ro
 from routers.sentcom import router as sentcom_router
 from routers.dynamic_risk_router import router as dynamic_risk_router
 from routers.ai_modules import router as ai_modules_router, inject_services as inject_ai_module_services
-from routers.simulation_router import router as simulation_router, init_simulation_router
 from routers.learning_connectors_router import router as learning_connectors_router, init_learning_connectors_router
 from routers.ib_collector_router import router as ib_collector_router
 from routers.data_storage_router import router as data_storage_router
@@ -101,6 +100,8 @@ from routers.ollama_proxy import (
     get_http_proxy_info, track_ollama_request
 )
 from routers.market_data import router as market_data_router, init_market_data_router
+from routers.system_router import router as system_router, init_system_router
+from routers.dashboard_router import router as dashboard_router, init_dashboard_router
 from services.sentcom_service import get_sentcom_service, init_sentcom_service
 from services.dynamic_risk_engine import get_dynamic_risk_engine
 from services.focus_mode_manager import focus_mode_manager
@@ -431,7 +432,6 @@ init_smart_stop_router()  # Initialize smart stop service
 app.include_router(sentcom_router)  # SentCom - Unified AI Command Center
 app.include_router(dynamic_risk_router)  # Dynamic Risk Management Engine
 app.include_router(ai_modules_router)  # AI Modules - Shadow Mode, Debate, Risk Manager
-app.include_router(simulation_router)  # Historical Simulation Engine
 app.include_router(learning_connectors_router)  # Learning Connectors - Data flow orchestration
 app.include_router(ib_collector_router)  # IB Historical Data Collector
 app.include_router(data_storage_router)  # Data Storage Management
@@ -444,6 +444,8 @@ app.include_router(portfolio_router)  # Portfolio positions (extracted from serv
 app.include_router(earnings_router)  # Earnings calendar & analysis (extracted from server.py)
 app.include_router(ollama_proxy_router)  # Ollama proxy HTTP endpoints (extracted from server.py)
 app.include_router(market_data_router)  # Market data, quotes, fundamentals (extracted from server.py)
+app.include_router(system_router)  # System health, startup-check, consolidated-status, LLM status, system monitor
+app.include_router(dashboard_router)  # Dashboard stats/init, alerts CRUD, scanner, wave-scanner, universe
 
 # Initialize job queue manager with sync database (uses asyncio.to_thread internally)
 job_queue_manager.set_db(db)
@@ -967,8 +969,7 @@ try:
     # Initialize the simulation engine
     asyncio.create_task(simulation_engine.initialize())
     
-    # Initialize router
-    init_simulation_router(simulation_engine)
+    # Initialize router (simulation engine unified into advanced backtest)
     
     register_service('simulation_engine', simulation_engine)
     
@@ -2446,698 +2447,44 @@ init_market_data_router(
     get_unusual_insider_activity, fetch_cot_data, get_cot_summary, fetch_market_news
 )
 
-# ===================== API ENDPOINTS =====================
-@app.get("/api/health")
-async def health_check():
-    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
+# ===================== INITIALIZE EXTRACTED ROUTERS =====================
+# System router: health, startup-check, consolidated-status, LLM status, system monitor
+init_system_router(
+    ib_service=ib_service,
+    assistant_service=assistant_service,
+    ollama_proxy_manager=ollama_proxy_manager,
+    is_http_ollama_proxy_connected=is_http_ollama_proxy_connected,
+    strategy_promotion_service=get_service_optional('strategy_promotion'),
+    simulation_engine=get_service_optional('simulation_engine'),
+    strategy_service=strategy_service,
+    db=db,
+    get_feature_engine=get_feature_engine,
+    get_scoring_engine=get_scoring_engine,
+    get_stock_service=get_stock_service,
+    get_service_optional=get_service_optional,
+    background_scanner=background_scanner,
+    LLMProvider=LLMProvider,
+)
 
+# Dashboard router: dashboard stats/init, alerts CRUD, scanner, wave-scanner, universe
+init_dashboard_router(
+    get_portfolio=_portfolio_get_portfolio,
+    get_watchlist=_watchlist_get_watchlist,
+    strategy_service=strategy_service,
+    get_ib_service=get_ib_service,
+    get_smart_watchlist=get_smart_watchlist,
+    background_scanner=background_scanner,
+    assistant_service=assistant_service,
+    alerts_col=alerts_col,
+    fetch_multiple_quotes=fetch_multiple_quotes,
+    score_stock_for_strategies=score_stock_for_strategies,
+    get_all_strategies_cached=get_all_strategies_cached,
+    scans_col=scans_col,
+    wave_scanner=wave_scanner,
+    index_universe=index_universe,
+)
 
-@app.get("/api/startup-check")
-async def startup_check():
-    """
-    Ultra-lightweight startup check endpoint for the StartupModal.
-    Returns ALL service statuses in a SINGLE call using ONLY in-memory state.
-    No DB queries, no network calls, no blocking operations.
-    Responds in <10ms even when event loop is under heavy load.
-    """
-    # Backend is healthy if we got here
-    backend_ok = True
-
-    # IB Gateway - check in-memory flag only
-    ib_connected = False
-    try:
-        ib_status = ib_service.get_connection_status()
-        ib_connected = ib_status.get("connected", False)
-    except Exception:
-        pass
-
-    # Ollama/AI Assistant - check the actual LLM routing priority:
-    # 1. HTTP Ollama Proxy (gpt-oss:120b-cloud) - PRIMARY, free
-    # 2. WebSocket Ollama Proxy - fallback 
-    # 3. Direct Ollama via ngrok URL - fallback
-    # 4. Emergent GPT-4o - PAID last resort
-    # Show green only when Ollama (primary) is available, yellow for Emergent-only
-    ollama_available = False
-    ai_fallback_only = False
-    try:
-        # Check if HTTP Ollama proxy is connected (primary path)
-        if is_http_ollama_proxy_connected():
-            ollama_available = True
-        # Check if WebSocket proxy is connected
-        elif ollama_proxy_manager and ollama_proxy_manager.is_connected:
-            ollama_available = True
-        # Check if direct Ollama URL is configured
-        elif LLMProvider.OLLAMA in assistant_service.llm_clients:
-            ollama_available = True  # URL configured, may or may not be reachable
-        # Only Emergent available = fallback mode
-        elif LLMProvider.EMERGENT in assistant_service.llm_clients and assistant_service.llm_clients[LLMProvider.EMERGENT].get("available"):
-            ai_fallback_only = True
-    except Exception:
-        pass
-
-    # AI Predictions (timeseries) - check if service object exists
-    timeseries_available = False
-    try:
-        ts_ai = get_service_optional('timeseries_ai')
-        timeseries_available = ts_ai is not None
-    except Exception:
-        pass
-
-    # Scanner - check in-memory running flag
-    scanner_running = False
-    try:
-        scanner_running = getattr(background_scanner, '_running', False)
-    except Exception:
-        pass
-
-    # Learning connectors - check if service exists
-    learning_available = False
-    try:
-        lc = get_service_optional('learning_connectors')
-        learning_available = lc is not None
-    except Exception:
-        pass
-
-    return {
-        "backend": backend_ok,
-        "database": backend_ok,  # If backend is up, DB is connected (checked at startup)
-        "websocket": backend_ok,  # WebSocket available when backend is up
-        "ib": ib_connected,
-        "ollama": ollama_available,
-        "ai_fallback_only": ai_fallback_only,  # True when only Emergent is available
-        "timeseries": timeseries_available,
-        "scanner": scanner_running,
-        "learning": learning_available,
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
-
-
-@app.get("/api/consolidated-status")
-async def consolidated_status():
-    """
-    Consolidated status endpoint - combines multiple status checks into one call.
-    Reduces frontend polling from 11+ endpoints to 1.
-    
-    Returns status for:
-    - AI modules (timeseries, debate, shadow)
-    - Learning connectors
-    - Strategy promotion
-    - IB collector
-    - Simulation jobs
-    """
-    from datetime import datetime, timezone
-    import asyncio
-    
-    result = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "ai_modules": {},
-        "learning": {},
-        "strategy": {},
-        "collector": {},
-        "simulation": {}
-    }
-    
-    try:
-        # AI Timeseries Status (quick check)
-        try:
-            ts_status = {
-                "available": ts_model_service is not None,
-                "training_active": getattr(ts_model_service, 'training_active', False) if ts_model_service else False,
-            }
-            if ts_model_service:
-                active = ts_model_service.get_active_model()
-                ts_status["model_active"] = active is not None
-            result["ai_modules"]["timeseries"] = ts_status
-        except Exception as e:
-            result["ai_modules"]["timeseries"] = {"error": str(e)}
-        
-        # AI Debate/Advisor Status (quick check)
-        try:
-            result["ai_modules"]["debate"] = {
-                "available": debate_service is not None,
-            }
-        except Exception as e:
-            result["ai_modules"]["debate"] = {"error": str(e)}
-        
-        # Shadow Stats (quick summary)
-        try:
-            if shadow_service:
-                stats = shadow_service.get_summary_stats()
-                result["ai_modules"]["shadow"] = {
-                    "total_signals": stats.get("total_signals", 0),
-                    "accurate_signals": stats.get("accurate_signals", 0),
-                }
-            else:
-                result["ai_modules"]["shadow"] = {"available": False}
-        except Exception as e:
-            result["ai_modules"]["shadow"] = {"error": str(e)}
-        
-        # Learning Connectors Status
-        try:
-            if learning_connector_service:
-                result["learning"]["status"] = {
-                    "connected": True,
-                    "thresholds_active": learning_connector_service.thresholds is not None
-                }
-            else:
-                result["learning"]["status"] = {"connected": False}
-        except Exception as e:
-            result["learning"]["status"] = {"error": str(e)}
-        
-        # Strategy Promotion (phases summary)
-        try:
-            if strategy_promotion_service:
-                phases = strategy_promotion_service.get_phase_status()
-                result["strategy"]["phases_count"] = len(phases) if phases else 0
-                result["strategy"]["available"] = True
-            else:
-                result["strategy"]["available"] = False
-        except Exception as e:
-            result["strategy"] = {"error": str(e)}
-        
-        # IB Collector Stats (quick summary)
-        try:
-            if ib_historical_collector:
-                stats = ib_historical_collector.get_collection_stats()
-                result["collector"] = {
-                    "available": True,
-                    "total_symbols": stats.get("total_symbols", 0),
-                    "active_collection": stats.get("is_collecting", False)
-                }
-            else:
-                result["collector"] = {"available": False}
-        except Exception as e:
-            result["collector"] = {"error": str(e)}
-        
-        # Simulation Jobs (count only)
-        try:
-            if simulation_engine:
-                jobs = await simulation_engine.get_recent_jobs(limit=5)
-                result["simulation"] = {
-                    "recent_jobs": len(jobs) if jobs else 0,
-                    "available": True
-                }
-            else:
-                result["simulation"] = {"available": False}
-        except Exception as e:
-            result["simulation"] = {"error": str(e)}
-            
-    except Exception as e:
-        result["error"] = str(e)
-    
-    return result
-
-
-@app.get("/api/llm/status")
-async def llm_status():
-    """Check which LLM provider is active and show smart routing config"""
-    status = {
-        "primary_provider": assistant_service.provider.value,
-        "smart_routing": {
-            "light": "Ollama (free) — quick chat, summaries",
-            "standard": "Ollama first, GPT-4o fallback — general use",
-            "deep": "GPT-4o (Emergent) — strategy analysis, trade evaluation, complex reasoning",
-        },
-        "providers": {}
-    }
-    
-    for provider, cfg in assistant_service.llm_clients.items():
-        info = {"available": cfg.get("available", False)}
-        if provider.value == "ollama":
-            info["url"] = cfg.get("url", "")
-            info["model"] = cfg.get("model", "")
-            info["role"] = "primary (light + standard tasks)"
-            try:
-                import httpx
-                async with httpx.AsyncClient() as client:
-                    resp = await client.get(
-                        f"{cfg['url']}/api/tags",
-                        timeout=5
-                    )
-                info["connected"] = resp.status_code == 200
-                if resp.status_code == 200:
-                    models = [m["name"] for m in resp.json().get("models", [])]
-                    info["models_available"] = models
-            except Exception as e:
-                info["connected"] = False
-                info["error"] = str(e)
-        elif provider.value == "emergent":
-            info["role"] = "deep tasks + fallback"
-        status["providers"][provider.value] = info
-    
-    return status
-
-
-@app.get("/api/system/monitor")
-async def system_monitor():
-    """
-    Comprehensive system health monitor.
-    Returns status of all backend services and integrations.
-    """
-    from datetime import datetime, timezone
-    
-    services = []
-    
-    # 1. Database (MongoDB)
-    try:
-        db.command("ping")
-        services.append({
-            "name": "MongoDB",
-            "status": "healthy",
-            "icon": "database",
-            "details": f"DB: {os.environ.get('DB_NAME', 'tradecommand')}"
-        })
-    except Exception as e:
-        services.append({
-            "name": "MongoDB",
-            "status": "error",
-            "icon": "database",
-            "details": str(e)[:50]
-        })
-    
-    # 2. IB Gateway Connection
-    try:
-        ib_status = ib_service.get_connection_status()
-        services.append({
-            "name": "IB Gateway",
-            "status": "healthy" if ib_status.get("connected") else "disconnected",
-            "icon": "activity",
-            "details": f"Port {ib_status.get('port', 4002)}" + (" - Connected" if ib_status.get("connected") else " - Not connected")
-        })
-    except Exception as e:
-        services.append({
-            "name": "IB Gateway",
-            "status": "error",
-            "icon": "activity",
-            "details": str(e)[:50]
-        })
-    
-    # 3. Strategies Service
-    try:
-        strategy_count = strategy_service.get_strategy_count()
-        services.append({
-            "name": "Strategies",
-            "status": "healthy",
-            "icon": "target",
-            "details": f"{strategy_count} strategies loaded"
-        })
-    except Exception as e:
-        services.append({
-            "name": "Strategies",
-            "status": "error",
-            "icon": "target",
-            "details": str(e)[:50]
-        })
-    
-    # 4. Feature Engine
-    try:
-        fe = get_feature_engine()
-        if fe:
-            services.append({
-                "name": "Feature Engine",
-                "status": "healthy",
-                "icon": "cpu",
-                "details": "Technical indicators ready"
-            })
-        else:
-            services.append({
-                "name": "Feature Engine",
-                "status": "error",
-                "icon": "cpu",
-                "details": "Not initialized"
-            })
-    except Exception as e:
-        services.append({
-            "name": "Feature Engine",
-            "status": "error",
-            "icon": "cpu",
-            "details": str(e)[:50]
-        })
-    
-    # 5. Scoring Engine
-    try:
-        se = get_scoring_engine(db)
-        if se:
-            services.append({
-                "name": "Scoring Engine",
-                "status": "healthy",
-                "icon": "bar-chart",
-                "details": "Scoring system ready"
-            })
-        else:
-            services.append({
-                "name": "Scoring Engine",
-                "status": "error",
-                "icon": "bar-chart",
-                "details": "Not initialized"
-            })
-    except Exception as e:
-        services.append({
-            "name": "Scoring Engine",
-            "status": "error",
-            "icon": "bar-chart",
-            "details": str(e)[:50]
-        })
-    
-    # 6. Newsletter Service (LLM)
-    try:
-        llm_key = os.environ.get("EMERGENT_LLM_KEY", "")
-        if llm_key:
-            services.append({
-                "name": "AI/LLM",
-                "status": "healthy",
-                "icon": "brain",
-                "details": "Emergent LLM Key configured"
-            })
-        else:
-            services.append({
-                "name": "AI/LLM",
-                "status": "warning",
-                "icon": "brain",
-                "details": "No LLM key configured"
-            })
-    except Exception as e:
-        services.append({
-            "name": "AI/LLM",
-            "status": "error",
-            "icon": "brain",
-            "details": str(e)[:50]
-        })
-    
-    # 7. Data Services (Alpaca, Finnhub, yfinance)
-    try:
-        stock_svc = get_stock_service()
-        data_status = await stock_svc.get_service_status()
-        
-        # Alpaca
-        alpaca_info = data_status.get("alpaca", {})
-        services.append({
-            "name": "Alpaca",
-            "status": "healthy" if alpaca_info.get("available") else "warning",
-            "icon": "trending-up",
-            "details": alpaca_info.get("status", "unknown")
-        })
-        
-        # Finnhub
-        finnhub_info = data_status.get("finnhub", {})
-        services.append({
-            "name": "Finnhub",
-            "status": "healthy" if finnhub_info.get("available") else "warning",
-            "icon": "bar-chart-2",
-            "details": finnhub_info.get("status", "not_configured")
-        })
-        
-        # yfinance (fallback)
-        yf_info = data_status.get("yfinance", {})
-        services.append({
-            "name": "Yahoo Finance",
-            "status": "healthy" if yf_info.get("available") else "warning",
-            "icon": "globe",
-            "details": yf_info.get("status", "available")
-        })
-        
-    except Exception as e:
-        services.append({
-            "name": "Data Services",
-            "status": "error",
-            "icon": "trending-up",
-            "details": str(e)[:50]
-        })
-    
-    # Calculate overall health
-    healthy_count = sum(1 for s in services if s["status"] == "healthy")
-    warning_count = sum(1 for s in services if s["status"] == "warning")
-    error_count = sum(1 for s in services if s["status"] == "error")
-    disconnected_count = sum(1 for s in services if s["status"] == "disconnected")
-    
-    if error_count > 0:
-        overall_status = "degraded"
-    elif warning_count > 0 or disconnected_count > 0:
-        overall_status = "partial"
-    else:
-        overall_status = "healthy"
-    
-    return {
-        "overall_status": overall_status,
-        "services": services,
-        "summary": {
-            "healthy": healthy_count,
-            "warning": warning_count,
-            "disconnected": disconnected_count,
-            "error": error_count,
-            "total": len(services)
-        },
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
-
-
-# ----- Market data/quotes/fundamentals/insider/COT/news routes extracted to routers/market_data.py -----
-
-# ----- Strategies -----
-# NOTE: Strategy endpoints are now handled by routers/strategies.py
-# The strategy_service is used for all strategy-related operations
-
-# ----- Scanner -----
-@app.post("/api/scanner/scan")
-async def run_scanner(
-    symbols: List[str],
-    category: Optional[str] = None,
-    min_score: int = 50,
-    include_fundamentals: bool = False
-):
-    """
-    Scan symbols against all 50 strategy criteria.
-    Uses detailed criteria matching for Intraday, Swing, and Investment strategies.
-    """
-    quotes = await fetch_multiple_quotes([s.upper() for s in symbols])
-    
-    results = []
-    for quote in quotes:
-        # Optionally fetch fundamentals for investment strategy scoring
-        fundamentals = None
-        if include_fundamentals or (category and category.lower() == "investment"):
-            try:
-                fundamentals = await fetch_fundamentals(quote["symbol"])
-            except Exception:
-                fundamentals = None
-        
-        # Score against strategies with detailed criteria
-        score_data = await score_stock_for_strategies(
-            quote["symbol"], 
-            quote, 
-            fundamentals=fundamentals,
-            category_filter=category.lower() if category else None
-        )
-        
-        if score_data["score"] >= min_score:
-            results.append({
-                **score_data,
-                "quote": quote,
-                "has_fundamentals": fundamentals is not None
-            })
-    
-    results.sort(key=lambda x: x["score"], reverse=True)
-    
-    scan_doc = {
-        "symbols": symbols,
-        "category": category,
-        "min_score": min_score,
-        "results_count": len(results),
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    await asyncio.to_thread(scans_col.insert_one, scan_doc)
-    
-    return {
-        "results": results[:20], 
-        "total_scanned": len(symbols),
-        "category_filter": category,
-        "min_score_filter": min_score,
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
-
-@app.get("/api/scanner/presets")
-async def get_scanner_presets():
-    """Get predefined scanner presets"""
-    presets = [
-        {"name": "Momentum Movers", "symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "AMD", "NFLX", "CRM"], "min_score": 40},
-        {"name": "Tech Leaders", "symbols": ["AAPL", "MSFT", "GOOGL", "META", "NVDA", "AMD", "INTC", "AVGO", "QCOM", "ADBE"], "min_score": 30},
-        {"name": "High Beta", "symbols": ["TSLA", "NVDA", "AMD", "COIN", "MSTR", "SQ", "SHOP", "ROKU", "SNAP", "PLTR"], "min_score": 40},
-        {"name": "Dividend Aristocrats", "symbols": ["JNJ", "PG", "KO", "PEP", "MMM", "ABT", "WMT", "TGT", "MCD", "HD"], "min_score": 20},
-    ]
-    return {"presets": presets}
-
-# ----- Watchlist & Smart Watchlist routes extracted to routers/watchlist.py -----
-
-
-# ===================== WAVE SCANNER API =====================
-
-@app.get("/api/wave-scanner/batch")
-async def get_wave_scanner_batch():
-    """
-    Get the next batch of symbols to scan
-    Returns tiered symbols: Tier1 (watchlist), Tier2 (high RVOL), Tier3 (universe wave)
-    """
-    batch = await wave_scanner.get_scan_batch()
-    return batch
-
-@app.get("/api/wave-scanner/stats")
-async def get_wave_scanner_stats():
-    """Get wave scanner statistics"""
-    return wave_scanner.get_stats()
-
-@app.get("/api/wave-scanner/config")
-async def get_wave_scanner_config():
-    """Get wave scanner configuration"""
-    return wave_scanner.get_scan_config()
-
-
-# ===================== INDEX UNIVERSE API =====================
-
-@app.get("/api/universe/stats")
-async def get_universe_stats():
-    """Get index universe statistics"""
-    return index_universe.get_stats()
-
-@app.get("/api/universe/symbols/{index_type}")
-async def get_index_symbols(index_type: str):
-    """
-    Get symbols for a specific index
-    Valid types: sp500, nasdaq100, russell2000, etf
-    """
-    from services.index_universe import IndexType
-    
-    try:
-        idx_type = IndexType(index_type.lower())
-    except ValueError:
-        raise HTTPException(
-            status_code=400, 
-            detail="Invalid index type. Valid: sp500, nasdaq100, russell2000, etf"
-        )
-    
-    symbols = index_universe.get_index_symbols(idx_type)
-    return {
-        "index": index_type,
-        "count": len(symbols),
-        "symbols": symbols
-    }
-
-
-# ----- Portfolio routes extracted to routers/portfolio.py -----
-
-# ----- Alerts -----
-@app.get("/api/alerts")
-async def get_alerts(unread_only: bool = False):
-    """Get all alerts"""
-    query = {"read": False} if unread_only else {}
-    alerts = await asyncio.to_thread(lambda: list(alerts_col.find(query, {"_id": 0}).sort("timestamp", -1).limit(50)))
-    unread_count = await asyncio.to_thread(alerts_col.count_documents, {"read": False})
-    return {"alerts": alerts, "unread_count": unread_count}
-
-@app.post("/api/alerts/generate")
-async def generate_alerts():
-    """Generate alerts based on strategy criteria"""
-    symbols = ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA", "AMD", "META", "AMZN"]
-    quotes = await fetch_multiple_quotes(symbols)
-    
-    new_alerts = []
-    all_strategies = get_all_strategies_cached()
-    for quote in quotes:
-        score_data = await score_stock_for_strategies(quote["symbol"], quote)
-        
-        if score_data["score"] >= 60:
-            for strategy_id in score_data["matched_strategies"][:2]:
-                strategy = next((s for s in all_strategies if s["id"] == strategy_id), None)
-                if strategy:
-                    alert = {
-                        "symbol": quote["symbol"],
-                        "strategy_id": strategy_id,
-                        "strategy_name": strategy["name"],
-                        "message": f"{quote['symbol']} matches {strategy['name']} criteria",
-                        "criteria_met": strategy["criteria"][:3],
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "read": False,
-                        "score": score_data["score"],
-                        "change_percent": quote["change_percent"]
-                    }
-                    alert_doc = alert.copy()
-                    await asyncio.to_thread(alerts_col.insert_one, alert_doc)
-                    new_alerts.append(alert)
-    
-    return {"alerts_generated": len(new_alerts), "alerts": new_alerts}
-
-@app.delete("/api/alerts/clear")
-async def clear_alerts():
-    """Clear all alerts"""
-    result = await asyncio.to_thread(alerts_col.delete_many, {})
-    return {"deleted": result.deleted_count}
-
-# ----- Earnings routes extracted to routers/earnings_router.py -----
-
-# ----- Dashboard Stats -----
-@app.get("/api/dashboard/stats")
-async def get_dashboard_stats():
-    """Get dashboard statistics"""
-    portfolio = await _portfolio_get_portfolio()
-    alerts_data = await get_alerts(unread_only=True)
-    watchlist = await _watchlist_get_watchlist()
-    
-    return {
-        "portfolio_value": portfolio["summary"]["total_value"],
-        "portfolio_change": portfolio["summary"]["total_gain_loss_percent"],
-        "unread_alerts": alerts_data["unread_count"],
-        "watchlist_count": watchlist["count"],
-        "strategies_count": strategy_service.get_strategy_count(),
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
-
-@app.get("/api/dashboard/init")
-async def get_dashboard_init():
-    """
-    Batch endpoint for initial dashboard data load.
-    Returns multiple data sources in one request to reduce API calls on startup.
-    """
-    try:
-        # Fetch all data in parallel
-        ib_status = get_ib_service().get_connection_status()
-        
-        # Add busy status to IB
-        is_busy, busy_op = get_ib_service().is_busy()
-        ib_status["is_busy"] = is_busy
-        ib_status["busy_operation"] = busy_op
-        
-        # Get system health
-        system_health = await system_monitor()
-        
-        # Get alerts
-        alerts_data = await get_alerts()
-        
-        # Get smart watchlist
-        smart_watchlist_items = get_smart_watchlist()
-        
-        # Get live scanner status
-        scanner_status = {
-            "active": background_scanner._running if background_scanner else False,
-            "alerts_count": len(background_scanner._live_alerts) if background_scanner else 0,
-        }
-        
-        return {
-            "ib_status": ib_status,
-            "system_health": system_health,
-            "alerts": alerts_data,
-            "smart_watchlist": [item.to_dict() for item in smart_watchlist_items[:20]],
-            "scanner_status": scanner_status,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-    except Exception as e:
-        return {
-            "error": str(e),
-            "ib_status": {"connected": False},
-            "system_health": {"overall_status": "error"},
-            "alerts": {"alerts": [], "unread_count": 0},
-            "smart_watchlist": [],
-            "scanner_status": {"active": False},
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
+# ===================== WEBSOCKET REAL-TIME STREAMING =====================
 
 # ===================== WEBSOCKET REAL-TIME STREAMING =====================
 

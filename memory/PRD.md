@@ -24,51 +24,64 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
 ## P2 Refactoring (Feb-Mar 2026)
 
 ### P2.1: GPU for LightGBM - COMPLETED
-- Auto-detection of GPU availability for LightGBM training
-
 ### P2.2: Backend Router Refactoring - COMPLETED
-- **server.py reduced from 5,038 to 3,741 lines** (26% reduction)
-- **Inline routes reduced from 56 to 19** (remaining are system-level/WebSocket)
-- Extracted route groups: watchlist, portfolio, earnings, ollama_proxy, market_data, advanced_backtest
+- **server.py reduced from 5,038 to 3,091 lines** (39% total reduction)
+- **Inline routes reduced from 56 to 4** (only WebSocket/SSE/scripts remain)
+- Extracted route groups: watchlist, portfolio, earnings, ollama_proxy, market_data, advanced_backtest, system_status, dashboard (includes alerts CRUD, scanner, wave-scanner, universe)
 
 ### P2.3: Migrate Raw fetch() Calls - COMPLETED
-- **108 raw fetch() calls migrated to centralized api utility**
-- Added `safeGet`, `safePost`, `safeDelete` helpers to `utils/api.js`
-
 ### P2.4: Merge historical_simulation_engine - COMPLETED (Mar 25, 2026)
-- Added "Full AI Sim" tab to AdvancedBacktestPanel
-- Backend endpoints: POST /full-ai-simulation, GET /status, /trades, /decisions, /summary, /jobs
-- Fixed summary endpoint (was using non-existent methods)
-- Frontend: Full config form, job start + status polling, detailed results with Summary/Trades/Decisions tabs
-- Per-symbol breakdown in summary view
-- Fixed missing api/safeGet imports in RightSidebar.jsx and TradingBotPanel.jsx (pre-existing compilation errors)
-- Backend tests: 12/12 passed (iteration_104)
+- Full AI Sim tab with detailed results (Summary/Trades/Decisions)
+- Market-wide backtest now runs as background jobs with progress polling
+
+### P2.5: Code Cleanup - COMPLETED (Mar 25, 2026)
+- Deleted `simulation_router.py` (superseded by advanced_backtest_router)
+- Deleted `TeamBrain.jsx` (unused component)
+- Removed all references from server.py
+- Fixed pre-existing bugs in consolidated-status (undefined variable names)
+- Fixed missing imports in RightSidebar.jsx and TradingBotPanel.jsx
+
+### P2.6: Final server.py Extraction - COMPLETED (Mar 25, 2026)
+- **Created `system_router.py`**: health, startup-check, consolidated-status, llm/status, system/monitor (5 routes)
+- **Created `dashboard_router.py`**: dashboard/stats, dashboard/init, alerts CRUD, scanner/scan, scanner/presets, wave-scanner/*, universe/* (12 routes)
+- All 17 REST routes extracted; only 4 routes remain (2 WebSocket, 1 SSE, 1 scripts)
+- Fixed consolidated-status to use get_service_optional correctly (was using undefined variable names)
+
+## Remaining in server.py
+- 4 inline routes: `/api/ws/quotes` (WebSocket), `/api/ws/ollama-proxy` (WebSocket), `/api/stream/status` (SSE), `/api/scripts/{script_name}` (static)
+- These are tightly coupled to ConnectionManager + background tasks and should remain
 
 ## Upcoming Tasks
 - **(P1.5)** AI Parameter Auto-Optimizer: sweep confidence thresholds & lookback windows
-- **(P2)** Finalize server.py refactoring: extract remaining 19 inline routes (health, status, scanner, dashboard, websockets)
-- **(P2)** Code Cleanup: delete deprecated files (simulation_router.py, historical_simulation_engine.py, TeamBrain.jsx)
-
-## Future/Backlog
 - **(P3)** Setup-Specific AI Models (train per trading setup)
 - **(P3)** Backtesting Workflow Automation (auto-run on model train)
-- **(P3)** Auto-Optimize AI Settings (saved enhancement idea)
-- **(P3)** API Route Profiling Dashboard
 
-## Key API Endpoints
-- `/api/health` — System health check
-- `/api/watchlist`, `/api/smart-watchlist` — Watchlist management
-- `/api/portfolio` — Portfolio positions
-- `/api/earnings/*` — Earnings calendar & analysis
-- `/api/quotes/*`, `/api/market/*`, `/api/news` — Market data
-- `/api/ollama-proxy/*` — Ollama proxy
-- `/api/backtest/ai-comparison` — AI comparison backtesting
-- `/api/backtest/full-ai-simulation` — Full AI pipeline simulation (NEW)
-- `/api/backtest/full-ai-simulation/summary/{job_id}` — Simulation summary with per-symbol breakdown (NEW)
-- `/api/backtest/full-ai-simulation/trades/{job_id}` — Simulation trades (NEW)
-- `/api/backtest/full-ai-simulation/decisions/{job_id}` — AI decisions log (NEW)
-- `/api/ai-modules/timeseries/*` — AI model management
-- `/api/dashboard/*` — Dashboard aggregation
+## Future/Backlog
+- (P3) Auto-Optimize AI Settings
+- (P3) API Route Profiling Dashboard
+- (P3) Compare Simulations side-by-side
+
+## Key API Endpoints (by router)
+### system_router.py
+- `/api/health` — Health check
+- `/api/startup-check` — Ultra-lightweight service status
+- `/api/consolidated-status` — Combined service status
+- `/api/llm/status` — LLM provider status
+- `/api/system/monitor` — Comprehensive system health
+
+### dashboard_router.py
+- `/api/dashboard/stats` — Dashboard summary stats
+- `/api/dashboard/init` — Batch initial data load
+- `/api/alerts`, `/api/alerts/generate`, `/api/alerts/clear` — Alert CRUD
+- `/api/scanner/scan`, `/api/scanner/presets` — Market scanner
+- `/api/wave-scanner/*` — Wave scanner (batch/stats/config)
+- `/api/universe/*` — Index universe (stats/symbols)
+
+### advanced_backtest_router.py
+- `/api/backtest/*` — Strategy backtesting, AI comparison, full AI simulation
+
+### Other routers
+- watchlist, portfolio, earnings, ollama_proxy, market_data, ai_modules, etc.
 
 ## Database Collections
 - `watchlists`, `portfolios`, `alerts` — User data
@@ -77,5 +90,4 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
 - `sim_jobs`, `sim_trades`, `sim_decisions` — Full AI simulation data
 
 ## Testing
-- Test reports: `/app/test_reports/iteration_104.json` (latest - 12/12 backend tests passed)
-- Backend tests: `/app/backend/tests/test_full_ai_simulation.py`
+- Test reports: `/app/test_reports/iteration_104.json` (latest)
