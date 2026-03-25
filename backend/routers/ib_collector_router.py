@@ -5,7 +5,7 @@ IB Historical Data Collector Router
 API endpoints for managing historical data collection from IB Gateway.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from typing import Optional, List
 import logging
 
@@ -2335,4 +2335,215 @@ async def get_system_health():
         
     except Exception as e:
         logger.error(f"Error in system health check: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# ==================== UNIFIED DATA INVENTORY ====================
+
+@router.post("/build-inventory")
+async def build_inventory(background_tasks: BackgroundTasks):
+    """
+    Build/rebuild the unified data inventory by scanning both
+    ib_historical_data and historical_bars collections.
+    """
+    try:
+        from services.data_inventory_service import build_data_inventory
+        collector = get_ib_collector()
+        db = collector._db
+        if db is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        
+        def _build():
+            try:
+                result = build_data_inventory(db)
+                logger.info(f"Inventory build complete: {result}")
+            except Exception as e:
+                logger.error(f"Inventory build failed: {e}")
+        
+        background_tasks.add_task(_build)
+        return {"success": True, "message": "Inventory build started in background. Check /inventory/summary in ~30s."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting inventory build: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/inventory/summary")
+async def get_inventory_summary_endpoint():
+    """
+    Get high-level summary of the unified data inventory.
+    
+    Returns:
+    - Total entries, unique symbols, backtestable count
+    - Breakdown by bar_size (deep/moderate/shallow/stub)
+    - Breakdown by liquidity tier
+    """
+    try:
+        from services.data_inventory_service import get_inventory_summary
+        collector = get_ib_collector()
+        db = collector._db
+        if db is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        
+        return get_inventory_summary(db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting inventory summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/inventory/symbol/{symbol}")
+async def get_symbol_inventory(symbol: str):
+    """
+    Get complete data inventory for a single symbol across all timeframes.
+    """
+    try:
+        from services.data_inventory_service import query_symbol_inventory
+        collector = get_ib_collector()
+        db = collector._db
+        if db is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        
+        return query_symbol_inventory(db, symbol)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error querying symbol inventory: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/deep-gap-analysis")
+async def deep_gap_analysis(tier: str = None):
+    """
+    Depth-aware gap analysis using the unified inventory.
+    
+    Unlike /gap-analysis (which only checks existence), this checks:
+    - Missing: qualified symbol has ZERO data for a timeframe
+    - Shallow: has data but below backtest minimum
+    - Stale: data exists but >7 days old
+    - Needs deepening: moderate data, could benefit from more history
+    
+    Args:
+        tier: Filter by tier ("intraday", "swing", "investment") or None for all
+    """
+    try:
+        from services.data_inventory_service import run_deep_gap_analysis
+        collector = get_ib_collector()
+        db = collector._db
+        if db is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        
+        return run_deep_gap_analysis(db, tier)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in deep gap analysis: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/backfill-plan")
+async def get_backfill_plan(tier: str = None, max_requests: int = None):
+    """
+    Generate a prioritized backfill plan from deep gap analysis.
+    
+    Priority order:
+    1. Missing daily data for liquid symbols (most valuable for backtesting)
+    2. Missing hourly data 
+    3. Shallow daily (needs deepening)
+    4. Missing intraday
+    5. Stale data refresh
+    6. General deepening
+    
+    Returns estimated time and request list ready to queue.
+    """
+    try:
+        from services.data_inventory_service import generate_backfill_plan
+        collector = get_ib_collector()
+        db = collector._db
+        if db is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        
+        return generate_backfill_plan(db, tier, max_requests)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating backfill plan: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/execute-backfill")
+async def execute_backfill(tier: str = None, max_requests: int = None):
+    """
+    Generate a backfill plan and queue all requests for the collector to process.
+    
+    This queues requests into `historical_data_requests` with proper priorities.
+    The IB Historical Collector (separate process) will pick them up.
+    
+    Skips symbols already queued (pending/processing).
+    """
+    try:
+        from services.data_inventory_service import generate_backfill_plan, queue_backfill_plan
+        collector = get_ib_collector()
+        db = collector._db
+        if db is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        
+        plan = generate_backfill_plan(db, tier, max_requests)
+        if not plan["success"]:
+            return plan
+        
+        queue_result = queue_backfill_plan(db, plan["requests"])
+        
+        return {
+            "success": True,
+            "plan_summary": {
+                "total_gaps": plan["total_requests"],
+                "estimated_hours": plan["estimated_hours"],
+                "by_bar_size": plan["by_bar_size"],
+            },
+            "queue_result": queue_result,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error executing backfill: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/clear-stale-jobs")
+async def clear_stale_jobs():
+    """
+    Mark all stale 'running' collection jobs as 'stalled'.
+    
+    Jobs stuck in 'running' state for >1 hour are considered stale
+    and block the queue processor from picking up new work.
+    """
+    try:
+        collector = get_ib_collector()
+        db = collector._db
+        if db is None:
+            raise HTTPException(status_code=503, detail="Database not initialized")
+        
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        
+        result = db["ib_collection_jobs"].update_many(
+            {"status": "running"},
+            {"$set": {
+                "status": "stalled",
+                "stalled_at": datetime.now(timezone.utc).isoformat(),
+                "stall_reason": "Cleared by admin — stale running job",
+            }}
+        )
+        
+        return {
+            "success": True,
+            "jobs_cleared": result.modified_count,
+            "message": f"Marked {result.modified_count} stale jobs as stalled",
+        }
+    except Exception as e:
+        logger.error(f"Error clearing stale jobs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
