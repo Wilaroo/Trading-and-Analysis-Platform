@@ -1,45 +1,45 @@
-<analysis>**original_problem_statement**: The user wants to enhance the Setup-Specific AI Models through a series of upgrades: enforcing ADV-Filtered training (only liquid stocks), integrating the Market Regime system into the AI pipeline, implementing Richer Trade Logging (MFE/MAE tracking), auto-managing system resources (Focus Mode) during heavy operations, and creating a closed-loop Backtesting Workflow Automation (Train → Validate → Promote).
+<analysis>**original_problem_statement**: 
+Initially, the user wanted to finish the missing Richer UI for the Train->Validate->Promote pipeline, which the agent successfully built. After that, the focus shifted entirely to the Historical Data Collection System. The user discovered massive gaps in their historical data for backtesting. The current goal is to adjust the IB historical collector scripts to automatically chain requests and fetch the absolute maximum allowable lookback from Interactive Brokers for all qualifying symbols across all timeframes (e.g., 6 months for 1-minute bars, 2 years for 5-minute bars, 10+ years for daily bars).
 
 PRODUCT REQUIREMENTS:
-1. **ADV-Filtered Training**: Ensure models only train on liquid stocks (>100k for general, >500k for intraday).
-2. **Market Regime Integration**: Integrate existing market regime logic into the AI pipeline (Training Features + Prediction Confidence Adjustment).
-3. **Richer Trade Logging**: Track MFE (Maximum Favorable Excursion) and MAE (Maximum Adverse Excursion) and context per trade.
-4. **Auto-Managed Focus Mode**: Automatically throttle non-essential services when starting training, collecting, or backtesting jobs.
-5. **Backtesting Workflow Automation**: Create an automated pipeline where a newly trained model is backtested against the market, and promoted only if it beats the baseline.
+1.  **5-Phase Auto-Validation UI**: Build frontend UI to display AI Comparison, Monte Carlo, Walk-Forward, and baseline results per setup model. (Completed)
+2.  **Data Inventory System**: Create a unified database to track exactly how much historical data exists per symbol/timeframe vs what is missing. (Completed)
+3.  **Max Lookback Data Chaining**: Overhaul the  script so it automatically chunks and chains API requests to fetch the maximum historical data allowed by IB for every bar size.
 
 **User's preferred language**: English
-*(INSTRUCT next agent: You MUST respond in English only)*
+(INSTRUCT next agent: You MUST respond in English only)
 
 **what currently exists?**: 
-A highly sophisticated full-stack AI trading platform. In this session, a massive amount of core backend logic was completed. The  is now accurate, training pulls ADV-filtered symbols, AI features now include 6 Market Regime factors, the  system accurately logs MFE/MAE in real-time, the system automatically shifts Focus Modes (TRAINING/COLLECTING/BACKTESTING/LIVE) to manage resources, and an automated Train→Validate→Promote pipeline was wired into the backend worker.
+A full-stack AI trading platform with a freshly implemented 5-Phase Auto-Validation Pipeline and UI. The application uses MongoDB Atlas, which currently holds ~39M historical data bars. A new  was built to audit data gaps in Atlas, revealing that while daily data is robust, lower timeframes like 1-minute bars are extremely shallow (~1 week of data). The  script has a foundational queueing system, but its chaining logic needs to be refactored to correctly loop and step backwards in time to hit the hard limits defined by Interactive Brokers.
 
 **Last working item**:
-    - Last item agent was working: Implementing the final phase of the Train→Validate→Promote pipeline: Maximizing training configs (bars, symbols, batches) and building a richer UI to display validation/promotion progress.
+    - Last item agent was working: Analyzing the chaining logic in  (specifically  and ) to rewrite how the collector queues up data requests to hit the maximum lookback limits.
     - Status: IN PROGRESS
-    - Agent Testing Done: N (Session cut off during implementation)
-    - Which testing method agent to use?: Both (Backend testing via python script for the new config data limits, Frontend screenshot tool for the new UI enhancements).
+    - Agent Testing Done: N
+    - Which testing method agent to use?: manual testing by curl / python -c to trigger the collection and verify the backend correctly queues multiple chained requests.
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  Issue 1: Missing Richer UI for Train/Validate/Promote Pipeline (P0)
-     - Attempted fixes: The agent successfully implemented the backend config maximization (,  inside  & ), but ran out of time before implementing the richer UI part the user requested to display validation results and promotion outcomes.
-     - Next debug checklist: Check  and . You need to surface the validation backtest progress, baseline comparison, and final promotion status in the frontend.
-     - Why fix this issue and what will be achieved with the fix?: User explicitly approved B. def make it richer and implement to see how the automated backtest pipeline performs per model. 
+  Issue 1: Maximize IB Historical Data Collection via Request Chaining (P0)
+     - Attempted fixes: Investigated IB limits and corrected  in  and  (e.g., capping 1-min max lookback at 180 days instead of 365). 
+     - Next debug checklist: Check  and  in . Implement the actual stepping/chaining logic so that if a symbol needs 6 months of 1-min data, it correctly queues up multiple chained 1-week requests stepping backward in time, ensuring pacing limits are respected.
+     - Why fix this issue and what will be achieved with the fix?: User explicitly requested to adjust collector scripts to get the max lookback possible. This will fill massive data gaps and enable deep intraday backtesting.
      - Status: IN PROGRESS
      - Is recurring issue?: N
-     - Should Test frontend/backend/both after fix?: Both
+     - Should Test frontend/backend/both after fix?: Backend
      - Blocked on other issue: None
 
 **In progress Task List**:
-  Task 1: Train/Validate/Promote UI Enhancements (P0)
-     - Where to resume: You are stepping in right after  was updated. You need to jump to the React frontend (likely  or an associated component) to display the new validation/promotion states originating from .
-     - What will be achieved with this?: Visual closure for the user on the automated validation workflow.
+  Task 1: Refactor  chaining logic (P0)
+     - Where to resume: You need to modify the data collection methods in . Look into how  flags are processed and write the logic that chunks a large lookback (e.g. 180 days for 1-min) into smaller permissible API request durations (e.g. 1-2 days or 1 week per request).
+     - What will be achieved with this?: Automated deep history backfills from IB.
      - Status: IN PROGRESS
-     - Should Test frontend/backend/both after fix?: Frontend
+     - Should Test frontend/backend/both after fix?: Backend
      - Blocked on something: None
 
-**Upcoming and Future Tasks**
+**Upcoming and Future Tasks**:
     Upcoming Tasks:
+    - (P1) Ensure local IB Pusher / Gateway connection stability: The local IB pusher script was logging timeout errors when hitting the backend () during the live trading loop. Need to ensure the backend can ingest live data reliably without hanging.
     - (P2) MFE/MAE Scatter Chart: Build a per-setup type visualization to reveal which setups leave money on the table (high MFE, low captured) and which shake users out (high MAE).
 
     Future Tasks:
@@ -47,85 +47,89 @@ A highly sophisticated full-stack AI trading platform. In this session, a massiv
     - (P3) API Route Profiling Dashboard: Monitor API performance.
     - (P3) Compare Simulations Side-by-Side: Allow comparing equity curves of multiple backtest runs.
     - (P3) Refactor active polling: Shift ~44 active polling intervals to WebSocket-based updates.
+    - (P3) Refactor : Break down the 4,300+ line file into , , and .
 
-**Completed work in this session**
-- ADV Cache Recalculation script & API endpoints (DONE)
-- ADV-Filtered Training integration in  (DONE)
-- Market Regime Integration: Layer 1 (6 features) + Layer 2 (Confidence dampening/boosting) (DONE)
-- Richer Trade Logging: MFE/MAE tracking & contextual tags in  (DONE)
-- Auto-Managed Focus Mode: Backend routing auto-activation + Frontend Badge replacing manual toggle (DONE)
-- Train→Validate→Promote Pipeline: Backend worker integration and  (DONE)
-- Maximized Training Data Configs: Batches, max_bars, max_symbols configuration updates (DONE)
+**Completed work in this session**:
+- 5-Phase Auto-Validation Pipeline UI inside  (DONE)
+- Backend  and  routing to support batch validations (DONE)
+- Built  to catalog and analyze IB historical data gaps in Atlas DB (DONE)
+- Added endpoints to  to trigger inventory builds and view gap analysis (DONE)
+- Cleared 15 stale data collection jobs blocking the queue (DONE)
 
-**Earlier issues found/mentioned but not fixed**
-   - None.
+**Earlier issues found/mentioned but not fixed**:
+   - None
 
-**Known issue recurrence from previous fork**
+**Known issue recurrence from previous fork**:
   - Issue recurrence in previous fork: None
   - Recurrence count: 0
   - Status: RESOLVED
 
-**Code Architecture**
+**Code Architecture**:
 
 
-**Key Technical Concepts**
-- **Two-Layer Market Regime Integration**: Layer 1 adds 6 SPY-based features to the ML vector (, , etc.). Layer 2 is a post-prediction heuristic that boosts/dampens confidence if the setup (e.g., BREAKOUT) is aligned/misaligned with the current regime (e.g., HOLD).
-- **MFE/MAE Tracking**: Calculates Maximum Favorable Excursion and Maximum Adverse Excursion as % and R-multiples the moment a trade is filled, tracking highest/lowest watermarks.
-- **Auto-Managed Focus Mode**: Priorities map (0 to 10). Training pauses scanners/bots. Collecting throttles them. Backend auto-activates these modes upon receiving REST/WS triggers and restores to LIVE via  job completion hooks.
-- **Train→Validate→Promote**:  trains the LightGBM model, automatically runs  (which runs an advanced backtest against the top 20 liquid symbols for 180 days), compares the accuracy to the baseline model, and promotes it if superior.
+**Key Technical Concepts**:
+- **IB Historical Data Limits**: Hard constraints on data retention by IB: 1 min -> 6 months; 5/15/30 mins -> 2 years; 1 hour -> 5 years; 1 day/week -> 10+ years.
+- **Request Chaining**: Because a single API request can only pull a fraction of the total history (e.g. max 1-2 days per request for 1-minute bars), requests must be chained backwards in time to fetch the full limits.
+- **Data Inventory**: Backend system maps  in MongoDB Atlas against expected minimums to categorize symbols as Deep, Moderate, Shallow, or Missing data for backtesting.
 
-**key DB schema**
-  - : Now includes , , , , , , , .
-  - : Corrected cache containing  for 9.2k symbols sourced from .
+**key DB schema**:
+  - : New collection tracking data depth. Contains , , , , , .
+  - : Stores actual OHLCV bars. **CRITICAL:** Backend connects to MongoDB Atlas (~39M bars), NOT local MongoDB.
 
-**changes in tech stack**
-  - None
+**changes in tech stack**:
+  - None.
 
-**All files of reference**
-  -  (Newly created validation engine)
-  -  (Job orchestrator)
-  -  (Holds new max_symbols/max_bars limits)
-  -  (Target for UI update)
+**All files of reference**:
+  -  (Needs chaining logic overhaul)
+  -  (Created in this session)
+  -  (Updated with new endpoints)
+  -  (UI completed in this session)
 
 **Areas that need refactoring**:
-  -  is over 4,300 lines long. As we move towards production, it should be broken down into discrete modules (PositionManager, TradeLogger, AlertEvaluator).
+  -  (4,300 lines -> Needs breakdown)
 
-**key api endpoints**
-  - : Fetches validation records.
-  - , : Auto-triggers collecting/backtesting Focus Modes.
+**key api endpoints**:
+  - 
+  - 
+  - 
 
-**Critical Info for New Agent**
-- You are stepping in mid-action. The previous agent successfully implemented the backend logic to maximize training configs per the user's request, but ran out of context before implementing the UI component of that exact same request (make the UI richer to show the validation outputs). Your very first move should be to build out this UI on the frontend so the user can actually visualize the Train->Validate->Promote pipeline.
+**Critical Info for New Agent**:
+- **MongoDB Environment**: The application uses MongoDB Atlas configured via the  file (). Previous agent made the mistake of testing python queries on the local MongoDB (), which is empty. Always ensure your terminal queries point to Atlas if you are checking live data.
+- **IB Limits**: Stick strictly to these max limit caps when writing the chunking logic: 1-min = 180 days. 5-min/15-min/30-min = 730 days. 1-hour = 1825 days. 1-day/1-week = 3650+ days.
+- **Current Objective**: Refactor  so that requesting max lookback correctly chunks the timeline and loops multiple valid requests into the queue rather than firing a single request that hits an IB duration limit.
 
-**documents and test reports created in this job**
-  -  (Updated comprehensively with all completed features).
+**documents and test reports created in this job**:
+  - 
+  -  (Passed for 5-phase validation UI implementation)
 
-**Last 10 User Messages and any pending HUMAN messages** 
-1. **user**: Discussed MFE/MAE benefits.
-2. **agent**: Suggested adding it.
-3. **user**: Approved Richer Trade Logging.
-4. **agent**: Implemented Richer Trade Logging completely.
-5. **user**: Asked if clicking Train prioritizes system resources automatically.
-6. **agent**: Pointed out it's manual currently, proposed auto-focus mode.
-7. **user**: Approved auto-focus mode.
-8. **agent**: Implemented Auto-Focus Mode entirely, asked if user wants Train->Validate->Promote workflow next.
-9. **user**: Approved Train->Validate->Promote workflow.
-10. **user**: Asked to maximize training configurations/batches, set validation capital to 50k, and requested richer UI for the validation process. *(Agent implemented backend changes, session ended before UI could be started).*
+**Last 10 User Messages and any pending HUMAN messages**: 
+1. **user**: ok lets do a few things first. 1. lets somehow combine all of this data into a smart database... 2. then lets investigate our entire data collection system...
+2. **agent**: Built data inventory, diagnosed issues but accidentally queried local DB.
+3. **user**: yes do these, but ib gateway is running now. can you see any data fetch jobs processing?
+4. **agent**: Investigated logs, cleared 15 stale jobs, noticed local Pusher is active but timing out.
+5. **user**: ok build this. hers logs from pusher: [logs showing pusher timing out on POST to localhost:8001]
+6. **agent**: Rebuilt data inventory pointing to correct Atlas DB, displayed real gap analysis and explained metrics.
+7. **user**: what does deep, moderate, backtestable mean? Bar Size Symbols Deep...
+8. **agent**: Explained meaning and data depth thresholds.
+9. **user**: what are the lookback limits for each timeframe on IB? can we get more than 1 week of 1 min bars for any given symbol?
+10. **agent**: Searched web, confirmed max 1-min lookback is 6 months via chaining, fixed config variables.
+11. **user**: we need to adjust our collector scripts to get as much of this max lookback we can for qualifying symbols. chain things if we need to [provided table of limits] *(Pending human message to execute task)*
 
 **Project Health Check:**
-  - Backend: Healthy
-  - Frontend: Healthy
-  - Database: Healthy (ADV cache successfully restored/fixed)
+- Broken: Local IB Pusher is timing out hitting the user's local backend on port 8001 (Needs investigation if this persists for the user).
+- Healthy: Backend, Frontend, MongoDB Atlas connection.
 
-**3rd Party Integrations**
-  - Interactive Brokers (IB Gateway) - requires local running instance
-  - LightGBM
+**3rd Party Integrations**:
+- Interactive Brokers (IB Gateway) - requires local running instance.
 
-**Testing status**
-  - Testing agent used after significant changes: NO (Self-tested iteratively via python simulation scripts and API curls).
+**Testing status**:
+  - Testing agent used after significant changes: YES (Used on Validation UI changes).
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: None
   - Known regressions: None
 
-**What agent forgot to execute**
-  - The agent updated the backend configurations to use max data and run validations, but forgot to implement the frontend UI enhancements inside the NIA components to display the validation progress, baseline comparisons, and promotion statuses.</analysis>
+**Credentials to test flow**:
+  - Standard  variables utilized. Use  for DB.
+
+**What agent forgot to execute**:
+  - The agent was about to implement the chaining logic adjustments in  (specifically chunking a large lookback into smaller queued requests) but ran out of time before writing the code.</analysis>

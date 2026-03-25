@@ -18,7 +18,7 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://model-validation-ui.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://data-chain-collector.preview.emergentagent.com').rstrip('/')
 
 
 class TestSmartFilterConfig:
