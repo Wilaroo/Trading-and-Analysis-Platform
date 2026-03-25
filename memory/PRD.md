@@ -28,6 +28,11 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
     - Frontend polls `/api/jobs/{job_id}` for real-time progress
     - Endpoints wired: `/train`, `/train-all`, `/train-full-universe`, `/train-full-universe-all`, `/setups/train`, `/setups/train-all`
     - Worker runs as supervisor process with auto-restart
+15. **Advanced Setup-Specific Models with Pattern Detection (Mar 25, 2026)** - COMPLETED
+    - Pattern detection (`setup_pattern_detector.py`) filters training data to setup-relevant bars only
+    - Setup-specific features (`setup_features.py`) add 6 extra features per setup type
+    - Training pipeline: scan bars → detect patterns → extract base+setup features → train enriched model
+    - Verified: BREAKOUT model trained on 1,438 patterns from 8,900 bars with 52 combined features
 
 ## Key API Endpoints
 
@@ -66,6 +71,9 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
 - (P3) Auto-Optimize AI Settings — Sweep confidence thresholds & lookback windows
 - (P3) API Route Profiling Dashboard
 - (P3) Compare Simulations side-by-side
+
+## Known Minor Issues
+- General Model "Untrained" Display — Race condition on NIA page (low priority, API returns correct data)
 
 ## Testing
 - `/app/test_reports/iteration_107.json` (latest - General Training Job Queue, 20/20 passed)

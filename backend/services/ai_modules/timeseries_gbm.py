@@ -454,6 +454,99 @@ class TimeSeriesGBM:
         logger.info(f"Training complete: accuracy={accuracy:.3f}, precision_up={precision_up:.3f}, f1_up={f1_up:.3f}")
         
         return self._metrics
+
+    def train_from_features(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        feature_names: List[str],
+        validation_split: float = 0.2,
+        num_boost_round: int = 100,
+        early_stopping_rounds: int = 10
+    ) -> 'ModelMetrics':
+        """
+        Train the model from pre-extracted features and targets.
+        
+        Used by setup-specific training where filtering and feature enrichment
+        happens outside of the GBM model.
+        
+        Args:
+            X: Feature matrix (n_samples, n_features)
+            y: Target array (n_samples,)
+            feature_names: Ordered list of feature names matching X columns
+            validation_split: Fraction for validation
+            num_boost_round: Boosting rounds
+            early_stopping_rounds: Early stopping patience
+            
+        Returns:
+            ModelMetrics with training results
+        """
+        if len(X) < 100:
+            logger.warning(f"Insufficient training data: {len(X)} samples")
+            return ModelMetrics()
+
+        logger.info(f"Training from pre-extracted features: {len(X)} samples, {len(feature_names)} features")
+
+        # Update feature names for this model
+        self._feature_names = feature_names
+
+        n_up = np.sum(y == 1)
+        n_down = np.sum(y == 0)
+        logger.info(f"Class distribution: UP={n_up} ({n_up/len(y)*100:.1f}%), DOWN={n_down} ({n_down/len(y)*100:.1f}%)")
+
+        # Split train/validation (time-ordered)
+        split_idx = int(len(X) * (1 - validation_split))
+        X_train, X_val = X[:split_idx], X[split_idx:]
+        y_train, y_val = y[:split_idx], y[split_idx:]
+
+        train_data = lgb.Dataset(X_train, label=y_train, feature_name=feature_names)
+        val_data = lgb.Dataset(X_val, label=y_val, feature_name=feature_names, reference=train_data)
+
+        callbacks = [lgb.early_stopping(early_stopping_rounds)]
+
+        self._model = lgb.train(
+            self.params,
+            train_data,
+            num_boost_round=num_boost_round * 2,
+            valid_sets=[train_data, val_data],
+            valid_names=["train", "val"],
+            callbacks=callbacks
+        )
+
+        # Evaluate
+        y_pred_proba = self._model.predict(X_val)
+        y_pred = (y_pred_proba > self.UP_THRESHOLD).astype(int)
+        accuracy = np.mean(y_pred == y_val)
+
+        tp_up = np.sum((y_pred == 1) & (y_val == 1))
+        fp_up = np.sum((y_pred == 1) & (y_val == 0))
+        fn_up = np.sum((y_pred == 0) & (y_val == 1))
+        precision_up = tp_up / (tp_up + fp_up) if (tp_up + fp_up) > 0 else 0
+        recall_up = tp_up / (tp_up + fn_up) if (tp_up + fn_up) > 0 else 0
+        f1_up = 2 * precision_up * recall_up / (precision_up + recall_up) if (precision_up + recall_up) > 0 else 0
+
+        importance = self._model.feature_importance(importance_type="gain")
+        top_indices = np.argsort(importance)[-10:][::-1]
+        top_features = [feature_names[i] for i in top_indices if i < len(feature_names)]
+
+        self._metrics = ModelMetrics(
+            accuracy=float(accuracy),
+            precision_up=float(precision_up),
+            recall_up=float(recall_up),
+            f1_up=float(f1_up),
+            training_samples=len(X_train),
+            validation_samples=len(X_val),
+            top_features=top_features,
+            last_trained=datetime.now(timezone.utc).isoformat()
+        )
+
+        version_parts = self._version.replace("v", "").split(".")
+        minor = int(version_parts[1]) + 1 if len(version_parts) > 1 else 1
+        self._version = f"v0.{minor}.0"
+        self._save_model()
+
+        logger.info(f"Setup training complete: accuracy={accuracy:.3f}, precision_up={precision_up:.3f}, f1_up={f1_up:.3f}")
+        return self._metrics
         
     def predict(
         self,
