@@ -4,7 +4,7 @@
 AI-powered trading platform with autonomous learning, backtesting, and market analysis capabilities.
 
 ## Architecture
-- **Backend**: FastAPI (Python) + MongoDB + Worker process
+- **Backend**: FastAPI (Python) + MongoDB + Worker process (supervisor-managed)
 - **Frontend**: React + Shadcn UI
 - **3rd Party**: Interactive Brokers, Ollama Pro, Alpaca, Finnhub, LightGBM, PyTorch, ChromaDB
 
@@ -22,52 +22,48 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
 11. P0 Backend Performance Fix (asyncio event loop unblocking)
 12. P2 Refactoring (GPU for LightGBM, backend router refactoring, fetch migration, engine merge, code cleanup, server extraction)
 13. **Setup-Specific AI Models (Mar 25, 2026)** - COMPLETED
-    - Backend: 5 new API endpoints for setup model management
-    - Service: train_setup_model, train_all_setup_models, predict_for_setup, get_setup_models_status
-    - Frontend: SetupModelsPanel.jsx on NIA page with train/status/predict UI
-    - 10 setup types: MOMENTUM, SCALP, BREAKOUT, GAP_AND_GO, RANGE, REVERSAL, TREND_CONTINUATION, ORB, VWAP, MEAN_REVERSION
-14. **Worker-Based Job Queue for Setup Training (Mar 25, 2026)** - COMPLETED
-    - Added `SETUP_TRAINING` job type to job queue manager
-    - Added `process_setup_training_job()` to worker.py (handles single + all setup types)
-    - Wired setup train endpoints to enqueue jobs → API returns job_id immediately
-    - Frontend polls `/api/jobs/{job_id}` every 2.5s for real-time progress (percent + message)
-    - Worker runs as separate supervisor process (`/etc/supervisor/conf.d/worker.conf`)
-    - Progress bars show on setup cards during training
+14. **Worker-Based Job Queue for ALL Training (Mar 25, 2026)** - COMPLETED
+    - ALL training endpoints now return `job_id` immediately (non-blocking)
+    - Worker process handles: TRAINING, SETUP_TRAINING, DATA_COLLECTION, BACKTEST, CALIBRATION
+    - Frontend polls `/api/jobs/{job_id}` for real-time progress
+    - Endpoints wired: `/train`, `/train-all`, `/train-full-universe`, `/train-full-universe-all`, `/setups/train`, `/setups/train-all`
+    - Worker runs as supervisor process with auto-restart
 
 ## Key API Endpoints
 
-### Setup-Specific Model Endpoints (ai_modules.py)
-- `GET /api/ai-modules/timeseries/setups/status` — Status of all 10 setup models
-- `POST /api/ai-modules/timeseries/setups/train` — Enqueue training job for specific setup type (returns job_id)
-- `POST /api/ai-modules/timeseries/setups/train-all` — Enqueue job to train all setup models (returns job_id)
-- `POST /api/ai-modules/timeseries/setups/predict` — Predict using setup-specific model
-- `POST /api/ai-modules/timeseries/stop-training` — Stop any running training
+### Training Endpoints (all return job_id, non-blocking)
+- `POST /api/ai-modules/timeseries/train` — Single timeframe training
+- `POST /api/ai-modules/timeseries/train-all` — All timeframes
+- `POST /api/ai-modules/timeseries/train-full-universe` — Full universe single TF
+- `POST /api/ai-modules/timeseries/train-full-universe-all` — Full universe all TFs
+- `POST /api/ai-modules/timeseries/setups/train` — Setup-specific model
+- `POST /api/ai-modules/timeseries/setups/train-all` — All setup models
+- `POST /api/ai-modules/timeseries/stop-training` — Stop training
 
-### Job Queue Endpoints (focus_mode_router.py)
-- `POST /api/jobs` — Create a new background job
-- `GET /api/jobs` — List jobs with filtering
+### Job Queue Endpoints
+- `POST /api/jobs` — Create job
 - `GET /api/jobs/{job_id}` — Poll job status/progress
-- `DELETE /api/jobs/{job_id}` — Cancel a job
-- `GET /api/jobs/running` — Get running jobs
+- `GET /api/jobs` — List jobs
+- `DELETE /api/jobs/{job_id}` — Cancel job
+- `GET /api/jobs/running` — Running jobs
 - `GET /api/jobs/stats` — Queue statistics
 
-## Database Collections
-- `job_queue` — Background job queue (training, backtest, data collection, calibration, setup_training)
-- `setup_type_models` — Setup-specific AI model storage
-- `timeseries_models`, `ai_models` — General timeframe model storage
-- `ib_historical_data` — Historical price data (39M+ bars)
-
 ## Worker Process
-- Runs as separate supervisor process (`worker.py`)
+- Supervisor config: `/etc/supervisor/conf.d/worker.conf`
 - Handles: TRAINING, SETUP_TRAINING, DATA_COLLECTION, BACKTEST, CALIBRATION
-- Polls MongoDB job_queue every 5s for pending jobs
-- Processes jobs with progress tracking
-- Config: `/etc/supervisor/conf.d/worker.conf`
+- Polls MongoDB `job_queue` every 5s for pending jobs
+- Progress tracking via `job_queue_manager.update_progress()`
+
+## Code Cleanup Notes
+- `historical_simulation_engine.py` — **Cannot be deleted** yet. Still actively used by:
+  - Full AI Simulation endpoint in `advanced_backtest_router.py`
+  - `server.py` startup initialization
+  - `worker.py` backtest job processing
+  - Requires migration of SimulationConfig and HistoricalSimulationEngine to a new location before deletion
 
 ## Upcoming Tasks
 - **(P1) Backtesting Workflow Automation** — Auto-run backtests when a new model is trained
-- **(P1) Wire existing general training through worker** — The general model training still runs inline in the server; should be moved to worker for consistency
-- **(P2) Code Cleanup** — Delete unused historical_simulation_engine.py (still has active references)
+- **(P2) Code Cleanup** — Migrate `historical_simulation_engine.py` exports, then delete
 
 ## Future/Backlog
 - (P3) Auto-Optimize AI Settings — Sweep confidence thresholds & lookback windows
@@ -75,6 +71,7 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
 - (P3) Compare Simulations side-by-side
 
 ## Testing
-- Test reports: `/app/test_reports/iteration_106.json` (latest - Worker Job Queue)
-- Test reports: `/app/test_reports/iteration_105.json` (Setup Models)
-- Backend tests: `/app/backend/tests/test_worker_job_queue.py`
+- `/app/test_reports/iteration_107.json` (latest - General Training Job Queue, 20/20 passed)
+- `/app/test_reports/iteration_106.json` (Worker Job Queue for Setup Training, 12/12 passed)
+- `/app/test_reports/iteration_105.json` (Setup Models, 10/10 passed)
+- Backend tests: `/app/backend/tests/test_general_training_job_queue.py`, `/app/backend/tests/test_worker_job_queue.py`
