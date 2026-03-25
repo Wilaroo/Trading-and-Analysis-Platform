@@ -37,7 +37,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { safePolling } from '../utils/safePolling';
-import api, { xhrPost } from '../utils/api';
+import api, { safeGet } from '../utils/api';
 import { useFocusMode } from '../contexts/FocusModeContext';
 
 // ===================== NOTIFICATION HELPERS =====================
@@ -359,7 +359,7 @@ const JobManager = ({ compact = false }) => {
   const handleCreateCollectionJob = async () => {
     setIsCreating(true);
     try {
-      const response = await xhrPost('/api/jobs', {
+      const { data: response } = await api.post('/api/jobs', {
         job_type: 'data_collection',
         params: {
           collection_type: collectionType,
@@ -370,11 +370,11 @@ const JobManager = ({ compact = false }) => {
         auto_start: true
       });
       
-      if (response.data.success) {
+      if (response.success) {
         toast.success(`Data collection job created!`);
         loadJobs();
       } else {
-        throw new Error(response.data.error);
+        throw new Error(response.error);
       }
     } catch (err) {
       toast.error(`Failed to create job: ${err.message}`);
@@ -387,7 +387,7 @@ const JobManager = ({ compact = false }) => {
   const handleCreateBacktestJob = async () => {
     setIsCreating(true);
     try {
-      const response = await xhrPost('/api/jobs', {
+      const { data: response } = await api.post('/api/jobs', {
         job_type: 'backtest',
         params: {
           start_date: `${backtestStartDate}T00:00:00Z`,
@@ -400,11 +400,11 @@ const JobManager = ({ compact = false }) => {
         auto_start: true
       });
       
-      if (response.data.success) {
+      if (response.success) {
         toast.success(`Backtest job created!`);
         loadJobs();
       } else {
-        throw new Error(response.data.error);
+        throw new Error(response.error);
       }
     } catch (err) {
       toast.error(`Failed to create job: ${err.message}`);

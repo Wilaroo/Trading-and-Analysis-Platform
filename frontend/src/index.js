@@ -2,21 +2,6 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
-import { requestThrottler } from './utils/requestThrottler';
-
-// ============================================
-// GLOBAL FETCH THROTTLER
-// Prevents ERR_INSUFFICIENT_RESOURCES by limiting
-// concurrent requests to 4 at a time.
-// ============================================
-const originalFetch = window.fetch.bind(window);
-
-// Expose un-throttled fetch for critical startup health checks
-window.__originalFetch = originalFetch;
-
-window.fetch = (url, options) => {
-  return requestThrottler.throttle(() => originalFetch(url, options));
-};
 
 // Suppress third-party script errors in development overlay
 if (process.env.NODE_ENV === 'development') {

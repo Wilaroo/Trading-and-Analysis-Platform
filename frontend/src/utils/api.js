@@ -9,78 +9,25 @@ export const api = axios.create({
   timeout: 30000  // 30 seconds default timeout
 });
 
-// Long-running requests get 10min timeout
+// Long-running requests get 10min timeout (job polling, training status)
 export const apiLongRunning = axios.create({
   baseURL: API_URL,
   timeout: 600000
 });
 
-// ---- Polling abort controller ----
-// All throttled GETs use this signal so we can abort them before user actions.
-let _pollingController = new AbortController();
-
-function getPollingSignal() {
-  return _pollingController.signal;
-}
-
-// Abort all in-flight polling GETs and reset the controller
-function abortPolling() {
-  _pollingController.abort();
-  _pollingController = new AbortController();
-}
-
-// ---- Throttled GET (background polling only) ----
+// ---- Throttled GET (background polling) ----
+// Browser allows 6 connections per domain. We reserve 2 for WebSockets,
+// leaving 4 for HTTP. Throttler ensures polling GETs don't starve user actions.
 const originalGet = api.get.bind(api);
 
 api.get = (url, config) => requestThrottler.throttle(() =>
-  originalGet(url, { ...config, signal: getPollingSignal() })
-    .catch(err => {
-      // Silently swallow AbortError from our intentional abort
-      if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError') {
-        return { data: null };
-      }
-      throw err;
-    })
+  originalGet(url, config)
 );
 
 // POST/PUT/DELETE are NOT throttled — user-initiated, must go through immediately
 
-// ---- Direct XHR POST for critical user actions ----
-// Posts directly to the backend (port 8001) to bypass the React dev proxy
-// and avoid competing with polling GETs for browser connection slots.
-// In production (same origin), posts to the normal URL.
-export const xhrPost = (url, body, timeout = 30000) => {
-  // Determine the target URL:
-  // - Dev (localhost:3000 proxying to :8001): POST directly to :8001
-  // - Production / preview: POST to same origin
-  let fullUrl;
-  const loc = window.location;
-  if (loc.hostname === 'localhost' && loc.port === '3000') {
-    fullUrl = `http://localhost:8001${url}`;
-  } else {
-    fullUrl = `${loc.origin}${url}`;
-  }
-
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.timeout = timeout;
-    xhr.onload = () => {
-      try {
-        const data = JSON.parse(xhr.responseText);
-        resolve({ data, status: xhr.status });
-      } catch {
-        resolve({ data: {}, status: xhr.status });
-      }
-    };
-    xhr.ontimeout = () => reject(new Error('Request timed out'));
-    xhr.onerror = () => reject(new Error('Network error'));
-    xhr.open('POST', fullUrl);
-    xhr.setRequestHeader('Content-Type', 'application/json');
-    xhr.send(JSON.stringify(body));
-  });
-};
-
 // ---- Safe wrappers (catch errors, return null) ----
+// Used by components for non-critical data fetching that should fail silently.
 
 export const safeGet = async (url, config) => {
   try {
@@ -110,22 +57,6 @@ export const safeDelete = async (url, config) => {
 };
 
 // ---- Helpers ----
-
-// Cache helper with TTL
-const _cache = {};
-export const getCached = (key) => {
-  const entry = _cache[key];
-  if (!entry) return null;
-  if (Date.now() - entry.ts > entry.ttl) {
-    delete _cache[key];
-    return null;
-  }
-  return entry;
-};
-
-export const setCache = (key, data, ttl = 10000) => {
-  _cache[key] = { data, ts: Date.now(), ttl };
-};
 
 export const getApiHealth = async () => {
   try {

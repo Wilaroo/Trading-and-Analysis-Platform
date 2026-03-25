@@ -158,7 +158,7 @@ export const FocusModeProvider = ({ children }) => {
     try {
       // Notify backend - use un-throttled fetch for instant response
       // Mode switches are user-initiated actions that should never queue behind polling
-      const directFetch = window.__originalFetch || window.fetch;
+      const directFetch = window.fetch;
       const API_URL = process.env.REACT_APP_BACKEND_URL || '';
       const res = await directFetch(`${API_URL}/api/focus-mode`, {
         method: 'POST',
