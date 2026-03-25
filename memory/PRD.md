@@ -105,9 +105,10 @@ MOMENTUM → [1hour (h=14), 1day (h=7)]
 
 ## Upcoming Tasks
 1. (P1) **Backtesting Workflow Automation** — auto-backtest on new model training
-2. (P3) Auto-Optimize AI Settings — sweep confidence thresholds/lookback windows
-3. (P3) Compare Simulations Side-by-Side
-4. (P3) API Route Profiling Dashboard
+2. (P2) **MFE/MAE Scatter Chart per Setup Type** — Visualize which setups leave money on the table (high MFE, low captured %) vs which shake you out (high MAE before recovering). Powerful edge-refinement tool once MFE/MAE data accumulates.
+3. (P3) Auto-Optimize AI Settings — sweep confidence thresholds/lookback windows
+4. (P3) Compare Simulations Side-by-Side
+5. (P3) API Route Profiling Dashboard
 
 ## Future Refactoring
 - Shift ~44 active polling intervals to WebSocket-based updates
