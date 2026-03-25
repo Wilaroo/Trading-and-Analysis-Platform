@@ -4,7 +4,7 @@
 AI-powered trading platform with autonomous learning, backtesting, and market analysis capabilities.
 
 ## Architecture
-- **Backend**: FastAPI (Python) + MongoDB
+- **Backend**: FastAPI (Python) + MongoDB + Worker process
 - **Frontend**: React + Shadcn UI
 - **3rd Party**: Interactive Brokers, Ollama Pro, Alpaca, Finnhub, LightGBM, PyTorch, ChromaDB
 
@@ -26,33 +26,48 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
     - Service: train_setup_model, train_all_setup_models, predict_for_setup, get_setup_models_status
     - Frontend: SetupModelsPanel.jsx on NIA page with train/status/predict UI
     - 10 setup types: MOMENTUM, SCALP, BREAKOUT, GAP_AND_GO, RANGE, REVERSAL, TREND_CONTINUATION, ORB, VWAP, MEAN_REVERSION
-    - Models stored in `setup_type_models` MongoDB collection
+14. **Worker-Based Job Queue for Setup Training (Mar 25, 2026)** - COMPLETED
+    - Added `SETUP_TRAINING` job type to job queue manager
+    - Added `process_setup_training_job()` to worker.py (handles single + all setup types)
+    - Wired setup train endpoints to enqueue jobs → API returns job_id immediately
+    - Frontend polls `/api/jobs/{job_id}` every 2.5s for real-time progress (percent + message)
+    - Worker runs as separate supervisor process (`/etc/supervisor/conf.d/worker.conf`)
+    - Progress bars show on setup cards during training
 
 ## Key API Endpoints
 
 ### Setup-Specific Model Endpoints (ai_modules.py)
 - `GET /api/ai-modules/timeseries/setups/status` — Status of all 10 setup models
-- `POST /api/ai-modules/timeseries/setups/train` — Train model for specific setup type
-- `POST /api/ai-modules/timeseries/setups/train-all` — Train all setup models (background)
+- `POST /api/ai-modules/timeseries/setups/train` — Enqueue training job for specific setup type (returns job_id)
+- `POST /api/ai-modules/timeseries/setups/train-all` — Enqueue job to train all setup models (returns job_id)
 - `POST /api/ai-modules/timeseries/setups/predict` — Predict using setup-specific model
 - `POST /api/ai-modules/timeseries/stop-training` — Stop any running training
 
-### Other Key Endpoints
-- `/api/health` — Health check
-- `/api/ai-modules/timeseries/*` — General timeseries AI endpoints
-- `/api/backtest/*` — Strategy backtesting
-- `/api/dashboard/*` — Dashboard stats
+### Job Queue Endpoints (focus_mode_router.py)
+- `POST /api/jobs` — Create a new background job
+- `GET /api/jobs` — List jobs with filtering
+- `GET /api/jobs/{job_id}` — Poll job status/progress
+- `DELETE /api/jobs/{job_id}` — Cancel a job
+- `GET /api/jobs/running` — Get running jobs
+- `GET /api/jobs/stats` — Queue statistics
 
 ## Database Collections
-- `setup_type_models` — Setup-specific AI model storage (NEW)
+- `job_queue` — Background job queue (training, backtest, data collection, calibration, setup_training)
+- `setup_type_models` — Setup-specific AI model storage
 - `timeseries_models`, `ai_models` — General timeframe model storage
 - `ib_historical_data` — Historical price data (39M+ bars)
-- `watchlists`, `portfolios`, `alerts` — User data
-- `sim_jobs`, `sim_trades`, `sim_decisions` — Simulation data
+
+## Worker Process
+- Runs as separate supervisor process (`worker.py`)
+- Handles: TRAINING, SETUP_TRAINING, DATA_COLLECTION, BACKTEST, CALIBRATION
+- Polls MongoDB job_queue every 5s for pending jobs
+- Processes jobs with progress tracking
+- Config: `/etc/supervisor/conf.d/worker.conf`
 
 ## Upcoming Tasks
 - **(P1) Backtesting Workflow Automation** — Auto-run backtests when a new model is trained
-- **(P2) Code Cleanup** — Delete unused historical_simulation_engine.py (still has active references in worker.py, server.py, advanced_backtest_router.py)
+- **(P1) Wire existing general training through worker** — The general model training still runs inline in the server; should be moved to worker for consistency
+- **(P2) Code Cleanup** — Delete unused historical_simulation_engine.py (still has active references)
 
 ## Future/Backlog
 - (P3) Auto-Optimize AI Settings — Sweep confidence thresholds & lookback windows
@@ -60,6 +75,6 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
 - (P3) Compare Simulations side-by-side
 
 ## Testing
-- Test reports: `/app/test_reports/iteration_105.json` (latest - Setup Models)
-- Test reports: `/app/test_reports/iteration_104.json` (Full AI Sim)
-- Backend tests: `/app/backend/tests/test_setup_models.py`
+- Test reports: `/app/test_reports/iteration_106.json` (latest - Worker Job Queue)
+- Test reports: `/app/test_reports/iteration_105.json` (Setup Models)
+- Backend tests: `/app/backend/tests/test_worker_job_queue.py`
