@@ -1,64 +1,61 @@
-<analysis>**original_problem_statement**: The user wants to enhance the Setup-Specific AI Models to improve their accuracy. The strategy evolved into creating a **Profile-Based Architecture** where intraday setups have specific timeframe models (e.g., 1min, 5min) with native forecast horizons, rather than mixing daily data. Additionally, the user requested a cleanup of the overly complex Neural Intelligence Agency (NIA) UI, and wants the AI to only train on highly liquid stocks using Average Daily Volume (ADV) filtering. 
+<analysis>**original_problem_statement**: The user wants to enhance the Setup-Specific AI Models through a series of upgrades: enforcing ADV-Filtered training (only liquid stocks), integrating the Market Regime system into the AI pipeline, implementing Richer Trade Logging (MFE/MAE tracking), auto-managing system resources (Focus Mode) during heavy operations, and creating a closed-loop Backtesting Workflow Automation (Train → Validate → Promote).
 
 PRODUCT REQUIREMENTS:
-1. **Profile-Based Setup AI Models**: Separate models for different timeframes per setup (e.g., SCALP/1min, SCALP/5min). (COMPLETED)
-2. **NIA UI Consolidation**: Simplify 11 panels into a clean, 4-section layout. (COMPLETED)
-3. **ADV-Filtered Training**: Ensure models only train on liquid stocks (>100k for general, >500k for intraday). (IN PROGRESS)
-4. **Market Regime Integration**: Integrate existing market regime logic into the AI pipeline. (PENDING)
+1. **ADV-Filtered Training**: Ensure models only train on liquid stocks (>100k for general, >500k for intraday).
+2. **Market Regime Integration**: Integrate existing market regime logic into the AI pipeline (Training Features + Prediction Confidence Adjustment).
+3. **Richer Trade Logging**: Track MFE (Maximum Favorable Excursion) and MAE (Maximum Adverse Excursion) and context per trade.
+4. **Auto-Managed Focus Mode**: Automatically throttle non-essential services when starting training, collecting, or backtesting jobs.
+5. **Backtesting Workflow Automation**: Create an automated pipeline where a newly trained model is backtested against the market, and promoted only if it beats the baseline.
 
 **User's preferred language**: English
 *(INSTRUCT next agent: You MUST respond in English only)*
 
 **what currently exists?**: 
-A full-stack AI trading platform. The AI training pipeline has been successfully refactored into a Profile-Based Architecture, resulting in 17 distinct models across 10 setup types, each tuned to a specific timeframe (e.g., 1 min, 5 min, 1 day) with an appropriate forecast horizon. The NIA frontend UI has been successfully consolidated from 11 disparate panels into 4 clean sections. The WebSocket handler successfully manages profile-specific training jobs.
+A highly sophisticated full-stack AI trading platform. In this session, a massive amount of core backend logic was completed. The  is now accurate, training pulls ADV-filtered symbols, AI features now include 6 Market Regime factors, the  system accurately logs MFE/MAE in real-time, the system automatically shifts Focus Modes (TRAINING/COLLECTING/BACKTESTING/LIVE) to manage resources, and an automated Train→Validate→Promote pipeline was wired into the backend worker.
 
 **Last working item**:
-    - Last item agent was working: Investigating the accuracy of the  in MongoDB before implementing ADV-filtered symbol selection for AI training.
+    - Last item agent was working: Implementing the final phase of the Train→Validate→Promote pipeline: Maximizing training configs (bars, symbols, batches) and building a richer UI to display validation/promotion progress.
     - Status: IN PROGRESS
-    - Agent Testing Done: N/A (Just running DB queries)
-    - Which testing method agent to use?: backend testing agent or manual python script testing to verify database updates.
+    - Agent Testing Done: N (Session cut off during implementation)
+    - Which testing method agent to use?: Both (Backend testing via python script for the new config data limits, Frontend screenshot tool for the new UI enhancements).
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  Issue 1: ADV Cache Data Inaccuracy (P0)
-     - Attempted fixes: The agent ran a python script to compare  values against actual  daily bar data in MongoDB. The output confirmed the user's suspicion: the cached ADV data (likely imported from old IEX/Alpaca data) is highly inaccurate compared to actual local daily bars (e.g., AAPL cache says 860k, actual is ~5M).
-     - Next debug checklist: You must write a script or service method to recalculate and overwrite the  collection using the actual  daily bar data stored in MongoDB.
-     - Why fix this issue and what will be achieved with the fix?: Fixing this is a prerequisite for Task 1. The AI needs accurate volume data to avoid training on illiquid stocks.
+  Issue 1: Missing Richer UI for Train/Validate/Promote Pipeline (P0)
+     - Attempted fixes: The agent successfully implemented the backend config maximization (,  inside  & ), but ran out of time before implementing the richer UI part the user requested to display validation results and promotion outcomes.
+     - Next debug checklist: Check  and . You need to surface the validation backtest progress, baseline comparison, and final promotion status in the frontend.
+     - Why fix this issue and what will be achieved with the fix?: User explicitly approved B. def make it richer and implement to see how the automated backtest pipeline performs per model. 
      - Status: IN PROGRESS
      - Is recurring issue?: N
-     - Should Test frontend/backend/both after fix?: Backend
+     - Should Test frontend/backend/both after fix?: Both
      - Blocked on other issue: None
 
 **In progress Task List**:
-  Task 1: ADV-Filtered Training Symbols (P1)
-     - Where to resume: Once Issue 1 is resolved (ADV data is accurate), update the  method in  to filter symbols based on ADV thresholds (e.g., >100k ADV for daily/swing setups, >500k ADV for intraday setups).
-     - What will be achieved with this?: Ensures AI models only learn from highly liquid stocks, improving real-world execution and reducing slippage.
-     - Status: BLOCKED
-     - Should Test frontend/backend/both after fix?: Backend
-     - Blocked on something: Issue 1 (ADV Cache Data Inaccuracy)
-
-  Task 2: Market Regime Integration (P2)
-     - Where to resume: Assess the existing  system (in  and ) and determine the best way to integrate it into the AI's training data or prediction evaluation. 
-     - What will be achieved with this?: Contextual awareness for the AI, allowing it to adjust predictions based on the broader market trend.
-     - Status: NOT STARTED
-     - Should Test frontend/backend/both after fix?: Backend
-     - Blocked on something: Complete Task 1 first.
+  Task 1: Train/Validate/Promote UI Enhancements (P0)
+     - Where to resume: You are stepping in right after  was updated. You need to jump to the React frontend (likely  or an associated component) to display the new validation/promotion states originating from .
+     - What will be achieved with this?: Visual closure for the user on the automated validation workflow.
+     - Status: IN PROGRESS
+     - Should Test frontend/backend/both after fix?: Frontend
+     - Blocked on something: None
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - (P1) Backtesting Workflow Automation: Create a system to automatically run backtests when a new model (general or setup-specific) is trained.
-    
+    - (P2) MFE/MAE Scatter Chart: Build a per-setup type visualization to reveal which setups leave money on the table (high MFE, low captured) and which shake users out (high MAE).
+
     Future Tasks:
     - (P3) Auto-Optimize AI Settings: Feature to sweep confidence thresholds and lookback windows to find optimal settings per strategy.
     - (P3) API Route Profiling Dashboard: Monitor API performance.
     - (P3) Compare Simulations Side-by-Side: Allow comparing equity curves of multiple backtest runs.
+    - (P3) Refactor active polling: Shift ~44 active polling intervals to WebSocket-based updates.
 
 **Completed work in this session**
-- Phase 4: Fixed multi-timeframe data aggregation loop in  (DONE)
-- Refactored AI Architecture to Profile-Based Setup Models (17 specific timeframe/setup combos) (DONE)
-- Updated  for distinct timeframe horizons (DONE)
-- Updated Backend API and Worker to support compound key model saving/loading (DONE)
-- Consolidated NIA Frontend UI from 11 panels into 4 clean sections (, , , ) (DONE)
+- ADV Cache Recalculation script & API endpoints (DONE)
+- ADV-Filtered Training integration in  (DONE)
+- Market Regime Integration: Layer 1 (6 features) + Layer 2 (Confidence dampening/boosting) (DONE)
+- Richer Trade Logging: MFE/MAE tracking & contextual tags in  (DONE)
+- Auto-Managed Focus Mode: Backend routing auto-activation + Frontend Badge replacing manual toggle (DONE)
+- Train→Validate→Promote Pipeline: Backend worker integration and  (DONE)
+- Maximized Training Data Configs: Batches, max_bars, max_symbols configuration updates (DONE)
 
 **Earlier issues found/mentioned but not fixed**
    - None.
@@ -72,65 +69,63 @@ A full-stack AI trading platform. The AI training pipeline has been successfully
 
 
 **Key Technical Concepts**
-- **Profile-Based AI Architecture**: Instead of mixing daily and intraday data into one SCALP model, there is now a  model and a  model. Each has a forecast horizon native to its timeframe (e.g., 30 bars for 1-min, 12 bars for 5-min).
-- **Embedded UI Components**: The NIA sub-panels (like ) were refactored to accept an  prop so they can be rendered directly inside tab wrappers without conflicting UI layers.
+- **Two-Layer Market Regime Integration**: Layer 1 adds 6 SPY-based features to the ML vector (, , etc.). Layer 2 is a post-prediction heuristic that boosts/dampens confidence if the setup (e.g., BREAKOUT) is aligned/misaligned with the current regime (e.g., HOLD).
+- **MFE/MAE Tracking**: Calculates Maximum Favorable Excursion and Maximum Adverse Excursion as % and R-multiples the moment a trade is filled, tracking highest/lowest watermarks.
+- **Auto-Managed Focus Mode**: Priorities map (0 to 10). Training pauses scanners/bots. Collecting throttles them. Backend auto-activates these modes upon receiving REST/WS triggers and restores to LIVE via  job completion hooks.
+- **Train→Validate→Promote**:  trains the LightGBM model, automatically runs  (which runs an advanced backtest against the top 20 liquid symbols for 180 days), compares the accuracy to the baseline model, and promotes it if superior.
 
 **key DB schema**
-  - : Now uses compound keys effectively (stores metrics specific to  AND ).
-  - : Stores . **Currently contains inaccurate data.**
+  - : Now includes , , , , , , , .
+  - : Corrected cache containing  for 9.2k symbols sourced from .
 
 **changes in tech stack**
   - None
 
 **All files of reference**
-  - 
-  - 
-  -  (and related child components)
-  - 
+  -  (Newly created validation engine)
+  -  (Job orchestrator)
+  -  (Holds new max_symbols/max_bars limits)
+  -  (Target for UI update)
 
 **Areas that need refactoring**:
-  - The  updating logic needs to be rewritten to pull directly from internal  data rather than relying on legacy external data sources.
+  -  is over 4,300 lines long. As we move towards production, it should be broken down into discrete modules (PositionManager, TradeLogger, AlertEvaluator).
 
 **key api endpoints**
-  - : . Leaving  out triggers training for all profiles associated with that setup.
+  - : Fetches validation records.
+  - , : Auto-triggers collecting/backtesting Focus Modes.
 
 **Critical Info for New Agent**
-- You are stepping in right after a DB script execution. The user suspected the  volume numbers were wrong. You ran a script comparing them to local  daily bars and **proved the user right** (the cache is highly inaccurate). 
-- **DO NOT** implement the ADV filtering inside  until you have written a script/function to fix the  using local daily bar data.
+- You are stepping in mid-action. The previous agent successfully implemented the backend logic to maximize training configs per the user's request, but ran out of context before implementing the UI component of that exact same request (make the UI richer to show the validation outputs). Your very first move should be to build out this UI on the frontend so the user can actually visualize the Train->Validate->Promote pipeline.
 
 **documents and test reports created in this job**
-  -  (Updated with UI consolidation and Profile architecture)
+  -  (Updated comprehensively with all completed features).
 
 **Last 10 User Messages and any pending HUMAN messages** 
-1. **user**: Discussed changing intraday setup forecasting (1min, 5min). Asked if separate models per timeframe is better.
-2. **agent**: Agreed. Proposed Profile-Based Architecture.
-3. **user**: Approved the plan. Tweaked specific horizons (e.g., intraday range breaks to 3 hrs, VWAP to 1 hr).
-4. **agent**: Implemented Profile-Based architecture. Tested via worker logs.
-5. **user**: Asked where models display in UI, and requested consolidating the heavily cluttered NIA page.
-6. **agent**: Asked clarifying questions about dropping old General Model and merging specific panels.
-7. **user**: Approved dropping General model, merging panels, and provided instructions for a full system workflow tag mapping.
-8. **agent**: Implemented full NIA UI consolidation (11 panels to 4). Sent screenshots of successful UI.
-9. **user**: Approved UI. Instructed to move to next action items: 1. ADV filters for training, 2. Market Regime integration.
-10. **user**: Interrupted the agent to warn that the existing  might contain inaccurate volume data from old API sources, and requested a double-check against MongoDB local data. *(Agent verified this is true, session ended here).*
+1. **user**: Discussed MFE/MAE benefits.
+2. **agent**: Suggested adding it.
+3. **user**: Approved Richer Trade Logging.
+4. **agent**: Implemented Richer Trade Logging completely.
+5. **user**: Asked if clicking Train prioritizes system resources automatically.
+6. **agent**: Pointed out it's manual currently, proposed auto-focus mode.
+7. **user**: Approved auto-focus mode.
+8. **agent**: Implemented Auto-Focus Mode entirely, asked if user wants Train->Validate->Promote workflow next.
+9. **user**: Approved Train->Validate->Promote workflow.
+10. **user**: Asked to maximize training configurations/batches, set validation capital to 50k, and requested richer UI for the validation process. *(Agent implemented backend changes, session ended before UI could be started).*
 
 **Project Health Check:**
   - Backend: Healthy
   - Frontend: Healthy
-  - Worker: Healthy
-  - Database:  contains legacy/inaccurate data.
+  - Database: Healthy (ADV cache successfully restored/fixed)
 
 **3rd Party Integrations**
-	 • Interactive Brokers (IB Gateway) - requires local running instance
-	 • LightGBM - AI models
+  - Interactive Brokers (IB Gateway) - requires local running instance
+  - LightGBM
 
 **Testing status**
-  - Testing agent used after significant changes: NO (Self-tested via Python scripts and Screenshot tool).
+  - Testing agent used after significant changes: NO (Self-tested iteratively via python simulation scripts and API curls).
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: None
   - Known regressions: None
 
-**Credentials to test flow:**
-  - N/A
-
 **What agent forgot to execute**
-  - The agent ran the script proving the ADV data was wrong, but the session ended before the agent could write the logic to recalculate and fix the . This is your immediate first step.</analysis>
+  - The agent updated the backend configurations to use max data and run validations, but forgot to implement the frontend UI enhancements inside the NIA components to display the validation progress, baseline comparisons, and promotion statuses.</analysis>

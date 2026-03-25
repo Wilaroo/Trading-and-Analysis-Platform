@@ -98,11 +98,11 @@ class TimeSeriesAIService:
         "1 week": {"batch_size": 100, "max_bars": 10000, "is_intraday": False}, # Lowest data
     }
     
-    # Training defaults - optimized for reliable completion
-    # Smaller batches ensure training finishes within timeout
-    # Can be increased via API parameters for longer training sessions
-    DEFAULT_MAX_SYMBOLS = 50  # Start small, complete quickly (~30-60 seconds)
-    DEFAULT_MAX_BARS_PER_SYMBOL = 500  # ~25,000 bars total
+    # Training defaults — PRODUCTION settings
+    # Maximize data usage: all ADV-qualified symbols, all available bars
+    # Batch processing prevents OOM on intraday timeframes
+    DEFAULT_MAX_SYMBOLS = 2000   # Use all ADV-qualified symbols (up to this cap)
+    DEFAULT_MAX_BARS_PER_SYMBOL = 10000  # Use all available bars per symbol
     
     # Setup types that have enough strategies to justify a dedicated model
     SETUP_TYPES = {

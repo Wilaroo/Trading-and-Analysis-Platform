@@ -31,6 +31,8 @@ def get_model_name(setup_type: str, bar_size: str) -> str:
 
 SETUP_TRAINING_PROFILES = {
     # ===== Intraday-Only Setups =====
+    # max_symbols/max_bars_per_symbol: Use ALL ADV-qualified data
+    # Batch sizes in TIMEFRAME_SETTINGS handle memory management
     "SCALP": [
         {
             "bar_size": "1 min",
@@ -40,6 +42,8 @@ SETUP_TRAINING_PROFILES = {
             "min_samples": 50,
             "num_boost_round": 150,
             "num_classes": 3,
+            "max_symbols": 2500,
+            "max_bars_per_symbol": 2500,
             "description": "30-min scalp on 1-min bars",
         },
         {
@@ -50,6 +54,8 @@ SETUP_TRAINING_PROFILES = {
             "min_samples": 50,
             "num_boost_round": 150,
             "num_classes": 3,
+            "max_symbols": 2500,
+            "max_bars_per_symbol": 5000,
             "description": "1-hour scalp on 5-min bars",
         },
     ],
@@ -62,6 +68,8 @@ SETUP_TRAINING_PROFILES = {
             "min_samples": 50,
             "num_boost_round": 120,
             "num_classes": 3,
+            "max_symbols": 2500,
+            "max_bars_per_symbol": 5000,
             "description": "1-hour ORB on 5-min bars",
         },
     ],
@@ -74,6 +82,8 @@ SETUP_TRAINING_PROFILES = {
             "min_samples": 50,
             "num_boost_round": 120,
             "num_classes": 3,
+            "max_symbols": 2500,
+            "max_bars_per_symbol": 5000,
             "description": "1-hour gap continuation on 5-min bars",
         },
     ],
@@ -86,6 +96,8 @@ SETUP_TRAINING_PROFILES = {
             "min_samples": 50,
             "num_boost_round": 120,
             "num_classes": 3,
+            "max_symbols": 2500,
+            "max_bars_per_symbol": 5000,
             "description": "1-hour VWAP bounce/fade on 5-min bars",
         },
     ],
