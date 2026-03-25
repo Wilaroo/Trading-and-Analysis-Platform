@@ -11,7 +11,7 @@ load_dotenv()
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 if not BASE_URL:
-    BASE_URL = "https://timeframe-aggregator.preview.emergentagent.com"
+    BASE_URL = "https://profile-models-v2.preview.emergentagent.com"
 
 
 class TestHealthAndStatus:

@@ -273,7 +273,7 @@ class TestRegimePerformanceAPI:
         import httpx
         
         # Get the API URL from env
-        api_url = "https://timeframe-aggregator.preview.emergentagent.com"
+        api_url = "https://profile-models-v2.preview.emergentagent.com"
         
         endpoints = [
             "/api/regime-performance/summary",

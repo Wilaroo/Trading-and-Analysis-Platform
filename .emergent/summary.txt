@@ -1,150 +1,136 @@
-<analysis>**original_problem_statement**: The user initiated a series of feature developments and refactoring tasks. This started with implementing Setup-Specific AI Models, which involved creating backend APIs and a corresponding frontend panel. The user then reported a UI issue where training progress wasn't visible, which the agent fixed. Following this, the user requested that all heavy AI training tasks be moved to a background worker process to prevent UI blocking. The agent successfully implemented a robust job queue system using MongoDB and a background worker managed by , and migrated all 6 AI training endpoints (both general and setup-specific) to this new system. After completing this, the agent performed a P2 code cleanup task, safely refactoring the  file. The current task is to enhance the setup-specific models by incorporating pattern detection (to filter training data) and adding setup-specific features to improve accuracy, a plan the user approved. The agent is currently debugging a bug that arose during this implementation.
+<analysis>**original_problem_statement**: The user wants to enhance the Setup-Specific AI Models to improve their accuracy. The strategy evolved into creating a **Profile-Based Architecture** where intraday setups have specific timeframe models (e.g., 1min, 5min) with native forecast horizons, rather than mixing daily data. Additionally, the user requested a cleanup of the overly complex Neural Intelligence Agency (NIA) UI, and wants the AI to only train on highly liquid stocks using Average Daily Volume (ADV) filtering. 
 
-**PRODUCT REQUIREMENTS**:
-1.  **Setup-Specific AI Models**: (**IN PROGRESS**) - Enhancing with pattern detection and custom features.
-2.  **Backtesting Workflow Automation**: (**BACKLOG**)
-3.  **Auto-Optimize AI Settings**: (**BACKLOG**)
-4.  **API Route Profiling Dashboard**: (**BACKLOG**)
-(Other requirements from the initial summary are stable and not being actively worked on.)
+PRODUCT REQUIREMENTS:
+1. **Profile-Based Setup AI Models**: Separate models for different timeframes per setup (e.g., SCALP/1min, SCALP/5min). (COMPLETED)
+2. **NIA UI Consolidation**: Simplify 11 panels into a clean, 4-section layout. (COMPLETED)
+3. **ADV-Filtered Training**: Ensure models only train on liquid stocks (>100k for general, >500k for intraday). (IN PROGRESS)
+4. **Market Regime Integration**: Integrate existing market regime logic into the AI pipeline. (PENDING)
 
 **User's preferred language**: English
+*(INSTRUCT next agent: You MUST respond in English only)*
 
-**what currently exists?**
-The application is a full-stack AI trading platform with a React frontend and FastAPI backend. A key feature is the background worker system () for processing long-running AI training jobs from a MongoDB .
-
-The backend logic for Advanced Setup-Specific Models is implemented, but a series of critical bugs were discovered and fixed in this session. The frontend UI for training is currently non-functional for the user due to a request timed out error, which is the primary blocker.
-
-Previous attempts to fix the timeout issue by modifying HTTP request handling (throttling, direct XHR, aborting polls) have all failed in the user's local environment. The current, in-progress strategy is to bypass HTTP entirely for this action and send the training command over the existing WebSocket connection.
+**what currently exists?**: 
+A full-stack AI trading platform. The AI training pipeline has been successfully refactored into a Profile-Based Architecture, resulting in 17 distinct models across 10 setup types, each tuned to a specific timeframe (e.g., 1 min, 5 min, 1 day) with an appropriate forecast horizon. The NIA frontend UI has been successfully consolidated from 11 disparate panels into 4 clean sections. The WebSocket handler successfully manages profile-specific training jobs.
 
 **Last working item**:
--   **Last item agent was working**: Refactoring the app to send model training commands over the existing WebSocket connection instead of via an HTTP POST. This is a novel approach to circumvent the browser's HTTP connection limit, which is causing persistent request timed out errors for the user when they try to train a model. The agent has just started this implementation.
--   **Status**: IN PROGRESS
--   **Agent Testing Done**: N
--   **Which testing method agent to use?**: Both
--   **User Testing Done**: N
+    - Last item agent was working: Investigating the accuracy of the  in MongoDB before implementing ADV-filtered symbol selection for AI training.
+    - Status: IN PROGRESS
+    - Agent Testing Done: N/A (Just running DB queries)
+    - Which testing method agent to use?: backend testing agent or manual python script testing to verify database updates.
+    - User Testing Done: N
 
 **All Pending/In progress Issue list**:
--   **Issue 1: Request Timed Out When Training Models from UI (P0)**
-    -   **Description**: Clicking the Train button in the UI results in a request timed out toast error. The root cause is the high number of concurrent polling GET requests saturating the browser's connection-per-domain limit, which blocks the training POST request from ever reaching the server in a timely manner.
-    -   **Attempted fixes**:
-        1.  Bypassing frontend throttler for POSTs. (Failed)
-        2.  Reducing throttler concurrency from 16 to 4. (Failed)
-        3.  Using  to bypass the  stack. (Failed)
-        4.  Pausing/aborting polling requests before the POST. (Failed)
-        5.  Posting directly to the backend port . (Failed)
-    -   **Next debug checklist**:
-        1.  **Backend ():** Complete the implementation of the  action handler within the  WebSocket endpoint. This logic should parse the incoming message, extract parameters like , and create a job using the  service.
-        2.  **Frontend ():** Add a  function to the hook. This function will send a JSON message like  through the open WebSocket.
-        3.  **Frontend (, ):** Import and use the new  function from the WebSocket context, replacing the failing  calls in the training handlers.
-    -   **Why fix this issue and what will be achieved with the fix?**: This is a critical P0 blocker preventing the user from using the core AI training functionality. Fixing it will make the application usable again.
-    -   **Status**: IN PROGRESS
-    -   **Is recurring issue?**: Y
-    -   **Should Test frontend/backend/both after fix?**: Both
-    -   **Blocked on other issue**: No
+  Issue 1: ADV Cache Data Inaccuracy (P0)
+     - Attempted fixes: The agent ran a python script to compare  values against actual  daily bar data in MongoDB. The output confirmed the user's suspicion: the cached ADV data (likely imported from old IEX/Alpaca data) is highly inaccurate compared to actual local daily bars (e.g., AAPL cache says 860k, actual is ~5M).
+     - Next debug checklist: You must write a script or service method to recalculate and overwrite the  collection using the actual  daily bar data stored in MongoDB.
+     - Why fix this issue and what will be achieved with the fix?: Fixing this is a prerequisite for Task 1. The AI needs accurate volume data to avoid training on illiquid stocks.
+     - Status: IN PROGRESS
+     - Is recurring issue?: N
+     - Should Test frontend/backend/both after fix?: Backend
+     - Blocked on other issue: None
 
 **In progress Task List**:
--   **Task 1: Implement Training via WebSocket (P0)**
-    -   **Where to resume**: Resume implementation in  to add the job creation logic to the new  WebSocket action. Then, implement the corresponding frontend changes in  and the UI components.
-    -   **What will be achieved with this?**: A robust method for triggering training jobs that is immune to HTTP connection pool saturation.
-    -   **Status**: IN PROGRESS
-    -   **Should Test frontend/backend/both after fix?**: Both
-    -   **Blocked on something**: This is the current P0 task.
+  Task 1: ADV-Filtered Training Symbols (P1)
+     - Where to resume: Once Issue 1 is resolved (ADV data is accurate), update the  method in  to filter symbols based on ADV thresholds (e.g., >100k ADV for daily/swing setups, >500k ADV for intraday setups).
+     - What will be achieved with this?: Ensures AI models only learn from highly liquid stocks, improving real-world execution and reducing slippage.
+     - Status: BLOCKED
+     - Should Test frontend/backend/both after fix?: Backend
+     - Blocked on something: Issue 1 (ADV Cache Data Inaccuracy)
+
+  Task 2: Market Regime Integration (P2)
+     - Where to resume: Assess the existing  system (in  and ) and determine the best way to integrate it into the AI's training data or prediction evaluation. 
+     - What will be achieved with this?: Contextual awareness for the AI, allowing it to adjust predictions based on the broader market trend.
+     - Status: NOT STARTED
+     - Should Test frontend/backend/both after fix?: Backend
+     - Blocked on something: Complete Task 1 first.
 
 **Upcoming and Future Tasks**
--   **Upcoming Tasks**:
-    -   (P1) **Backtesting Workflow Automation**: Create a system to automatically run backtests when a new model (general or setup-specific) is trained.
-    -   (P2) **Improve Setup Model Accuracy**: The newly fixed setup models have low accuracy (~47-48%). Investigate improving pattern detection, using more data, or tuning features.
--   **Future Tasks**:
-    -   (P3) **Auto-Optimize AI Settings**: Create a feature to sweep confidence thresholds and lookback windows to find optimal settings per strategy.
-    -   (P3) **API Route Profiling Dashboard**: An enhancement to monitor API performance.
-    -   (P3) **Compare Simulations Side-by-Side**: An enhancement to allow comparing equity curves of multiple backtest runs.
+    Upcoming Tasks:
+    - (P1) Backtesting Workflow Automation: Create a system to automatically run backtests when a new model (general or setup-specific) is trained.
+    
+    Future Tasks:
+    - (P3) Auto-Optimize AI Settings: Feature to sweep confidence thresholds and lookback windows to find optimal settings per strategy.
+    - (P3) API Route Profiling Dashboard: Monitor API performance.
+    - (P3) Compare Simulations Side-by-Side: Allow comparing equity curves of multiple backtest runs.
 
 **Completed work in this session**
--   **Critical Bug Fix: Setup Models Were Copies of General Model**: Fixed three critical bugs in the training pipeline that caused all setup-specific models to be saved as copies of the general model. Setup models now train and save as distinct, specialized models with their own unique accuracies.
--   **Critical Bug Fix:  in Worker**: Fixed a P0 bug () in  that crashed the training worker.
--   **Bug Fix: General Model Untrained UI Race Condition**: Fixed a UI bug where the model status briefly showed Untrained during initial load by adding a loading... state.
--   **Bug Fix: IB Gateway Status Display**: Enhanced the startup check to distinguish between a connected IB socket and actual data flow, providing a more accurate status in the UI.
--   **Maintenance & Diagnosis**:
-    -   Diagnosed and cleared job queue issues multiple times.
-    -   Diagnosed and resolved worker cache issues.
-    -   Diagnosed a race condition between the preview worker and the user's local worker competing for jobs.
+- Phase 4: Fixed multi-timeframe data aggregation loop in  (DONE)
+- Refactored AI Architecture to Profile-Based Setup Models (17 specific timeframe/setup combos) (DONE)
+- Updated  for distinct timeframe horizons (DONE)
+- Updated Backend API and Worker to support compound key model saving/loading (DONE)
+- Consolidated NIA Frontend UI from 11 panels into 4 clean sections (, , , ) (DONE)
 
 **Earlier issues found/mentioned but not fixed**
--   None.
+   - None.
 
 **Known issue recurrence from previous fork**
--   None.
+  - Issue recurrence in previous fork: None
+  - Recurrence count: 0
+  - Status: RESOLVED
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **WebSocket Communication**: The current strategy is to shift high-priority actions (like training) from HTTP POST to a WebSocket message to bypass browser connection limits that are blocking HTTP requests.
--   **Request Throttling & Connection Pooling**: A deep and recurring problem in this session. The high number of polling GET requests saturates the browser's limited connection pool (6 per domain), blocking critical user actions.
--   **Model Training & Protection Logic**: Corrected a critical flaw where specialized models were being overwritten by a general model.
+- **Profile-Based AI Architecture**: Instead of mixing daily and intraday data into one SCALP model, there is now a  model and a  model. Each has a forecast horizon native to its timeframe (e.g., 30 bars for 1-min, 12 bars for 5-min).
+- **Embedded UI Components**: The NIA sub-panels (like ) were refactored to accept an  prop so they can be rendered directly inside tab wrappers without conflicting UI layers.
 
 **key DB schema**
--   **job_queue**: 
--   **setup_type_models**:  - Now stores correctly specialized models.
+  - : Now uses compound keys effectively (stores metrics specific to  AND ).
+  - : Stores . **Currently contains inaccurate data.**
 
 **changes in tech stack**
--   None.
+  - None
 
 **All files of reference**
--   : The WebSocket handler is being modified here to accept a  command.
--   : The frontend hook that needs to be updated to send the  command.
--   : The UI component that will trigger the WebSocket training command.
--   : Contains the logic for the failed HTTP-based timeout fixes.
--   : Contains the recently fixed critical bugs related to model saving and prediction.
+  - 
+  - 
+  -  (and related child components)
+  - 
 
-**Areas that need refactoring**
--   The high volume of polling GET requests on the frontend is the root cause of the connection saturation issue. While the WebSocket is a good workaround for the immediate P0 blocker, a future task should be to refactor the frontend to reduce polling, possibly by consolidating API calls or using WebSockets for more status updates instead of polling.
+**Areas that need refactoring**:
+  - The  updating logic needs to be rewritten to pull directly from internal  data rather than relying on legacy external data sources.
 
 **key api endpoints**
--   **WebSocket **: Being enhanced to accept a  message.
--   **POST **: The HTTP endpoint that is being replaced by the WebSocket action due to unreliability.
+  - : . Leaving  out triggers training for all profiles associated with that setup.
 
 **Critical Info for New Agent**
--   **Your immediate and only task is to fix the Request Timed Out bug by implementing training via WebSocket.** The user is completely blocked. Do not attempt any more HTTP-based fixes; they have all failed.
--   The plan is to add a  action to the existing WebSocket. The backend  needs to handle this message and create a job in the . The frontend  hook needs a new function to send this message, and the UI components (, etc.) must be updated to call it.
--   The previous agent has already started the backend change in . You need to complete that logic and then implement all the required frontend changes.
+- You are stepping in right after a DB script execution. The user suspected the  volume numbers were wrong. You ran a script comparing them to local  daily bars and **proved the user right** (the cache is highly inaccurate). 
+- **DO NOT** implement the ADV filtering inside  until you have written a script/function to fix the  using local daily bar data.
 
 **documents and test reports created in this job**
--    (Updated multiple times with bug fixes and progress).
+  -  (Updated with UI consolidation and Profile architecture)
 
-**Last 10 User Messages and any pending HUMAN messages**
-1.  **user**:  - **Status**: IN PROGRESS. User confirms the latest HTTP-based fix did not work, prompting the pivot to WebSockets.
-2.  **user**:  - **Status**: COMPLETED. User correctly identified that jobs were being processed by the agent's preview worker, not their local one.
-3.  **user**:  - **Status**: IN PROGRESS. User reports the core request timed out issue persists after pulling fixes.
-4.  **user**:  - **Status**: IN PROGRESS. User confirms another attempted fix (abort polling) failed.
-5.  **user**:  - **Status**: COMPLETED. User request to clean the job queue.
-6.  **user**:  - **Status**: IN PROGRESS. User confirms another attempted fix (pause polling) failed.
-7.  **user**:  - **Status**: COMPLETED. User reported a bug in the startup status check, which the agent then fixed.
-8.  **user**: (server logs) - **Status**: COMPLETED. User provided logs showing the POST request was getting stuck for minutes.
-9.  **user**:  - **Status**: COMPLETED. User confirmed a backend fix worked locally, but the UI timed out.
-10. **user**:  - **Status**: COMPLETED. User reported the worker wasn't picking up jobs, leading to diagnosis of competing workers.
+**Last 10 User Messages and any pending HUMAN messages** 
+1. **user**: Discussed changing intraday setup forecasting (1min, 5min). Asked if separate models per timeframe is better.
+2. **agent**: Agreed. Proposed Profile-Based Architecture.
+3. **user**: Approved the plan. Tweaked specific horizons (e.g., intraday range breaks to 3 hrs, VWAP to 1 hr).
+4. **agent**: Implemented Profile-Based architecture. Tested via worker logs.
+5. **user**: Asked where models display in UI, and requested consolidating the heavily cluttered NIA page.
+6. **agent**: Asked clarifying questions about dropping old General Model and merging specific panels.
+7. **user**: Approved dropping General model, merging panels, and provided instructions for a full system workflow tag mapping.
+8. **agent**: Implemented full NIA UI consolidation (11 panels to 4). Sent screenshots of successful UI.
+9. **user**: Approved UI. Instructed to move to next action items: 1. ADV filters for training, 2. Market Regime integration.
+10. **user**: Interrupted the agent to warn that the existing  might contain inaccurate volume data from old API sources, and requested a double-check against MongoDB local data. *(Agent verified this is true, session ended here).*
 
 **Project Health Check:**
--   **Broken**: The application is currently unusable for its primary purpose (AI training) due to a P0 frontend blocker (Request Timed Out). While the backend logic is now sound, the user cannot trigger it from the UI.
+  - Backend: Healthy
+  - Frontend: Healthy
+  - Worker: Healthy
+  - Database:  contains legacy/inaccurate data.
 
 **3rd Party Integrations**
--   Interactive Brokers (IB Gateway)
--   Ollama Pro
--   MongoDB Atlas
--   PyTorch (with CUDA)
--   LightGBM
--   ChromaDB
--   pymongo
--   Alpaca ()
+	 • Interactive Brokers (IB Gateway) - requires local running instance
+	 • LightGBM - AI models
 
 **Testing status**
--   **Testing agent used after significant changes**: NO
--   **Troubleshoot agent used after agent stuck in loop**: NO
--   **Test files created**: None
--   **Known regressions**: None.
+  - Testing agent used after significant changes: NO (Self-tested via Python scripts and Screenshot tool).
+  - Troubleshoot agent used after agent stuck in loop: NO
+  - Test files created: None
+  - Known regressions: None
 
 **Credentials to test flow:**
--   N/A
+  - N/A
 
 **What agent forgot to execute**
--   The agent got stuck in a loop trying various HTTP-based solutions for the timeout issue before pivoting to the more robust WebSocket approach. It also forgot to re-add several exports to  after a rewrite, causing a temporary build failure.</analysis>
+  - The agent ran the script proving the ADV data was wrong, but the session ended before the agent could write the logic to recalculate and fix the . This is your immediate first step.</analysis>

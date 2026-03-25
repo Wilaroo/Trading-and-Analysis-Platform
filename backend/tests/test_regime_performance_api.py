@@ -9,7 +9,7 @@ import requests
 import os
 
 # Get API URL from environment
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://timeframe-aggregator.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://profile-models-v2.preview.emergentagent.com').rstrip('/')
 
 
 class TestRegimePerformanceEndpoints:
