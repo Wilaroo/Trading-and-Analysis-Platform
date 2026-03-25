@@ -12,7 +12,8 @@ const QuickStatsBar = memo(({ data }) => {
     const collectionActive = pendingCollections > 0;
     const readyPromotions = (data.candidates || []).filter(c => c.meets_requirements).length;
     const totalBars = data.historicalBars || 0;
-    const modelTrained = data.modelTrained || false;
+    const modelTrained = data.modelTrained;
+    const modelLoading = modelTrained === null || modelTrained === undefined;
     const accuracy = data.aiAccuracy;
 
     return [
@@ -59,10 +60,10 @@ const QuickStatsBar = memo(({ data }) => {
         id: 'ai',
         icon: Brain,
         label: 'AI Model',
-        value: modelTrained && accuracy ? `${(accuracy * 100).toFixed(1)}%` : modelTrained ? 'Trained' : 'Untrained',
-        sub: modelTrained ? 'accuracy' : 'needs training',
-        active: modelTrained,
-        color: modelTrained ? (accuracy >= 0.55 ? 'emerald' : accuracy >= 0.5 ? 'yellow' : 'cyan') : 'zinc'
+        value: modelLoading ? '--' : modelTrained && accuracy ? `${(accuracy * 100).toFixed(1)}%` : modelTrained ? 'Trained' : 'Untrained',
+        sub: modelLoading ? 'loading...' : modelTrained ? 'accuracy' : 'needs training',
+        active: !!modelTrained,
+        color: modelLoading ? 'zinc' : modelTrained ? (accuracy >= 0.55 ? 'emerald' : accuracy >= 0.5 ? 'yellow' : 'cyan') : 'zinc'
       },
       {
         id: 'health',

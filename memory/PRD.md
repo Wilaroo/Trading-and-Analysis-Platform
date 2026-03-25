@@ -33,6 +33,9 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
     - Setup-specific features (`setup_features.py`) add 6 extra features per setup type
     - Training pipeline: scan bars → detect patterns → extract base+setup features → train enriched model
     - Verified: BREAKOUT model trained on 1,438 patterns from 8,900 bars with 52 combined features
+16. **Fix: AI Model "Untrained" Display on First Load (Mar 25, 2026)** - COMPLETED
+    - Added `modelTrained: null` and `timeseriesTrained: null` to DEFAULT_DATA
+    - QuickStatsBar now shows `--` / `loading...` instead of false "Untrained" during API fetch
 
 ## Key API Endpoints
 
@@ -73,7 +76,7 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
 - (P3) Compare Simulations side-by-side
 
 ## Known Minor Issues
-- General Model "Untrained" Display — Race condition on NIA page (low priority, API returns correct data)
+- None
 
 ## Testing
 - `/app/test_reports/iteration_107.json` (latest - General Training Job Queue, 20/20 passed)

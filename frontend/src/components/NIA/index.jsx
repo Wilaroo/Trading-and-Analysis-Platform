@@ -36,6 +36,8 @@ import SetupModelsPanel from './SetupModelsPanel';
 const DEFAULT_DATA = {
   aiAccuracy: null,
   aiAccuracyTrend: null,
+  modelTrained: null,
+  timeseriesTrained: null,
   liveStrategies: 0,
   paperStrategies: 0,
   learningHealth: null,
