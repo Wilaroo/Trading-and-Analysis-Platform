@@ -101,6 +101,7 @@ const SetupModelsPanel = memo(() => {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [trainingAll, setTrainingAll] = useState(false);
+  const [localTraining, setLocalTraining] = useState({});  // track per-type training locally
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -108,6 +109,18 @@ const SetupModelsPanel = memo(() => {
       const res = await api.get('/api/ai-modules/timeseries/setups/status');
       if (res.data?.success) {
         setStatus(res.data);
+        // Clear local training flags for types that finished
+        setLocalTraining(prev => {
+          const next = { ...prev };
+          const ts = res.data.training_status || {};
+          for (const key of Object.keys(next)) {
+            const serverStatus = ts[`setup_${key}`]?.status;
+            if (serverStatus !== 'running') {
+              delete next[key];
+            }
+          }
+          return next;
+        });
       }
     } catch (err) {
       console.error('Error fetching setup models status:', err);
@@ -120,19 +133,22 @@ const SetupModelsPanel = memo(() => {
     if (expanded && !status) fetchStatus();
   }, [expanded, status, fetchStatus]);
 
-  // Poll while any model is training
-  useEffect(() => {
-    if (!expanded) return;
-    const hasTraining = status?.training_status && Object.values(status.training_status).some(t => t?.status === 'running');
-    if (!hasTraining && !trainingAll) return;
+  // Poll while any model is training (local or server-side)
+  const hasAnyTraining = Object.keys(localTraining).length > 0 || trainingAll ||
+    (status?.training_status && Object.values(status.training_status).some(t => t?.status === 'running'));
 
-    const interval = setInterval(fetchStatus, 5000);
+  useEffect(() => {
+    if (!expanded || !hasAnyTraining) return;
+    const interval = setInterval(fetchStatus, 3000);
     return () => clearInterval(interval);
-  }, [expanded, status, trainingAll, fetchStatus]);
+  }, [expanded, hasAnyTraining, fetchStatus]);
 
   const handleTrainOne = useCallback(async (setupType) => {
+    // Set local training state immediately so the card shows "Training..."
+    setLocalTraining(prev => ({ ...prev, [setupType]: { status: 'running', message: 'Starting training...' } }));
+    toast.info(`Training ${setupType.replace(/_/g, ' ')} model...`);
+
     try {
-      toast.info(`Training ${setupType.replace(/_/g, ' ')} model...`);
       const res = await apiLongRunning.post('/api/ai-modules/timeseries/setups/train', {
         setup_type: setupType,
         bar_size: '1 day',
@@ -143,9 +159,11 @@ const SetupModelsPanel = memo(() => {
       } else {
         toast.error(res.data?.result?.error || `Failed to train ${setupType}`);
       }
-      fetchStatus();
     } catch (err) {
       toast.error(`Error training ${setupType}: ${err.message}`);
+    } finally {
+      setLocalTraining(prev => { const n = { ...prev }; delete n[setupType]; return n; });
+      fetchStatus();
     }
   }, [fetchStatus]);
 
@@ -171,17 +189,29 @@ const SetupModelsPanel = memo(() => {
   const models = status?.models || {};
   const trainedCount = status?.models_trained || 0;
   const totalCount = status?.total_setup_types || 10;
-  const trainingStatus = status?.training_status || {};
+  const serverTrainingStatus = status?.training_status || {};
 
-  // Check if any are currently training
-  const anyTraining = Object.values(trainingStatus).some(t => t?.status === 'running');
+  // Merge local training state with server training status
+  const mergedTrainingStatus = { ...serverTrainingStatus };
+  for (const [key, val] of Object.entries(localTraining)) {
+    const serverKey = `setup_${key}`;
+    if (!mergedTrainingStatus[serverKey] || mergedTrainingStatus[serverKey].status !== 'running') {
+      mergedTrainingStatus[serverKey] = val;
+    }
+  }
+
+  // Check if any are currently training (local or server)
+  const anyTraining = hasAnyTraining;
 
   // Stop polling for train-all when done
   useEffect(() => {
-    if (trainingAll && !anyTraining && status?.models_trained > 0) {
-      setTrainingAll(false);
+    if (trainingAll && Object.keys(localTraining).length === 0) {
+      const serverRunning = status?.training_status && Object.values(status.training_status).some(t => t?.status === 'running');
+      if (!serverRunning) {
+        setTrainingAll(false);
+      }
     }
-  }, [trainingAll, anyTraining, status]);
+  }, [trainingAll, localTraining, status]);
 
   return (
     <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }} data-testid="setup-models-panel">
@@ -253,7 +283,7 @@ const SetupModelsPanel = memo(() => {
                     key={name}
                     name={name}
                     model={model}
-                    training={trainingStatus[`setup_${name}`]}
+                    training={mergedTrainingStatus[`setup_${name}`]}
                     onTrain={handleTrainOne}
                   />
                 ))}
