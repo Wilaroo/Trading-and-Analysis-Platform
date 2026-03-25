@@ -28,7 +28,7 @@ import {
 import MarketIntelPanel from './MarketIntelPanel';
 import QuickActionsMenu from './QuickActionsMenu';
 import SimulatorControl from './SimulatorControl';
-import api from '../utils/api';
+import api, { safeGet } from '../utils/api';
 
 // ===================== CALENDAR-STYLE EARNINGS WIDGET =====================
 const EarningsWidget = ({ onTickerSelect }) => {

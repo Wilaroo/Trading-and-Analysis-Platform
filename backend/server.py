@@ -972,6 +972,9 @@ try:
     
     register_service('simulation_engine', simulation_engine)
     
+    # Wire simulation engine into the advanced backtest router (unified access)
+    init_advanced_backtest_router(advanced_backtest_engine, simulation_engine=simulation_engine)
+    
     print("Historical Simulation Engine initialized")
     print("  - Full SentCom bot backtesting on 1+ year of data")
     print("  - Uses all AI agents (Debate, Risk, Time-Series, Institutional)")

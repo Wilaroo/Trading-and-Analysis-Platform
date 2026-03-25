@@ -9,7 +9,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Play, Loader2, CheckCircle2, XCircle, RefreshCw, ChevronDown, ChevronRight,
   BarChart3, TrendingUp, Target, Shuffle, Calendar, Clock, Settings, 
-  AlertTriangle, Download, Filter, Layers, Zap, PieChart, Globe, Search
+  AlertTriangle, Download, Filter, Layers, Zap, PieChart, Globe, Search, Brain
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '../utils/api';
@@ -107,6 +107,7 @@ const AdvancedBacktestPanel = () => {
   const tabs = [
     { id: 'quick', label: 'Quick Test', icon: Zap, tip: 'Fast single-strategy test on one symbol. Great for validating ideas.' },
     { id: 'ai', label: 'AI Comparison', icon: Target, tip: 'Compare setup-only vs AI+setup vs AI-only. Does your AI model actually improve results?' },
+    { id: 'fullsim', label: 'Full AI Sim', icon: Brain, tip: 'Run the complete SentCom AI pipeline on historical data. Tests all agents: Debate, Risk, Institutional, Time-Series.' },
     { id: 'market', label: 'Market-Wide', icon: Globe, tip: 'Scan entire US market with a strategy. Find all historical setups across thousands of stocks.' },
     { id: 'multi', label: 'Multi-Strategy', icon: Layers, tip: 'Test multiple strategies simultaneously to compare performance.' },
     { id: 'walkforward', label: 'Walk-Forward', icon: TrendingUp, tip: 'Advanced optimization: train on one period, test on next. Validates robustness.' },
@@ -157,6 +158,14 @@ const AdvancedBacktestPanel = () => {
       {activeTab === 'ai' && (
         <AIComparisonTab 
           allStrategies={allStrategies}
+          onJobStarted={fetchJobs}
+          setLoading={setLoading}
+          loading={loading}
+        />
+      )}
+
+      {activeTab === 'fullsim' && (
+        <FullAISimTab 
           onJobStarted={fetchJobs}
           setLoading={setLoading}
           loading={loading}
@@ -2040,3 +2049,630 @@ const GenericResultDetail = ({ result }) => (
 );
 
 export default AdvancedBacktestPanel;
+
+// ============================================================================
+// Full AI Simulation Tab
+// ============================================================================
+
+const FullAISimTab = ({ onJobStarted, setLoading, loading }) => {
+  const [config, setConfig] = useState({
+    universe: 'sp500',
+    custom_symbols: '',
+    starting_capital: 100000,
+    max_position_pct: 10,
+    max_open_positions: 5,
+    use_ai_agents: true,
+    bar_size: '1 day',
+    start_date: '',
+    end_date: '',
+    min_adv: 100000,
+    min_price: 5,
+    max_price: 500,
+  });
+  const [simJobs, setSimJobs] = useState([]);
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [jobDetail, setJobDetail] = useState(null);
+  const [pollInterval, setPollInterval] = useState(null);
+  const [detailView, setDetailView] = useState('summary'); // summary | trades | decisions
+  const [trades, setTrades] = useState([]);
+  const [decisions, setDecisions] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  // Fetch existing simulation jobs
+  const fetchSimJobs = useCallback(async () => {
+    try {
+      const { data } = await api.get('/api/backtest/full-ai-simulation/jobs?limit=20');
+      if (data.success) {
+        setSimJobs(data.jobs || []);
+      }
+    } catch (err) {
+      // silent
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSimJobs();
+  }, [fetchSimJobs]);
+
+  // Poll running job status
+  useEffect(() => {
+    if (!pollInterval) return;
+    const timer = setInterval(async () => {
+      if (selectedJob) {
+        try {
+          const { data } = await api.get(`/api/backtest/full-ai-simulation/status/${selectedJob}`);
+          if (data.success) {
+            setJobDetail(data.job);
+            if (data.job.status === 'completed' || data.job.status === 'failed') {
+              clearInterval(timer);
+              setPollInterval(null);
+              fetchSimJobs();
+              if (data.job.status === 'completed') fetchDetailData(selectedJob);
+            }
+          }
+        } catch (err) {
+          // silent
+        }
+      }
+    }, pollInterval);
+    return () => clearInterval(timer);
+  }, [pollInterval, selectedJob, fetchSimJobs]);
+
+  const fetchDetailData = async (jobId) => {
+    setLoadingDetail(true);
+    try {
+      const [summaryRes, tradesRes, decisionsRes] = await Promise.all([
+        api.get(`/api/backtest/full-ai-simulation/summary/${jobId}`),
+        api.get(`/api/backtest/full-ai-simulation/trades/${jobId}?limit=100`),
+        api.get(`/api/backtest/full-ai-simulation/decisions/${jobId}?limit=100`),
+      ]);
+      if (summaryRes.data?.success) setSummary(summaryRes.data.summary);
+      if (tradesRes.data?.success) setTrades(tradesRes.data.trades || []);
+      if (decisionsRes.data?.success) setDecisions(decisionsRes.data.decisions || []);
+    } catch (err) {
+      console.error('Failed to load detail data:', err);
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
+
+  const startSimulation = async () => {
+    setLoading(true);
+    try {
+      const payload = {
+        ...config,
+        custom_symbols: config.universe === 'custom' 
+          ? config.custom_symbols.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) 
+          : [],
+      };
+      if (!payload.start_date) delete payload.start_date;
+      if (!payload.end_date) delete payload.end_date;
+      
+      const { data } = await api.post('/api/backtest/full-ai-simulation', payload);
+      if (data.success) {
+        toast.success(`Full AI simulation started! Job: ${data.job_id}`);
+        setSelectedJob(data.job_id);
+        setJobDetail({ status: 'running', ...data.config });
+        setPollInterval(3000);
+        setSummary(null); setTrades([]); setDecisions([]);
+        onJobStarted?.();
+        fetchSimJobs();
+      } else {
+        toast.error(data.message || 'Failed to start simulation');
+      }
+    } catch (err) {
+      toast.error('Failed to start simulation: ' + (err?.response?.data?.detail || err.message));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const viewJobDetail = async (jobId) => {
+    setSelectedJob(jobId);
+    setSummary(null); setTrades([]); setDecisions([]);
+    setDetailView('summary');
+    try {
+      const { data } = await api.get(`/api/backtest/full-ai-simulation/status/${jobId}`);
+      if (data.success) {
+        setJobDetail(data.job);
+        if (data.job.status === 'running') {
+          setPollInterval(3000);
+        } else if (data.job.status === 'completed') {
+          fetchDetailData(jobId);
+        }
+      }
+    } catch (err) {
+      toast.error('Failed to load job status');
+    }
+  };
+
+  const winRate = jobDetail ? (jobDetail.win_rate > 1 ? jobDetail.win_rate : (jobDetail.win_rate || 0) * 100) : 0;
+
+  return (
+    <div className="space-y-4" data-testid="full-ai-sim-tab">
+      {/* Config Panel */}
+      <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-5 space-y-4">
+        <div className="flex items-center gap-3 mb-2">
+          <Brain className="w-5 h-5 text-purple-400" />
+          <h3 className="text-lg font-semibold text-slate-100">Full AI Pipeline Simulation</h3>
+        </div>
+        <p className="text-sm text-slate-400 leading-relaxed">
+          Replays the complete SentCom bot on historical data. Uses all AI agents (Debate, Risk, Institutional, Time-Series) 
+          to make trade decisions on each bar. More realistic than strategy backtests but compute-intensive.
+        </p>
+
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Stock Universe</label>
+            <select 
+              data-testid="sim-universe-select"
+              value={config.universe}
+              onChange={e => setConfig(p => ({ ...p, universe: e.target.value }))}
+              className="w-full bg-slate-900/60 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200"
+            >
+              <option value="sp500">S&P 500</option>
+              <option value="nasdaq100">NASDAQ 100</option>
+              <option value="all">All US Stocks</option>
+              <option value="custom">Custom List</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Starting Capital</label>
+            <input 
+              data-testid="sim-capital-input"
+              type="number" 
+              value={config.starting_capital}
+              onChange={e => setConfig(p => ({ ...p, starting_capital: Number(e.target.value) }))}
+              className="w-full bg-slate-900/60 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Max Position %</label>
+            <input 
+              data-testid="sim-max-position-input"
+              type="number" 
+              value={config.max_position_pct}
+              onChange={e => setConfig(p => ({ ...p, max_position_pct: Number(e.target.value) }))}
+              className="w-full bg-slate-900/60 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Max Open Positions</label>
+            <input 
+              data-testid="sim-max-positions-input"
+              type="number" 
+              value={config.max_open_positions}
+              onChange={e => setConfig(p => ({ ...p, max_open_positions: Number(e.target.value) }))}
+              className="w-full bg-slate-900/60 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Bar Size</label>
+            <select 
+              data-testid="sim-bar-size-select"
+              value={config.bar_size}
+              onChange={e => setConfig(p => ({ ...p, bar_size: e.target.value }))}
+              className="w-full bg-slate-900/60 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200"
+            >
+              <option value="1 day">Daily</option>
+              <option value="1 hour">Hourly</option>
+              <option value="15 mins">15 Minutes</option>
+              <option value="5 mins">5 Minutes</option>
+              <option value="1 min">1 Minute</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-3 pt-5">
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input 
+                data-testid="sim-ai-agents-toggle"
+                type="checkbox" 
+                checked={config.use_ai_agents}
+                onChange={e => setConfig(p => ({ ...p, use_ai_agents: e.target.checked }))}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-slate-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-500"></div>
+              <span className="ml-2 text-xs text-slate-300">AI Agents</span>
+            </label>
+          </div>
+        </div>
+
+        {config.universe === 'custom' && (
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Custom Symbols (comma-separated)</label>
+            <input 
+              data-testid="sim-custom-symbols-input"
+              type="text" 
+              value={config.custom_symbols}
+              onChange={e => setConfig(p => ({ ...p, custom_symbols: e.target.value }))}
+              placeholder="AAPL, MSFT, GOOGL, NVDA, TSLA"
+              className="w-full bg-slate-900/60 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200"
+            />
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Start Date (optional, default: 6mo ago)</label>
+            <input 
+              data-testid="sim-start-date-input"
+              type="date" 
+              value={config.start_date}
+              onChange={e => setConfig(p => ({ ...p, start_date: e.target.value }))}
+              className="w-full bg-slate-900/60 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">End Date (optional, default: yesterday)</label>
+            <input 
+              data-testid="sim-end-date-input"
+              type="date" 
+              value={config.end_date}
+              onChange={e => setConfig(p => ({ ...p, end_date: e.target.value }))}
+              className="w-full bg-slate-900/60 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200"
+            />
+          </div>
+        </div>
+
+        <details className="group">
+          <summary className="cursor-pointer text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1">
+            <Settings className="w-3 h-3" />
+            <span>Advanced Filters</span>
+            <ChevronDown className="w-3 h-3 group-open:rotate-180 transition-transform" />
+          </summary>
+          <div className="grid grid-cols-3 gap-4 mt-3 pt-3 border-t border-slate-700/30">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Min ADV</label>
+              <input type="number" value={config.min_adv}
+                onChange={e => setConfig(p => ({ ...p, min_adv: Number(e.target.value) }))}
+                className="w-full bg-slate-900/60 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Min Price</label>
+              <input type="number" value={config.min_price}
+                onChange={e => setConfig(p => ({ ...p, min_price: Number(e.target.value) }))}
+                className="w-full bg-slate-900/60 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Max Price</label>
+              <input type="number" value={config.max_price}
+                onChange={e => setConfig(p => ({ ...p, max_price: Number(e.target.value) }))}
+                className="w-full bg-slate-900/60 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-200"
+              />
+            </div>
+          </div>
+        </details>
+
+        <button
+          data-testid="start-full-sim-button"
+          onClick={startSimulation}
+          disabled={loading}
+          className="w-full flex items-center justify-center gap-2 bg-purple-600/80 hover:bg-purple-600 text-white py-3 rounded-lg font-medium transition-all disabled:opacity-50"
+        >
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+          Start Full AI Simulation
+        </button>
+      </div>
+
+      {/* Job Status & Results */}
+      {jobDetail && (
+        <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-medium text-slate-200">
+              Simulation: {selectedJob?.substring(0, 16)}...
+            </h4>
+            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+              jobDetail.status === 'running' ? 'bg-cyan-500/20 text-cyan-400' :
+              jobDetail.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' :
+              jobDetail.status === 'failed' ? 'bg-red-500/20 text-red-400' :
+              'bg-slate-500/20 text-slate-400'
+            }`}>
+              {jobDetail.status}
+            </span>
+          </div>
+
+          {/* Progress bar for running jobs */}
+          {jobDetail.status === 'running' && (
+            <div>
+              <div className="flex justify-between text-xs text-slate-400 mb-1">
+                <span>Progress: {jobDetail.symbols_processed || 0}/{jobDetail.symbols_total || jobDetail.total_symbols || '?'} symbols</span>
+                <span>{jobDetail.current_date || ''}</span>
+              </div>
+              <div className="w-full bg-slate-700 rounded-full h-2">
+                <div 
+                  className="bg-purple-500 h-2 rounded-full transition-all" 
+                  style={{ width: `${Math.min(100, (jobDetail.progress || (jobDetail.symbols_total ? (jobDetail.symbols_processed / jobDetail.symbols_total * 100) : 0)))}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Summary Stats Row */}
+          {(jobDetail.status === 'completed' || jobDetail.total_trades > 0) && (
+            <div className="grid grid-cols-4 gap-3 text-center">
+              <div className="bg-slate-900/40 rounded-lg p-2">
+                <div className="text-xs text-slate-500">Trades</div>
+                <div className="font-medium text-slate-200">{jobDetail.total_trades || 0}</div>
+              </div>
+              <div className="bg-slate-900/40 rounded-lg p-2">
+                <div className="text-xs text-slate-500">Win Rate</div>
+                <div className={`font-medium ${winRate >= 50 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {winRate.toFixed(1)}%
+                </div>
+              </div>
+              <div className="bg-slate-900/40 rounded-lg p-2">
+                <div className="text-xs text-slate-500">P&L</div>
+                <div className={`font-medium ${(jobDetail.total_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  ${(jobDetail.total_pnl || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </div>
+              </div>
+              <div className="bg-slate-900/40 rounded-lg p-2">
+                <div className="text-xs text-slate-500">Max DD</div>
+                <div className="font-medium text-red-400">
+                  {(jobDetail.max_drawdown || 0).toFixed(1)}%
+                </div>
+              </div>
+            </div>
+          )}
+
+          {jobDetail.error_message && (
+            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-300">
+              {jobDetail.error_message}
+            </div>
+          )}
+
+          {/* Detail Tabs for completed jobs */}
+          {jobDetail.status === 'completed' && (
+            <>
+              <div className="flex items-center gap-1 border-b border-slate-700/50 pb-0">
+                {[
+                  { id: 'summary', label: 'Summary', icon: PieChart },
+                  { id: 'trades', label: `Trades (${trades.length})`, icon: TrendingUp },
+                  { id: 'decisions', label: `AI Decisions (${decisions.length})`, icon: Brain },
+                ].map(t => (
+                  <button
+                    key={t.id}
+                    data-testid={`sim-detail-tab-${t.id}`}
+                    onClick={() => setDetailView(t.id)}
+                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-all ${
+                      detailView === t.id
+                        ? 'border-purple-400 text-purple-300'
+                        : 'border-transparent text-slate-500 hover:text-slate-300'
+                    }`}
+                  >
+                    <t.icon className="w-3.5 h-3.5" />
+                    {t.label}
+                  </button>
+                ))}
+                {loadingDetail && <Loader2 className="w-3.5 h-3.5 text-purple-400 animate-spin ml-auto" />}
+              </div>
+
+              {/* Summary View */}
+              {detailView === 'summary' && summary && (
+                <div className="space-y-4" data-testid="sim-summary-view">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <StatCard label="Winners" value={summary.winners} color="emerald" />
+                    <StatCard label="Losers" value={summary.losers} color="red" />
+                    <StatCard label="Avg Win" value={`$${(summary.avg_win || 0).toFixed(0)}`} color="emerald" />
+                    <StatCard label="Avg Loss" value={`$${(summary.avg_loss || 0).toFixed(0)}`} color="red" />
+                    <StatCard label="Profit Factor" value={(summary.profit_factor || 0).toFixed(2)} color={summary.profit_factor >= 1 ? 'emerald' : 'red'} />
+                    <StatCard label="Total Decisions" value={summary.total_decisions} color="purple" />
+                  </div>
+
+                  {/* Symbols Breakdown */}
+                  {summary.symbols_breakdown && Object.keys(summary.symbols_breakdown).length > 0 && (
+                    <div>
+                      <h5 className="text-xs font-medium text-slate-400 mb-2">Per-Symbol Breakdown</h5>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-slate-500 border-b border-slate-700/50">
+                              <th className="text-left py-1.5 px-2">Symbol</th>
+                              <th className="text-right py-1.5 px-2">Trades</th>
+                              <th className="text-right py-1.5 px-2">Wins</th>
+                              <th className="text-right py-1.5 px-2">Win Rate</th>
+                              <th className="text-right py-1.5 px-2">P&L</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(summary.symbols_breakdown)
+                              .sort((a, b) => b[1].pnl - a[1].pnl)
+                              .map(([sym, d]) => (
+                                <tr key={sym} className="border-b border-slate-800/50 hover:bg-slate-800/30">
+                                  <td className="py-1.5 px-2 font-mono text-slate-200">{sym}</td>
+                                  <td className="py-1.5 px-2 text-right text-slate-300">{d.trades}</td>
+                                  <td className="py-1.5 px-2 text-right text-slate-300">{d.wins}</td>
+                                  <td className="py-1.5 px-2 text-right text-slate-300">
+                                    {d.trades ? (d.wins / d.trades * 100).toFixed(0) : 0}%
+                                  </td>
+                                  <td className={`py-1.5 px-2 text-right font-medium ${d.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                    ${d.pnl.toFixed(0)}
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Trades View */}
+              {detailView === 'trades' && (
+                <div className="space-y-2" data-testid="sim-trades-view">
+                  {trades.length === 0 && !loadingDetail && (
+                    <p className="text-xs text-slate-500 text-center py-4">No trades recorded</p>
+                  )}
+                  <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-slate-800">
+                        <tr className="text-slate-500 border-b border-slate-700/50">
+                          <th className="text-left py-1.5 px-2">Symbol</th>
+                          <th className="text-left py-1.5 px-2">Dir</th>
+                          <th className="text-left py-1.5 px-2">Setup</th>
+                          <th className="text-right py-1.5 px-2">Entry</th>
+                          <th className="text-right py-1.5 px-2">Exit</th>
+                          <th className="text-right py-1.5 px-2">Shares</th>
+                          <th className="text-right py-1.5 px-2">P&L</th>
+                          <th className="text-right py-1.5 px-2">P&L %</th>
+                          <th className="text-left py-1.5 px-2">Exit Reason</th>
+                          <th className="text-left py-1.5 px-2">AI Rec</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {trades.map((t, i) => (
+                          <tr key={t.id || i} className="border-b border-slate-800/50 hover:bg-slate-800/30">
+                            <td className="py-1.5 px-2 font-mono text-slate-200">{t.symbol}</td>
+                            <td className="py-1.5 px-2">
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                t.direction === 'long' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                              }`}>{t.direction}</span>
+                            </td>
+                            <td className="py-1.5 px-2 text-slate-400">{t.setup_type}</td>
+                            <td className="py-1.5 px-2 text-right text-slate-300">${(t.entry_price || 0).toFixed(2)}</td>
+                            <td className="py-1.5 px-2 text-right text-slate-300">${(t.exit_price || 0).toFixed(2)}</td>
+                            <td className="py-1.5 px-2 text-right text-slate-300">{t.shares}</td>
+                            <td className={`py-1.5 px-2 text-right font-medium ${(t.realized_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              ${(t.realized_pnl || 0).toFixed(2)}
+                            </td>
+                            <td className={`py-1.5 px-2 text-right ${(t.realized_pnl_pct || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {(t.realized_pnl_pct || 0).toFixed(2)}%
+                            </td>
+                            <td className="py-1.5 px-2 text-slate-500 max-w-[100px] truncate">{t.exit_reason}</td>
+                            <td className="py-1.5 px-2">
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                t.ai_consultation?.recommendation === 'proceed' ? 'bg-emerald-500/20 text-emerald-400' :
+                                t.ai_consultation?.recommendation === 'skip' ? 'bg-amber-500/20 text-amber-400' :
+                                'bg-slate-500/20 text-slate-400'
+                              }`}>{t.ai_consultation?.recommendation || '-'}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Decisions View */}
+              {detailView === 'decisions' && (
+                <div className="space-y-2" data-testid="sim-decisions-view">
+                  {decisions.length === 0 && !loadingDetail && (
+                    <p className="text-xs text-slate-500 text-center py-4">No AI decisions recorded</p>
+                  )}
+                  <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-slate-800">
+                        <tr className="text-slate-500 border-b border-slate-700/50">
+                          <th className="text-left py-1.5 px-2">Date</th>
+                          <th className="text-left py-1.5 px-2">Symbol</th>
+                          <th className="text-left py-1.5 px-2">Signal</th>
+                          <th className="text-left py-1.5 px-2">Dir</th>
+                          <th className="text-right py-1.5 px-2">Strength</th>
+                          <th className="text-left py-1.5 px-2">AI Rec</th>
+                          <th className="text-right py-1.5 px-2">Conf</th>
+                          <th className="text-left py-1.5 px-2">TS Dir</th>
+                          <th className="text-right py-1.5 px-2">P(up)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {decisions.map((d, i) => {
+                          const ts = d.ai_decision?.agents?.timeseries;
+                          return (
+                            <tr key={i} className="border-b border-slate-800/50 hover:bg-slate-800/30">
+                              <td className="py-1.5 px-2 text-slate-400">{d.date ? new Date(d.date).toLocaleDateString() : '-'}</td>
+                              <td className="py-1.5 px-2 font-mono text-slate-200">{d.symbol}</td>
+                              <td className="py-1.5 px-2 text-slate-300">{d.signal?.type}</td>
+                              <td className="py-1.5 px-2">
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                  d.signal?.direction === 'long' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                                }`}>{d.signal?.direction}</span>
+                              </td>
+                              <td className="py-1.5 px-2 text-right text-slate-300">{d.signal?.strength || '-'}</td>
+                              <td className="py-1.5 px-2">
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                  d.ai_decision?.recommendation === 'proceed' ? 'bg-emerald-500/20 text-emerald-400' :
+                                  d.ai_decision?.recommendation === 'skip' ? 'bg-amber-500/20 text-amber-400' :
+                                  'bg-slate-500/20 text-slate-400'
+                                }`}>{d.ai_decision?.recommendation || '-'}</span>
+                              </td>
+                              <td className="py-1.5 px-2 text-right text-slate-300">{(d.ai_decision?.confidence || 0).toFixed(2)}</td>
+                              <td className="py-1.5 px-2 text-slate-300">{ts?.direction || '-'}</td>
+                              <td className="py-1.5 px-2 text-right text-slate-300">{ts ? (ts.probability_up * 100).toFixed(1) + '%' : '-'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Past Jobs */}
+      {simJobs.length > 0 && (
+        <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-5 space-y-3">
+          <h4 className="text-sm font-medium text-slate-200 flex items-center gap-2">
+            <Clock className="w-4 h-4 text-slate-400" />
+            Past Simulations
+          </h4>
+          <div className="space-y-2">
+            {simJobs.map(job => {
+              const jid = job.id || job.job_id;
+              const jWinRate = job.win_rate > 1 ? job.win_rate : (job.win_rate || 0) * 100;
+              return (
+                <button
+                  key={jid}
+                  data-testid={`sim-job-${jid}`}
+                  onClick={() => viewJobDetail(jid)}
+                  className={`w-full text-left p-3 rounded-lg border transition-all ${
+                    selectedJob === jid
+                      ? 'bg-purple-500/10 border-purple-500/30'
+                      : 'bg-slate-900/30 border-slate-700/30 hover:border-slate-600/50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-300 font-mono">{jid?.substring(0, 20)}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                      job.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' :
+                      job.status === 'running' ? 'bg-cyan-500/20 text-cyan-400' :
+                      job.status === 'failed' ? 'bg-red-500/20 text-red-400' :
+                      'bg-slate-500/20 text-slate-400'
+                    }`}>
+                      {job.status}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-4 mt-1 text-[11px] text-slate-500">
+                    <span>{job.config?.universe || job.universe || 'sp500'}</span>
+                    <span>{job.total_trades || 0} trades</span>
+                    {jWinRate > 0 && <span className={jWinRate >= 50 ? 'text-emerald-500' : 'text-red-500'}>{jWinRate.toFixed(0)}% WR</span>}
+                    {job.total_pnl != null && (
+                      <span className={job.total_pnl >= 0 ? 'text-emerald-500' : 'text-red-500'}>
+                        ${job.total_pnl.toFixed(0)}
+                      </span>
+                    )}
+                    {job.started_at && <span>{new Date(job.started_at).toLocaleDateString()}</span>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Small stat card helper for Full AI Sim summary
+const StatCard = ({ label, value, color = 'slate' }) => (
+  <div className="bg-slate-900/40 rounded-lg p-2 text-center">
+    <div className="text-xs text-slate-500">{label}</div>
+    <div className={`font-medium text-${color}-400`}>{value}</div>
+  </div>
+);

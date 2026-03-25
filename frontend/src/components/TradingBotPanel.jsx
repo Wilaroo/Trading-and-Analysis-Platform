@@ -32,6 +32,7 @@ import {
   Ban
 } from 'lucide-react';
 import { Tip, TipIcon, CustomTip } from './shared/Tooltip';
+import api, { safeGet } from '../utils/api';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || ''; // For EventSource URLs
 

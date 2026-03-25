@@ -16,16 +16,22 @@ from typing import Optional, List
 from pydantic import BaseModel, Field
 from datetime import datetime
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/backtest", tags=["advanced-backtest"])
 
 # Will be initialized from server
 _advanced_engine = None
+_simulation_engine = None
 
 
-def init_advanced_backtest_router(engine):
-    """Initialize the router with the backtest engine"""
-    global _advanced_engine
+def init_advanced_backtest_router(engine, simulation_engine=None):
+    """Initialize the router with the backtest engine and optional simulation engine"""
+    global _advanced_engine, _simulation_engine
     _advanced_engine = engine
+    _simulation_engine = simulation_engine
 
 
 # ============================================================================
@@ -121,6 +127,22 @@ class AIComparisonRequest(BaseModel):
     ai_confidence_threshold: float = Field(0.0, ge=0.0, le=1.0, description="Minimum AI confidence to confirm entry (0.0 = any 'up' prediction)")
     ai_lookback_bars: int = Field(50, ge=20, le=200, description="Number of historical bars for AI prediction")
     run_in_background: bool = Field(True, description="Run as background job (recommended)")
+
+
+class FullAISimulationRequest(BaseModel):
+    """Request for full AI pipeline simulation (replays the complete SentCom bot)"""
+    start_date: Optional[str] = Field(None, description="Start date ISO format (default: 6 months ago)")
+    end_date: Optional[str] = Field(None, description="End date ISO format (default: yesterday)")
+    universe: str = Field("sp500", description="Stock universe: all, sp500, nasdaq100, custom")
+    custom_symbols: List[str] = Field(default=[], description="Custom symbol list if universe=custom")
+    starting_capital: float = Field(100000.0, description="Starting capital")
+    max_position_pct: float = Field(10.0, description="Max % of capital per position")
+    max_open_positions: int = Field(5, description="Max concurrent open positions")
+    use_ai_agents: bool = Field(True, description="Use full AI consultation pipeline (debate, risk, institutional)")
+    bar_size: str = Field("1 day", description="Bar size: '1 min', '5 mins', '15 mins', '1 hour', '1 day'")
+    min_adv: int = Field(100000, description="Minimum average daily volume")
+    min_price: float = Field(5.0, description="Minimum stock price")
+    max_price: float = Field(500.0, description="Maximum stock price")
 
 
 # ============================================================================
@@ -1079,3 +1101,176 @@ def _map_strategy_to_setup_type(name: str) -> str:
         return "HOD_BREAK"
     else:
         return "MOMENTUM"  # Default
+
+
+# ============================================================================
+# Full AI Simulation (unified from historical_simulation_engine)
+# ============================================================================
+
+@router.post("/full-ai-simulation")
+async def run_full_ai_simulation(
+    request: FullAISimulationRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Run a full AI pipeline simulation that replays the complete SentCom bot
+    on historical data. This uses all AI agents (Debate, Risk, Institutional,
+    Time-Series) to make trade decisions on each bar.
+    
+    Unlike strategy backtests which test entry/exit rules, this simulates
+    the actual live trading bot behavior including AI consultation.
+    
+    Always runs in background due to compute intensity.
+    """
+    if not _simulation_engine:
+        raise HTTPException(503, "Simulation engine not initialized. Make sure the historical simulation engine is loaded.")
+    
+    from services.historical_simulation_engine import SimulationConfig
+    
+    config = SimulationConfig(
+        start_date=request.start_date,
+        end_date=request.end_date,
+        universe=request.universe,
+        custom_symbols=request.custom_symbols,
+        starting_capital=request.starting_capital,
+        max_position_pct=request.max_position_pct,
+        max_open_positions=request.max_open_positions,
+        use_ai_agents=request.use_ai_agents,
+        bar_size=request.bar_size,
+        min_adv=request.min_adv,
+        min_price=request.min_price,
+        max_price=request.max_price,
+    )
+    
+    job_id = await _simulation_engine.start_simulation(config)
+    
+    return {
+        "success": True,
+        "job_id": job_id,
+        "message": "Full AI simulation started in background",
+        "status": "running",
+        "config": {
+            "universe": config.universe,
+            "start_date": config.start_date,
+            "end_date": config.end_date,
+            "starting_capital": config.starting_capital,
+            "use_ai_agents": config.use_ai_agents,
+            "bar_size": config.bar_size
+        }
+    }
+
+
+@router.get("/full-ai-simulation/status/{job_id}")
+async def get_simulation_status(job_id: str):
+    """Get status of a running full AI simulation"""
+    if not _simulation_engine:
+        raise HTTPException(503, "Simulation engine not initialized")
+    
+    status = await _simulation_engine.get_job_status(job_id)
+    if not status:
+        raise HTTPException(404, f"Simulation job {job_id} not found")
+    
+    return {
+        "success": True,
+        "job": status
+    }
+
+
+@router.get("/full-ai-simulation/trades/{job_id}")
+async def get_simulation_trades(job_id: str, limit: int = Query(50, ge=1, le=500)):
+    """Get trades from a completed simulation"""
+    if not _simulation_engine:
+        raise HTTPException(503, "Simulation engine not initialized")
+    
+    trades = await _simulation_engine.get_job_trades(job_id, limit)
+    return {
+        "success": True,
+        "job_id": job_id,
+        "trades": trades,
+        "count": len(trades)
+    }
+
+
+@router.get("/full-ai-simulation/decisions/{job_id}")
+async def get_simulation_decisions(job_id: str, limit: int = Query(50, ge=1, le=500)):
+    """Get AI decisions from a simulation (how each trade was evaluated)"""
+    if not _simulation_engine:
+        raise HTTPException(503, "Simulation engine not initialized")
+    
+    decisions = await _simulation_engine.get_job_decisions(job_id, limit)
+    return {
+        "success": True,
+        "job_id": job_id,
+        "decisions": decisions,
+        "count": len(decisions)
+    }
+
+
+@router.get("/full-ai-simulation/summary/{job_id}")
+async def get_simulation_summary(job_id: str):
+    """Get comprehensive summary of a completed simulation"""
+    if not _simulation_engine:
+        raise HTTPException(503, "Simulation engine not initialized")
+    
+    job = await _simulation_engine.get_job_status(job_id)
+    if not job:
+        raise HTTPException(404, f"Simulation job {job_id} not found")
+    
+    trades = await _simulation_engine.get_job_trades(job_id, limit=500)
+    decisions = await _simulation_engine.get_job_decisions(job_id, limit=500)
+    
+    # Compute summary from trades
+    total_trades = len(trades)
+    winners = [t for t in trades if (t.get("realized_pnl") or 0) > 0]
+    losers = [t for t in trades if (t.get("realized_pnl") or 0) < 0]
+    win_rate = len(winners) / total_trades * 100 if total_trades else 0
+    total_pnl = sum(t.get("realized_pnl", 0) for t in trades)
+    avg_win = sum(t.get("realized_pnl", 0) for t in winners) / len(winners) if winners else 0
+    avg_loss = sum(t.get("realized_pnl", 0) for t in losers) / len(losers) if losers else 0
+    gross_profit = sum(t.get("realized_pnl", 0) for t in winners)
+    gross_loss = abs(sum(t.get("realized_pnl", 0) for t in losers))
+    profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf") if gross_profit > 0 else 0
+    
+    # Symbols breakdown
+    symbols = {}
+    for t in trades:
+        sym = t.get("symbol", "?")
+        if sym not in symbols:
+            symbols[sym] = {"trades": 0, "pnl": 0, "wins": 0}
+        symbols[sym]["trades"] += 1
+        symbols[sym]["pnl"] += t.get("realized_pnl", 0)
+        if (t.get("realized_pnl") or 0) > 0:
+            symbols[sym]["wins"] += 1
+    
+    summary = {
+        "job": job,
+        "total_trades": total_trades,
+        "winners": len(winners),
+        "losers": len(losers),
+        "win_rate": win_rate,
+        "total_pnl": total_pnl,
+        "avg_win": avg_win,
+        "avg_loss": avg_loss,
+        "profit_factor": profit_factor if profit_factor != float("inf") else 999,
+        "total_decisions": len(decisions),
+        "symbols_breakdown": symbols,
+    }
+    
+    return {
+        "success": True,
+        "job_id": job_id,
+        "summary": summary
+    }
+
+
+@router.get("/full-ai-simulation/jobs")
+async def list_simulation_jobs(limit: int = Query(20, ge=1, le=100)):
+    """List all simulation jobs (running and completed)"""
+    if not _simulation_engine:
+        raise HTTPException(503, "Simulation engine not initialized")
+    
+    jobs = await _simulation_engine.get_all_jobs(limit)
+    return {
+        "success": True,
+        "jobs": jobs
+    }
