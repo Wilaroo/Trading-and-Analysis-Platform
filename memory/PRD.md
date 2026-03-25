@@ -32,6 +32,25 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
     - Data & Backtesting (Data Collection + Market Scanner + Backtesting)
     - Strategy & Performance (Pipeline + Report Card)
     - Enhanced QuickStatsBar with data source visibility, model counts, detail
+15. **ADV Cache Recalculation & Filtered Training (Mar 25, 2026)** — COMPLETED
+    - Fixed `symbol_adv_cache`: replaced 12,283 legacy Alpaca entries with 9,248 entries calculated from real IB `ib_historical_data` daily bars
+    - Discovered and accounted for mistagged intraday bars (date length 25 vs 10 for real daily)
+    - ADV thresholds: 500K+ intraday (1min/5min/1hr), 100K+ swing (1day), 50K+ position (1week)
+    - Training pipeline (`_get_training_symbols_from_db`) now filters by ADV before selecting symbols
+    - Result: 2,700 symbols for intraday models, 3,900 for swing, 4,600 for position
+    - API endpoints: `GET /api/ai-modules/adv/stats`, `POST /api/ai-modules/adv/recalculate`
+    - Reusable recalculation script: `/app/backend/scripts/recalculate_adv_cache.py`
+
+## ADV Threshold Architecture
+```
+Bar Size    | ADV Minimum | Trading Style          | Qualifying Symbols
+------------|-------------|------------------------|-------------------
+1 min       | 500,000     | Intraday/Scalp         | ~2,618
+5 mins      | 500,000     | Intraday/Scalp         | ~2,673
+1 hour      | 500,000     | Intraday (short swing)  | ~2,675
+1 day       | 100,000     | Swing                  | ~3,883
+1 week      | 50,000      | Position/Investment    | ~4,611
+```
 
 ## Profile Architecture
 ```
@@ -56,24 +75,21 @@ Strategy & Performance — [Pipeline | Report Card]
 ```
 
 ## Key Files
-- `/app/backend/services/ai_modules/setup_training_config.py` — Profile-based training configs
-- `/app/backend/services/ai_modules/timeseries_service.py` — Training pipeline (profile-aware)
+- `/app/backend/services/ai_modules/setup_training_config.py` — Profile configs + ADV thresholds
+- `/app/backend/services/ai_modules/timeseries_service.py` — Training pipeline (ADV-filtered, profile-aware)
+- `/app/backend/scripts/recalculate_adv_cache.py` — ADV cache recalculation from IB daily bars
+- `/app/backend/routers/ai_modules.py` — ADV stats/recalculate endpoints
 - `/app/backend/worker.py` — Background job processor (profile-aware)
 - `/app/backend/server.py` — WebSocket handler (train_setup, train_setup_all)
 - `/app/frontend/src/components/NIA/index.jsx` — NIA main (4-section layout)
 - `/app/frontend/src/components/NIA/SetupModelsPanel.jsx` — Profile-aware setup model cards
-- `/app/frontend/src/components/NIA/AICommandCenter.jsx` — AI section wrapper
-- `/app/frontend/src/components/NIA/DataBacktestingPanel.jsx` — Data section wrapper
-- `/app/frontend/src/components/NIA/StrategyPerformancePanel.jsx` — Strategy section wrapper
-- `/app/frontend/src/components/NIA/QuickStatsBar.jsx` — Enhanced stats bar
 
 ## Upcoming Tasks (User-Confirmed Priorities)
-1. (P1) **Richer Trade Tagging** — Pattern variations (VWAP_BOUNCE vs rubberband vs consolidation break), entry context, MFE/MAE tracking
-2. (P1) **ADV-Filtered Training Symbols** — Use all symbols filtered by ADV volume (no low-volume for intraday)
-3. (P1) **Deprecate General Model** — Replace with lightweight Market Regime indicator
-4. (P2) Backtesting Workflow Automation
-5. (P3) Auto-Optimize AI Settings
-6. (P3) Compare Simulations Side-by-Side
+1. (P2) **Market Regime Integration** — Integrate existing MarketRegime logic into AI training/prediction pipeline
+2. (P1) **Richer Trade Tagging** — Pattern variations, entry context, MFE/MAE tracking
+3. (P2) Backtesting Workflow Automation
+4. (P3) Auto-Optimize AI Settings
+5. (P3) Compare Simulations Side-by-Side
 
 ## Future Refactoring
 - Shift ~44 active polling intervals to WebSocket-based updates

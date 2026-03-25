@@ -1294,16 +1294,45 @@ class TimeSeriesAIService:
         return FALLBACK_DATA
             
     async def _get_training_symbols_from_db(self, bar_size: str = "1 day", limit: int = 1000) -> List[str]:
-        """Get symbols with most historical data from MongoDB for a specific bar_size.
+        """Get symbols with most historical data from MongoDB for a specific bar_size,
+        filtered by ADV (Average Daily Volume) threshold.
+        
+        ADV thresholds ensure models only train on liquid stocks:
+          - 500K+ ADV for intraday (1min, 5min, 1hr)
+          - 100K+ ADV for swing (1day)
+          - 50K+ ADV for position (1week)
+        
         Runs MongoDB query in thread pool to avoid blocking the event loop."""
         if self._db is None:
             return []
         
+        from services.ai_modules.setup_training_config import get_adv_threshold
+        adv_threshold = get_adv_threshold(bar_size)
+        
         def _blocking_query():
             """This runs in a thread pool"""
             try:
+                # Step 1: Get ADV-qualified symbols from cache
+                adv_qualified = set()
+                adv_cursor = self._db["symbol_adv_cache"].find(
+                    {"avg_volume": {"$gte": adv_threshold}},
+                    {"_id": 0, "symbol": 1}
+                )
+                for doc in adv_cursor:
+                    adv_qualified.add(doc["symbol"])
+                
+                if not adv_qualified:
+                    logger.warning(f"No symbols meet ADV threshold {adv_threshold:,} for {bar_size}")
+                    return []
+                
+                logger.info(
+                    f"ADV filter: {len(adv_qualified)} symbols >= {adv_threshold:,} volume "
+                    f"(threshold for {bar_size})"
+                )
+                
+                # Step 2: From those, find symbols with enough bars
                 pipeline = [
-                    {"$match": {"bar_size": bar_size}},
+                    {"$match": {"bar_size": bar_size, "symbol": {"$in": list(adv_qualified)}}},
                     {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
                     {"$match": {"count": {"$gte": self.MIN_BARS_FOR_TRAINING}}},
                     {"$sort": {"count": -1}},
@@ -1318,7 +1347,10 @@ class TimeSeriesAIService:
         try:
             loop = asyncio.get_event_loop()
             symbols = await loop.run_in_executor(None, _blocking_query)
-            logger.info(f"Found {len(symbols)} symbols with sufficient {bar_size} data")
+            logger.info(
+                f"Found {len(symbols)} ADV-filtered symbols with sufficient {bar_size} data "
+                f"(ADV >= {adv_threshold:,})"
+            )
             return symbols if symbols else [
                 "NVDA", "TSLA", "ORCL", "AVGO", "MSFT", "GOOGL", "AAPL", 
                 "META", "AMZN", "JPM", "ADBE", "V"

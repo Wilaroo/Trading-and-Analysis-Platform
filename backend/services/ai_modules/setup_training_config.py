@@ -257,3 +257,31 @@ def get_setup_profile(setup_type: str, bar_size: str) -> dict:
 def get_all_profile_count() -> int:
     """Total number of models across all setups."""
     return sum(len(profiles) for profiles in SETUP_TRAINING_PROFILES.values())
+
+
+# ===== ADV (Average Daily Volume) Thresholds for Training =====
+# Symbols must meet these minimum volume requirements to be included in training.
+# Thresholds are keyed by bar_size since liquidity needs scale with timeframe.
+#
+# User-defined tiers:
+#   50K+ ADV  → investment/position
+#   100K+ ADV → investment/position/swing
+#   500K+ ADV → investment/position/swing/intraday/scalp
+
+ADV_THRESHOLDS = {
+    "1 min":   500_000,   # Intraday/scalp — needs highest liquidity
+    "5 mins":  500_000,   # Intraday/scalp
+    "15 mins": 500_000,   # Intraday
+    "30 mins": 500_000,   # Intraday
+    "1 hour":  500_000,   # Intraday (short swing)
+    "1 day":   100_000,   # Swing
+    "1 week":   50_000,   # Position/investment
+}
+
+# Default for unknown bar sizes
+ADV_THRESHOLD_DEFAULT = 100_000
+
+
+def get_adv_threshold(bar_size: str) -> int:
+    """Get the minimum ADV threshold for a given bar_size."""
+    return ADV_THRESHOLDS.get(bar_size, ADV_THRESHOLD_DEFAULT)

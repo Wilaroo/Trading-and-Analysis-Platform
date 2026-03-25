@@ -1792,3 +1792,80 @@ async def predict_for_setup(request: SetupPredictRequest):
         logger.error(f"Setup prediction error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+# ===== ADV (Average Daily Volume) Cache Endpoints =====
+
+@router.get("/adv/stats")
+async def get_adv_stats():
+    """
+    Get ADV cache statistics and threshold breakdown.
+    Shows how many symbols qualify at each training tier.
+    """
+    from services.ai_modules.setup_training_config import ADV_THRESHOLDS
+    
+    try:
+        if not _timeseries_ai or _timeseries_ai._db is None:
+            raise HTTPException(status_code=503, detail="AI service not initialized")
+        
+        db = _timeseries_ai._db
+        total = db.symbol_adv_cache.count_documents({})
+        
+        # Source breakdown
+        sources = list(db.symbol_adv_cache.aggregate([
+            {"$group": {"_id": "$source", "count": {"$sum": 1}}}
+        ]))
+        
+        # Sample of most recent update
+        sample = db.symbol_adv_cache.find_one(
+            {}, {"_id": 0, "updated_at": 1, "source": 1}
+        )
+        
+        return {
+            "success": True,
+            "total_symbols": total,
+            "thresholds": {
+                "50k_position": db.symbol_adv_cache.count_documents({"avg_volume": {"$gte": 50_000}}),
+                "100k_swing": db.symbol_adv_cache.count_documents({"avg_volume": {"$gte": 100_000}}),
+                "500k_intraday": db.symbol_adv_cache.count_documents({"avg_volume": {"$gte": 500_000}}),
+            },
+            "adv_config": ADV_THRESHOLDS,
+            "sources": {s["_id"] or "unknown": s["count"] for s in sources},
+            "last_updated": sample.get("updated_at") if sample else None,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting ADV stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/adv/recalculate")
+async def recalculate_adv_cache():
+    """
+    Recalculate the ADV cache from actual IB historical daily bar data.
+    This is a heavy operation that runs in a background thread.
+    """
+    try:
+        if not _timeseries_ai or _timeseries_ai._db is None:
+            raise HTTPException(status_code=503, detail="AI service not initialized")
+        
+        db = _timeseries_ai._db
+        
+        import sys
+        sys.path.insert(0, '/app/backend')
+        from scripts.recalculate_adv_cache import recalculate_adv_cache as do_recalc
+        
+        loop = asyncio.get_event_loop()
+        stats = await loop.run_in_executor(
+            None, lambda: do_recalc(db, lookback_days=20, min_bars=10, verbose=False)
+        )
+        
+        return {
+            "success": True,
+            "message": "ADV cache recalculated from IB daily bars",
+            "stats": stats,
+        }
+    except Exception as e:
+        logger.error(f"Error recalculating ADV cache: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
