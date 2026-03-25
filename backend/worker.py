@@ -504,12 +504,124 @@ async def process_calibration_job(job: dict, db) -> dict:
         }
 
 
+async def process_setup_training_job(job: dict, db) -> dict:
+    """Process a setup-specific AI model training job.
+    
+    Job params:
+        - setup_type: str (e.g., 'MOMENTUM', 'BREAKOUT', or 'ALL')
+        - bar_size: str (default '1 day')
+        - max_symbols: int (optional)
+        - max_bars_per_symbol: int (optional)
+    """
+    params = job.get('params', {})
+    job_id = job['job_id']
+    
+    logger.info(f"Processing setup training job {job_id}")
+    logger.info(f"Parameters: {params}")
+    
+    from services.ai_modules.timeseries_service import init_timeseries_ai
+    
+    timeseries_service = init_timeseries_ai(db=db)
+    
+    setup_type = params.get('setup_type', '').upper()
+    bar_size = params.get('bar_size', '1 day')
+    max_symbols = params.get('max_symbols')
+    max_bars_per_symbol = params.get('max_bars_per_symbol')
+    
+    try:
+        if setup_type == 'ALL':
+            # Train all setup types
+            setup_types = list(timeseries_service.SETUP_TYPES.keys())
+            total = len(setup_types)
+            results = {}
+            completed = 0
+            
+            for idx, st in enumerate(setup_types):
+                pct = int(5 + (idx / total) * 90)
+                await job_queue_manager.update_progress(
+                    job_id, percent=pct,
+                    message=f'Training {st} ({idx + 1}/{total})...',
+                    current_step=idx + 1,
+                    total_steps=total
+                )
+                
+                try:
+                    result = await timeseries_service.train_setup_model(
+                        setup_type=st,
+                        bar_size=bar_size,
+                        max_symbols=max_symbols,
+                        max_bars_per_symbol=max_bars_per_symbol,
+                    )
+                    results[st] = result
+                    if result.get('success'):
+                        completed += 1
+                        acc = result.get('metrics', {}).get('accuracy', 0)
+                        await job_queue_manager.update_progress(
+                            job_id, percent=pct + 5,
+                            message=f'{st} done ({acc*100:.1f}%) - {completed}/{total} complete'
+                        )
+                except Exception as e:
+                    logger.error(f"Setup {st} training failed: {e}")
+                    results[st] = {'success': False, 'error': str(e)}
+            
+            await job_queue_manager.update_progress(
+                job_id, percent=100,
+                message=f'All setup training complete! {completed}/{total} successful'
+            )
+            
+            return {
+                'success': completed > 0,
+                'models_trained': completed,
+                'total_types': total,
+                'results': results
+            }
+        else:
+            # Train single setup type
+            await job_queue_manager.update_progress(
+                job_id, percent=10,
+                message=f'Training {setup_type} model on {bar_size} data...'
+            )
+            
+            result = await timeseries_service.train_setup_model(
+                setup_type=setup_type,
+                bar_size=bar_size,
+                max_symbols=max_symbols,
+                max_bars_per_symbol=max_bars_per_symbol,
+            )
+            
+            if result.get('success'):
+                acc = result.get('metrics', {}).get('accuracy', 0)
+                await job_queue_manager.update_progress(
+                    job_id, percent=100,
+                    message=f'{setup_type} trained! {acc*100:.1f}% accuracy'
+                )
+                return {
+                    'success': True,
+                    'setup_type': setup_type,
+                    'accuracy': acc,
+                    'details': result
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': result.get('error', f'Training failed for {setup_type}')
+                }
+    
+    except Exception as e:
+        logger.error(f"Setup training job failed: {e}", exc_info=True)
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
 async def process_job(job: dict, db) -> dict:
     """Route job to appropriate processor."""
     job_type = job.get('job_type')
     
     processors = {
         JobType.TRAINING.value: process_training_job,
+        JobType.SETUP_TRAINING.value: process_setup_training_job,
         JobType.DATA_COLLECTION.value: process_data_collection_job,
         JobType.BACKTEST.value: process_backtest_job,
         JobType.CALIBRATION.value: process_calibration_job,

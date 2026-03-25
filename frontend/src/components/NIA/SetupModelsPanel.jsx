@@ -7,7 +7,7 @@ import {
   XCircle, RefreshCw, Layers
 } from 'lucide-react';
 import { toast } from 'sonner';
-import api, { apiLongRunning } from '../../utils/api';
+import api from '../../utils/api';
 
 const SETUP_CONFIG = {
   MOMENTUM:           { icon: TrendingUp, color: 'text-cyan-400',   bg: 'bg-cyan-500/15',   border: 'border-cyan-500/25' },
@@ -77,7 +77,17 @@ const SetupCard = memo(({ name, model, training, onTrain }) => {
       )}
 
       {isTraining ? (
-        <div className="text-[10px] text-cyan-400/80 truncate">{training?.message || 'Training...'}</div>
+        <div className="space-y-1">
+          {training?.percent > 0 && (
+            <div className="w-full h-1 rounded-full bg-white/10 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-cyan-400 transition-all duration-500"
+                style={{ width: `${Math.min(training.percent, 100)}%` }}
+              />
+            </div>
+          )}
+          <div className="text-[10px] text-cyan-400/80 truncate">{training?.message || 'Training...'}</div>
+        </div>
       ) : (
         <button
           onClick={() => onTrain(name)}
@@ -103,24 +113,14 @@ const SetupModelsPanel = memo(() => {
   const [trainingAll, setTrainingAll] = useState(false);
   const [localTraining, setLocalTraining] = useState({});  // track per-type training locally
 
+  const [activeJobs, setActiveJobs] = useState({});  // { setupType: job_id }
+
   const fetchStatus = useCallback(async () => {
     try {
       setLoading(true);
       const res = await api.get('/api/ai-modules/timeseries/setups/status');
       if (res.data?.success) {
         setStatus(res.data);
-        // Clear local training flags for types that finished
-        setLocalTraining(prev => {
-          const next = { ...prev };
-          const ts = res.data.training_status || {};
-          for (const key of Object.keys(next)) {
-            const serverStatus = ts[`setup_${key}`]?.status;
-            if (serverStatus !== 'running') {
-              delete next[key];
-            }
-          }
-          return next;
-        });
       }
     } catch (err) {
       console.error('Error fetching setup models status:', err);
@@ -129,62 +129,107 @@ const SetupModelsPanel = memo(() => {
     }
   }, []);
 
+  // Poll active jobs for progress
+  const pollJobs = useCallback(async () => {
+    const jobs = { ...activeJobs };
+    let changed = false;
+
+    for (const [key, jobId] of Object.entries(jobs)) {
+      try {
+        const res = await api.get(`/api/jobs/${jobId}`);
+        const job = res.data?.job;
+        if (!job) continue;
+
+        const progress = job.progress || {};
+
+        if (job.status === 'completed') {
+          const acc = job.result?.accuracy || job.result?.details?.metrics?.accuracy;
+          toast.success(`${key} trained${acc ? ` — ${(acc * 100).toFixed(1)}%` : ''}!`);
+          delete jobs[key];
+          changed = true;
+        } else if (job.status === 'failed') {
+          toast.error(`${key} failed: ${job.error || 'Unknown error'}`);
+          delete jobs[key];
+          changed = true;
+        } else {
+          // Still running — update local training message
+          setLocalTraining(prev => ({
+            ...prev,
+            [key]: { status: 'running', message: progress.message || 'Processing...', percent: progress.percent || 0 }
+          }));
+        }
+      } catch {
+        // ignore polling errors
+      }
+    }
+
+    if (changed) {
+      setActiveJobs(jobs);
+      // Clear finished local training entries
+      setLocalTraining(prev => {
+        const next = { ...prev };
+        for (const k of Object.keys(next)) {
+          if (!jobs[k]) delete next[k];
+        }
+        return next;
+      });
+      fetchStatus();
+    }
+  }, [activeJobs, fetchStatus]);
+
   useEffect(() => {
     if (expanded && !status) fetchStatus();
   }, [expanded, status, fetchStatus]);
 
-  // Poll while any model is training (local or server-side)
-  const hasAnyTraining = Object.keys(localTraining).length > 0 || trainingAll ||
-    (status?.training_status && Object.values(status.training_status).some(t => t?.status === 'running'));
+  // Poll while any jobs are active
+  const hasActiveJobs = Object.keys(activeJobs).length > 0;
 
   useEffect(() => {
-    if (!expanded || !hasAnyTraining) return;
-    const interval = setInterval(fetchStatus, 3000);
+    if (!expanded || !hasActiveJobs) return;
+    const interval = setInterval(pollJobs, 2500);
     return () => clearInterval(interval);
-  }, [expanded, hasAnyTraining, fetchStatus]);
+  }, [expanded, hasActiveJobs, pollJobs]);
 
   const handleTrainOne = useCallback(async (setupType) => {
-    // Set local training state immediately so the card shows "Training..."
-    setLocalTraining(prev => ({ ...prev, [setupType]: { status: 'running', message: 'Starting training...' } }));
+    setLocalTraining(prev => ({ ...prev, [setupType]: { status: 'running', message: 'Queuing job...' } }));
     toast.info(`Training ${setupType.replace(/_/g, ' ')} model...`);
 
     try {
-      const res = await apiLongRunning.post('/api/ai-modules/timeseries/setups/train', {
+      const res = await api.post('/api/ai-modules/timeseries/setups/train', {
         setup_type: setupType,
         bar_size: '1 day',
       });
-      if (res.data?.success) {
-        const acc = res.data.result?.metrics?.accuracy;
-        toast.success(`${setupType} trained${acc ? ` - ${(acc * 100).toFixed(1)}% accuracy` : ''}`);
+      if (res.data?.success && res.data.job_id) {
+        setActiveJobs(prev => ({ ...prev, [setupType]: res.data.job_id }));
+        setLocalTraining(prev => ({ ...prev, [setupType]: { status: 'running', message: 'Waiting for worker...' } }));
       } else {
-        toast.error(res.data?.result?.error || `Failed to train ${setupType}`);
+        toast.error(res.data?.error || `Failed to queue ${setupType}`);
+        setLocalTraining(prev => { const n = { ...prev }; delete n[setupType]; return n; });
       }
     } catch (err) {
-      toast.error(`Error training ${setupType}: ${err.message}`);
-    } finally {
+      toast.error(`Error: ${err.message}`);
       setLocalTraining(prev => { const n = { ...prev }; delete n[setupType]; return n; });
-      fetchStatus();
     }
-  }, [fetchStatus]);
+  }, []);
 
   const handleTrainAll = useCallback(async () => {
     try {
       setTrainingAll(true);
-      toast.info('Training all setup models in background...');
+      toast.info('Queuing all setup model training...');
       const res = await api.post('/api/ai-modules/timeseries/setups/train-all', { bar_size: '1 day' });
-      if (res.data?.success) {
-        toast.success(`Training ${res.data.total_types} setup models in background`);
+      if (res.data?.success && res.data.job_id) {
+        toast.success(`Training ${res.data.total_types} setup models queued`);
+        setActiveJobs(prev => ({ ...prev, _ALL: res.data.job_id }));
+        setLocalTraining(prev => ({ ...prev, _ALL: { status: 'running', message: 'Waiting for worker...' } }));
       } else {
-        toast.error(res.data?.error || 'Failed to start training');
+        toast.error(res.data?.error || 'Failed to queue training');
         setTrainingAll(false);
       }
-      // Keep polling until done
-      setTimeout(() => fetchStatus(), 3000);
     } catch (err) {
       toast.error(`Error: ${err.message}`);
       setTrainingAll(false);
     }
-  }, [fetchStatus]);
+  }, []);
 
   const models = status?.models || {};
   const trainedCount = status?.models_trained || 0;
@@ -200,18 +245,15 @@ const SetupModelsPanel = memo(() => {
     }
   }
 
-  // Check if any are currently training (local or server)
-  const anyTraining = hasAnyTraining;
+  // Check if any are currently training
+  const anyTraining = hasActiveJobs || Object.keys(localTraining).length > 0;
 
-  // Stop polling for train-all when done
+  // Stop train-all state when its job completes
   useEffect(() => {
-    if (trainingAll && Object.keys(localTraining).length === 0) {
-      const serverRunning = status?.training_status && Object.values(status.training_status).some(t => t?.status === 'running');
-      if (!serverRunning) {
-        setTrainingAll(false);
-      }
+    if (trainingAll && !activeJobs._ALL) {
+      setTrainingAll(false);
     }
-  }, [trainingAll, localTraining, status]);
+  }, [trainingAll, activeJobs]);
 
   return (
     <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }} data-testid="setup-models-panel">

@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 class JobType(str, Enum):
     """Types of background jobs"""
     TRAINING = "training"
+    SETUP_TRAINING = "setup_training"
     DATA_COLLECTION = "data_collection"
     BACKTEST = "backtest"
     CALIBRATION = "calibration"

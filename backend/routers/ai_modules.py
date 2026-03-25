@@ -1698,8 +1698,8 @@ async def train_setup_model(request: SetupTrainRequest):
     """
     Train a model specialized for a specific trading setup type.
     
-    The model is trained on general market data but can learn patterns
-    specific to the given setup type (e.g., BREAKOUT, MOMENTUM).
+    Enqueues a background job via the worker process.
+    Returns a job_id for progress polling via GET /api/jobs/{job_id}.
     
     Supported setup types:
     MOMENTUM, SCALP, BREAKOUT, GAP_AND_GO, RANGE, REVERSAL,
@@ -1717,19 +1717,40 @@ async def train_setup_model(request: SetupTrainRequest):
     if not _timeseries_ai:
         raise HTTPException(status_code=503, detail="Time-series AI not initialized")
     
+    # Validate setup type
+    setup_upper = request.setup_type.upper()
+    if setup_upper not in _timeseries_ai.SETUP_TYPES:
+        return {
+            "success": False,
+            "error": f"Unknown setup type: {setup_upper}. Valid: {list(_timeseries_ai.SETUP_TYPES.keys())}"
+        }
+    
     try:
-        result = await _timeseries_ai.train_setup_model(
-            setup_type=request.setup_type,
-            bar_size=request.bar_size or "1 day",
-            max_symbols=request.max_symbols,
-            max_bars_per_symbol=request.max_bars_per_symbol,
+        from services.job_queue_manager import job_queue_manager
+        
+        result = await job_queue_manager.create_job(
+            job_type="setup_training",
+            params={
+                "setup_type": setup_upper,
+                "bar_size": request.bar_size or "1 day",
+                "max_symbols": request.max_symbols,
+                "max_bars_per_symbol": request.max_bars_per_symbol,
+            },
+            priority=7,
+            metadata={"description": f"Train {setup_upper} setup model"}
         )
         
-        return {
-            "success": result.get("success", False),
-            "result": result
-        }
-        
+        if result.get("success"):
+            job = result["job"]
+            return {
+                "success": True,
+                "job_id": job["job_id"],
+                "message": f"Training {setup_upper} model queued. Poll /api/jobs/{job['job_id']} for progress.",
+                "setup_type": setup_upper,
+            }
+        else:
+            return {"success": False, "error": result.get("error", "Failed to enqueue job")}
+    
     except Exception as e:
         logger.error(f"Setup model training error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1738,10 +1759,10 @@ async def train_setup_model(request: SetupTrainRequest):
 @router.post("/timeseries/setups/train-all")
 async def train_all_setup_models(request: Optional[SetupTrainAllRequest] = None):
     """
-    Train models for ALL setup types sequentially.
+    Train models for ALL setup types sequentially via the worker.
     
-    This trains 10 specialized models, one for each setup type.
-    Long-running operation - runs in background.
+    Enqueues a single background job that trains all 10 setup types.
+    Returns a job_id for progress polling via GET /api/jobs/{job_id}.
     """
     from services.ai_modules import ML_AVAILABLE
     if not ML_AVAILABLE:
@@ -1756,31 +1777,36 @@ async def train_all_setup_models(request: Optional[SetupTrainAllRequest] = None)
         raise HTTPException(status_code=503, detail="Time-series AI not initialized")
     
     try:
+        from services.job_queue_manager import job_queue_manager
+        
         bar_size = request.bar_size if request and request.bar_size else "1 day"
         max_symbols = request.max_symbols if request and request.max_symbols else None
         max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else None
         
-        # Run in background to avoid timeout
-        async def _run_train_all():
-            try:
-                result = await _timeseries_ai.train_all_setup_models(
-                    bar_size=bar_size,
-                    max_symbols=max_symbols,
-                    max_bars_per_symbol=max_bars_per_symbol,
-                )
-                logger.info(f"[SETUP TRAIN ALL] Complete: {result}")
-            except Exception as e:
-                logger.error(f"[SETUP TRAIN ALL] Error: {e}", exc_info=True)
+        result = await job_queue_manager.create_job(
+            job_type="setup_training",
+            params={
+                "setup_type": "ALL",
+                "bar_size": bar_size,
+                "max_symbols": max_symbols,
+                "max_bars_per_symbol": max_bars_per_symbol,
+            },
+            priority=6,
+            metadata={"description": "Train all setup-specific models"}
+        )
         
-        asyncio.create_task(_run_train_all())
-        
-        return {
-            "success": True,
-            "message": f"Training all setup models in background ({bar_size})",
-            "setup_types": list(_timeseries_ai.SETUP_TYPES.keys()),
-            "total_types": len(_timeseries_ai.SETUP_TYPES),
-        }
-        
+        if result.get("success"):
+            job = result["job"]
+            return {
+                "success": True,
+                "job_id": job["job_id"],
+                "message": f"Training all setup models queued. Poll /api/jobs/{job['job_id']} for progress.",
+                "setup_types": list(_timeseries_ai.SETUP_TYPES.keys()),
+                "total_types": len(_timeseries_ai.SETUP_TYPES),
+            }
+        else:
+            return {"success": False, "error": result.get("error", "Failed to enqueue job")}
+    
     except Exception as e:
         logger.error(f"Train all setup models error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
