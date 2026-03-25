@@ -58,13 +58,18 @@ const SetupCard = memo(({ name, model, training, onTrain }) => {
 
       {/* Training config */}
       {model?.training_config && (
-        <div className="flex gap-2 mb-2">
+        <div className="flex gap-2 mb-2 flex-wrap">
           <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-zinc-500 font-mono">
             {model.training_config.forecast_horizon}d horizon
           </span>
           <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-zinc-500 font-mono">
-            {(model.training_config.noise_threshold * 100).toFixed(1)}% filter
+            {(model.training_config.noise_threshold * 100).toFixed(1)}% threshold
           </span>
+          {model.training_config.num_classes >= 3 && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400/80 font-mono">
+              3-class
+            </span>
+          )}
         </div>
       )}
 

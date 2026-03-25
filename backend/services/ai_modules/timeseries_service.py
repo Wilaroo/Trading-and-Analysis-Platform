@@ -195,7 +195,7 @@ class TimeSeriesAIService:
                 if default_model._model is not None:
                     self._model = default_model
                     reloaded += 1
-                    logger.info(f"Loaded default direction_predictor model from DB")
+                    logger.info("Loaded default direction_predictor model from DB")
             except Exception as e:
                 logger.warning(f"Could not load default model: {e}")
         elif self._model._db is not None:
@@ -1644,6 +1644,7 @@ class TimeSeriesAIService:
                     "training_config": {
                         "forecast_horizon": config["forecast_horizon"],
                         "noise_threshold": config["noise_threshold"],
+                        "num_classes": config.get("num_classes", 2),
                     },
                 }
             else:
@@ -1653,6 +1654,7 @@ class TimeSeriesAIService:
                     "training_config": {
                         "forecast_horizon": config["forecast_horizon"],
                         "noise_threshold": config["noise_threshold"],
+                        "num_classes": config.get("num_classes", 2),
                     },
                 }
         
@@ -1719,7 +1721,7 @@ class TimeSeriesAIService:
             import numpy as np
             from services.ai_modules.setup_pattern_detector import detect_setup
             from services.ai_modules.setup_features import get_setup_features, get_setup_feature_names
-            from services.ai_modules.setup_training_config import get_setup_config
+            from services.ai_modules.setup_training_config import get_setup_config, get_bar_horizon
             
             # ---- Phase 1: Load setup-specific training config ----
             setup_config = get_setup_config(effective_type)
@@ -1728,10 +1730,14 @@ class TimeSeriesAIService:
             class_weight = setup_config["scale_pos_weight"]
             min_samples = setup_config["min_samples"]
             num_boost_round = setup_config["num_boost_round"]
+            num_classes = setup_config.get("num_classes", 2)
+            training_bar_sizes = setup_config.get("training_bar_sizes", [bar_size])
             
             logger.info(
                 f"[SETUP TRAIN] {effective_type} config: horizon={forecast_horizon}, "
-                f"threshold={noise_threshold*100:.1f}%, weight={class_weight}, rounds={num_boost_round}"
+                f"threshold={noise_threshold*100:.1f}%, weight={class_weight}, "
+                f"rounds={num_boost_round}, classes={num_classes}, "
+                f"bar_sizes={training_bar_sizes}"
             )
             
             # Create a dedicated GBM model with setup-specific forecast horizon
@@ -1745,13 +1751,7 @@ class TimeSeriesAIService:
                 model.params["scale_pos_weight"] = class_weight
                 model.params.pop("is_unbalance", None)  # Can't use both
             
-            # Get training symbols — use ALL available symbols (no cap unless specified)
-            symbols = await self._get_training_symbols_from_db(bar_size=bar_size, limit=max_symbols)
-            logger.info(f"[SETUP TRAIN] {effective_type}: {len(symbols)} symbols")
-            
-            self._training_status[status_key]["message"] = f"Loading {len(symbols)} symbols..."
-            
-            # Load bars and scan for setup patterns
+            # Load bars and scan for setup patterns across ALL training bar sizes
             all_features = []
             all_targets = []
             total_bars_scanned = 0
@@ -1765,88 +1765,125 @@ class TimeSeriesAIService:
             combined_feature_names = base_feature_names + [f"setup_{n}" for n in setup_feature_names]
             
             loaded = 0
-            for symbol in symbols:
-                bars = await self._get_historical_bars_from_db(
-                    symbol, bar_size=bar_size, max_bars=max_bars_per_symbol
+            
+            # ---- Phase 4: Multi-timeframe training loop ----
+            for tf_idx, tf_bar_size in enumerate(training_bar_sizes):
+                # Scale forecast horizon for this bar size
+                tf_horizon = get_bar_horizon(forecast_horizon, tf_bar_size)
+                
+                logger.info(
+                    f"[SETUP TRAIN] {effective_type} bar_size {tf_idx+1}/{len(training_bar_sizes)}: "
+                    f"{tf_bar_size} (horizon={tf_horizon} bars)"
                 )
-                if not bars or len(bars) < 50 + forecast_horizon:
-                    continue
-                loaded += 1
                 
-                if loaded % 50 == 0:
-                    self._training_status[status_key]["message"] = (
-                        f"Scanning {loaded}/{len(symbols)} symbols... "
-                        f"({total_matches} {effective_type} patterns, {noise_filtered} noise-filtered)"
+                # Get symbols for this bar size
+                symbols = await self._get_training_symbols_from_db(bar_size=tf_bar_size, limit=max_symbols)
+                logger.info(f"[SETUP TRAIN] {effective_type}/{tf_bar_size}: {len(symbols)} symbols")
+                
+                self._training_status[status_key]["message"] = (
+                    f"[{tf_idx+1}/{len(training_bar_sizes)} {tf_bar_size}] "
+                    f"Loading {len(symbols)} symbols..."
+                )
+                
+                tf_loaded = 0
+                for symbol in symbols:
+                    bars = await self._get_historical_bars_from_db(
+                        symbol, bar_size=tf_bar_size, max_bars=max_bars_per_symbol
                     )
-                
-                # Bars are oldest-first from DB. Create numpy arrays for pattern detection
-                opens_arr = np.array([b.get('open', 0) for b in bars], dtype=float)
-                highs_arr = np.array([b.get('high', 0) for b in bars], dtype=float)
-                lows_arr = np.array([b.get('low', 0) for b in bars], dtype=float)
-                closes_arr = np.array([b.get('close', 0) for b in bars], dtype=float)
-                volumes_arr = np.array([b.get('volume', 0) for b in bars], dtype=float)
-                
-                # Replace zeros
-                closes_arr = np.where(closes_arr == 0, 1, closes_arr)
-                opens_arr = np.where(opens_arr == 0, closes_arr, opens_arr)
-                volumes_arr = np.where(volumes_arr == 0, 1, volumes_arr)
-                
-                # Slide through bars (oldest first), checking for setup pattern at each position
-                for i in range(len(bars) - 50 - forecast_horizon):
-                    total_bars_scanned += 1
-                    
-                    # Window of 50 bars ending at position i+49
-                    window_bars = bars[i:i+50]
-                    window_recent_first = window_bars[::-1]
-                    
-                    # Arrays for the window (recent-first for pattern detection)
-                    w_opens = opens_arr[i:i+50][::-1]
-                    w_highs = highs_arr[i:i+50][::-1]
-                    w_lows = lows_arr[i:i+50][::-1]
-                    w_closes = closes_arr[i:i+50][::-1]
-                    w_volumes = volumes_arr[i:i+50][::-1]
-                    
-                    # Pattern detection: does this window match the setup?
-                    is_match, confidence, direction = detect_setup(
-                        effective_type, w_opens, w_highs, w_lows, w_closes, w_volumes
-                    )
-                    
-                    if not is_match:
+                    if not bars or len(bars) < 50 + tf_horizon:
                         continue
+                    tf_loaded += 1
+                    loaded += 1
                     
-                    total_matches += 1
+                    if tf_loaded % 50 == 0:
+                        self._training_status[status_key]["message"] = (
+                            f"[{tf_idx+1}/{len(training_bar_sizes)} {tf_bar_size}] "
+                            f"Scanning {tf_loaded}/{len(symbols)} symbols... "
+                            f"({total_matches} {effective_type} patterns, {noise_filtered} noise-filtered)"
+                        )
                     
-                    # ---- Phase 2A: Noise threshold filtering ----
-                    # Compute forward return and discard samples in the noise zone
-                    current_price = bars[i + 49]["close"]
-                    future_price = bars[i + 49 + forecast_horizon]["close"]
-                    target_return = (future_price - current_price) / current_price if current_price > 0 else 0
+                    # Bars are oldest-first from DB. Create numpy arrays for pattern detection
+                    opens_arr = np.array([b.get('open', 0) for b in bars], dtype=float)
+                    highs_arr = np.array([b.get('high', 0) for b in bars], dtype=float)
+                    lows_arr = np.array([b.get('low', 0) for b in bars], dtype=float)
+                    closes_arr = np.array([b.get('close', 0) for b in bars], dtype=float)
+                    volumes_arr = np.array([b.get('volume', 0) for b in bars], dtype=float)
                     
-                    if abs(target_return) < noise_threshold:
-                        noise_filtered += 1
-                        continue  # Skip — this move is too small to learn from
+                    # Replace zeros
+                    closes_arr = np.where(closes_arr == 0, 1, closes_arr)
+                    opens_arr = np.where(opens_arr == 0, closes_arr, opens_arr)
+                    volumes_arr = np.where(volumes_arr == 0, 1, volumes_arr)
                     
-                    # Extract base features
-                    feature_set = feature_engineer.extract_features(
-                        window_recent_first, symbol=symbol, include_target=False
-                    )
-                    if feature_set is None:
-                        continue
-                    
-                    # Base feature vector
-                    base_vector = [feature_set.features.get(f, 0.0) for f in base_feature_names]
-                    
-                    # Setup-specific features
-                    setup_feats = get_setup_features(effective_type, w_opens, w_highs, w_lows, w_closes, w_volumes)
-                    setup_vector = [setup_feats.get(f, 0.0) for f in setup_feature_names]
-                    
-                    # Combined feature vector
-                    combined_vector = base_vector + setup_vector
-                    
-                    target = 1 if target_return > 0 else 0
-                    
-                    all_features.append(combined_vector)
-                    all_targets.append(target)
+                    # Slide through bars (oldest first), checking for setup pattern at each position
+                    for i in range(len(bars) - 50 - tf_horizon):
+                        total_bars_scanned += 1
+                        
+                        # Window of 50 bars ending at position i+49
+                        window_bars = bars[i:i+50]
+                        window_recent_first = window_bars[::-1]
+                        
+                        # Arrays for the window (recent-first for pattern detection)
+                        w_opens = opens_arr[i:i+50][::-1]
+                        w_highs = highs_arr[i:i+50][::-1]
+                        w_lows = lows_arr[i:i+50][::-1]
+                        w_closes = closes_arr[i:i+50][::-1]
+                        w_volumes = volumes_arr[i:i+50][::-1]
+                        
+                        # Pattern detection: does this window match the setup?
+                        is_match, confidence, direction = detect_setup(
+                            effective_type, w_opens, w_highs, w_lows, w_closes, w_volumes
+                        )
+                        
+                        if not is_match:
+                            continue
+                        
+                        total_matches += 1
+                        
+                        # Compute forward return using tf_horizon (scaled for this bar size)
+                        current_price = bars[i + 49]["close"]
+                        future_price = bars[i + 49 + tf_horizon]["close"]
+                        target_return = (future_price - current_price) / current_price if current_price > 0 else 0
+                        
+                        # ---- Target labeling based on num_classes ----
+                        if num_classes >= 3:
+                            # 3-class: 0=DOWN, 1=FLAT, 2=UP
+                            if target_return > noise_threshold:
+                                target = 2  # UP
+                            elif target_return < -noise_threshold:
+                                target = 0  # DOWN
+                            else:
+                                target = 1  # FLAT (noise zone — kept as training data)
+                        else:
+                            # Binary: discard noise zone
+                            if abs(target_return) < noise_threshold:
+                                noise_filtered += 1
+                                continue  # Skip — this move is too small to learn from
+                            target = 1 if target_return > 0 else 0
+                        
+                        # Extract base features
+                        feature_set = feature_engineer.extract_features(
+                            window_recent_first, symbol=symbol, include_target=False
+                        )
+                        if feature_set is None:
+                            continue
+                        
+                        # Base feature vector
+                        base_vector = [feature_set.features.get(f, 0.0) for f in base_feature_names]
+                        
+                        # Setup-specific features
+                        setup_feats = get_setup_features(effective_type, w_opens, w_highs, w_lows, w_closes, w_volumes)
+                        setup_vector = [setup_feats.get(f, 0.0) for f in setup_feature_names]
+                        
+                        # Combined feature vector
+                        combined_vector = base_vector + setup_vector
+                        
+                        all_features.append(combined_vector)
+                        all_targets.append(target)
+                
+                logger.info(
+                    f"[SETUP TRAIN] {effective_type}/{tf_bar_size} done: "
+                    f"{tf_loaded} symbols, running total {len(all_features)} samples"
+                )
             
             if len(all_features) < min_samples:
                 msg = (f"Insufficient {effective_type} patterns after noise filtering: "
@@ -1860,12 +1897,14 @@ class TimeSeriesAIService:
             logger.info(
                 f"[SETUP TRAIN] {effective_type}: {len(all_features)} usable patterns from "
                 f"{total_matches} detected ({noise_filtered} noise-filtered), "
-                f"{loaded} symbols, {total_bars_scanned:,} bars scanned"
+                f"{loaded} symbols across {len(training_bar_sizes)} bar sizes, "
+                f"{total_bars_scanned:,} bars scanned"
             )
             
             self._training_status[status_key]["message"] = (
                 f"Training on {len(all_features):,} {effective_type} patterns "
-                f"(horizon={forecast_horizon}, threshold={noise_threshold*100:.1f}%)..."
+                f"(horizon={forecast_horizon}, {len(training_bar_sizes)} timeframes, "
+                f"threshold={noise_threshold*100:.1f}%)..."
             )
             
             # Train with enriched features — skip GBM's internal save
@@ -1874,17 +1913,19 @@ class TimeSeriesAIService:
             X = np.array(all_features)
             y = np.array(all_targets)
             
-            n_up = np.sum(y == 1)
-            n_down = np.sum(y == 0)
-            logger.info(
-                f"[SETUP TRAIN] {effective_type} class dist: UP={n_up} ({n_up/len(y)*100:.1f}%), "
-                f"DOWN={n_down} ({n_down/len(y)*100:.1f}%)"
-            )
+            unique, counts = np.unique(y.astype(int), return_counts=True)
+            if num_classes >= 3:
+                class_labels = {0: "DOWN", 1: "FLAT", 2: "UP"}
+            else:
+                class_labels = {0: "DOWN", 1: "UP"}
+            dist_parts = [f"{class_labels.get(int(c), c)}={n} ({n/len(y)*100:.1f}%)" for c, n in zip(unique, counts)]
+            logger.info(f"[SETUP TRAIN] {effective_type} class dist: {', '.join(dist_parts)}")
             
             metrics = model.train_from_features(
                 X, y, combined_feature_names,
                 skip_save=True,
-                num_boost_round=num_boost_round
+                num_boost_round=num_boost_round,
+                num_classes=num_classes
             )
             
             # Setup model protection: compare against previous setup model of same type
@@ -1921,11 +1962,15 @@ class TimeSeriesAIService:
                         "usable_samples": len(all_features),
                         "setup_features": [f"setup_{n}" for n in setup_feature_names],
                         "total_features": len(combined_feature_names),
+                        "num_classes": num_classes,
+                        "training_bar_sizes": training_bar_sizes,
                         "training_config": {
                             "forecast_horizon": forecast_horizon,
                             "noise_threshold": noise_threshold,
                             "scale_pos_weight": class_weight,
                             "num_boost_round": num_boost_round,
+                            "num_classes": num_classes,
+                            "training_bar_sizes": training_bar_sizes,
                         },
                     }
                 )
@@ -1936,14 +1981,16 @@ class TimeSeriesAIService:
                 "message": (
                     f"{metrics.accuracy*100:.1f}% accuracy on {len(all_features):,} samples "
                     f"({total_matches:,} patterns, {noise_filtered:,} noise-filtered, "
-                    f"{total_bars_scanned:,} bars, horizon={forecast_horizon})"
+                    f"{total_bars_scanned:,} bars across {len(training_bar_sizes)} timeframes, "
+                    f"horizon={forecast_horizon})"
                 )
             }
             
             logger.info(
                 f"[SETUP TRAIN] {effective_type} complete: {metrics.accuracy*100:.1f}% accuracy "
                 f"(horizon={forecast_horizon}, threshold={noise_threshold*100:.1f}%, "
-                f"{len(all_features)} usable / {total_matches} detected / {noise_filtered} noise-filtered)"
+                f"{len(all_features)} usable / {total_matches} detected / {noise_filtered} noise-filtered, "
+                f"bar_sizes={training_bar_sizes})"
             )
             
             return {
@@ -1959,10 +2006,12 @@ class TimeSeriesAIService:
                 "training_samples": metrics.training_samples,
                 "validation_samples": metrics.validation_samples,
                 "total_features": len(combined_feature_names),
+                "training_bar_sizes": training_bar_sizes,
                 "training_config": {
                     "forecast_horizon": forecast_horizon,
                     "noise_threshold": noise_threshold,
                     "scale_pos_weight": class_weight,
+                    "training_bar_sizes": training_bar_sizes,
                 },
             }
         except Exception as e:
@@ -2098,29 +2147,54 @@ class TimeSeriesAIService:
                     ]])
                     
                     # Predict using the setup model directly
-                    prob_up = float(model._model.predict(feature_vector)[0])
-                    prob_down = 1 - prob_up
+                    pred_raw = model._model.predict(feature_vector)
+                    num_classes = getattr(model, '_num_classes', 2)
                     
-                    if prob_up > model.UP_THRESHOLD:
-                        direction = "up"
-                        confidence = min((prob_up - model.UP_THRESHOLD) / (1 - model.UP_THRESHOLD), 1.0)
-                    elif prob_down > 0.55:
-                        direction = "down"
-                        confidence = (prob_down - 0.5) * 2
+                    if len(pred_raw.shape) > 1 and pred_raw.shape[1] >= 3:
+                        # 3-class: pred_raw shape = (1, 3) → [P(DOWN), P(FLAT), P(UP)]
+                        prob_down = float(pred_raw[0][0])
+                        prob_flat = float(pred_raw[0][1])
+                        prob_up = float(pred_raw[0][2])
+                        
+                        # Direction = highest probability class
+                        max_class = int(np.argmax(pred_raw[0]))
+                        if max_class == 2:
+                            direction = "up"
+                            confidence = prob_up
+                        elif max_class == 0:
+                            direction = "down"
+                            confidence = prob_down
+                        else:
+                            direction = "flat"
+                            confidence = prob_flat
                     else:
-                        direction = "flat"
-                        confidence = 0.2
+                        # Binary: pred_raw shape = (1,) → P(UP)
+                        prob_up = float(pred_raw[0]) if pred_raw.ndim == 1 else float(pred_raw[0][0])
+                        prob_down = 1 - prob_up
+                        prob_flat = 0.0
+                        
+                        if prob_up > model.UP_THRESHOLD:
+                            direction = "up"
+                            confidence = min((prob_up - model.UP_THRESHOLD) / (1 - model.UP_THRESHOLD), 1.0)
+                        elif prob_down > 0.55:
+                            direction = "down"
+                            confidence = (prob_down - 0.5) * 2
+                        else:
+                            direction = "flat"
+                            confidence = 0.2
                     
                     result = {
                         "symbol": symbol,
                         "direction": direction,
                         "probability_up": prob_up,
                         "probability_down": prob_down,
+                        "probability_flat": prob_flat,
                         "confidence": float(confidence),
                         "model_version": model._version,
                         "feature_count": len(model._feature_names),
                         "model_used": f"{effective_type.lower()}_predictor",
                         "model_type": "setup_specific",
+                        "num_classes": 3 if prob_flat > 0 else 2,
                     }
                     return result
             except Exception as e:

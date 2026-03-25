@@ -21,7 +21,7 @@ echo.
 :: CONFIGURATION
 :: =====================================================
 set SCRIPT_DIR=%~dp0
-set CLOUD_URL=https://setup-models-v2.preview.emergentagent.com
+set CLOUD_URL=https://timeframe-aggregator.preview.emergentagent.com
 set LOG_FILE=%SCRIPT_DIR%nightly_auto.log
 
 :: Log start time

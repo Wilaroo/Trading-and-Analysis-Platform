@@ -206,7 +206,7 @@ class TimeSeriesGBM:
                 # Update model name to reflect what was actually loaded
                 self.model_name = loaded_name
             else:
-                logger.warning(f"No trained models found in database")
+                logger.warning("No trained models found in database")
         except Exception as e:
             logger.warning(f"Could not load model: {e}")
             
@@ -463,13 +463,14 @@ class TimeSeriesGBM:
         validation_split: float = 0.2,
         num_boost_round: int = 100,
         early_stopping_rounds: int = 10,
-        skip_save: bool = False
+        skip_save: bool = False,
+        num_classes: int = 2
     ) -> 'ModelMetrics':
         """
         Train the model from pre-extracted features and targets.
         
-        Used by setup-specific training where filtering and feature enrichment
-        happens outside of the GBM model.
+        Supports binary (2-class: UP/DOWN) and multiclass (3-class: DOWN/FLAT/UP).
+        For 3-class: y values are 0=DOWN, 1=FLAT, 2=UP.
         
         Args:
             X: Feature matrix (n_samples, n_features)
@@ -479,6 +480,7 @@ class TimeSeriesGBM:
             num_boost_round: Boosting rounds
             early_stopping_rounds: Early stopping patience
             skip_save: If True, skip saving to DB (caller will handle saving)
+            num_classes: 2 for binary, 3 for UP/FLAT/DOWN
             
         Returns:
             ModelMetrics with training results
@@ -487,14 +489,26 @@ class TimeSeriesGBM:
             logger.warning(f"Insufficient training data: {len(X)} samples")
             return ModelMetrics()
 
-        logger.info(f"Training from pre-extracted features: {len(X)} samples, {len(feature_names)} features")
+        self._num_classes = num_classes
+        logger.info(f"Training from pre-extracted features: {len(X)} samples, {len(feature_names)} features, {num_classes}-class")
 
         # Update feature names for this model
         self._feature_names = feature_names
 
-        n_up = np.sum(y == 1)
-        n_down = np.sum(y == 0)
-        logger.info(f"Class distribution: UP={n_up} ({n_up/len(y)*100:.1f}%), DOWN={n_down} ({n_down/len(y)*100:.1f}%)")
+        # Log class distribution
+        unique, counts = np.unique(y.astype(int), return_counts=True)
+        class_labels = {0: "DOWN", 1: "FLAT", 2: "UP"} if num_classes == 3 else {0: "DOWN", 1: "UP"}
+        dist_parts = [f"{class_labels.get(int(c), c)}={n} ({n/len(y)*100:.1f}%)" for c, n in zip(unique, counts)]
+        logger.info(f"Class distribution: {', '.join(dist_parts)}")
+
+        # Configure params for multiclass if needed
+        train_params = dict(self.params)
+        if num_classes >= 3:
+            train_params["objective"] = "multiclass"
+            train_params["num_class"] = num_classes
+            train_params["metric"] = "multi_logloss"
+            train_params.pop("is_unbalance", None)  # Not supported for multiclass
+            train_params.pop("scale_pos_weight", None)  # Not supported for multiclass
 
         # Split train/validation (time-ordered)
         split_idx = int(len(X) * (1 - validation_split))
@@ -507,7 +521,7 @@ class TimeSeriesGBM:
         callbacks = [lgb.early_stopping(early_stopping_rounds)]
 
         self._model = lgb.train(
-            self.params,
+            train_params,
             train_data,
             num_boost_round=num_boost_round * 2,
             valid_sets=[train_data, val_data],
@@ -516,16 +530,52 @@ class TimeSeriesGBM:
         )
 
         # Evaluate
-        y_pred_proba = self._model.predict(X_val)
-        y_pred = (y_pred_proba > self.UP_THRESHOLD).astype(int)
-        accuracy = np.mean(y_pred == y_val)
+        y_pred_raw = self._model.predict(X_val)
 
-        tp_up = np.sum((y_pred == 1) & (y_val == 1))
-        fp_up = np.sum((y_pred == 1) & (y_val == 0))
-        fn_up = np.sum((y_pred == 0) & (y_val == 1))
-        precision_up = tp_up / (tp_up + fp_up) if (tp_up + fp_up) > 0 else 0
-        recall_up = tp_up / (tp_up + fn_up) if (tp_up + fn_up) > 0 else 0
-        f1_up = 2 * precision_up * recall_up / (precision_up + recall_up) if (precision_up + recall_up) > 0 else 0
+        if num_classes >= 3:
+            # Multiclass: y_pred_raw shape = (n_samples, num_classes)
+            # Classes: 0=DOWN, 1=FLAT, 2=UP
+            y_pred = np.argmax(y_pred_raw, axis=1)
+            accuracy = np.mean(y_pred == y_val)
+
+            # Per-class metrics for UP (class 2) — most important for trading
+            up_class = 2
+            tp_up = np.sum((y_pred == up_class) & (y_val == up_class))
+            fp_up = np.sum((y_pred == up_class) & (y_val != up_class))
+            fn_up = np.sum((y_pred != up_class) & (y_val == up_class))
+            precision_up = tp_up / (tp_up + fp_up) if (tp_up + fp_up) > 0 else 0
+            recall_up = tp_up / (tp_up + fn_up) if (tp_up + fn_up) > 0 else 0
+            f1_up = 2 * precision_up * recall_up / (precision_up + recall_up) if (precision_up + recall_up) > 0 else 0
+
+            # Per-class metrics for DOWN (class 0)
+            down_class = 0
+            tp_dn = np.sum((y_pred == down_class) & (y_val == down_class))
+            fp_dn = np.sum((y_pred == down_class) & (y_val != down_class))
+            fn_dn = np.sum((y_pred != down_class) & (y_val == down_class))
+            precision_down = tp_dn / (tp_dn + fp_dn) if (tp_dn + fp_dn) > 0 else 0
+
+            # FLAT accuracy — how well does it identify no-trade zones
+            flat_class = 1
+            flat_correct = np.sum((y_pred == flat_class) & (y_val == flat_class))
+            flat_total = np.sum(y_val == flat_class)
+            flat_recall = flat_correct / flat_total if flat_total > 0 else 0
+
+            logger.info(
+                f"3-class eval: accuracy={accuracy:.3f}, "
+                f"UP prec={precision_up:.3f} recall={recall_up:.3f}, "
+                f"DOWN prec={precision_down:.3f}, FLAT recall={flat_recall:.3f}"
+            )
+        else:
+            # Binary: y_pred_raw shape = (n_samples,)
+            y_pred = (y_pred_raw > self.UP_THRESHOLD).astype(int)
+            accuracy = np.mean(y_pred == y_val)
+
+            tp_up = np.sum((y_pred == 1) & (y_val == 1))
+            fp_up = np.sum((y_pred == 1) & (y_val == 0))
+            fn_up = np.sum((y_pred == 0) & (y_val == 1))
+            precision_up = tp_up / (tp_up + fp_up) if (tp_up + fp_up) > 0 else 0
+            recall_up = tp_up / (tp_up + fn_up) if (tp_up + fn_up) > 0 else 0
+            f1_up = 2 * precision_up * recall_up / (precision_up + recall_up) if (precision_up + recall_up) > 0 else 0
 
         importance = self._model.feature_importance(importance_type="gain")
         top_indices = np.argsort(importance)[-10:][::-1]
@@ -549,7 +599,7 @@ class TimeSeriesGBM:
         if not skip_save:
             self._save_model()
 
-        logger.info(f"Setup training complete: accuracy={accuracy:.3f}, precision_up={precision_up:.3f}, f1_up={f1_up:.3f}")
+        logger.info(f"Training complete ({num_classes}-class): accuracy={accuracy:.3f}, precision_up={precision_up:.3f}, f1_up={f1_up:.3f}")
         return self._metrics
         
     def predict(
