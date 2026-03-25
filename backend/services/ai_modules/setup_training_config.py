@@ -1,149 +1,259 @@
 """
-Setup Training Configuration
+Setup Training Configuration — Profile-Based Architecture
 
-Per-setup-type training parameters. Each setup has its own forecast horizon,
-noise threshold, and class weight settings tuned to its trading characteristics.
+Each setup type has one or more timeframe PROFILES. Each profile defines
+a model that is independently trained and stored:
 
-These configs control:
-  - forecast_horizon: How many DAILY bars ahead to predict (matches the setup's hold time)
-  - noise_threshold: Minimum |return| to count as a real move (class boundary for 3-class)
-  - scale_pos_weight: Corrects for class imbalance in UP vs DOWN labels
-  - min_samples: Minimum pattern matches required to train
-  - num_boost_round: LightGBM boosting iterations (more = slower but potentially better)
-  - num_classes: 2 for binary UP/DOWN, 3 for UP/FLAT/DOWN
-  - training_bar_sizes: List of bar sizes to train on. More bar sizes = more data.
-    Forecast horizon is automatically scaled for each bar size.
+  - bar_size: The timeframe to train on (e.g., "5 mins", "1 day")
+  - forecast_horizon: Bars ahead to predict (native to that bar_size)
+  - noise_threshold: Minimum |return| to count as a real move
+  - Other LightGBM params
 
-BAR_SIZE_BARS_PER_DAY maps bar sizes to how many bars fit in one trading day (6.5 hours).
-This is used to convert the daily forecast_horizon to bar-equivalent horizons.
+A separate model is trained and stored for each (setup_type, bar_size) combo.
+Model names follow: {setup_type}_{slug}_predictor  (e.g. scalp_5min_predictor)
+
+Intraday setups use 1-min / 5-min bars with horizons measured in minutes/hours.
+Swing setups use daily bars with horizons measured in days.
+Some setups have both intraday AND swing profiles.
 """
 
-# How many bars fit in one trading day (6.5 market hours)
-BAR_SIZE_BARS_PER_DAY = {
-    "1 day": 1,
-    "1 hour": 7,     # ~6.5 hours/day → 7 bars
-    "30 mins": 13,    # 6.5 * 2 = 13
-    "15 mins": 26,    # 6.5 * 4 = 26
-    "5 mins": 78,     # 6.5 * 12 = 78
+
+def bar_size_to_slug(bar_size: str) -> str:
+    """Convert bar_size like '5 mins' to a slug like '5min' for model naming."""
+    return bar_size.replace(" ", "").replace("mins", "min")
+
+
+def get_model_name(setup_type: str, bar_size: str) -> str:
+    """Generate model name for a (setup_type, bar_size) combo."""
+    slug = bar_size_to_slug(bar_size)
+    return f"{setup_type.lower()}_{slug}_predictor"
+
+
+SETUP_TRAINING_PROFILES = {
+    # ===== Intraday-Only Setups =====
+    "SCALP": [
+        {
+            "bar_size": "1 min",
+            "forecast_horizon": 30,
+            "noise_threshold": 0.0008,
+            "scale_pos_weight": 1.0,
+            "min_samples": 50,
+            "num_boost_round": 150,
+            "num_classes": 3,
+            "description": "30-min scalp on 1-min bars",
+        },
+        {
+            "bar_size": "5 mins",
+            "forecast_horizon": 12,
+            "noise_threshold": 0.0015,
+            "scale_pos_weight": 1.0,
+            "min_samples": 50,
+            "num_boost_round": 150,
+            "num_classes": 3,
+            "description": "1-hour scalp on 5-min bars",
+        },
+    ],
+    "ORB": [
+        {
+            "bar_size": "5 mins",
+            "forecast_horizon": 12,
+            "noise_threshold": 0.002,
+            "scale_pos_weight": 1.0,
+            "min_samples": 50,
+            "num_boost_round": 120,
+            "num_classes": 3,
+            "description": "1-hour ORB on 5-min bars",
+        },
+    ],
+    "GAP_AND_GO": [
+        {
+            "bar_size": "5 mins",
+            "forecast_horizon": 12,
+            "noise_threshold": 0.002,
+            "scale_pos_weight": 1.1,
+            "min_samples": 50,
+            "num_boost_round": 120,
+            "num_classes": 3,
+            "description": "1-hour gap continuation on 5-min bars",
+        },
+    ],
+    "VWAP": [
+        {
+            "bar_size": "5 mins",
+            "forecast_horizon": 12,
+            "noise_threshold": 0.0015,
+            "scale_pos_weight": 1.0,
+            "min_samples": 50,
+            "num_boost_round": 120,
+            "num_classes": 3,
+            "description": "1-hour VWAP bounce/fade on 5-min bars",
+        },
+    ],
+
+    # ===== Dual: Intraday + Swing =====
+    "BREAKOUT": [
+        {
+            "bar_size": "5 mins",
+            "forecast_horizon": 24,
+            "noise_threshold": 0.002,
+            "scale_pos_weight": 1.1,
+            "min_samples": 50,
+            "num_boost_round": 150,
+            "num_classes": 3,
+            "description": "2-hour intraday breakout on 5-min bars",
+        },
+        {
+            "bar_size": "1 day",
+            "forecast_horizon": 5,
+            "noise_threshold": 0.005,
+            "scale_pos_weight": 1.1,
+            "min_samples": 50,
+            "num_boost_round": 150,
+            "num_classes": 3,
+            "description": "5-day swing breakout on daily bars",
+        },
+    ],
+    "RANGE": [
+        {
+            "bar_size": "5 mins",
+            "forecast_horizon": 36,
+            "noise_threshold": 0.002,
+            "scale_pos_weight": 1.0,
+            "min_samples": 50,
+            "num_boost_round": 150,
+            "num_classes": 3,
+            "description": "3-hour intraday range break on 5-min bars",
+        },
+        {
+            "bar_size": "1 day",
+            "forecast_horizon": 5,
+            "noise_threshold": 0.004,
+            "scale_pos_weight": 1.0,
+            "min_samples": 50,
+            "num_boost_round": 150,
+            "num_classes": 3,
+            "description": "5-day swing range trade on daily bars",
+        },
+    ],
+    "MEAN_REVERSION": [
+        {
+            "bar_size": "5 mins",
+            "forecast_horizon": 36,
+            "noise_threshold": 0.0015,
+            "scale_pos_weight": 1.0,
+            "min_samples": 50,
+            "num_boost_round": 150,
+            "num_classes": 3,
+            "description": "3-hour intraday mean reversion on 5-min bars",
+        },
+        {
+            "bar_size": "1 day",
+            "forecast_horizon": 5,
+            "noise_threshold": 0.005,
+            "scale_pos_weight": 1.0,
+            "min_samples": 50,
+            "num_boost_round": 150,
+            "num_classes": 3,
+            "description": "5-day swing mean reversion on daily bars",
+        },
+    ],
+    "REVERSAL": [
+        {
+            "bar_size": "5 mins",
+            "forecast_horizon": 60,
+            "noise_threshold": 0.002,
+            "scale_pos_weight": 1.0,
+            "min_samples": 50,
+            "num_boost_round": 150,
+            "num_classes": 3,
+            "description": "5-hour intraday reversal on 5-min bars",
+        },
+        {
+            "bar_size": "1 day",
+            "forecast_horizon": 5,
+            "noise_threshold": 0.006,
+            "scale_pos_weight": 1.0,
+            "min_samples": 50,
+            "num_boost_round": 150,
+            "num_classes": 3,
+            "description": "5-day swing reversal on daily bars",
+        },
+    ],
+
+    # ===== Swing / Position (with optional intraday) =====
+    "TREND_CONTINUATION": [
+        {
+            "bar_size": "5 mins",
+            "forecast_horizon": 78,
+            "noise_threshold": 0.002,
+            "scale_pos_weight": 1.15,
+            "min_samples": 50,
+            "num_boost_round": 200,
+            "num_classes": 3,
+            "description": "Full-day intraday trend continuation on 5-min bars",
+        },
+        {
+            "bar_size": "1 day",
+            "forecast_horizon": 7,
+            "noise_threshold": 0.005,
+            "scale_pos_weight": 1.15,
+            "min_samples": 50,
+            "num_boost_round": 200,
+            "num_classes": 3,
+            "description": "1-week swing trend continuation on daily bars",
+        },
+    ],
+    "MOMENTUM": [
+        {
+            "bar_size": "1 hour",
+            "forecast_horizon": 14,
+            "noise_threshold": 0.003,
+            "scale_pos_weight": 1.2,
+            "min_samples": 50,
+            "num_boost_round": 200,
+            "num_classes": 3,
+            "description": "2-day momentum on hourly bars",
+        },
+        {
+            "bar_size": "1 day",
+            "forecast_horizon": 7,
+            "noise_threshold": 0.005,
+            "scale_pos_weight": 1.2,
+            "min_samples": 50,
+            "num_boost_round": 200,
+            "num_classes": 3,
+            "description": "1-week momentum on daily bars",
+        },
+    ],
 }
 
 
-def get_bar_horizon(daily_horizon: int, bar_size: str) -> int:
-    """Convert a daily forecast_horizon to the equivalent number of bars for a given bar_size."""
-    bars_per_day = BAR_SIZE_BARS_PER_DAY.get(bar_size, 1)
-    return max(1, daily_horizon * bars_per_day)
-
-
-SETUP_TRAINING_CONFIGS = {
-    # ------- High-frequency / Short-hold setups -------
-    "SCALP": {
-        "forecast_horizon": 2,       # 2 days — scalps resolve fast
-        "noise_threshold": 0.002,    # 0.2% — tighter since moves are smaller
-        "scale_pos_weight": 1.0,     # Neutral — scalps are roughly 50/50
-        "min_samples": 50,
-        "num_boost_round": 150,
-        "num_classes": 3,
-        "training_bar_sizes": ["1 day", "1 hour"],  # Scalps benefit from intraday data
-    },
-    "ORB": {
-        "forecast_horizon": 3,       # 3 days
-        "noise_threshold": 0.004,    # 0.4%
-        "scale_pos_weight": 1.0,
-        "min_samples": 50,
-        "num_boost_round": 120,
-        "num_classes": 3,
-        "training_bar_sizes": ["1 day", "1 hour"],
-    },
-
-    # ------- Medium-hold setups -------
-    "BREAKOUT": {
-        "forecast_horizon": 5,       # 5 days
-        "noise_threshold": 0.005,    # 0.5%
-        "scale_pos_weight": 1.1,
-        "min_samples": 50,
-        "num_boost_round": 150,
-        "num_classes": 3,
-        "training_bar_sizes": ["1 day"],
-    },
-    "GAP_AND_GO": {
-        "forecast_horizon": 3,       # 3 days
-        "noise_threshold": 0.005,    # 0.5%
-        "scale_pos_weight": 1.1,
-        "min_samples": 50,
-        "num_boost_round": 120,
-        "num_classes": 3,
-        "training_bar_sizes": ["1 day", "1 hour"],
-    },
-    "RANGE": {
-        "forecast_horizon": 5,       # 5 days
-        "noise_threshold": 0.004,    # 0.4%
-        "scale_pos_weight": 1.0,
-        "min_samples": 50,
-        "num_boost_round": 150,
-        "num_classes": 3,
-        "training_bar_sizes": ["1 day"],
-    },
-    "VWAP": {
-        "forecast_horizon": 3,       # 3 days
-        "noise_threshold": 0.003,    # 0.3%
-        "scale_pos_weight": 1.0,
-        "min_samples": 50,
-        "num_boost_round": 120,
-        "num_classes": 3,
-        "training_bar_sizes": ["1 day", "1 hour"],
-    },
-    "MEAN_REVERSION": {
-        "forecast_horizon": 5,       # 5 days
-        "noise_threshold": 0.005,    # 0.5%
-        "scale_pos_weight": 1.0,
-        "min_samples": 50,
-        "num_boost_round": 150,
-        "num_classes": 3,
-        "training_bar_sizes": ["1 day"],
-    },
-
-    # ------- Longer-hold / Trend setups -------
-    "MOMENTUM": {
-        "forecast_horizon": 7,       # 7 days
-        "noise_threshold": 0.005,    # 0.5%
-        "scale_pos_weight": 1.2,
-        "min_samples": 50,
-        "num_boost_round": 200,
-        "num_classes": 3,
-        "training_bar_sizes": ["1 day"],
-    },
-    "TREND_CONTINUATION": {
-        "forecast_horizon": 7,       # 7 days
-        "noise_threshold": 0.005,    # 0.5%
-        "scale_pos_weight": 1.15,
-        "min_samples": 50,
-        "num_boost_round": 200,
-        "num_classes": 3,
-        "training_bar_sizes": ["1 day"],
-    },
-    "REVERSAL": {
-        "forecast_horizon": 5,       # 5 days
-        "noise_threshold": 0.006,    # 0.6%
-        "scale_pos_weight": 1.0,
-        "min_samples": 50,
-        "num_boost_round": 150,
-        "num_classes": 3,
-        "training_bar_sizes": ["1 day"],
-    },
-}
-
-# Default config for any setup type not explicitly listed
-DEFAULT_TRAINING_CONFIG = {
+# Fallback for unknown setup types
+DEFAULT_PROFILE = {
+    "bar_size": "1 day",
     "forecast_horizon": 5,
-    "noise_threshold": 0.005,   # 0.5%
+    "noise_threshold": 0.005,
     "scale_pos_weight": 1.0,
     "min_samples": 50,
     "num_boost_round": 150,
     "num_classes": 3,
-    "training_bar_sizes": ["1 day"],
+    "description": "Default 5-day prediction on daily bars",
 }
 
 
-def get_setup_config(setup_type: str) -> dict:
-    """Get training config for a setup type, with defaults as fallback."""
-    return SETUP_TRAINING_CONFIGS.get(setup_type.upper(), DEFAULT_TRAINING_CONFIG.copy())
+def get_setup_profiles(setup_type: str) -> list:
+    """Get ALL training profiles for a setup type."""
+    return SETUP_TRAINING_PROFILES.get(setup_type.upper(), [DEFAULT_PROFILE.copy()])
+
+
+def get_setup_profile(setup_type: str, bar_size: str) -> dict:
+    """Get a specific profile for a (setup_type, bar_size) combo."""
+    for p in get_setup_profiles(setup_type):
+        if p["bar_size"] == bar_size:
+            return p
+    return DEFAULT_PROFILE.copy()
+
+
+def get_all_profile_count() -> int:
+    """Total number of models across all setups."""
+    return sum(len(profiles) for profiles in SETUP_TRAINING_PROFILES.values())

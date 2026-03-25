@@ -1592,7 +1592,9 @@ class TimeSeriesAIService:
     # ===================== SETUP-SPECIFIC MODEL METHODS =====================
     
     def _load_setup_models_from_db(self):
-        """Load all setup-specific models from MongoDB on startup"""
+        """Load all setup-specific models from MongoDB on startup.
+        Models are keyed by (setup_type, bar_size) in the DB and cached
+        as self._setup_models[(setup_type, bar_size)]."""
         if self._db is None or not self._ml_available:
             return
         
@@ -1601,62 +1603,91 @@ class TimeSeriesAIService:
         for doc in col.find({"model_data": {"$exists": True}}):
             try:
                 setup_type = doc.get("setup_type")
+                bar_size = doc.get("bar_size", "1 day")
                 if not setup_type:
                     continue
                 model_bytes = base64.b64decode(doc["model_data"])
                 loaded_model = pickle.loads(model_bytes)
                 
-                model_name = f"{setup_type.lower()}_predictor"
+                from services.ai_modules.setup_training_config import get_model_name
+                model_name = doc.get("model_name") or get_model_name(setup_type, bar_size)
                 gbm = TimeSeriesGBM(model_name=model_name)
                 gbm.set_db(self._db)
                 gbm._model = loaded_model
                 gbm._version = doc.get("version", "v0.0.0")
                 if doc.get("metrics"):
                     gbm._metrics = ModelMetrics(**doc["metrics"])
+                if doc.get("feature_names"):
+                    gbm._feature_names = doc["feature_names"]
                 
-                self._setup_models[setup_type] = gbm
+                # Store with compound key (setup_type, bar_size)
+                cache_key = (setup_type, bar_size)
+                self._setup_models[cache_key] = gbm
+                # Also keep legacy single-key for backward compat with predict_for_setup
+                if setup_type not in self._setup_models:
+                    self._setup_models[setup_type] = gbm
                 loaded += 1
-                logger.info(f"Loaded setup model: {setup_type} ({doc.get('version', '?')})")
+                logger.info(f"Loaded setup model: {setup_type}/{bar_size} ({doc.get('version', '?')})")
             except Exception as e:
-                logger.warning(f"Could not load setup model {doc.get('setup_type')}: {e}")
+                logger.warning(f"Could not load setup model {doc.get('setup_type')}/{doc.get('bar_size')}: {e}")
         
         if loaded:
             logger.info(f"Loaded {loaded} setup-specific models from database")
     
     def get_setup_models_status(self) -> Dict[str, Any]:
-        """Get status of all setup-specific models"""
-        from services.ai_modules.setup_training_config import get_setup_config
+        """Get status of all setup-specific models, organized by profile."""
+        from services.ai_modules.setup_training_config import (
+            get_setup_profiles, get_model_name, get_all_profile_count
+        )
         
         models = {}
+        total_profiles = 0
+        trained_count = 0
+        
         for st_name, st_config in self.SETUP_TYPES.items():
-            model = self._setup_models.get(st_name)
-            config = get_setup_config(st_name)
-            if model and model._model is not None:
-                metrics = model._metrics
-                models[st_name] = {
-                    "trained": True,
-                    "description": st_config["description"],
-                    "version": model._version,
-                    "accuracy": metrics.accuracy if metrics else None,
-                    "training_samples": metrics.training_samples if metrics else 0,
-                    "validation_samples": metrics.validation_samples if metrics else 0,
-                    "trained_at": metrics.last_trained if metrics else None,
-                    "training_config": {
-                        "forecast_horizon": config["forecast_horizon"],
-                        "noise_threshold": config["noise_threshold"],
-                        "num_classes": config.get("num_classes", 2),
-                    },
-                }
-            else:
-                models[st_name] = {
-                    "trained": False,
-                    "description": st_config["description"],
-                    "training_config": {
-                        "forecast_horizon": config["forecast_horizon"],
-                        "noise_threshold": config["noise_threshold"],
-                        "num_classes": config.get("num_classes", 2),
-                    },
-                }
+            profiles = get_setup_profiles(st_name)
+            profile_statuses = []
+            
+            for profile in profiles:
+                total_profiles += 1
+                bar_size = profile["bar_size"]
+                cache_key = (st_name, bar_size)
+                model = self._setup_models.get(cache_key)
+                
+                if model and model._model is not None:
+                    trained_count += 1
+                    metrics = model._metrics
+                    profile_statuses.append({
+                        "bar_size": bar_size,
+                        "trained": True,
+                        "description": profile.get("description", ""),
+                        "version": model._version,
+                        "model_name": get_model_name(st_name, bar_size),
+                        "accuracy": metrics.accuracy if metrics else None,
+                        "training_samples": metrics.training_samples if metrics else 0,
+                        "validation_samples": metrics.validation_samples if metrics else 0,
+                        "trained_at": metrics.last_trained if metrics else None,
+                        "forecast_horizon": profile["forecast_horizon"],
+                        "noise_threshold": profile["noise_threshold"],
+                        "num_classes": profile.get("num_classes", 3),
+                    })
+                else:
+                    profile_statuses.append({
+                        "bar_size": bar_size,
+                        "trained": False,
+                        "description": profile.get("description", ""),
+                        "model_name": get_model_name(st_name, bar_size),
+                        "forecast_horizon": profile["forecast_horizon"],
+                        "noise_threshold": profile["noise_threshold"],
+                        "num_classes": profile.get("num_classes", 3),
+                    })
+            
+            models[st_name] = {
+                "description": st_config["description"],
+                "profiles": profile_statuses,
+                "profiles_trained": sum(1 for p in profile_statuses if p["trained"]),
+                "profiles_total": len(profile_statuses),
+            }
         
         training_status = {}
         for k, v in self._training_status.items():
@@ -1665,7 +1696,8 @@ class TimeSeriesAIService:
         
         return {
             "total_setup_types": len(self.SETUP_TYPES),
-            "models_trained": sum(1 for m in models.values() if m["trained"]),
+            "total_profiles": total_profiles,
+            "models_trained": trained_count,
             "models": models,
             "training_status": training_status,
         }
@@ -1673,16 +1705,16 @@ class TimeSeriesAIService:
     async def train_setup_model(
         self,
         setup_type: str,
-        bar_size: str = "1 day",
+        bar_size: str = None,
         max_symbols: int = None,
         max_bars_per_symbol: int = None,
     ) -> Dict[str, Any]:
         """
-        Train a model specialized for a specific setup type.
+        Train a model for one (setup_type, bar_size) profile.
         
-        The model trains on general market data but with the setup_type encoded
-        as a feature, allowing it to learn patterns specific to that setup.
-        The model is stored separately from the general timeframe models.
+        If bar_size is None, trains ALL profiles for that setup type and
+        returns a combined result. If bar_size is specified, trains only
+        that specific profile.
         """
         if not self._ml_available:
             return {"success": False, "error": "ML not available - lightgbm not installed"}
@@ -1695,63 +1727,107 @@ class TimeSeriesAIService:
         ]:
             return {"success": False, "error": f"Unknown setup type: {setup_type}"}
         
-        # Merge small VWAP types
         effective_type = setup_type
         if setup_type in ("VWAP_BOUNCE", "VWAP_FADE"):
             effective_type = "VWAP"
         
+        from services.ai_modules.setup_training_config import (
+            get_setup_profiles, get_setup_profile, get_model_name
+        )
+        
+        if bar_size is None:
+            # Train ALL profiles for this setup type
+            profiles = get_setup_profiles(effective_type)
+            results = {}
+            completed = 0
+            for idx, profile in enumerate(profiles):
+                pbar = profile["bar_size"]
+                logger.info(f"[SETUP TRAIN] {effective_type} profile {idx+1}/{len(profiles)}: {pbar}")
+                result = await self._train_single_setup_profile(
+                    effective_type, profile, max_symbols, max_bars_per_symbol
+                )
+                results[pbar] = result
+                if result.get("success"):
+                    completed += 1
+            
+            return {
+                "success": completed > 0,
+                "setup_type": effective_type,
+                "profiles_trained": completed,
+                "profiles_total": len(profiles),
+                "results": results,
+            }
+        else:
+            # Train single specified profile
+            profile = get_setup_profile(effective_type, bar_size)
+            return await self._train_single_setup_profile(
+                effective_type, profile, max_symbols, max_bars_per_symbol
+            )
+    
+    async def _train_single_setup_profile(
+        self,
+        setup_type: str,
+        profile: dict,
+        max_symbols: int = None,
+        max_bars_per_symbol: int = None,
+    ) -> Dict[str, Any]:
+        """
+        Train one model for a specific (setup_type, bar_size) profile.
+        
+        This is the core training loop: loads bars for the profile's bar_size,
+        scans for setup patterns, extracts features, and trains a LightGBM model.
+        """
+        from services.ai_modules.setup_training_config import get_model_name
+        
+        bar_size = profile["bar_size"]
+        forecast_horizon = profile["forecast_horizon"]
+        noise_threshold = profile["noise_threshold"]
+        class_weight = profile["scale_pos_weight"]
+        min_samples = profile["min_samples"]
+        num_boost_round = profile["num_boost_round"]
+        num_classes = profile.get("num_classes", 3)
+        
         if max_symbols is None:
             max_symbols = self.DEFAULT_MAX_SYMBOLS
         if max_bars_per_symbol is None:
-            max_bars_per_symbol = self.DEFAULT_MAX_BARS_PER_SYMBOL
+            max_bars_per_symbol = max(self.DEFAULT_MAX_BARS_PER_SYMBOL, 50 + forecast_horizon + 100)
         
-        status_key = f"setup_{effective_type}"
-        model_name = f"{effective_type.lower()}_predictor"
+        model_name = get_model_name(setup_type, bar_size)
+        status_key = f"setup_{setup_type}_{bar_size}"
+        cache_key = (setup_type, bar_size)
         
-        logger.info(f"[SETUP TRAIN] Starting {effective_type} model ({bar_size}, up to {max_symbols} symbols)")
+        logger.info(
+            f"[SETUP TRAIN] {setup_type}/{bar_size}: horizon={forecast_horizon}, "
+            f"threshold={noise_threshold*100:.2f}%, weight={class_weight}, "
+            f"rounds={num_boost_round}, classes={num_classes}, model={model_name}"
+        )
         
         self._training_in_progress = True
         self._training_status[status_key] = {
             "status": "running",
             "started_at": datetime.now(timezone.utc).isoformat(),
-            "message": f"Loading data for {effective_type}..."
+            "message": f"Loading data for {setup_type}/{bar_size}..."
         }
         
         try:
             import numpy as np
             from services.ai_modules.setup_pattern_detector import detect_setup
             from services.ai_modules.setup_features import get_setup_features, get_setup_feature_names
-            from services.ai_modules.setup_training_config import get_setup_config, get_bar_horizon
             
-            # ---- Phase 1: Load setup-specific training config ----
-            setup_config = get_setup_config(effective_type)
-            forecast_horizon = setup_config["forecast_horizon"]
-            noise_threshold = setup_config["noise_threshold"]
-            class_weight = setup_config["scale_pos_weight"]
-            min_samples = setup_config["min_samples"]
-            num_boost_round = setup_config["num_boost_round"]
-            num_classes = setup_config.get("num_classes", 2)
-            training_bar_sizes = setup_config.get("training_bar_sizes", [bar_size])
-            
-            logger.info(
-                f"[SETUP TRAIN] {effective_type} config: horizon={forecast_horizon}, "
-                f"threshold={noise_threshold*100:.1f}%, weight={class_weight}, "
-                f"rounds={num_boost_round}, classes={num_classes}, "
-                f"bar_sizes={training_bar_sizes}"
-            )
-            
-            # Create a dedicated GBM model with setup-specific forecast horizon
+            # Create a dedicated GBM model
             model = TimeSeriesGBM(model_name=model_name, forecast_horizon=forecast_horizon)
             model.set_db(self._db)
             
-            # Apply class weighting to LightGBM params
-            # Note: LightGBM doesn't allow is_unbalance + scale_pos_weight together.
-            # When we set an explicit weight, disable is_unbalance.
             if class_weight != 1.0:
                 model.params["scale_pos_weight"] = class_weight
-                model.params.pop("is_unbalance", None)  # Can't use both
+                model.params.pop("is_unbalance", None)
             
-            # Load bars and scan for setup patterns across ALL training bar sizes
+            # Get training symbols for this bar_size
+            symbols = await self._get_training_symbols_from_db(bar_size=bar_size, limit=max_symbols)
+            logger.info(f"[SETUP TRAIN] {setup_type}/{bar_size}: {len(symbols)} symbols")
+            
+            self._training_status[status_key]["message"] = f"Loading {len(symbols)} symbols..."
+            
             all_features = []
             all_targets = []
             total_bars_scanned = 0
@@ -1759,167 +1835,111 @@ class TimeSeriesAIService:
             noise_filtered = 0
             feature_engineer = get_feature_engineer()
             
-            # Determine combined feature names: base 46 + setup-specific
             base_feature_names = feature_engineer.get_feature_names()
-            setup_feature_names = get_setup_feature_names(effective_type)
+            setup_feature_names = get_setup_feature_names(setup_type)
             combined_feature_names = base_feature_names + [f"setup_{n}" for n in setup_feature_names]
             
             loaded = 0
-            
-            # ---- Phase 4: Multi-timeframe training loop ----
-            for tf_idx, tf_bar_size in enumerate(training_bar_sizes):
-                # Scale forecast horizon for this bar size
-                tf_horizon = get_bar_horizon(forecast_horizon, tf_bar_size)
-                
-                logger.info(
-                    f"[SETUP TRAIN] {effective_type} bar_size {tf_idx+1}/{len(training_bar_sizes)}: "
-                    f"{tf_bar_size} (horizon={tf_horizon} bars)"
+            for symbol in symbols:
+                bars = await self._get_historical_bars_from_db(
+                    symbol, bar_size=bar_size, max_bars=max_bars_per_symbol
                 )
+                if not bars or len(bars) < 50 + forecast_horizon:
+                    continue
+                loaded += 1
                 
-                # Get symbols for this bar size
-                symbols = await self._get_training_symbols_from_db(bar_size=tf_bar_size, limit=max_symbols)
-                logger.info(f"[SETUP TRAIN] {effective_type}/{tf_bar_size}: {len(symbols)} symbols")
-                
-                self._training_status[status_key]["message"] = (
-                    f"[{tf_idx+1}/{len(training_bar_sizes)} {tf_bar_size}] "
-                    f"Loading {len(symbols)} symbols..."
-                )
-                
-                tf_loaded = 0
-                for symbol in symbols:
-                    bars = await self._get_historical_bars_from_db(
-                        symbol, bar_size=tf_bar_size, max_bars=max_bars_per_symbol
+                if loaded % 50 == 0:
+                    self._training_status[status_key]["message"] = (
+                        f"Scanning {loaded}/{len(symbols)} symbols... "
+                        f"({total_matches} patterns, {noise_filtered} noise-filtered)"
                     )
-                    if not bars or len(bars) < 50 + tf_horizon:
-                        continue
-                    tf_loaded += 1
-                    loaded += 1
-                    
-                    if tf_loaded % 50 == 0:
-                        self._training_status[status_key]["message"] = (
-                            f"[{tf_idx+1}/{len(training_bar_sizes)} {tf_bar_size}] "
-                            f"Scanning {tf_loaded}/{len(symbols)} symbols... "
-                            f"({total_matches} {effective_type} patterns, {noise_filtered} noise-filtered)"
-                        )
-                    
-                    # Bars are oldest-first from DB. Create numpy arrays for pattern detection
-                    opens_arr = np.array([b.get('open', 0) for b in bars], dtype=float)
-                    highs_arr = np.array([b.get('high', 0) for b in bars], dtype=float)
-                    lows_arr = np.array([b.get('low', 0) for b in bars], dtype=float)
-                    closes_arr = np.array([b.get('close', 0) for b in bars], dtype=float)
-                    volumes_arr = np.array([b.get('volume', 0) for b in bars], dtype=float)
-                    
-                    # Replace zeros
-                    closes_arr = np.where(closes_arr == 0, 1, closes_arr)
-                    opens_arr = np.where(opens_arr == 0, closes_arr, opens_arr)
-                    volumes_arr = np.where(volumes_arr == 0, 1, volumes_arr)
-                    
-                    # Slide through bars (oldest first), checking for setup pattern at each position
-                    for i in range(len(bars) - 50 - tf_horizon):
-                        total_bars_scanned += 1
-                        
-                        # Window of 50 bars ending at position i+49
-                        window_bars = bars[i:i+50]
-                        window_recent_first = window_bars[::-1]
-                        
-                        # Arrays for the window (recent-first for pattern detection)
-                        w_opens = opens_arr[i:i+50][::-1]
-                        w_highs = highs_arr[i:i+50][::-1]
-                        w_lows = lows_arr[i:i+50][::-1]
-                        w_closes = closes_arr[i:i+50][::-1]
-                        w_volumes = volumes_arr[i:i+50][::-1]
-                        
-                        # Pattern detection: does this window match the setup?
-                        is_match, confidence, direction = detect_setup(
-                            effective_type, w_opens, w_highs, w_lows, w_closes, w_volumes
-                        )
-                        
-                        if not is_match:
-                            continue
-                        
-                        total_matches += 1
-                        
-                        # Compute forward return using tf_horizon (scaled for this bar size)
-                        current_price = bars[i + 49]["close"]
-                        future_price = bars[i + 49 + tf_horizon]["close"]
-                        target_return = (future_price - current_price) / current_price if current_price > 0 else 0
-                        
-                        # ---- Target labeling based on num_classes ----
-                        if num_classes >= 3:
-                            # 3-class: 0=DOWN, 1=FLAT, 2=UP
-                            if target_return > noise_threshold:
-                                target = 2  # UP
-                            elif target_return < -noise_threshold:
-                                target = 0  # DOWN
-                            else:
-                                target = 1  # FLAT (noise zone — kept as training data)
-                        else:
-                            # Binary: discard noise zone
-                            if abs(target_return) < noise_threshold:
-                                noise_filtered += 1
-                                continue  # Skip — this move is too small to learn from
-                            target = 1 if target_return > 0 else 0
-                        
-                        # Extract base features
-                        feature_set = feature_engineer.extract_features(
-                            window_recent_first, symbol=symbol, include_target=False
-                        )
-                        if feature_set is None:
-                            continue
-                        
-                        # Base feature vector
-                        base_vector = [feature_set.features.get(f, 0.0) for f in base_feature_names]
-                        
-                        # Setup-specific features
-                        setup_feats = get_setup_features(effective_type, w_opens, w_highs, w_lows, w_closes, w_volumes)
-                        setup_vector = [setup_feats.get(f, 0.0) for f in setup_feature_names]
-                        
-                        # Combined feature vector
-                        combined_vector = base_vector + setup_vector
-                        
-                        all_features.append(combined_vector)
-                        all_targets.append(target)
                 
-                logger.info(
-                    f"[SETUP TRAIN] {effective_type}/{tf_bar_size} done: "
-                    f"{tf_loaded} symbols, running total {len(all_features)} samples"
-                )
+                opens_arr = np.array([b.get('open', 0) for b in bars], dtype=float)
+                highs_arr = np.array([b.get('high', 0) for b in bars], dtype=float)
+                lows_arr = np.array([b.get('low', 0) for b in bars], dtype=float)
+                closes_arr = np.array([b.get('close', 0) for b in bars], dtype=float)
+                volumes_arr = np.array([b.get('volume', 0) for b in bars], dtype=float)
+                
+                closes_arr = np.where(closes_arr == 0, 1, closes_arr)
+                opens_arr = np.where(opens_arr == 0, closes_arr, opens_arr)
+                volumes_arr = np.where(volumes_arr == 0, 1, volumes_arr)
+                
+                for i in range(len(bars) - 50 - forecast_horizon):
+                    total_bars_scanned += 1
+                    
+                    w_opens = opens_arr[i:i+50][::-1]
+                    w_highs = highs_arr[i:i+50][::-1]
+                    w_lows = lows_arr[i:i+50][::-1]
+                    w_closes = closes_arr[i:i+50][::-1]
+                    w_volumes = volumes_arr[i:i+50][::-1]
+                    
+                    is_match, confidence, direction = detect_setup(
+                        setup_type, w_opens, w_highs, w_lows, w_closes, w_volumes
+                    )
+                    
+                    if not is_match:
+                        continue
+                    
+                    total_matches += 1
+                    
+                    current_price = bars[i + 49]["close"]
+                    future_price = bars[i + 49 + forecast_horizon]["close"]
+                    target_return = (future_price - current_price) / current_price if current_price > 0 else 0
+                    
+                    if num_classes >= 3:
+                        if target_return > noise_threshold:
+                            target = 2  # UP
+                        elif target_return < -noise_threshold:
+                            target = 0  # DOWN
+                        else:
+                            target = 1  # FLAT
+                    else:
+                        if abs(target_return) < noise_threshold:
+                            noise_filtered += 1
+                            continue
+                        target = 1 if target_return > 0 else 0
+                    
+                    window_recent_first = bars[i:i+50][::-1]
+                    feature_set = feature_engineer.extract_features(
+                        window_recent_first, symbol=symbol, include_target=False
+                    )
+                    if feature_set is None:
+                        continue
+                    
+                    base_vector = [feature_set.features.get(f, 0.0) for f in base_feature_names]
+                    setup_feats = get_setup_features(setup_type, w_opens, w_highs, w_lows, w_closes, w_volumes)
+                    setup_vector = [setup_feats.get(f, 0.0) for f in setup_feature_names]
+                    combined_vector = base_vector + setup_vector
+                    
+                    all_features.append(combined_vector)
+                    all_targets.append(target)
             
             if len(all_features) < min_samples:
-                msg = (f"Insufficient {effective_type} patterns after noise filtering: "
+                msg = (f"Insufficient {setup_type}/{bar_size} patterns: "
                        f"{len(all_features)} usable of {total_matches} detected "
-                       f"({noise_filtered} filtered as noise, threshold={noise_threshold*100:.1f}%). "
-                       f"Need {min_samples}+ samples.")
+                       f"({noise_filtered} noise-filtered). Need {min_samples}+.")
                 logger.warning(f"[SETUP TRAIN] {msg}")
                 self._training_status[status_key] = {"status": "error", "message": msg}
                 return {"success": False, "error": msg}
             
             logger.info(
-                f"[SETUP TRAIN] {effective_type}: {len(all_features)} usable patterns from "
+                f"[SETUP TRAIN] {setup_type}/{bar_size}: {len(all_features)} usable from "
                 f"{total_matches} detected ({noise_filtered} noise-filtered), "
-                f"{loaded} symbols across {len(training_bar_sizes)} bar sizes, "
-                f"{total_bars_scanned:,} bars scanned"
+                f"{loaded} symbols, {total_bars_scanned:,} bars"
             )
             
             self._training_status[status_key]["message"] = (
-                f"Training on {len(all_features):,} {effective_type} patterns "
-                f"(horizon={forecast_horizon}, {len(training_bar_sizes)} timeframes, "
-                f"threshold={noise_threshold*100:.1f}%)..."
+                f"Training {len(all_features):,} patterns..."
             )
             
-            # Train with enriched features — skip GBM's internal save
-            # because _save_model() compares against the general model (wrong scope).
-            # We handle setup model saving ourselves via _save_setup_model_to_db().
+            import numpy as np
             X = np.array(all_features)
             y = np.array(all_targets)
             
             unique, counts = np.unique(y.astype(int), return_counts=True)
-            if num_classes >= 3:
-                class_labels = {0: "DOWN", 1: "FLAT", 2: "UP"}
-            else:
-                class_labels = {0: "DOWN", 1: "UP"}
+            class_labels = {0: "DOWN", 1: "FLAT", 2: "UP"} if num_classes >= 3 else {0: "DOWN", 1: "UP"}
             dist_parts = [f"{class_labels.get(int(c), c)}={n} ({n/len(y)*100:.1f}%)" for c, n in zip(unique, counts)]
-            logger.info(f"[SETUP TRAIN] {effective_type} class dist: {', '.join(dist_parts)}")
+            logger.info(f"[SETUP TRAIN] {setup_type}/{bar_size} class dist: {', '.join(dist_parts)}")
             
             metrics = model.train_from_features(
                 X, y, combined_feature_names,
@@ -1928,10 +1948,10 @@ class TimeSeriesAIService:
                 num_classes=num_classes
             )
             
-            # Setup model protection: compare against previous setup model of same type
+            # Model protection: compare against previous model for same (setup, bar_size)
             should_promote = True
             existing_doc = self._db["setup_type_models"].find_one(
-                {"setup_type": effective_type},
+                {"setup_type": setup_type, "bar_size": bar_size},
                 {"metrics": 1, "version": 1, "_id": 0}
             )
             if existing_doc and existing_doc.get("metrics"):
@@ -1940,21 +1960,20 @@ class TimeSeriesAIService:
                 if new_acc < existing_acc:
                     should_promote = False
                     logger.warning(
-                        f"Setup model protection: NEW {effective_type} accuracy ({new_acc:.4f}) "
-                        f"< EXISTING accuracy ({existing_acc:.4f}). Keeping existing setup model."
+                        f"Model protection: NEW {setup_type}/{bar_size} ({new_acc:.4f}) "
+                        f"< EXISTING ({existing_acc:.4f}). Keeping existing."
                     )
                 else:
                     logger.info(
-                        f"Setup model {effective_type}: {existing_acc:.4f} -> {new_acc:.4f}. Promoting."
+                        f"Model {setup_type}/{bar_size}: {existing_acc:.4f} -> {new_acc:.4f}. Promoting."
                     )
             
             if should_promote:
-                # Store in setup models cache
-                self._setup_models[effective_type] = model
+                self._setup_models[cache_key] = model
+                self._setup_models[setup_type] = model  # legacy compat
                 
-                # Save to DB
                 await self._save_setup_model_to_db(
-                    effective_type, model, metrics, bar_size, loaded,
+                    setup_type, model, metrics, bar_size, loaded,
                     sum_bars=total_bars_scanned,
                     extra_meta={
                         "patterns_found": total_matches,
@@ -1963,15 +1982,7 @@ class TimeSeriesAIService:
                         "setup_features": [f"setup_{n}" for n in setup_feature_names],
                         "total_features": len(combined_feature_names),
                         "num_classes": num_classes,
-                        "training_bar_sizes": training_bar_sizes,
-                        "training_config": {
-                            "forecast_horizon": forecast_horizon,
-                            "noise_threshold": noise_threshold,
-                            "scale_pos_weight": class_weight,
-                            "num_boost_round": num_boost_round,
-                            "num_classes": num_classes,
-                            "training_bar_sizes": training_bar_sizes,
-                        },
+                        "profile": profile,
                     }
                 )
             
@@ -1979,23 +1990,20 @@ class TimeSeriesAIService:
                 "status": "completed",
                 "completed_at": datetime.now(timezone.utc).isoformat(),
                 "message": (
-                    f"{metrics.accuracy*100:.1f}% accuracy on {len(all_features):,} samples "
-                    f"({total_matches:,} patterns, {noise_filtered:,} noise-filtered, "
-                    f"{total_bars_scanned:,} bars across {len(training_bar_sizes)} timeframes, "
-                    f"horizon={forecast_horizon})"
+                    f"{metrics.accuracy*100:.1f}% accuracy, {len(all_features):,} samples, "
+                    f"horizon={forecast_horizon} bars"
                 )
             }
             
             logger.info(
-                f"[SETUP TRAIN] {effective_type} complete: {metrics.accuracy*100:.1f}% accuracy "
-                f"(horizon={forecast_horizon}, threshold={noise_threshold*100:.1f}%, "
-                f"{len(all_features)} usable / {total_matches} detected / {noise_filtered} noise-filtered, "
-                f"bar_sizes={training_bar_sizes})"
+                f"[SETUP TRAIN] {setup_type}/{bar_size} complete: "
+                f"{metrics.accuracy*100:.1f}% accuracy, {len(all_features)} samples"
             )
             
             return {
                 "success": True,
-                "setup_type": effective_type,
+                "setup_type": setup_type,
+                "bar_size": bar_size,
                 "model_name": model_name,
                 "metrics": metrics.to_dict(),
                 "symbols_used": loaded,
@@ -2006,16 +2014,11 @@ class TimeSeriesAIService:
                 "training_samples": metrics.training_samples,
                 "validation_samples": metrics.validation_samples,
                 "total_features": len(combined_feature_names),
-                "training_bar_sizes": training_bar_sizes,
-                "training_config": {
-                    "forecast_horizon": forecast_horizon,
-                    "noise_threshold": noise_threshold,
-                    "scale_pos_weight": class_weight,
-                    "training_bar_sizes": training_bar_sizes,
-                },
+                "forecast_horizon": forecast_horizon,
+                "description": profile.get("description", ""),
             }
         except Exception as e:
-            logger.error(f"[SETUP TRAIN] Error training {effective_type}: {e}", exc_info=True)
+            logger.error(f"[SETUP TRAIN] Error training {setup_type}/{bar_size}: {e}", exc_info=True)
             self._training_status[status_key] = {"status": "error", "message": str(e)}
             return {"success": False, "error": str(e)}
         finally:
@@ -2023,47 +2026,58 @@ class TimeSeriesAIService:
     
     async def train_all_setup_models(
         self,
-        bar_size: str = "1 day",
         max_symbols: int = None,
         max_bars_per_symbol: int = None,
     ) -> Dict[str, Any]:
-        """Train models for ALL setup types sequentially."""
+        """Train ALL profiles for ALL setup types sequentially."""
         if not self._ml_available:
             return {"success": False, "error": "ML not available"}
         if self._db is None:
             return {"success": False, "error": "Database not connected"}
         
+        from services.ai_modules.setup_training_config import get_setup_profiles
+        
         results = {}
-        total = len(self.SETUP_TYPES)
+        total_profiles = 0
         completed = 0
         
         for setup_type in self.SETUP_TYPES:
             if self._stop_training:
-                logger.info(f"[SETUP TRAIN] Stopped early after {completed}/{total}")
+                logger.info(f"[SETUP TRAIN] Stopped early after {completed} profiles")
                 break
             
-            logger.info(f"[SETUP TRAIN ALL] Training {setup_type} ({completed+1}/{total})")
-            result = await self.train_setup_model(
-                setup_type=setup_type,
-                bar_size=bar_size,
-                max_symbols=max_symbols,
-                max_bars_per_symbol=max_bars_per_symbol,
-            )
-            results[setup_type] = result
-            completed += 1
+            profiles = get_setup_profiles(setup_type)
+            setup_results = {}
+            
+            for profile in profiles:
+                total_profiles += 1
+                bar_size = profile["bar_size"]
+                logger.info(f"[SETUP TRAIN ALL] {setup_type}/{bar_size} (profile {total_profiles})")
+                
+                result = await self._train_single_setup_profile(
+                    setup_type=setup_type,
+                    profile=profile,
+                    max_symbols=max_symbols,
+                    max_bars_per_symbol=max_bars_per_symbol,
+                )
+                setup_results[bar_size] = result
+                if result.get("success"):
+                    completed += 1
+            
+            results[setup_type] = setup_results
         
-        successful = sum(1 for r in results.values() if r.get("success"))
         return {
             "success": True,
-            "total_types": total,
-            "trained": successful,
-            "failed": completed - successful,
+            "total_profiles": total_profiles,
+            "trained": completed,
+            "failed": total_profiles - completed,
             "results": results,
         }
     
     async def _save_setup_model_to_db(self, setup_type, model, metrics, bar_size, symbols_used, sum_bars=0, extra_meta=None):
-        """Save a setup-specific model to MongoDB"""
+        """Save a setup-specific model to MongoDB using compound key (setup_type, bar_size)."""
         import asyncio
+        from services.ai_modules.setup_training_config import get_model_name
         col = self._db["setup_type_models"]
         
         # Serialize model
@@ -2075,10 +2089,10 @@ class TimeSeriesAIService:
         
         doc = {
             "setup_type": setup_type,
-            "model_name": model.model_name,
+            "bar_size": bar_size,
+            "model_name": get_model_name(setup_type, bar_size),
             "model_data": model_b64,
             "version": model._version,
-            "bar_size": bar_size,
             "metrics": metrics.to_dict() if metrics else {},
             "symbols_used": symbols_used,
             "total_bars": sum_bars,
@@ -2089,13 +2103,14 @@ class TimeSeriesAIService:
         if extra_meta:
             doc.update(extra_meta)
         
+        # Compound key: (setup_type, bar_size)
         await asyncio.to_thread(
             col.update_one,
-            {"setup_type": setup_type},
+            {"setup_type": setup_type, "bar_size": bar_size},
             {"$set": doc},
             upsert=True,
         )
-        logger.info(f"Saved setup model {setup_type} to DB")
+        logger.info(f"Saved setup model {setup_type}/{bar_size} to DB")
     
     def predict_for_setup(self, symbol: str, bars: list, setup_type: str) -> Optional[Dict]:
         """

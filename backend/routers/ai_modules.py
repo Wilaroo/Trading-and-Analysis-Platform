@@ -1589,13 +1589,12 @@ async def stop_training():
 
 class SetupTrainRequest(BaseModel):
     setup_type: str = Field(..., description="Setup type to train (e.g., MOMENTUM, BREAKOUT)")
-    bar_size: Optional[str] = Field("1 day", description="Bar size/timeframe")
+    bar_size: Optional[str] = Field(None, description="Specific bar size profile to train (omit to train all profiles)")
     max_symbols: Optional[int] = Field(None, description="Max symbols to train on")
     max_bars_per_symbol: Optional[int] = Field(None, description="Max bars per symbol")
 
 
 class SetupTrainAllRequest(BaseModel):
-    bar_size: Optional[str] = Field("1 day", description="Bar size/timeframe")
     max_symbols: Optional[int] = Field(None, description="Max symbols to train on")
     max_bars_per_symbol: Optional[int] = Field(None, description="Max bars per symbol")
 
@@ -1662,7 +1661,7 @@ async def train_setup_model(request: SetupTrainRequest):
             job_type="setup_training",
             params={
                 "setup_type": setup_upper,
-                "bar_size": request.bar_size or "1 day",
+                "bar_size": request.bar_size,  # None = train all profiles
                 "max_symbols": request.max_symbols,
                 "max_bars_per_symbol": request.max_bars_per_symbol,
             },
@@ -1709,7 +1708,6 @@ async def train_all_setup_models(request: Optional[SetupTrainAllRequest] = None)
     try:
         from services.job_queue_manager import job_queue_manager
         
-        bar_size = request.bar_size if request and request.bar_size else "1 day"
         max_symbols = request.max_symbols if request and request.max_symbols else None
         max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else None
         
@@ -1717,7 +1715,7 @@ async def train_all_setup_models(request: Optional[SetupTrainAllRequest] = None)
             job_type="setup_training",
             params={
                 "setup_type": "ALL",
-                "bar_size": bar_size,
+                "bar_size": None,  # Train all profiles for all setups
                 "max_symbols": max_symbols,
                 "max_bars_per_symbol": max_bars_per_symbol,
             },

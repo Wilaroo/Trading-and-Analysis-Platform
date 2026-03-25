@@ -509,7 +509,7 @@ async def process_setup_training_job(job: dict, db) -> dict:
     
     Job params:
         - setup_type: str (e.g., 'MOMENTUM', 'BREAKOUT', or 'ALL')
-        - bar_size: str (default '1 day')
+        - bar_size: str (optional — if omitted, trains all profiles for that setup)
         - max_symbols: int (optional)
         - max_bars_per_symbol: int (optional)
     """
@@ -524,81 +524,114 @@ async def process_setup_training_job(job: dict, db) -> dict:
     timeseries_service = init_timeseries_ai(db=db)
     
     setup_type = params.get('setup_type', '').upper()
-    bar_size = params.get('bar_size', '1 day')
+    bar_size = params.get('bar_size')  # None means train all profiles
     max_symbols = params.get('max_symbols')
     max_bars_per_symbol = params.get('max_bars_per_symbol')
     
     try:
         if setup_type == 'ALL':
-            # Train all setup types
+            # Train all profiles for all setup types
+            from services.ai_modules.setup_training_config import get_setup_profiles
+            
             setup_types = list(timeseries_service.SETUP_TYPES.keys())
-            total = len(setup_types)
+            total_profiles = 0
+            for st in setup_types:
+                total_profiles += len(get_setup_profiles(st))
+            
             results = {}
             completed = 0
+            profile_idx = 0
             
-            for idx, st in enumerate(setup_types):
-                pct = int(5 + (idx / total) * 90)
-                await job_queue_manager.update_progress(
-                    job_id, percent=pct,
-                    message=f'Training {st} ({idx + 1}/{total})...',
-                    current_step=idx + 1,
-                    total_steps=total
-                )
+            for st in setup_types:
+                profiles = get_setup_profiles(st)
+                st_results = {}
                 
-                try:
-                    result = await timeseries_service.train_setup_model(
-                        setup_type=st,
-                        bar_size=bar_size,
-                        max_symbols=max_symbols,
-                        max_bars_per_symbol=max_bars_per_symbol,
+                for profile in profiles:
+                    profile_idx += 1
+                    pbar = profile["bar_size"]
+                    pct = int(5 + (profile_idx / total_profiles) * 90)
+                    
+                    await job_queue_manager.update_progress(
+                        job_id, percent=pct,
+                        message=f'Training {st}/{pbar} ({profile_idx}/{total_profiles})...',
+                        current_step=profile_idx,
+                        total_steps=total_profiles
                     )
-                    results[st] = result
-                    if result.get('success'):
-                        completed += 1
-                        acc = result.get('metrics', {}).get('accuracy', 0)
-                        await job_queue_manager.update_progress(
-                            job_id, percent=pct + 5,
-                            message=f'{st} done ({acc*100:.1f}%) - {completed}/{total} complete'
+                    
+                    try:
+                        result = await timeseries_service._train_single_setup_profile(
+                            setup_type=st,
+                            profile=profile,
+                            max_symbols=max_symbols,
+                            max_bars_per_symbol=max_bars_per_symbol,
                         )
-                except Exception as e:
-                    logger.error(f"Setup {st} training failed: {e}")
-                    results[st] = {'success': False, 'error': str(e)}
+                        st_results[pbar] = result
+                        if result.get('success'):
+                            completed += 1
+                            acc = result.get('metrics', {}).get('accuracy', 0)
+                            await job_queue_manager.update_progress(
+                                job_id, percent=pct + 2,
+                                message=f'{st}/{pbar} done ({acc*100:.1f}%) - {completed}/{total_profiles}'
+                            )
+                    except Exception as e:
+                        logger.error(f"Profile {st}/{pbar} failed: {e}")
+                        st_results[pbar] = {'success': False, 'error': str(e)}
+                
+                results[st] = st_results
             
             await job_queue_manager.update_progress(
                 job_id, percent=100,
-                message=f'All setup training complete! {completed}/{total} successful'
+                message=f'All setup training complete! {completed}/{total_profiles} profiles'
             )
             
             return {
                 'success': completed > 0,
-                'models_trained': completed,
-                'total_types': total,
+                'profiles_trained': completed,
+                'total_profiles': total_profiles,
                 'results': results
             }
         else:
-            # Train single setup type
-            await job_queue_manager.update_progress(
-                job_id, percent=10,
-                message=f'Training {setup_type} model on {bar_size} data...'
-            )
-            
-            result = await timeseries_service.train_setup_model(
-                setup_type=setup_type,
-                bar_size=bar_size,
-                max_symbols=max_symbols,
-                max_bars_per_symbol=max_bars_per_symbol,
-            )
+            # Train one setup type (all profiles or specific bar_size)
+            if bar_size:
+                # Train single profile
+                from services.ai_modules.setup_training_config import get_setup_profile
+                profile = get_setup_profile(setup_type, bar_size)
+                
+                await job_queue_manager.update_progress(
+                    job_id, percent=10,
+                    message=f'Training {setup_type}/{bar_size} (horizon={profile["forecast_horizon"]})...'
+                )
+                
+                result = await timeseries_service._train_single_setup_profile(
+                    setup_type=setup_type,
+                    profile=profile,
+                    max_symbols=max_symbols,
+                    max_bars_per_symbol=max_bars_per_symbol,
+                )
+            else:
+                # Train all profiles for this setup type
+                await job_queue_manager.update_progress(
+                    job_id, percent=10,
+                    message=f'Training all {setup_type} profiles...'
+                )
+                
+                result = await timeseries_service.train_setup_model(
+                    setup_type=setup_type,
+                    bar_size=None,
+                    max_symbols=max_symbols,
+                    max_bars_per_symbol=max_bars_per_symbol,
+                )
             
             if result.get('success'):
                 acc = result.get('metrics', {}).get('accuracy', 0)
+                profiles_trained = result.get('profiles_trained', 1)
                 await job_queue_manager.update_progress(
                     job_id, percent=100,
-                    message=f'{setup_type} trained! {acc*100:.1f}% accuracy'
+                    message=f'{setup_type} trained! {acc*100:.1f}% acc' if acc else f'{setup_type}: {profiles_trained} profiles done'
                 )
                 return {
                     'success': True,
                     'setup_type': setup_type,
-                    'accuracy': acc,
                     'details': result
                 }
             else:
