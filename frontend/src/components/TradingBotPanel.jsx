@@ -710,7 +710,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
     setActionLoading('toggle');
     try {
       const endpoint = status?.running ? 'stop' : 'start';
-      await api.post('/api/trading-bot/${endpoint}');
+      await api.post(`/api/trading-bot/${endpoint}`);
       await fetchStatus();
     } catch (err) {
       console.error('Failed to toggle bot:', err);
@@ -722,7 +722,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const changeMode = async (mode) => {
     setActionLoading('mode');
     try {
-      await api.post('/api/trading-bot/mode/${mode}');
+      await api.post(`/api/trading-bot/mode/${mode}`);
       await fetchStatus();
     } catch (err) {
       console.error('Failed to change mode:', err);
@@ -734,7 +734,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const confirmTrade = async (tradeId) => {
     setActionLoading(tradeId);
     try {
-      const res = await api.post('/api/trading-bot/trades/${tradeId}/confirm');
+      const res = await api.post(`/api/trading-bot/trades/${tradeId}/confirm`);
       const data = await res.json();
       if (data.success) {
         await fetchTrades();
@@ -750,7 +750,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const rejectTrade = async (tradeId) => {
     setActionLoading(tradeId);
     try {
-      const res = await api.post('/api/trading-bot/trades/${tradeId}/reject');
+      const res = await api.post(`/api/trading-bot/trades/${tradeId}/reject`);
       const data = await res.json();
       if (data.success) {
         await fetchTrades();
@@ -767,7 +767,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
     
     setActionLoading(tradeId);
     try {
-      const res = await api.post('/api/trading-bot/trades/${tradeId}/close');
+      const res = await api.post(`/api/trading-bot/trades/${tradeId}/close`);
       const data = await res.json();
       if (data.success) {
         await fetchTrades();
@@ -783,7 +783,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const saveStrategyConfig = async (strategy) => {
     setActionLoading(`strategy-${strategy}`);
     try {
-      const { data } = await api.post('/api/trading-bot/strategy-configs/${strategy}', strategyForm);
+      const { data } = await api.post(`/api/trading-bot/strategy-configs/${strategy}`, strategyForm);
       if (data.success) {
         await fetchStatus();
         setEditingStrategy(null);

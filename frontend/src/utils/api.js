@@ -138,6 +138,11 @@ export const getApiHealth = async () => {
 
 // ---- WebSocket URL helper ----
 export const getWebSocketUrl = () => {
+  const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
+  if (backendUrl) {
+    return `${backendUrl.replace(/^http/, 'ws')}/api/ws/quotes`;
+  }
+  // Fallback: derive from current page URL
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${protocol}//${window.location.host}/api/ws/quotes`;
 };

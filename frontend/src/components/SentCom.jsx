@@ -1997,7 +1997,7 @@ const useTradingBotControl = (pollInterval = 5000) => {
     setActionLoading('toggle');
     try {
       const endpoint = botStatus?.running ? 'stop' : 'start';
-      await api.post('/api/trading-bot/${endpoint}');
+      await api.post(`/api/trading-bot/${endpoint}`);
       await fetchBotStatus();
       toast.success(botStatus?.running ? 'Bot stopped' : 'Bot started');
     } catch (err) {
@@ -2010,7 +2010,7 @@ const useTradingBotControl = (pollInterval = 5000) => {
   const changeMode = useCallback(async (mode) => {
     setActionLoading('mode');
     try {
-      await api.post('/api/trading-bot/mode/${mode}');
+      await api.post(`/api/trading-bot/mode/${mode}`);
       await fetchBotStatus();
       toast.success(`Mode changed to ${mode}`);
     } catch (err) {
@@ -2106,7 +2106,7 @@ const useAIModules = (pollInterval = 10000) => {
   const toggleModule = useCallback(async (moduleName, enabled) => {
     setActionLoading(moduleName);
     try {
-      const { data } = await api.post('/api/ai-modules/toggle/${moduleName}', { enabled });
+      const { data } = await api.post(`/api/ai-modules/toggle/${moduleName}`, { enabled });
       if (data.success) {
         await fetchStatus();
         toast.success(`${moduleName.replace('_', ' ')} ${enabled ? 'enabled' : 'disabled'}`);

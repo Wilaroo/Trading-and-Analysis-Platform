@@ -698,7 +698,7 @@ const LiveAlertsPanel = ({
   const toggleScanner = useCallback(async () => {
     try {
       const endpoint = status?.running ? 'stop' : 'start';
-      await api.post('/api/live-scanner/${endpoint}');
+      await api.post(`/api/live-scanner/${endpoint}`);
       fetchStatus();
     } catch (err) {
       console.error('Failed to toggle scanner:', err);
