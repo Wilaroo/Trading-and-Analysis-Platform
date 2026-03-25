@@ -1,82 +1,73 @@
-<analysis>**original_problem_statement**: The user, after the completion of major refactoring tasks, wanted to discuss the next action items. This led to planning the Setup-Specific AI Models and Backtesting Workflow Automation features. During the discussion, the user reported that their recently trained AI model was not appearing in the system. The agent investigated and found a bug in the model loading logic within the . After fixing the bug and confirming the model's existence, the user and agent decided to proceed with building setup-specific AI models. The user chose Option B, which involves creating one model per setup type (e.g., BREAKOUT, MOMENTUM) that can be used across different timeframes (intraday, swing, investment).
+<analysis>**original_problem_statement**: The user initiated a series of feature developments and refactoring tasks. This started with implementing Setup-Specific AI Models, which involved creating backend APIs and a corresponding frontend panel. The user then reported a UI issue where training progress wasn't visible, which the agent fixed. Following this, the user requested that all heavy AI training tasks be moved to a background worker process to prevent UI blocking. The agent successfully implemented a robust job queue system using MongoDB and a background worker managed by , and migrated all 6 AI training endpoints (both general and setup-specific) to this new system. After completing this, the agent performed a P2 code cleanup task, safely refactoring the  file. The current task is to enhance the setup-specific models by incorporating pattern detection (to filter training data) and adding setup-specific features to improve accuracy, a plan the user approved. The agent is currently debugging a bug that arose during this implementation.
 
 **PRODUCT REQUIREMENTS**:
-1.  **Robust Data Pipeline**: (**COMPLETED**)
-2.  **Autonomous Learning Loop**: (**IN PROGRESS**)
-3.  **Comprehensive UI**: (**IN PROGRESS**)
-4.  **Startup Status Dashboard**: (**COMPLETED**)
-5.  **Comprehensive User Guide**: (**COMPLETED**)
-6.  **Resource Prioritization System (Focus Mode)**: (**COMPLETED**)
-7.  **Startup & Polling Optimization**: (**COMPLETED**)
-8.  **Job Processing Pipeline**: (**COMPLETED**)
-9.  **Persistent Chat History**: (**COMPLETED**)
-10. **Market Regime Clarity**: (**COMPLETED**)
-11. **Enable Shadow Learning**: (**COMPLETED**)
-12. **AI Comparison Backtesting**: (**COMPLETED**)
-13. **Best Model Protection**: (**COMPLETED**)
-14. **P2 Refactoring**: (**COMPLETED**)
-    -   Enable GPU for LightGBM. (**COMPLETED**)
-    -   Complete backend router refactoring. (**COMPLETED**)
-    -   Migrate raw  calls to  utility. (**COMPLETED**)
-    -   Merge  into the advanced backtest engine. (**COMPLETED**)
-15. **Setup-Specific AI Models**: (**IN PROGRESS**)
-16. **Backtesting Workflow Automation**: (**BACKLOG**)
-17. **Auto-Optimize AI Settings**: (**BACKLOG**)
-18. **API Route Profiling Dashboard**: (**BACKLOG**)
+1.  **Setup-Specific AI Models**: (**IN PROGRESS**) - Enhancing with pattern detection and custom features.
+2.  **Backtesting Workflow Automation**: (**BACKLOG**)
+3.  **Auto-Optimize AI Settings**: (**BACKLOG**)
+4.  **API Route Profiling Dashboard**: (**BACKLOG**)
+(Other requirements from the initial summary are stable and not being actively worked on.)
 
 **User's preferred language**: English
 
 **what currently exists?**
-The application is a stable full-stack AI trading platform. A major backend refactoring is complete, with 17 REST routes extracted from the monolithic  into modular  and  files. The agent has also fixed a critical bug preventing a trained time-series AI model from being loaded on startup. Following the user's direction, the agent has started implementing setup-specific AI models. The foundational backend logic has been added to , including new dictionaries to hold the models () and new methods to train and query them (, ). However, these new service methods are not yet exposed via any API endpoints.
+The application is a full-stack AI trading platform with a React frontend and FastAPI backend. A key feature is the background worker system () for processing long-running AI training jobs from a MongoDB .
+
+The backend logic for Advanced Setup-Specific Models is implemented, but a series of critical bugs were discovered and fixed in this session. The frontend UI for training is currently non-functional for the user due to a request timed out error, which is the primary blocker.
+
+Previous attempts to fix the timeout issue by modifying HTTP request handling (throttling, direct XHR, aborting polls) have all failed in the user's local environment. The current, in-progress strategy is to bypass HTTP entirely for this action and send the training command over the existing WebSocket connection.
 
 **Last working item**:
--   **Last item agent was working**: Adding the backend infrastructure for setup-specific AI models. The agent added a  dictionary to , updated the  method to load these models from the database on startup, and created new placeholder methods: , , and .
+-   **Last item agent was working**: Refactoring the app to send model training commands over the existing WebSocket connection instead of via an HTTP POST. This is a novel approach to circumvent the browser's HTTP connection limit, which is causing persistent request timed out errors for the user when they try to train a model. The agent has just started this implementation.
 -   **Status**: IN PROGRESS
 -   **Agent Testing Done**: N
--   **Which testing method agent to use?**: both
-    -   **Backend**: Create and test new API endpoints in  using  to trigger the new training and prediction flows for setup-specific models.
-    -   **Frontend**: Once backend endpoints exist, build a new UI section for managing these models and use the screenshot tool for verification. A full  run should follow to ensure no regressions.
+-   **Which testing method agent to use?**: Both
 -   **User Testing Done**: N
 
 **All Pending/In progress Issue list**:
--   **Issue 1: Expose Setup-Specific Model logic via API (P0)**
-    -   **Description**: The new methods in  (, , etc.) are not accessible. New API endpoints need to be created in  to allow the frontend (and testing tools) to trigger training for specific setup types and retrieve their predictions.
-    -   **Attempted fixes**: None.
+-   **Issue 1: Request Timed Out When Training Models from UI (P0)**
+    -   **Description**: Clicking the Train button in the UI results in a request timed out toast error. The root cause is the high number of concurrent polling GET requests saturating the browser's connection-per-domain limit, which blocks the training POST request from ever reaching the server in a timely manner.
+    -   **Attempted fixes**:
+        1.  Bypassing frontend throttler for POSTs. (Failed)
+        2.  Reducing throttler concurrency from 16 to 4. (Failed)
+        3.  Using  to bypass the  stack. (Failed)
+        4.  Pausing/aborting polling requests before the POST. (Failed)
+        5.  Posting directly to the backend port . (Failed)
     -   **Next debug checklist**:
-        1.  Open .
-        2.  Add a new POST endpoint, e.g., , that takes a  and calls the  method in  service.
-        3.  Add a new GET endpoint, e.g., , that takes a  and symbol to call .
-        4.  Add an endpoint to get the status of all setup models.
-        5.  Test the new endpoints with .
-    -   **Why fix this issue and what will be achieved with the fix?**: This will make the new backend logic functional and usable, unblocking frontend development for the feature.
-    -   **Status**: NOT STARTED
-    -   **Is recurring issue?**: N
-    -   **Should Test frontend/backend/both after fix?**: Backend
+        1.  **Backend ():** Complete the implementation of the  action handler within the  WebSocket endpoint. This logic should parse the incoming message, extract parameters like , and create a job using the  service.
+        2.  **Frontend ():** Add a  function to the hook. This function will send a JSON message like  through the open WebSocket.
+        3.  **Frontend (, ):** Import and use the new  function from the WebSocket context, replacing the failing  calls in the training handlers.
+    -   **Why fix this issue and what will be achieved with the fix?**: This is a critical P0 blocker preventing the user from using the core AI training functionality. Fixing it will make the application usable again.
+    -   **Status**: IN PROGRESS
+    -   **Is recurring issue?**: Y
+    -   **Should Test frontend/backend/both after fix?**: Both
     -   **Blocked on other issue**: No
 
 **In progress Task List**:
--   **Task 1: Complete Setup-Specific AI Models Feature (P0)**
-    -   **Where to resume**: Start with Issue 1 to create the necessary API endpoints. After the backend is functional, a new UI section needs to be built in the frontend (likely within the  page or ) to list the 15 setup types, show their model status (trained/not trained), and provide buttons to trigger training.
-    -   **What will be achieved with this?**: Users will be able to train and use specialized AI models for each of the 15 core trading setup types, leading to more accurate predictions.
+-   **Task 1: Implement Training via WebSocket (P0)**
+    -   **Where to resume**: Resume implementation in  to add the job creation logic to the new  WebSocket action. Then, implement the corresponding frontend changes in  and the UI components.
+    -   **What will be achieved with this?**: A robust method for triggering training jobs that is immune to HTTP connection pool saturation.
     -   **Status**: IN PROGRESS
     -   **Should Test frontend/backend/both after fix?**: Both
-    -   **Blocked on something**: No.
+    -   **Blocked on something**: This is the current P0 task.
 
 **Upcoming and Future Tasks**
 -   **Upcoming Tasks**:
-    -   (P1) **Backtesting Workflow Automation**: As requested by the user, create a system to automatically run backtests when a new model (either general or setup-specific) is trained.
-    -   (P2) **Code Cleanup**: Delete the now-unused  file. The unification task is complete, and its functionality is now within the .
+    -   (P1) **Backtesting Workflow Automation**: Create a system to automatically run backtests when a new model (general or setup-specific) is trained.
+    -   (P2) **Improve Setup Model Accuracy**: The newly fixed setup models have low accuracy (~47-48%). Investigate improving pattern detection, using more data, or tuning features.
 -   **Future Tasks**:
-    -   (P3) **AI Parameter Auto-Optimizer**: Create a feature to sweep AI confidence thresholds and lookback windows to find optimal settings per strategy.
-    -   (P3) **Compare Simulations Side-by-Side**: An enhancement suggested by the agent to allow comparing equity curves of multiple backtest runs.
+    -   (P3) **Auto-Optimize AI Settings**: Create a feature to sweep confidence thresholds and lookback windows to find optimal settings per strategy.
+    -   (P3) **API Route Profiling Dashboard**: An enhancement to monitor API performance.
+    -   (P3) **Compare Simulations Side-by-Side**: An enhancement to allow comparing equity curves of multiple backtest runs.
 
 **Completed work in this session**
--   **Market-Wide Backtest Fix**: Converted the synchronous, timeout-prone market-wide backtest into an asynchronous background job with a real-time progress bar.
--   **Server Refactoring & Cleanup**:
-    -   Extracted 17 REST routes from  into new  and  files, reducing  from 3,744 to 3,091 lines.
-    -   Deleted deprecated files:  and .
--   **AI Model Loading Bugfix**: Investigated and fixed a critical bug where a user's trained time-series model wasn't being loaded on startup. The fix involved correcting the database collection name and ensuring the model loading logic runs at initialization.
--   **Setup-Specific Models (Started)**: Added initial backend infrastructure to  to support training and prediction for models based on setup type.
+-   **Critical Bug Fix: Setup Models Were Copies of General Model**: Fixed three critical bugs in the training pipeline that caused all setup-specific models to be saved as copies of the general model. Setup models now train and save as distinct, specialized models with their own unique accuracies.
+-   **Critical Bug Fix:  in Worker**: Fixed a P0 bug () in  that crashed the training worker.
+-   **Bug Fix: General Model Untrained UI Race Condition**: Fixed a UI bug where the model status briefly showed Untrained during initial load by adding a loading... state.
+-   **Bug Fix: IB Gateway Status Display**: Enhanced the startup check to distinguish between a connected IB socket and actual data flow, providing a more accurate status in the UI.
+-   **Maintenance & Diagnosis**:
+    -   Diagnosed and cleared job queue issues multiple times.
+    -   Diagnosed and resolved worker cache issues.
+    -   Diagnosed a race condition between the preview worker and the user's local worker competing for jobs.
 
 **Earlier issues found/mentioned but not fixed**
 -   None.
@@ -88,52 +79,53 @@ The application is a stable full-stack AI trading platform. A major backend refa
 
 
 **Key Technical Concepts**
--   **Modular Router Refactoring**: Extracting FastAPI  instances from a monolithic file into feature-specific files.
--   **Asynchronous Background Jobs**: Converting long-running synchronous API calls into background tasks with status polling to prevent timeouts and improve user experience.
--   **Setup-Specific Models**: A new architecture where instead of one monolithic AI model, specialized models are trained for each setup type (e.g., BREAKOUT, MOMENTUM) to improve prediction accuracy.
+-   **WebSocket Communication**: The current strategy is to shift high-priority actions (like training) from HTTP POST to a WebSocket message to bypass browser connection limits that are blocking HTTP requests.
+-   **Request Throttling & Connection Pooling**: A deep and recurring problem in this session. The high number of polling GET requests saturates the browser's limited connection pool (6 per domain), blocking critical user actions.
+-   **Model Training & Protection Logic**: Corrected a critical flaw where specialized models were being overwritten by a general model.
 
 **key DB schema**
--   **timeseries_models**: Collection where trained AI models are stored. A  field will need to be added to documents to distinguish the new models.
+-   **job_queue**: 
+-   **setup_type_models**:  - Now stores correctly specialized models.
 
 **changes in tech stack**
 -   None.
 
 **All files of reference**
--   **/app/backend/services/ai_modules/timeseries_service.py**: Contains the core logic for the current task.
--   **/app/backend/routers/ai_modules.py**: Needs to be modified to expose the new service logic via API endpoints.
--   **/app/backend/server.py**: The main application file, significantly cleaned up.
+-   : The WebSocket handler is being modified here to accept a  command.
+-   : The frontend hook that needs to be updated to send the  command.
+-   : The UI component that will trigger the WebSocket training command.
+-   : Contains the logic for the failed HTTP-based timeout fixes.
+-   : Contains the recently fixed critical bugs related to model saving and prediction.
 
-**Areas that need refactoring**:
--    should be deleted as its functionality has been fully merged into the advanced backtest engine.
+**Areas that need refactoring**
+-   The high volume of polling GET requests on the frontend is the root cause of the connection saturation issue. While the WebSocket is a good workaround for the immediate P0 blocker, a future task should be to refactor the frontend to reduce polling, possibly by consolidating API calls or using WebSockets for more status updates instead of polling.
 
 **key api endpoints**
--   **/api/ai-modules/timeseries/setups/train (POST)**: (PLANNED) To train a model for a specific setup type.
--   **/api/ai-modules/timeseries/setups/predict (GET)**: (PLANNED) To get a prediction from a setup-specific model.
--   **/api/ai-modules/timeseries/setups/status (GET)**: (PLANNED) To get the status of all setup-specific models.
+-   **WebSocket **: Being enhanced to accept a  message.
+-   **POST **: The HTTP endpoint that is being replaced by the WebSocket action due to unreliability.
 
 **Critical Info for New Agent**
--   Your immediate priority is to complete the **Setup-Specific AI Models** feature. The backend service logic is partially in place; you need to create the API endpoints in  to make it functional.
--   After creating and testing the backend endpoints, you will need to build the corresponding frontend UI to allow users to manage and train these new models.
--   Once that feature is complete and verified by the user, the next task is **Backtesting Workflow Automation**.
+-   **Your immediate and only task is to fix the Request Timed Out bug by implementing training via WebSocket.** The user is completely blocked. Do not attempt any more HTTP-based fixes; they have all failed.
+-   The plan is to add a  action to the existing WebSocket. The backend  needs to handle this message and create a job in the . The frontend  hook needs a new function to send this message, and the UI components (, etc.) must be updated to call it.
+-   The previous agent has already started the backend change in . You need to complete that logic and then implement all the required frontend changes.
 
 **documents and test reports created in this job**
--   
--    (updated)
+-    (Updated multiple times with bug fixes and progress).
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User**: yes lets setup a model per type. but i have a question, couldnt a breakout or a trend continuation be classified in intraday, swing, and/or investment? - **Status**: COMPLETED. User confirmed the plan and asked a clarifying question about the modeling approach.
-2.  **User**: ok lets do option B - **Status**: COMPLETED. User approved the proposed Option B: one model per setup type, shared across timeframes.
-3.  **User**: why is the time series model archive empty? i just trained it last night - **Status**: RESOLVED. User reported a bug, which the agent investigated and fixed.
-4.  **User**: yes lets discuss next action items - **Status**: COMPLETED. User approved moving on to the next phase of development.
-5.  **User**: ok lets finalize server refactoring, code cleanup and then lets talk about building setup specific ai models and backtesting worklfow automation - **Status**: COMPLETED. User set the priority for the next set of tasks.
-6.  **User**: yes. how does this server route refactoring affect our app? - **Status**: COMPLETED. User asked for clarification on the impact of the refactoring, which the agent provided.
-7.  **User**: ok i see them now. im runnning a market wide backtest intradayfor 30 day lookback for rubberband scalps. i see that it is spinning and scanning market. i dont see any progress anywhere else - **Status**: RESOLVED. User reported an issue with the market-wide backtest UI, which the agent fixed by making it a background job with a progress bar.
-8.  **User**: ok under advanced testing its not showing any strategies are available - **Status**: RESOLVED. User reported a UI issue. It was a transient loading problem, and the agent confirmed the backend was sending the data correctly.
-9.  **User**: Please use ask_human tool and confirm your plan now. - **Status**: COMPLETED.
-10. **User**: System Review: Memory Limit exceeded... - **Status**: NOTED. An environmental issue occurred but the agent recovered.
+1.  **user**:  - **Status**: IN PROGRESS. User confirms the latest HTTP-based fix did not work, prompting the pivot to WebSockets.
+2.  **user**:  - **Status**: COMPLETED. User correctly identified that jobs were being processed by the agent's preview worker, not their local one.
+3.  **user**:  - **Status**: IN PROGRESS. User reports the core request timed out issue persists after pulling fixes.
+4.  **user**:  - **Status**: IN PROGRESS. User confirms another attempted fix (abort polling) failed.
+5.  **user**:  - **Status**: COMPLETED. User request to clean the job queue.
+6.  **user**:  - **Status**: IN PROGRESS. User confirms another attempted fix (pause polling) failed.
+7.  **user**:  - **Status**: COMPLETED. User reported a bug in the startup status check, which the agent then fixed.
+8.  **user**: (server logs) - **Status**: COMPLETED. User provided logs showing the POST request was getting stuck for minutes.
+9.  **user**:  - **Status**: COMPLETED. User confirmed a backend fix worked locally, but the UI timed out.
+10. **user**:  - **Status**: COMPLETED. User reported the worker wasn't picking up jobs, leading to diagnosis of competing workers.
 
 **Project Health Check:**
--   **Healthy**: The application is stable and development is proceeding based on a clear, user-approved roadmap. Major technical debt has been addressed through refactoring, and the agent is now working on new features.
+-   **Broken**: The application is currently unusable for its primary purpose (AI training) due to a P0 frontend blocker (Request Timed Out). While the backend logic is now sound, the user cannot trigger it from the UI.
 
 **3rd Party Integrations**
 -   Interactive Brokers (IB Gateway)
@@ -146,13 +138,13 @@ The application is a stable full-stack AI trading platform. A major backend refa
 -   Alpaca ()
 
 **Testing status**
--   **Testing agent used after significant changes**: YES. A test run was completed () after the Full AI Sim feature was finished.
--   **Troubleshoot agent used after agent stuck in loop**: NO.
--   **Test files created**: None.
+-   **Testing agent used after significant changes**: NO
+-   **Troubleshoot agent used after agent stuck in loop**: NO
+-   **Test files created**: None
 -   **Known regressions**: None.
 
 **Credentials to test flow:**
--   N/A. Credentials are in environment variables.
+-   N/A
 
 **What agent forgot to execute**
--   None. The agent has been following the user's requests and the agreed-upon plan.</analysis>
+-   The agent got stuck in a loop trying various HTTP-based solutions for the timeout issue before pivoting to the more robust WebSocket approach. It also forgot to re-add several exports to  after a rewrite, causing a temporary build failure.</analysis>

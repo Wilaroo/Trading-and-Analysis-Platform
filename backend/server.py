@@ -3018,6 +3018,57 @@ async def websocket_quotes(websocket: WebSocket):
             
             elif data.get("action") == "ping":
                 await manager.send_personal_message({"type": "pong"}, websocket)
+            
+            elif data.get("action") == "train_setup":
+                # Handle training request via WebSocket (bypasses HTTP connection pool)
+                setup_type = data.get("setup_type")
+                bar_size = data.get("bar_size", "1 day")
+                try:
+                    from services.job_queue_manager import JobQueueManager
+                    jqm = JobQueueManager()
+                    job_id = jqm.create_job(
+                        job_type="setup_training",
+                        params={"setup_type": setup_type, "bar_size": bar_size, "max_symbols": None, "max_bars_per_symbol": None}
+                    )
+                    await manager.send_personal_message({
+                        "type": "train_queued",
+                        "job_id": job_id,
+                        "setup_type": setup_type,
+                        "success": True
+                    }, websocket)
+                    print(f"[WS] Created setup_training job {job_id} for {setup_type}")
+                except Exception as train_err:
+                    await manager.send_personal_message({
+                        "type": "train_error",
+                        "error": str(train_err),
+                        "setup_type": setup_type,
+                        "success": False
+                    }, websocket)
+            
+            elif data.get("action") == "train_general":
+                # Handle general training request via WebSocket
+                bar_size = data.get("bar_size", "1 day")
+                train_type = data.get("train_type", "train-all")
+                try:
+                    from services.job_queue_manager import JobQueueManager
+                    jqm = JobQueueManager()
+                    job_id = jqm.create_job(
+                        job_type="training",
+                        params={"bar_size": bar_size, "train_type": train_type}
+                    )
+                    await manager.send_personal_message({
+                        "type": "train_queued",
+                        "job_id": job_id,
+                        "train_type": train_type,
+                        "success": True
+                    }, websocket)
+                    print(f"[WS] Created training job {job_id} ({train_type})")
+                except Exception as train_err:
+                    await manager.send_personal_message({
+                        "type": "train_error",
+                        "error": str(train_err),
+                        "success": False
+                    }, websocket)
     
     except WebSocketDisconnect:
         print("WebSocket client disconnected gracefully")

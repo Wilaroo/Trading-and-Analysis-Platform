@@ -17,7 +17,7 @@ import requests
 import os
 
 # Base URL from environment (using the public-facing URL)
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://setup-models-debug.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://setup-models-v2.preview.emergentagent.com').rstrip('/')
 
 
 class TestIntelligentStopSetupRules:
