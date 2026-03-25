@@ -455,6 +455,25 @@ class BotTrade:
     stop_order_id: Optional[str] = None
     target_order_ids: List[str] = field(default_factory=list)
     
+    # === RICHER TRADE LOGGING ===
+    
+    # Pattern variant: granular SMB setup name (e.g., "spencer_scalp", "vwap_bounce")
+    # while setup_type holds the broad AI category (e.g., "SCALP", "VWAP")
+    setup_variant: str = ""
+    
+    # Entry context: signals and conditions that aligned for this trade
+    entry_context: Dict[str, Any] = field(default_factory=dict)
+    
+    # MFE (Maximum Favorable Excursion) - best unrealized profit during trade
+    mfe_price: float = 0.0    # Best favorable price since fill
+    mfe_pct: float = 0.0      # MFE as % from entry
+    mfe_r: float = 0.0        # MFE in R-multiples (relative to risk)
+    
+    # MAE (Maximum Adverse Excursion) - worst unrealized loss during trade
+    mae_price: float = 0.0    # Worst adverse price since fill
+    mae_pct: float = 0.0      # MAE as % from entry (always negative)
+    mae_r: float = 0.0        # MAE in R-multiples (always negative)
+    
     def to_dict(self) -> Dict:
         """Convert to dictionary for JSON serialization"""
         d = asdict(self)
@@ -466,6 +485,15 @@ class BotTrade:
         d['market_regime'] = self.market_regime
         d['regime_score'] = self.regime_score
         d['regime_position_multiplier'] = self.regime_position_multiplier
+        # Ensure richer logging fields are included
+        d['setup_variant'] = self.setup_variant
+        d['entry_context'] = self.entry_context
+        d['mfe_price'] = self.mfe_price
+        d['mfe_pct'] = self.mfe_pct
+        d['mfe_r'] = self.mfe_r
+        d['mae_price'] = self.mae_price
+        d['mae_pct'] = self.mae_pct
+        d['mae_r'] = self.mae_r
         return d
 
 
@@ -1116,6 +1144,16 @@ class TradingBotService:
                         # Initialize trailing stop with current stop
                         trade.trailing_stop_config["current_stop"] = stop_price
                         trade.trailing_stop_config["original_stop"] = stop_price
+                    
+                    # Restore richer trade logging fields
+                    trade.setup_variant = trade_doc.get("setup_variant", "")
+                    trade.entry_context = trade_doc.get("entry_context", {})
+                    trade.mfe_price = trade_doc.get("mfe_price", trade.fill_price)
+                    trade.mfe_pct = trade_doc.get("mfe_pct", 0.0)
+                    trade.mfe_r = trade_doc.get("mfe_r", 0.0)
+                    trade.mae_price = trade_doc.get("mae_price", trade.fill_price)
+                    trade.mae_pct = trade_doc.get("mae_pct", 0.0)
+                    trade.mae_r = trade_doc.get("mae_r", 0.0)
                     
                     # Add to appropriate dict
                     if trade.status == TradeStatus.PENDING:
@@ -1931,6 +1969,12 @@ class TradingBotService:
                 market_regime=current_regime,
                 regime_score=regime_score,
                 regime_position_multiplier=regime_multiplier,
+                # Richer trade logging
+                setup_variant=alert.get("strategy_name", alert.get("setup_variant", setup_type)),
+                entry_context=self._build_entry_context(
+                    alert, intelligence, current_regime, regime_score,
+                    filter_action, filter_win_rate, atr, atr_percent
+                ),
                 scale_out_config={
                     "enabled": True,
                     "targets_hit": [],
@@ -2559,6 +2603,118 @@ class TradingBotService:
         
         return adjustment
     
+    def _build_entry_context(
+        self, alert: Dict, intelligence: Dict, regime: str,
+        regime_score: float, filter_action: str, filter_win_rate: float,
+        atr: float, atr_percent: float
+    ) -> Dict[str, Any]:
+        """
+        Build rich entry context capturing WHY this trade was taken.
+        This snapshot records the conditions and signals at the moment of entry
+        for post-trade analysis and AI learning.
+        """
+        ctx = {}
+        
+        # 1. Setup identification
+        ctx["scanner_setup_type"] = alert.get("setup_type", "")
+        ctx["strategy_name"] = alert.get("strategy_name", "")
+        ctx["setup_category"] = alert.get("setup_category", "")
+        ctx["score"] = alert.get("score", 0)
+        ctx["trigger_probability"] = alert.get("trigger_probability", 0)
+        ctx["tape_confirmation"] = alert.get("tape_confirmation", False)
+        ctx["priority"] = alert.get("priority", "medium")
+        if isinstance(ctx["priority"], type) and hasattr(ctx["priority"], "value"):
+            ctx["priority"] = ctx["priority"].value
+        
+        # 2. Market regime context
+        ctx["market_regime"] = regime
+        ctx["regime_score"] = regime_score
+        
+        # 3. Strategy filter context (smart filter)
+        ctx["filter_action"] = filter_action
+        ctx["filter_win_rate"] = filter_win_rate
+        ctx["strategy_win_rate"] = alert.get("strategy_win_rate", 0)
+        
+        # 4. Volatility context
+        ctx["atr"] = round(atr, 4) if atr else 0
+        ctx["atr_percent"] = round(atr_percent, 2) if atr_percent else 0
+        ctx["rvol"] = alert.get("rvol", 0) or alert.get("relative_volume", 0)
+        
+        # 5. Technical signals from intelligence
+        if intelligence:
+            tech = intelligence.get("technicals", {})
+            ctx["technicals"] = {
+                "trend": tech.get("trend", ""),
+                "rsi": tech.get("momentum", 0),
+                "vwap_relation": tech.get("vwap_relation", ""),
+                "volume_trend": tech.get("volume_trend", ""),
+                "support_nearby": tech.get("near_support", False),
+                "resistance_nearby": tech.get("near_resistance", False),
+            }
+            
+            # News/catalyst
+            if intelligence.get("news"):
+                ctx["catalyst"] = {
+                    "has_catalyst": True,
+                    "headline_count": len(intelligence["news"]) if isinstance(intelligence["news"], list) else 1,
+                }
+            
+            # Institutional signals
+            if intelligence.get("institutional"):
+                inst = intelligence["institutional"]
+                ctx["institutional"] = {
+                    "dark_pool_signal": inst.get("dark_pool_signal", ""),
+                    "block_trade_alert": inst.get("block_trade_alert", False),
+                }
+        
+        # 6. Time context
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        ctx["entry_time_et"] = now_et.strftime("%H:%M:%S")
+        ctx["time_window"] = self._classify_time_window(now_et)
+        
+        # 7. AI prediction context (if available)
+        if hasattr(self, '_last_ai_prediction') and self._last_ai_prediction:
+            pred = self._last_ai_prediction
+            if pred.get("symbol") == alert.get("symbol"):
+                ctx["ai_prediction"] = {
+                    "direction": pred.get("direction", ""),
+                    "confidence": pred.get("confidence", 0),
+                    "regime_aligned": pred.get("regime_adjustment", {}).get("regime_aligned"),
+                }
+        
+        return ctx
+    
+    @staticmethod
+    def _classify_time_window(now_et) -> str:
+        """Classify the current ET time into a trading time window."""
+        h, m = now_et.hour, now_et.minute
+        t = h * 60 + m
+        if t < 9 * 60 + 30:
+            return "pre_market"
+        elif t < 9 * 60 + 45:
+            return "opening_auction"
+        elif t < 10 * 60:
+            return "opening_drive"
+        elif t < 10 * 60 + 30:
+            return "morning_momentum"
+        elif t < 11 * 60 + 30:
+            return "morning_session"
+        elif t < 12 * 60:
+            return "late_morning"
+        elif t < 13 * 60 + 30:
+            return "midday"
+        elif t < 15 * 60:
+            return "afternoon"
+        elif t < 16 * 60:
+            return "power_hour"
+        else:
+            return "after_hours"
+    
+
     def _generate_explanation(self, alert: Dict, shares: int, entry: float, stop: float, targets: List[float], intelligence: Dict = None) -> TradeExplanation:
         """Generate detailed explanation for the trade with intelligence data"""
         symbol = alert.get('symbol', '')
@@ -2756,6 +2912,10 @@ class TradingBotService:
                 trade.executed_at = datetime.now(timezone.utc).isoformat()
                 trade.entry_order_id = result.get('order_id')
                 
+                # Initialize MFE/MAE at fill price (starting point)
+                trade.mfe_price = trade.fill_price
+                trade.mae_price = trade.fill_price
+                
                 # Mark if simulated
                 if result.get('simulated'):
                     trade.notes = (trade.notes or "") + " [SIMULATED]"
@@ -2800,6 +2960,10 @@ class TradingBotService:
                 trade.executed_at = datetime.now(timezone.utc).isoformat()
                 trade.entry_order_id = result.get('order_id')
                 trade.notes = (trade.notes or "") + " [TIMEOUT-NEEDS-SYNC]"
+                
+                # Initialize MFE/MAE
+                trade.mfe_price = trade.fill_price
+                trade.mae_price = trade.fill_price
                 
                 # Move to open trades so bot tracks it
                 if trade.id in self._pending_trades:
@@ -2885,6 +3049,36 @@ class TradingBotService:
                     trade.unrealized_pnl = (trade.current_price - trade.fill_price) * trade.remaining_shares
                 else:
                     trade.unrealized_pnl = (trade.fill_price - trade.current_price) * trade.remaining_shares
+                
+                # === MFE/MAE TRACKING ===
+                # Track from moment of fill for the full trade lifecycle
+                if trade.fill_price and trade.fill_price > 0:
+                    risk_per_share = abs(trade.fill_price - trade.stop_price) if trade.stop_price else trade.fill_price * 0.02
+                    if risk_per_share == 0:
+                        risk_per_share = trade.fill_price * 0.02  # Fallback: 2% of entry
+                    
+                    if trade.direction == TradeDirection.LONG:
+                        # MFE: highest price since fill
+                        if trade.current_price > trade.mfe_price or trade.mfe_price == 0:
+                            trade.mfe_price = trade.current_price
+                            trade.mfe_pct = ((trade.mfe_price - trade.fill_price) / trade.fill_price) * 100
+                            trade.mfe_r = (trade.mfe_price - trade.fill_price) / risk_per_share
+                        # MAE: lowest price since fill
+                        if trade.current_price < trade.mae_price or trade.mae_price == 0:
+                            trade.mae_price = trade.current_price
+                            trade.mae_pct = ((trade.mae_price - trade.fill_price) / trade.fill_price) * 100
+                            trade.mae_r = (trade.mae_price - trade.fill_price) / risk_per_share
+                    else:  # SHORT
+                        # MFE: lowest price since fill (favorable for shorts)
+                        if trade.current_price < trade.mfe_price or trade.mfe_price == 0:
+                            trade.mfe_price = trade.current_price
+                            trade.mfe_pct = ((trade.fill_price - trade.mfe_price) / trade.fill_price) * 100
+                            trade.mfe_r = (trade.fill_price - trade.mfe_price) / risk_per_share
+                        # MAE: highest price since fill (adverse for shorts)
+                        if trade.current_price > trade.mae_price or trade.mae_price == 0:
+                            trade.mae_price = trade.current_price
+                            trade.mae_pct = -((trade.mae_price - trade.fill_price) / trade.fill_price) * 100
+                            trade.mae_r = -(trade.mae_price - trade.fill_price) / risk_per_share
                 
                 # Include realized P&L from partial exits
                 total_value = trade.remaining_shares * trade.fill_price
@@ -4046,9 +4240,11 @@ class TradingBotService:
                     "stop_loss": trade.stop_price,
                     "target": trade.target_prices[0] if trade.target_prices else None,
                     "setup_type": trade.setup_type or "bot_trade",
+                    "setup_variant": trade.setup_variant,
                     "strategy": trade.setup_type or "Auto-Trade",
                     "market_regime": regime,
-                    "notes": f"[AUTO-RECORDED by Trading Bot]\nSetup: {trade.setup_type}\nReason: {trade.notes or 'Bot execution'}",
+                    "entry_context": trade.entry_context,
+                    "notes": f"[AUTO-RECORDED by Trading Bot]\nSetup: {trade.setup_type} ({trade.setup_variant})\nReason: {trade.notes or 'Bot execution'}",
                     "status": "open",
                     "tags": ["auto-recorded", "trading-bot", regime.lower()],
                     "bot_trade_id": trade.id,
@@ -4070,7 +4266,7 @@ class TradingBotService:
                     )
                     
                     if existing:
-                        # Update the existing entry with exit data
+                        # Update the existing entry with exit data + MFE/MAE
                         update_data = {
                             "exit_price": trade.exit_price,
                             "exit_date": (trade.closed_at or datetime.now(timezone.utc).isoformat())[:10],
@@ -4078,7 +4274,18 @@ class TradingBotService:
                             "pnl_percent": trade.pnl_pct,
                             "status": "closed",
                             "exit_reason": trade.close_reason or "closed",
-                            "notes": existing.get("notes", "") + f"\n\n[EXIT] Reason: {trade.close_reason or 'closed'}, P&L: ${trade.realized_pnl:+,.2f}",
+                            "mfe_price": trade.mfe_price,
+                            "mfe_pct": round(trade.mfe_pct, 2),
+                            "mfe_r": round(trade.mfe_r, 2),
+                            "mae_price": trade.mae_price,
+                            "mae_pct": round(trade.mae_pct, 2),
+                            "mae_r": round(trade.mae_r, 2),
+                            "notes": existing.get("notes", "") + (
+                                f"\n\n[EXIT] Reason: {trade.close_reason or 'closed'}, "
+                                f"P&L: ${trade.realized_pnl:+,.2f}\n"
+                                f"MFE: {trade.mfe_pct:+.2f}% ({trade.mfe_r:+.2f}R) | "
+                                f"MAE: {trade.mae_pct:+.2f}% ({trade.mae_r:+.2f}R)"
+                            ),
                         }
                         
                         await asyncio.to_thread(
@@ -4100,9 +4307,22 @@ class TradingBotService:
                             "pnl_percent": trade.pnl_pct,
                             "status": "closed",
                             "setup_type": trade.setup_type or "bot_trade",
+                            "setup_variant": trade.setup_variant,
                             "strategy": trade.setup_type or "Auto-Trade",
                             "market_regime": regime,
-                            "notes": f"[AUTO-RECORDED by Trading Bot]\nExit Reason: {trade.close_reason or 'closed'}",
+                            "entry_context": trade.entry_context,
+                            "mfe_price": trade.mfe_price,
+                            "mfe_pct": round(trade.mfe_pct, 2),
+                            "mfe_r": round(trade.mfe_r, 2),
+                            "mae_price": trade.mae_price,
+                            "mae_pct": round(trade.mae_pct, 2),
+                            "mae_r": round(trade.mae_r, 2),
+                            "notes": (
+                                f"[AUTO-RECORDED by Trading Bot]\n"
+                                f"Exit Reason: {trade.close_reason or 'closed'}\n"
+                                f"MFE: {trade.mfe_pct:+.2f}% ({trade.mfe_r:+.2f}R) | "
+                                f"MAE: {trade.mae_pct:+.2f}% ({trade.mae_r:+.2f}R)"
+                            ),
                             "tags": ["auto-recorded", "trading-bot", regime.lower()],
                             "bot_trade_id": trade.id,
                         }
