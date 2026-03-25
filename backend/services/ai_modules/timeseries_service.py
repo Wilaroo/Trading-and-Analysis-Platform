@@ -1625,9 +1625,12 @@ class TimeSeriesAIService:
     
     def get_setup_models_status(self) -> Dict[str, Any]:
         """Get status of all setup-specific models"""
+        from services.ai_modules.setup_training_config import get_setup_config
+        
         models = {}
         for st_name, st_config in self.SETUP_TYPES.items():
             model = self._setup_models.get(st_name)
+            config = get_setup_config(st_name)
             if model and model._model is not None:
                 metrics = model._metrics
                 models[st_name] = {
@@ -1638,11 +1641,19 @@ class TimeSeriesAIService:
                     "training_samples": metrics.training_samples if metrics else 0,
                     "validation_samples": metrics.validation_samples if metrics else 0,
                     "trained_at": metrics.last_trained if metrics else None,
+                    "training_config": {
+                        "forecast_horizon": config["forecast_horizon"],
+                        "noise_threshold": config["noise_threshold"],
+                    },
                 }
             else:
                 models[st_name] = {
                     "trained": False,
                     "description": st_config["description"],
+                    "training_config": {
+                        "forecast_horizon": config["forecast_horizon"],
+                        "noise_threshold": config["noise_threshold"],
+                    },
                 }
         
         training_status = {}
@@ -1708,10 +1719,31 @@ class TimeSeriesAIService:
             import numpy as np
             from services.ai_modules.setup_pattern_detector import detect_setup
             from services.ai_modules.setup_features import get_setup_features, get_setup_feature_names
+            from services.ai_modules.setup_training_config import get_setup_config
             
-            # Create a dedicated GBM model for this setup type
-            model = TimeSeriesGBM(model_name=model_name)
+            # ---- Phase 1: Load setup-specific training config ----
+            setup_config = get_setup_config(effective_type)
+            forecast_horizon = setup_config["forecast_horizon"]
+            noise_threshold = setup_config["noise_threshold"]
+            class_weight = setup_config["scale_pos_weight"]
+            min_samples = setup_config["min_samples"]
+            num_boost_round = setup_config["num_boost_round"]
+            
+            logger.info(
+                f"[SETUP TRAIN] {effective_type} config: horizon={forecast_horizon}, "
+                f"threshold={noise_threshold*100:.1f}%, weight={class_weight}, rounds={num_boost_round}"
+            )
+            
+            # Create a dedicated GBM model with setup-specific forecast horizon
+            model = TimeSeriesGBM(model_name=model_name, forecast_horizon=forecast_horizon)
             model.set_db(self._db)
+            
+            # Apply class weighting to LightGBM params
+            # Note: LightGBM doesn't allow is_unbalance + scale_pos_weight together.
+            # When we set an explicit weight, disable is_unbalance.
+            if class_weight != 1.0:
+                model.params["scale_pos_weight"] = class_weight
+                model.params.pop("is_unbalance", None)  # Can't use both
             
             # Get training symbols — use ALL available symbols (no cap unless specified)
             symbols = await self._get_training_symbols_from_db(bar_size=bar_size, limit=max_symbols)
@@ -1724,6 +1756,7 @@ class TimeSeriesAIService:
             all_targets = []
             total_bars_scanned = 0
             total_matches = 0
+            noise_filtered = 0
             feature_engineer = get_feature_engineer()
             
             # Determine combined feature names: base 46 + setup-specific
@@ -1736,14 +1769,14 @@ class TimeSeriesAIService:
                 bars = await self._get_historical_bars_from_db(
                     symbol, bar_size=bar_size, max_bars=max_bars_per_symbol
                 )
-                if not bars or len(bars) < 50 + model.forecast_horizon:
+                if not bars or len(bars) < 50 + forecast_horizon:
                     continue
                 loaded += 1
                 
                 if loaded % 50 == 0:
                     self._training_status[status_key]["message"] = (
                         f"Scanning {loaded}/{len(symbols)} symbols... "
-                        f"({total_matches} {effective_type} patterns found)"
+                        f"({total_matches} {effective_type} patterns, {noise_filtered} noise-filtered)"
                     )
                 
                 # Bars are oldest-first from DB. Create numpy arrays for pattern detection
@@ -1759,7 +1792,7 @@ class TimeSeriesAIService:
                 volumes_arr = np.where(volumes_arr == 0, 1, volumes_arr)
                 
                 # Slide through bars (oldest first), checking for setup pattern at each position
-                for i in range(len(bars) - 50 - model.forecast_horizon):
+                for i in range(len(bars) - 50 - forecast_horizon):
                     total_bars_scanned += 1
                     
                     # Window of 50 bars ending at position i+49
@@ -1783,6 +1816,16 @@ class TimeSeriesAIService:
                     
                     total_matches += 1
                     
+                    # ---- Phase 2A: Noise threshold filtering ----
+                    # Compute forward return and discard samples in the noise zone
+                    current_price = bars[i + 49]["close"]
+                    future_price = bars[i + 49 + forecast_horizon]["close"]
+                    target_return = (future_price - current_price) / current_price if current_price > 0 else 0
+                    
+                    if abs(target_return) < noise_threshold:
+                        noise_filtered += 1
+                        continue  # Skip — this move is too small to learn from
+                    
                     # Extract base features
                     feature_set = feature_engineer.extract_features(
                         window_recent_first, symbol=symbol, include_target=False
@@ -1800,29 +1843,29 @@ class TimeSeriesAIService:
                     # Combined feature vector
                     combined_vector = base_vector + setup_vector
                     
-                    # Target: forward-looking return
-                    current_price = bars[i + 49]["close"]
-                    future_price = bars[i + 49 + model.forecast_horizon]["close"]
-                    target_return = (future_price - current_price) / current_price if current_price > 0 else 0
                     target = 1 if target_return > 0 else 0
                     
                     all_features.append(combined_vector)
                     all_targets.append(target)
             
-            if len(all_features) < 50:
-                msg = (f"Insufficient {effective_type} patterns: {total_matches} found across "
-                       f"{loaded} symbols ({total_bars_scanned:,} bars scanned). Need 50+ samples.")
+            if len(all_features) < min_samples:
+                msg = (f"Insufficient {effective_type} patterns after noise filtering: "
+                       f"{len(all_features)} usable of {total_matches} detected "
+                       f"({noise_filtered} filtered as noise, threshold={noise_threshold*100:.1f}%). "
+                       f"Need {min_samples}+ samples.")
                 logger.warning(f"[SETUP TRAIN] {msg}")
                 self._training_status[status_key] = {"status": "error", "message": msg}
                 return {"success": False, "error": msg}
             
             logger.info(
-                f"[SETUP TRAIN] {effective_type}: {total_matches} patterns from "
+                f"[SETUP TRAIN] {effective_type}: {len(all_features)} usable patterns from "
+                f"{total_matches} detected ({noise_filtered} noise-filtered), "
                 f"{loaded} symbols, {total_bars_scanned:,} bars scanned"
             )
             
             self._training_status[status_key]["message"] = (
-                f"Training on {len(all_features):,} {effective_type} patterns..."
+                f"Training on {len(all_features):,} {effective_type} patterns "
+                f"(horizon={forecast_horizon}, threshold={noise_threshold*100:.1f}%)..."
             )
             
             # Train with enriched features — skip GBM's internal save
@@ -1830,7 +1873,19 @@ class TimeSeriesAIService:
             # We handle setup model saving ourselves via _save_setup_model_to_db().
             X = np.array(all_features)
             y = np.array(all_targets)
-            metrics = model.train_from_features(X, y, combined_feature_names, skip_save=True)
+            
+            n_up = np.sum(y == 1)
+            n_down = np.sum(y == 0)
+            logger.info(
+                f"[SETUP TRAIN] {effective_type} class dist: UP={n_up} ({n_up/len(y)*100:.1f}%), "
+                f"DOWN={n_down} ({n_down/len(y)*100:.1f}%)"
+            )
+            
+            metrics = model.train_from_features(
+                X, y, combined_feature_names,
+                skip_save=True,
+                num_boost_round=num_boost_round
+            )
             
             # Setup model protection: compare against previous setup model of same type
             should_promote = True
@@ -1862,18 +1917,34 @@ class TimeSeriesAIService:
                     sum_bars=total_bars_scanned,
                     extra_meta={
                         "patterns_found": total_matches,
+                        "noise_filtered": noise_filtered,
+                        "usable_samples": len(all_features),
                         "setup_features": [f"setup_{n}" for n in setup_feature_names],
                         "total_features": len(combined_feature_names),
+                        "training_config": {
+                            "forecast_horizon": forecast_horizon,
+                            "noise_threshold": noise_threshold,
+                            "scale_pos_weight": class_weight,
+                            "num_boost_round": num_boost_round,
+                        },
                     }
                 )
             
             self._training_status[status_key] = {
                 "status": "completed",
                 "completed_at": datetime.now(timezone.utc).isoformat(),
-                "message": f"{metrics.accuracy*100:.1f}% accuracy on {total_matches:,} patterns ({total_bars_scanned:,} bars scanned)"
+                "message": (
+                    f"{metrics.accuracy*100:.1f}% accuracy on {len(all_features):,} samples "
+                    f"({total_matches:,} patterns, {noise_filtered:,} noise-filtered, "
+                    f"{total_bars_scanned:,} bars, horizon={forecast_horizon})"
+                )
             }
             
-            logger.info(f"[SETUP TRAIN] {effective_type} complete: {metrics.accuracy*100:.1f}% accuracy")
+            logger.info(
+                f"[SETUP TRAIN] {effective_type} complete: {metrics.accuracy*100:.1f}% accuracy "
+                f"(horizon={forecast_horizon}, threshold={noise_threshold*100:.1f}%, "
+                f"{len(all_features)} usable / {total_matches} detected / {noise_filtered} noise-filtered)"
+            )
             
             return {
                 "success": True,
@@ -1883,9 +1954,16 @@ class TimeSeriesAIService:
                 "symbols_used": loaded,
                 "total_bars_scanned": total_bars_scanned,
                 "patterns_found": total_matches,
+                "noise_filtered": noise_filtered,
+                "usable_samples": len(all_features),
                 "training_samples": metrics.training_samples,
                 "validation_samples": metrics.validation_samples,
                 "total_features": len(combined_feature_names),
+                "training_config": {
+                    "forecast_horizon": forecast_horizon,
+                    "noise_threshold": noise_threshold,
+                    "scale_pos_weight": class_weight,
+                },
             }
         except Exception as e:
             logger.error(f"[SETUP TRAIN] Error training {effective_type}: {e}", exc_info=True)
