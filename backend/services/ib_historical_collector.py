@@ -92,7 +92,7 @@ class IBHistoricalCollector:
     BAR_CONFIGS = {
         "1 min": {
             "max_duration": "1 W",       # 2000 bars ÷ 390/day = ~5 trading days = ~1 week
-            "max_history_days": 365,     # IB limit: ~1 year max history
+            "max_history_days": 180,     # IB limit: ~6 months max for 1-min bars
             "bars_per_day": 390,         # 6.5 hours * 60 mins
         },
         "5 mins": {

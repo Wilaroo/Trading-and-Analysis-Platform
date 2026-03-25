@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # ─── IB Max Lookback Config ──────────────────────────────────────────────────
 
 IB_MAX_LOOKBACK = {
-    "1 min":  {"max_days": 365,  "max_duration": "1 W",  "bars_per_day": 390},
+    "1 min":  {"max_days": 180,  "max_duration": "1 W",  "bars_per_day": 390},
     "5 mins": {"max_days": 730,  "max_duration": "1 M",  "bars_per_day": 78},
     "15 mins":{"max_days": 730,  "max_duration": "3 M",  "bars_per_day": 26},
     "30 mins":{"max_days": 730,  "max_duration": "6 M",  "bars_per_day": 13},
