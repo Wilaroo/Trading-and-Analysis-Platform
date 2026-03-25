@@ -31,6 +31,7 @@ import SimulationQuickPanel from './SimulationQuickPanel';
 import TestingToolsPanel from './TestingToolsPanel';
 import AIModulesPanel from './AIModulesPanel';
 import StrategyPipelinePanel from './StrategyPipelinePanel';
+import SetupModelsPanel from './SetupModelsPanel';
 
 const DEFAULT_DATA = {
   aiAccuracy: null,
@@ -368,6 +369,9 @@ const NIA = () => {
 
       {/* 1. Unified AI Training & Calibration */}
       <UnifiedAITraining onTrainComplete={handleTrainComplete} />
+
+      {/* 1.5 Setup-Specific AI Models */}
+      <SetupModelsPanel />
 
       {/* 2. Intel Overview - Key metrics with connector health */}
       <IntelOverview data={intelOverviewData} />

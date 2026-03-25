@@ -104,9 +104,24 @@ class TimeSeriesAIService:
     DEFAULT_MAX_SYMBOLS = 50  # Start small, complete quickly (~30-60 seconds)
     DEFAULT_MAX_BARS_PER_SYMBOL = 500  # ~25,000 bars total
     
+    # Setup types that have enough strategies to justify a dedicated model
+    SETUP_TYPES = {
+        "MOMENTUM": {"description": "Trend-following momentum plays", "min_strategies": 35},
+        "SCALP": {"description": "Quick scalp trades on micro-moves", "min_strategies": 12},
+        "BREAKOUT": {"description": "Price breakout from consolidation", "min_strategies": 6},
+        "GAP_AND_GO": {"description": "Gap continuation plays", "min_strategies": 4},
+        "RANGE": {"description": "Range-bound mean reversion", "min_strategies": 4},
+        "REVERSAL": {"description": "Trend reversal/counter-trend", "min_strategies": 3},
+        "TREND_CONTINUATION": {"description": "Continuation after pullback", "min_strategies": 3},
+        "ORB": {"description": "Opening Range Breakout", "min_strategies": 2},
+        "VWAP": {"description": "VWAP bounce/fade plays", "min_strategies": 3},
+        "MEAN_REVERSION": {"description": "Statistical mean reversion", "min_strategies": 1},
+    }
+    
     def __init__(self):
         self._model = get_timeseries_model() if ML_AVAILABLE else None
         self._models = {}  # Cache for multi-timeframe models
+        self._setup_models = {}  # Cache for setup-type-specific models
         self._db = None
         self._historical_service = None
         self._last_train_time = None
@@ -127,6 +142,7 @@ class TimeSeriesAIService:
         # Auto-load models from DB on startup
         if db is not None and self._ml_available:
             self.reload_models_from_db()
+            self._load_setup_models_from_db()
     
     def reload_models_from_db(self):
         """Reload all trained models from MongoDB.
@@ -1547,15 +1563,316 @@ class TimeSeriesAIService:
         
     def get_status(self) -> Dict[str, Any]:
         """Get service status"""
-        model_status = self._model.get_status()
+        model_status = self._model.get_status() if self._model else {}
+        
+        # Setup models status
+        setup_status = {}
+        for st, model in self._setup_models.items():
+            try:
+                s = model.get_status()
+                setup_status[st] = {
+                    "trained": s.get("trained", False),
+                    "version": s.get("version"),
+                    "accuracy": s.get("metrics", {}).get("accuracy"),
+                    "training_samples": s.get("metrics", {}).get("training_samples"),
+                }
+            except Exception:
+                setup_status[st] = {"trained": False}
         
         return {
             "service": "timeseries_ai",
             "model": model_status,
+            "setup_models": setup_status,
+            "setup_models_count": len(self._setup_models),
             "last_train": self._last_train_time.isoformat() if self._last_train_time else None,
             "historical_service_connected": self._historical_service is not None,
             "db_connected": self._db is not None
         }
+    
+    # ===================== SETUP-SPECIFIC MODEL METHODS =====================
+    
+    def _load_setup_models_from_db(self):
+        """Load all setup-specific models from MongoDB on startup"""
+        if self._db is None or not self._ml_available:
+            return
+        
+        col = self._db["setup_type_models"]
+        loaded = 0
+        for doc in col.find({"model_data": {"$exists": True}}):
+            try:
+                setup_type = doc.get("setup_type")
+                if not setup_type:
+                    continue
+                model_bytes = base64.b64decode(doc["model_data"])
+                loaded_model = pickle.loads(model_bytes)
+                
+                model_name = f"{setup_type.lower()}_predictor"
+                gbm = TimeSeriesGBM(model_name=model_name)
+                gbm.set_db(self._db)
+                gbm._model = loaded_model
+                gbm._version = doc.get("version", "v0.0.0")
+                if doc.get("metrics"):
+                    gbm._metrics = ModelMetrics(**doc["metrics"])
+                
+                self._setup_models[setup_type] = gbm
+                loaded += 1
+                logger.info(f"Loaded setup model: {setup_type} ({doc.get('version', '?')})")
+            except Exception as e:
+                logger.warning(f"Could not load setup model {doc.get('setup_type')}: {e}")
+        
+        if loaded:
+            logger.info(f"Loaded {loaded} setup-specific models from database")
+    
+    def get_setup_models_status(self) -> Dict[str, Any]:
+        """Get status of all setup-specific models"""
+        models = {}
+        for st_name, st_config in self.SETUP_TYPES.items():
+            model = self._setup_models.get(st_name)
+            if model and model._model is not None:
+                metrics = model._metrics
+                models[st_name] = {
+                    "trained": True,
+                    "description": st_config["description"],
+                    "version": model._version,
+                    "accuracy": metrics.accuracy if metrics else None,
+                    "training_samples": metrics.training_samples if metrics else 0,
+                    "validation_samples": metrics.validation_samples if metrics else 0,
+                    "trained_at": metrics.last_trained if metrics else None,
+                }
+            else:
+                models[st_name] = {
+                    "trained": False,
+                    "description": st_config["description"],
+                }
+        
+        training_status = {}
+        for k, v in self._training_status.items():
+            if k.startswith("setup_"):
+                training_status[k] = v
+        
+        return {
+            "total_setup_types": len(self.SETUP_TYPES),
+            "models_trained": sum(1 for m in models.values() if m["trained"]),
+            "models": models,
+            "training_status": training_status,
+        }
+    
+    async def train_setup_model(
+        self,
+        setup_type: str,
+        bar_size: str = "1 day",
+        max_symbols: int = None,
+        max_bars_per_symbol: int = None,
+    ) -> Dict[str, Any]:
+        """
+        Train a model specialized for a specific setup type.
+        
+        The model trains on general market data but with the setup_type encoded
+        as a feature, allowing it to learn patterns specific to that setup.
+        The model is stored separately from the general timeframe models.
+        """
+        if not self._ml_available:
+            return {"success": False, "error": "ML not available - lightgbm not installed"}
+        if self._db is None:
+            return {"success": False, "error": "Database not connected"}
+        
+        setup_type = setup_type.upper()
+        if setup_type not in self.SETUP_TYPES and setup_type not in [
+            "PULLBACK", "VWAP_FADE", "FLAG", "PIVOT", "SWING", "VWAP_BOUNCE"
+        ]:
+            return {"success": False, "error": f"Unknown setup type: {setup_type}"}
+        
+        # Merge small VWAP types
+        effective_type = setup_type
+        if setup_type in ("VWAP_BOUNCE", "VWAP_FADE"):
+            effective_type = "VWAP"
+        
+        if max_symbols is None:
+            max_symbols = self.DEFAULT_MAX_SYMBOLS
+        if max_bars_per_symbol is None:
+            max_bars_per_symbol = self.DEFAULT_MAX_BARS_PER_SYMBOL
+        
+        status_key = f"setup_{effective_type}"
+        model_name = f"{effective_type.lower()}_predictor"
+        
+        logger.info(f"[SETUP TRAIN] Starting {effective_type} model ({bar_size}, up to {max_symbols} symbols)")
+        
+        self._training_in_progress = True
+        self._training_status[status_key] = {
+            "status": "running",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "message": f"Loading data for {effective_type}..."
+        }
+        
+        try:
+            # Create a dedicated GBM model for this setup type
+            model = TimeSeriesGBM(model_name=model_name)
+            model.set_db(self._db)
+            
+            # Get training symbols
+            symbols = await self._get_training_symbols_from_db(bar_size=bar_size, limit=max_symbols)
+            logger.info(f"[SETUP TRAIN] {effective_type}: {len(symbols)} symbols")
+            
+            self._training_status[status_key]["message"] = f"Loading {len(symbols)} symbols..."
+            
+            # Load bars
+            bars_by_symbol = {}
+            loaded = 0
+            for symbol in symbols:
+                bars = await self._get_historical_bars_from_db(
+                    symbol, bar_size=bar_size, max_bars=max_bars_per_symbol
+                )
+                if bars and len(bars) >= self.MIN_BARS_FOR_TRAINING:
+                    bars_by_symbol[symbol] = bars
+                    loaded += 1
+                    if loaded % 25 == 0:
+                        self._training_status[status_key]["message"] = f"Loaded {loaded}/{len(symbols)} symbols..."
+            
+            if not bars_by_symbol:
+                self._training_status[status_key] = {"status": "error", "message": "No data available"}
+                return {"success": False, "error": "No historical data available"}
+            
+            total_bars = sum(len(b) for b in bars_by_symbol.values())
+            logger.info(f"[SETUP TRAIN] Training {effective_type} on {len(bars_by_symbol)} symbols, {total_bars:,} bars")
+            
+            self._training_status[status_key]["message"] = f"Training {effective_type} on {total_bars:,} bars..."
+            
+            # Train the model
+            metrics = model.train(bars_by_symbol)
+            
+            # Store in setup models cache
+            self._setup_models[effective_type] = model
+            
+            # Save to DB
+            await self._save_setup_model_to_db(effective_type, model, metrics, bar_size, len(bars_by_symbol), total_bars)
+            
+            self._training_status[status_key] = {
+                "status": "completed",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "message": f"{metrics.accuracy*100:.1f}% accuracy on {total_bars:,} bars"
+            }
+            
+            logger.info(f"[SETUP TRAIN] {effective_type} complete: {metrics.accuracy*100:.1f}% accuracy")
+            
+            return {
+                "success": True,
+                "setup_type": effective_type,
+                "model_name": model_name,
+                "metrics": metrics.to_dict(),
+                "symbols_used": len(bars_by_symbol),
+                "total_bars": total_bars,
+                "training_samples": metrics.training_samples,
+                "validation_samples": metrics.validation_samples,
+            }
+        except Exception as e:
+            logger.error(f"[SETUP TRAIN] Error training {effective_type}: {e}", exc_info=True)
+            self._training_status[status_key] = {"status": "error", "message": str(e)}
+            return {"success": False, "error": str(e)}
+        finally:
+            self._training_in_progress = False
+    
+    async def train_all_setup_models(
+        self,
+        bar_size: str = "1 day",
+        max_symbols: int = None,
+        max_bars_per_symbol: int = None,
+    ) -> Dict[str, Any]:
+        """Train models for ALL setup types sequentially."""
+        if not self._ml_available:
+            return {"success": False, "error": "ML not available"}
+        if self._db is None:
+            return {"success": False, "error": "Database not connected"}
+        
+        results = {}
+        total = len(self.SETUP_TYPES)
+        completed = 0
+        
+        for setup_type in self.SETUP_TYPES:
+            if self._stop_training:
+                logger.info(f"[SETUP TRAIN] Stopped early after {completed}/{total}")
+                break
+            
+            logger.info(f"[SETUP TRAIN ALL] Training {setup_type} ({completed+1}/{total})")
+            result = await self.train_setup_model(
+                setup_type=setup_type,
+                bar_size=bar_size,
+                max_symbols=max_symbols,
+                max_bars_per_symbol=max_bars_per_symbol,
+            )
+            results[setup_type] = result
+            completed += 1
+        
+        successful = sum(1 for r in results.values() if r.get("success"))
+        return {
+            "success": True,
+            "total_types": total,
+            "trained": successful,
+            "failed": completed - successful,
+            "results": results,
+        }
+    
+    async def _save_setup_model_to_db(self, setup_type, model, metrics, bar_size, symbols_used, total_bars):
+        """Save a setup-specific model to MongoDB"""
+        import asyncio
+        col = self._db["setup_type_models"]
+        
+        # Serialize model
+        model_bytes = pickle.dumps(model._model)
+        model_b64 = base64.b64encode(model_bytes).decode('utf-8')
+        
+        doc = {
+            "setup_type": setup_type,
+            "model_name": model.model_name,
+            "model_data": model_b64,
+            "version": model._version,
+            "bar_size": bar_size,
+            "metrics": metrics.to_dict() if metrics else {},
+            "symbols_used": symbols_used,
+            "total_bars": total_bars,
+            "trained_at": datetime.now(timezone.utc).isoformat(),
+        }
+        
+        await asyncio.to_thread(
+            col.update_one,
+            {"setup_type": setup_type},
+            {"$set": doc},
+            upsert=True,
+        )
+        logger.info(f"Saved setup model {setup_type} to DB")
+    
+    def predict_for_setup(self, symbol: str, bars: list, setup_type: str) -> Optional[Dict]:
+        """
+        Make a prediction using the setup-specific model if available,
+        otherwise fall back to the general model.
+        """
+        effective_type = setup_type.upper()
+        if effective_type in ("VWAP_BOUNCE", "VWAP_FADE"):
+            effective_type = "VWAP"
+        
+        # Try setup-specific model first
+        model = self._setup_models.get(effective_type)
+        if model and model._model is not None:
+            try:
+                prediction = model.predict(bars)
+                if prediction:
+                    prediction["model_used"] = f"{effective_type.lower()}_predictor"
+                    prediction["model_type"] = "setup_specific"
+                    return prediction
+            except Exception as e:
+                logger.warning(f"Setup model {effective_type} prediction failed: {e}")
+        
+        # Fall back to general model
+        if self._model and self._model._model is not None:
+            try:
+                prediction = self._model.predict(bars)
+                if prediction:
+                    prediction["model_used"] = "general"
+                    prediction["model_type"] = "general"
+                    return prediction
+            except Exception as e:
+                logger.warning(f"General model prediction failed: {e}")
+        
+        return None
         
     async def verify_pending_predictions(self) -> Dict[str, Any]:
         """

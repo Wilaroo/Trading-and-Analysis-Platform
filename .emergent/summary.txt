@@ -1,125 +1,139 @@
-<analysis>**original_problem_statement**: The user initially reported a critical regression where the application's startup modal was extremely slow and getting stuck, blocking all access. After fixing this and several other related performance and data display issues, the user has now asked for a thorough analysis of the NIA (Neural Intelligence Agency) page. The goal is to identify areas for improvement, such as consolidating components, maximizing screen space, and removing redundancies, and to provide suggestions without implementing any changes yet.
+<analysis>**original_problem_statement**: The user, after the completion of major refactoring tasks, wanted to discuss the next action items. This led to planning the Setup-Specific AI Models and Backtesting Workflow Automation features. During the discussion, the user reported that their recently trained AI model was not appearing in the system. The agent investigated and found a bug in the model loading logic within the . After fixing the bug and confirming the model's existence, the user and agent decided to proceed with building setup-specific AI models. The user chose Option B, which involves creating one model per setup type (e.g., BREAKOUT, MOMENTUM) that can be used across different timeframes (intraday, swing, investment).
 
 **PRODUCT REQUIREMENTS**:
-1.  **Robust Data Pipeline**: Collect historical data for all required timeframes. (**COMPLETED**)
-2.  **Autonomous Learning Loop**: Implement automation for data collection and model training. (**IN PROGRESS**)
-3.  **Comprehensive UI**: Consolidate all features into an intuitive dashboard. (**IN PROGRESS**)
-4.  **Startup Status Dashboard**: Ensure the UI correctly reflects the status of all backend services. (**COMPLETED**)
-5.  **Comprehensive User Guide**: Create a detailed, visual, and downloadable guide. (**COMPLETED**)
-6.  **Resource Prioritization System (Focus Mode)**: Implement a system to manage application resources. (**COMPLETED**)
-7.  **Startup & Polling Optimization**: Implement a system to prevent the backend from being overwhelmed by frontend requests. (**COMPLETED**)
-8.  **Job Processing Pipeline**: Ensure background jobs are correctly created, queued, and executed by the worker process. (**COMPLETED**)
-9.  **Persistent Chat History**: Chat messages should persist across sessions/refreshes. (**COMPLETED**)
-10. **Market Regime Clarity**: Improve the Market Regime panel's readability. (**COMPLETED**)
-11. **Enable Shadow Learning**: The system should automatically evaluate shadow trade decisions. (**COMPLETED**)
+1.  **Robust Data Pipeline**: (**COMPLETED**)
+2.  **Autonomous Learning Loop**: (**IN PROGRESS**)
+3.  **Comprehensive UI**: (**IN PROGRESS**)
+4.  **Startup Status Dashboard**: (**COMPLETED**)
+5.  **Comprehensive User Guide**: (**COMPLETED**)
+6.  **Resource Prioritization System (Focus Mode)**: (**COMPLETED**)
+7.  **Startup & Polling Optimization**: (**COMPLETED**)
+8.  **Job Processing Pipeline**: (**COMPLETED**)
+9.  **Persistent Chat History**: (**COMPLETED**)
+10. **Market Regime Clarity**: (**COMPLETED**)
+11. **Enable Shadow Learning**: (**COMPLETED**)
+12. **AI Comparison Backtesting**: (**COMPLETED**)
+13. **Best Model Protection**: (**COMPLETED**)
+14. **P2 Refactoring**: (**COMPLETED**)
+    -   Enable GPU for LightGBM. (**COMPLETED**)
+    -   Complete backend router refactoring. (**COMPLETED**)
+    -   Migrate raw  calls to  utility. (**COMPLETED**)
+    -   Merge  into the advanced backtest engine. (**COMPLETED**)
+15. **Setup-Specific AI Models**: (**IN PROGRESS**)
+16. **Backtesting Workflow Automation**: (**BACKLOG**)
+17. **Auto-Optimize AI Settings**: (**BACKLOG**)
+18. **API Route Profiling Dashboard**: (**BACKLOG**)
 
 **User's preferred language**: English
 
 **what currently exists?**
-A full-stack AI trading application named SentCom. The current session involved a major debugging and refactoring effort that successfully resolved a critical performance regression in the application's startup sequence. The root cause was identified as synchronous I/O calls blocking the backend's  event loop. This was fixed, along with numerous related frontend bugs affecting data display, persistence, and loading times. The application is now stable and performant.
+The application is a stable full-stack AI trading platform. A major backend refactoring is complete, with 17 REST routes extracted from the monolithic  into modular  and  files. The agent has also fixed a critical bug preventing a trained time-series AI model from being loaded on startup. Following the user's direction, the agent has started implementing setup-specific AI models. The foundational backend logic has been added to , including new dictionaries to hold the models () and new methods to train and query them (, ). However, these new service methods are not yet exposed via any API endpoints.
 
 **Last working item**:
--   **Last item agent was working**: Analyzing the NIA (Neural Intelligence Agency) page located at . The goal is to review its layout, components, and data flow to propose suggestions for improvement regarding component consolidation, screen space usage, and redundancy, as per the user's request.
+-   **Last item agent was working**: Adding the backend infrastructure for setup-specific AI models. The agent added a  dictionary to , updated the  method to load these models from the database on startup, and created new placeholder methods: , , and .
 -   **Status**: IN PROGRESS
--   **Agent Testing Done**: N/A (Analysis phase, no code changes implemented)
--   **Which testing method agent to use?**: N/A (Next agent should formulate suggestions and present them to the user with  before any implementation).
--   **User Testing Done**: N/A
+-   **Agent Testing Done**: N
+-   **Which testing method agent to use?**: both
+    -   **Backend**: Create and test new API endpoints in  using  to trigger the new training and prediction flows for setup-specific models.
+    -   **Frontend**: Once backend endpoints exist, build a new UI section for managing these models and use the screenshot tool for verification. A full  run should follow to ensure no regressions.
+-   **User Testing Done**: N
 
 **All Pending/In progress Issue list**:
--   None. All previously reported issues have been resolved.
+-   **Issue 1: Expose Setup-Specific Model logic via API (P0)**
+    -   **Description**: The new methods in  (, , etc.) are not accessible. New API endpoints need to be created in  to allow the frontend (and testing tools) to trigger training for specific setup types and retrieve their predictions.
+    -   **Attempted fixes**: None.
+    -   **Next debug checklist**:
+        1.  Open .
+        2.  Add a new POST endpoint, e.g., , that takes a  and calls the  method in  service.
+        3.  Add a new GET endpoint, e.g., , that takes a  and symbol to call .
+        4.  Add an endpoint to get the status of all setup models.
+        5.  Test the new endpoints with .
+    -   **Why fix this issue and what will be achieved with the fix?**: This will make the new backend logic functional and usable, unblocking frontend development for the feature.
+    -   **Status**: NOT STARTED
+    -   **Is recurring issue?**: N
+    -   **Should Test frontend/backend/both after fix?**: Backend
+    -   **Blocked on other issue**: No
 
 **In progress Task List**:
--   **Task 1: Analyze NIA Page for Improvements (P0)**
-    -   **Description**: The user wants a thorough analysis of the NIA page to find opportunities for consolidation, better screen space usage, and removal of redundancies. The agent should propose suggestions without implementing them.
-    -   **Where to resume**: The agent has viewed the  file. The next step is to analyze its sub-components (, , etc.) and their data dependencies to formulate concrete suggestions.
-    -   **What will be achieved with this?**: Provide the user with actionable suggestions to improve the UX and information density of the NIA page.
+-   **Task 1: Complete Setup-Specific AI Models Feature (P0)**
+    -   **Where to resume**: Start with Issue 1 to create the necessary API endpoints. After the backend is functional, a new UI section needs to be built in the frontend (likely within the  page or ) to list the 15 setup types, show their model status (trained/not trained), and provide buttons to trigger training.
+    -   **What will be achieved with this?**: Users will be able to train and use specialized AI models for each of the 15 core trading setup types, leading to more accurate predictions.
     -   **Status**: IN PROGRESS
-    -   **Should Test frontend/backend/both after fix?**: Frontend (after implementation is approved and completed).
+    -   **Should Test frontend/backend/both after fix?**: Both
     -   **Blocked on something**: No.
 
 **Upcoming and Future Tasks**
 -   **Upcoming Tasks**:
-    -   (P1) **Implement Best Model Protection**: Add logic to only save new models if their accuracy is better than the currently active one.
+    -   (P1) **Backtesting Workflow Automation**: As requested by the user, create a system to automatically run backtests when a new model (either general or setup-specific) is trained.
+    -   (P2) **Code Cleanup**: Delete the now-unused  file. The unification task is complete, and its functionality is now within the .
 -   **Future Tasks**:
-    -   (P2) **Enable GPU for LightGBM**: Re-install LightGBM with GPU support.
-    -   (P2) **Complete Backend Router Refactoring**: Activate the modular routers that are currently unused in .
-    -   (P2) **Migrate Raw  Calls**: Refactor the ~93 raw  calls scattered across the frontend to use the centralized  utility for consistency and better error handling.
-    -   (P3) **Setup-Specific AI Models**: Train specialized models for each of the 77 trading setups.
-    -   (P3) **Backtesting Workflow Automation**.
+    -   (P3) **AI Parameter Auto-Optimizer**: Create a feature to sweep AI confidence thresholds and lookback windows to find optimal settings per strategy.
+    -   (P3) **Compare Simulations Side-by-Side**: An enhancement suggested by the agent to allow comparing equity curves of multiple backtest runs.
 
 **Completed work in this session**
--   **Backend Event Loop Fix**: Resolved a critical performance issue by identifying and fixing synchronous SDK calls (Alpaca, pymongo) inside async functions. These were wrapped in  to prevent blocking the event loop, making the entire backend responsive.
--   **StartupModal Rearchitecture**: Replaced a slow, multi-call process with a single, instant  endpoint and rewrote  to use it, reducing load time from >30s to <3s.
--   **Data Persistence Fix**: Eliminated data loss on tab switching by removing the  prop in  and using CSS to keep components mounted but hidden.
--   **Data Display and Loading Fixes**:
-    -   Corrected P&L calculation in  to handle  values from IB Gateway.
-    -   Fixed the Learning Insights widget by correctly aggregating per-strategy stats on the frontend.
-    -   Improved the Bot Performance chart to prevent it from blanking out while loading new time ranges.
-    -   Reduced data loading delays in  and  from 20s to 3s.
--   ** Endpoint Fix**: Resolved the endpoint hang by moving heavy database operations to a non-blocking thread.
--   **Testing**: Used the  to verify the primary fixes, confirming their stability and performance.
+-   **Market-Wide Backtest Fix**: Converted the synchronous, timeout-prone market-wide backtest into an asynchronous background job with a real-time progress bar.
+-   **Server Refactoring & Cleanup**:
+    -   Extracted 17 REST routes from  into new  and  files, reducing  from 3,744 to 3,091 lines.
+    -   Deleted deprecated files:  and .
+-   **AI Model Loading Bugfix**: Investigated and fixed a critical bug where a user's trained time-series model wasn't being loaded on startup. The fix involved correcting the database collection name and ensuring the model loading logic runs at initialization.
+-   **Setup-Specific Models (Started)**: Added initial backend infrastructure to  to support training and prediction for models based on setup type.
 
 **Earlier issues found/mentioned but not fixed**
 -   None.
 
 **Known issue recurrence from previous fork**
--   None. The previously recurring issue with  has been resolved.
+-   None.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **Asyncio Event Loop Blocking**: The core problem of the session was synchronous I/O calls blocking the async event loop. This was solved using  to run blocking code in a separate thread.
--   **Frontend State Persistence**: The data loss issue on tab switch was caused by React unmounting/remounting components due to a changing  prop. The solution was to keep components mounted and toggle their visibility with CSS ().
--   **API Endpoint Consolidation**: UI performance was dramatically improved by replacing multiple slow, sequential API calls with a single, fast, consolidated backend endpoint ().
--   **Defensive Backend Logic**: Backend services were improved to calculate values (like P&L) from available data instead of returning  when an external service fails to provide a specific field.
+-   **Modular Router Refactoring**: Extracting FastAPI  instances from a monolithic file into feature-specific files.
+-   **Asynchronous Background Jobs**: Converting long-running synchronous API calls into background tasks with status polling to prevent timeouts and improve user experience.
+-   **Setup-Specific Models**: A new architecture where instead of one monolithic AI model, specialized models are trained for each setup type (e.g., BREAKOUT, MOMENTUM) to improve prediction accuracy.
 
 **key DB schema**
--   No changes were made to the database schema.
+-   **timeseries_models**: Collection where trained AI models are stored. A  field will need to be added to documents to distinguish the new models.
 
 **changes in tech stack**
 -   None.
 
 **All files of reference**
--   **/app/frontend/src/components/NIA.jsx**: The component for the current analysis task.
--   **/app/backend/server.py**: Contains the crucial event loop fixes and the new  endpoint.
--   **/app/frontend/src/components/StartupModal.jsx**: The completely re-architected startup modal.
--   **/app/frontend/src/App.js**: Contains the fix for data persistence across tabs.
--   **/app/backend/services/alpaca_service.py**: Example of fixing event loop blocking.
--   **/app/backend/services/sentcom_service.py**: Contains the P&L calculation fix.
+-   **/app/backend/services/ai_modules/timeseries_service.py**: Contains the core logic for the current task.
+-   **/app/backend/routers/ai_modules.py**: Needs to be modified to expose the new service logic via API endpoints.
+-   **/app/backend/server.py**: The main application file, significantly cleaned up.
 
 **Areas that need refactoring**:
--   ****: This is the subject of the current task. At over 3000 lines, it's a monolithic component that handles layout, data fetching, and state for numerous sub-panels. It should be broken down into smaller components and custom hooks.
--   **Raw  calls**: Over 90 raw  calls are used across the frontend. These should be migrated to the central  utility () to standardize error handling and request logic.
+-    should be deleted as its functionality has been fully merged into the advanced backtest engine.
 
 **key api endpoints**
--    (NEW): A fast, consolidated endpoint that returns the status of all backend services from in-memory state.
--   : Returns user positions; was fixed to always return a calculated P&L value.
--   : An endpoint for backfilling historical data that was fixed to be non-blocking.
--   : Provides aggregated and per-strategy performance data.
--   : Provides live trading alerts.
+-   **/api/ai-modules/timeseries/setups/train (POST)**: (PLANNED) To train a model for a specific setup type.
+-   **/api/ai-modules/timeseries/setups/predict (GET)**: (PLANNED) To get a prediction from a setup-specific model.
+-   **/api/ai-modules/timeseries/setups/status (GET)**: (PLANNED) To get the status of all setup-specific models.
 
 **Critical Info for New Agent**
--   The most significant achievement of this session was fixing the backend event loop blocking, which was the root cause of almost all performance problems. Be extremely careful not to re-introduce synchronous I/O calls in  functions.
--   The current task is **analysis and suggestion only**. Your first action should be to analyze the  component and its sub-components, then formulate a set of improvement suggestions to present to the user via the  tool. Do not implement any changes until you receive explicit approval.
+-   Your immediate priority is to complete the **Setup-Specific AI Models** feature. The backend service logic is partially in place; you need to create the API endpoints in  to make it functional.
+-   After creating and testing the backend endpoints, you will need to build the corresponding frontend UI to allow users to manage and train these new models.
+-   Once that feature is complete and verified by the user, the next task is **Backtesting Workflow Automation**.
 
 **documents and test reports created in this job**
--   /app/test_reports/iteration_97.json
--   /app/memory/PRD.md (updated multiple times)
+-   
+-    (updated)
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User**: Asks for a deep look at the entire NIA page for suggestions on consolidation, screen space, and redundancies, without making changes yet. (PENDING)
-2.  **User**: Reports that P&L, Bot Performance, Market Regime, and scanner alerts are slow or not displaying. (RESOLVED)
-3.  **User**: Asks for clarification on the AI provider architecture and reports that data takes forever to populate and doesn't persist on tab switches. (RESOLVED)
-4.  **User**: Confirms the startup modal and data persistence are fixed, but asks the agent to check on new issues with the scanner, regime, and learning insights. (RESOLVED)
-5.  **User**: Acknowledges the agent's summary and asks for clarification on the AI status and data population issues. (RESOLVED)
-6.  **User**: Reports that the AI assistant status is incorrect in the modal and that no data is populating in the app after startup. (RESOLVED)
-7.  **User**: Approves the agent's plan to fix the startup modal. (RESOLVED)
-8.  **User**: Asks the agent to confirm its plan via . (RESOLVED)
+1.  **User**: yes lets setup a model per type. but i have a question, couldnt a breakout or a trend continuation be classified in intraday, swing, and/or investment? - **Status**: COMPLETED. User confirmed the plan and asked a clarifying question about the modeling approach.
+2.  **User**: ok lets do option B - **Status**: COMPLETED. User approved the proposed Option B: one model per setup type, shared across timeframes.
+3.  **User**: why is the time series model archive empty? i just trained it last night - **Status**: RESOLVED. User reported a bug, which the agent investigated and fixed.
+4.  **User**: yes lets discuss next action items - **Status**: COMPLETED. User approved moving on to the next phase of development.
+5.  **User**: ok lets finalize server refactoring, code cleanup and then lets talk about building setup specific ai models and backtesting worklfow automation - **Status**: COMPLETED. User set the priority for the next set of tasks.
+6.  **User**: yes. how does this server route refactoring affect our app? - **Status**: COMPLETED. User asked for clarification on the impact of the refactoring, which the agent provided.
+7.  **User**: ok i see them now. im runnning a market wide backtest intradayfor 30 day lookback for rubberband scalps. i see that it is spinning and scanning market. i dont see any progress anywhere else - **Status**: RESOLVED. User reported an issue with the market-wide backtest UI, which the agent fixed by making it a background job with a progress bar.
+8.  **User**: ok under advanced testing its not showing any strategies are available - **Status**: RESOLVED. User reported a UI issue. It was a transient loading problem, and the agent confirmed the backend was sending the data correctly.
+9.  **User**: Please use ask_human tool and confirm your plan now. - **Status**: COMPLETED.
+10. **User**: System Review: Memory Limit exceeded... - **Status**: NOTED. An environmental issue occurred but the agent recovered.
 
 **Project Health Check:**
--   **Broken**: None. All reported critical issues have been fixed.
--   **Mocked**: None.
+-   **Healthy**: The application is stable and development is proceeding based on a clear, user-approved roadmap. Major technical debt has been addressed through refactoring, and the agent is now working on new features.
 
 **3rd Party Integrations**
 -   Interactive Brokers (IB Gateway)
@@ -129,16 +143,16 @@ A full-stack AI trading application named SentCom. The current session involved 
 -   LightGBM
 -   ChromaDB
 -   pymongo
--   Emergent LLM Key (for GPT-4o fallback)
+-   Alpaca ()
 
 **Testing status**
--   **Testing agent used after significant changes**: YES. A  run was completed successfully to verify the modal and backend fixes.
+-   **Testing agent used after significant changes**: YES. A test run was completed () after the Full AI Sim feature was finished.
 -   **Troubleshoot agent used after agent stuck in loop**: NO.
 -   **Test files created**: None.
--   **Known regressions**: None. The major regression from the previous session () has been fully resolved.
+-   **Known regressions**: None.
 
 **Credentials to test flow:**
--   Credentials are stored in environment variables (e.g., ) and should be used as-is.
+-   N/A. Credentials are in environment variables.
 
 **What agent forgot to execute**
--   The agent performed exceptionally well, identifying and fixing a complex cascade of interconnected bugs. No significant tasks or steps were forgotten.</analysis>
+-   None. The agent has been following the user's requests and the agreed-upon plan.</analysis>

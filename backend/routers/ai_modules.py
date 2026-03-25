@@ -1620,18 +1620,22 @@ async def stop_training():
     Note: Progress is NOT saved - training must complete to save the model.
     """
     try:
-        service = get_timeseries_service()
+        if not _timeseries_ai:
+            raise HTTPException(status_code=503, detail="Time-series AI not initialized")
         
         # Check if training is running
-        status = service.get_training_status()
+        status = _timeseries_ai.get_training_status()
         was_running = status.get("training_in_progress", False)
         
         # Set stop flag
-        service._stop_training = True
+        _timeseries_ai._stop_training = True
         
         # Exit training mode
-        from services.training_mode_manager import training_mode_manager
-        training_mode_manager.exit_training_mode()
+        try:
+            from services.training_mode import training_mode_manager
+            training_mode_manager.exit_training_mode()
+        except ImportError:
+            pass
         
         return {
             "success": True,
@@ -1639,10 +1643,198 @@ async def stop_training():
             "was_running": was_running,
             "note": "Progress is NOT saved - only completed training saves the model"
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error stopping training: {e}")
         return {
             "success": False,
             "error": str(e)
         }
+
+
+# =====================
+# Setup-Specific Model Endpoints
+# =====================
+
+class SetupTrainRequest(BaseModel):
+    setup_type: str = Field(..., description="Setup type to train (e.g., MOMENTUM, BREAKOUT)")
+    bar_size: Optional[str] = Field("1 day", description="Bar size/timeframe")
+    max_symbols: Optional[int] = Field(None, description="Max symbols to train on")
+    max_bars_per_symbol: Optional[int] = Field(None, description="Max bars per symbol")
+
+
+class SetupTrainAllRequest(BaseModel):
+    bar_size: Optional[str] = Field("1 day", description="Bar size/timeframe")
+    max_symbols: Optional[int] = Field(None, description="Max symbols to train on")
+    max_bars_per_symbol: Optional[int] = Field(None, description="Max bars per symbol")
+
+
+class SetupPredictRequest(BaseModel):
+    symbol: str = Field(..., description="Ticker symbol")
+    setup_type: str = Field(..., description="Setup type (e.g., MOMENTUM, BREAKOUT)")
+    bars: Optional[List[Dict[str, Any]]] = Field(None, description="OHLCV bars (most recent first). If not provided, fetched from DB.")
+
+
+@router.get("/timeseries/setups/status")
+async def get_setup_models_status():
+    """
+    Get the status of all setup-specific AI models.
+    
+    Returns each of the 10 setup types with their training status,
+    accuracy, version, and training sample count.
+    """
+    if not _timeseries_ai:
+        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
+    
+    return {
+        "success": True,
+        **_timeseries_ai.get_setup_models_status()
+    }
+
+
+@router.post("/timeseries/setups/train")
+async def train_setup_model(request: SetupTrainRequest):
+    """
+    Train a model specialized for a specific trading setup type.
+    
+    The model is trained on general market data but can learn patterns
+    specific to the given setup type (e.g., BREAKOUT, MOMENTUM).
+    
+    Supported setup types:
+    MOMENTUM, SCALP, BREAKOUT, GAP_AND_GO, RANGE, REVERSAL,
+    TREND_CONTINUATION, ORB, VWAP, MEAN_REVERSION
+    """
+    from services.ai_modules import ML_AVAILABLE
+    if not ML_AVAILABLE:
+        return {
+            "success": False,
+            "ml_not_available": True,
+            "error": "ML libraries not installed",
+            "install_command": "pip install lightgbm"
+        }
+    
+    if not _timeseries_ai:
+        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
+    
+    try:
+        result = await _timeseries_ai.train_setup_model(
+            setup_type=request.setup_type,
+            bar_size=request.bar_size or "1 day",
+            max_symbols=request.max_symbols,
+            max_bars_per_symbol=request.max_bars_per_symbol,
+        )
+        
+        return {
+            "success": result.get("success", False),
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"Setup model training error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/timeseries/setups/train-all")
+async def train_all_setup_models(request: Optional[SetupTrainAllRequest] = None):
+    """
+    Train models for ALL setup types sequentially.
+    
+    This trains 10 specialized models, one for each setup type.
+    Long-running operation - runs in background.
+    """
+    from services.ai_modules import ML_AVAILABLE
+    if not ML_AVAILABLE:
+        return {
+            "success": False,
+            "ml_not_available": True,
+            "error": "ML libraries not installed",
+            "install_command": "pip install lightgbm"
+        }
+    
+    if not _timeseries_ai:
+        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
+    
+    try:
+        bar_size = request.bar_size if request and request.bar_size else "1 day"
+        max_symbols = request.max_symbols if request and request.max_symbols else None
+        max_bars_per_symbol = request.max_bars_per_symbol if request and request.max_bars_per_symbol else None
+        
+        # Run in background to avoid timeout
+        async def _run_train_all():
+            try:
+                result = await _timeseries_ai.train_all_setup_models(
+                    bar_size=bar_size,
+                    max_symbols=max_symbols,
+                    max_bars_per_symbol=max_bars_per_symbol,
+                )
+                logger.info(f"[SETUP TRAIN ALL] Complete: {result}")
+            except Exception as e:
+                logger.error(f"[SETUP TRAIN ALL] Error: {e}", exc_info=True)
+        
+        asyncio.create_task(_run_train_all())
+        
+        return {
+            "success": True,
+            "message": f"Training all setup models in background ({bar_size})",
+            "setup_types": list(_timeseries_ai.SETUP_TYPES.keys()),
+            "total_types": len(_timeseries_ai.SETUP_TYPES),
+        }
+        
+    except Exception as e:
+        logger.error(f"Train all setup models error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/timeseries/setups/predict")
+async def predict_for_setup(request: SetupPredictRequest):
+    """
+    Get a prediction using a setup-specific model.
+    
+    If a setup-specific model exists, it will be used.
+    Otherwise, falls back to the general model.
+    
+    Args:
+        symbol: Ticker symbol
+        setup_type: Trading setup type
+        bars: Optional OHLCV bars (most recent first). Fetched from DB if not provided.
+    """
+    if not _timeseries_ai:
+        raise HTTPException(status_code=503, detail="Time-series AI not initialized")
+    
+    try:
+        bars = request.bars
+        
+        # Fetch bars from DB if not provided
+        if not bars:
+            bars = await _timeseries_ai._get_bars_from_db_for_prediction(request.symbol.upper())
+        
+        if not bars or len(bars) < 20:
+            return {
+                "success": False,
+                "error": f"Insufficient data for {request.symbol} (need 20+ bars, got {len(bars) if bars else 0})"
+            }
+        
+        prediction = _timeseries_ai.predict_for_setup(
+            symbol=request.symbol.upper(),
+            bars=bars,
+            setup_type=request.setup_type
+        )
+        
+        if prediction is None:
+            return {
+                "success": False,
+                "error": "Prediction failed - no trained models available"
+            }
+        
+        return {
+            "success": True,
+            "prediction": prediction,
+            "symbol": request.symbol.upper(),
+            "setup_type": request.setup_type.upper(),
+        }
+        
+    except Exception as e:
+        logger.error(f"Setup prediction error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
