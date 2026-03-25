@@ -485,6 +485,8 @@ const MarketWideBacktestTab = ({ allStrategies, onJobStarted, setLoading, loadin
   const [searchTerm, setSearchTerm] = useState('');
   const [result, setResult] = useState(null);
   const [jobStatus, setJobStatus] = useState(null);
+  const [jobId, setJobId] = useState(null);
+  const pollRef = useRef(null);
 
   const tradeStyles = [
     { id: 'intraday', label: 'Intraday', desc: 'Fast-moving, 500K min volume' },
@@ -500,6 +502,40 @@ const MarketWideBacktestTab = ({ allStrategies, onJobStarted, setLoading, loadin
     return matchesCategory && matchesSearch;
   });
 
+  // Cleanup poll on unmount
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
+  const pollJobStatus = useCallback((id) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const { data } = await api.get(`/api/backtest/job/${id}`);
+        if (data?.success && data.job) {
+          setJobStatus(data.job);
+          if (data.job.status === 'completed') {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+            setResult(data.job.result || null);
+            setLoading(false);
+            const trades = data.job.result?.summary?.total_trades || 0;
+            const syms = data.job.result?.symbols_with_signals || 0;
+            toast.success(`Found ${trades} trades across ${syms} symbols`);
+            onJobStarted?.();
+          } else if (data.job.status === 'failed') {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+            setLoading(false);
+            toast.error('Backtest failed: ' + (data.job.error || 'Unknown error'));
+          }
+        }
+      } catch (err) {
+        // silent poll error
+      }
+    }, 2000);
+  }, [onJobStarted, setLoading]);
+
   const runMarketWideBacktest = async () => {
     if (!selectedStrategy) {
       toast.error('Please select a strategy');
@@ -508,14 +544,17 @@ const MarketWideBacktestTab = ({ allStrategies, onJobStarted, setLoading, loadin
 
     setLoading(true);
     setResult(null);
-    setJobStatus({ status: 'running', progress: 0 });
+    setJobStatus({ status: 'running', progress: 0, progress_message: 'Starting scan...' });
+    setJobId(null);
 
     try {
       const res = await api.post('/api/backtest/market-wide', {
         strategy: {
           name: selectedStrategy.name,
-          setup_type: selectedStrategy.id.startsWith('INT-') ? 'MOMENTUM' : 
-                      selectedStrategy.id.startsWith('SWG-') ? 'SWING' : 'BREAKOUT',
+          setup_type: selectedStrategy.setup_type || (
+            selectedStrategy.id.startsWith('INT-') ? 'MOMENTUM' : 
+            selectedStrategy.id.startsWith('SWG-') ? 'SWING' : 'BREAKOUT'
+          ),
           min_tqs_score: 55,
           stop_pct: 3.0,
           target_pct: 6.0,
@@ -528,20 +567,19 @@ const MarketWideBacktestTab = ({ allStrategies, onJobStarted, setLoading, loadin
         start_date: startDate,
         end_date: endDate,
         max_symbols: maxSymbols,
-        run_in_background: false
+        run_in_background: true
       });
 
-      if (res.data?.success) {
-        setResult(res.data.result);
-        setJobStatus({ status: 'completed' });
-        toast.success(`Found ${res.data.result?.summary?.total_trades || 0} trades across ${res.data.result?.symbols_with_signals || 0} symbols`);
+      if (res.data?.success && res.data.job_id) {
+        setJobId(res.data.job_id);
+        toast.success(`Backtest started — scanning up to ${maxSymbols} symbols`);
         onJobStarted?.();
+        pollJobStatus(res.data.job_id);
       }
     } catch (err) {
       console.error('Market-wide backtest error:', err);
-      toast.error('Backtest failed: ' + (err.response?.data?.detail || err.message));
+      toast.error('Failed to start backtest: ' + (err.response?.data?.detail || err.message));
       setJobStatus({ status: 'failed' });
-    } finally {
       setLoading(false);
     }
   };
@@ -689,6 +727,7 @@ const MarketWideBacktestTab = ({ allStrategies, onJobStarted, setLoading, loadin
           <button
             onClick={runMarketWideBacktest}
             disabled={loading || !selectedStrategy}
+            data-testid="run-market-wide-btn"
             className={`w-full py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all ${
               loading || !selectedStrategy
                 ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
@@ -709,6 +748,43 @@ const MarketWideBacktestTab = ({ allStrategies, onJobStarted, setLoading, loadin
           </button>
         </div>
       </div>
+
+      {/* Job Progress */}
+      {jobStatus && jobStatus.status === 'running' && (
+        <div className="bg-slate-800/40 border border-cyan-500/30 rounded-xl p-4 space-y-3" data-testid="market-wide-progress">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />
+              <span className="text-sm font-medium text-cyan-300">
+                {jobStatus.progress_message || 'Scanning market...'}
+              </span>
+            </div>
+            <span className="text-xs text-slate-400">
+              {jobId ? `Job: ${jobId.substring(0, 12)}...` : ''}
+            </span>
+          </div>
+          <div className="w-full bg-slate-700 rounded-full h-2.5">
+            <div 
+              className="bg-gradient-to-r from-cyan-500 to-purple-500 h-2.5 rounded-full transition-all duration-500" 
+              style={{ width: `${Math.min(100, jobStatus.progress || 5)}%` }}
+            />
+          </div>
+          <div className="flex justify-between text-xs text-slate-500">
+            <span>{Math.round(jobStatus.progress || 0)}% complete</span>
+            <span>{jobStatus.job_type === 'market_wide' ? 'Market-Wide Scan' : 'Processing'}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Job Failed */}
+      {jobStatus && jobStatus.status === 'failed' && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
+          <div className="flex items-center gap-2 text-red-400 text-sm">
+            <XCircle className="w-4 h-4" />
+            <span>Backtest failed: {jobStatus.error || 'Unknown error'}</span>
+          </div>
+        </div>
+      )}
 
       {/* Results Section */}
       {result && (
