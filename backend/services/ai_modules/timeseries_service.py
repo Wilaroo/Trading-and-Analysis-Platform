@@ -120,10 +120,13 @@ class TimeSeriesAIService:
         self._cache_ttl_seconds = 3600  # Cache for 1 hour
         
     def set_db(self, db):
-        """Set database connection"""
+        """Set database connection and load any saved models"""
         self._db = db
         if self._model:
             self._model.set_db(db)
+        # Auto-load models from DB on startup
+        if db is not None and self._ml_available:
+            self.reload_models_from_db()
     
     def reload_models_from_db(self):
         """Reload all trained models from MongoDB.
@@ -135,10 +138,19 @@ class TimeSeriesAIService:
             return {"reloaded": 0}
         
         reloaded = 0
+        # Check both ai_models and timeseries_models collections
+        collections_to_check = ["ai_models", "timeseries_models"]
+        
         for bar_size, config in self.SUPPORTED_TIMEFRAMES.items():
             model_name = config["model_name"]
             try:
-                doc = self._db["ai_models"].find_one({"name": model_name})
+                doc = None
+                for col_name in collections_to_check:
+                    doc = self._db[col_name].find_one({"name": model_name})
+                    if doc and "model_data" in doc:
+                        break
+                    doc = None
+                
                 if doc and "model_data" in doc:
                     model_bytes = base64.b64decode(doc["model_data"])
                     loaded_model = pickle.loads(model_bytes)
@@ -151,16 +163,29 @@ class TimeSeriesAIService:
                     
                     self._models[bar_size]._model = loaded_model
                     self._models[bar_size]._version = doc.get("version", "v0.0.0")
-                    self._models[bar_size]._metrics = ModelMetrics(**doc.get("metrics", {}))
+                    if doc.get("metrics"):
+                        self._models[bar_size]._metrics = ModelMetrics(**doc.get("metrics", {}))
                     reloaded += 1
-                    logger.info(f"Reloaded model {model_name} {doc.get('version', '?')}")
+                    logger.info(f"Reloaded model {model_name} {doc.get('version', '?')} from DB")
             except Exception as e:
                 logger.warning(f"Could not reload model {model_name}: {e}")
         
-        # Also reload the default model
-        if self._model:
+        # Also try to load the default model via GBM's own loader
+        if self._model is None:
+            try:
+                from .timeseries_gbm import TimeSeriesGBM
+                default_model = TimeSeriesGBM(model_name="direction_predictor")
+                default_model.set_db(self._db)
+                if default_model._model is not None:
+                    self._model = default_model
+                    reloaded += 1
+                    logger.info(f"Loaded default direction_predictor model from DB")
+            except Exception as e:
+                logger.warning(f"Could not load default model: {e}")
+        elif self._model._db is not None:
             self._model._load_model()
-            reloaded += 1
+            if self._model._model is not None:
+                reloaded += 1
         
         logger.info(f"Reloaded {reloaded} models from database")
         return {"reloaded": reloaded}
