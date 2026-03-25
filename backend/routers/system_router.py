@@ -81,9 +81,20 @@ async def startup_check():
     backend_ok = True
 
     ib_connected = False
+    ib_data_flowing = False
     try:
         ib_status = _ib_service.get_connection_status()
         ib_connected = ib_status.get("connected", False)
+        # Check if actual data is flowing (not just socket connected)
+        # IB Gateway can be "connected" but farms (market data, historical) may be red
+        try:
+            from routers.ib import _pushed_ib_data, is_pusher_connected
+            if is_pusher_connected():
+                quotes = _pushed_ib_data.get("quotes", {})
+                positions = _pushed_ib_data.get("positions", [])
+                ib_data_flowing = len(quotes) > 0 or len(positions) > 0
+        except Exception:
+            pass
     except Exception:
         pass
 
@@ -125,7 +136,9 @@ async def startup_check():
         "backend": backend_ok,
         "database": backend_ok,
         "websocket": backend_ok,
-        "ib": ib_connected,
+        "ib": ib_connected and ib_data_flowing,
+        "ib_connected": ib_connected,
+        "ib_data_flowing": ib_data_flowing,
         "ollama": ollama_available,
         "ai_fallback_only": ai_fallback_only,
         "timeseries": timeseries_available,

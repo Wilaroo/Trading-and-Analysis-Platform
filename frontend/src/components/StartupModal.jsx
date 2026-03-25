@@ -108,14 +108,16 @@ const StartupModal = ({ onComplete }) => {
       newStatus.backend   = d.backend   ? 'success' : 'error';
       newStatus.database  = d.database  ? 'success' : 'error';
       newStatus.websocket = d.websocket ? 'success' : 'error';
-      newStatus.ib        = d.ib        ? 'success' : 'warning';
+      // IB Gateway: green only if connected AND data flowing (farms active)
+      // Yellow if socket connected but farms not sending data
+      newStatus.ib        = d.ib        ? 'success' : d.ib_connected ? 'warning' : 'warning';
       newStatus.scanner   = d.scanner   ? 'success' : 'warning';
       // AI Assistant: green if Ollama connected, yellow if only Emergent fallback
       newStatus.ollama    = d.ollama    ? 'success' : d.ai_fallback_only ? 'warning' : 'warning';
       newStatus.timeseries = d.timeseries ? 'success' : 'warning';
       newStatus.learning  = d.learning  ? 'success' : 'warning';
 
-      console.log(`[StartupModal] Check #${checkCount + 1}: backend=${d.backend} ib=${d.ib} ollama=${d.ollama} ai_fallback=${d.ai_fallback_only} scanner=${d.scanner}`);
+      console.log(`[StartupModal] Check #${checkCount + 1}: backend=${d.backend} ib=${d.ib} ib_connected=${d.ib_connected} ib_data=${d.ib_data_flowing} ollama=${d.ollama} ai_fallback=${d.ai_fallback_only} scanner=${d.scanner}`);
       setServiceStatus(newStatus);
       setLastResponseData(d);
     } else {
@@ -199,6 +201,9 @@ const StartupModal = ({ onComplete }) => {
   const getStatusText = (status, serviceId, data) => {
     if (serviceId === 'ollama' && status === 'warning' && data?.ai_fallback_only) {
       return 'Fallback Only';
+    }
+    if (serviceId === 'ib' && status === 'warning' && data?.ib_connected) {
+      return 'No Data';
     }
     switch (status) {
       case 'success': return 'Ready';
