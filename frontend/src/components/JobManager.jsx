@@ -37,7 +37,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { safePolling } from '../utils/safePolling';
-import api from '../utils/api';
+import api, { xhrPost } from '../utils/api';
 import { useFocusMode } from '../contexts/FocusModeContext';
 
 // ===================== NOTIFICATION HELPERS =====================
@@ -359,7 +359,7 @@ const JobManager = ({ compact = false }) => {
   const handleCreateCollectionJob = async () => {
     setIsCreating(true);
     try {
-      const response = await api.post('/api/jobs', {
+      const response = await xhrPost('/api/jobs', {
         job_type: 'data_collection',
         params: {
           collection_type: collectionType,
@@ -387,7 +387,7 @@ const JobManager = ({ compact = false }) => {
   const handleCreateBacktestJob = async () => {
     setIsCreating(true);
     try {
-      const response = await api.post('/api/jobs', {
+      const response = await xhrPost('/api/jobs', {
         job_type: 'backtest',
         params: {
           start_date: `${backtestStartDate}T00:00:00Z`,

@@ -7,7 +7,7 @@ import {
   XCircle, RefreshCw, Layers
 } from 'lucide-react';
 import { toast } from 'sonner';
-import api from '../../utils/api';
+import api, { xhrPost } from '../../utils/api';
 
 const SETUP_CONFIG = {
   MOMENTUM:           { icon: TrendingUp, color: 'text-cyan-400',   bg: 'bg-cyan-500/15',   border: 'border-cyan-500/25' },
@@ -201,7 +201,7 @@ const SetupModelsPanel = memo(() => {
     toast.info(`Training ${setupType.replace(/_/g, ' ')} model...`);
 
     try {
-      const res = await api.post('/api/ai-modules/timeseries/setups/train', {
+      const res = await xhrPost('/api/ai-modules/timeseries/setups/train', {
         setup_type: setupType,
         bar_size: '1 day',
       });
@@ -222,7 +222,7 @@ const SetupModelsPanel = memo(() => {
     try {
       setTrainingAll(true);
       toast.info('Queuing all setup model training...');
-      const res = await api.post('/api/ai-modules/timeseries/setups/train-all', { bar_size: '1 day' });
+      const res = await xhrPost('/api/ai-modules/timeseries/setups/train-all', { bar_size: '1 day' });
       if (res.data?.success && res.data.job_id) {
         toast.success(`Training ${res.data.total_types} setup models queued`);
         setActiveJobs(prev => ({ ...prev, _ALL: res.data.job_id }));

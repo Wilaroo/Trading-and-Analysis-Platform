@@ -81,4 +81,28 @@ export const safeDelete = async (url) => {
   }
 };
 
+// Direct XHR POST — bypasses axios interceptors and connection pool contention.
+// Use for critical user-initiated actions (training, job creation) that must not
+// be delayed by background polling.
+export const xhrPost = (url, body, timeout = 30000) => {
+  const fullUrl = `${window.location.origin}${url}`;
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.timeout = timeout;
+    xhr.onload = () => {
+      try {
+        const data = JSON.parse(xhr.responseText);
+        resolve({ data, status: xhr.status });
+      } catch {
+        resolve({ data: {}, status: xhr.status });
+      }
+    };
+    xhr.ontimeout = () => reject(new Error('Request timed out'));
+    xhr.onerror = () => reject(new Error('Network error'));
+    xhr.open('POST', fullUrl);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.send(JSON.stringify(body));
+  });
+};
+
 export default api;

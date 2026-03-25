@@ -40,7 +40,7 @@ import {
   Globe
 } from 'lucide-react';
 import { toast } from 'sonner';
-import api, { apiLongRunning } from '../utils/api';
+import api, { apiLongRunning, xhrPost } from '../utils/api';
 import { useTrainingMode } from '../contexts';
 
 // Timeframe configurations
@@ -994,7 +994,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
     toast.info(`Queuing ${timeframes.length} timeframe models for training...`);
 
     try {
-      const res = await api.post('/api/ai-modules/timeseries/train-all');
+      const res = await xhrPost('/api/ai-modules/timeseries/train-all');
 
       if (res.data?.success && res.data?.job_id) {
         const jobId = res.data.job_id;
@@ -1122,7 +1122,7 @@ const UnifiedAITraining = memo(({ onTrainComplete }) => {
       toast.info('Quick Train: Training Daily model...');
       
       // Enqueue training job via worker
-      const trainRes = await api.post('/api/ai-modules/timeseries/train', {
+      const trainRes = await xhrPost('/api/ai-modules/timeseries/train', {
         bar_size: '1 day'
       });
 

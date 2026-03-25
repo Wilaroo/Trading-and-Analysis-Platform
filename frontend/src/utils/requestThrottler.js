@@ -77,6 +77,8 @@ class RequestThrottler {
 }
 
 // Global throttler instance - limit to 16 concurrent requests
-export const requestThrottler = new RequestThrottler(16);
+export // Browser limits to 6 concurrent connections per domain.
+// Keep this below 6 so user-initiated actions (POST/PUT/DELETE) always have free slots.
+const requestThrottler = new RequestThrottler(4);
 
 export default RequestThrottler;
