@@ -10,7 +10,7 @@ import api from '../../utils/api';
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL;
 
-const DataCollectionPanel = memo(({ onRefresh }) => {
+const DataCollectionPanel = memo(({ onRefresh, embedded = false }) => {
   const [expanded, setExpanded] = useState(true);
   const [lookbackDays, setLookbackDays] = useState(30);
   const [tier, setTier] = useState('all');

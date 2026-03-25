@@ -3022,7 +3022,7 @@ async def websocket_quotes(websocket: WebSocket):
             elif data.get("action") == "train_setup":
                 # Handle setup-specific training via WebSocket (bypasses HTTP connection pool)
                 setup_type = data.get("setup_type")
-                bar_size = data.get("bar_size", "1 day")
+                bar_size = data.get("bar_size")  # None = train all profiles for this setup
                 try:
                     result = await job_queue_manager.create_job(
                         job_type="setup_training",
@@ -3050,11 +3050,10 @@ async def websocket_quotes(websocket: WebSocket):
             
             elif data.get("action") == "train_setup_all":
                 # Handle train-all setup models via WebSocket
-                bar_size = data.get("bar_size", "1 day")
                 try:
                     result = await job_queue_manager.create_job(
-                        job_type="setup_training_all",
-                        params={"bar_size": bar_size}
+                        job_type="setup_training",
+                        params={"setup_type": "ALL", "bar_size": None}
                     )
                     if not result.get("success"):
                         raise Exception(result.get("error", "Failed to create job"))

@@ -1,7 +1,7 @@
 import React, { useMemo, memo } from 'react';
 import {
   Download, FlaskConical, Rocket, Database,
-  Brain, Activity
+  Brain, Activity, Radio
 } from 'lucide-react';
 
 const QuickStatsBar = memo(({ data }) => {
@@ -12,40 +12,30 @@ const QuickStatsBar = memo(({ data }) => {
     const collectionActive = pendingCollections > 0;
     const readyPromotions = (data.candidates || []).filter(c => c.meets_requirements).length;
     const totalBars = data.historicalBars || 0;
-    const modelTrained = data.modelTrained;
-    const modelLoading = modelTrained === null || modelTrained === undefined;
-    const accuracy = data.aiAccuracy;
+
+    // Setup model stats
+    const setupStatus = data.setupModelsStatus || {};
+    const profilesTrained = setupStatus.models_trained || 0;
+    const totalProfiles = setupStatus.total_profiles || 17;
+
+    // Training status detail
+    const trainingStatus = setupStatus.training_status || {};
+    const activeTraining = Object.entries(trainingStatus).filter(([, v]) => v?.status === 'running');
+
+    // Data source
+    const ibConnected = data.connectorSummary?.healthy > 0;
+    const dataSource = data.dataSource || (ibConnected ? 'IB Gateway' : 'Alpaca');
 
     return [
       {
-        id: 'collections',
-        icon: Download,
-        label: 'Collections',
-        value: collectionActive ? pendingCollections.toLocaleString() : 'Idle',
-        sub: collectionActive ? 'pending' : `${completedCollections.toLocaleString()} done`,
-        active: collectionActive,
-        color: collectionActive ? 'amber' : 'zinc',
-        pulse: collectionActive
-      },
-      {
-        id: 'backtests',
-        icon: FlaskConical,
-        label: 'Backtests',
-        value: runningJobs.length > 0 ? runningJobs.length : 'None',
-        sub: runningJobs.length > 0 ? 'running' : `${(data.simulationJobs || []).filter(j => j.status === 'completed').length} completed`,
-        active: runningJobs.length > 0,
-        color: runningJobs.length > 0 ? 'cyan' : 'zinc',
-        pulse: runningJobs.length > 0
-      },
-      {
-        id: 'promotions',
-        icon: Rocket,
-        label: 'Promotions',
-        value: readyPromotions > 0 ? readyPromotions : 'None',
-        sub: readyPromotions > 0 ? 'ready' : 'pending',
-        active: readyPromotions > 0,
-        color: readyPromotions > 0 ? 'green' : 'zinc',
-        pulse: readyPromotions > 0
+        id: 'source',
+        icon: Radio,
+        label: 'Data Source',
+        value: dataSource,
+        sub: ibConnected ? 'primary' : 'fallback',
+        active: true,
+        color: ibConnected ? 'emerald' : 'amber',
+        pulse: false
       },
       {
         id: 'data',
@@ -57,13 +47,48 @@ const QuickStatsBar = memo(({ data }) => {
         color: totalBars > 100000 ? 'emerald' : totalBars > 0 ? 'blue' : 'zinc'
       },
       {
-        id: 'ai',
+        id: 'collections',
+        icon: Download,
+        label: 'Collections',
+        value: collectionActive ? pendingCollections.toLocaleString() : 'Idle',
+        sub: collectionActive ? 'pending symbols' : `${completedCollections.toLocaleString()} done`,
+        active: collectionActive,
+        color: collectionActive ? 'amber' : 'zinc',
+        pulse: collectionActive
+      },
+      {
+        id: 'models',
         icon: Brain,
-        label: 'AI Model',
-        value: modelLoading ? '--' : modelTrained && accuracy ? `${(accuracy * 100).toFixed(1)}%` : modelTrained ? 'Trained' : 'Untrained',
-        sub: modelLoading ? 'loading...' : modelTrained ? 'accuracy' : 'needs training',
-        active: !!modelTrained,
-        color: modelLoading ? 'zinc' : modelTrained ? (accuracy >= 0.55 ? 'emerald' : accuracy >= 0.5 ? 'yellow' : 'cyan') : 'zinc'
+        label: 'AI Models',
+        value: `${profilesTrained}/${totalProfiles}`,
+        sub: activeTraining.length > 0
+          ? activeTraining[0][1].message?.slice(0, 30) || 'Training...'
+          : profilesTrained === totalProfiles ? 'all trained' : 'profiles trained',
+        active: profilesTrained > 0,
+        color: activeTraining.length > 0 ? 'cyan' : profilesTrained === totalProfiles ? 'emerald' : profilesTrained > 0 ? 'yellow' : 'zinc',
+        pulse: activeTraining.length > 0
+      },
+      {
+        id: 'backtests',
+        icon: FlaskConical,
+        label: 'Backtests',
+        value: runningJobs.length > 0 ? runningJobs.length : 'None',
+        sub: runningJobs.length > 0
+          ? `running (${runningJobs[0]?.symbols_processed || 0}/${runningJobs[0]?.symbols_total || '?'} sym)`
+          : `${(data.simulationJobs || []).filter(j => j.status === 'completed').length} completed`,
+        active: runningJobs.length > 0,
+        color: runningJobs.length > 0 ? 'cyan' : 'zinc',
+        pulse: runningJobs.length > 0
+      },
+      {
+        id: 'promotions',
+        icon: Rocket,
+        label: 'Promotions',
+        value: readyPromotions > 0 ? readyPromotions : 'None',
+        sub: readyPromotions > 0 ? 'ready to promote' : 'pending',
+        active: readyPromotions > 0,
+        color: readyPromotions > 0 ? 'green' : 'zinc',
+        pulse: readyPromotions > 0
       },
       {
         id: 'health',
@@ -78,8 +103,8 @@ const QuickStatsBar = memo(({ data }) => {
     ];
   }, [
     data.simulationJobs, data.collectionQueue, data.candidates,
-    data.historicalBars, data.modelTrained, data.aiAccuracy,
-    data.connectorSummary
+    data.historicalBars, data.connectorSummary, data.setupModelsStatus,
+    data.dataSource
   ]);
 
   const activeCount = stats.filter(s => s.active && s.pulse).length;
@@ -104,7 +129,7 @@ const QuickStatsBar = memo(({ data }) => {
           </span>
         </div>
       </div>
-      <div className="grid grid-cols-3 lg:grid-cols-6 gap-2">
+      <div className="grid grid-cols-4 lg:grid-cols-7 gap-2">
         {stats.map((stat) => {
           const colors = colorMap[stat.color] || colorMap.zinc;
           return (

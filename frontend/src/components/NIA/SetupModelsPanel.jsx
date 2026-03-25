@@ -4,7 +4,7 @@ import {
   Crosshair, TrendingUp, Zap, BarChart3, Target,
   ArrowUpDown, GitBranch, Clock, Gauge, Activity,
   ChevronDown, PlayCircle, Loader2, CheckCircle2,
-  XCircle, RefreshCw, Layers
+  XCircle, RefreshCw, Layers, Timer
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '../../utils/api';
@@ -23,115 +23,183 @@ const SETUP_CONFIG = {
   MEAN_REVERSION:     { icon: Target,     color: 'text-pink-400',   bg: 'bg-pink-500/15',   border: 'border-pink-500/25' },
 };
 
-const SetupCard = memo(({ name, model, training, onTrain }) => {
+const BAR_SIZE_LABELS = {
+  '1 min': '1m',
+  '5 mins': '5m',
+  '1 hour': '1h',
+  '1 day': '1D',
+};
+
+const ProfileBadge = ({ profile }) => {
+  const label = BAR_SIZE_LABELS[profile.bar_size] || profile.bar_size;
+  if (profile.trained) {
+    const acc = profile.accuracy != null ? `${(profile.accuracy * 100).toFixed(1)}%` : '?';
+    const accColor = profile.accuracy >= 0.55 ? 'text-green-400 bg-green-500/15 border-green-500/25'
+      : profile.accuracy >= 0.50 ? 'text-yellow-400 bg-yellow-500/15 border-yellow-500/25'
+      : 'text-zinc-400 bg-white/5 border-white/10';
+    return (
+      <div className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono ${accColor}`} data-testid={`profile-badge-${profile.bar_size}`}>
+        <Timer className="w-2.5 h-2.5" />
+        <span className="font-semibold">{label}</span>
+        <span>{acc}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-white/10 bg-white/[0.02] text-[10px] text-zinc-500 font-mono" data-testid={`profile-badge-${profile.bar_size}`}>
+      <Timer className="w-2.5 h-2.5" />
+      <span>{label}</span>
+      <span>--</span>
+    </div>
+  );
+};
+
+const SetupCard = memo(({ name, data, trainingStatus, onTrain }) => {
+  const [showProfiles, setShowProfiles] = useState(false);
   const cfg = SETUP_CONFIG[name] || SETUP_CONFIG.MOMENTUM;
   const Icon = cfg.icon;
-  const isTraining = training?.status === 'running';
-  const isTrained = model?.trained;
+
+  const profiles = data?.profiles || [];
+  const trainedCount = data?.profiles_trained || 0;
+  const totalCount = data?.profiles_total || profiles.length;
+  const isAnyTraining = Object.keys(trainingStatus).some(k => k.startsWith(`setup_${name}`) && trainingStatus[k]?.status === 'running');
+
+  const bestProfile = profiles.reduce((best, p) => {
+    if (!p.trained) return best;
+    if (!best || (p.accuracy || 0) > (best.accuracy || 0)) return p;
+    return best;
+  }, null);
 
   return (
     <div
-      className={`p-3 rounded-lg border ${cfg.border} ${cfg.bg} transition-all hover:brightness-110`}
+      className={`rounded-lg border ${cfg.border} ${cfg.bg} transition-all hover:brightness-110`}
       data-testid={`setup-card-${name}`}
     >
-      <div className="flex items-center justify-between mb-1.5">
-        <div className="flex items-center gap-2 min-w-0">
-          <Icon className={`w-4 h-4 flex-shrink-0 ${cfg.color}`} />
-          <span className="text-xs font-semibold text-white truncate">{name.replace(/_/g, ' ')}</span>
+      <div className="p-3">
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center gap-2 min-w-0">
+            <Icon className={`w-4 h-4 flex-shrink-0 ${cfg.color}`} />
+            <span className="text-xs font-semibold text-white truncate">{name.replace(/_/g, ' ')}</span>
+          </div>
+          {isAnyTraining ? (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 text-[10px] flex-shrink-0">
+              <Loader2 className="w-2.5 h-2.5 animate-spin" /> Training
+            </span>
+          ) : trainedCount === totalCount && totalCount > 0 ? (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400 text-[10px] flex-shrink-0">
+              <CheckCircle2 className="w-2.5 h-2.5" /> {trainedCount}/{totalCount}
+            </span>
+          ) : trainedCount > 0 ? (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 text-[10px] flex-shrink-0">
+              {trainedCount}/{totalCount}
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-zinc-500/20 text-zinc-500 text-[10px] flex-shrink-0">
+              <XCircle className="w-2.5 h-2.5" /> 0/{totalCount}
+            </span>
+          )}
         </div>
-        {isTraining ? (
-          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 text-[10px] flex-shrink-0">
-            <Loader2 className="w-2.5 h-2.5 animate-spin" /> Training
-          </span>
-        ) : isTrained ? (
-          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400 text-[10px] flex-shrink-0">
-            <CheckCircle2 className="w-2.5 h-2.5" /> Trained
-          </span>
+
+        <p className="text-[10px] text-zinc-500 mb-2">{data?.description || ''}</p>
+
+        {/* Profile badges row */}
+        <div className="flex flex-wrap gap-1 mb-2">
+          {profiles.map(p => <ProfileBadge key={p.bar_size} profile={p} />)}
+        </div>
+
+        {/* Best accuracy highlight */}
+        {bestProfile && (
+          <div className="flex justify-between text-[10px] mb-1">
+            <span className="text-zinc-500">Best</span>
+            <span className="text-green-400 font-mono">
+              {(bestProfile.accuracy * 100).toFixed(1)}% ({BAR_SIZE_LABELS[bestProfile.bar_size] || bestProfile.bar_size})
+            </span>
+          </div>
+        )}
+
+        {/* Expandable profile details */}
+        <button
+          onClick={() => setShowProfiles(!showProfiles)}
+          className="w-full text-left text-[10px] text-zinc-500 hover:text-zinc-300 flex items-center gap-1 mb-2"
+          data-testid={`toggle-profiles-${name}`}
+        >
+          <ChevronDown className={`w-3 h-3 transition-transform ${showProfiles ? 'rotate-180' : ''}`} />
+          {showProfiles ? 'Hide profiles' : `${totalCount} profile${totalCount > 1 ? 's' : ''}`}
+        </button>
+
+        <AnimatePresence>
+          {showProfiles && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="space-y-1.5 mb-2 overflow-hidden"
+            >
+              {profiles.map(p => {
+                const statusKey = `setup_${name}_${p.bar_size}`;
+                const pTraining = trainingStatus[statusKey];
+                return (
+                  <div key={p.bar_size} className="p-2 rounded bg-black/20 border border-white/5" data-testid={`profile-detail-${name}-${p.bar_size}`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] font-mono text-zinc-300">{BAR_SIZE_LABELS[p.bar_size] || p.bar_size}</span>
+                      {p.trained ? (
+                        <span className="text-[10px] text-green-400 font-mono">{(p.accuracy * 100).toFixed(1)}%</span>
+                      ) : pTraining?.status === 'running' ? (
+                        <span className="text-[10px] text-cyan-400 flex items-center gap-1"><Loader2 className="w-2 h-2 animate-spin" /> Training</span>
+                      ) : (
+                        <span className="text-[10px] text-zinc-500">Not trained</span>
+                      )}
+                    </div>
+                    <div className="text-[9px] text-zinc-500">{p.description}</div>
+                    <div className="flex gap-2 mt-1 text-[9px]">
+                      <span className="text-zinc-600">h={p.forecast_horizon}</span>
+                      <span className="text-zinc-600">thr={((p.noise_threshold || 0) * 100).toFixed(2)}%</span>
+                      {p.num_classes >= 3 && <span className="text-amber-500/60">3-class</span>}
+                    </div>
+                    {p.trained && (
+                      <div className="flex gap-3 mt-1 text-[9px]">
+                        <span className="text-zinc-500">{(p.training_samples || 0).toLocaleString()} samples</span>
+                        {p.version && <span className="text-zinc-600">{p.version}</span>}
+                      </div>
+                    )}
+                    {pTraining?.status === 'running' && pTraining.message && (
+                      <div className="text-[9px] text-cyan-400/70 mt-1 truncate">{pTraining.message}</div>
+                    )}
+                  </div>
+                );
+              })}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Train button */}
+        {isAnyTraining ? (
+          <div className="text-[10px] text-cyan-400/80 text-center">Training in progress...</div>
         ) : (
-          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-zinc-500/20 text-zinc-500 text-[10px] flex-shrink-0">
-            <XCircle className="w-2.5 h-2.5" /> Untrained
-          </span>
+          <button
+            onClick={() => onTrain(name)}
+            className={`w-full flex items-center justify-center gap-1 px-2 py-1.5 rounded text-[10px] font-medium transition-colors ${
+              trainedCount === totalCount && totalCount > 0
+                ? 'bg-white/5 hover:bg-white/10 text-zinc-400 border border-white/5'
+                : 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 border border-cyan-500/30'
+            }`}
+            data-testid={`train-${name}-btn`}
+          >
+            <PlayCircle className="w-3 h-3" />
+            {trainedCount === totalCount && totalCount > 0 ? 'Retrain All Profiles' : `Train ${totalCount} Profile${totalCount > 1 ? 's' : ''}`}
+          </button>
         )}
       </div>
-
-      <p className="text-[10px] text-zinc-500 mb-2 leading-tight">{model?.description || ''}</p>
-
-      {/* Training config */}
-      {model?.training_config && (
-        <div className="flex gap-2 mb-2 flex-wrap">
-          <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-zinc-500 font-mono">
-            {model.training_config.forecast_horizon}d horizon
-          </span>
-          <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-zinc-500 font-mono">
-            {(model.training_config.noise_threshold * 100).toFixed(1)}% threshold
-          </span>
-          {model.training_config.num_classes >= 3 && (
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400/80 font-mono">
-              3-class
-            </span>
-          )}
-        </div>
-      )}
-
-      {isTrained && (
-        <div className="space-y-1 mb-2">
-          <div className="flex justify-between text-[10px]">
-            <span className="text-zinc-500">Accuracy</span>
-            <span className={`font-mono ${model.accuracy >= 0.55 ? 'text-green-400' : model.accuracy >= 0.50 ? 'text-yellow-400' : 'text-zinc-400'}`}>
-              {model.accuracy != null ? `${(model.accuracy * 100).toFixed(1)}%` : '--'}
-            </span>
-          </div>
-          <div className="flex justify-between text-[10px]">
-            <span className="text-zinc-500">Samples</span>
-            <span className="text-zinc-400 font-mono">{(model.training_samples || 0).toLocaleString()}</span>
-          </div>
-          {model.version && (
-            <div className="flex justify-between text-[10px]">
-              <span className="text-zinc-500">Version</span>
-              <span className="text-zinc-500 font-mono">{model.version}</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {isTraining ? (
-        <div className="space-y-1">
-          {training?.percent > 0 && (
-            <div className="w-full h-1 rounded-full bg-white/10 overflow-hidden">
-              <div
-                className="h-full rounded-full bg-cyan-400 transition-all duration-500"
-                style={{ width: `${Math.min(training.percent, 100)}%` }}
-              />
-            </div>
-          )}
-          <div className="text-[10px] text-cyan-400/80 truncate">{training?.message || 'Training...'}</div>
-        </div>
-      ) : (
-        <button
-          onClick={() => onTrain(name)}
-          className={`w-full flex items-center justify-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
-            isTrained
-              ? 'bg-white/5 hover:bg-white/10 text-zinc-400 border border-white/5'
-              : 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 border border-cyan-500/30'
-          }`}
-          data-testid={`train-${name}-btn`}
-        >
-          <PlayCircle className="w-3 h-3" />
-          {isTrained ? 'Retrain' : 'Train'}
-        </button>
-      )}
     </div>
   );
 });
 
-const SetupModelsPanel = memo(() => {
-  const [expanded, setExpanded] = useState(false);
+const SetupModelsPanel = memo(({ embedded = false }) => {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [trainingAll, setTrainingAll] = useState(false);
-  const [localTraining, setLocalTraining] = useState({});  // track per-type training locally
-
-  const [activeJobs, setActiveJobs] = useState({});  // { setupType: job_id }
+  const [localTraining, setLocalTraining] = useState({});
+  const [activeJobs, setActiveJobs] = useState({});
   const sendTrainCommand = useTrainCommand();
 
   const fetchStatus = useCallback(async () => {
@@ -148,7 +216,6 @@ const SetupModelsPanel = memo(() => {
     }
   }, []);
 
-  // Poll active jobs for progress
   const pollJobs = useCallback(async () => {
     const jobs = { ...activeJobs };
     let changed = false;
@@ -158,12 +225,11 @@ const SetupModelsPanel = memo(() => {
         const res = await api.get(`/api/jobs/${jobId}`);
         const job = res.data?.job;
         if (!job) continue;
-
         const progress = job.progress || {};
 
         if (job.status === 'completed') {
-          const acc = job.result?.accuracy || job.result?.details?.metrics?.accuracy;
-          toast.success(`${key} trained${acc ? ` — ${(acc * 100).toFixed(1)}%` : ''}!`);
+          const profiles = job.result?.details?.profiles_trained || job.result?.profiles_trained;
+          toast.success(`${key} training complete${profiles ? ` — ${profiles} profiles` : ''}`);
           delete jobs[key];
           changed = true;
         } else if (job.status === 'failed') {
@@ -171,20 +237,16 @@ const SetupModelsPanel = memo(() => {
           delete jobs[key];
           changed = true;
         } else {
-          // Still running — update local training message
           setLocalTraining(prev => ({
             ...prev,
             [key]: { status: 'running', message: progress.message || 'Processing...', percent: progress.percent || 0 }
           }));
         }
-      } catch {
-        // ignore polling errors
-      }
+      } catch { /* ignore */ }
     }
 
     if (changed) {
       setActiveJobs(jobs);
-      // Clear finished local training entries
       setLocalTraining(prev => {
         const next = { ...prev };
         for (const k of Object.keys(next)) {
@@ -196,33 +258,21 @@ const SetupModelsPanel = memo(() => {
     }
   }, [activeJobs, fetchStatus]);
 
-  // Fetch on mount so header badge shows correct count
-  useEffect(() => {
-    fetchStatus();
-  }, [fetchStatus]);
+  useEffect(() => { fetchStatus(); }, [fetchStatus]);
 
-  // Re-fetch when expanded if stale
-  useEffect(() => {
-    if (expanded) fetchStatus();
-  }, [expanded, fetchStatus]);
-
-  // Poll while any jobs are active
   const hasActiveJobs = Object.keys(activeJobs).length > 0;
-
   useEffect(() => {
-    if (!expanded || !hasActiveJobs) return;
-    const interval = setInterval(pollJobs, 2500);
+    if (!hasActiveJobs) return;
+    const interval = setInterval(pollJobs, 3000);
     return () => clearInterval(interval);
-  }, [expanded, hasActiveJobs, pollJobs]);
+  }, [hasActiveJobs, pollJobs]);
 
   const handleTrainOne = useCallback(async (setupType) => {
-    setLocalTraining(prev => ({ ...prev, [setupType]: { status: 'running', message: 'Queuing job...' } }));
-    toast.info(`Training ${setupType.replace(/_/g, ' ')} model...`);
-
+    setLocalTraining(prev => ({ ...prev, [setupType]: { status: 'running', message: 'Queuing...' } }));
+    toast.info(`Training all ${setupType.replace(/_/g, ' ')} profiles...`);
     try {
-      // Send training command via WebSocket (bypasses HTTP connection pool)
       const res = await sendTrainCommand(
-        { action: 'train_setup', setup_type: setupType, bar_size: '1 day' },
+        { action: 'train_setup', setup_type: setupType },
         setupType
       );
       if (res.success && res.job_id) {
@@ -233,52 +283,27 @@ const SetupModelsPanel = memo(() => {
         setLocalTraining(prev => { const n = { ...prev }; delete n[setupType]; return n; });
       }
     } catch (err) {
-      // Fallback: check if a job is already running for this setup type
-      try {
-        const check = await api.get('/api/jobs/running');
-        const running = check?.data?.jobs || [];
-        const match = running.find(j => j.params?.setup_type === setupType);
-        if (match) {
-          setActiveJobs(prev => ({ ...prev, [setupType]: match.job_id }));
-          setLocalTraining(prev => ({ ...prev, [setupType]: { status: 'running', message: 'Training in progress...' } }));
-          toast.success(`${setupType.replace(/_/g, ' ')} training is running`);
-          return;
-        }
-      } catch { /* fallback check failed */ }
       toast.error(`Error: ${err.message}`);
       setLocalTraining(prev => { const n = { ...prev }; delete n[setupType]; return n; });
     }
   }, [sendTrainCommand]);
 
   const handleTrainAll = useCallback(async () => {
+    setTrainingAll(true);
+    toast.info('Queuing all setup model training...');
     try {
-      setTrainingAll(true);
-      toast.info('Queuing all setup model training...');
       const res = await sendTrainCommand(
-        { action: 'train_setup_all', bar_size: '1 day' },
+        { action: 'train_setup_all' },
         'setup_all'
       );
       if (res.success && res.job_id) {
-        toast.success('All setup models training queued');
+        toast.success('All setup model training queued');
         setActiveJobs(prev => ({ ...prev, _ALL: res.job_id }));
-        setLocalTraining(prev => ({ ...prev, _ALL: { status: 'running', message: 'Waiting for worker...' } }));
       } else {
         toast.error(res.error || 'Failed to queue training');
         setTrainingAll(false);
       }
     } catch (err) {
-      // Fallback: check for running jobs
-      try {
-        const check = await api.get('/api/jobs/running');
-        const running = check?.data?.jobs || [];
-        const match = running.find(j => j.job_type === 'setup_training');
-        if (match) {
-          setActiveJobs(prev => ({ ...prev, _ALL: match.job_id }));
-          setLocalTraining(prev => ({ ...prev, _ALL: { status: 'running', message: 'Training in progress...' } }));
-          toast.success('Setup training is running');
-          return;
-        }
-      } catch { /* check failed */ }
       toast.error(`Error: ${err.message}`);
       setTrainingAll(false);
     }
@@ -286,121 +311,84 @@ const SetupModelsPanel = memo(() => {
 
   const models = status?.models || {};
   const trainedCount = status?.models_trained || 0;
-  const totalCount = status?.total_setup_types || 10;
-  const serverTrainingStatus = status?.training_status || {};
+  const totalProfiles = status?.total_profiles || 17;
+  const serverTraining = status?.training_status || {};
 
-  // Merge local training state with server training status
-  const mergedTrainingStatus = { ...serverTrainingStatus };
+  const mergedTraining = { ...serverTraining };
   for (const [key, val] of Object.entries(localTraining)) {
     const serverKey = `setup_${key}`;
-    if (!mergedTrainingStatus[serverKey] || mergedTrainingStatus[serverKey].status !== 'running') {
-      mergedTrainingStatus[serverKey] = val;
+    if (!mergedTraining[serverKey] || mergedTraining[serverKey].status !== 'running') {
+      mergedTraining[serverKey] = val;
     }
   }
 
-  // Check if any are currently training
   const anyTraining = hasActiveJobs || Object.keys(localTraining).length > 0;
 
-  // Stop train-all state when its job completes
   useEffect(() => {
-    if (trainingAll && !activeJobs._ALL) {
-      setTrainingAll(false);
-    }
+    if (trainingAll && !activeJobs._ALL) setTrainingAll(false);
   }, [trainingAll, activeJobs]);
+
+  const content = (
+    <div data-testid="setup-models-content">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <span className={`text-xs px-2 py-0.5 rounded-full ${trainedCount > 0 ? 'bg-green-500/20 text-green-400' : 'bg-zinc-500/20 text-zinc-500'}`}>
+            {trainedCount}/{totalProfiles} profiles trained
+          </span>
+          <span className="text-[10px] text-zinc-500">{Object.keys(models).length} setup types</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={fetchStatus}
+            disabled={loading}
+            className="p-1.5 rounded bg-white/5 hover:bg-white/10 border border-white/5 text-zinc-400"
+            data-testid="refresh-setup-status-btn"
+          >
+            <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+          <button
+            onClick={handleTrainAll}
+            disabled={anyTraining || trainingAll}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 border border-cyan-500/30 disabled:opacity-40"
+            data-testid="train-all-setups-btn"
+          >
+            {anyTraining || trainingAll ? (
+              <><Loader2 className="w-3 h-3 animate-spin" /> Training...</>
+            ) : (
+              <><PlayCircle className="w-3 h-3" /> Train All</>
+            )}
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+        {Object.entries(models).map(([name, model]) => (
+          <SetupCard
+            key={name}
+            name={name}
+            data={model}
+            trainingStatus={mergedTraining}
+            onTrain={handleTrainOne}
+          />
+        ))}
+      </div>
+
+      {Object.keys(models).length === 0 && !loading && (
+        <div className="text-center py-8 text-zinc-500 text-sm">No setup model data. Click refresh to load.</div>
+      )}
+      {loading && Object.keys(models).length === 0 && (
+        <div className="flex items-center justify-center py-8 gap-2 text-zinc-500 text-sm">
+          <Loader2 className="w-4 h-4 animate-spin" /> Loading...
+        </div>
+      )}
+    </div>
+  );
+
+  if (embedded) return content;
 
   return (
     <div className="rounded-xl border border-white/10 overflow-hidden mb-4" style={{ background: 'rgba(21, 28, 36, 0.8)' }} data-testid="setup-models-panel">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
-        data-testid="setup-models-toggle"
-      >
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #06b6d4, #8b5cf6)' }}>
-            <Layers className="w-4 h-4 text-white" />
-          </div>
-          <div className="text-left">
-            <h3 className="text-sm font-semibold text-white">Setup-Specific AI Models</h3>
-            <p className="text-xs text-zinc-400">Specialized models per trading setup type</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className={`text-xs px-2 py-0.5 rounded-full ${trainedCount > 0 ? 'bg-green-500/20 text-green-400' : 'bg-zinc-500/20 text-zinc-500'}`}>
-            {trainedCount}/{totalCount} trained
-          </span>
-          <ChevronDown className={`w-4 h-4 text-zinc-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-        </div>
-      </button>
-
-      <AnimatePresence>
-        {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="border-t border-white/10"
-          >
-            <div className="p-4">
-              {/* Header actions */}
-              <div className="flex items-center justify-between mb-4">
-                <p className="text-xs text-zinc-500">
-                  One model per setup type, shared across all timeframes (intraday, swing, investment).
-                </p>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={fetchStatus}
-                    disabled={loading}
-                    className="p-1.5 rounded bg-white/5 hover:bg-white/10 border border-white/5 text-zinc-400 transition-colors"
-                    data-testid="refresh-setup-status-btn"
-                  >
-                    <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
-                  </button>
-                  <button
-                    onClick={handleTrainAll}
-                    disabled={anyTraining || trainingAll}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 border border-cyan-500/30 disabled:opacity-40 disabled:cursor-not-allowed"
-                    data-testid="train-all-setups-btn"
-                  >
-                    {anyTraining || trainingAll ? (
-                      <><Loader2 className="w-3 h-3 animate-spin" /> Training...</>
-                    ) : (
-                      <><PlayCircle className="w-3 h-3" /> Train All</>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {/* Setup model grid */}
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
-                {Object.entries(models).map(([name, model]) => (
-                  <SetupCard
-                    key={name}
-                    name={name}
-                    model={model}
-                    training={mergedTrainingStatus[`setup_${name}`]}
-                    onTrain={handleTrainOne}
-                  />
-                ))}
-              </div>
-
-              {/* Empty state */}
-              {Object.keys(models).length === 0 && !loading && (
-                <div className="text-center py-8 text-zinc-500 text-sm">
-                  No setup model data available. Click refresh to load.
-                </div>
-              )}
-
-              {/* Loading state */}
-              {loading && Object.keys(models).length === 0 && (
-                <div className="flex items-center justify-center py-8 gap-2 text-zinc-500 text-sm">
-                  <Loader2 className="w-4 h-4 animate-spin" /> Loading setup models...
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <div className="p-4">{content}</div>
     </div>
   );
 });
