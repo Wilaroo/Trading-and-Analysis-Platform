@@ -146,12 +146,9 @@ const SmartStopSelector = ({
   useEffect(() => {
     const fetchModes = async () => {
       try {
-        const response = await safeGet('/api/smart-stops/modes');
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success) {
-            setModes(data.modes);
-          }
+        const data = await safeGet('/api/smart-stops/modes');
+        if (data?.success) {
+          setModes(data.modes);
         }
       } catch (err) {
         console.error('Failed to fetch stop modes:', err);
@@ -174,12 +171,9 @@ const SmartStopSelector = ({
         ...(resistance && { resistance: resistance.toString() })
       });
       
-      const response = await safeGet('/api/smart-stops/compare?${params}');
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setComparison(data.comparison);
-        }
+      const data = await safeGet(`/api/smart-stops/compare?${params}`);
+      if (data?.success) {
+        setComparison(data.comparison);
       }
     } catch (err) {
       console.error('Failed to fetch stop comparison:', err);
@@ -199,12 +193,9 @@ const SmartStopSelector = ({
         volatility_regime: volatilityRegime
       });
       
-      const response = await safeGet('/api/smart-stops/recommend/${symbol}?${params}');
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setRecommendation(data);
-        }
+      const data = await safeGet(`/api/smart-stops/recommend/${symbol}?${params}`);
+      if (data?.success) {
+        setRecommendation(data);
       }
     } catch (err) {
       console.error('Failed to fetch stop recommendation:', err);

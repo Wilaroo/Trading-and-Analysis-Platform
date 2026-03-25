@@ -35,8 +35,7 @@ const SimulationQuickPanel = memo(({ jobs, loading, onRefresh }) => {
   const handleQuickTest = async () => {
     setStarting('quick');
     try {
-      const res = await api.post(`/api/simulation/quick-test?bar_size=${encodeURIComponent(simBarSize)}`);
-      const data = await res.json();
+      const { data } = await api.post(`/api/simulation/quick-test?bar_size=${encodeURIComponent(simBarSize)}`);
       if (data.success) {
         toast.success(`Smart Test started: ${data.symbols_count} symbols on ${simBarSize} bars`);
         if (onRefresh) onRefresh();

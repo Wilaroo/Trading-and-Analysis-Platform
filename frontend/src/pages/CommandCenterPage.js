@@ -39,7 +39,7 @@ const CommandCenterPage = ({
     const checkOllama = async () => {
       try {
         const data = await safeGet('/api/assistant/check-ollama');
-          setOllamaStatus(data.available ? 'online' : 'offline');
+          setOllamaStatus(data?.available ? 'online' : 'offline');
       } catch (e) {
         setOllamaStatus('offline');
       }

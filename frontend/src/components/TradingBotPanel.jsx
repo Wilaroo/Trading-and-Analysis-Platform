@@ -649,7 +649,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const fetchStatus = useCallback(async () => {
     try {
       const data = await safeGet('/api/trading-bot/status');
-      if (data.success) {
+      if (data?.success) {
         setStatus(data);
       }
     } catch (err) {
@@ -661,7 +661,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const fetchOrderQueue = useCallback(async () => {
     try {
       const data = await safeGet('/api/ib/orders/queue/status');
-      if (data.success) {
+      if (data?.success) {
         setOrderQueue({
           pending: data.pending_count || 0,
           executing: data.executing_count || 0,
@@ -678,19 +678,15 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   // Fetch trades
   const fetchTrades = useCallback(async () => {
     try {
-      const [pendingRes, openRes, closedRes] = await Promise.all([
+      const [pendingData, openData, closedData] = await Promise.all([
         safeGet('/api/trading-bot/trades/pending'),
         safeGet('/api/trading-bot/trades/open'),
         safeGet('/api/trading-bot/trades/closed?limit=20')
       ]);
       
-      const pendingData = await pendingRes.json();
-      const openData = await openRes.json();
-      const closedData = await closedRes.json();
-      
-      if (pendingData.success) setPendingTrades(pendingData.trades || []);
-      if (openData.success) setOpenTrades(openData.trades || []);
-      if (closedData.success) setClosedTrades(closedData.trades || []);
+      if (pendingData?.success) setPendingTrades(pendingData.trades || []);
+      if (openData?.success) setOpenTrades(openData.trades || []);
+      if (closedData?.success) setClosedTrades(closedData.trades || []);
       
     } catch (err) {
       console.error('Failed to fetch trades:', err);
@@ -734,8 +730,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const confirmTrade = async (tradeId) => {
     setActionLoading(tradeId);
     try {
-      const res = await api.post(`/api/trading-bot/trades/${tradeId}/confirm`);
-      const data = await res.json();
+      const { data } = await api.post(`/api/trading-bot/trades/${tradeId}/confirm`);
       if (data.success) {
         await fetchTrades();
         await fetchStatus();
@@ -750,8 +745,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   const rejectTrade = async (tradeId) => {
     setActionLoading(tradeId);
     try {
-      const res = await api.post(`/api/trading-bot/trades/${tradeId}/reject`);
-      const data = await res.json();
+      const { data } = await api.post(`/api/trading-bot/trades/${tradeId}/reject`);
       if (data.success) {
         await fetchTrades();
       }
@@ -767,8 +761,7 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
     
     setActionLoading(tradeId);
     try {
-      const res = await api.post(`/api/trading-bot/trades/${tradeId}/close`);
-      const data = await res.json();
+      const { data } = await api.post(`/api/trading-bot/trades/${tradeId}/close`);
       if (data.success) {
         await fetchTrades();
         await fetchStatus();

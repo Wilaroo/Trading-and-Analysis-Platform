@@ -414,10 +414,8 @@ const BotPerformanceChart = ({
     }
     
     try {
-      const response = await safeGet('/api/trading-bot/performance/equity-curve?period=${timeRange}');
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
+      const data = await safeGet(`/api/trading-bot/performance/equity-curve?period=${timeRange}`);
+      if (data?.success) {
           const equityData = data.equity_curve.map(point => ({
             time: Math.floor(point.time / 1000),
             value: point.value,
@@ -441,7 +439,6 @@ const BotPerformanceChart = ({
           
           setChartData(equityData);
           setStats(newStats);
-        }
       }
     } catch (err) {
       console.error('Failed to fetch equity curve:', err);

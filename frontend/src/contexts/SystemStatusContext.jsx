@@ -119,11 +119,10 @@ export const SystemStatusProvider = ({ children }) => {
     if (!service?.checkEndpoint) return;
     
     try {
-      // Use safeGet (axios-based, goes through CRA proxy) for consistent behavior
-      const response = await safeGet(service.checkEndpoint);
-      const data = response?.data;
+      // safeGet returns response.data directly (JSON body) or null on error
+      const data = await safeGet(service.checkEndpoint);
       
-      if (data && response?.status === 200) {
+      if (data) {
         let connected = false;
         let message = null;
         
@@ -162,10 +161,9 @@ export const SystemStatusProvider = ({ children }) => {
     
     // Check backend first (if backend is down, others will fail)
     try {
-      const healthResponse = await safeGet('/api/health');
-      // safeGet returns an axios response (.status, .data) — NOT a fetch Response (.ok)
-      const isHealthy = healthResponse?.status === 200 || healthResponse?.data?.status === 'healthy';
-      if (isHealthy) {
+      const data = await safeGet('/api/health');
+      // safeGet now returns response.data directly, or null on error
+      if (data && (data.status === 'healthy' || data.status === 'ok')) {
         updateStatus('backend', STATUS.CONNECTED);
         updateStatus('mongodb', STATUS.CONNECTED); // If backend is up, DB is connected
         

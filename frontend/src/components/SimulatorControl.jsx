@@ -84,9 +84,8 @@ const SimulatorControl = ({ onAlertGenerated, onAlertsUpdated, className = '' })
   // Fetch simulator status
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await safeGet('/api/simulator/status');
-      if (res.ok) {
-        const data = await res.json();
+      const data = await safeGet('/api/simulator/status');
+      if (data) {
         setStatus(data);
         setSelectedScenario(data.scenario || 'range_bound');
         setSelectedInterval(data.alert_interval || 30);
@@ -100,9 +99,8 @@ const SimulatorControl = ({ onAlertGenerated, onAlertsUpdated, className = '' })
   // Fetch simulator alerts and update parent
   const fetchAlerts = useCallback(async () => {
     try {
-      const res = await safeGet('/api/simulator/alerts');
-      if (res.ok) {
-        const data = await res.json();
+      const data = await safeGet('/api/simulator/alerts');
+      if (data) {
         const alerts = data.alerts || [];
         // Notify parent of all simulated alerts
         if (onAlertsUpdated && alerts.length > 0) {
@@ -120,20 +118,13 @@ const SimulatorControl = ({ onAlertGenerated, onAlertsUpdated, className = '' })
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
-        '/api/simulator/start?scenario=${selectedScenario}&interval=${selectedInterval}',
-        { method: 'POST' }
-      );
-      if (res.ok) {
-        const data = await res.json();
+      const { data } = await api.post(`/api/simulator/start?scenario=${selectedScenario}&interval=${selectedInterval}`);
+      if (data) {
         setStatus(data);
         setShowSettings(false);
-      } else {
-        const err = await res.json();
-        setError(err.detail || 'Failed to start simulator');
       }
     } catch (err) {
-      setError('Failed to connect to simulator');
+      setError(err?.response?.data?.detail || 'Failed to start simulator');
       console.error('Failed to start simulator:', err);
     }
     setLoading(false);
@@ -143,10 +134,8 @@ const SimulatorControl = ({ onAlertGenerated, onAlertsUpdated, className = '' })
   const stopSimulator = async () => {
     setLoading(true);
     try {
-      const res = await api.post('/api/simulator/stop');
-      if (res.ok) {
-        await fetchStatus();
-      }
+      await api.post('/api/simulator/stop');
+      await fetchStatus();
     } catch (err) {
       console.error('Failed to stop simulator:', err);
     }
@@ -157,14 +146,11 @@ const SimulatorControl = ({ onAlertGenerated, onAlertsUpdated, className = '' })
   const generateAlert = async () => {
     setLoading(true);
     try {
-      const res = await api.post('/api/simulator/generate');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.alert) {
-          onAlertGenerated?.(data.alert);
-        }
-        await fetchStatus();
+      const { data } = await api.post('/api/simulator/generate');
+      if (data?.success && data.alert) {
+        onAlertGenerated?.(data.alert);
       }
+      await fetchStatus();
     } catch (err) {
       console.error('Failed to generate alert:', err);
     }

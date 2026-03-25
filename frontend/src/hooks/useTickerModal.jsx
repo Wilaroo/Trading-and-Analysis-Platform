@@ -26,11 +26,8 @@ export const TickerModalProvider = ({ children, onTrade, onAskAI }) => {
   // Fetch bot's open trades to check if we have a position
   const fetchBotTrades = useCallback(async () => {
     try {
-      const response = await safeGet('/api/trading-bot/trades/open');
-      if (response.ok) {
-        const data = await response.json();
-        setBotTrades(data.trades || []);
-      }
+      const data = await safeGet('/api/trading-bot/trades/open');
+      setBotTrades(data?.trades || []);
     } catch (err) {
       console.error('Failed to fetch bot trades:', err);
     }

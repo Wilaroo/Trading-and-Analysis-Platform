@@ -71,9 +71,8 @@ export default function MarketScannerPanel() {
   // Fetch symbol count on mount
   useEffect(() => {
     safeGet('/api/market-scanner/symbols')
-      .then(res => res.json())
       .then(data => {
-        if (data.success) {
+        if (data?.success) {
           setSymbolCount(data.total_symbols);
         }
       })
@@ -90,10 +89,9 @@ export default function MarketScannerPanel() {
     }
 
     const interval = setInterval(() => {
-      safeGet('/api/market-scanner/scan/${activeScan.id}')
-        .then(res => res.json())
+      safeGet(`/api/market-scanner/scan/${activeScan.id}`)
         .then(data => {
-          if (data.success && data.scan) {
+          if (data?.success && data.scan) {
             setActiveScan(data.scan);
             if (data.scan.status === 'completed' || data.scan.status === 'failed') {
               setIsScanning(false);
@@ -109,9 +107,8 @@ export default function MarketScannerPanel() {
 
   const loadRecentScans = useCallback(() => {
     safeGet('/api/market-scanner/scans?limit=10')
-      .then(res => res.json())
       .then(data => {
-        if (data.success) {
+        if (data?.success) {
           setRecentScans(data.scans || []);
         }
       })
@@ -165,8 +162,8 @@ export default function MarketScannerPanel() {
     
     // Fetch signals for this scan
     try {
-      const data = await safeGet('/api/market-scanner/scan/${scan.id}/signals?limit=50');
-      if (data.success) {
+      const data = await safeGet(`/api/market-scanner/scan/${scan.id}/signals?limit=50`);
+      if (data?.success) {
         setScanSignals(data.signals || []);
       }
     } catch (error) {

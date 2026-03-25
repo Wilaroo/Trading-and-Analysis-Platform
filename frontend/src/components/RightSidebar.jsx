@@ -522,12 +522,12 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
   const fetchAlerts = useCallback(async () => {
     setLoading(true);
     try {
-      const [alertsRes, statusRes] = await Promise.all([
-        safeGet('/api/live-scanner/alerts').then(r => r.json()),
-        safeGet('/api/live-scanner/status').then(r => r.json())
+      const [alertsData, statusData] = await Promise.all([
+        safeGet('/api/live-scanner/alerts'),
+        safeGet('/api/live-scanner/status')
       ]);
-      setAlerts(alertsRes.alerts || []);
-      setStats(statusRes);
+      setAlerts(alertsData?.alerts || []);
+      setStats(statusData);
     } catch (err) {
       console.error('Failed to load scanner results:', err);
     } finally {

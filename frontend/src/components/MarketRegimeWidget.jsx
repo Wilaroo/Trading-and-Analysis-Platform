@@ -23,8 +23,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { CustomTip } from './shared/Tooltip';
-import api, { safeGet, safePost } from '../utils/api';
-const API_URL = process.env.REACT_APP_BACKEND_URL || ''; // For useEffect dep
+import { safeGet } from '../utils/api';
 
 const UPDATE_INTERVAL = 30 * 60 * 1000;
 
@@ -160,11 +159,10 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
     const fetchRegime = useCallback(async (showToast = false) => {
     try {
       if (!regime) setLoading(true); // Only show loading spinner on initial load
-      const response = await safeGet('/api/market-regime/summary');
+      const data = await safeGet('/api/market-regime/summary');
       
-      if (!response.ok) throw new Error('Failed to fetch market regime');
+      if (!data) throw new Error('Failed to fetch market regime');
       
-      const data = await response.json();
       setRegime(data);
       setError(null);
       
@@ -184,7 +182,7 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
     } finally {
       setLoading(false);
     }
-  }, [API_URL, onStateChange]);
+  }, [onStateChange]);
 
   useEffect(() => {
     fetchRegime();

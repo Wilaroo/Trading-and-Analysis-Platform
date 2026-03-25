@@ -1044,7 +1044,7 @@ const useAIInsights = (pollInterval = 60000) => {  // Increased to 60s to avoid 
 
   const fetchInsights = useCallback(async () => {
     try {
-      const [decisionsRes, performanceRes, timeseriesRes, accuracyRes, predictionsRes] = await Promise.all([
+      const [decisionsData, performanceData, timeseriesData, accuracyData, predictionsData] = await Promise.all([
         safeGet('/api/ai-modules/shadow/decisions?limit=10'),
         safeGet('/api/ai-modules/shadow/performance?days=7'),
         safeGet('/api/ai-modules/timeseries/status'),
@@ -1052,26 +1052,11 @@ const useAIInsights = (pollInterval = 60000) => {  // Increased to 60s to avoid 
         safeGet('/api/ai-modules/timeseries/predictions?limit=10')
       ]);
 
-      // Handle rate limiting gracefully - skip parsing if any request was rate limited
-      const responses = [decisionsRes, performanceRes, timeseriesRes, accuracyRes, predictionsRes];
-      if (responses.some(r => r.status === 429)) {
-        console.warn('AI insights rate limited, will retry later');
-        return;
-      }
-
-      const [decisionsData, performanceData, timeseriesData, accuracyData, predictionsData] = await Promise.all([
-        decisionsRes.ok ? decisionsRes.json().catch(() => ({})) : {},
-        performanceRes.ok ? performanceRes.json().catch(() => ({})) : {},
-        timeseriesRes.ok ? timeseriesRes.json().catch(() => ({})) : {},
-        accuracyRes.ok ? accuracyRes.json().catch(() => ({})) : {},
-        predictionsRes.ok ? predictionsRes.json().catch(() => ({})) : {}
-      ]);
-
-      if (decisionsData.success) setShadowDecisions(decisionsData.decisions || []);
-      if (performanceData.success) setShadowPerformance(performanceData.performance || null);
-      if (timeseriesData.success) setTimeseriesStatus(timeseriesData.status || null);
-      if (accuracyData.success) setPredictionAccuracy(accuracyData.accuracy || null);
-      if (predictionsData.success) setRecentPredictions(predictionsData.predictions || []);
+      if (decisionsData?.success) setShadowDecisions(decisionsData.decisions || []);
+      if (performanceData?.success) setShadowPerformance(performanceData.performance || null);
+      if (timeseriesData?.success) setTimeseriesStatus(timeseriesData.status || null);
+      if (accuracyData?.success) setPredictionAccuracy(accuracyData.accuracy || null);
+      if (predictionsData?.success) setRecentPredictions(predictionsData.predictions || []);
     } catch (err) {
       console.error('Error fetching AI insights:', err);
     } finally {
@@ -1694,16 +1679,9 @@ const useSentComStream = (pollInterval = 45000) => {  // Increased to 45s to avo
 
   const fetchStream = useCallback(async () => {
     try {
-      const res = await safeGet('/api/sentcom/stream?limit=20');
+      const data = await safeGet('/api/sentcom/stream?limit=20');
+      if (!data) return;
       
-      // Handle rate limiting gracefully
-      if (res.status === 429) {
-        console.warn('Stream rate limited, will retry later');
-        return;
-      }
-      if (!res.ok) return;
-      
-      const data = await res.json().catch(() => ({}));
       if (data.success && data.messages) {
         // Separate chat messages from status/system messages
         const chatMessages = data.messages.filter(m => 

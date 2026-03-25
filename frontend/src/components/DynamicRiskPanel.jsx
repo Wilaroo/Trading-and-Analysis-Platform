@@ -126,8 +126,7 @@ export const DynamicRiskPanel = ({ expanded = false, onToggleExpand }) => {
   const handleToggle = async () => {
     setActionLoading(true);
     try {
-      const res = await api.post('/api/dynamic-risk/toggle');
-      const data = await res.json();
+      const { data } = await api.post('/api/dynamic-risk/toggle');
       if (data.success) {
         toast.success(data.enabled ? 'Dynamic risk enabled' : 'Dynamic risk disabled');
         refresh();

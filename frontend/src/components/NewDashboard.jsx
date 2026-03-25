@@ -338,11 +338,8 @@ const ScannerAlertsStrip = ({ alerts: propAlerts = [], onViewAll }) => {
     if (propAlerts.length > 0) return; // WebSocket is providing data
     const fetchAlerts = async () => {
       try {
-        const res = await safeGet('/api/live-scanner/alerts');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.alerts?.length > 0) setFetchedAlerts(data.alerts);
-        }
+        const data = await safeGet('/api/live-scanner/alerts');
+        if (data?.alerts?.length > 0) setFetchedAlerts(data.alerts);
       } catch (e) { /* silent */ }
     };
     fetchAlerts();
@@ -476,13 +473,10 @@ const NewDashboard = ({
   const fetchDashboardData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await safeGet('/api/trading-bot/dashboard-data');
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setDashboardData(data);
-          setError(null);
-        }
+      const data = await safeGet('/api/trading-bot/dashboard-data');
+      if (data?.success) {
+        setDashboardData(data);
+        setError(null);
       }
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
@@ -495,28 +489,24 @@ const NewDashboard = ({
   // Fetch account data from IB
   const fetchAccountData = useCallback(async () => {
     try {
-      const [accountRes, ibDataRes] = await Promise.all([
+      const [accountData, ibData] = await Promise.all([
         safeGet('/api/ib/account/summary'),
         safeGet('/api/ib/pushed-data')
       ]);
       
-      if (accountRes.ok) {
-        const data = await accountRes.json();
-        if (data.success) {
-          setAccountData(prev => ({
-            ...prev,
-            net_liquidation: data.net_liquidation,
-            buying_power: data.buying_power,
-            available_funds: data.available_funds,
-            daily_pnl: data.daily_pnl,
-            realized_pnl: data.realized_pnl,
-            unrealized_pnl: data.unrealized_pnl,
-          }));
-        }
+      if (accountData?.success) {
+        setAccountData(prev => ({
+          ...prev,
+          net_liquidation: accountData.net_liquidation,
+          buying_power: accountData.buying_power,
+          available_funds: accountData.available_funds,
+          daily_pnl: accountData.daily_pnl,
+          realized_pnl: accountData.realized_pnl,
+          unrealized_pnl: accountData.unrealized_pnl,
+        }));
       }
       
-      if (ibDataRes.ok) {
-        const ibData = await ibDataRes.json();
+      if (ibData) {
         setAccountData(prev => ({
           ...prev,
           ib_connected: ibData.connected || false,
@@ -530,17 +520,14 @@ const NewDashboard = ({
   // Fetch order queue status
   const fetchOrderQueue = useCallback(async () => {
     try {
-      const response = await safeGet('/api/ib/orders/queue/status');
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setOrderQueue({
-            pending: data.counts?.pending || data.pending?.length || 0,
-            executing: data.counts?.executing || data.executing?.length || 0,
-            completed: data.counts?.completed || data.completed?.length || 0,
-            recent_orders: data.completed?.slice(0, 5) || [],
-          });
-        }
+      const data = await safeGet('/api/ib/orders/queue/status');
+      if (data?.success) {
+        setOrderQueue({
+          pending: data.counts?.pending || data.pending?.length || 0,
+          executing: data.counts?.executing || data.executing?.length || 0,
+          completed: data.counts?.completed || data.completed?.length || 0,
+          recent_orders: data.completed?.slice(0, 5) || [],
+        });
       }
     } catch (err) {
       console.error('Failed to fetch order queue:', err);

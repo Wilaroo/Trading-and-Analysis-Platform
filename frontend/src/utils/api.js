@@ -85,27 +85,27 @@ export const xhrPost = (url, body, timeout = 30000) => {
 export const safeGet = async (url, config) => {
   try {
     const res = await api.get(url, config);
-    return res;
+    return res.data;
   } catch {
-    return { data: null };
+    return null;
   }
 };
 
 export const safePost = async (url, data, config) => {
   try {
     const res = await api.post(url, data, config);
-    return res;
+    return res.data;
   } catch {
-    return { data: null };
+    return null;
   }
 };
 
 export const safeDelete = async (url, config) => {
   try {
     const res = await api.delete(url, config);
-    return res;
+    return res.data;
   } catch {
-    return { data: null };
+    return null;
   }
 };
 

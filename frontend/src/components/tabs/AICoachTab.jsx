@@ -50,15 +50,12 @@ const AICoachTab = ({
   // Fetch regime data
   const fetchRegimeData = useCallback(async () => {
     try {
-      const response = await safeGet('/api/market-regime/summary');
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setRegime({
-            name: data.state || 'HOLD',
-            score: data.composite_score || 50
-          });
-        }
+      const data = await safeGet('/api/market-regime/summary');
+      if (data) {
+        setRegime({
+          name: data.state || 'HOLD',
+          score: data.composite_score || 50
+        });
       }
     } catch (err) {
       console.error('Failed to fetch regime:', err);
@@ -68,12 +65,9 @@ const AICoachTab = ({
   // Fetch session data
   const fetchSessionData = useCallback(async () => {
     try {
-      const response = await safeGet('/api/context/session');
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setMarketSession(data.session?.name || 'MARKET CLOSED');
-        }
+      const data = await safeGet('/api/context/session');
+      if (data?.success) {
+        setMarketSession(data.session?.name || 'MARKET CLOSED');
       }
     } catch (err) {
       console.error('Failed to fetch session:', err);
