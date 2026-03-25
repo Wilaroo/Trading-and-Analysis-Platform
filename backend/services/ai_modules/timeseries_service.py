@@ -1845,6 +1845,9 @@ class TimeSeriesAIService:
             import numpy as np
             from services.ai_modules.setup_pattern_detector import detect_setup
             from services.ai_modules.setup_features import get_setup_features, get_setup_feature_names
+            from services.ai_modules.regime_features import (
+                RegimeFeatureProvider, REGIME_FEATURE_NAMES
+            )
             
             # Create a dedicated GBM model
             model = TimeSeriesGBM(model_name=model_name, forecast_horizon=forecast_horizon)
@@ -1853,6 +1856,17 @@ class TimeSeriesAIService:
             if class_weight != 1.0:
                 model.params["scale_pos_weight"] = class_weight
                 model.params.pop("is_unbalance", None)
+            
+            # Layer 1: Preload SPY daily bars for regime context features
+            regime_provider = RegimeFeatureProvider(self._db)
+            spy_bar_count = await asyncio.get_event_loop().run_in_executor(
+                None, regime_provider.preload_spy_daily
+            )
+            regime_available = spy_bar_count >= 25
+            if regime_available:
+                logger.info(f"[SETUP TRAIN] Regime features enabled ({spy_bar_count} SPY bars)")
+            else:
+                logger.warning("[SETUP TRAIN] Regime features disabled (insufficient SPY data)")
             
             # Get training symbols for this bar_size
             symbols = await self._get_training_symbols_from_db(bar_size=bar_size, limit=max_symbols)
@@ -1869,7 +1883,12 @@ class TimeSeriesAIService:
             
             base_feature_names = feature_engineer.get_feature_names()
             setup_feature_names = get_setup_feature_names(setup_type)
-            combined_feature_names = base_feature_names + [f"setup_{n}" for n in setup_feature_names]
+            regime_feat_names = REGIME_FEATURE_NAMES if regime_available else []
+            combined_feature_names = (
+                base_feature_names
+                + [f"setup_{n}" for n in setup_feature_names]
+                + regime_feat_names
+            )
             
             loaded = 0
             for symbol in symbols:
@@ -1941,7 +1960,16 @@ class TimeSeriesAIService:
                     base_vector = [feature_set.features.get(f, 0.0) for f in base_feature_names]
                     setup_feats = get_setup_features(setup_type, w_opens, w_highs, w_lows, w_closes, w_volumes)
                     setup_vector = [setup_feats.get(f, 0.0) for f in setup_feature_names]
-                    combined_vector = base_vector + setup_vector
+                    
+                    # Layer 1: Add regime context features
+                    if regime_available:
+                        bar_date = str(bars[i + 49].get("timestamp", bars[i + 49].get("date", "")))
+                        regime_feats = regime_provider.get_regime_features_for_date(bar_date)
+                        regime_vector = [regime_feats.get(f, 0.0) for f in REGIME_FEATURE_NAMES]
+                    else:
+                        regime_vector = []
+                    
+                    combined_vector = base_vector + setup_vector + regime_vector
                     
                     all_features.append(combined_vector)
                     all_targets.append(target)
@@ -2012,6 +2040,8 @@ class TimeSeriesAIService:
                         "noise_filtered": noise_filtered,
                         "usable_samples": len(all_features),
                         "setup_features": [f"setup_{n}" for n in setup_feature_names],
+                        "regime_features": regime_feat_names,
+                        "regime_enabled": regime_available,
                         "total_features": len(combined_feature_names),
                         "num_classes": num_classes,
                         "profile": profile,
@@ -2150,7 +2180,11 @@ class TimeSeriesAIService:
         otherwise fall back to the general model.
         
         For setup models, we must extract BOTH base features AND setup-specific
-        features to match the training feature set.
+        features to match the training feature set. Regime features are also
+        included if the model was trained with them.
+        
+        Layer 2: After raw prediction, adjusts confidence based on current
+        market regime alignment with the setup's preferences.
         """
         import numpy as np
         effective_type = setup_type.upper()
@@ -2188,6 +2222,30 @@ class TimeSeriesAIService:
                     for k, v in setup_feats.items():
                         combined[f"setup_{k}"] = v
                     
+                    # Layer 1: Add regime features if model expects them
+                    from .regime_features import REGIME_FEATURE_NAMES
+                    model_expects_regime = any(
+                        f in model._feature_names for f in REGIME_FEATURE_NAMES
+                    )
+                    if model_expects_regime:
+                        try:
+                            from .regime_features import compute_regime_features_from_bars
+                            # Get SPY bars from DB for current regime context
+                            if self._db is not None:
+                                spy_bars = list(self._db["ib_historical_data"].find(
+                                    {"symbol": "SPY", "bar_size": "1 day"},
+                                    {"_id": 0, "close": 1, "high": 1, "low": 1, "date": 1}
+                                ).sort("date", -1).limit(30))
+                                real_spy = [b for b in spy_bars if len(str(b.get("date", ""))) == 10]
+                                if len(real_spy) >= 25:
+                                    spy_c = np.array([b["close"] for b in real_spy], dtype=float)
+                                    spy_h = np.array([b["high"] for b in real_spy], dtype=float)
+                                    spy_l = np.array([b["low"] for b in real_spy], dtype=float)
+                                    regime_feats = compute_regime_features_from_bars(spy_c, spy_h, spy_l)
+                                    combined.update(regime_feats)
+                        except Exception as e:
+                            logger.debug(f"Regime features for prediction failed: {e}")
+                    
                     # Build feature vector matching model's expected feature order
                     feature_vector = np.array([[
                         combined.get(f, 0.0) for f in model._feature_names
@@ -2195,7 +2253,6 @@ class TimeSeriesAIService:
                     
                     # Predict using the setup model directly
                     pred_raw = model._model.predict(feature_vector)
-                    num_classes = getattr(model, '_num_classes', 2)
                     
                     if len(pred_raw.shape) > 1 and pred_raw.shape[1] >= 3:
                         # 3-class: pred_raw shape = (1, 3) → [P(DOWN), P(FLAT), P(UP)]
@@ -2230,6 +2287,35 @@ class TimeSeriesAIService:
                             direction = "flat"
                             confidence = 0.2
                     
+                    # Layer 2: Regime-aware confidence adjustment
+                    regime_adjustment = None
+                    try:
+                        from .regime_confidence import adjust_confidence_for_regime
+                        from services.service_registry import get_service_optional
+                        
+                        engine_state = None
+                        scanner_regime = None
+                        
+                        # Try MarketRegimeEngine
+                        regime_engine = get_service_optional('market_regime_engine')
+                        if regime_engine and hasattr(regime_engine, 'current_state'):
+                            engine_state = regime_engine.current_state.value
+                        
+                        # Try scanner's regime
+                        scanner = get_service_optional('enhanced_scanner')
+                        if scanner and hasattr(scanner, '_market_regime'):
+                            scanner_regime = scanner._market_regime.value
+                        
+                        if engine_state or scanner_regime:
+                            regime_adjustment = adjust_confidence_for_regime(
+                                effective_type, confidence,
+                                engine_state=engine_state,
+                                scanner_regime=scanner_regime,
+                            )
+                            confidence = regime_adjustment["adjusted_confidence"]
+                    except Exception as e:
+                        logger.debug(f"Regime confidence adjustment skipped: {e}")
+                    
                     result = {
                         "symbol": symbol,
                         "direction": direction,
@@ -2243,6 +2329,11 @@ class TimeSeriesAIService:
                         "model_type": "setup_specific",
                         "num_classes": 3 if prob_flat > 0 else 2,
                     }
+                    
+                    # Include regime context in result
+                    if regime_adjustment:
+                        result["regime_adjustment"] = regime_adjustment
+                    
                     return result
             except Exception as e:
                 logger.warning(f"Setup model {effective_type} prediction failed: {e}")
