@@ -40,6 +40,14 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
     - Frontend syncs with backend every 5s for fast mode change detection
     - Priority matrix tuned: TRAINING zeroes IB streaming (not needed), COLLECTING zeroes bot scan
     - Wired: WS train handlers, backtest background jobs, data collection endpoints, cancel endpoints
+19. **Automated Train→Validate→Promote Pipeline (Mar 25, 2026)** — COMPLETED
+    - After training, automatically backtests the new model on top 20 liquid symbols (180 days)
+    - Compares against stored baseline using composite score: Sharpe (40%), Win Rate (30%), Return (20%), AI Edge (10%)
+    - Promotes if better (or first model), rolls back to backup if worse
+    - Backs up current model before every training run
+    - DB collections: `model_baselines` (current benchmarks), `model_validations` (audit trail), `setup_type_models_backup` (rollback)
+    - API: `GET /api/ai-modules/validation/history`, `GET /api/ai-modules/validation/baselines`
+    - Full pipeline: Click Train → TRAINING focus mode → Train model → Backup → Validate via backtest → Promote/Reject → Restore LIVE
 
 ## Key Data Models
 
@@ -112,11 +120,10 @@ MOMENTUM → [1hour (h=14), 1day (h=7)]
 - `/app/frontend/src/components/NIA/index.jsx` — NIA main (4-section layout)
 
 ## Upcoming Tasks
-1. (P1) **Backtesting Workflow Automation** — auto-backtest on new model training
-2. (P2) **MFE/MAE Scatter Chart per Setup Type** — Visualize which setups leave money on the table (high MFE, low captured %) vs which shake you out (high MAE before recovering). Powerful edge-refinement tool once MFE/MAE data accumulates.
-3. (P3) Auto-Optimize AI Settings — sweep confidence thresholds/lookback windows
-4. (P3) Compare Simulations Side-by-Side
-5. (P3) API Route Profiling Dashboard
+1. (P2) **MFE/MAE Scatter Chart per Setup Type** — Visualize which setups leave money on the table vs which shake you out
+2. (P3) Auto-Optimize AI Settings — sweep confidence thresholds/lookback windows
+3. (P3) Compare Simulations Side-by-Side
+4. (P3) API Route Profiling Dashboard
 
 ## Future Refactoring
 - Shift ~44 active polling intervals to WebSocket-based updates

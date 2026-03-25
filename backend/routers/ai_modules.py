@@ -1869,3 +1869,71 @@ async def recalculate_adv_cache():
     except Exception as e:
         logger.error(f"Error recalculating ADV cache: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# ===== Model Validation History Endpoint =====
+
+@router.get("/validation/history")
+async def get_validation_history(
+    setup_type: str = None,
+    limit: int = 50,
+):
+    """
+    Get model validation history showing train→backtest→promote/reject results.
+    """
+    try:
+        if not _timeseries_ai or _timeseries_ai._db is None:
+            raise HTTPException(status_code=503, detail="AI service not initialized")
+        
+        db = _timeseries_ai._db
+        query = {}
+        if setup_type:
+            query["setup_type"] = setup_type.upper()
+        
+        records = list(db["model_validations"].find(
+            query, {"_id": 0}
+        ).sort("validated_at", -1).limit(limit))
+        
+        # Summary stats
+        total = len(records)
+        promoted = sum(1 for r in records if r.get("status") == "promoted")
+        rejected = sum(1 for r in records if r.get("status") == "rejected")
+        
+        return {
+            "success": True,
+            "total": total,
+            "promoted": promoted,
+            "rejected": rejected,
+            "records": records,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting validation history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/validation/baselines")
+async def get_model_baselines():
+    """
+    Get current baseline metrics for all models.
+    These are the benchmarks that new models must beat to be promoted.
+    """
+    try:
+        if not _timeseries_ai or _timeseries_ai._db is None:
+            raise HTTPException(status_code=503, detail="AI service not initialized")
+        
+        db = _timeseries_ai._db
+        baselines = list(db["model_baselines"].find({}, {"_id": 0}).sort("setup_type", 1))
+        
+        return {
+            "success": True,
+            "total": len(baselines),
+            "baselines": baselines,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting model baselines: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

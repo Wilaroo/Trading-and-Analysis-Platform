@@ -120,7 +120,7 @@ async def process_training_job(job: dict, db) -> dict:
     try:
         # Update progress
         await job_queue_manager.update_progress(
-            job_id, percent=5, message=f'Starting training...'
+            job_id, percent=5, message='Starting training...'
         )
         
         if all_timeframes:
@@ -141,7 +141,7 @@ async def process_training_job(job: dict, db) -> dict:
                     message=f'Training timeframe {tf_num}/{len(timeframes)}: {tf}...'
                 )
                 
-                logger.info(f"")
+                logger.info("")
                 logger.info(f">>> Timeframe {tf_num}/{len(timeframes)}: {tf}")
                 
                 try:
@@ -529,6 +529,10 @@ async def process_setup_training_job(job: dict, db) -> dict:
     max_bars_per_symbol = params.get('max_bars_per_symbol')
     
     try:
+        from services.ai_modules.post_training_validator import (
+            backup_current_model, validate_trained_model
+        )
+        
         if setup_type == 'ALL':
             # Train all profiles for all setup types
             from services.ai_modules.setup_training_config import get_setup_profiles
@@ -541,6 +545,7 @@ async def process_setup_training_job(job: dict, db) -> dict:
             results = {}
             completed = 0
             profile_idx = 0
+            validation_results = []
             
             for st in setup_types:
                 profiles = get_setup_profiles(st)
@@ -549,7 +554,7 @@ async def process_setup_training_job(job: dict, db) -> dict:
                 for profile in profiles:
                     profile_idx += 1
                     pbar = profile["bar_size"]
-                    pct = int(5 + (profile_idx / total_profiles) * 90)
+                    pct = int(5 + (profile_idx / total_profiles) * 80)
                     
                     await job_queue_manager.update_progress(
                         job_id, percent=pct,
@@ -557,6 +562,9 @@ async def process_setup_training_job(job: dict, db) -> dict:
                         current_step=profile_idx,
                         total_steps=total_profiles
                     )
+                    
+                    # Backup current model before training
+                    await backup_current_model(db, st, pbar)
                     
                     try:
                         result = await timeseries_service._train_single_setup_profile(
@@ -579,23 +587,59 @@ async def process_setup_training_job(job: dict, db) -> dict:
                 
                 results[st] = st_results
             
+            # Validation phase: backtest each successfully trained profile
+            await job_queue_manager.update_progress(
+                job_id, percent=85,
+                message=f'Training done! Validating {completed} models...'
+            )
+            
+            try:
+                backtest_engine = _get_backtest_engine(db, timeseries_service)
+                val_idx = 0
+                for st, st_results in results.items():
+                    for pbar, result in st_results.items():
+                        if result.get('success'):
+                            val_idx += 1
+                            vpct = int(85 + (val_idx / max(completed, 1)) * 14)
+                            
+                            async def _prog(p, m, _j=job_id, _p=vpct):
+                                await job_queue_manager.update_progress(_j, percent=_p, message=m)
+                            
+                            val = await validate_trained_model(
+                                db, timeseries_service, backtest_engine,
+                                st, pbar, result, job_id, _prog
+                            )
+                            validation_results.append(val)
+            except Exception as val_err:
+                logger.warning(f"Validation phase error (models still saved): {val_err}")
+            
+            promoted = sum(1 for v in validation_results if v.get("status") == "promoted")
+            rejected = sum(1 for v in validation_results if v.get("status") == "rejected")
+            
             await job_queue_manager.update_progress(
                 job_id, percent=100,
-                message=f'All setup training complete! {completed}/{total_profiles} profiles'
+                message=f'Complete! {completed} trained, {promoted} promoted, {rejected} rejected'
             )
             
             return {
                 'success': completed > 0,
                 'profiles_trained': completed,
                 'total_profiles': total_profiles,
-                'results': results
+                'results': results,
+                'validation': {
+                    'promoted': promoted,
+                    'rejected': rejected,
+                    'details': validation_results,
+                }
             }
         else:
             # Train one setup type (all profiles or specific bar_size)
             if bar_size:
-                # Train single profile
+                # Train single profile — backup first
                 from services.ai_modules.setup_training_config import get_setup_profile
                 profile = get_setup_profile(setup_type, bar_size)
+                
+                await backup_current_model(db, setup_type, bar_size)
                 
                 await job_queue_manager.update_progress(
                     job_id, percent=10,
@@ -609,7 +653,11 @@ async def process_setup_training_job(job: dict, db) -> dict:
                     max_bars_per_symbol=max_bars_per_symbol,
                 )
             else:
-                # Train all profiles for this setup type
+                # Train all profiles for this setup type — backup each
+                from services.ai_modules.setup_training_config import get_setup_profiles
+                for prof in get_setup_profiles(setup_type):
+                    await backup_current_model(db, setup_type, prof["bar_size"])
+                
                 await job_queue_manager.update_progress(
                     job_id, percent=10,
                     message=f'Training all {setup_type} profiles...'
@@ -624,15 +672,38 @@ async def process_setup_training_job(job: dict, db) -> dict:
             
             if result.get('success'):
                 acc = result.get('metrics', {}).get('accuracy', 0)
-                profiles_trained = result.get('profiles_trained', 1)
+                
+                # Validation phase
+                await job_queue_manager.update_progress(
+                    job_id, percent=85,
+                    message=f'{setup_type} trained! Running validation backtest...'
+                )
+                
+                validation = None
+                try:
+                    backtest_engine = _get_backtest_engine(db, timeseries_service)
+                    target_bar = bar_size or (get_setup_profiles(setup_type)[0]["bar_size"] if not bar_size else bar_size)
+                    
+                    async def _prog(p, m):
+                        await job_queue_manager.update_progress(job_id, percent=p, message=m)
+                    
+                    validation = await validate_trained_model(
+                        db, timeseries_service, backtest_engine,
+                        setup_type, target_bar, result, job_id, _prog
+                    )
+                except Exception as val_err:
+                    logger.warning(f"Validation failed (model still saved): {val_err}")
+                
+                status = validation.get("status", "unknown") if validation else "skipped"
                 await job_queue_manager.update_progress(
                     job_id, percent=100,
-                    message=f'{setup_type} trained! {acc*100:.1f}% acc' if acc else f'{setup_type}: {profiles_trained} profiles done'
+                    message=f'{setup_type}: {status.upper()}' + (f' ({acc*100:.1f}% acc)' if acc else '')
                 )
                 return {
                     'success': True,
                     'setup_type': setup_type,
-                    'details': result
+                    'details': result,
+                    'validation': validation,
                 }
             else:
                 return {
@@ -646,6 +717,25 @@ async def process_setup_training_job(job: dict, db) -> dict:
             'success': False,
             'error': str(e)
         }
+
+
+def _get_backtest_engine(db, timeseries_service):
+    """Create a backtest engine instance for validation."""
+    try:
+        from services.slow_learning.advanced_backtest_engine import AdvancedBacktestEngine
+        from services.simulation_engine import SimulationEngine
+        
+        simulation_engine = SimulationEngine(db=db)
+        backtest_engine = AdvancedBacktestEngine(
+            db=db,
+            simulation_engine=simulation_engine,
+            timeseries_ai=timeseries_service,
+        )
+        return backtest_engine
+    except Exception as e:
+        logger.error(f"Failed to create backtest engine: {e}")
+        raise
+
 
 
 async def process_job(job: dict, db) -> dict:
