@@ -26,18 +26,15 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
 15. **Advanced Setup-Specific Models with Pattern Detection (Mar 25, 2026)** - COMPLETED
 16. **Fix: AI Model "Untrained" Display on First Load (Mar 25, 2026)** - COMPLETED
 17. **Fix: POST Requests Blocked by Request Throttler (Mar 25, 2026)** - COMPLETED
-    - Reduced throttler concurrency from 16 to 4 (browser limit is 6)
-    - POST/PUT/DELETE bypass throttler entirely
-    - Added `xhrPost` utility for training actions (bypasses axios stack)
 18. **Fix: IB Gateway Startup Check Shows False Green (Mar 25, 2026)** - COMPLETED
-    - Now checks actual data flow, not just socket connection
-    - Shows "No Data" (yellow) when connected but farms are down
 19. **CRITICAL FIX: Setup Models Were Copies of General Model (Mar 25, 2026)** - COMPLETED
-    - **Root cause**: `train_from_features()` called `_save_model()` which compared against the general model, model protection rejected the setup model (lower accuracy), reloaded the general model, then `_save_setup_model_to_db()` saved the general model as the setup model
-    - **Fix 1**: Added `skip_save=True` parameter to `train_from_features()` — setup training skips GBM's internal save
-    - **Fix 2**: Setup model protection in `train_setup_model()` now compares against existing setup model of SAME TYPE (not the general model)
-    - **Fix 3**: `predict_for_setup()` now extracts both base features AND setup-specific features before prediction (previously only extracted base features, leaving setup features as zeros)
-    - **Verified**: MOMENTUM=47.3%, BREAKOUT=48.4% (each has its own accuracy, general model untouched at 76.8%)
+20. **P0 FIX: WebSocket Training Commands (Mar 25, 2026)** - COMPLETED
+    - Root cause: Browser's HTTP connection pool (6 per domain) saturated by polling GET requests, blocking training POST requests
+    - Fix: All training commands (setup, setup_all, general) now sent via WebSocket, bypassing HTTP entirely
+    - Backend: 3 new WebSocket actions (train_setup, train_setup_all, train_general) using job_queue_manager singleton
+    - Frontend: useWebSocket hook exposes `sendTrainCommand()` promise-based function
+    - Frontend: SetupModelsPanel + UnifiedAITraining migrated from xhrPost → sendTrainCommand
+    - Also fixed: WebSocket URL now correctly includes /api/ws/quotes path
 
 ## Key API Endpoints
 
@@ -48,7 +45,11 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
 - `POST /api/ai-modules/timeseries/train-full-universe-all` — Full universe all TFs
 - `POST /api/ai-modules/timeseries/setups/train` — Setup-specific model
 - `POST /api/ai-modules/timeseries/setups/train-all` — All setup models
-- `POST /api/ai-modules/timeseries/stop-training` — Stop training
+
+### WebSocket Training (bypasses HTTP — preferred for UI)
+- `WS /api/ws/quotes` action: `train_setup` — Queue setup-specific model training
+- `WS /api/ws/quotes` action: `train_setup_all` — Queue all setup models training
+- `WS /api/ws/quotes` action: `train_general` — Queue general model training
 
 ### Job Queue Endpoints
 - `POST /api/jobs` — Create job
@@ -58,15 +59,16 @@ AI-powered trading platform with autonomous learning, backtesting, and market an
 
 ## Upcoming Tasks
 - **(P1) Backtesting Workflow Automation** — Auto-run backtests when a new model is trained
+- **(P2) Improve Setup Model Accuracy** — Current models at ~47-48%, need better pattern detection
 
 ## Future/Backlog
 - (P3) Auto-Optimize AI Settings — Sweep confidence thresholds & lookback windows
 - (P3) API Route Profiling Dashboard
 - (P3) Compare Simulations side-by-side
-- (P2) Improve setup model accuracy — current models at ~47-48%, may need better pattern detection, more data, or feature engineering
 
 ## Known Minor Issues
 - None
 
 ## Testing
 - `/app/test_reports/iteration_107.json` (General Training Job Queue, 20/20 passed)
+- `/app/test_reports/iteration_108.json` (WebSocket Training Commands, 8/9 passed, 1 transient)
