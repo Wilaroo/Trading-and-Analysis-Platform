@@ -2264,8 +2264,13 @@ class TimeSeriesAIService:
                                     bars = list(self._db["ib_historical_data"].find(
                                         {"symbol": symbol, "bar_size": "1 day"},
                                         {"_id": 0, "close": 1, "high": 1, "low": 1, "date": 1}
-                                    ).sort("date", -1).limit(30))
-                                    real = [b for b in bars if len(str(b.get("date", ""))) == 10]
+                                    ).sort("date", -1).limit(3000))
+                                    seen = {}
+                                    for b in bars:
+                                        dk = str(b.get("date", ""))[:10]
+                                        if len(dk) == 10 and dk not in seen:
+                                            seen[dk] = b
+                                    real = sorted(seen.values(), key=lambda x: str(x["date"])[:10], reverse=True)
                                     if len(real) < 25:
                                         return None, None, None
                                     return (
@@ -2298,8 +2303,13 @@ class TimeSeriesAIService:
                                 daily_bars = list(self._db["ib_historical_data"].find(
                                     {"symbol": symbol, "bar_size": "1 day"},
                                     {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
-                                ).sort("date", -1).limit(55))
-                                real_daily = [b for b in daily_bars if len(str(b.get("date", ""))) == 10]
+                                ).sort("date", -1).limit(3000))
+                                seen_dates = {}
+                                for b in daily_bars:
+                                    dk = str(b.get("date", ""))[:10]
+                                    if len(dk) == 10 and dk not in seen_dates:
+                                        seen_dates[dk] = b
+                                real_daily = sorted(seen_dates.values(), key=lambda x: str(x["date"])[:10], reverse=True)
                                 if len(real_daily) >= 25:
                                     mtf_feats = compute_mtf_features_from_daily_bars(
                                         np.array([b["close"] for b in real_daily], dtype=float),

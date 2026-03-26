@@ -183,3 +183,232 @@ async def check_data_readiness():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.get("/regime-live")
+async def get_live_regime():
+    """
+    Get live market regime classification from SPY, QQQ, IWM daily bars.
+    Returns the current regime (bull/bear/range/high_vol) plus per-index metrics.
+    """
+    try:
+        from server import db as mongo_db
+        if mongo_db is None:
+            raise HTTPException(status_code=503, detail="Database not connected")
+
+        import numpy as np
+        from services.ai_modules.regime_conditional_model import classify_regime
+        from services.ai_modules.regime_features import compute_single_index_features
+
+        def _load_index(symbol):
+            # Use aggregation to get one bar per date, much faster than pulling 3000 raw bars
+            pipeline = [
+                {"$match": {"symbol": symbol, "bar_size": "1 day"}},
+                {"$addFields": {"date_key": {"$substr": [{"$toString": "$date"}, 0, 10]}}},
+                {"$sort": {"date": -1}},
+                {"$group": {
+                    "_id": "$date_key",
+                    "close": {"$first": "$close"},
+                    "high": {"$first": "$high"},
+                    "low": {"$first": "$low"},
+                    "date": {"$first": "$date_key"},
+                }},
+                {"$sort": {"_id": -1}},
+                {"$limit": 30},
+            ]
+            try:
+                real = list(mongo_db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True))
+            except Exception:
+                return None, None, None, None
+
+            if len(real) < 25:
+                return None, None, None, None
+            return (
+                np.array([b["close"] for b in real], dtype=float),
+                np.array([b["high"] for b in real], dtype=float),
+                np.array([b["low"] for b in real], dtype=float),
+                real[0].get("date", ""),
+            )
+
+        spy_c, spy_h, spy_l, spy_date = _load_index("SPY")
+        qqq_c, qqq_h, qqq_l, qqq_date = _load_index("QQQ")
+        iwm_c, iwm_h, iwm_l, iwm_date = _load_index("IWM")
+
+        regime = "unknown"
+        if spy_c is not None:
+            regime = classify_regime(spy_c, spy_h, spy_l)
+
+        # Per-index features
+        indexes = {}
+        for name, c, h, lo, dt in [
+            ("SPY", spy_c, spy_h, spy_l, spy_date),
+            ("QQQ", qqq_c, qqq_h, qqq_l, qqq_date),
+            ("IWM", iwm_c, iwm_h, iwm_l, iwm_date),
+        ]:
+            if c is not None:
+                feats = compute_single_index_features(f"regime_{name.lower()}", c, h, lo)
+                indexes[name] = {
+                    "price": float(c[0]),
+                    "date": dt,
+                    "trend": feats.get(f"regime_{name.lower()}_trend", 0),
+                    "rsi": feats.get(f"regime_{name.lower()}_rsi", 0),
+                    "momentum": feats.get(f"regime_{name.lower()}_momentum", 0),
+                    "volatility": feats.get(f"regime_{name.lower()}_volatility", 0),
+                    "vol_expansion": feats.get(f"regime_{name.lower()}_vol_expansion", 0),
+                    "breadth": feats.get(f"regime_{name.lower()}_breadth", 0),
+                }
+            else:
+                indexes[name] = {"price": 0, "date": "", "trend": 0, "rsi": 0,
+                                 "momentum": 0, "volatility": 0, "vol_expansion": 0, "breadth": 0}
+
+        # Cross-correlations
+        cross = {}
+        if spy_c is not None and qqq_c is not None and iwm_c is not None:
+            from services.ai_modules.regime_features import compute_cross_features
+            cross_feats = compute_cross_features(spy_c, qqq_c, iwm_c)
+            cross = {
+                "spy_qqq_corr": cross_feats.get("regime_corr_spy_qqq", 0),
+                "spy_iwm_corr": cross_feats.get("regime_corr_spy_iwm", 0),
+                "qqq_iwm_corr": cross_feats.get("regime_corr_qqq_iwm", 0),
+                "rotation_qqq_spy": cross_feats.get("regime_rotation_qqq_spy", 0),
+                "rotation_iwm_spy": cross_feats.get("regime_rotation_iwm_spy", 0),
+                "rotation_qqq_iwm": cross_feats.get("regime_rotation_qqq_iwm", 0),
+            }
+
+        return {
+            "success": True,
+            "regime": regime,
+            "indexes": indexes,
+            "cross": cross,
+        }
+
+    except Exception as e:
+        logger.error(f"Live regime error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/model-inventory")
+async def get_model_inventory():
+    """
+    Get complete inventory of all model definitions with their training status.
+    Shows which models are defined, which are trained, and their accuracy.
+    """
+    try:
+        from server import db as mongo_db
+
+        # Get trained models from DB
+        trained_models = {}
+        if mongo_db:
+            for doc in mongo_db["timeseries_models"].find({}, {"_id": 0, "model_data": 0}):
+                trained_models[doc.get("model_name", "")] = {
+                    "accuracy": doc.get("accuracy", 0),
+                    "training_samples": doc.get("training_samples", 0),
+                    "promoted_at": doc.get("promoted_at", ""),
+                }
+
+        from services.ai_modules.volatility_model import VOL_MODEL_CONFIGS
+        from services.ai_modules.exit_timing_model import EXIT_MODEL_CONFIGS
+        from services.ai_modules.sector_relative_model import SECTOR_MODEL_CONFIGS
+        from services.ai_modules.gap_fill_model import GAP_MODEL_CONFIGS
+        from services.ai_modules.risk_of_ruin_model import RISK_MODEL_CONFIGS
+        from services.ai_modules.ensemble_model import ENSEMBLE_MODEL_CONFIGS
+
+        categories = {
+            "generic_directional": {
+                "label": "Generic Directional",
+                "description": "Predicts UP/DOWN per timeframe",
+                "models": [],
+            },
+            "setup_specific": {
+                "label": "Setup-Specific",
+                "description": "Per setup type + timeframe",
+                "models": [],
+            },
+            "volatility": {
+                "label": "Volatility Prediction",
+                "description": "Predicts high/low vol for position sizing",
+                "models": [],
+            },
+            "exit_timing": {
+                "label": "Exit Timing",
+                "description": "Predicts optimal holding period",
+                "models": [],
+            },
+            "sector_relative": {
+                "label": "Sector-Relative",
+                "description": "Outperform/underperform vs sector ETF",
+                "models": [],
+            },
+            "gap_fill": {
+                "label": "Gap Fill Probability",
+                "description": "Gap fill vs continuation prediction",
+                "models": [],
+            },
+            "risk_of_ruin": {
+                "label": "Risk-of-Ruin",
+                "description": "Stop-loss hit probability",
+                "models": [],
+            },
+            "ensemble": {
+                "label": "Ensemble Meta-Learner",
+                "description": "Stacks multi-timeframe signals",
+                "models": [],
+            },
+        }
+
+        # Generic directional
+        for bs in ["1 min", "5 mins", "15 mins", "30 mins", "1 hour", "1 day", "1 week"]:
+            name = f"direction_predictor_{bs.replace(' ', '_')}"
+            categories["generic_directional"]["models"].append({
+                "name": name, "bar_size": bs,
+                "trained": name in trained_models,
+                **(trained_models.get(name, {})),
+            })
+
+        # Setup-specific (from existing config)
+        from services.ai_modules.setup_training_config import get_setup_training_config, ALL_SETUP_TYPES as SETUP_LIST
+        for st in SETUP_LIST:
+            cfg = get_setup_training_config(st)
+            for bs in cfg.get("bar_sizes", []):
+                name = f"{st.lower()}_{bs.replace(' ', '_')}_predictor"
+                categories["setup_specific"]["models"].append({
+                    "name": name, "setup_type": st, "bar_size": bs,
+                    "trained": name in trained_models,
+                    **(trained_models.get(name, {})),
+                })
+
+        # New model categories
+        for config_map, category_key in [
+            (VOL_MODEL_CONFIGS, "volatility"),
+            (EXIT_MODEL_CONFIGS, "exit_timing"),
+            (SECTOR_MODEL_CONFIGS, "sector_relative"),
+            (GAP_MODEL_CONFIGS, "gap_fill"),
+            (RISK_MODEL_CONFIGS, "risk_of_ruin"),
+            (ENSEMBLE_MODEL_CONFIGS, "ensemble"),
+        ]:
+            for key, cfg in config_map.items():
+                name = cfg["model_name"]
+                categories[category_key]["models"].append({
+                    "name": name, "config_key": key,
+                    "trained": name in trained_models,
+                    **(trained_models.get(name, {})),
+                })
+
+        # Summary stats
+        total_defined = sum(len(c["models"]) for c in categories.values())
+        total_trained = sum(
+            sum(1 for m in c["models"] if m.get("trained"))
+            for c in categories.values()
+        )
+
+        return {
+            "success": True,
+            "total_defined": total_defined,
+            "total_trained": total_trained,
+            "categories": categories,
+        }
+
+    except Exception as e:
+        logger.error(f"Model inventory error: {e}")
+        return {"success": False, "error": str(e)}

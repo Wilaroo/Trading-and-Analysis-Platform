@@ -330,30 +330,38 @@ class RegimeFeatureProvider:
     def _load_single_index(self, key: str, symbol: str) -> int:
         """Load daily bars for a single index symbol."""
         try:
-            pipeline = [
-                {"$match": {"symbol": symbol, "bar_size": "1 day"}},
-                {"$addFields": {"_dateLen": {"$strLenCP": {"$toString": "$date"}}}},
-                {"$match": {"_dateLen": 10}},
-                {"$sort": {"date": 1}},
-                {"$project": {"_id": 0, "date": 1, "close": 1, "high": 1, "low": 1}},
-            ]
-            bars = list(self._db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True))
+            bars = list(self._db["ib_historical_data"].find(
+                {"symbol": symbol, "bar_size": "1 day"},
+                {"_id": 0, "date": 1, "close": 1, "high": 1, "low": 1},
+            ).sort("date", 1))
 
             if not bars:
                 logger.warning(f"No {symbol} daily bars found for regime features")
                 return 0
 
-            self._data[key]["dates"] = [b["date"] for b in bars]
-            self._data[key]["closes"] = np.array([b["close"] for b in bars], dtype=float)
-            self._data[key]["highs"] = np.array([b["high"] for b in bars], dtype=float)
-            self._data[key]["lows"] = np.array([b["low"] for b in bars], dtype=float)
+            # Deduplicate by date (take first 10 chars as date key, keep last per date)
+            seen = {}
+            for b in bars:
+                date_key = str(b.get("date", ""))[:10]
+                if len(date_key) == 10:
+                    seen[date_key] = b
+
+            deduped = sorted(seen.values(), key=lambda x: str(x["date"])[:10])
+            if not deduped:
+                logger.warning(f"No valid {symbol} daily bars after dedup")
+                return 0
+
+            self._data[key]["dates"] = [str(b["date"])[:10] for b in deduped]
+            self._data[key]["closes"] = np.array([b["close"] for b in deduped], dtype=float)
+            self._data[key]["highs"] = np.array([b["high"] for b in deduped], dtype=float)
+            self._data[key]["lows"] = np.array([b["low"] for b in deduped], dtype=float)
             self._data[key]["date_to_idx"] = {d: i for i, d in enumerate(self._data[key]["dates"])}
 
             logger.info(
-                f"Regime provider: loaded {len(bars)} {symbol} daily bars "
+                f"Regime provider: loaded {len(deduped)} {symbol} daily bars "
                 f"({self._data[key]['dates'][0]} to {self._data[key]['dates'][-1]})"
             )
-            return len(bars)
+            return len(deduped)
 
         except Exception as e:
             logger.error(f"Failed to preload {symbol} bars for regime: {e}")
@@ -426,11 +434,23 @@ class RegimeFeatureProvider:
             loop = asyncio.get_event_loop()
 
             def _query_index(symbol: str):
-                bars = list(self._db["ib_historical_data"].find(
-                    {"symbol": symbol, "bar_size": "1 day"},
-                    {"_id": 0, "date": 1, "close": 1, "high": 1, "low": 1}
-                ).sort("date", -1).limit(30))
-                real_bars = [b for b in bars if len(str(b.get("date", ""))) == 10]
+                pipeline = [
+                    {"$match": {"symbol": symbol, "bar_size": "1 day"}},
+                    {"$addFields": {"date_key": {"$substr": [{"$toString": "$date"}, 0, 10]}}},
+                    {"$sort": {"date": -1}},
+                    {"$group": {
+                        "_id": "$date_key",
+                        "close": {"$first": "$close"},
+                        "high": {"$first": "$high"},
+                        "low": {"$first": "$low"},
+                    }},
+                    {"$sort": {"_id": -1}},
+                    {"$limit": 30},
+                ]
+                try:
+                    real_bars = list(self._db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True))
+                except Exception:
+                    return None, None, None
                 if len(real_bars) < 25:
                     return None, None, None
                 c = np.array([b["close"] for b in real_bars], dtype=float)

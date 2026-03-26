@@ -18,6 +18,7 @@ import QuickStatsBar from './QuickStatsBar';
 import AICommandCenter from './AICommandCenter';
 import DataBacktestingPanel from './DataBacktestingPanel';
 import StrategyPerformancePanel from './StrategyPerformancePanel';
+import TrainingPipelinePanel from './TrainingPipelinePanel';
 
 const DEFAULT_DATA = {
   aiAccuracy: null,
@@ -342,6 +343,9 @@ const NIA = () => {
         onRefresh={handleRefresh}
         onRunCalibrations={handleRunCalibrations}
       />
+
+      {/* 2.5 Training Pipeline — model inventory, regime, training controls */}
+      <TrainingPipelinePanel onRefresh={handleRefresh} />
 
       {/* 3. Data & Backtesting — collection + scanner + simulations */}
       <DataBacktestingPanel

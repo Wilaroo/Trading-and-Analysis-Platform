@@ -215,19 +215,24 @@ class MultiTimeframeFeatureProvider:
             if not bars:
                 return 0
 
-            # Filter to real daily bars (date length == 10)
-            bars = [b for b in bars if len(str(b.get("date", ""))) == 10]
+            # Deduplicate by date (first 10 chars), keep last per date
+            seen = {}
+            for b in bars:
+                dk = str(b.get("date", ""))[:10]
+                if len(dk) == 10:
+                    seen[dk] = b
+            bars = sorted(seen.values(), key=lambda x: str(x["date"])[:10])
             if len(bars) < 25:
                 return 0
 
             self._symbol_data[symbol] = {
-                "dates": [b["date"] for b in bars],
+                "dates": [str(b["date"])[:10] for b in bars],
                 "closes": np.array([b["close"] for b in bars], dtype=float),
                 "highs": np.array([b["high"] for b in bars], dtype=float),
                 "lows": np.array([b["low"] for b in bars], dtype=float),
                 "volumes": np.array([b.get("volume", 0) for b in bars], dtype=float),
                 "opens": np.array([b.get("open", 0) for b in bars], dtype=float),
-                "date_to_idx": {b["date"]: i for i, b in enumerate(bars)},
+                "date_to_idx": {str(b["date"])[:10]: i for i, b in enumerate(bars)},
             }
             self._loaded_symbols.add(symbol)
             return len(bars)
@@ -293,8 +298,13 @@ class MultiTimeframeFeatureProvider:
                 bars = list(self._db["ib_historical_data"].find(
                     {"symbol": symbol, "bar_size": "1 day"},
                     {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
-                ).sort("date", -1).limit(55))
-                real = [b for b in bars if len(str(b.get("date", ""))) == 10]
+                ).sort("date", -1).limit(3000))
+                seen = {}
+                for b in bars:
+                    dk = str(b.get("date", ""))[:10]
+                    if len(dk) == 10 and dk not in seen:
+                        seen[dk] = b
+                real = sorted(seen.values(), key=lambda x: str(x["date"])[:10], reverse=True)
                 if len(real) < 25:
                     return {name: 0.0 for name in MTF_FEATURE_NAMES}
                 closes = np.array([b["close"] for b in real], dtype=float)

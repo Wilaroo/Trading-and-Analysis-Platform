@@ -151,6 +151,7 @@ const ScoreBar = ({ label, value, tip, category }) => {
 
 const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
   const [regime, setRegime] = useState(null);
+  const [aiRegime, setAiRegime] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [expanded, setExpanded] = useState(false);
@@ -184,10 +185,21 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
     }
   }, [onStateChange]);
 
+  // Fetch AI regime data (expanded view)
+  const fetchAiRegime = useCallback(async () => {
+    try {
+      const res = await safeGet('/api/ai-training/regime-live');
+      if (res?.success) setAiRegime(res);
+    } catch {
+      // Silent fail - optional enhancement data
+    }
+  }, []);
+
   useEffect(() => {
     fetchRegime();
-    return safePolling(() => fetchRegime(), UPDATE_INTERVAL, { immediate: false });
-  }, [fetchRegime]);
+    fetchAiRegime();
+    return safePolling(() => { fetchRegime(); fetchAiRegime(); }, UPDATE_INTERVAL, { immediate: false });
+  }, [fetchRegime, fetchAiRegime]);
 
   const getStateConfig = (state) => {
     const configs = {
@@ -393,6 +405,49 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
               </span>
             </div>
           </div>
+          
+          {/* AI Regime Classification */}
+          {aiRegime && (
+            <div className="space-y-2" data-testid="ai-regime-section">
+              <span className="text-[10px] text-zinc-500 block">AI REGIME CLASSIFICATION</span>
+              <div className={`p-2 rounded-lg border ${
+                aiRegime.regime === 'bull_trend' ? 'bg-emerald-500/5 border-emerald-500/20' :
+                aiRegime.regime === 'bear_trend' ? 'bg-red-500/5 border-red-500/20' :
+                aiRegime.regime === 'high_vol' ? 'bg-violet-500/5 border-violet-500/20' :
+                'bg-amber-500/5 border-amber-500/20'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-zinc-400">Detected Regime</span>
+                  <span className={`text-xs font-bold ${
+                    aiRegime.regime === 'bull_trend' ? 'text-emerald-400' :
+                    aiRegime.regime === 'bear_trend' ? 'text-red-400' :
+                    aiRegime.regime === 'high_vol' ? 'text-violet-400' :
+                    'text-amber-400'
+                  }`}>
+                    {aiRegime.regime?.replace('_', ' ').toUpperCase()}
+                  </span>
+                </div>
+              </div>
+              
+              {/* Rotation Signals */}
+              {aiRegime.cross && (
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[
+                    { label: 'Growth/Mkt', val: aiRegime.cross.rotation_qqq_spy, desc: 'QQQ vs SPY' },
+                    { label: 'Small/Large', val: aiRegime.cross.rotation_iwm_spy, desc: 'IWM vs SPY' },
+                    { label: 'Growth/Val', val: aiRegime.cross.rotation_qqq_iwm, desc: 'QQQ vs IWM' },
+                  ].map(({ label, val, desc }) => (
+                    <div key={label} className="p-1.5 bg-black/30 rounded-lg text-center">
+                      <span className="text-[9px] text-zinc-500 block">{label}</span>
+                      <span className={`text-xs font-mono font-medium ${val > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {val > 0 ? '+' : ''}{(val * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           
           {/* Recommendation */}
           <div className="flex items-start gap-2 p-2 bg-black/30 rounded-lg">
