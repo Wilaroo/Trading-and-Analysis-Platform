@@ -1416,8 +1416,8 @@ class IBHistoricalCollector:
         current_end = chain_from
 
         while current_end > max_lookback_start:
-            # IB endDateTime format: "YYYYMMDD HH:MM:SS"
-            end_date_str = current_end.strftime("%Y%m%d %H:%M:%S")
+            # IB endDateTime format: "YYYYMMDD-HH:MM:SS UTC"
+            end_date_str = current_end.strftime("%Y%m%d-%H:%M:%S") + " UTC"
             chains.append({
                 "duration": max_duration,
                 "end_date": end_date_str,
