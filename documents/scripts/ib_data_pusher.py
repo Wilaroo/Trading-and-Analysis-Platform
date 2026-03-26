@@ -1505,6 +1505,10 @@ class IBDataPusher:
         last_status_update = 0
         status_update_interval = 30  # Show status every 30 seconds
         
+        # Rolling rate tracker (5-minute window)
+        _rate_window = []  # list of (timestamp, count) tuples
+        _RATE_WINDOW_SECS = 300  # 5-minute rolling window
+        
         # Adaptive rate limiting
         base_batch_delay = 10  # seconds between batches
         current_batch_delay = base_batch_delay
@@ -1554,6 +1558,10 @@ class IBDataPusher:
                         requests_failed += batch_failed
                         pacing_violations += batch_pacing
                         
+                        # Record batch into rolling rate window
+                        if batch_completed > 0:
+                            _rate_window.append((time.time(), batch_completed))
+                        
                         # ADAPTIVE PACING: If we hit pacing violations, back off
                         if batch_pacing > 0:
                             current_batch_delay = min(current_batch_delay * 1.5, 30)  # Max 30s
@@ -1572,7 +1580,37 @@ class IBDataPusher:
                     # Status update
                     if current_time - last_status_update >= status_update_interval:
                         elapsed = current_time - collection_start_time
-                        rate = requests_completed / (elapsed / 3600) if elapsed > 0 else 0
+                        
+                        # Rolling rate: only count requests within the last 5 minutes
+                        cutoff = current_time - _RATE_WINDOW_SECS
+                        _rate_window[:] = [(t, c) for t, c in _rate_window if t >= cutoff]
+                        window_total = sum(c for _, c in _rate_window)
+                        window_span = current_time - _rate_window[0][0] if _rate_window else 0
+                        
+                        if window_span > 30:  # Need at least 30s of data for meaningful rate
+                            rolling_rate = window_total / (window_span / 3600)
+                        elif elapsed > 0:
+                            # Fallback to lifetime avg if window too small
+                            rolling_rate = requests_completed / (elapsed / 3600)
+                        else:
+                            rolling_rate = 0
+                        
+                        # ETA calculation
+                        if rolling_rate > 0:
+                            try:
+                                # Fetch current pending count from last known or estimate
+                                remaining = max(0, 153000 - requests_completed)  # rough estimate
+                                eta_hours = remaining / rolling_rate
+                                if eta_hours < 1:
+                                    eta_str = f"{eta_hours * 60:.0f} min"
+                                elif eta_hours < 48:
+                                    eta_str = f"{eta_hours:.1f} hrs"
+                                else:
+                                    eta_str = f"{eta_hours / 24:.1f} days"
+                            except:
+                                eta_str = "calculating..."
+                        else:
+                            eta_str = "calculating..."
                         
                         logger.info("")
                         logger.info("=" * 50)
@@ -1581,7 +1619,8 @@ class IBDataPusher:
                         logger.info(f"  Failed: {requests_failed}")
                         logger.info(f"  Dead symbols skipped: {len(self._dead_symbols)}")
                         logger.info(f"  Pacing violations: {pacing_violations}")
-                        logger.info(f"  Rate: {rate:.0f} requests/hour")
+                        logger.info(f"  Rate: {rolling_rate:.0f} requests/hour (5-min rolling)")
+                        logger.info(f"  ETA remaining: {eta_str}")
                         logger.info(f"  Current batch delay: {current_batch_delay:.1f}s")
                         logger.info(f"  Running: {elapsed/60:.1f} minutes")
                         if self._dead_symbols:
