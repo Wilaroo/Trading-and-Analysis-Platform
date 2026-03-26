@@ -1,0 +1,92 @@
+{
+  "summary": "AI Confidence Gate Wiring & Cold-Start Bootstrap Testing - Backend 100% (21/21 tests passed). Verified: (1) Confidence gate wired into trading bot execution path, (2) Cold-start bootstrap mode for 0W/0L trades, (3) Entry context captures confidence_gate field, (4) Multiple evaluate calls accumulate stats correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_confidence_gate_wiring.py",
+    "/app/test_reports/pytest/pytest_confidence_gate_wiring.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "VERIFIED: Confidence gate wired in server.py lines 615-625 - init_confidence_gate(db=db) and trading_bot.set_confidence_gate(confidence_gate)",
+    "VERIFIED: _confidence_gate initialized at line 618 in trading_bot_service.py",
+    "VERIFIED: set_confidence_gate method at lines 704-717 in trading_bot_service.py",
+    "VERIFIED: _confidence_gate.evaluate() called in _evaluate_opportunity at lines 1879-1918",
+    "VERIFIED: Cold-start bootstrap mode at lines 808-823 - returns REDUCE_SIZE with 50% position when wins+losses==0",
+    "VERIFIED: _build_entry_context accepts confidence_gate_result parameter at line 2701",
+    "VERIFIED: entry_context captures confidence_gate data at lines 2782-2790 (decision, confidence_score, position_multiplier, trading_mode, ai_regime, reasoning)",
+    "VERIFIED: confidence_gate_result passed to _build_entry_context at line 2068",
+    "VERIFIED: Stats accumulate correctly - 7 evaluate calls reflected in stats (total_evaluated=7, reduce_count=7)",
+    "VERIFIED: Decisions log shows all test symbols with full reasoning"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_confidence_gate_wiring.py"
+  ],
+  "success_rate": {
+    "backend": "100% (21/21 passed)",
+    "frontend": "N/A (backend only testing requested)"
+  },
+  "test_credentials": null,
+  "seed_data_creation": "7 evaluate calls made during testing - AAPL, TSLA, SPY, NVDA, AMD, META, GOOGL",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Confidence gate wiring fully verified. All 7 test evaluate calls returned REDUCE decision due to bear_trend regime (ai_regime=bear_trend, regime_score=65.1). The confidence gate is correctly integrated into the trade execution flow: Setup Detected → Smart Filter → Confidence Gate → Position Sizing → Execute or Skip. Cold-start bootstrap mode (lines 808-823) correctly returns REDUCE_SIZE with 50% position when wins+losses==0 but sample_size>=5.",
+  "features_verified": {
+    "confidence_gate_wiring": {
+      "server_init": "Line 617: confidence_gate = init_confidence_gate(db=db)",
+      "server_wire": "Line 624: trading_bot.set_confidence_gate(confidence_gate)",
+      "bot_init": "Line 618: self._confidence_gate = None",
+      "bot_setter": "Lines 704-717: def set_confidence_gate(self, confidence_gate)",
+      "bot_evaluate_call": "Lines 1879-1918: await self._confidence_gate.evaluate() in _evaluate_opportunity"
+    },
+    "cold_start_bootstrap": {
+      "location": "Lines 808-823 in trading_bot_service.py",
+      "condition": "completed_trades == 0 (wins + losses == 0)",
+      "action": "REDUCE_SIZE",
+      "adjustment_pct": "0.5 (50% position size)",
+      "reasoning": "Bootstrap mode - taking with 50% size to build history"
+    },
+    "entry_context_confidence_gate": {
+      "param_location": "Line 2701: confidence_gate_result: Dict = None",
+      "capture_location": "Lines 2782-2790",
+      "fields_captured": ["decision", "confidence_score", "position_multiplier", "trading_mode", "ai_regime", "reasoning[:3]"],
+      "call_location": "Line 2068: confidence_gate_result=confidence_gate_result"
+    },
+    "stats_accumulation": {
+      "total_evaluated": 7,
+      "go_count": 0,
+      "reduce_count": 7,
+      "skip_count": 0,
+      "trading_mode": "defensive",
+      "mode_reason": "Bear regime detected (score: 65.1)"
+    },
+    "api_endpoints_tested": {
+      "POST /api/ai-training/confidence-gate/evaluate": "Returns decision, confidence_score, reasoning, regime info - VERIFIED",
+      "GET /api/ai-training/confidence-gate/decisions": "Returns accumulated decisions array - VERIFIED (7 decisions)",
+      "GET /api/ai-training/confidence-gate/stats": "Returns go_count, reduce_count, skip_count - VERIFIED",
+      "GET /api/ai-training/confidence-gate/summary": "Returns trading_mode, today stats - VERIFIED"
+    }
+  },
+  "test_execution_details": {
+    "test_file": "/app/backend/tests/test_confidence_gate_wiring.py",
+    "tests_run": 21,
+    "tests_passed": 21,
+    "tests_failed": 0,
+    "execution_time": "28.81s",
+    "test_classes": [
+      "TestConfidenceGateEvaluateAccumulation (6 tests)",
+      "TestColdStartBootstrapMode (1 test)",
+      "TestConfidenceGateWiringVerification (4 tests)",
+      "TestEntryContextConfidenceGate (3 tests)",
+      "TestConfidenceGateDecisionLogic (3 tests)",
+      "TestConfidenceGateAPIEndpoints (4 tests)"
+    ]
+  }
+}

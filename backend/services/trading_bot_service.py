@@ -614,6 +614,9 @@ class TradingBotService:
         # Enhanced scanner reference for strategy stats
         self._enhanced_scanner = None
         
+        # AI Confidence Gate (pre-trade regime + model consensus check)
+        self._confidence_gate = None
+        
         # Smart filtering thresholds (can be tuned)
         self._smart_filter_config = {
             "enabled": True,
@@ -697,6 +700,21 @@ class TradingBotService:
             live_count = sum(1 for p in phases.values() if p == "live")
             paper_count = sum(1 for p in phases.values() if p == "paper")
             logger.info(f"  - Tracking {len(phases)} strategies: {live_count} LIVE, {paper_count} PAPER")
+
+    def set_confidence_gate(self, confidence_gate):
+        """
+        Set AI Confidence Gate for pre-trade regime + model consensus evaluation.
+
+        Flow: Setup Detected → Smart Filter → **Confidence Gate** → Position Sizing → Execute
+        
+        The gate evaluates:
+        - Current market regime (rule-based + AI)
+        - Model consensus for this setup type
+        - Returns GO / REDUCE / SKIP with position multiplier
+        """
+        self._confidence_gate = confidence_gate
+        logger.info("TradingBotService: AI Confidence Gate connected")
+        logger.info("  - Pre-trade flow: Smart Filter → Confidence Gate → Position Sizing → Execute")
     
     # ==================== SMART STRATEGY FILTERING ====================
     
@@ -1852,6 +1870,53 @@ class TradingBotService:
             
             # Note: REDUCE_SIZE is handled later in position sizing
             
+            # ==================== AI CONFIDENCE GATE ====================
+            # Check current market conditions: regime + AI classification + model consensus
+            # This runs AFTER the smart filter (historical) and BEFORE position sizing
+            confidence_gate_result = None
+            confidence_multiplier = 1.0
+            
+            if hasattr(self, '_confidence_gate') and self._confidence_gate is not None:
+                try:
+                    confidence_gate_result = await self._confidence_gate.evaluate(
+                        symbol=symbol,
+                        setup_type=setup_type,
+                        direction=direction.value if hasattr(direction, 'value') else str(direction),
+                        quality_score=alert.get('score', 70),
+                        entry_price=alert.get('trigger_price', current_price),
+                        stop_price=alert.get('stop_price', 0),
+                        regime_engine=self._market_regime_engine,
+                    )
+                    
+                    gate_decision = confidence_gate_result.get("decision", "GO")
+                    gate_confidence = confidence_gate_result.get("confidence_score", 50)
+                    gate_reasoning = confidence_gate_result.get("reasoning", [])
+                    confidence_multiplier = confidence_gate_result.get("position_multiplier", 1.0)
+                    gate_mode = confidence_gate_result.get("trading_mode", "normal")
+                    
+                    # Log to filter thoughts for visibility in UI
+                    reasoning_summary = "; ".join(gate_reasoning[:2]) if gate_reasoning else "No reasoning"
+                    self._add_filter_thought({
+                        "text": f"🧠 [CONFIDENCE GATE] {gate_decision} ({gate_confidence}% conf, {gate_mode} mode) — {reasoning_summary}",
+                        "symbol": symbol,
+                        "setup_type": setup_type,
+                        "action": f"GATE_{gate_decision}",
+                        "confidence_score": gate_confidence,
+                        "trading_mode": gate_mode,
+                    })
+                    
+                    if gate_decision == "SKIP":
+                        print(f"   🧠 [CONFIDENCE GATE] SKIP ({gate_confidence}% conf) — {reasoning_summary}")
+                        return None
+                    elif gate_decision == "REDUCE":
+                        print(f"   🧠 [CONFIDENCE GATE] REDUCE ({gate_confidence}% conf, {confidence_multiplier:.0%} size) — {reasoning_summary}")
+                    else:
+                        print(f"   🧠 [CONFIDENCE GATE] GO ({gate_confidence}% conf) — {reasoning_summary}")
+                        
+                except Exception as e:
+                    logger.warning(f"Confidence gate error (proceeding anyway): {e}")
+                    print(f"   ⚠️ Confidence gate error: {str(e)[:100]}")
+            
             # ==================== ENHANCED INTELLIGENCE GATHERING ====================
             # Gather all available real-time data to make informed decision
             intelligence = await self._gather_trade_intelligence(symbol, alert)
@@ -1900,6 +1965,15 @@ class TradingBotService:
                 shares = max(1, int(shares * filter_adjustment))
                 risk_amount = risk_amount * filter_adjustment
                 print(f"   📊 [SMART FILTER] Reduced size: {original_shares} -> {shares} shares ({filter_adjustment*100:.0f}%)")
+            
+            # ==================== CONFIDENCE GATE SIZE ADJUSTMENT ====================
+            # Apply size reduction from confidence gate (regime + model consensus)
+            if confidence_multiplier < 1.0:
+                original_shares = shares
+                shares = max(1, int(shares * confidence_multiplier))
+                risk_amount = risk_amount * confidence_multiplier
+                gate_conf = confidence_gate_result.get("confidence_score", 0) if confidence_gate_result else 0
+                print(f"   🧠 [CONFIDENCE GATE] Reduced size: {original_shares} -> {shares} shares ({confidence_multiplier*100:.0f}%, {gate_conf}% conf)")
             
             if shares <= 0:
                 print(f"   ❌ Position size = 0 (entry=${entry_price:.2f}, stop=${stop_price:.2f}, risk=${risk_amount:.2f})")
@@ -1990,7 +2064,8 @@ class TradingBotService:
                 setup_variant=alert.get("strategy_name", alert.get("setup_variant", setup_type)),
                 entry_context=self._build_entry_context(
                     alert, intelligence, current_regime, regime_score,
-                    filter_action, filter_win_rate, atr, atr_percent
+                    filter_action, filter_win_rate, atr, atr_percent,
+                    confidence_gate_result=confidence_gate_result
                 ),
                 scale_out_config={
                     "enabled": True,
@@ -2623,7 +2698,7 @@ class TradingBotService:
     def _build_entry_context(
         self, alert: Dict, intelligence: Dict, regime: str,
         regime_score: float, filter_action: str, filter_win_rate: float,
-        atr: float, atr_percent: float
+        atr: float, atr_percent: float, confidence_gate_result: Dict = None
     ) -> Dict[str, Any]:
         """
         Build rich entry context capturing WHY this trade was taken.
@@ -2702,6 +2777,17 @@ class TradingBotService:
                     "confidence": pred.get("confidence", 0),
                     "regime_aligned": pred.get("regime_adjustment", {}).get("regime_aligned"),
                 }
+        
+        # 8. Confidence gate context (regime + AI + model consensus)
+        if confidence_gate_result:
+            ctx["confidence_gate"] = {
+                "decision": confidence_gate_result.get("decision", ""),
+                "confidence_score": confidence_gate_result.get("confidence_score", 0),
+                "position_multiplier": confidence_gate_result.get("position_multiplier", 1.0),
+                "trading_mode": confidence_gate_result.get("trading_mode", ""),
+                "ai_regime": confidence_gate_result.get("ai_regime", ""),
+                "reasoning": confidence_gate_result.get("reasoning", [])[:3],
+            }
         
         return ctx
     

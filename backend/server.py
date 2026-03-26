@@ -620,6 +620,10 @@ print("AI Confidence Gate initialized")
 print("  - Pre-trade intelligence: Regime + Model Consensus → GO/REDUCE/SKIP")
 print("  - Endpoints: /api/ai-training/confidence-gate/summary, decisions, stats")
 
+# Wire Confidence Gate to Trading Bot
+trading_bot.set_confidence_gate(confidence_gate)
+print("  - Wired to Trading Bot: Every trade now passes through the confidence gate")
+
 # ===================== CONTEXT AWARENESS SERVICE (Phase 2 AI) =====================
 # Initialize Context Awareness Service for smarter AI responses
 context_awareness_service = init_context_awareness_service(
