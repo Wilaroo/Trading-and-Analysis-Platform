@@ -12,7 +12,7 @@ echo.
 :: CONFIGURATION - EDIT THESE AS NEEDED
 :: =====================================================
 :: Production platform URL (custom domain)
-set CLOUD_URL=https://tradecommand.trade
+set CLOUD_URL=http://localhost:8001
 
 :: GitHub repo for auto-updates
 set GITHUB_RAW=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents
@@ -429,7 +429,7 @@ echo.
 :: Open browser
 echo       Opening platform...
 timeout /t 2 /nobreak >nul
-start "" "%CLOUD_URL%"
+start "" "http://localhost:3000"
 
 echo.
 echo ============================================
