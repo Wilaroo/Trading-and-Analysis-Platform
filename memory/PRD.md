@@ -261,6 +261,7 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - Real-time collection dashboard (heatmap of data depth per symbol/bar_size)
 - MFE/MAE Scatter Chart per setup type
 - Auto-Optimize AI Settings (sweep confidence thresholds/lookback windows)
+- **Confidence Gate Tuner**: Once live trade decisions accumulate, auto-calibrate skip/reduce/go thresholds by analyzing which combinations produce the best results for your actual trading style
 
 ### P3 - Future
 - Refactor active polling to WebSocket (~44 intervals)
