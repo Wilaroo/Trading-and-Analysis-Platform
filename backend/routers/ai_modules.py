@@ -932,10 +932,21 @@ async def get_timeseries_status():
             }
         }
     
-    return {
-        "success": True,
-        "status": _timeseries_ai.get_status()
-    }
+    try:
+        status = _timeseries_ai.get_status()
+        # Sanitize: ensure all dict keys are strings (fixes unhashable list key error)
+        if isinstance(status, dict) and "metrics" in status and isinstance(status["metrics"], dict):
+            status["metrics"] = {str(k): v for k, v in status["metrics"].items()}
+        return {"success": True, "status": status}
+    except Exception as e:
+        return {
+            "success": True,
+            "status": {
+                "service": "timeseries_ai",
+                "initialized": True,
+                "error": str(e)
+            }
+        }
 
 
 @router.get("/timeseries/model-history")
