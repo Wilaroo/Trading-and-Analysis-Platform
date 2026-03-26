@@ -1575,7 +1575,7 @@ class IBDataPusher:
         _RATE_WINDOW_SECS = 300  # 5-minute rolling window
         
         # Adaptive rate limiting
-        base_batch_delay = 6  # seconds between batches (was 10 — reduced since 0 pacing violations)
+        base_batch_delay = 3  # seconds between batches (was 10→6→3, 0 pacing violations)
         current_batch_delay = base_batch_delay
         
         logger.info("")
