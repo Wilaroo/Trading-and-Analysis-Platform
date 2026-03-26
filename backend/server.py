@@ -612,6 +612,14 @@ print("  - Endpoints: /api/regime-performance/summary, /api/regime-performance/b
 trading_bot.set_trade_journal(trade_journal_service)
 print("  - Trade Journal: Auto-recording enabled for bot trades")
 
+# ===================== AI CONFIDENCE GATE =====================
+from services.ai_modules.confidence_gate import init_confidence_gate
+confidence_gate = init_confidence_gate(db=db)
+register_service('confidence_gate', confidence_gate)
+print("AI Confidence Gate initialized")
+print("  - Pre-trade intelligence: Regime + Model Consensus → GO/REDUCE/SKIP")
+print("  - Endpoints: /api/ai-training/confidence-gate/summary, decisions, stats")
+
 # ===================== CONTEXT AWARENESS SERVICE (Phase 2 AI) =====================
 # Initialize Context Awareness Service for smarter AI responses
 context_awareness_service = init_context_awareness_service(

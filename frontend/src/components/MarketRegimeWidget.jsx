@@ -349,13 +349,13 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
 
       {/* Expandable Details */}
       <button
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => { setExpanded(!expanded); if (!expanded && !aiRegime) fetchAiRegime(); }}
         className="w-full flex items-center justify-center gap-1 py-2 border-t border-white/5 
                    text-[10px] text-zinc-500 hover:text-zinc-400 hover:bg-white/5 transition-colors"
         data-testid="regime-expand-btn"
       >
         {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-        {expanded ? 'Hide' : 'Details'}
+        {expanded ? 'Hide' : 'AI Details'}
       </button>
 
       {/* Expanded Panel */}

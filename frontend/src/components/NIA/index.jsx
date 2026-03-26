@@ -19,6 +19,7 @@ import AICommandCenter from './AICommandCenter';
 import DataBacktestingPanel from './DataBacktestingPanel';
 import StrategyPerformancePanel from './StrategyPerformancePanel';
 import TrainingPipelinePanel from './TrainingPipelinePanel';
+import SentComIntelligencePanel from './SentComIntelligencePanel';
 
 const DEFAULT_DATA = {
   aiAccuracy: null,
@@ -346,6 +347,9 @@ const NIA = () => {
 
       {/* 2.5 Training Pipeline — model inventory, regime, training controls */}
       <TrainingPipelinePanel onRefresh={handleRefresh} />
+
+      {/* 2.75 SentCom Intelligence — confidence gate decisions, trading mode */}
+      <SentComIntelligencePanel onRefresh={handleRefresh} />
 
       {/* 3. Data & Backtesting — collection + scanner + simulations */}
       <DataBacktestingPanel

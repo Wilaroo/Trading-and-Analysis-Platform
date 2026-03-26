@@ -81,7 +81,7 @@ async def get_training_status():
 
         # Check pipeline status from DB
         status_doc = None
-        if mongo_db:
+        if mongo_db is not None:
             status_doc = mongo_db["training_pipeline_status"].find_one(
                 {"_id": "pipeline"}, {"_id": 0}
             )
@@ -299,7 +299,7 @@ async def get_model_inventory():
 
         # Get trained models from DB
         trained_models = {}
-        if mongo_db:
+        if mongo_db is not None:
             for doc in mongo_db["timeseries_models"].find({}, {"_id": 0, "model_data": 0}):
                 trained_models[doc.get("model_name", "")] = {
                     "accuracy": doc.get("accuracy", 0),
@@ -367,11 +367,12 @@ async def get_model_inventory():
             })
 
         # Setup-specific (from existing config)
-        from services.ai_modules.setup_training_config import get_setup_training_config, ALL_SETUP_TYPES as SETUP_LIST
-        for st in SETUP_LIST:
-            cfg = get_setup_training_config(st)
-            for bs in cfg.get("bar_sizes", []):
-                name = f"{st.lower()}_{bs.replace(' ', '_')}_predictor"
+        from services.ai_modules.setup_training_config import SETUP_TRAINING_PROFILES, get_setup_profiles, get_model_name
+        for st in SETUP_TRAINING_PROFILES.keys():
+            profiles = get_setup_profiles(st)
+            for profile in profiles:
+                bs = profile.get("bar_size", "1 day")
+                name = get_model_name(st, bs)
                 categories["setup_specific"]["models"].append({
                     "name": name, "setup_type": st, "bar_size": bs,
                     "trained": name in trained_models,
@@ -411,4 +412,102 @@ async def get_model_inventory():
 
     except Exception as e:
         logger.error(f"Model inventory error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+
+# ============ CONFIDENCE GATE ENDPOINTS ============
+
+@router.get("/confidence-gate/summary")
+async def get_confidence_gate_summary():
+    """
+    Get SentCom's current trading mode, today's decision stats, and recent streak.
+    Used by the NIA SentCom Intelligence panel header.
+    """
+    try:
+        from services.ai_modules.confidence_gate import get_confidence_gate
+        gate = get_confidence_gate()
+        return {"success": True, **gate.get_summary()}
+    except Exception as e:
+        logger.error(f"Confidence gate summary error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/confidence-gate/decisions")
+async def get_confidence_gate_decisions(limit: int = 30):
+    """
+    Get recent confidence gate decisions for the NIA decision log.
+    Shows what SentCom evaluated, what it decided, and why.
+    """
+    try:
+        from services.ai_modules.confidence_gate import get_confidence_gate
+        gate = get_confidence_gate()
+        decisions = gate.get_decision_log(limit=limit)
+        # Strip heavy fields for API response
+        clean = []
+        for d in decisions:
+            clean.append({
+                "decision": d.get("decision"),
+                "confidence_score": d.get("confidence_score"),
+                "symbol": d.get("symbol"),
+                "setup_type": d.get("setup_type"),
+                "direction": d.get("direction"),
+                "regime_state": d.get("regime_state"),
+                "ai_regime": d.get("ai_regime"),
+                "trading_mode": d.get("trading_mode"),
+                "position_multiplier": d.get("position_multiplier"),
+                "reasoning": d.get("reasoning"),
+                "timestamp": d.get("timestamp"),
+            })
+        return {"success": True, "decisions": clean, "count": len(clean)}
+    except Exception as e:
+        logger.error(f"Confidence gate decisions error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/confidence-gate/stats")
+async def get_confidence_gate_stats():
+    """
+    Get lifetime and daily statistics for the confidence gate.
+    """
+    try:
+        from services.ai_modules.confidence_gate import get_confidence_gate
+        gate = get_confidence_gate()
+        return {"success": True, **gate.get_stats()}
+    except Exception as e:
+        logger.error(f"Confidence gate stats error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/confidence-gate/evaluate")
+async def evaluate_trade_confidence(symbol: str, setup_type: str, direction: str = "long", quality_score: int = 70):
+    """
+    Manually evaluate a symbol+setup through the confidence gate.
+    Useful for testing or manual pre-trade checks.
+    """
+    try:
+        from server import db as mongo_db
+        from services.ai_modules.confidence_gate import get_confidence_gate
+        gate = get_confidence_gate()
+        if mongo_db is not None and gate._db is None:
+            gate.set_db(mongo_db)
+
+        # Try to get regime engine
+        regime_engine = None
+        try:
+            from server import market_regime_engine
+            regime_engine = market_regime_engine
+        except ImportError:
+            pass
+
+        result = await gate.evaluate(
+            symbol=symbol,
+            setup_type=setup_type,
+            direction=direction,
+            quality_score=quality_score,
+            regime_engine=regime_engine,
+        )
+        return {"success": True, **result}
+    except Exception as e:
+        logger.error(f"Confidence gate evaluate error: {e}")
         return {"success": False, "error": str(e)}

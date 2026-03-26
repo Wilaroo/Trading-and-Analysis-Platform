@@ -1,0 +1,89 @@
+{
+  "summary": "AI Confidence Gate Feature Testing - Backend 100% (25/25 tests passed), Frontend verified via screenshots. All confidence gate endpoints working. SentCom Intelligence panel renders correctly on NIA page with trading mode, decision stats, and decision log. Fixed 2 backend bugs: MongoDB truth testing and import error.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_confidence_gate.py",
+    "/app/test_reports/pytest/pytest_confidence_gate.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Fixed MongoDB truth testing bug in /api/ai-training/model-inventory - changed 'if mongo_db:' to 'if mongo_db is not None:'",
+    "Fixed MongoDB truth testing bug in /api/ai-training/status - same fix",
+    "Fixed import error in model-inventory endpoint - changed from non-existent 'get_setup_training_config, ALL_SETUP_TYPES' to correct 'SETUP_TRAINING_PROFILES, get_setup_profiles, get_model_name'",
+    "GET /api/ai-training/confidence-gate/summary returns trading_mode, today stats, streak - VERIFIED",
+    "GET /api/ai-training/confidence-gate/decisions returns recent decisions array - VERIFIED",
+    "GET /api/ai-training/confidence-gate/stats returns go_count, skip_count, reduce_count - VERIFIED",
+    "POST /api/ai-training/confidence-gate/evaluate returns decision, confidence_score, reasoning, regime info - VERIFIED",
+    "GET /api/ai-training/regime-live returns regime, indexes, cross data - VERIFIED",
+    "GET /api/ai-training/model-inventory returns categories with model lists (63 total defined) - VERIFIED",
+    "GET /api/ai-training/status returns pipeline status - VERIFIED",
+    "Frontend NIA page shows SentCom Intelligence panel with NORMAL trading mode - VERIFIED",
+    "Frontend NIA page shows Training Pipeline panel with regime badge - VERIFIED",
+    "Frontend MarketRegimeWidget shows on Command Center with expand button - VERIFIED (score 65.1, Neutral status)"
+  ],
+  "updated_files": [
+    "/app/backend/routers/ai_training.py",
+    "/app/backend/tests/test_confidence_gate.py"
+  ],
+  "success_rate": {
+    "backend": "100% (25/25 passed)",
+    "frontend": "100% (all data-testid elements found)"
+  },
+  "test_credentials": null,
+  "seed_data_creation": "None - confidence gate stats show 0 evaluated/taken/skipped because SentCom bot isn't actively trading on preview env",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "AI Confidence Gate feature fully implemented. Backend endpoints all working after 2 bug fixes. Frontend SentCom Intelligence panel renders on NIA page with trading mode (NORMAL), decision stats (0/0/0), and empty decision log. MarketRegimeWidget shows on Command Center with score 65.1 and Neutral status. Cold-start bootstrap fix in trading_bot_service.py lines 782-804 handles 0W/0L trades by using REDUCE_SIZE action with 50% position.",
+  "features_verified": {
+    "backend_endpoints": {
+      "GET /api/ai-training/confidence-gate/summary": "Returns trading_mode=normal, today={evaluated:0, taken:0, skipped:0}, streak=null - VERIFIED",
+      "GET /api/ai-training/confidence-gate/decisions": "Returns decisions=[] (empty, no trades yet) - VERIFIED",
+      "GET /api/ai-training/confidence-gate/stats": "Returns go_count=0, skip_count=0, reduce_count=0, total_evaluated=0 - VERIFIED",
+      "POST /api/ai-training/confidence-gate/evaluate": "Returns decision=GO/REDUCE/SKIP, confidence_score, reasoning array, regime info - VERIFIED",
+      "GET /api/ai-training/regime-live": "Returns regime classification, index data (SPY/QQQ/IWM), cross correlations - VERIFIED",
+      "GET /api/ai-training/model-inventory": "Returns 63 total defined models across 8 categories - VERIFIED (after fix)",
+      "GET /api/ai-training/status": "Returns task_status=idle, pipeline_status - VERIFIED (after fix)"
+    },
+    "frontend_components": {
+      "NIA page container": "data-testid=nia-page - VERIFIED",
+      "SentCom Intelligence Panel": "data-testid=sentcom-intelligence-panel - VERIFIED",
+      "Trading Mode Banner": "data-testid=trading-mode-banner - VERIFIED (shows NORMAL mode)",
+      "Training Pipeline Panel": "data-testid=training-pipeline-panel - VERIFIED",
+      "Regime Badge": "data-testid=regime-badge - VERIFIED",
+      "MarketRegimeWidget": "data-testid=market-regime-widget - VERIFIED (score 65.1, Neutral)"
+    },
+    "cold_start_fix": {
+      "location": "/app/backend/services/trading_bot_service.py lines 782-804",
+      "behavior": "When wins+losses=0 but sample_size>=5, returns REDUCE_SIZE action with 50% position instead of blocking trade",
+      "verified": "Code review confirmed bootstrap mode logic"
+    }
+  },
+  "bugs_fixed": [
+    {
+      "file": "/app/backend/routers/ai_training.py",
+      "line": "302",
+      "issue": "MongoDB truth testing error - 'if mongo_db:' fails with 'Database objects do not implement truth value testing'",
+      "fix": "Changed to 'if mongo_db is not None:'"
+    },
+    {
+      "file": "/app/backend/routers/ai_training.py",
+      "line": "84",
+      "issue": "Same MongoDB truth testing error in status endpoint",
+      "fix": "Changed to 'if mongo_db is not None:'"
+    },
+    {
+      "file": "/app/backend/routers/ai_training.py",
+      "line": "370",
+      "issue": "Import error - 'get_setup_training_config' and 'ALL_SETUP_TYPES' don't exist in setup_training_config.py",
+      "fix": "Changed to import 'SETUP_TRAINING_PROFILES, get_setup_profiles, get_model_name' and updated loop logic"
+    }
+  ]
+}

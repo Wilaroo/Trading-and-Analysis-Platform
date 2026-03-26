@@ -787,6 +787,23 @@ class TradingBotService:
                 "stats": stats
             }
         
+        # === COLD-START BOOTSTRAP MODE ===
+        # If we have alerts but NO completed trades (0W/0L), we can't judge the setup.
+        # Proceed with reduced sizing to build real trade history.
+        wins = stats.get("wins", 0)
+        losses = stats.get("losses", 0)
+        completed_trades = wins + losses
+        
+        if completed_trades == 0:
+            return {
+                "action": "REDUCE_SIZE",
+                "reasoning": f"🆕 Bootstrap mode for {symbol} {setup_type} - {sample_size} alerts detected but 0 completed trades. Taking with 50% size to build history.",
+                "adjustment_pct": config["size_reduction_pct"],
+                "stats": stats,
+                "win_rate": 0,
+                "bootstrap": True
+            }
+        
         # === SMART FILTERING DECISION TREE ===
         
         # SKIP: Very low win rate (<35%) - historically losing setup
