@@ -263,6 +263,10 @@ class IBDataPusher:
         # Connectivity tracking — don't trust error 200 during connectivity loss
         self._last_connectivity_loss = 0  # timestamp of last error 1100
         
+        # Track IB error 200 "No security definition" per symbol (from async error callback)
+        # This is the definitive signal that a symbol is dead/delisted
+        self._error_200_symbols: Dict[str, int] = {}  # symbol → count of error 200 events
+        
         # Fundamental data refresh tracking (don't need to refresh every second)
         self.last_fundamentals_refresh = 0
         self.fundamentals_refresh_interval = 300  # Refresh every 5 minutes
@@ -459,6 +463,12 @@ class IBDataPusher:
             logger.debug(f"IB L2 [{errorCode}]: {errorString} for {contract.symbol if contract else 'unknown'}")
         elif errorCode == 1100:  # Connectivity lost
             self._last_connectivity_loss = time.time()
+            logger.warning(f"IB Error [{errorCode}]: {errorString}")
+        elif errorCode == 200:  # No security definition
+            # Track per-symbol — this is the definitive "dead symbol" signal
+            if contract and hasattr(contract, 'symbol') and contract.symbol:
+                sym = contract.symbol
+                self._error_200_symbols[sym] = self._error_200_symbols.get(sym, 0) + 1
             logger.warning(f"IB Error [{errorCode}]: {errorString}")
         else:
             logger.warning(f"IB Error [{errorCode}]: {errorString}")
@@ -1424,6 +1434,10 @@ class IBDataPusher:
             # for older end_dates, e.g., CFLT IPO'd 2021 but chain goes to 2018).
             # Do NOT flag as dead here — only qualifyContracts failure counts.
             
+            # BUT: Check if IB fired error 200 for this symbol (async via on_error)
+            if not bar_data and self._error_200_symbols.get(symbol, 0) >= 2:
+                self._mark_symbol_dead(symbol)
+            
             return {
                 "request_id": request_id,
                 "symbol": symbol,
@@ -1919,6 +1933,12 @@ class IBDataPusher:
             # for older end_dates, e.g., CFLT IPO'd 2021 but chain goes to 2018).
             # Do NOT flag as dead here — only qualifyContracts failure or
             # "No security definition" IB error should trigger dead symbol detection.
+            
+            # BUT: Check if IB fired error 200 "No security definition" for this symbol
+            # (arrives asynchronously through on_error callback)
+            if not bar_data and self._error_200_symbols.get(symbol, 0) >= 2:
+                # Error 200 fired multiple times AND returned 0 bars = truly dead
+                self._mark_symbol_dead(symbol)
             
             logger.info(f"[Collection] {symbol} ({bar_size}): {len(bar_data)} bars")
             return True
