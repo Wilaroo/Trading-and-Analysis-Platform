@@ -108,6 +108,34 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
   - Collector 1: Daily/Weekly (dark yellow), Collector 2: Hourly/15m/30m (light red), Collector 3: 5-min (aqua)
   - Updated terminal color guide and health check display
 
+### Session 4.8 (Mar 26, 2026 - P3 Complete: WebSocket Context + Full Migration + SmartFilter Delegation)
+
+- **WebSocketDataContext** (`contexts/WebSocketDataContext.jsx`)
+  - Centralized WS data store: 13 data types (quotes, ibStatus, botStatus, botTrades, scannerStatus, scannerAlerts, smartWatchlist, coachingNotifications, confidenceGate, trainingStatus, marketRegime, filterThoughts, sentcomStream)
+  - `useWsData()` hook — any component can subscribe to any WS data type without prop drilling
+  - Wrapped in App.js around entire component tree
+  - Processes all incoming WS messages via `lastWsMessage` forwarding
+
+- **Backend: 12th WS Push Type** (`filter_thoughts`)
+  - `stream_filter_thoughts()` — pushes smart filter thoughts every 10s (change-detected)
+
+- **Frontend WebSocket Migration** (Polling → WS)
+  - `useTradingBotControl`: 5s polling → WS `bot_status` (removed setInterval)
+  - `useIBConnectionStatus`: 3s polling → WS `ib_status` (removed setInterval)
+  - `useSentComAlerts`: 5s polling → WS `scanner_alerts` (removed setInterval)
+  - `TradingBotPanel`: 20s polling → WS `bot_status` + `bot_trades` + `scanner_alerts` (removed setInterval, kept 3s order queue poll for confirmations)
+  - All migrated hooks: initial REST fetch + WebSocket handles subsequent updates
+
+- **SmartFilter Delegation** (`trading_bot_service.py` → `smart_filter.py`)
+  - `_evaluate_strategy_filter()` now delegates to `self._smart_filter.evaluate()`
+  - `_add_filter_thought()` delegates to `self._smart_filter.add_thought()`
+  - `get_filter_thoughts()` delegates to `self._smart_filter.get_thoughts()`
+  - `get/update_smart_filter_config()` delegates to `self._smart_filter.config/update_config()`
+  - ~120 lines of inline code replaced with 20 lines of delegation
+
+- **Bug Fixes (Testing Agent)**:
+  - Fixed TradingBotPanel calling non-existent `setTrades` — separated by status
+
 ### Session 4.7 (Mar 26, 2026 - IB Paper Orders + Commissions + DMA Filter)
 
 - **Gap 2: IB Paper Account Order Execution** (`trade_executor_service.py`)
