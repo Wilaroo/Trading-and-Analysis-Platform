@@ -259,7 +259,7 @@ echo.
 :: =====================================================
 :: STEP 8: START BACKGROUND WORKER (for training/collection)
 :: =====================================================
-echo [8/10] Starting Background Worker...
+echo [8/11] Starting Background Worker...
 
 :: Kill existing worker
 taskkill /F /FI "WINDOWTITLE eq TradeCommand Worker*" >nul 2>&1
@@ -299,16 +299,37 @@ if exist "%BACKEND_DIR%\worker.py" (
 echo.
 
 :: =====================================================
-:: STEP 9: WAIT FOR FRONTEND
+:: STEP 9: START HISTORICAL DATA COLLECTOR
 :: =====================================================
-echo [9/10] Waiting for frontend to compile...
+echo [9/11] Starting Historical Data Collector...
+
+:: Kill existing collector if running
+taskkill /F /FI "WINDOWTITLE eq IB Historical Collector*" >nul 2>&1
+timeout /t 1 /nobreak >nul
+
+:: Use client ID 16 (different from trading pusher's 15)
+set IB_COLLECTOR_CLIENT_ID=16
+
+if exist "%SCRIPTS_DIR%\ib_data_pusher.py" (
+    start "IB Historical Collector" cmd /k "title [COLLECTOR] Historical Data Backfill && color 06 && cd /d %SCRIPTS_DIR% && echo. && echo ===================================================== && echo   [COLLECTOR] Historical Data Backfill && echo   Client ID: %IB_COLLECTOR_CLIENT_ID% ^| Color: DARK YELLOW && echo   Processing queued chain requests && echo ===================================================== && echo. && python ib_data_pusher.py --cloud-url %LOCAL_BACKEND% --mode collection --client-id %IB_COLLECTOR_CLIENT_ID%"
+    echo        Collector started (client ID: %IB_COLLECTOR_CLIENT_ID%)
+    echo        Processing 153K+ chained requests in background
+) else (
+    echo        [SKIP] ib_data_pusher.py not found
+)
+echo.
+
+:: =====================================================
+:: STEP 10: WAIT FOR FRONTEND
+:: =====================================================
+echo [10/11] Waiting for frontend to compile...
 timeout /t 20 /nobreak >nul
 echo.
 
 :: =====================================================
-:: STEP 10: OPEN BROWSER
+:: STEP 11: OPEN BROWSER
 :: =====================================================
-echo [10/10] Opening TradeCommand...
+echo [11/11] Opening TradeCommand...
 start "" "%LOCAL_FRONTEND%"
 
 echo.
@@ -322,17 +343,19 @@ echo.
 echo    +-------------------------------------------------+
 echo    ^|  TERMINAL COLOR GUIDE                           ^|
 echo    +-------------------------------------------------+
-echo    ^|  GREEN  [BACKEND]    API Server (port 8001)     ^|
-echo    ^|  CYAN   [FRONTEND]   React UI (port 3000)       ^|
-echo    ^|  YELLOW [IB PUSHER]  Market Data Feed           ^|
-echo    ^|  PURPLE [WORKER]     Background Jobs            ^|
-echo    ^|  GRAY   [OLLAMA]     AI Model Server (hidden)   ^|
+echo    ^|  GREEN       [BACKEND]    API Server (8001)     ^|
+echo    ^|  CYAN        [FRONTEND]   React UI (3000)       ^|
+echo    ^|  YELLOW      [IB PUSHER]  Market Data Feed      ^|
+echo    ^|  DARK YELLOW [COLLECTOR]  Historical Backfill   ^|
+echo    ^|  PURPLE      [WORKER]     Background Jobs       ^|
+echo    ^|  GRAY        [OLLAMA]     AI Model Server       ^|
 echo    +-------------------------------------------------+
 echo.
 echo    ML Training Ready:
 echo    * GPU available for LightGBM training
 echo    * Backend in stable mode (no auto-reload)
 echo    * Background Worker running for isolated jobs
+echo    * Historical Collector running (153K+ queue)
 echo    * Go to NIA page to train models
 echo.
 echo    Focus Mode System:
@@ -390,6 +413,19 @@ if "%ERRORLEVEL%"=="0" (
 ) else (
     echo Worker:      NOT RUNNING
 )
+
+:: Collector status
+echo.
+echo ------- DATA COLLECTION STATUS -------
+curl -s -f -m 5 %LOCAL_BACKEND%/api/ib-collector/queue-progress 2>nul > "%TEMP%\queue_check.tmp"
+if %errorlevel%==0 (
+    for /f "tokens=2 delims=:," %%a in ('findstr "pending" "%TEMP%\queue_check.tmp"') do echo Pending:       %%a
+    for /f "tokens=2 delims=:," %%a in ('findstr "claimed" "%TEMP%\queue_check.tmp"') do echo Claimed:       %%a
+    for /f "tokens=2 delims=:," %%a in ('findstr "completed" "%TEMP%\queue_check.tmp"') do echo Completed:     %%a
+) else (
+    echo Queue: Unable to check
+)
+del "%TEMP%\queue_check.tmp" 2>nul
 
 :: ML Status
 echo.
