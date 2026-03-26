@@ -260,6 +260,9 @@ class IBDataPusher:
         self._collection_bar_sizes = None   # e.g., ["5 mins", "15 mins"]
         self._collection_partition = None    # e.g., (0, 3) = instance 0 of 3
         
+        # Connectivity tracking — don't trust error 200 during connectivity loss
+        self._last_connectivity_loss = 0  # timestamp of last error 1100
+        
         # Fundamental data refresh tracking (don't need to refresh every second)
         self.last_fundamentals_refresh = 0
         self.fundamentals_refresh_interval = 300  # Refresh every 5 minutes
@@ -454,6 +457,9 @@ class IBDataPusher:
             logger.debug(f"IB Market Data [{errorCode}]: Using delayed data for {contract.symbol if contract else 'unknown'}")
         elif errorCode in [10092, 10182]:  # Deep market data not available
             logger.debug(f"IB L2 [{errorCode}]: {errorString} for {contract.symbol if contract else 'unknown'}")
+        elif errorCode == 1100:  # Connectivity lost
+            self._last_connectivity_loss = time.time()
+            logger.warning(f"IB Error [{errorCode}]: {errorString}")
         else:
             logger.warning(f"IB Error [{errorCode}]: {errorString}")
     
@@ -1778,9 +1784,17 @@ class IBDataPusher:
         """
         Mark a symbol as dead (no security definition) and bulk-skip
         all remaining queue requests for it via backend API.
+        
+        SAFETY: Refuses to mark dead if IB Gateway had connectivity loss
+        in the last 60 seconds — error 200 can be spurious during blips.
         """
         if symbol in self._dead_symbols:
             return  # Already handled
+        
+        # Don't trust error 200 during connectivity issues
+        if time.time() - self._last_connectivity_loss < 60:
+            logger.info(f"[Collection] {symbol}: Ignoring dead signal — connectivity loss within last 60s")
+            return
         
         self._dead_symbols.add(symbol)
         logger.warning(f"[Collection] DEAD SYMBOL: {symbol} — skipping all remaining requests")
