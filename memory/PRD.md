@@ -108,6 +108,39 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
   - Collector 1: Daily/Weekly (dark yellow), Collector 2: Hourly/15m/30m (light red), Collector 3: 5-min (aqua)
   - Updated terminal color guide and health check display
 
+### Session 4.5 (Mar 26, 2026 - AI Confidence Gate & Cold-Start Fix)
+- **Cold-Start Smart Filter Fix**: `trading_bot_service.py`
+  - Added bootstrap mode: when wins+losses=0 but sample_size>=5, proceeds with 50% sizing instead of blocking
+  - Fixes catch-22 where SentCom couldn't trade because no history, couldn't build history because not trading
+  - Log shows: "Bootstrap mode for {symbol} {setup_type} - {N} alerts detected but 0 completed trades. Taking with 50% size to build history."
+
+- **AI Confidence Gate (NEW)**: `services/ai_modules/confidence_gate.py`
+  - Pre-trade intelligence layer SentCom checks before every trade
+  - Evaluates: regime (rule-based + AI classification), model consensus, quality score
+  - Returns GO/REDUCE/SKIP decision with confidence score (0-100) and position multiplier
+  - Maintains trading mode: AGGRESSIVE / NORMAL / CAUTIOUS / DEFENSIVE
+  - Decision log persisted to `confidence_gate_log` collection
+  - Tracks daily stats: evaluated, taken, skipped, take rate
+
+- **Confidence Gate API Endpoints**: `routers/ai_training.py`
+  - `GET /api/ai-training/confidence-gate/summary` - Trading mode, today's stats, streak
+  - `GET /api/ai-training/confidence-gate/decisions` - Recent decision log
+  - `GET /api/ai-training/confidence-gate/stats` - Lifetime + daily statistics
+  - `POST /api/ai-training/confidence-gate/evaluate` - Manual pre-trade check
+
+- **SentCom Intelligence Panel (NEW)**: `NIA/SentComIntelligencePanel.jsx`
+  - Shows SentCom's current trading mode (Aggressive/Normal/Cautious/Defensive) with reason
+  - Today's decision stats: Evaluated, Taken, Skipped, Take Rate
+  - Streak indicator (3+ consecutive GO/SKIP)
+  - Recent decisions log with per-decision reasoning
+  - Wired into NIA dashboard between Training Pipeline and Data & Backtesting
+
+- **MarketRegimeWidget Enhancement**: Updated expand button text to "AI Details"
+
+- **Bug Fixes (Found by Testing Agent)**:
+  - Fixed 3x MongoDB truth testing errors (`if mongo_db:` → `if mongo_db is not None:`) in ai_training.py
+  - Fixed import error in model-inventory endpoint (wrong import names from setup_training_config)
+
 ### Session 4 (Mar 26, 2026 - AI Model Architecture Expansion)
 - **Expanded Regime Features (6 → 24)**: `regime_features.py`
   - Added QQQ (growth/tech) and IWM (small-cap) features alongside SPY
@@ -203,25 +236,22 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 ## Prioritized Backlog
 
 ### P0 - Active
-- IB data collection at 64.8% (~4 days remaining for slowest collector)
+- IB data collection at ~65.6% (136,730/208,517 completed, 249 failed)
 - Feature engineering & model architecture complete — ready for training when collection finishes
 
 ### P1 - Next Up
-- **Training Pipeline Execution**: Train all ~142 models on available 39M+ bars
+- **Training Pipeline Execution**: Train all ~154 models on available 52.7M+ bars
   - Can start immediately with `POST /api/ai-training/start`
   - Retrain on complete dataset once collection reaches 100%
+- **Wire Confidence Gate into Trading Bot**: Connect `ConfidenceGate.evaluate()` into SentCom's trade execution path so it's called automatically before every trade
 - User to purchase vendor 1-min data and run import script
 
 ### P2 - Upcoming
-- Build medium-impact models (Sector-Relative, Gap Fill Probability, Risk-of-Ruin)
-- Target variable improvements (regression targets, risk-adjusted returns)
 - Real-time collection dashboard (heatmap of data depth per symbol/bar_size)
 - MFE/MAE Scatter Chart per setup type
-- Auto-Optimize AI Settings
+- Auto-Optimize AI Settings (sweep confidence thresholds/lookback windows)
 
 ### P3 - Future
-- API Route Profiling Dashboard
-- Compare Simulations Side-by-Side
 - Refactor active polling to WebSocket (~44 intervals)
 - Refactor trading_bot_service.py (4,300+ lines → modules)
 
@@ -242,5 +272,7 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - `/app/backend/services/ai_modules/gap_fill_model.py` - Gap fill probability features & targets (NEW)
 - `/app/backend/services/ai_modules/risk_of_ruin_model.py` - Risk-of-ruin features & targets (NEW)
 - `/app/backend/services/ai_modules/advanced_targets.py` - Advanced target variable system (NEW)
+- `/app/backend/services/ai_modules/confidence_gate.py` - Pre-trade confidence gate (NEW)
+- `/app/frontend/src/components/NIA/SentComIntelligencePanel.jsx` - SentCom Intelligence UI (NEW)
 - `/app/documents/scripts/ib_data_pusher.py` - Local IB fetcher (updated for end_date)
 - `/app/documents/scripts/import_vendor_data.py` - Vendor bulk import
