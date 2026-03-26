@@ -2433,15 +2433,40 @@ def main():
             _auto_login_gateway()
         
         def _auto_login_gateway():
-            """Send credentials to IB Gateway window via VBScript (same as .bat)."""
+            """Send credentials to IB Gateway window via VBScript (same as .bat).
+            
+            Uses a file lock to prevent multiple collector instances from
+            sending keystrokes simultaneously after IB Gateway restarts.
+            """
             if platform.system() != "Windows":
                 return
             if not ib_username or not ib_password:
                 return
-                
-            logger.info(f"  Auto-logging into IB Gateway...")
+            
+            # File-based lock — only one collector instance does auto-login
+            lock_file = os.path.join(tempfile.gettempdir(), "ib_auto_login.lock")
+            try:
+                # Try to create lock file exclusively
+                fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode())
+                os.close(fd)
+            except FileExistsError:
+                # Another collector instance is handling the login
+                # Check if lock is stale (older than 2 minutes)
+                try:
+                    lock_age = time.time() - os.path.getmtime(lock_file)
+                    if lock_age > 120:
+                        os.remove(lock_file)
+                        logger.info("  Stale login lock removed, retrying...")
+                        return _auto_login_gateway()
+                except:
+                    pass
+                logger.info("  Another collector is handling auto-login. Waiting...")
+                return
             
             try:
+                logger.info(f"  Auto-logging into IB Gateway (this instance has the lock)...")
+            
                 # Create login VBScript (same approach as TradeCommand_AITraining.bat)
                 login_vbs = os.path.join(tempfile.gettempdir(), "ib_collector_login.vbs")
                 with open(login_vbs, "w") as f:
@@ -2493,6 +2518,12 @@ def main():
                         os.remove(os.path.join(tempfile.gettempdir(), f))
                     except:
                         pass
+            finally:
+                # Always release the lock file
+                try:
+                    os.remove(lock_file)
+                except:
+                    pass
         
         def _wait_for_api_port(host, port, max_wait_secs=120):
             """Wait until IB Gateway API port is accepting connections."""
@@ -2526,6 +2557,12 @@ def main():
                     ib_port=args.ib_port,
                     client_id=args.client_id
                 )
+                
+                # Re-apply collection filters after reconnect
+                if args.bar_sizes:
+                    pusher._collection_bar_sizes = [b.strip() for b in args.bar_sizes.split(",") if b.strip()]
+                if args.partition is not None and args.partition_total:
+                    pusher._collection_partition = (args.partition, args.partition_total)
                 
                 pusher.run_collection_mode()
                 
