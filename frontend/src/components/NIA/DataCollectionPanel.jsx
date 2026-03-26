@@ -6,6 +6,7 @@ import {
   AlertTriangle, AlertCircle, CheckCircle, Clock, Play
 } from 'lucide-react';
 import { toast } from 'sonner';
+import DataHeatmap from './DataHeatmap';
 import api from '../../utils/api';
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL;
@@ -387,108 +388,8 @@ const CoverageTab = memo(({ loadingCoverage, dataCoverage, lastDataChange, detai
 
   return (
     <div className="space-y-4">
-      {/* ADV Cache Status */}
-      <div className={`p-3 rounded-xl border ${dataCoverage.adv_cache?.status === 'ready' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-amber-500/5 border-amber-500/20'}`}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Database className={`w-4 h-4 ${dataCoverage.adv_cache?.status === 'ready' ? 'text-emerald-400' : 'text-amber-400'}`} />
-            <span className="text-xs font-medium text-white">ADV Cache</span>
-            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" title="Auto-refreshing every 15s" />
-          </div>
-          <div className="flex items-center gap-3">
-            {lastDataChange && (
-              <span className="text-[9px] text-zinc-500" title="When coverage data last changed">Updated: {lastDataChange.toLocaleTimeString()}</span>
-            )}
-            <span className={`text-sm font-bold ${dataCoverage.adv_cache?.status === 'ready' ? 'text-emerald-400' : 'text-amber-400'}`}>
-              {dataCoverage.adv_cache?.total_symbols?.toLocaleString() || 0} symbols
-            </span>
-          </div>
-        </div>
-        <div className="flex items-center gap-4 mt-2 text-[10px] text-zinc-500">
-          <span>Total bars: {dataCoverage.by_timeframe?.reduce((sum, tf) => sum + (tf.total_bars || 0), 0).toLocaleString()}</span>
-          <span>&bull;</span>
-          <span>Gaps: {dataCoverage.total_gaps || 0}</span>
-        </div>
-      </div>
-
-      {/* Per-Tier Coverage */}
-      <div>
-        <p className="text-xs font-medium text-zinc-400 mb-2">Coverage by Tier</p>
-        <div className="space-y-3">
-          {dataCoverage.by_tier?.map((tierData, i) => {
-            const totalPossible = tierData.timeframes?.reduce((sum, tf) => sum + (tf.symbols_needed || 0), 0) || 1;
-            const totalCovered = tierData.timeframes?.reduce((sum, tf) => sum + (tf.symbols_with_data || 0), 0) || 0;
-            const overallPct = Math.round((totalCovered / totalPossible) * 100);
-
-            return (
-              <div key={i} className="p-3 rounded-xl bg-black/40 border border-white/10">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    {tierData.tier === 'intraday' && <Zap className="w-4 h-4 text-yellow-400" />}
-                    {tierData.tier === 'swing' && <TrendingUp className="w-4 h-4 text-cyan-400" />}
-                    {tierData.tier === 'investment' && <Layers className="w-4 h-4 text-violet-400" />}
-                    <span className="text-sm font-bold text-white capitalize">{tierData.tier}</span>
-                    <span className="text-[10px] text-zinc-500">({tierData.description})</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-zinc-400">{tierData.total_symbols?.toLocaleString()} symbols</span>
-                    <span className={`text-xs font-bold ${overallPct >= 90 ? 'text-emerald-400' : overallPct >= 50 ? 'text-amber-400' : 'text-rose-400'}`}>{overallPct}%</span>
-                  </div>
-                </div>
-                <div className="h-1.5 bg-black/50 rounded-full mb-3 overflow-hidden">
-                  <div className={`h-full rounded-full transition-all duration-500 ${overallPct >= 90 ? 'bg-emerald-500' : overallPct >= 50 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{ width: `${overallPct}%` }} />
-                </div>
-                <div className="grid grid-cols-5 gap-1.5">
-                  {tierData.timeframes?.map((tf, j) => {
-                    const isHigh = tf.coverage_pct >= 90;
-                    const isMedium = tf.coverage_pct >= 50 && tf.coverage_pct < 90;
-                    const queueData = detailedProgress.by_bar_size?.find(bs => bs.bar_size === tf.timeframe);
-                    const pendingCount = queueData?.pending || 0;
-
-                    return (
-                      <div
-                        key={j}
-                        className={`p-2 rounded-lg bg-black/30 border transition-all ${isHigh ? 'border-emerald-500/30' : isMedium ? 'border-amber-500/30' : 'border-rose-500/30'}`}
-                        title={`${tf.symbols_with_data}/${tf.symbols_needed} symbols, ${tf.total_bars?.toLocaleString()} bars${pendingCount > 0 ? `, ${pendingCount} pending` : ''}`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <p className="text-[9px] text-zinc-500 truncate">{tf.timeframe}</p>
-                          {pendingCount > 0 && (
-                            <span className="px-1 py-0.5 rounded bg-amber-500/20 text-[7px] text-amber-400 font-medium">
-                              {pendingCount > 999 ? `${(pendingCount / 1000).toFixed(1)}K` : pendingCount}
-                            </span>
-                          )}
-                        </div>
-                        <p className={`text-xs font-bold ${isHigh ? 'text-emerald-400' : isMedium ? 'text-amber-400' : 'text-rose-400'}`}>{tf.coverage_pct}%</p>
-                        <p className="text-[8px] text-zinc-600">{tf.symbols_with_data}/{tf.symbols_needed}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Missing Data */}
-      {dataCoverage.missing?.length > 0 && (
-        <div>
-          <p className="text-xs font-medium text-zinc-400 mb-2">Data Gaps ({dataCoverage.total_gaps} total)</p>
-          <div className="space-y-1">
-            {dataCoverage.missing.slice(0, 5).map((gap, i) => (
-              <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-rose-500/5 border border-rose-500/20">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-3 h-3 text-rose-400" />
-                  <span className="text-xs text-white capitalize">{gap.tier}</span>
-                  <span className="text-[10px] text-zinc-500">{gap.timeframe}</span>
-                </div>
-                <span className="text-xs text-rose-400">{gap.missing_symbols} missing</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Heatmap Visual */}
+      <DataHeatmap dataCoverage={dataCoverage} queueProgress={{ by_bar_size: detailedProgress.by_bar_size }} />
 
       {/* Action Buttons */}
       <div className="flex gap-2">

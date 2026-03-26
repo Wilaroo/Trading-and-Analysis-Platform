@@ -75,11 +75,20 @@ const DecisionRow = memo(({ decision }) => {
   );
 });
 
-const SentComIntelligencePanel = memo(({ onRefresh }) => {
+const SentComIntelligencePanel = memo(({ onRefresh, wsConfidenceGate }) => {
   const [summary, setSummary] = useState(null);
   const [decisions, setDecisions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showDecisions, setShowDecisions] = useState(true);
+
+  // Use WebSocket data when available, fall back to REST on initial load
+  useEffect(() => {
+    if (wsConfidenceGate) {
+      if (wsConfidenceGate.summary) setSummary(wsConfidenceGate.summary);
+      if (wsConfidenceGate.decisions) setDecisions(wsConfidenceGate.decisions);
+      setLoading(false);
+    }
+  }, [wsConfidenceGate]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -101,10 +110,9 @@ const SentComIntelligencePanel = memo(({ onRefresh }) => {
     }
   }, []);
 
+  // Initial REST fetch only (WebSocket handles subsequent updates)
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 30000);
-    return () => clearInterval(interval);
   }, [fetchData]);
 
   const modeKey = summary?.trading_mode || 'normal';

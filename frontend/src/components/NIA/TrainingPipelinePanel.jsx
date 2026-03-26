@@ -159,12 +159,21 @@ const CategoryRow = memo(({ categoryKey, category }) => {
   );
 });
 
-const TrainingPipelinePanel = memo(({ onRefresh }) => {
+const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus, wsMarketRegime }) => {
   const [regime, setRegime] = useState(null);
   const [inventory, setInventory] = useState(null);
   const [pipelineStatus, setPipelineStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
+
+  // Use WebSocket data when available
+  useEffect(() => {
+    if (wsTrainingStatus) setPipelineStatus({ task_status: wsTrainingStatus.status, ...wsTrainingStatus });
+  }, [wsTrainingStatus]);
+
+  useEffect(() => {
+    if (wsMarketRegime) setRegime(prev => ({ ...prev, ...wsMarketRegime }));
+  }, [wsMarketRegime]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -190,10 +199,9 @@ const TrainingPipelinePanel = memo(({ onRefresh }) => {
     }
   }, []);
 
+  // Initial REST fetch only (WebSocket handles subsequent updates for regime + status)
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 120000);
-    return () => clearInterval(interval);
   }, [fetchData]);
 
   const handleStartTraining = useCallback(async () => {

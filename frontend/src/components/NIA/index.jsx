@@ -53,7 +53,7 @@ const DEFAULT_DATA = {
   dataSource: null,
 };
 
-const NIA = () => {
+const NIA = ({ wsConfidenceGate, wsTrainingStatus, wsMarketRegime }) => {
   const { getCached, setCached } = useDataCache();
   const { getPollingInterval, isTrainingActive } = useTrainingMode();
   const isFirstMount = useRef(true);
@@ -346,10 +346,10 @@ const NIA = () => {
       />
 
       {/* 2.5 Training Pipeline — model inventory, regime, training controls */}
-      <TrainingPipelinePanel onRefresh={handleRefresh} />
+      <TrainingPipelinePanel onRefresh={handleRefresh} wsTrainingStatus={wsTrainingStatus} wsMarketRegime={wsMarketRegime} />
 
       {/* 2.75 SentCom Intelligence — confidence gate decisions, trading mode */}
-      <SentComIntelligencePanel onRefresh={handleRefresh} />
+      <SentComIntelligencePanel onRefresh={handleRefresh} wsConfidenceGate={wsConfidenceGate} />
 
       {/* 3. Data & Backtesting — collection + scanner + simulations */}
       <DataBacktestingPanel

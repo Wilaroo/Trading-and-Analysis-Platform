@@ -140,6 +140,9 @@ function App() {
   const [wsScannerStatus, setWsScannerStatus] = useState(null);
   const [wsSmartWatchlist, setWsSmartWatchlist] = useState([]);
   const [wsCoachingNotifications, setWsCoachingNotifications] = useState([]);
+  const [wsConfidenceGate, setWsConfidenceGate] = useState(null);
+  const [wsTrainingStatus, setWsTrainingStatus] = useState(null);
+  const [wsMarketRegime, setWsMarketRegime] = useState(null);
 
   // Save activeTab to localStorage when it changes
   useEffect(() => {
@@ -280,6 +283,21 @@ function App() {
         return [...newNotifications, ...prev].slice(0, 50); // Keep last 50
       });
     }
+    
+    // Confidence Gate updates (replaces SentComIntelligencePanel polling)
+    else if (message.type === 'confidence_gate') {
+      setWsConfidenceGate(message.data);
+    }
+    
+    // Training pipeline status (replaces TrainingPipelinePanel polling)
+    else if (message.type === 'training_status') {
+      setWsTrainingStatus(message.data);
+    }
+    
+    // Market regime (replaces MarketRegimeWidget polling)
+    else if (message.type === 'market_regime') {
+      setWsMarketRegime(message.data);
+    }
   }, []);
 
   const { isConnected, lastUpdate, sendTrainCommand } = useWebSocket(handleWebSocketMessage);
@@ -361,6 +379,10 @@ function App() {
     wsScannerStatus,
     wsSmartWatchlist,
     wsCoachingNotifications,
+    // WebSocket-pushed AI data
+    wsConfidenceGate,
+    wsTrainingStatus,
+    wsMarketRegime,
   };
 
   const renderPage = () => {
@@ -514,7 +536,7 @@ function App() {
           {/* NIA - always mounted, hidden when not active */}
           <div style={{ display: activeTab === 'nia' ? 'block' : 'none' }}>
             <ErrorBoundary name="NIA">
-              <NIA />
+              <NIA wsConfidenceGate={wsConfidenceGate} wsTrainingStatus={wsTrainingStatus} wsMarketRegime={wsMarketRegime} />
             </ErrorBoundary>
           </div>
           

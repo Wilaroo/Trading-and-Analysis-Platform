@@ -2839,6 +2839,111 @@ async def stream_coaching_notifications():
         
         await asyncio.sleep(12)  # Check every 12 seconds
 
+
+async def stream_confidence_gate():
+    """Push confidence gate summary + recent decisions via WebSocket."""
+    await asyncio.sleep(20)
+    
+    last_summary_hash = None
+    
+    while True:
+        if manager.active_connections:
+            try:
+                from services.ai_modules.confidence_gate import get_confidence_gate
+                gate = get_confidence_gate()
+                summary = gate.get_summary()
+                decisions = gate.get_decision_log(limit=20)
+                
+                # Only broadcast on change
+                summary_hash = hash((
+                    summary.get("trading_mode"),
+                    summary.get("today", {}).get("evaluated", 0),
+                    len(decisions),
+                ))
+                
+                if summary_hash != last_summary_hash:
+                    # Strip heavy fields from decisions
+                    clean_decisions = [{
+                        "decision": d.get("decision"),
+                        "confidence_score": d.get("confidence_score"),
+                        "symbol": d.get("symbol"),
+                        "setup_type": d.get("setup_type"),
+                        "direction": d.get("direction"),
+                        "regime_state": d.get("regime_state"),
+                        "ai_regime": d.get("ai_regime"),
+                        "trading_mode": d.get("trading_mode"),
+                        "position_multiplier": d.get("position_multiplier"),
+                        "reasoning": d.get("reasoning", [])[:3],
+                        "timestamp": d.get("timestamp"),
+                    } for d in decisions]
+                    
+                    await manager.broadcast({
+                        "type": "confidence_gate",
+                        "data": {
+                            "summary": summary,
+                            "decisions": clean_decisions,
+                        },
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    last_summary_hash = summary_hash
+            except Exception as e:
+                print(f"Confidence gate stream error: {e}")
+        
+        await asyncio.sleep(15)  # Every 15 seconds
+
+
+async def stream_training_status():
+    """Push AI training pipeline status via WebSocket."""
+    await asyncio.sleep(25)
+    
+    last_status_hash = None
+    
+    while True:
+        if manager.active_connections:
+            try:
+                status = db["training_pipeline_status"].find_one(
+                    {}, {"_id": 0}, sort=[("started_at", -1)]
+                )
+                
+                status_hash = hash(str(status.get("status")) + str(status.get("progress"))) if status else None
+                
+                if status_hash != last_status_hash:
+                    await manager.broadcast({
+                        "type": "training_status",
+                        "data": status or {"status": "idle"},
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    last_status_hash = status_hash
+            except Exception as e:
+                print(f"Training status stream error: {e}")
+        
+        await asyncio.sleep(30)  # Every 30 seconds
+
+
+async def stream_market_regime():
+    """Push market regime data via WebSocket."""
+    await asyncio.sleep(18)
+    
+    last_regime_hash = None
+    
+    while True:
+        if manager.active_connections:
+            try:
+                regime_data = await market_regime_engine.get_current_regime()
+                regime_hash = hash(str(regime_data.get("state")) + str(regime_data.get("composite_score")))
+                
+                if regime_hash != last_regime_hash:
+                    await manager.broadcast({
+                        "type": "market_regime",
+                        "data": regime_data,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    last_regime_hash = regime_hash
+            except Exception as e:
+                print(f"Market regime stream error: {e}")
+        
+        await asyncio.sleep(60)  # Every 60 seconds (regime changes slowly)
+
 @app.on_event("startup")
 async def startup_event():
     """Start background streaming task and background scanner"""
@@ -2854,7 +2959,10 @@ async def startup_event():
     asyncio.create_task(stream_scanner_alerts())
     asyncio.create_task(stream_smart_watchlist())
     asyncio.create_task(stream_coaching_notifications())
-    print("WebSocket streaming started (quotes + system status + bot + scanner + watchlist + coaching)")
+    asyncio.create_task(stream_confidence_gate())
+    asyncio.create_task(stream_training_status())
+    asyncio.create_task(stream_market_regime())
+    print("WebSocket streaming started (quotes + system status + bot + scanner + watchlist + coaching + confidence gate + training + regime)")
     
     # Initialize web research service with database for credit tracking
     try:
