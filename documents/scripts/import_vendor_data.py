@@ -295,7 +295,7 @@ def run_import(
             reader = csv.DictReader(f)
             for row in reader:
                 stats["lines_read"] += 1
-                bytes_read = f.tell()
+                bytes_read += 1  # approximate for CSV
 
                 mapped = map_vendor_row(row, import_ts)
                 if not mapped:
@@ -331,7 +331,7 @@ def run_import(
             # ndjson: one JSON object per line
             for line in f:
                 stats["lines_read"] += 1
-                bytes_read = f.tell()
+                bytes_read += len(line)
 
                 line = line.strip()
                 if not line:
