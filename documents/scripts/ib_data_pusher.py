@@ -1384,12 +1384,33 @@ class IBDataPusher:
         
         try:
             from ib_insync import Stock
-            contract = Stock(symbol, "SMART", "USD")
             
-            try:
-                self.ib.qualifyContracts(contract)
-            except Exception as e:
-                # Track for dead symbol detection
+            # Create contract with exchange fallback
+            contract = None
+            exchanges_to_try = [
+                ("SMART", "USD"),
+                ("SMART", "USD", "AMEX"),
+                ("SMART", "USD", "NYSE"),
+                ("SMART", "USD", "NASDAQ"),
+                ("SMART", "USD", "ARCA"),
+            ]
+            
+            qualify_failed = True
+            for exchange_args in exchanges_to_try:
+                try:
+                    if len(exchange_args) == 2:
+                        contract = Stock(symbol, exchange_args[0], exchange_args[1])
+                    else:
+                        contract = Stock(symbol, exchange_args[0], exchange_args[1])
+                        contract.primaryExchange = exchange_args[2]
+                    self.ib.qualifyContracts(contract)
+                    if contract.conId and contract.conId > 0:
+                        qualify_failed = False
+                        break
+                except:
+                    continue
+            
+            if qualify_failed:
                 self._symbol_nodata_count[symbol] = self._symbol_nodata_count.get(symbol, 0) + 1
                 if self._symbol_nodata_count[symbol] >= self._DEAD_SYMBOL_THRESHOLD:
                     self._mark_symbol_dead(symbol)
@@ -1401,7 +1422,7 @@ class IBDataPusher:
                     "status": "no_data",
                     "data": [],
                     "bar_count": 0,
-                    "error": f"Symbol not available: {e}"
+                    "error": "Symbol not available on any exchange"
                 }
             
             # Normalize end_date to include explicit UTC timezone
@@ -1873,20 +1894,45 @@ class IBDataPusher:
             if not claim_result:
                 return False  # Already claimed
             
-            # Create contract
-            contract = Stock(symbol, "SMART", "USD")
+            # Create contract with exchange fallback
+            # Some symbols (e.g., NGD on NYSE American) fail with SMART routing
+            # Try SMART first, then specific exchanges
+            contract = None
+            exchanges_to_try = [
+                ("SMART", "USD"),
+                ("SMART", "USD", "AMEX"),     # NYSE American
+                ("SMART", "USD", "NYSE"),
+                ("SMART", "USD", "NASDAQ"),
+                ("SMART", "USD", "ARCA"),
+            ]
             
-            try:
-                self.ib.qualifyContracts(contract)
-            except Exception as e:
-                # Invalid symbol — likely dead/delisted
+            qualify_failed = True
+            for exchange_args in exchanges_to_try:
+                try:
+                    if len(exchange_args) == 2:
+                        contract = Stock(symbol, exchange_args[0], exchange_args[1])
+                    else:
+                        contract = Stock(symbol, exchange_args[0], exchange_args[1])
+                        contract.primaryExchange = exchange_args[2]
+                    
+                    self.ib.qualifyContracts(contract)
+                    
+                    # Check if qualification actually worked (conId > 0)
+                    if contract.conId and contract.conId > 0:
+                        qualify_failed = False
+                        break
+                except:
+                    continue
+            
+            if qualify_failed:
+                # Could not qualify on any exchange
                 self._report_historical_data_result(
                     request_id=request_id,
                     symbol=symbol,
                     success=True,
                     data=[],
                     status="no_data",
-                    error=f"Symbol not available: {e}"
+                    error=f"Symbol not available on any exchange"
                 )
                 # Track consecutive failures
                 self._symbol_nodata_count[symbol] = self._symbol_nodata_count.get(symbol, 0) + 1
