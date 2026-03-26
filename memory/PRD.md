@@ -86,6 +86,28 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
   - Returns count of skipped requests
   - Pre-emptively skipped 107 SGN requests as first use
 
+- **Multi-Instance Collection**: `ib_data_pusher.py` + `historical_data_queue_service.py` + `ib.py`
+  - New CLI args: `--bar-sizes` (filter by timeframe), `--partition`/`--partition-total` (symbol hash partitioning)
+  - Backend `/pending` endpoint accepts `bar_sizes`, `partition`, `partition_total` query params
+  - Queue service `get_pending_requests()` filters by bar_size and symbol partition
+  - Enables running 3 parallel collector instances with independent IB pacing limits
+
+- **5-Min Duration Optimization**: `build_chains.py`
+  - Tested and confirmed IB accepts `"3 M"` duration for 5-min bars (was `"1 M"`)
+  - Re-queued all 5-min requests: 64K → 21K (67% reduction, ~8 chains/symbol instead of ~24)
+  - Updated BAR_CONFIGS to use `"3 M"` for future runs
+
+- **Swing-Tier 5-Min Trim**
+  - Cancelled 31K pending 5-min requests for swing-tier symbols (100K-500K ADV)
+  - Swing symbols retain 30 mins, 1 hour, 1 day coverage
+
+- **Queue Reduction Summary**: 153K → 79K pending requests (48% reduction)
+
+- **Bat File Update**: `TradeCommand_AITraining.bat`
+  - Step 9 now launches 3 collector instances (client IDs 16/17/18)
+  - Collector 1: Daily/Weekly (dark yellow), Collector 2: Hourly/15m/30m (light red), Collector 3: 5-min (aqua)
+  - Updated terminal color guide and health check display
+
 ## Key Technical Details
 
 ### IB Lookback Limits & Chaining

@@ -299,21 +299,31 @@ if exist "%BACKEND_DIR%\worker.py" (
 echo.
 
 :: =====================================================
-:: STEP 9: START HISTORICAL DATA COLLECTOR
+:: STEP 9: START HISTORICAL DATA COLLECTORS (3 INSTANCES)
 :: =====================================================
-echo [9/11] Starting Historical Data Collector...
+echo [9/11] Starting Historical Data Collectors (3 instances)...
 
-:: Kill existing collector if running
-taskkill /F /FI "WINDOWTITLE eq IB Historical Collector*" >nul 2>&1
+:: Kill existing collectors if running
+taskkill /F /FI "WINDOWTITLE eq *COLLECTOR*" >nul 2>&1
 timeout /t 1 /nobreak >nul
 
-:: Use client ID 16 (different from trading pusher's 15)
-set IB_COLLECTOR_CLIENT_ID=16
+:: Client IDs (must be unique across all IB connections)
+set IB_COLLECTOR1_ID=16
+set IB_COLLECTOR2_ID=17
+set IB_COLLECTOR3_ID=18
 
 if exist "%SCRIPTS_DIR%\ib_data_pusher.py" (
-    start "IB Historical Collector" cmd /k "title [COLLECTOR] Historical Data Backfill && color 06 && cd /d %SCRIPTS_DIR% && echo. && echo ===================================================== && echo   [COLLECTOR] Historical Data Backfill && echo   Client ID: %IB_COLLECTOR_CLIENT_ID% ^| Color: DARK YELLOW && echo   Processing queued chain requests && echo ===================================================== && echo. && python ib_data_pusher.py --cloud-url %LOCAL_BACKEND% --mode collection --client-id %IB_COLLECTOR_CLIENT_ID%"
-    echo        Collector started (client ID: %IB_COLLECTOR_CLIENT_ID%)
-    echo        Processing 153K+ chained requests in background
+    :: Collector 1: Daily + Weekly (fastest to complete, ~12K requests)
+    start "COLLECTOR-1 Daily" cmd /k "title [COLLECTOR-1] Daily/Weekly Backfill && color 06 && cd /d %SCRIPTS_DIR% && echo. && echo ===================================================== && echo   [COLLECTOR-1] Daily + Weekly Data && echo   Client ID: %IB_COLLECTOR1_ID% ^| Color: DARK YELLOW && echo   Bar sizes: 1 day, 1 week && echo ===================================================== && echo. && python ib_data_pusher.py --cloud-url %LOCAL_BACKEND% --mode collection --client-id %IB_COLLECTOR1_ID% --bar-sizes \"1 day,1 week\""
+    echo        Collector 1 started: Daily/Weekly (client ID: %IB_COLLECTOR1_ID%)
+
+    :: Collector 2: Hourly + 30min + 15min (~46K requests)
+    start "COLLECTOR-2 Hourly" cmd /k "title [COLLECTOR-2] Hourly/Mins Backfill && color 0C && cd /d %SCRIPTS_DIR% && echo. && echo ===================================================== && echo   [COLLECTOR-2] Hourly + 30min + 15min Data && echo   Client ID: %IB_COLLECTOR2_ID% ^| Color: LIGHT RED && echo   Bar sizes: 1 hour, 30 mins, 15 mins && echo ===================================================== && echo. && python ib_data_pusher.py --cloud-url %LOCAL_BACKEND% --mode collection --client-id %IB_COLLECTOR2_ID% --bar-sizes \"1 hour,30 mins,15 mins\""
+    echo        Collector 2 started: Hourly/Mins (client ID: %IB_COLLECTOR2_ID%)
+
+    :: Collector 3: 5-min only (~21K requests, heaviest per-request)
+    start "COLLECTOR-3 5min" cmd /k "title [COLLECTOR-3] 5-Min Backfill && color 03 && cd /d %SCRIPTS_DIR% && echo. && echo ===================================================== && echo   [COLLECTOR-3] 5-Minute Data && echo   Client ID: %IB_COLLECTOR3_ID% ^| Color: AQUA && echo   Bar sizes: 5 mins (3M duration per request) && echo ===================================================== && echo. && python ib_data_pusher.py --cloud-url %LOCAL_BACKEND% --mode collection --client-id %IB_COLLECTOR3_ID% --bar-sizes \"5 mins\""
+    echo        Collector 3 started: 5-Min (client ID: %IB_COLLECTOR3_ID%)
 ) else (
     echo        [SKIP] ib_data_pusher.py not found
 )
@@ -343,19 +353,21 @@ echo.
 echo    +-------------------------------------------------+
 echo    ^|  TERMINAL COLOR GUIDE                           ^|
 echo    +-------------------------------------------------+
-echo    ^|  GREEN       [BACKEND]    API Server (8001)     ^|
-echo    ^|  CYAN        [FRONTEND]   React UI (3000)       ^|
-echo    ^|  YELLOW      [IB PUSHER]  Market Data Feed      ^|
-echo    ^|  DARK YELLOW [COLLECTOR]  Historical Backfill   ^|
-echo    ^|  PURPLE      [WORKER]     Background Jobs       ^|
-echo    ^|  GRAY        [OLLAMA]     AI Model Server       ^|
+echo    ^|  GREEN       [BACKEND]      API Server (8001)   ^|
+echo    ^|  CYAN        [FRONTEND]     React UI (3000)     ^|
+echo    ^|  YELLOW      [IB PUSHER]    Market Data Feed    ^|
+echo    ^|  DARK YELLOW [COLLECTOR-1]  Daily/Weekly        ^|
+echo    ^|  LIGHT RED   [COLLECTOR-2]  Hourly/15m/30m      ^|
+echo    ^|  AQUA        [COLLECTOR-3]  5-Minute Data       ^|
+echo    ^|  PURPLE      [WORKER]       Background Jobs     ^|
+echo    ^|  GRAY        [OLLAMA]       AI Model Server     ^|
 echo    +-------------------------------------------------+
 echo.
 echo    ML Training Ready:
 echo    * GPU available for LightGBM training
 echo    * Backend in stable mode (no auto-reload)
 echo    * Background Worker running for isolated jobs
-echo    * Historical Collector running (153K+ queue)
+echo    * 3 Historical Collectors running (~79K queue)
 echo    * Go to NIA page to train models
 echo.
 echo    Focus Mode System:
@@ -417,6 +429,7 @@ if "%ERRORLEVEL%"=="0" (
 :: Collector status
 echo.
 echo ------- DATA COLLECTION STATUS -------
+echo Collectors: 3 instances (Daily, Hourly, 5min)
 curl -s -f -m 5 %LOCAL_BACKEND%/api/ib-collector/queue-progress 2>nul > "%TEMP%\queue_check.tmp"
 if %errorlevel%==0 (
     for /f "tokens=2 delims=:," %%a in ('findstr "pending" "%TEMP%\queue_check.tmp"') do echo Pending:       %%a
