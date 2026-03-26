@@ -108,6 +108,39 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
   - Collector 1: Daily/Weekly (dark yellow), Collector 2: Hourly/15m/30m (light red), Collector 3: 5-min (aqua)
   - Updated terminal color guide and health check display
 
+### Session 4.7 (Mar 26, 2026 - IB Paper Orders + Commissions + DMA Filter)
+
+- **Gap 2: IB Paper Account Order Execution** (`trade_executor_service.py`)
+  - Enabled LIVE mode when IB pusher is connected (removed forced SIMULATED fallback)
+  - Orders route through order queue → local IB Gateway → paper account execution
+  - Market orders (MKT) for immediate execution
+  - Falls back to SIMULATED only when pusher is NOT connected
+
+- **Commission Tracking** (`trading_bot_service.py`)
+  - IB tiered pricing: $0.005/share, $1.00 minimum per order
+  - BotTrade fields: `commission_per_share`, `commission_min`, `total_commissions`, `net_pnl`
+  - Commission applied on: entry, each scale-out, final exit
+  - `net_pnl = realized_pnl - total_commissions`
+  - Daily stats now use `net_pnl` (after commissions) instead of `realized_pnl`
+
+- **Price Recalculation on Confirmation** (`confirm_trade()`)
+  - On confirm: fetches current price from IB quotes (primary) or Alpaca (fallback)
+  - Recalculates: entry_price, shares, remaining_shares, target_prices
+  - Preserves stop_price (risk anchor), adjusts position size to match risk rules
+
+- **Stale Alert Timeout** (`confirm_trade()`)
+  - Scalps: 5 min, Day trades: 10 min, Swings: 15 min, Investment: 60 min
+  - Expired alerts auto-rejected with `[EXPIRED]` tag
+
+- **Gap 6: DMA Directional Filter** (`enhanced_scanner.py`)
+  - Swing trades (multi_day): require price above EMA50 for longs, below for shorts
+  - Investment trades (position): also require price above SMA200 for longs, below for shorts
+  - Filters applied in `_process_new_alert()` before alert is emitted
+
+- **Bug Fixes:**
+  - Fixed NoneType crash in `_build_entry_context` when technicals is None
+  - Fixed `risk_per_trade` → `max_risk_per_trade` field name in `confirm_trade`
+
 ### Session 4.6 (Mar 26, 2026 - Data Heatmap + WebSocket Migration + Refactor)
 
 - **P2: Data Coverage Heatmap** (`NIA/DataHeatmap.jsx`)
