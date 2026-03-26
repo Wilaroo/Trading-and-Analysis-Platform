@@ -108,7 +108,62 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
   - Collector 1: Daily/Weekly (dark yellow), Collector 2: Hourly/15m/30m (light red), Collector 3: 5-min (aqua)
   - Updated terminal color guide and health check display
 
+### Session 4 (Mar 26, 2026 - AI Model Architecture Expansion)
+- **Expanded Regime Features (6 → 24)**: `regime_features.py`
+  - Added QQQ (growth/tech) and IWM (small-cap) features alongside SPY
+  - 6 features per index: trend, RSI, momentum, volatility, vol expansion, breadth
+  - 3 cross-correlation features: SPY-QQQ, SPY-IWM, QQQ-IWM return correlation
+  - 3 rotation/divergence signals: growth vs market, small vs large, growth vs value
+  - Backward compatible: old models get 0.0 for new features
+
+- **Multi-Timeframe Context Features (NEW 8 features)**: `multi_timeframe_features.py`
+  - Daily-level context injected into intraday models
+  - Features: daily_trend, daily_rsi, daily_momentum, daily_volatility, daily_bb_position, daily_volume_trend, daily_higher_tf_align, daily_gap
+  - Provides stock's own daily-level context (vs regime features which provide index-level context)
+  - Integrated into training loop and prediction path
+
+- **Volatility Prediction Model (NEW)**: `volatility_model.py`
+  - Predicts HIGH_VOL vs LOW_VOL for next N bars
+  - 6 vol-specific features: vol_rank_20, vol_rank_50, vol_acceleration, range_expansion, gap_frequency, volume_vol_corr
+  - 7 models (one per timeframe) with per-timeframe forecast horizons
+  - Critical for dynamic position sizing and stop distance calibration
+
+- **Exit Timing Model (NEW)**: `exit_timing_model.py`
+  - Predicts optimal holding period: QUICK (1-5 bars), MEDIUM (6-15), EXTENDED (16+)
+  - 7 exit-specific features: mfe_10_pct, mae_10_pct, mfe_mae_ratio, streak_length, exhaustion_rsi, momentum_decay, volume_climax
+  - 10 models (one per setup type) with configurable max horizons
+  - Target: bars until Maximum Favorable Excursion (MFE) peak
+
+- **Regime-Conditional Model Framework (NEW)**: `regime_conditional_model.py`
+  - 4 market regimes: bull_trend, bear_trend, range_bound, high_vol
+  - SPY-based regime classifier using SMA/RSI/momentum/ATR expansion
+  - At prediction: detect regime → route to regime-specific model variant
+  - Up to 92 regime-conditional model variants (23 base × 4 regimes)
+
+- **Multi-Timeframe Ensemble / Meta-Learner (NEW)**: `ensemble_model.py`
+  - Stacks daily + hourly + 5-min model predictions as input features
+  - 14 meta-features: per-model prob_up/prob_down/confidence + agreement_count, avg_confidence, confidence_spread, direction_entropy, bull_vote_pct
+  - 10 ensemble models (one per setup type)
+  - Captures "all timeframes agree" signals for highest probability setups
+
+- **Bulk Training Pipeline (NEW)**: `training_pipeline.py` + `routers/ai_training.py`
+  - 5 API endpoints: POST /start, GET /status, POST /stop, GET /models, GET /data-readiness
+  - Trains all model types in coordinated phases: generic → setup → volatility → exit → regime → ensemble
+  - Progress tracking via training_pipeline_status collection
+  - Accuracy-gated model promotion (new model must beat old to replace it)
+
 ## Key Technical Details
+
+### Model Architecture Summary (Post-Session 4)
+| Model Category | Count | Features Per Sample | Target |
+|----------------|-------|--------------------| -------|
+| Generic Directional | 7 | 78 (base 46 + regime 24 + MTF 8) | UP/DOWN binary |
+| Setup-Specific | 16 | 83-86 (+ setup features) | UP/DOWN/FLAT 3-class |
+| Volatility Prediction | 7 | 76 (base 46 + vol 6 + regime 24) | HIGH_VOL/LOW_VOL |
+| Exit Timing | 10 | 53 (base 46 + exit 7) | QUICK/MEDIUM/EXTENDED |
+| Regime-Conditional | ~92 | Same as parent model | Same as parent model |
+| Ensemble Meta-Learner | 10 | 14 (stacked predictions) | UP/DOWN/FLAT |
+| **Total** | **~142** | | |
 
 ### IB Lookback Limits & Chaining
 | Bar Size | Max Lookback | Duration/Request | Chains/Symbol |
@@ -127,11 +182,19 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 
 ## Prioritized Backlog
 
+### P0 - Active
+- IB data collection at 64.8% (~4 days remaining for slowest collector)
+- Feature engineering & model architecture complete — ready for training when collection finishes
+
 ### P1 - Next Up
-- User to verify overnight collection progress (33,513 of 187,260 completed = ~18%)
+- **Training Pipeline Execution**: Train all ~142 models on available 39M+ bars
+  - Can start immediately with `POST /api/ai-training/start`
+  - Retrain on complete dataset once collection reaches 100%
 - User to purchase vendor 1-min data and run import script
 
 ### P2 - Upcoming
+- Build medium-impact models (Sector-Relative, Gap Fill Probability, Risk-of-Ruin)
+- Target variable improvements (regression targets, risk-adjusted returns)
 - Real-time collection dashboard (heatmap of data depth per symbol/bar_size)
 - MFE/MAE Scatter Chart per setup type
 - Auto-Optimize AI Settings
@@ -147,5 +210,13 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - `/app/backend/services/data_inventory_service.py` - Gap analysis
 - `/app/backend/services/historical_data_queue_service.py` - Queue with end_date
 - `/app/backend/routers/ib_collector_router.py` - Collection endpoints
+- `/app/backend/routers/ai_training.py` - Training pipeline API (NEW)
+- `/app/backend/services/ai_modules/regime_features.py` - SPY+QQQ+IWM regime context (UPDATED)
+- `/app/backend/services/ai_modules/multi_timeframe_features.py` - Daily context for intraday (NEW)
+- `/app/backend/services/ai_modules/volatility_model.py` - Vol prediction features+targets (NEW)
+- `/app/backend/services/ai_modules/exit_timing_model.py` - Exit timing features+targets (NEW)
+- `/app/backend/services/ai_modules/regime_conditional_model.py` - Regime classifier+routing (NEW)
+- `/app/backend/services/ai_modules/ensemble_model.py` - Meta-learner features (NEW)
+- `/app/backend/services/ai_modules/training_pipeline.py` - Bulk training orchestrator (NEW)
 - `/app/documents/scripts/ib_data_pusher.py` - Local IB fetcher (updated for end_date)
 - `/app/documents/scripts/import_vendor_data.py` - Vendor bulk import

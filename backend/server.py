@@ -102,6 +102,7 @@ from routers.ollama_proxy import (
 from routers.market_data import router as market_data_router, init_market_data_router
 from routers.system_router import router as system_router, init_system_router
 from routers.dashboard_router import router as dashboard_router, init_dashboard_router
+from routers.ai_training import router as ai_training_router
 from services.sentcom_service import get_sentcom_service, init_sentcom_service
 from services.dynamic_risk_engine import get_dynamic_risk_engine
 from services.focus_mode_manager import focus_mode_manager
@@ -434,6 +435,7 @@ app.include_router(dynamic_risk_router)  # Dynamic Risk Management Engine
 app.include_router(ai_modules_router)  # AI Modules - Shadow Mode, Debate, Risk Manager
 app.include_router(learning_connectors_router)  # Learning Connectors - Data flow orchestration
 app.include_router(ib_collector_router)  # IB Historical Data Collector
+app.include_router(ai_training_router)  # AI Bulk Training Pipeline
 app.include_router(data_storage_router)  # Data Storage Management
 app.include_router(strategy_promotion_router)  # Strategy Promotion - Autonomous Loop
 app.include_router(scripts_router)  # Scripts auto-update endpoint for StartTrading.bat
