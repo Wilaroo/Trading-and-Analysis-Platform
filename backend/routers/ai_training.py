@@ -62,7 +62,7 @@ async def start_training(request: TrainingRequest):
         return {
             "success": True,
             "message": "Training pipeline started",
-            "phases": request.phases or ["generic", "setup", "volatility", "exit"],
+            "phases": request.phases or ["generic", "setup", "volatility", "exit", "sector", "gap_fill", "risk"],
             "bar_sizes": request.bar_sizes or "all",
         }
 

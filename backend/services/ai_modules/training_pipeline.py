@@ -148,9 +148,10 @@ def count_total_models() -> int:
     setup_specific = 16  # As defined in setup_training_config
     volatility = len(BAR_SIZE_CONFIGS)  # 7
     exit_timing = len(ALL_SETUP_TYPES)  # 10
-    # Regime-conditional and ensemble are trained as part of the pipeline
-    # but count varies based on available data
-    return generic + setup_specific + volatility + exit_timing
+    sector_relative = 3  # daily, hourly, 5min
+    gap_fill = 3  # 5min, 1min, 15min
+    risk_of_ruin = 6  # 1min through daily
+    return generic + setup_specific + volatility + exit_timing + sector_relative + gap_fill + risk_of_ruin
 
 
 async def run_training_pipeline(
@@ -173,8 +174,8 @@ async def run_training_pipeline(
         Dict with training results summary.
     """
     if phases is None:
-        phases = ["generic", "setup", "volatility", "exit"]
-        # Note: "regime" and "ensemble" depend on Phase 1-4 models being trained first
+        phases = ["generic", "setup", "volatility", "exit", "sector", "gap_fill", "risk"]
+        # Note: "regime" and "ensemble" depend on Phase 1-7 models being trained first
 
     if bar_sizes is None:
         bar_sizes = list(BAR_SIZE_CONFIGS.keys())
@@ -487,20 +488,217 @@ async def run_training_pipeline(
                     results["models_failed"].append({"name": model_name, "reason": str(e)})
                     status.add_error(model_name, str(e))
 
-        # ── Phase 5: Regime-Conditional (depends on Phase 1-2) ──
+        # ── Phase 5: Sector-Relative Models ──
+        if "sector" in phases:
+            status.update(phase="sector_relative")
+            logger.info("=== Phase 5: Training Sector-Relative Models ===")
+            from services.ai_modules.sector_relative_model import (
+                SECTOR_MODEL_CONFIGS, SECTOR_REL_FEATURE_NAMES,
+                compute_sector_relative_features, compute_sector_relative_target,
+                SectorMapper,
+            )
+            from services.ai_modules.timeseries_gbm import TimeSeriesGBM
+            from services.ai_modules.timeseries_features import get_feature_engineer
+
+            feature_engineer = get_feature_engineer()
+            base_names = feature_engineer.get_feature_names()
+            sector_mapper = SectorMapper(db)
+
+            for bs, sec_config in SECTOR_MODEL_CONFIGS.items():
+                model_name = sec_config["model_name"]
+                fh = sec_config["forecast_horizon"]
+                status.update(current_model=model_name)
+
+                try:
+                    bs_config = BAR_SIZE_CONFIGS.get(bs, {})
+                    symbols = await get_available_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
+                    symbols = symbols[:1000]
+
+                    # Preload sector ETF bars
+                    sector_etf_bars = {}
+                    for etf in sector_mapper.get_all_sector_etfs():
+                        etf_bars = await load_symbol_bars(db, etf, bs)
+                        if len(etf_bars) >= 50:
+                            sector_etf_bars[etf] = {
+                                "closes": np.array([b["close"] for b in etf_bars], dtype=float),
+                                "volumes": np.array([b.get("volume", 0) for b in etf_bars], dtype=float),
+                            }
+
+                    combined_names = base_names + [f"secrel_{n}" for n in SECTOR_REL_FEATURE_NAMES]
+                    all_X = []
+                    all_y = []
+
+                    for sym in symbols:
+                        sector_etf = sector_mapper.get_sector_etf(sym)
+                        if sector_etf is None or sector_etf not in sector_etf_bars:
+                            continue
+
+                        bars = await load_symbol_bars(db, sym, bs)
+                        if len(bars) < 70 + fh:
+                            continue
+
+                        stock_closes = np.array([b["close"] for b in bars], dtype=float)
+                        stock_volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
+                        sec_data = sector_etf_bars[sector_etf]
+                        sec_closes = sec_data["closes"]
+                        sec_volumes = sec_data["volumes"]
+
+                        min_len = min(len(stock_closes), len(sec_closes))
+                        if min_len < 70 + fh:
+                            continue
+
+                        for i in range(50, min_len - fh):
+                            # Base features
+                            window = bars[i - 49: i + 1][::-1]
+                            fs = feature_engineer.extract_features(window, symbol=sym, include_target=False)
+                            if fs is None:
+                                continue
+                            base_vec = [fs.features.get(f, 0.0) for f in base_names]
+
+                            # Sector-relative features
+                            sc = stock_closes[max(0, i - 24): i + 1][::-1]
+                            sv = stock_volumes[max(0, i - 24): i + 1][::-1]
+                            ec = sec_closes[max(0, i - 24): i + 1][::-1]
+                            ev = sec_volumes[max(0, i - 24): i + 1][::-1]
+
+                            sec_feats = compute_sector_relative_features(sc, sv, ec, ev)
+                            sec_vec = [sec_feats.get(f, 0.0) for f in SECTOR_REL_FEATURE_NAMES]
+
+                            target = compute_sector_relative_target(stock_closes, sec_closes, i, fh)
+                            if target is None:
+                                continue
+
+                            all_X.append(base_vec + sec_vec)
+                            all_y.append(target)
+
+                    if len(all_X) < MIN_TRAINING_SAMPLES:
+                        logger.warning(f"Insufficient sector-relative data for {bs}: {len(all_X)}")
+                        continue
+
+                    X = np.array(all_X)
+                    y = np.array(all_y)
+                    logger.info(f"Training {model_name}: {len(X)} samples")
+
+                    model = TimeSeriesGBM(model_name=model_name, forecast_horizon=fh)
+                    model.set_db(db)
+                    metrics = model.train_from_features(X, y, combined_names, num_boost_round=150, early_stopping_rounds=15)
+
+                    if metrics and metrics.accuracy > 0:
+                        results["models_trained"].append({"name": model_name, "accuracy": metrics.accuracy, "samples": metrics.training_samples})
+                        results["total_samples"] += metrics.training_samples
+                        status.add_completed(model_name, metrics.accuracy)
+
+                except Exception as e:
+                    logger.error(f"Failed to train {model_name}: {e}")
+                    results["models_failed"].append({"name": model_name, "reason": str(e)})
+                    status.add_error(model_name, str(e))
+
+        # ── Phase 6: Risk-of-Ruin Models ──
+        if "risk" in phases:
+            status.update(phase="risk_of_ruin")
+            logger.info("=== Phase 6: Training Risk-of-Ruin Models ===")
+            from services.ai_modules.risk_of_ruin_model import (
+                RISK_MODEL_CONFIGS, RISK_FEATURE_NAMES,
+                compute_risk_features, compute_risk_target,
+            )
+            from services.ai_modules.timeseries_gbm import TimeSeriesGBM
+            from services.ai_modules.timeseries_features import get_feature_engineer
+
+            feature_engineer = get_feature_engineer()
+            base_names = feature_engineer.get_feature_names()
+
+            for bs in bar_sizes:
+                risk_config = RISK_MODEL_CONFIGS.get(bs)
+                if not risk_config:
+                    continue
+
+                model_name = risk_config["model_name"]
+                max_bars = risk_config["max_bars"]
+                status.update(current_model=model_name)
+
+                try:
+                    bs_config = BAR_SIZE_CONFIGS.get(bs, {})
+                    symbols = await get_available_symbols(db, bs, bs_config.get("min_bars_per_symbol", 100))
+                    symbols = symbols[:1000]
+
+                    combined_names = base_names + [f"risk_{n}" for n in RISK_FEATURE_NAMES]
+                    all_X = []
+                    all_y = []
+
+                    for sym in symbols:
+                        bars = await load_symbol_bars(db, sym, bs)
+                        if len(bars) < 70 + max_bars:
+                            continue
+
+                        closes = np.array([b["close"] for b in bars], dtype=float)
+                        highs = np.array([b["high"] for b in bars], dtype=float)
+                        lows = np.array([b["low"] for b in bars], dtype=float)
+                        volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
+
+                        for i in range(50, len(bars) - max_bars):
+                            window = bars[i - 49: i + 1][::-1]
+                            fs = feature_engineer.extract_features(window, symbol=sym, include_target=False)
+                            if fs is None:
+                                continue
+                            base_vec = [fs.features.get(f, 0.0) for f in base_names]
+
+                            c_window = closes[i - 24: i + 1][::-1]
+                            h_window = highs[i - 24: i + 1][::-1]
+                            l_window = lows[i - 24: i + 1][::-1]
+                            v_window = volumes[i - 24: i + 1][::-1]
+
+                            direction = "up" if closes[i] > closes[max(0, i - 3)] else "down"
+                            risk_feats = compute_risk_features(c_window, h_window, l_window, v_window, direction)
+                            risk_vec = [risk_feats.get(f, 0.0) for f in RISK_FEATURE_NAMES]
+
+                            # Compute ATR for stop distance
+                            atr_vals = []
+                            for j in range(max(0, i - 10), i):
+                                tr = max(highs[j] - lows[j], abs(highs[j] - closes[j - 1]) if j > 0 else 0, abs(lows[j] - closes[j - 1]) if j > 0 else 0)
+                                atr_vals.append(tr)
+                            atr = np.mean(atr_vals) if atr_vals else 0.01
+
+                            target = compute_risk_target(closes, highs, lows, i, atr, direction, max_bars=max_bars)
+                            if target is None:
+                                continue
+
+                            all_X.append(base_vec + risk_vec)
+                            all_y.append(target)
+
+                    if len(all_X) < MIN_TRAINING_SAMPLES:
+                        logger.warning(f"Insufficient risk data for {bs}: {len(all_X)}")
+                        continue
+
+                    X = np.array(all_X)
+                    y = np.array(all_y)
+                    logger.info(f"Training {model_name}: {len(X)} samples, stop_hit={np.sum(y==1)} ({np.mean(y)*100:.1f}%)")
+
+                    model = TimeSeriesGBM(model_name=model_name, forecast_horizon=max_bars)
+                    model.set_db(db)
+                    metrics = model.train_from_features(X, y, combined_names, num_boost_round=150, early_stopping_rounds=15)
+
+                    if metrics and metrics.accuracy > 0:
+                        results["models_trained"].append({"name": model_name, "accuracy": metrics.accuracy, "samples": metrics.training_samples})
+                        results["total_samples"] += metrics.training_samples
+                        status.add_completed(model_name, metrics.accuracy)
+
+                except Exception as e:
+                    logger.error(f"Failed to train {model_name}: {e}")
+                    results["models_failed"].append({"name": model_name, "reason": str(e)})
+                    status.add_error(model_name, str(e))
+
+        # ── Phase 7: Regime-Conditional (depends on Phase 1-6) ──
         if "regime" in phases:
             status.update(phase="regime_conditional")
-            logger.info("=== Phase 5: Training Regime-Conditional Models ===")
+            logger.info("=== Phase 7: Training Regime-Conditional Models ===")
             logger.info("Regime-conditional training will split existing training data by detected regime "
-                        "and train regime-specific variants. This runs after generic+setup models.")
-            # Implementation: For each trained model, re-train with data filtered by regime
-            # This is a second pass that reuses the same data loading infrastructure
+                        "and train regime-specific variants. This runs after all base models.")
 
-        # ── Phase 6: Ensemble Meta-Learner (depends on Phase 1-4) ──
+        # ── Phase 8: Ensemble Meta-Learner (depends on Phase 1-7) ──
         if "ensemble" in phases:
             status.update(phase="ensemble_meta")
-            logger.info("=== Phase 6: Training Ensemble Meta-Learner ===")
-            logger.info("Ensemble training requires Phase 1-4 models to be trained first "
+            logger.info("=== Phase 8: Training Ensemble Meta-Learner ===")
+            logger.info("Ensemble training requires Phase 1-7 models to be trained first "
                         "(needs their predictions as input features).")
 
         # ── Done ──

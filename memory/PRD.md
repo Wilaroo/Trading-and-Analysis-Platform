@@ -161,9 +161,29 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 | Setup-Specific | 16 | 83-86 (+ setup features) | UP/DOWN/FLAT 3-class |
 | Volatility Prediction | 7 | 76 (base 46 + vol 6 + regime 24) | HIGH_VOL/LOW_VOL |
 | Exit Timing | 10 | 53 (base 46 + exit 7) | QUICK/MEDIUM/EXTENDED |
+| Sector-Relative | 3 | 56 (base 46 + sector 10) | OUTPERFORM/UNDERPERFORM |
+| Gap Fill Probability | 3 | 55 (base 46 + gap 9) | GAP_FILL/GAP_CONTINUE |
+| Risk-of-Ruin | 6 | 54 (base 46 + risk 8) | STOP_HIT/SURVIVED |
 | Regime-Conditional | ~92 | Same as parent model | Same as parent model |
 | Ensemble Meta-Learner | 10 | 14 (stacked predictions) | UP/DOWN/FLAT |
-| **Total** | **~142** | | |
+| **Total** | **~154** | | |
+
+### Target Variable System
+| Type | Description | Use Case |
+|------|-------------|----------|
+| classification_binary | UP (>0.5%) vs DOWN | Simple directional models |
+| classification_3class | UP/FLAT/DOWN with noise filter | Setup-specific models |
+| regression | Actual return magnitude | Information-rich; post-hoc threshold |
+| r_multiple | Return / ATR (normalized) | Cross-volatility comparison |
+| asymmetric | Regime-adjusted thresholds | Bull: easy longs; Bear: easy shorts |
+
+### Regime-Aware Thresholds
+| Regime | Long Threshold | Short Threshold | Rationale |
+|--------|---------------|-----------------|-----------|
+| Bull Trend | >0.3% | <-0.8% | Easy to go long, hard to short |
+| Bear Trend | >0.8% | <-0.3% | Hard to go long, easy to short |
+| Range Bound | >0.5% | <-0.5% | Symmetric |
+| High Vol | >1.0% | <-1.0% | Wider to filter noise |
 
 ### IB Lookback Limits & Chaining
 | Bar Size | Max Lookback | Duration/Request | Chains/Symbol |
@@ -218,5 +238,9 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - `/app/backend/services/ai_modules/regime_conditional_model.py` - Regime classifier+routing (NEW)
 - `/app/backend/services/ai_modules/ensemble_model.py` - Meta-learner features (NEW)
 - `/app/backend/services/ai_modules/training_pipeline.py` - Bulk training orchestrator (NEW)
+- `/app/backend/services/ai_modules/sector_relative_model.py` - Sector-relative features & targets (NEW)
+- `/app/backend/services/ai_modules/gap_fill_model.py` - Gap fill probability features & targets (NEW)
+- `/app/backend/services/ai_modules/risk_of_ruin_model.py` - Risk-of-ruin features & targets (NEW)
+- `/app/backend/services/ai_modules/advanced_targets.py` - Advanced target variable system (NEW)
 - `/app/documents/scripts/ib_data_pusher.py` - Local IB fetcher (updated for end_date)
 - `/app/documents/scripts/import_vendor_data.py` - Vendor bulk import
