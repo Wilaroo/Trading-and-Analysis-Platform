@@ -1581,62 +1581,66 @@ async def report_historical_data_result(request: Request):
             bar_count=bar_count
         )
         
-        # IMMEDIATELY store to main collection using BULK WRITE for performance
-        bars_stored = 0
+        # Store bars to main collection in BACKGROUND to avoid timeout
+        # The pusher gets an immediate response while bars are written async
+        bars_to_store = []
         if success and data:
             try:
                 from services.ib_historical_collector import get_ib_collector
-                from pymongo import UpdateOne
                 collector = get_ib_collector()
                 
                 if collector._data_col is not None:
                     from datetime import datetime, timezone
                     now = datetime.now(timezone.utc).isoformat()
                     
-                    # Build bulk operations list
-                    bulk_operations = []
                     for bar in data:
                         date_val = bar.get("date") or bar.get("time")
                         if not date_val:
                             continue
-                        
-                        bulk_operations.append(
-                            UpdateOne(
-                                {
-                                    "symbol": symbol,
-                                    "bar_size": bar_size,
-                                    "date": date_val
-                                },
-                                {
-                                    "$set": {
-                                        "symbol": symbol,
-                                        "bar_size": bar_size,
-                                        "date": date_val,
-                                        "open": bar.get("open"),
-                                        "high": bar.get("high"),
-                                        "low": bar.get("low"),
-                                        "close": bar.get("close"),
-                                        "volume": bar.get("volume"),
-                                        "collected_at": now
-                                    }
-                                },
-                                upsert=True
-                            )
-                        )
-                    
-                    # Execute bulk write in single operation
-                    if bulk_operations:
-                        result = collector._data_col.bulk_write(bulk_operations, ordered=False)
-                        bars_stored = result.upserted_count + result.modified_count
-                        logger.info(f"Bulk stored {bars_stored} bars for {symbol} (upserted: {result.upserted_count}, modified: {result.modified_count})")
-                        
+                        bars_to_store.append({
+                            "symbol": symbol,
+                            "bar_size": bar_size,
+                            "date": date_val,
+                            "open": bar.get("open"),
+                            "high": bar.get("high"),
+                            "low": bar.get("low"),
+                            "close": bar.get("close"),
+                            "volume": bar.get("volume"),
+                            "collected_at": now
+                        })
             except Exception as e:
-                logger.warning(f"Bulk write error for {symbol}: {e}")
+                logger.warning(f"Error preparing bars for {symbol}: {e}")
+        
+        # Fire-and-forget: store bars in background thread so pusher doesn't wait
+        if bars_to_store:
+            import asyncio
+            async def _store_bars_async(bars, sym, bs):
+                try:
+                    from services.ib_historical_collector import get_ib_collector
+                    from pymongo import UpdateOne
+                    collector = get_ib_collector()
+                    if collector._data_col is not None:
+                        ops = [
+                            UpdateOne(
+                                {"symbol": b["symbol"], "bar_size": b["bar_size"], "date": b["date"]},
+                                {"$set": b},
+                                upsert=True
+                            ) for b in bars
+                        ]
+                        result = await asyncio.to_thread(
+                            collector._data_col.bulk_write, ops, ordered=False
+                        )
+                        stored = result.upserted_count + result.modified_count
+                        logger.info(f"Async stored {stored} bars for {sym} ({bs})")
+                except Exception as e:
+                    logger.warning(f"Async bulk write error for {sym}: {e}")
+            
+            asyncio.create_task(_store_bars_async(bars_to_store, symbol, bar_size))
         
         return {
             "success": True, 
             "message": f"Result recorded for {request_id}",
-            "bars_stored": bars_stored
+            "bars_queued_for_storage": len(bars_to_store)
         }
     except HTTPException:
         raise
