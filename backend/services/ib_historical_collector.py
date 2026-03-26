@@ -1444,7 +1444,8 @@ class IBHistoricalCollector:
         recent_days_threshold: int = 7,
         max_symbols: int = None,
         specific_symbols: List[str] = None,
-        use_max_lookback: bool = False
+        use_max_lookback: bool = False,
+        only_bar_sizes: List[str] = None,
     ) -> Dict[str, Any]:
         """
         Collect ALL applicable timeframes for each stock before moving to the next.
@@ -1484,6 +1485,7 @@ class IBHistoricalCollector:
         tier_timeframes = self.TIER_TIMEFRAMES
         get_tier = self.get_symbol_tier
         get_safe_dur = self.get_safe_duration
+        allowed_bar_sizes = set(only_bar_sizes) if only_bar_sizes else None
         
         def _build_queue():
             """Sync function to build the collection queue — runs in thread"""
@@ -1545,6 +1547,10 @@ class IBHistoricalCollector:
                     continue
                 
                 timeframes = tier_timeframes.get(tier, ["1 day"])
+                
+                # Filter to specific bar sizes if requested
+                if allowed_bar_sizes:
+                    timeframes = [tf for tf in timeframes if tf in allowed_bar_sizes]
                 
                 for bar_size in timeframes:
                     if use_max_lookback:

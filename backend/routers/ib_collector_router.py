@@ -1839,6 +1839,42 @@ async def per_stock_collection(
 
 # ==================== MAX LOOKBACK CHAINING ====================
 
+# In-memory status tracker for background chaining jobs
+_chaining_job_status = {
+    "running": False,
+    "started_at": None,
+    "result": None,
+    "error": None,
+}
+
+
+async def _run_max_lookback_background(collector, symbols_list, bar_sizes_list, max_symbols):
+    """Background task to run max lookback chaining."""
+    global _chaining_job_status
+    try:
+        _chaining_job_status["running"] = True
+        _chaining_job_status["error"] = None
+        
+        result = await collector.run_per_stock_collection(
+            lookback_days=365,
+            skip_recent=False,
+            max_symbols=max_symbols,
+            specific_symbols=symbols_list,
+            use_max_lookback=True,
+            only_bar_sizes=bar_sizes_list,
+        )
+        
+        _chaining_job_status["result"] = result
+        logger.info(f"Max lookback chaining complete: {result.get('total_requests', 0)} requests queued")
+        
+    except Exception as e:
+        import traceback
+        _chaining_job_status["error"] = str(e)
+        logger.error(f"Max lookback chaining failed: {e}\n{traceback.format_exc()}")
+    finally:
+        _chaining_job_status["running"] = False
+
+
 @router.post("/max-lookback-collection")
 async def max_lookback_collection(
     background_tasks: BackgroundTasks,
@@ -1847,37 +1883,30 @@ async def max_lookback_collection(
     bar_sizes: str = None,
 ):
     """
-    Start MAX LOOKBACK collection with request chaining.
+    Start MAX LOOKBACK collection with request chaining (runs in background).
 
     This is the deep-history backfill endpoint. For every qualifying symbol
     and timeframe, it generates chained requests stepping backward in time
-    to hit the absolute maximum IB lookback limit:
+    to hit the absolute maximum IB lookback limit.
 
-    | Bar Size | Max Lookback | Chains/Symbol |
-    |----------|-------------|---------------|
-    | 1 min    | 180 days    | ~26           |
-    | 5 mins   | 730 days    | ~25           |
-    | 15 mins  | 730 days    | ~9            |
-    | 30 mins  | 730 days    | ~5            |
-    | 1 hour   | 1825 days   | ~5            |
-    | 1 day    | 7300 days   | ~3            |
-    | 1 week   | 7300 days   | ~1            |
-
-    **Smart features:**
-    - Checks existing data per (symbol, bar_size) to avoid redundant fetches
-    - Only chains for the MISSING time window
-    - Each request has an `end_date` so the pusher fetches the correct time slice
-    - Dedup prevents duplicate queue entries
+    Returns immediately with an acknowledgement. The heavy aggregation and
+    queue building runs in background. Check status via GET /max-lookback-status.
 
     Args:
         max_symbols: Limit number of symbols (default None = all qualifying)
         specific_symbols: Comma-separated symbols to target (e.g., "AAPL,TSLA,MSFT")
         bar_sizes: Comma-separated bar sizes to collect (e.g., "5 mins,1 hour").
                    Default: all applicable bar sizes per tier.
-
-    Returns:
-        Collection job info with chaining breakdown and time estimates
     """
+    global _chaining_job_status
+    
+    if _chaining_job_status["running"]:
+        return {
+            "success": False,
+            "message": "A max lookback chaining job is already running. Check /max-lookback-status for progress.",
+            "started_at": _chaining_job_status["started_at"],
+        }
+    
     try:
         collector = get_ib_collector()
 
@@ -1885,20 +1914,48 @@ async def max_lookback_collection(
         if specific_symbols:
             symbols_list = [s.strip().upper() for s in specific_symbols.split(",") if s.strip()]
 
-        result = await collector.run_per_stock_collection(
-            lookback_days=365,  # Ignored when use_max_lookback=True
-            skip_recent=False,  # Don't skip — we want to fill gaps backward
-            max_symbols=max_symbols,
-            specific_symbols=symbols_list,
-            use_max_lookback=True,
+        bar_sizes_list = None
+        if bar_sizes:
+            bar_sizes_list = [b.strip() for b in bar_sizes.split(",") if b.strip()]
+
+        from datetime import datetime, timezone
+        _chaining_job_status = {
+            "running": True,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "result": None,
+            "error": None,
+        }
+
+        # Launch in background — returns immediately
+        background_tasks.add_task(
+            _run_max_lookback_background,
+            collector, symbols_list, bar_sizes_list, max_symbols
         )
 
-        return result
+        return {
+            "success": True,
+            "message": "Max lookback chaining job started in background. This will take a few minutes to build the queue.",
+            "bar_sizes_filter": bar_sizes_list or "all applicable per tier",
+            "check_status": "/api/ib-collector/max-lookback-status",
+            "check_queue": "/api/ib-collector/queue-progress",
+        }
 
     except Exception as e:
         import traceback
         logger.error(f"Error starting max lookback collection: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/max-lookback-status")
+async def max_lookback_status():
+    """Check the status of the background max lookback chaining job."""
+    return {
+        "success": True,
+        "running": _chaining_job_status["running"],
+        "started_at": _chaining_job_status["started_at"],
+        "result": _chaining_job_status["result"],
+        "error": _chaining_job_status["error"],
+    }
 
 
 @router.get("/chain-preview")
