@@ -1575,7 +1575,7 @@ class IBDataPusher:
         _RATE_WINDOW_SECS = 300  # 5-minute rolling window
         
         # Adaptive rate limiting
-        base_batch_delay = 10  # seconds between batches
+        base_batch_delay = 6  # seconds between batches (was 10 — reduced since 0 pacing violations)
         current_batch_delay = base_batch_delay
         
         logger.info("")
@@ -1584,7 +1584,7 @@ class IBDataPusher:
         logger.info("=" * 60)
         logger.info("  Live trading: PAUSED")
         logger.info("  Order execution: DISABLED")
-        logger.info("  Target rate: ~1800 requests/hour")
+        logger.info("  Target rate: ~2500 requests/hour")
         logger.info("  Strategy: 6-request bursts with adaptive pacing")
         logger.info("=" * 60)
         logger.info("")
@@ -1823,7 +1823,7 @@ class IBDataPusher:
                     failed += 1
                 
                 # Minimal delay between requests in burst (IB can handle 6 rapid requests)
-                time.sleep(0.3)
+                time.sleep(0.2)
             
             return {"completed": completed, "failed": failed, "pacing_violations": pacing_violations}
             
