@@ -250,6 +250,12 @@ class IBDataPusher:
         self.news_buffer: Dict[str, List[dict]] = {}  # News by symbol
         self.news_providers: List[dict] = []  # Available news providers
         
+        # Dead symbol tracking for collection mode
+        # Symbols that IB says "No security definition found" — skip all remaining requests
+        self._dead_symbols: set = set()
+        self._symbol_nodata_count: Dict[str, int] = {}  # Track consecutive no-data per symbol
+        self._DEAD_SYMBOL_THRESHOLD = 2  # Mark dead after this many consecutive failures
+        
         # Fundamental data refresh tracking (don't need to refresh every second)
         self.last_fundamentals_refresh = 0
         self.fundamentals_refresh_interval = 300  # Refresh every 5 minutes
@@ -1343,6 +1349,19 @@ class IBDataPusher:
         duration = request.get("duration", "1 Y")
         end_date = request.get("end_date", "")  # IB endDateTime — empty = now
         
+        # AUTO-SKIP: If symbol is already known dead, skip immediately
+        if symbol in self._dead_symbols:
+            return {
+                "request_id": request_id,
+                "symbol": symbol,
+                "bar_size": bar_size,
+                "success": True,
+                "status": "skipped_dead_symbol",
+                "data": [],
+                "bar_count": 0,
+                "error": "Symbol previously identified as dead/delisted"
+            }
+        
         try:
             from ib_insync import Stock
             contract = Stock(symbol, "SMART", "USD")
@@ -1350,6 +1369,10 @@ class IBDataPusher:
             try:
                 self.ib.qualifyContracts(contract)
             except Exception as e:
+                # Track for dead symbol detection
+                self._symbol_nodata_count[symbol] = self._symbol_nodata_count.get(symbol, 0) + 1
+                if self._symbol_nodata_count[symbol] >= self._DEAD_SYMBOL_THRESHOLD:
+                    self._mark_symbol_dead(symbol)
                 return {
                     "request_id": request_id,
                     "symbol": symbol,
@@ -1361,10 +1384,13 @@ class IBDataPusher:
                     "error": f"Symbol not available: {e}"
                 }
             
+            # Normalize end_date to include explicit UTC timezone
+            normalized_end_date = self._normalize_end_date(end_date)
+            
             # Fetch from IB
             bars = self.ib.reqHistoricalData(
                 contract,
-                endDateTime=end_date,
+                endDateTime=normalized_end_date,
                 durationStr=duration,
                 barSizeSetting=bar_size,
                 whatToShow="TRADES",
@@ -1383,6 +1409,14 @@ class IBDataPusher:
                     "volume": bar.volume
                 })
             
+            # Track no-data for dead symbol detection
+            if not bar_data:
+                self._symbol_nodata_count[symbol] = self._symbol_nodata_count.get(symbol, 0) + 1
+                if self._symbol_nodata_count[symbol] >= self._DEAD_SYMBOL_THRESHOLD:
+                    self._mark_symbol_dead(symbol)
+            else:
+                self._symbol_nodata_count.pop(symbol, None)
+            
             return {
                 "request_id": request_id,
                 "symbol": symbol,
@@ -1396,6 +1430,18 @@ class IBDataPusher:
             
         except Exception as e:
             error_str = str(e)
+            if "no security definition" in error_str.lower():
+                self._mark_symbol_dead(symbol)
+                return {
+                    "request_id": request_id,
+                    "symbol": symbol,
+                    "bar_size": bar_size,
+                    "success": True,
+                    "status": "skipped_dead_symbol",
+                    "data": [],
+                    "bar_count": 0,
+                    "error": "No security definition found"
+                }
             if "pacing" in error_str.lower():
                 logger.warning(f"[Collection] {symbol}: IB PACING - waiting 10s")
                 time.sleep(10)
@@ -1533,10 +1579,14 @@ class IBDataPusher:
                         logger.info(f"  COLLECTION STATUS (Optimized)")
                         logger.info(f"  Completed: {requests_completed}")
                         logger.info(f"  Failed: {requests_failed}")
+                        logger.info(f"  Dead symbols skipped: {len(self._dead_symbols)}")
                         logger.info(f"  Pacing violations: {pacing_violations}")
                         logger.info(f"  Rate: {rate:.0f} requests/hour")
                         logger.info(f"  Current batch delay: {current_batch_delay:.1f}s")
                         logger.info(f"  Running: {elapsed/60:.1f} minutes")
+                        if self._dead_symbols:
+                            logger.info(f"  Dead: {', '.join(sorted(self._dead_symbols)[:20])}" + 
+                                       (f" +{len(self._dead_symbols)-20} more" if len(self._dead_symbols) > 20 else ""))
                         logger.info("=" * 50)
                         logger.info("")
                         
@@ -1658,6 +1708,51 @@ class IBDataPusher:
             logger.error(f"[Collection] Batch error: {e}")
             return {"completed": 0, "failed": 0}
     
+    def _normalize_end_date(self, end_date: str) -> str:
+        """
+        Normalize end_date to include explicit UTC timezone for IB API.
+        Fixes IB warning 2174 about implicit timezone.
+        
+        IB format: "YYYYMMDD-HH:MM:SS UTC" or "YYYYMMDD HH:MM:SS US/Eastern"
+        """
+        if not end_date:
+            return ""  # Empty = "now", IB handles this fine
+        
+        # Already has timezone suffix
+        if "UTC" in end_date or "US/" in end_date or "Europe/" in end_date:
+            return end_date
+        
+        # Add UTC suffix to bare datetime strings
+        # e.g. "20260217-16:00:00" -> "20260217-16:00:00 UTC"
+        # e.g. "20260217 16:00:00" -> "20260217 16:00:00 UTC"
+        return end_date.strip() + " UTC"
+    
+    def _mark_symbol_dead(self, symbol: str):
+        """
+        Mark a symbol as dead (no security definition) and bulk-skip
+        all remaining queue requests for it via backend API.
+        """
+        if symbol in self._dead_symbols:
+            return  # Already handled
+        
+        self._dead_symbols.add(symbol)
+        logger.warning(f"[Collection] DEAD SYMBOL: {symbol} — skipping all remaining requests")
+        
+        # Call backend to bulk-skip all pending requests for this symbol
+        try:
+            result = self.api.post_safe(
+                "/api/ib/historical-data/skip-symbol",
+                {"symbol": symbol, "reason": "No security definition found"},
+                timeout=15
+            )
+            if result:
+                skipped = result.get("skipped", 0)
+                logger.info(f"[Collection] Bulk-skipped {skipped} remaining requests for {symbol}")
+            else:
+                logger.warning(f"[Collection] Could not bulk-skip {symbol} on backend (will skip locally)")
+        except Exception as e:
+            logger.warning(f"[Collection] Backend skip call failed for {symbol}: {e}")
+    
     def _collection_fetch_single(self, req: dict) -> bool:
         """Fetch a single historical data request. Returns True if successful."""
         request_id = req.get("request_id")
@@ -1665,6 +1760,24 @@ class IBDataPusher:
         duration = req.get("duration", "1 M")
         bar_size = req.get("bar_size", "1 day")
         end_date = req.get("end_date", "")  # IB endDateTime — empty = now
+        
+        # AUTO-SKIP: If symbol is already known dead, skip immediately
+        if symbol in self._dead_symbols:
+            # Claim + report skip in one shot (no IB call needed)
+            try:
+                self.api.post_safe(f"/api/ib/historical-data/claim/{request_id}", timeout=10)
+            except:
+                pass
+            self._report_historical_data_result(
+                request_id=request_id,
+                symbol=symbol,
+                success=True,
+                data=[],
+                status="skipped_dead_symbol",
+                error="Symbol previously identified as dead/delisted"
+            )
+            logger.info(f"[Collection] {symbol} ({bar_size}): SKIPPED (dead symbol)")
+            return True
         
         try:
             # Claim the request
@@ -1679,7 +1792,7 @@ class IBDataPusher:
             try:
                 self.ib.qualifyContracts(contract)
             except Exception as e:
-                # Invalid symbol
+                # Invalid symbol — likely dead/delisted
                 self._report_historical_data_result(
                     request_id=request_id,
                     symbol=symbol,
@@ -1688,12 +1801,19 @@ class IBDataPusher:
                     status="no_data",
                     error=f"Symbol not available: {e}"
                 )
+                # Track consecutive failures
+                self._symbol_nodata_count[symbol] = self._symbol_nodata_count.get(symbol, 0) + 1
+                if self._symbol_nodata_count[symbol] >= self._DEAD_SYMBOL_THRESHOLD:
+                    self._mark_symbol_dead(symbol)
                 return True  # Not a failure, just no data
+            
+            # Normalize end_date to include explicit UTC timezone (fixes IB warning 2174)
+            normalized_end_date = self._normalize_end_date(end_date)
             
             # Fetch from IB
             bars = self.ib.reqHistoricalData(
                 contract,
-                endDateTime=end_date,
+                endDateTime=normalized_end_date,
                 durationStr=duration,
                 barSizeSetting=bar_size,
                 whatToShow="TRADES",
@@ -1722,13 +1842,34 @@ class IBDataPusher:
                 status=status
             )
             
+            # Track no-data results for dead symbol detection
+            if not bar_data:
+                self._symbol_nodata_count[symbol] = self._symbol_nodata_count.get(symbol, 0) + 1
+                if self._symbol_nodata_count[symbol] >= self._DEAD_SYMBOL_THRESHOLD:
+                    self._mark_symbol_dead(symbol)
+            else:
+                # Got data — reset failure counter (symbol is alive)
+                self._symbol_nodata_count.pop(symbol, None)
+            
             logger.info(f"[Collection] {symbol} ({bar_size}): {len(bar_data)} bars")
             return True
             
         except Exception as e:
             error_str = str(e)
             
-            if "pacing" in error_str.lower() or "limit" in error_str.lower():
+            # Check for "No security definition" error (symbol doesn't exist in IB)
+            if "no security definition" in error_str.lower():
+                self._report_historical_data_result(
+                    request_id=request_id,
+                    symbol=symbol,
+                    success=True,
+                    data=[],
+                    status="no_data",
+                    error="No security definition found"
+                )
+                self._mark_symbol_dead(symbol)
+                return True
+            elif "pacing" in error_str.lower() or "limit" in error_str.lower():
                 # IB rate limit - wait and retry later
                 logger.warning(f"[Collection] {symbol}: IB PACING VIOLATION - backing off")
                 time.sleep(15)  # Longer delay for pacing violation
@@ -1964,7 +2105,7 @@ class IBDataPusher:
             # Request historical data from IB Gateway
             bars = self.ib.reqHistoricalData(
                 contract,
-                endDateTime=end_date,
+                endDateTime=self._normalize_end_date(end_date),
                 durationStr=duration,
                 barSizeSetting=bar_size,
                 whatToShow="TRADES",

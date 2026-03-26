@@ -334,7 +334,7 @@ async def get_pusher_setup_info():
     cloud_url = os.environ.get("REACT_APP_BACKEND_URL", "")
     if not cloud_url:
         # Try to infer from request or env
-        cloud_url = os.environ.get("APP_URL", "https://data-chain-collector.preview.emergentagent.com")
+        cloud_url = os.environ.get("APP_URL", "https://historical-data-push.preview.emergentagent.com")
     
     pusher_connected = False
     last_update = _pushed_ib_data.get("last_update")
@@ -1755,6 +1755,64 @@ async def report_historical_data_batch_result(request: Request):
     except Exception as e:
         logger.error(f"Error in batch result: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.post("/historical-data/skip-symbol")
+async def skip_symbol_requests(request: Request):
+    """
+    Bulk-skip all pending queue requests for a dead/delisted symbol.
+    
+    Called by the IB Data Pusher when it detects a symbol with
+    "No security definition" errors. This prevents the pusher from
+    wasting IB API requests on symbols that don't exist.
+    
+    Body: {"symbol": "SGN", "reason": "No security definition found"}
+    Returns: {"skipped": 42, "symbol": "SGN"}
+    """
+    service = _get_historical_data_service()
+    if not service:
+        raise HTTPException(status_code=503, detail="Historical data service not available")
+    
+    try:
+        body = await request.json()
+        symbol = body.get("symbol", "").upper()
+        reason = body.get("reason", "Dead/delisted symbol")
+        
+        if not symbol:
+            raise HTTPException(status_code=400, detail="symbol is required")
+        
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        
+        # Mark all pending requests for this symbol as completed with skip status
+        result = service.collection.update_many(
+            {"symbol": symbol, "status": "pending"},
+            {"$set": {
+                "status": "completed",
+                "result_status": "skipped_dead_symbol",
+                "error": reason,
+                "bar_count": 0,
+                "completed_at": now
+            }}
+        )
+        
+        skipped = result.modified_count
+        logger.info(f"Bulk-skipped {skipped} pending requests for dead symbol: {symbol}")
+        
+        return {
+            "success": True,
+            "symbol": symbol,
+            "skipped": skipped,
+            "reason": reason
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error skipping symbol requests: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @router.post("/historical-data/optimize-indexes")

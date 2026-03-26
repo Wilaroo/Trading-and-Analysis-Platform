@@ -17,7 +17,7 @@ echo.
 :: CONFIGURATION
 :: =====================================================
 set SCRIPT_DIR=%~dp0
-set CLOUD_URL=https://data-chain-collector.preview.emergentagent.com
+set CLOUD_URL=https://historical-data-push.preview.emergentagent.com
 set LOG_FILE=%SCRIPT_DIR%post_restart.log
 
 :: Log start time
