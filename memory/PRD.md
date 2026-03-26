@@ -137,6 +137,18 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 
 - **MarketRegimeWidget Enhancement**: Updated expand button text to "AI Details"
 
+- **Confidence Gate Wired to Trading Bot**: `trading_bot_service.py` + `server.py`
+  - Integrated into `_evaluate_opportunity()` between Smart Filter and Intelligence Gathering
+  - Flow: Setup → Smart Filter → **Confidence Gate** → Position Sizing → Execute
+  - Gate returns GO/REDUCE/SKIP based on regime (rule-based + AI) + model consensus + quality score
+  - SKIP: Trade logged but not taken
+  - REDUCE: Position multiplier applied to reduce size
+  - GO: Full size proceeds
+  - All decisions logged to `confidence_gate_log` collection and SentCom Intelligence Panel
+  - Position multiplier applied in position sizing section alongside smart filter adjustment
+  - Entry context (`entry_context.confidence_gate`) captures gate decision, score, reasoning for post-trade analysis
+  - Trading mode (Aggressive/Normal/Cautious/Defensive) auto-updated based on regime conditions
+
 - **Bug Fixes (Found by Testing Agent)**:
   - Fixed 3x MongoDB truth testing errors (`if mongo_db:` → `if mongo_db is not None:`) in ai_training.py
   - Fixed import error in model-inventory endpoint (wrong import names from setup_training_config)
@@ -243,7 +255,6 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - **Training Pipeline Execution**: Train all ~154 models on available 52.7M+ bars
   - Can start immediately with `POST /api/ai-training/start`
   - Retrain on complete dataset once collection reaches 100%
-- **Wire Confidence Gate into Trading Bot**: Connect `ConfidenceGate.evaluate()` into SentCom's trade execution path so it's called automatically before every trade
 - User to purchase vendor 1-min data and run import script
 
 ### P2 - Upcoming
