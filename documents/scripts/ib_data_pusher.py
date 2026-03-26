@@ -1485,6 +1485,11 @@ class IBDataPusher:
                     # Keep IB connection alive
                     self.ib.sleep(0.1)
                     
+                    # Periodic connection health check
+                    if not self.ib.isConnected():
+                        logger.warning("IB Gateway connection lost. Returning to auto-reconnect...")
+                        return
+                    
                     current_time = time.time()
                     
                     # Fetch and process historical data requests - OPTIMIZED SPEED
@@ -1548,6 +1553,14 @@ class IBDataPusher:
                             pass  # Non-critical
                     
                 except Exception as e:
+                    error_str = str(e).lower()
+                    
+                    # Check if this is a connection loss
+                    if any(x in error_str for x in ['not connected', 'connection', 'disconnected', 'eof', 'broken pipe', 'reset by peer']):
+                        logger.error(f"IB CONNECTION LOST: {e}")
+                        logger.info("Returning to auto-reconnect loop...")
+                        return  # Exit run_collection_mode, auto-reconnect in main() will retry
+                    
                     logger.error(f"Collection loop error: {e}")
                     import traceback
                     traceback.print_exc()
@@ -2130,8 +2143,63 @@ def main():
     )
     
     if args.mode == "collection":
-        # Dedicated bulk collection mode (for overnight runs)
-        pusher.run_collection_mode()
+        # Dedicated bulk collection mode with AUTO-RECONNECT
+        # Survives IB Gateway restarts, daily logoffs, and connection drops
+        max_retries = 999  # Effectively infinite
+        retry_count = 0
+        base_wait = 30  # Start with 30s wait
+        max_wait = 300   # Max 5 minutes between retries
+        
+        while retry_count < max_retries:
+            try:
+                pusher = IBDataPusher(
+                    cloud_url=args.cloud_url,
+                    ib_host=args.ib_host,
+                    ib_port=args.ib_port,
+                    client_id=args.client_id
+                )
+                
+                logger.info("")
+                if retry_count > 0:
+                    logger.info(f"  AUTO-RECONNECT: Attempt #{retry_count + 1}")
+                
+                pusher.run_collection_mode()
+                
+                # If run_collection_mode returns cleanly (no pending requests left), we're done
+                logger.info("Collection mode ended normally. Checking for more work...")
+                time.sleep(30)
+                retry_count = 0  # Reset on successful run
+                continue
+                
+            except KeyboardInterrupt:
+                logger.info("Collection stopped by user (Ctrl+C)")
+                break
+            except Exception as e:
+                retry_count += 1
+                wait_time = min(base_wait * (1.5 ** min(retry_count, 10)), max_wait)
+                
+                logger.error(f"")
+                logger.error(f"{'='*50}")
+                logger.error(f"  CONNECTION LOST: {e}")
+                logger.error(f"  Reconnecting in {wait_time:.0f}s (attempt {retry_count})")
+                logger.error(f"  IB Gateway may be restarting...")
+                logger.error(f"  Press Ctrl+C to stop")
+                logger.error(f"{'='*50}")
+                logger.error(f"")
+                
+                try:
+                    time.sleep(wait_time)
+                except KeyboardInterrupt:
+                    logger.info("Collection stopped by user during reconnect wait")
+                    break
+                
+                # Try to disconnect cleanly before reconnecting
+                try:
+                    pusher.ib.disconnect()
+                except:
+                    pass
+        
+        logger.info("Collection mode exited.")
     elif args.mode == "auto":
         # Legacy auto mode - polls cloud and switches dynamically
         pusher.run_auto_mode(symbols=args.symbols, enable_level2=not args.no_level2)
