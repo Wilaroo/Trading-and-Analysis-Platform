@@ -1,35 +1,35 @@
 <analysis>**original_problem_statement**: 
-The user wants to adjust IB historical collector scripts to automatically chain requests and fetch the absolute maximum allowable lookback from Interactive Brokers for all qualifying symbols across all timeframes (e.g., 6 months for 1-minute bars, 2 years for 5-minute bars, 10+ years for daily bars).
+The user wants to adjust IB historical collector scripts to automatically chain requests and fetch the absolute maximum allowable lookback from Interactive Brokers for all qualifying symbols across all timeframes (e.g., 6 months for 1-minute bars, 2 years for 5-minute bars, 10+ years for daily bars). Ensure resilience against nightly IB Gateway restarts. Also requires a script to import large streaming vendor data  files. 
 
 PRODUCT REQUIREMENTS:
 1.  **Max Lookback Data Chaining**: Overhaul  and  to chunk/chain API requests backwards in time using .
-2.  **Vendor Data Import**: A script to parse and filter large streamable  files to bulk-load 30 days of 1-min data.
-3.  **Resilience**: Ensure the local pusher handles IB Gateway's nightly auto-restart (1:45 AM) without manual intervention.
+2.  **Vendor Data Import**: Bulk load 30 days of 1-min data.
+3.  **Resilience & Speed**: Support multiple concurrent pushers, skip delisted (dead) symbols automatically, handle timezone quirks, and survive IB Gateway 1:45 AM restarts seamlessly.
 
 **User's preferred language**: English
 (INSTRUCT next agent: You MUST respond in English only)
 
-**what currently exists?**: 
-A robust, overnight-capable historical data collection system. The backend generated a queue of ~153,000 chained data requests directly into MongoDB Atlas. The local IB Data Pusher script () now has a dedicated  mode with auto-reconnect and VBScript auto-login capabilities to survive overnight Gateway restarts. Data is posted to an async backend endpoint that acknowledges receipt instantly while bulk-writing to Atlas in the background, entirely eliminating proxy/Cloudflare timeouts.
+**what currently exists?** 
+A highly optimized, multi-instance historical data collection system running locally via IB Gateway. The main  script launches 3 parallel Python pushers, partitioned by timeframes (Daily/Weekly, Hourly/Mins, 5-mins). The system handles dead-symbol auto-skipping, recovers from nightly IB Gateway restarts using file locks (to prevent concurrent keyboard automation collisions), utilizes exchange fallback resolution (SMART -> AMEX, etc.), and asynchronously pushes data to MongoDB Atlas. It is currently mid-flight on processing an optimized ~208k queue.
 
-**Last working item**:
-    - Last item agent was working: Debugging pusher connection timeouts, which were solved by making the backend's data-receive endpoint () asynchronous. Added auto-reconnect and auto-login logic to the pusher, and configured the master  file to spawn the collector alongside live trading.
-    - Status: USER VERIFICATION PENDING (User left the system running overnight to process the 153K item queue).
+**Last working item**: 
+    - Last item agent was working: Monitoring the multi-instance historical data backfill execution over the night. The agent successfully optimized 5-min durations to 3 M, cancelled unnecessary 5-min swing tier queues, and resolved IB false-positive dead-symbol flags caused by connectivity losses.
+    - Status: IN PROGRESS
     - Agent Testing Done: Y
-    - Which testing method agent to use? manual testing by curl/ python -c 
-    - User Testing Done: Y
+    - Which testing method agent to use? manual testing by curl/ python -c (Testing subagent cannot be used because the primary focus is bridging the user's local Windows IB Gateway).
+    - User Testing Done: Y (User left it running overnight and confirmed 64.7% completion with no errors).
 
-**All Pending/In progress Issue list**:
-  Issue 1: Monitor Background IB Data Collection Pipeline (P0)
-     - Attempted fixes: Successfully queued 153K chained requests and mitigated all timeout bugs.
-     - Next debug checklist: Ask the user to run  to verify the nightly job succeeded without hanging. Check for any stalled claims.
-     - Why fix this issue and what will be achieved with the fix?: Ensures the massive MongoDB backfill from IB completes successfully, taking the platform from ~39M bars to ~300M bars for deep backtesting.
-     - Status: USER VERIFICATION PENDING
+**All Pending/In progress Issue list**: 
+  Issue 1: Monitor Final IB Data Collection Pipeline (P0)
+     - Attempted fixes: Successfully partitioned 3 collectors to speed up processing from ~10 days to ~1 day. 
+     - Next debug checklist: Ask the user to run  to verify the collection has reached 100%. Check for any failed chunks.
+     - Why fix this issue and what will be achieved with the fix?: Collection must finish to achieve the ~112M bar dataset needed for LightGBM model training.
+     - Status: IN PROGRESS
      - Is recurring issue?: N
      - Should Test frontend/backend/both after fix?: Backend
      - Blocked on other issue: None
 
-**In progress Task List**:
+**In progress Task List**: 
   Task 1: Import Vendor 1-min Data (P1)
      - Where to resume: Await user confirmation that they received the  file from their data vendor. Guide them to run .
      - What will be achieved with this?: Instantly injects ~16M 1-min bars for 2,702 intraday symbols without hitting IB API limits.
@@ -37,8 +37,9 @@ A robust, overnight-capable historical data collection system. The backend gener
      - Should Test frontend/backend/both after fix?: Backend
      - Blocked on something: User awaiting delivery of vendor file.
 
-**Upcoming and Future Tasks**
+**Upcoming and Future Tasks**:
     Upcoming Tasks:
+    - (P0) Feature Engineering & Model Training pipeline initialization (Once data collection is done, process the 112M bars into features and train LightGBM models locally).
     - (P2) Real-time collection dashboard: Show progress per (symbol, bar_size) as the pusher processes chained requests with a heatmap of data depth.
     - (P2) MFE/MAE Scatter Chart: Build a per-setup type visualization to reveal which setups leave money on the table and which shake users out.
 
@@ -49,93 +50,98 @@ A robust, overnight-capable historical data collection system. The backend gener
     - (P3) Refactor active polling: Shift ~44 active polling intervals in the Frontend to WebSocket-based updates (Identified as causing heavy log spam).
     - (P3) Refactor  (4,300+ lines -> discrete modules).
 
-**Completed work in this session**
-- Built chained request generator in  (DONE)
-- Created  to massively queue 153K requests to MongoDB (DONE)
-- Added  support to  and  (DONE)
-- Created  for streaming  ingestion (DONE)
-- Updated  bulk_write to be asynchronous to eliminate pusher timeouts (DONE)
-- Added VBScript auto-login & 30s auto-reconnect retry loop to  to survive IB Gateway 1:45 AM restarts (DONE)
-- Fixed  500 error in  (DONE)
-- Configured  to launch the standalone Collector instance (DONE)
+**Completed work in this session**:
+- Implemented  for dead symbols (delisted) with a new backend endpoint () and pusher logic (DONE).
+- Optimized 5-min historical duration from 1 M to 3 M, massively reducing API calls required per symbol (DONE).
+- Pruned queue by cancelling ~31K unnecessary 5-min requests for swing-tier symbols (DONE).
+- Created multi-instance architecture partitioning tasks by , updating backend ( limits) and creating  (DONE).
+- Fixed Windows CMD quoting bugs with  URL-encoding (DONE).
+- Added exchange fallback mapping mechanism (SMART -> AMEX -> NYSE -> NASDAQ -> ARCA) to  to fix falsely skipped valid symbols like NGD (DONE).
+- Implemented a rolling 5-minute average calculator for accurate throughput rates and ETA predictions in terminal (DONE).
+- Added file-locking mechanism () for VBScript auto-login so the 3 collectors do not send keystrokes simultaneously during the 1:45 AM restart (DONE).
+- Fixed timezone format bug causing IB Error 10314 by stripping the explicit  UTC suffix on dashed dates (DONE).
+- Fixed dead-symbol detector to ignore false 200 errors thrown during IB Error 1100 connectivity loss and correctly ignore 0-bar outputs on IPOs (DONE).
 
-**Earlier issues found/mentioned but not fixed**
+**Earlier issues found/mentioned but not fixed**:
    Issue 1: Frontend React app aggressively polls backend endpoints
-   - Debug checklist: Audit React app components. The user's backend logs showed 20+ endpoint hits per few seconds (e.g., , ) when a browser tab was open.
+   - Debug checklist: Audit React app components. The user's backend logs showed 20+ endpoint hits per few seconds when a browser tab was open.
    - Why to solve this issue and what will be achieved with this?: Reduces backend CPU load and removes log spam; necessary step towards P3 WebSocket migration.
    - Should Test frontend/backend/both after fix: Frontend
    - Is recurring issue? Y
 
-**Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: Pusher timing out hitting the backend () during bulk fetch.
-  - Recurrence count: 1
-  - Status: RESOLVED (Fixed by making the DB insert async in the background task).
+**Known issue recurrence from previous fork**:
+  - Issue recurrence in previous fork: None. (Previously resolved proxy timeout issue did not recur).
+  - Recurrence count: 0
+  - Status: RESOLVED
 
-**Code Architecture**
+**Code Architecture**:
 
 
-**Key Technical Concepts**
-- **Data Chaining**: Splitting a large historical time window (e.g., 20 years) into sequential backwards-stepping slices (e.g., , ) to satisfy IB limit rules.
-- **Asynchronous Storage Offloading**: Fast-tracking the pusher response () immediately and putting the actual MongoDB  into a  to circumvent  limits.
-- **Overnight System Resilience**: Combining Python exception handling,  polls, and  (VBScript) to physically automate typing credentials into the IBKR Gateway UI upon its mandatory daily refresh.
+**Key Technical Concepts**:
+- **Multi-Instance Partitioning**: Distributing API load across 3 isolated workers fetching distinct chunks () to bypass IB's rate limits and drastically cut collection time.
+- **Concurrent VBScript Locking**: Preventing race conditions via OS-level file locks () when multiple Python processes attempt to auto-type IB credentials simultaneously.
+- **Error 200 vs 1100 Arbitration**: Distinguishing between a genuinely delisted ticker (Error 200) and an IB connectivity hallucination (Error 200 occurring within 60s of Error 1100).
+- **Exchange Fallback Caching**: Attempting alternative primaryExchanges for assets that fail on default SMART routing and caching success strings locally to maintain speed.
 
-**key DB schema**
+**key DB schema**:
   - : {, , , , , }
-  - : Target repository for the ~300M expected OHLCV bars. 
+  - : Target repository for the ~112M expected OHLCV bars.
 
-**changes in tech stack**
-  - No new stack, but heavy utilization of PyMongo  and FastAPI .
+**changes in tech stack**:
+  - None.
 
-**All files of reference**
-  -  (Modified for async DB writes)
-  -  (Heavily modified for chaining, collection mode, and reconnects)
-  -  (Created to generate the massive 153k task queue)
-  -  (Created for vendor processing)
-  -  (Modified environment launcher)
+**All files of reference**:
+  -  (Heavily updated for dead symbols, exchange fallbacks, locking, partitioned requests)
+  -  (Updated to handle  and URL-encoded  limits)
+  -  (Updated to handle filtered queries)
+  -  (Updated duration mappings and UTC timezone string parsing)
+  -  (Updated for multi-instance orchestration)
+  -  (Created to bypass Windows CMD string parsing limits)
 
-**Areas that need refactoring**
+**Areas that need refactoring**:
   -  (Flagged as >4,300 lines).
   - WebSockets migration to replace spammy Frontend REST polling.
 
-**key api endpoints**
+**key api endpoints**:
+  - 
+  -  (NEW)
   - 
   - 
-  -  (Bugfixed)
 
-**Critical Info for New Agent**
-- **Do not alter the  error-catching loop in **. The VBScript and 30-second timers are carefully tuned to survive IB Gateway's rigid 1:45 AM restart logic on Windows.
-- **MongoDB Configuration**: The environment connects to MongoDB Atlas. Because bulk operations over the internet are slow, any new endpoint saving large payloads must use  to free the HTTP thread, otherwise the local pusher hits .
+**Critical Info for New Agent**:
+- **Do not alter the  file locking mechanism () in **. The logic ensures the 3 separate processes don't step on each other during the 1:45 AM restart VBScript execution. 
+- **MongoDB Configuration**: We evaluated the Atlas M20 Tier. The projected dataset will take ~10.5 GB compressed on disk, comfortably below the 20 GB hard cap limit. Storage auto-scaling is enabled just in case.
 
-**documents and test reports created in this job**
+**documents and test reports created in this job**:
   - 
 
-**Last 10 User Messages and any pending HUMAN messages** 
-1. **user**: there is no auto login feature on ib gateway. right now it is set to auto restart at 1:45am. check my tradecommandaitraining.bat for how it autologs into ib gateway for me
-2. **agent**: Integrated VBScript auto-login directly into the collection script's auto-reconnect flow.
-3. **user**: ok still getting alot of timeouts before i save this latest github version...
-4. **agent**: Explained timeouts are due to the old code blocking the thread; pushed the asynchronous  fix.
-5. **user**: also seeing these in backend api server terminal. shouldnt these be disabled with the collector running... TypeError: unhashable type: list
-6. **agent**: Identified that the logs were caused by the user's browser tab polling 20 endpoints continuously, and patched the 500 error in . Instructed user to save, pull, restart.
-7. **user**: ok saved, pulled, restarted closed everything but ib gateway and the yellow terminal. here is what i see: [Logs showing successful connection, data flowing, but a port 8001 connection refused at the end]
-8. **agent**: Pointed out the user completely closed the API server (Green terminal). Instructed them to restart the master  file to bring up the backend alongside the collector.
-9. **user**: ok
-10. **agent**: Wrapped up, told user to check queue progress in the morning and updated PRD. *(Pending user return to verify morning progress).*
+**Last 10 User Messages and any pending HUMAN messages**:
+1. **User**: Sent logs highlighting error 10314 regarding an invalid time-zone format.
+2. **Agent**: Strip explicitly added  UTC text from date formats containing dashes, solving the error.
+3. **User**: Asked if pulling massive data will automatically charge and scale up the current MongoDB Atlas M20 server.
+4. **Agent**: Analyzed the DB using Bash. Confirmed current space is 7.2 GB of 18 GB allocated. The remaining queue requires 3.3 GB compressed, securely landing at ~10.5 GB without triggering the 20 GB scale-up charge.
+5. **User**: Asked how many bars will roughly be collected for the models to train.
+6. **Agent**: Outputted breakdown showing the final dataset will consist of ~112 million bars across 9,400+ symbols.
+7. **User**: Asked how long the next step (digest, learn, test, pipe into trading bot) will take.
+8. **Agent**: Documented the timeline. Collection (1-3 days), local feature engineering/GPU LightGBM training (hours), and wide symbol walk-forward backtesting (1-3 days). 
+9. **User**: good morning heres where we stand after overnight (Supplied screenshot of collector statuses).
+10. **Agent**: Re-analyzed the database via script, verifying the system ran flawlessly overnight and successfully executed 134,993 requests (64.7% completion). *(Pending user return to start training phase once fully complete).*
 
-**Project Health Check:**
+**Project Health Check**:
 Healthy.
 
-**3rd Party Integrations**
-  - Interactive Brokers (IB Gateway) — Requires local user instance and credentials logic.
-  - MongoDB Atlas — Cloud DB (M20 Tier - User decided to stay on this tier and conditionally store specific data lengths).
+**3rd Party Integrations**:
+  - Interactive Brokers (IB Gateway) — Requires local user instance.
+  - MongoDB Atlas — Cloud DB (M20 Tier - Confirmed limits are safe).
 
-**Testing status**
-  - Testing agent used after significant changes: NO (Testing pertained exclusively to bridging the local Windows machine's IB Gateway via Bash/Curl, necessitating manual step-by-step local validation rather than cloud auto-testing).
+**Testing status**:
+  - Testing agent used after significant changes: NO (Testing pertains exclusively to bridging the local Windows machine's IB Gateway via Bash/Curl, necessitating manual local validation).
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: None
   - Known regressions: None
 
-**Credentials to test flow:**
+**Credentials to test flow**:
 Standard  variables.
 
-**What agent forgot to execute**
-The agent didn't invoke the testing sub-agent, but this was a deliberate architectural choice since the active issues centered entirely around the user's local IB Gateway constraints, VBScript execution, and  file orchestration, which the cloud subagent cannot reproduce.</analysis>
+**What agent forgot to execute**:
+The agent didn't invoke the testing sub-agent, but this is an established architectural necessity since cloud subagents cannot validate against the user's localized IB Gateway instance.</analysis>
