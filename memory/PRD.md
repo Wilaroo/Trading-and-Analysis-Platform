@@ -354,6 +354,60 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - Migrate trading_bot_service.py to use extracted smart_filter.py module (delegation instead of inline)
 - Further refactor trading_bot_service.py (4,300+ lines → trade_executor, position_manager, learning_loop, stop_manager, risk_calculator modules)
 
+### Post-Development: Full Local Migration
+**Goal:** Run the entire platform locally with zero cloud dependencies (except IB Gateway's internet connection for live data/trading). Eliminates Atlas costs, reduces latency, ensures data privacy.
+
+#### Migration Steps
+1. Install MongoDB Community Server, configure data directory on dedicated drive
+2. `mongodump` all collections from Atlas
+3. `mongorestore` to local MongoDB
+4. Update `.env`: `MONGO_URL=mongodb://localhost:27017/tradecommand`
+5. Verify all services connect locally
+6. Decommission Atlas cluster
+
+#### Recommended Hardware (5-Year Horizon)
+**Why these specs:** The platform runs MongoDB (RAM-hungry for large datasets), LightGBM training (CPU-bound), Ollama AI models (GPU VRAM), plus 7+ concurrent processes (backend, frontend, pusher, 3 collectors, worker). Data grows ~50-100GB/year.
+
+| Component | Recommendation | Why |
+|-----------|---------------|-----|
+| **CPU** | AMD Ryzen 9 7950X (16 cores/32 threads) or Intel i9-14900K | LightGBM training is heavily multi-threaded. 3 collectors + backend + worker all run simultaneously. 16 cores gives headroom for 5 years. |
+| **RAM** | **64GB DDR5** (minimum 32GB) | MongoDB keeps hot data in RAM. At ~500GB-1TB of data over 5 years, 64GB ensures your most-queried data (recent bars, model cache) stays in memory. LightGBM training can also spike to 8-16GB. |
+| **Primary SSD** | 2TB NVMe Gen4 (Samsung 990 Pro or WD Black SN850X) | MongoDB data directory lives here. NVMe gives <0.1ms random reads vs 5-10ms on external HDD. Critical for query performance. |
+| **Backup Drive** | 4TB external SSD (Samsung T7 Shield or similar) | Nightly `mongodump` backups. Not for running the DB — just disaster recovery. |
+| **GPU** | NVIDIA RTX 4070 Ti Super (16GB VRAM) or RTX 4080 | Ollama models: 7B needs ~4GB VRAM, 13B needs ~8GB, 70B needs ~40GB. 16GB lets you run 13B models comfortably with room to grow. Also future-proofs for PyTorch/TensorFlow if you add deep learning models. |
+| **PSU** | 850W 80+ Gold | Handles CPU + GPU under full load with headroom. |
+| **UPS** | APC 1500VA battery backup | Protects against power loss during DB writes or model training. Critical for data integrity. |
+| **OS** | Windows 11 Pro | Already your environment. Pro gives Hyper-V/WSL2 if needed. |
+
+#### Software Stack
+| Software | Version | Purpose |
+|----------|---------|---------|
+| MongoDB Community Server | 7.x+ | Local database (free, no license) |
+| Python | 3.11+ | Backend, collectors, training |
+| Node.js | 20 LTS | Frontend |
+| NVIDIA CUDA Toolkit | 12.x | GPU acceleration for Ollama + future ML |
+| Ollama | Latest | Local AI inference |
+| IB Gateway | Latest | Live market data + order execution |
+
+#### Estimated Data Growth (5 Years)
+| Timeframe | Bars/Day (2700 symbols) | Year 1 | Year 5 |
+|-----------|------------------------|--------|--------|
+| 1 min | ~1,053,000 | ~265M bars | ~1.3B bars |
+| 5 min | ~210,600 | ~53M | ~265M |
+| 15 min | ~70,200 | ~18M | ~88M |
+| 1 hour | ~17,550 | ~4.4M | ~22M |
+| 1 day | ~2,700 | ~680K | ~3.4M |
+| **Storage** | | **~150GB** | **~750GB-1TB** |
+
+#### Cost Comparison (5 Years)
+| | Atlas M10+ | Local Setup |
+|---|---|---|
+| Year 1 | ~$600-1,200/yr | ~$2,500 one-time hardware |
+| Year 2-5 | ~$2,400-4,800 | $0 (electricity only) |
+| **5-Year Total** | **$3,000-6,000** | **~$2,500 + electricity** |
+
+**Bottom line:** Local pays for itself within 1-2 years and gives you faster performance, full data ownership, and zero recurring costs.
+
 ## Key Files
 - `/app/backend/services/ib_historical_collector.py` - Chaining logic
 - `/app/backend/services/data_inventory_service.py` - Gap analysis
