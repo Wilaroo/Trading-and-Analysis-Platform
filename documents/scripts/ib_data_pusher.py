@@ -267,6 +267,9 @@ class IBDataPusher:
         # This is the definitive signal that a symbol is dead/delisted
         self._error_200_symbols: Dict[str, int] = {}  # symbol → count of error 200 events
         
+        # Cache which exchange resolved for symbols that fail on SMART
+        self._symbol_exchange_cache: Dict[str, tuple] = {}  # symbol → exchange_args that worked
+        
         # Fundamental data refresh tracking (don't need to refresh every second)
         self.last_fundamentals_refresh = 0
         self.fundamentals_refresh_interval = 300  # Refresh every 5 minutes
@@ -1385,30 +1388,47 @@ class IBDataPusher:
         try:
             from ib_insync import Stock
             
-            # Create contract with exchange fallback
+            # Create contract with exchange fallback + cache
             contract = None
-            exchanges_to_try = [
-                ("SMART", "USD"),
-                ("SMART", "USD", "AMEX"),
-                ("SMART", "USD", "NYSE"),
-                ("SMART", "USD", "NASDAQ"),
-                ("SMART", "USD", "ARCA"),
-            ]
+            cached = self._symbol_exchange_cache.get(symbol)
             
-            qualify_failed = True
-            for exchange_args in exchanges_to_try:
+            if cached:
+                if len(cached) == 2:
+                    contract = Stock(symbol, cached[0], cached[1])
+                else:
+                    contract = Stock(symbol, cached[0], cached[1])
+                    contract.primaryExchange = cached[2]
                 try:
-                    if len(exchange_args) == 2:
-                        contract = Stock(symbol, exchange_args[0], exchange_args[1])
-                    else:
-                        contract = Stock(symbol, exchange_args[0], exchange_args[1])
-                        contract.primaryExchange = exchange_args[2]
                     self.ib.qualifyContracts(contract)
-                    if contract.conId and contract.conId > 0:
-                        qualify_failed = False
-                        break
+                    if not (contract.conId and contract.conId > 0):
+                        cached = None
                 except:
-                    continue
+                    cached = None
+            
+            if not cached:
+                exchanges_to_try = [
+                    ("SMART", "USD"),
+                    ("SMART", "USD", "AMEX"),
+                    ("SMART", "USD", "NYSE"),
+                    ("SMART", "USD", "NASDAQ"),
+                    ("SMART", "USD", "ARCA"),
+                ]
+                
+                qualify_failed = True
+                for exchange_args in exchanges_to_try:
+                    try:
+                        if len(exchange_args) == 2:
+                            contract = Stock(symbol, exchange_args[0], exchange_args[1])
+                        else:
+                            contract = Stock(symbol, exchange_args[0], exchange_args[1])
+                            contract.primaryExchange = exchange_args[2]
+                        self.ib.qualifyContracts(contract)
+                        if contract.conId and contract.conId > 0:
+                            self._symbol_exchange_cache[symbol] = exchange_args
+                            qualify_failed = False
+                            break
+                    except:
+                        continue
             
             if qualify_failed:
                 self._symbol_nodata_count[symbol] = self._symbol_nodata_count.get(symbol, 0) + 1
@@ -1894,35 +1914,51 @@ class IBDataPusher:
             if not claim_result:
                 return False  # Already claimed
             
-            # Create contract with exchange fallback
-            # Some symbols (e.g., NGD on NYSE American) fail with SMART routing
-            # Try SMART first, then specific exchanges
+            # Create contract with exchange fallback + cache
+            # Most symbols resolve on SMART. Cache avoids retrying fallbacks every request.
             contract = None
-            exchanges_to_try = [
-                ("SMART", "USD"),
-                ("SMART", "USD", "AMEX"),     # NYSE American
-                ("SMART", "USD", "NYSE"),
-                ("SMART", "USD", "NASDAQ"),
-                ("SMART", "USD", "ARCA"),
-            ]
+            cached = self._symbol_exchange_cache.get(symbol)
             
-            qualify_failed = True
-            for exchange_args in exchanges_to_try:
+            if cached:
+                # Use cached exchange that worked before
+                if len(cached) == 2:
+                    contract = Stock(symbol, cached[0], cached[1])
+                else:
+                    contract = Stock(symbol, cached[0], cached[1])
+                    contract.primaryExchange = cached[2]
                 try:
-                    if len(exchange_args) == 2:
-                        contract = Stock(symbol, exchange_args[0], exchange_args[1])
-                    else:
-                        contract = Stock(symbol, exchange_args[0], exchange_args[1])
-                        contract.primaryExchange = exchange_args[2]
-                    
                     self.ib.qualifyContracts(contract)
-                    
-                    # Check if qualification actually worked (conId > 0)
-                    if contract.conId and contract.conId > 0:
-                        qualify_failed = False
-                        break
+                    if not (contract.conId and contract.conId > 0):
+                        cached = None  # Cache stale, try all
                 except:
-                    continue
+                    cached = None
+            
+            if not cached:
+                exchanges_to_try = [
+                    ("SMART", "USD"),
+                    ("SMART", "USD", "AMEX"),
+                    ("SMART", "USD", "NYSE"),
+                    ("SMART", "USD", "NASDAQ"),
+                    ("SMART", "USD", "ARCA"),
+                ]
+                
+                qualify_failed = True
+                for exchange_args in exchanges_to_try:
+                    try:
+                        if len(exchange_args) == 2:
+                            contract = Stock(symbol, exchange_args[0], exchange_args[1])
+                        else:
+                            contract = Stock(symbol, exchange_args[0], exchange_args[1])
+                            contract.primaryExchange = exchange_args[2]
+                        
+                        self.ib.qualifyContracts(contract)
+                        
+                        if contract.conId and contract.conId > 0:
+                            self._symbol_exchange_cache[symbol] = exchange_args
+                            qualify_failed = False
+                            break
+                    except:
+                        continue
             
             if qualify_failed:
                 # Could not qualify on any exchange
