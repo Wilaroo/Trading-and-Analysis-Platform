@@ -1848,6 +1848,9 @@ class TimeSeriesAIService:
             from services.ai_modules.regime_features import (
                 RegimeFeatureProvider, REGIME_FEATURE_NAMES
             )
+            from services.ai_modules.multi_timeframe_features import (
+                MultiTimeframeFeatureProvider, MTF_FEATURE_NAMES
+            )
             
             # Create a dedicated GBM model
             model = TimeSeriesGBM(model_name=model_name, forecast_horizon=forecast_horizon)
@@ -1857,20 +1860,36 @@ class TimeSeriesAIService:
                 model.params["scale_pos_weight"] = class_weight
                 model.params.pop("is_unbalance", None)
             
-            # Layer 1: Preload SPY daily bars for regime context features
+            # Layer 1: Preload index daily bars for regime context features
             regime_provider = RegimeFeatureProvider(self._db)
-            spy_bar_count = await asyncio.get_event_loop().run_in_executor(
-                None, regime_provider.preload_spy_daily
+            index_bar_count = await asyncio.get_event_loop().run_in_executor(
+                None, regime_provider.preload_index_daily
             )
-            regime_available = spy_bar_count >= 25
+            regime_available = index_bar_count >= 25
             if regime_available:
-                logger.info(f"[SETUP TRAIN] Regime features enabled ({spy_bar_count} SPY bars)")
+                logger.info(f"[SETUP TRAIN] Regime features enabled ({index_bar_count} index bars)")
             else:
-                logger.warning("[SETUP TRAIN] Regime features disabled (insufficient SPY data)")
+                logger.warning("[SETUP TRAIN] Regime features disabled (insufficient index data)")
+            
+            # Layer 2: Multi-timeframe features (only for intraday bar sizes)
+            is_intraday = bar_size in ("1 min", "5 mins", "15 mins", "30 mins", "1 hour")
+            mtf_provider = None
+            mtf_available = False
             
             # Get training symbols for this bar_size
             symbols = await self._get_training_symbols_from_db(bar_size=bar_size, limit=max_symbols)
             logger.info(f"[SETUP TRAIN] {setup_type}/{bar_size}: {len(symbols)} symbols")
+            
+            if is_intraday:
+                mtf_provider = MultiTimeframeFeatureProvider(self._db)
+                mtf_loaded = await asyncio.get_event_loop().run_in_executor(
+                    None, mtf_provider.preload_daily_bars, symbols
+                )
+                mtf_available = mtf_loaded > 0
+                if mtf_available:
+                    logger.info(f"[SETUP TRAIN] MTF features enabled ({mtf_loaded} daily bars)")
+                else:
+                    logger.warning("[SETUP TRAIN] MTF features disabled (no daily bars)")
             
             self._training_status[status_key]["message"] = f"Loading {len(symbols)} symbols..."
             
@@ -1884,10 +1903,12 @@ class TimeSeriesAIService:
             base_feature_names = feature_engineer.get_feature_names()
             setup_feature_names = get_setup_feature_names(setup_type)
             regime_feat_names = REGIME_FEATURE_NAMES if regime_available else []
+            mtf_feat_names = MTF_FEATURE_NAMES if mtf_available else []
             combined_feature_names = (
                 base_feature_names
                 + [f"setup_{n}" for n in setup_feature_names]
                 + regime_feat_names
+                + mtf_feat_names
             )
             
             loaded = 0
@@ -1969,7 +1990,15 @@ class TimeSeriesAIService:
                     else:
                         regime_vector = []
                     
-                    combined_vector = base_vector + setup_vector + regime_vector
+                    # Layer 2: Add multi-timeframe context features (intraday only)
+                    if mtf_available:
+                        bar_date = str(bars[i + 49].get("timestamp", bars[i + 49].get("date", "")))
+                        mtf_feats = mtf_provider.get_mtf_features(symbol, bar_date)
+                        mtf_vector = [mtf_feats.get(f, 0.0) for f in MTF_FEATURE_NAMES]
+                    else:
+                        mtf_vector = []
+                    
+                    combined_vector = base_vector + setup_vector + regime_vector + mtf_vector
                     
                     all_features.append(combined_vector)
                     all_targets.append(target)
@@ -2230,21 +2259,58 @@ class TimeSeriesAIService:
                     if model_expects_regime:
                         try:
                             from .regime_features import compute_regime_features_from_bars
-                            # Get SPY bars from DB for current regime context
                             if self._db is not None:
-                                spy_bars = list(self._db["ib_historical_data"].find(
-                                    {"symbol": "SPY", "bar_size": "1 day"},
-                                    {"_id": 0, "close": 1, "high": 1, "low": 1, "date": 1}
-                                ).sort("date", -1).limit(30))
-                                real_spy = [b for b in spy_bars if len(str(b.get("date", ""))) == 10]
-                                if len(real_spy) >= 25:
-                                    spy_c = np.array([b["close"] for b in real_spy], dtype=float)
-                                    spy_h = np.array([b["high"] for b in real_spy], dtype=float)
-                                    spy_l = np.array([b["low"] for b in real_spy], dtype=float)
-                                    regime_feats = compute_regime_features_from_bars(spy_c, spy_h, spy_l)
+                                def _query_index_bars(symbol):
+                                    bars = list(self._db["ib_historical_data"].find(
+                                        {"symbol": symbol, "bar_size": "1 day"},
+                                        {"_id": 0, "close": 1, "high": 1, "low": 1, "date": 1}
+                                    ).sort("date", -1).limit(30))
+                                    real = [b for b in bars if len(str(b.get("date", ""))) == 10]
+                                    if len(real) < 25:
+                                        return None, None, None
+                                    return (
+                                        np.array([b["close"] for b in real], dtype=float),
+                                        np.array([b["high"] for b in real], dtype=float),
+                                        np.array([b["low"] for b in real], dtype=float),
+                                    )
+                                spy_c, spy_h, spy_l = _query_index_bars("SPY")
+                                qqq_c, qqq_h, qqq_l = _query_index_bars("QQQ")
+                                iwm_c, iwm_h, iwm_l = _query_index_bars("IWM")
+                                if spy_c is not None:
+                                    regime_feats = compute_regime_features_from_bars(
+                                        spy_c, spy_h, spy_l,
+                                        qqq_c, qqq_h, qqq_l,
+                                        iwm_c, iwm_h, iwm_l,
+                                    )
                                     combined.update(regime_feats)
                         except Exception as e:
                             logger.debug(f"Regime features for prediction failed: {e}")
+                    
+                    # Layer 2: Add MTF features if model expects them
+                    from .multi_timeframe_features import MTF_FEATURE_NAMES
+                    model_expects_mtf = any(
+                        f in model._feature_names for f in MTF_FEATURE_NAMES
+                    )
+                    if model_expects_mtf:
+                        try:
+                            from .multi_timeframe_features import compute_mtf_features_from_daily_bars
+                            if self._db is not None:
+                                daily_bars = list(self._db["ib_historical_data"].find(
+                                    {"symbol": symbol, "bar_size": "1 day"},
+                                    {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
+                                ).sort("date", -1).limit(55))
+                                real_daily = [b for b in daily_bars if len(str(b.get("date", ""))) == 10]
+                                if len(real_daily) >= 25:
+                                    mtf_feats = compute_mtf_features_from_daily_bars(
+                                        np.array([b["close"] for b in real_daily], dtype=float),
+                                        np.array([b["high"] for b in real_daily], dtype=float),
+                                        np.array([b["low"] for b in real_daily], dtype=float),
+                                        np.array([b.get("volume", 0) for b in real_daily], dtype=float),
+                                        np.array([b.get("open", 0) for b in real_daily], dtype=float),
+                                    )
+                                    combined.update(mtf_feats)
+                        except Exception as e:
+                            logger.debug(f"MTF features for prediction failed: {e}")
                     
                     # Build feature vector matching model's expected feature order
                     feature_vector = np.array([[
