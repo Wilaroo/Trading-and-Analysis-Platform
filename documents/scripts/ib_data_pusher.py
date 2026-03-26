@@ -12,6 +12,10 @@ UPDATED: Added Cloudflare evasion with proper User-Agent headers and exponential
 import argparse
 import json
 import logging
+import os
+import platform
+import subprocess
+import tempfile
 import time
 import random
 import requests
@@ -2143,25 +2147,153 @@ def main():
     )
     
     if args.mode == "collection":
-        # Dedicated bulk collection mode with AUTO-RECONNECT
+        # Dedicated bulk collection mode with AUTO-RECONNECT + AUTO-LOGIN
         # Survives IB Gateway restarts, daily logoffs, and connection drops
         max_retries = 999  # Effectively infinite
         retry_count = 0
         base_wait = 30  # Start with 30s wait
         max_wait = 300   # Max 5 minutes between retries
         
+        # IB Gateway auto-login credentials (inherited from parent .bat env vars)
+        ib_username = os.environ.get("IB_USERNAME", "")
+        ib_password = os.environ.get("IB_PASSWORD", "")
+        ib_gateway_path = os.environ.get("IB_GATEWAY_PATH", r"C:\Jts\ibgateway\1037\ibgateway.exe")
+        
+        def _ensure_ib_gateway_running():
+            """Check if IB Gateway is running. If not, start it and auto-login."""
+            if platform.system() != "Windows":
+                return  # VBScript login only works on Windows
+            
+            # Check if ibgateway.exe is running
+            try:
+                result = subprocess.run(
+                    ["tasklist", "/FI", "IMAGENAME eq ibgateway.exe"],
+                    capture_output=True, text=True, timeout=10
+                )
+                if "ibgateway.exe" in result.stdout.lower():
+                    logger.info("  IB Gateway process is running")
+                    return  # Already running, just need to wait for API port
+                    
+            except Exception as e:
+                logger.warning(f"  Could not check Gateway process: {e}")
+                return
+            
+            # Gateway not running — start it and auto-login
+            if not os.path.exists(ib_gateway_path):
+                logger.error(f"  IB Gateway not found at: {ib_gateway_path}")
+                logger.error(f"  Set IB_GATEWAY_PATH env var to the correct path")
+                return
+            
+            logger.info(f"  Starting IB Gateway...")
+            try:
+                subprocess.Popen([ib_gateway_path], shell=False)
+            except Exception as e:
+                logger.error(f"  Failed to start IB Gateway: {e}")
+                return
+            
+            time.sleep(8)  # Wait for Gateway UI to load
+            
+            if not ib_username or not ib_password:
+                logger.warning("  No IB_USERNAME/IB_PASSWORD env vars — cannot auto-login")
+                logger.warning("  Please log in to IB Gateway manually")
+                return
+            
+            _auto_login_gateway()
+        
+        def _auto_login_gateway():
+            """Send credentials to IB Gateway window via VBScript (same as .bat)."""
+            if platform.system() != "Windows":
+                return
+            if not ib_username or not ib_password:
+                return
+                
+            logger.info(f"  Auto-logging into IB Gateway...")
+            
+            try:
+                # Create login VBScript (same approach as TradeCommand_AITraining.bat)
+                login_vbs = os.path.join(tempfile.gettempdir(), "ib_collector_login.vbs")
+                with open(login_vbs, "w") as f:
+                    f.write('Set WshShell = CreateObject("WScript.Shell")\n')
+                    f.write('WScript.Sleep 1000\n')
+                    f.write('WshShell.AppActivate "IB Gateway"\n')
+                    f.write('WScript.Sleep 500\n')
+                    f.write('If Not WshShell.AppActivate("IB Gateway") Then WshShell.AppActivate "IBKR Gateway"\n')
+                    f.write('WScript.Sleep 400\n')
+                    f.write(f'WshShell.SendKeys "{ib_username}"\n')
+                    f.write('WScript.Sleep 250\n')
+                    f.write('WshShell.SendKeys "{TAB}"\n')
+                    f.write('WScript.Sleep 200\n')
+                    f.write(f'WshShell.SendKeys "{ib_password}"\n')
+                    f.write('WScript.Sleep 250\n')
+                    f.write('WshShell.SendKeys "{ENTER}"\n')
+                
+                subprocess.run(["cscript", "//nologo", login_vbs], timeout=15)
+                os.remove(login_vbs)
+                
+                logger.info("  Credentials sent. Waiting for authentication...")
+                time.sleep(10)  # Wait for auth
+                
+                # Dismiss popups (same as .bat)
+                popup_vbs = os.path.join(tempfile.gettempdir(), "ib_collector_popup.vbs")
+                with open(popup_vbs, "w") as f:
+                    f.write('Set WshShell = CreateObject("WScript.Shell")\n')
+                    f.write('WScript.Sleep 400\n')
+                    f.write('WshShell.AppActivate "Warning"\n')
+                    f.write('WScript.Sleep 250\n')
+                    f.write('WshShell.SendKeys "{ENTER}"\n')
+                    f.write('WScript.Sleep 400\n')
+                    f.write('WshShell.AppActivate "IBKR"\n')
+                    f.write('WScript.Sleep 250\n')
+                    f.write('WshShell.SendKeys "{ENTER}"\n')
+                    f.write('WScript.Sleep 300\n')
+                    f.write('WshShell.SendKeys "{ENTER}"\n')
+                
+                subprocess.run(["cscript", "//nologo", popup_vbs], timeout=15)
+                os.remove(popup_vbs)
+                
+                logger.info("  Auto-login complete. Waiting for API port...")
+                
+            except Exception as e:
+                logger.warning(f"  Auto-login script error: {e}")
+                # Clean up temp files
+                for f in ["ib_collector_login.vbs", "ib_collector_popup.vbs"]:
+                    try:
+                        os.remove(os.path.join(tempfile.gettempdir(), f))
+                    except:
+                        pass
+        
+        def _wait_for_api_port(host, port, max_wait_secs=120):
+            """Wait until IB Gateway API port is accepting connections."""
+            import socket
+            logger.info(f"  Waiting for API port {host}:{port}...")
+            start = time.time()
+            while time.time() - start < max_wait_secs:
+                try:
+                    sock = socket.create_connection((host, port), timeout=2)
+                    sock.close()
+                    logger.info(f"  API port {port} is ready!")
+                    return True
+                except (ConnectionRefusedError, OSError, socket.timeout):
+                    time.sleep(3)
+            logger.warning(f"  API port {port} not ready after {max_wait_secs}s")
+            return False
+        
         while retry_count < max_retries:
             try:
+                # Ensure IB Gateway is running and logged in before connecting
+                if retry_count > 0:
+                    logger.info("")
+                    logger.info(f"  AUTO-RECONNECT: Attempt #{retry_count + 1}")
+                    logger.info(f"  Checking IB Gateway status...")
+                    _ensure_ib_gateway_running()
+                    _wait_for_api_port(args.ib_host, args.ib_port, max_wait_secs=180)
+                
                 pusher = IBDataPusher(
                     cloud_url=args.cloud_url,
                     ib_host=args.ib_host,
                     ib_port=args.ib_port,
                     client_id=args.client_id
                 )
-                
-                logger.info("")
-                if retry_count > 0:
-                    logger.info(f"  AUTO-RECONNECT: Attempt #{retry_count + 1}")
                 
                 pusher.run_collection_mode()
                 
@@ -2181,9 +2313,8 @@ def main():
                 logger.error(f"")
                 logger.error(f"{'='*50}")
                 logger.error(f"  CONNECTION LOST: {e}")
-                logger.error(f"  Reconnecting in {wait_time:.0f}s (attempt {retry_count})")
-                logger.error(f"  IB Gateway may be restarting...")
-                logger.error(f"  Press Ctrl+C to stop")
+                logger.error(f"  Will auto-reconnect + auto-login in {wait_time:.0f}s")
+                logger.error(f"  Attempt {retry_count} | Press Ctrl+C to stop")
                 logger.error(f"{'='*50}")
                 logger.error(f"")
                 
