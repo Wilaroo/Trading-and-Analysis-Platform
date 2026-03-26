@@ -307,23 +307,18 @@ echo [9/11] Starting Historical Data Collectors (3 instances)...
 taskkill /F /FI "WINDOWTITLE eq *COLLECTOR*" >nul 2>&1
 timeout /t 1 /nobreak >nul
 
-:: Client IDs (must be unique across all IB connections)
-set IB_COLLECTOR1_ID=16
-set IB_COLLECTOR2_ID=17
-set IB_COLLECTOR3_ID=18
-
 if exist "%SCRIPTS_DIR%\ib_data_pusher.py" (
     :: Collector 1: Daily + Weekly (fastest to complete, ~12K requests)
-    start "COLLECTOR-1 Daily" cmd /k "title [COLLECTOR-1] Daily/Weekly Backfill && color 06 && cd /d %SCRIPTS_DIR% && echo. && echo ===================================================== && echo   [COLLECTOR-1] Daily + Weekly Data && echo   Client ID: %IB_COLLECTOR1_ID% ^| Color: DARK YELLOW && echo   Bar sizes: 1 day, 1 week && echo ===================================================== && echo. && python ib_data_pusher.py --cloud-url %LOCAL_BACKEND% --mode collection --client-id %IB_COLLECTOR1_ID% --bar-sizes \"1 day,1 week\""
-    echo        Collector 1 started: Daily/Weekly (client ID: %IB_COLLECTOR1_ID%)
+    start "COLLECTOR-1 Daily" cmd /k "%SCRIPTS_DIR%\run_collector1.bat"
+    echo        Collector 1 started: Daily/Weekly (client ID: 16)
 
     :: Collector 2: Hourly + 30min + 15min (~46K requests)
-    start "COLLECTOR-2 Hourly" cmd /k "title [COLLECTOR-2] Hourly/Mins Backfill && color 0C && cd /d %SCRIPTS_DIR% && echo. && echo ===================================================== && echo   [COLLECTOR-2] Hourly + 30min + 15min Data && echo   Client ID: %IB_COLLECTOR2_ID% ^| Color: LIGHT RED && echo   Bar sizes: 1 hour, 30 mins, 15 mins && echo ===================================================== && echo. && python ib_data_pusher.py --cloud-url %LOCAL_BACKEND% --mode collection --client-id %IB_COLLECTOR2_ID% --bar-sizes \"1 hour,30 mins,15 mins\""
-    echo        Collector 2 started: Hourly/Mins (client ID: %IB_COLLECTOR2_ID%)
+    start "COLLECTOR-2 Hourly" cmd /k "%SCRIPTS_DIR%\run_collector2.bat"
+    echo        Collector 2 started: Hourly/Mins (client ID: 17)
 
     :: Collector 3: 5-min only (~21K requests, heaviest per-request)
-    start "COLLECTOR-3 5min" cmd /k "title [COLLECTOR-3] 5-Min Backfill && color 03 && cd /d %SCRIPTS_DIR% && echo. && echo ===================================================== && echo   [COLLECTOR-3] 5-Minute Data && echo   Client ID: %IB_COLLECTOR3_ID% ^| Color: AQUA && echo   Bar sizes: 5 mins (3M duration per request) && echo ===================================================== && echo. && python ib_data_pusher.py --cloud-url %LOCAL_BACKEND% --mode collection --client-id %IB_COLLECTOR3_ID% --bar-sizes \"5 mins\""
-    echo        Collector 3 started: 5-Min (client ID: %IB_COLLECTOR3_ID%)
+    start "COLLECTOR-3 5min" cmd /k "%SCRIPTS_DIR%\run_collector3.bat"
+    echo        Collector 3 started: 5-Min (client ID: 18)
 ) else (
     echo        [SKIP] ib_data_pusher.py not found
 )
