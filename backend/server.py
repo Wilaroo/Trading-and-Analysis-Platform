@@ -2944,6 +2944,31 @@ async def stream_market_regime():
         
         await asyncio.sleep(60)  # Every 60 seconds (regime changes slowly)
 
+
+async def stream_filter_thoughts():
+    """Push smart filter & confidence gate thoughts via WebSocket."""
+    await asyncio.sleep(22)
+    
+    last_thoughts_hash = None
+    
+    while True:
+        if manager.active_connections:
+            try:
+                thoughts = trading_bot.get_filter_thoughts(limit=20)
+                thoughts_hash = hash(str(len(thoughts)) + str(thoughts[0].get('timestamp', '')) if thoughts else '')
+                
+                if thoughts_hash != last_thoughts_hash:
+                    await manager.broadcast({
+                        "type": "filter_thoughts",
+                        "data": thoughts,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    last_thoughts_hash = thoughts_hash
+            except Exception as e:
+                print(f"Filter thoughts stream error: {e}")
+        
+        await asyncio.sleep(10)  # Every 10 seconds
+
 @app.on_event("startup")
 async def startup_event():
     """Start background streaming task and background scanner"""
@@ -2962,7 +2987,8 @@ async def startup_event():
     asyncio.create_task(stream_confidence_gate())
     asyncio.create_task(stream_training_status())
     asyncio.create_task(stream_market_regime())
-    print("WebSocket streaming started (quotes + system status + bot + scanner + watchlist + coaching + confidence gate + training + regime)")
+    asyncio.create_task(stream_filter_thoughts())
+    print("WebSocket streaming: 12 push types (quotes, ib_status, bot_status, scanner_status, bot_trades, scanner_alerts, smart_watchlist, coaching, confidence_gate, training, regime, filter_thoughts)")
     
     # Initialize web research service with database for credit tracking
     try:

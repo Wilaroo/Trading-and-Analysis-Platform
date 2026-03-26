@@ -625,17 +625,10 @@ class TradingBotService:
         # AI Confidence Gate (pre-trade regime + model consensus check)
         self._confidence_gate = None
         
-        # Smart filtering thresholds (can be tuned)
-        self._smart_filter_config = {
-            "enabled": True,
-            "min_sample_size": 5,              # Need at least 5 trades to filter
-            "skip_win_rate_threshold": 0.35,   # Skip trades if win rate < 35%
-            "reduce_size_threshold": 0.45,     # Reduce size if win rate 35-45%
-            "require_higher_tqs_threshold": 0.50,  # Require TQS 75+ if win rate 45-50%
-            "normal_threshold": 0.55,          # Normal trading if win rate >= 55%
-            "size_reduction_pct": 0.5,         # Reduce to 50% size for low win rate
-            "high_tqs_requirement": 75,        # TQS required for borderline setups
-        }
+        # Smart filtering (delegated to SmartFilter module)
+        from services.smart_filter import SmartFilter
+        self._smart_filter = SmartFilter()
+        self._smart_filter_config = self._smart_filter.config
         
         logger.info("TradingBotService initialized in AUTONOMOUS mode")
     
@@ -790,152 +783,31 @@ class TradingBotService:
     
     def _evaluate_strategy_filter(self, setup_type: str, quality_score: int, symbol: str) -> Dict[str, Any]:
         """
-        Evaluate if a trade should be filtered based on user's historical performance.
-        
-        This is the core "Smart Strategy Filtering" logic that:
-        1. Checks user's historical win rate for this setup type
-        2. Decides: PROCEED, REDUCE_SIZE, REQUIRE_HIGHER_TQS, or SKIP
-        3. Generates reasoning for the Bot's Thoughts stream
-        
-        Returns:
-            dict with action, reasoning, adjustments
+        Evaluate if a trade should be filtered based on historical performance.
+        Delegates to the SmartFilter module for the actual decision logic.
         """
-        if not self._smart_filter_config.get("enabled", True):
-            return {"action": "PROCEED", "reasoning": "Smart filtering disabled"}
-        
         stats = self.get_strategy_historical_stats(setup_type)
-        
-        if not stats.get("available"):
-            # No historical data - proceed with caution
-            return {
-                "action": "PROCEED",
-                "reasoning": f"No historical data for {setup_type} - proceeding with default sizing",
-                "adjustment_pct": 1.0,
-                "stats": stats
-            }
-        
-        sample_size = stats.get("sample_size", 0)
-        win_rate = stats.get("win_rate", 0)
-        expected_value = stats.get("expected_value", 0)
-        config = self._smart_filter_config
-        
-        # Not enough data to filter
-        if sample_size < config["min_sample_size"]:
-            return {
-                "action": "PROCEED",
-                "reasoning": f"Only {sample_size} trades on record for {setup_type} - need {config['min_sample_size']}+ to filter",
-                "adjustment_pct": 1.0,
-                "stats": stats
-            }
-        
-        # === COLD-START BOOTSTRAP MODE ===
-        # If we have alerts but NO completed trades (0W/0L), we can't judge the setup.
-        # Proceed with reduced sizing to build real trade history.
-        wins = stats.get("wins", 0)
-        losses = stats.get("losses", 0)
-        completed_trades = wins + losses
-        
-        if completed_trades == 0:
-            return {
-                "action": "REDUCE_SIZE",
-                "reasoning": f"🆕 Bootstrap mode for {symbol} {setup_type} - {sample_size} alerts detected but 0 completed trades. Taking with 50% size to build history.",
-                "adjustment_pct": config["size_reduction_pct"],
-                "stats": stats,
-                "win_rate": 0,
-                "bootstrap": True
-            }
-        
-        # === SMART FILTERING DECISION TREE ===
-        
-        # SKIP: Very low win rate (<35%) - historically losing setup
-        if win_rate < config["skip_win_rate_threshold"]:
-            reasoning = f"🚫 Passing on {symbol} {setup_type} - we're only {win_rate:.0%} historically ({stats.get('wins', 0)}W/{stats.get('losses', 0)}L on {sample_size} trades)"
-            if expected_value < 0:
-                reasoning += f". Negative EV ({expected_value:.2f}R)"
-            
-            return {
-                "action": "SKIP",
-                "reasoning": reasoning,
-                "adjustment_pct": 0,
-                "stats": stats,
-                "win_rate": win_rate
-            }
-        
-        # REDUCE_SIZE: Low win rate (35-45%) - reduce position by 50%
-        if win_rate < config["reduce_size_threshold"]:
-            reasoning = f"⚠️ Taking {symbol} {setup_type} with reduced size - we're {win_rate:.0%} historically ({sample_size} trades). Using {config['size_reduction_pct']*100:.0f}% position."
-            
-            return {
-                "action": "REDUCE_SIZE",
-                "reasoning": reasoning,
-                "adjustment_pct": config["size_reduction_pct"],
-                "stats": stats,
-                "win_rate": win_rate
-            }
-        
-        # REQUIRE_HIGHER_TQS: Borderline (45-50%) - only take if TQS is high
-        if win_rate < config["normal_threshold"]:
-            if quality_score < config["high_tqs_requirement"]:
-                reasoning = f"🎯 Passing on {symbol} {setup_type} - we're {win_rate:.0%} on this setup and TQS ({quality_score}) doesn't meet threshold ({config['high_tqs_requirement']})"
-                return {
-                    "action": "SKIP",
-                    "reasoning": reasoning,
-                    "adjustment_pct": 0,
-                    "stats": stats,
-                    "win_rate": win_rate,
-                    "tqs_required": config["high_tqs_requirement"]
-                }
-            else:
-                reasoning = f"✅ Taking {symbol} {setup_type} - borderline win rate ({win_rate:.0%}) but TQS is strong ({quality_score})"
-                return {
-                    "action": "PROCEED",
-                    "reasoning": reasoning,
-                    "adjustment_pct": 1.0,
-                    "stats": stats,
-                    "win_rate": win_rate
-                }
-        
-        # PROCEED: Good win rate (55%+) - full sizing
-        reasoning = f"✅ Taking {symbol} {setup_type} - we're {win_rate:.0%} historically ({stats.get('wins', 0)}W/{stats.get('losses', 0)}L)"
-        if expected_value > 0.2:
-            reasoning += f". Positive EV (+{expected_value:.2f}R)"
-        
-        return {
-            "action": "PROCEED",
-            "reasoning": reasoning,
-            "adjustment_pct": 1.0,
-            "stats": stats,
-            "win_rate": win_rate
-        }
+        return self._smart_filter.evaluate(setup_type, quality_score, symbol, stats)
     
     def _add_filter_thought(self, thought: Dict):
         """Add a strategy filter reasoning to the thoughts list"""
-        thought["timestamp"] = datetime.now(timezone.utc).isoformat()
-        thought["type"] = "strategy_filter"
-        
-        self._strategy_filter_thoughts.insert(0, thought)
-        
-        # Keep only recent thoughts
-        if len(self._strategy_filter_thoughts) > self._max_filter_thoughts:
-            self._strategy_filter_thoughts = self._strategy_filter_thoughts[:self._max_filter_thoughts]
-        
-        logger.info(f"📊 Strategy Filter: {thought.get('reasoning', '')[:100]}")
+        self._smart_filter.add_thought(thought)
+        # Also keep local reference for backward compat
+        self._strategy_filter_thoughts = self._smart_filter.get_thoughts(self._max_filter_thoughts)
     
     def get_filter_thoughts(self, limit: int = 10) -> List[Dict]:
         """Get recent strategy filter thoughts for Bot's Brain display"""
-        return self._strategy_filter_thoughts[:limit]
+        return self._smart_filter.get_thoughts(limit)
     
     def get_smart_filter_config(self) -> Dict:
         """Get current smart filter configuration"""
-        return self._smart_filter_config.copy()
+        return self._smart_filter.config
     
     def update_smart_filter_config(self, updates: Dict) -> Dict:
         """Update smart filter configuration"""
-        for key, value in updates.items():
-            if key in self._smart_filter_config:
-                self._smart_filter_config[key] = value
-                logger.info(f"Smart filter config updated: {key} = {value}")
-        return self._smart_filter_config.copy()
+        result = self._smart_filter.update_config(updates)
+        self._smart_filter_config = result
+        return result
     
     async def _update_market_regime(self):
         """Fetch current market regime for position sizing adjustments"""

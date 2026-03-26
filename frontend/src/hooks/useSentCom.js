@@ -10,6 +10,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { useDataCache } from '../contexts';
 import api, { safeGet, safePost } from '../utils/api';
+import { useWsData } from '../contexts/WebSocketDataContext';
 
 /**
  * Hook for AI Insights data (shadow decisions, predictions, etc.)
@@ -323,6 +324,15 @@ export const useSentComContext = (pollInterval = 30000) => {
 export const useSentComAlerts = (pollInterval = 5000) => {
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { scannerAlerts } = useWsData();
+
+  // Use WebSocket data when available
+  useEffect(() => {
+    if (scannerAlerts && scannerAlerts.length > 0) {
+      setAlerts(scannerAlerts);
+      setLoading(false);
+    }
+  }, [scannerAlerts]);
 
   const fetchAlerts = useCallback(async () => {
     try {
@@ -339,11 +349,10 @@ export const useSentComAlerts = (pollInterval = 5000) => {
     }
   }, []);
 
+  // Initial REST fetch only — WebSocket handles subsequent updates
   useEffect(() => {
     fetchAlerts();
-    const interval = setInterval(fetchAlerts, pollInterval);
-    return () => clearInterval(interval);
-  }, [fetchAlerts, pollInterval]);
+  }, [fetchAlerts]);
 
   return { alerts, loading, refresh: fetchAlerts };
 };
@@ -398,6 +407,15 @@ export const useTradingBotControl = (pollInterval = 5000) => {
   const [botStatus, setBotStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const { botStatus: wsBotStatus } = useWsData();
+
+  // Use WebSocket data when available
+  useEffect(() => {
+    if (wsBotStatus) {
+      setBotStatus(wsBotStatus);
+      setLoading(false);
+    }
+  }, [wsBotStatus]);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -432,11 +450,10 @@ export const useTradingBotControl = (pollInterval = 5000) => {
     }
   }, [fetchStatus]);
 
+  // Initial REST fetch only — WebSocket handles subsequent updates
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, pollInterval);
-    return () => clearInterval(interval);
-  }, [fetchStatus, pollInterval]);
+  }, [fetchStatus]);
 
   return { botStatus, loading, actionLoading, toggleBot, refresh: fetchStatus };
 };
@@ -447,6 +464,15 @@ export const useTradingBotControl = (pollInterval = 5000) => {
 export const useIBConnectionStatus = (pollInterval = 3000) => {
   const [ibConnected, setIbConnected] = useState(false);
   const [loading, setLoading] = useState(true);
+  const { ibStatus } = useWsData();
+
+  // Use WebSocket data when available
+  useEffect(() => {
+    if (ibStatus) {
+      setIbConnected(ibStatus.ib_connected || ibStatus.connected || false);
+      setLoading(false);
+    }
+  }, [ibStatus]);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -459,11 +485,10 @@ export const useIBConnectionStatus = (pollInterval = 3000) => {
     }
   }, []);
 
+  // Initial REST fetch only — WebSocket handles subsequent updates
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, pollInterval);
-    return () => clearInterval(interval);
-  }, [fetchStatus, pollInterval]);
+  }, [fetchStatus]);
 
   return { ibConnected, loading };
 };

@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { Tip, TipIcon, CustomTip } from './shared/Tooltip';
 import api, { safeGet } from '../utils/api';
+import { useWsData } from '../contexts/WebSocketDataContext';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || ''; // For EventSource URLs
 
@@ -830,6 +831,29 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
   }, [fetchTrades, fetchStatus]);
   
   // Initial load
+  const { botStatus: wsBotStatus, botTrades: wsBotTrades, scannerAlerts: wsAlerts } = useWsData();
+
+  // Use WebSocket data when available
+  useEffect(() => {
+    if (wsBotStatus) { setStatus(wsBotStatus); setLoading(false); }
+  }, [wsBotStatus]);
+
+  useEffect(() => {
+    if (wsBotTrades && wsBotTrades.length > 0) {
+      // WS bot_trades contains all trades - separate by status
+      const pending = wsBotTrades.filter(t => t.status === 'pending');
+      const open = wsBotTrades.filter(t => t.status === 'open');
+      const closed = wsBotTrades.filter(t => t.status === 'closed');
+      if (pending.length > 0) setPendingTrades(pending);
+      if (open.length > 0) setOpenTrades(open);
+      if (closed.length > 0) setClosedTrades(closed);
+    }
+  }, [wsBotTrades]);
+
+  useEffect(() => {
+    if (wsAlerts && wsAlerts.length > 0) setLiveSignals(wsAlerts.slice(0, 8));
+  }, [wsAlerts]);
+
   useEffect(() => {
     fetchStatus();
     fetchTrades();
@@ -848,18 +872,10 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
     };
     fetchSignals();
     
-    const interval = setInterval(() => {
-      fetchStatus();
-      fetchTrades();
-      fetchSignals();
-      fetchOrderQueue();
-    }, 20000);
-    
-    // Poll order queue more frequently (every 3 seconds)
+    // Poll order queue frequently (needs near-real-time for confirmations)
     const orderQueueInterval = setInterval(fetchOrderQueue, 3000);
     
     return () => {
-      clearInterval(interval);
       clearInterval(orderQueueInterval);
     };
   }, [fetchStatus, fetchTrades, fetchOrderQueue]);

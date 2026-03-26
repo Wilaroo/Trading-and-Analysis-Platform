@@ -18,6 +18,7 @@ import {
   useSystemStatus,
   TrainCommandProvider
 } from './contexts';
+import { WebSocketDataProvider } from './contexts/WebSocketDataContext';
 import api from './utils/api';
 import { resetStaggerCounter } from './utils/safePolling';
 import StartupModal from './components/StartupModal';
@@ -143,6 +144,7 @@ function App() {
   const [wsConfidenceGate, setWsConfidenceGate] = useState(null);
   const [wsTrainingStatus, setWsTrainingStatus] = useState(null);
   const [wsMarketRegime, setWsMarketRegime] = useState(null);
+  const [lastWsMessage, setLastWsMessage] = useState(null);
 
   // Save activeTab to localStorage when it changes
   useEffect(() => {
@@ -210,6 +212,9 @@ function App() {
 
   // WebSocket handler for real-time updates (quotes + system status)
   const handleWebSocketMessage = useCallback((message) => {
+    // Forward ALL messages to the WebSocket context provider
+    setLastWsMessage(message);
+    
     // Quote updates
     if (message.type === 'quotes' || message.type === 'initial') {
       const quotesMap = {};
@@ -407,6 +412,7 @@ function App() {
     <TrainingModeProvider>
     <TrainCommandProvider value={sendTrainCommand}>
     <DataCacheProvider>
+    <WebSocketDataProvider wsMessage={lastWsMessage}>
     <TickerModalProvider>
       {/* Sync WebSocket status to SystemStatusContext */}
       <WebSocketStatusSync isConnected={isConnected} />
@@ -554,6 +560,7 @@ function App() {
       )}
       </div>
     </TickerModalProvider>
+    </WebSocketDataProvider>
     </DataCacheProvider>
     </TrainCommandProvider>
     </TrainingModeProvider>
