@@ -111,7 +111,7 @@ def generate_chains(bar_size, earliest_existing_date=None):
     chains = []
     current_end = chain_from
     while current_end > max_lookback_start:
-        end_date_str = current_end.strftime("%Y%m%d-%H:%M:%S") + " UTC"
+        end_date_str = current_end.strftime("%Y%m%d-%H:%M:%S")  # dash format = UTC
         chains.append({"duration": max_duration, "end_date": end_date_str})
         current_end -= timedelta(days=step_days)
 

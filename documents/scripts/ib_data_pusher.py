@@ -1833,22 +1833,30 @@ class IBDataPusher:
     
     def _normalize_end_date(self, end_date: str) -> str:
         """
-        Normalize end_date to include explicit UTC timezone for IB API.
-        Fixes IB warning 2174 about implicit timezone.
+        Normalize end_date for IB API.
         
-        IB format: "YYYYMMDD-HH:MM:SS UTC" or "YYYYMMDD HH:MM:SS US/Eastern"
+        IB accepts two formats:
+        - Dash format: "yyyymmdd-hh:mm:ss" (implies UTC, NO timezone suffix)
+        - Space format: "yyyymmdd hh:mm:ss US/Eastern" (requires timezone)
+        
+        Many queued dates have "yyyymmdd-hh:mm:ss UTC" which is INVALID
+        (dash already means UTC, adding " UTC" breaks it).
         """
         if not end_date:
             return ""  # Empty = "now", IB handles this fine
         
-        # Already has timezone suffix
-        if "UTC" in end_date or "US/" in end_date or "Europe/" in end_date:
-            return end_date
+        end_date = end_date.strip()
         
-        # Add UTC suffix to bare datetime strings
-        # e.g. "20260217-16:00:00" -> "20260217-16:00:00 UTC"
-        # e.g. "20260217 16:00:00" -> "20260217 16:00:00 UTC"
-        return end_date.strip() + " UTC"
+        # Remove timezone suffix — we'll use dash format which implies UTC
+        for tz in (" UTC", " US/Eastern", " US/Central", " US/Pacific", " Europe/London"):
+            if end_date.endswith(tz):
+                end_date = end_date[:-len(tz)].strip()
+        
+        # If space format "yyyymmdd hh:mm:ss", convert to dash format "yyyymmdd-hh:mm:ss"
+        if len(end_date) >= 15 and end_date[8] == ' ':
+            end_date = end_date[:8] + '-' + end_date[9:]
+        
+        return end_date
     
     def _mark_symbol_dead(self, symbol: str):
         """
