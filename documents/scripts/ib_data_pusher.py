@@ -1726,7 +1726,8 @@ class IBDataPusher:
             # Build pending URL with optional filters
             pending_url = "/api/ib/historical-data/pending?limit=6"
             if self._collection_bar_sizes:
-                pending_url += f"&bar_sizes={','.join(self._collection_bar_sizes)}"
+                from urllib.parse import quote
+                pending_url += f"&bar_sizes={quote(','.join(self._collection_bar_sizes))}"
             if self._collection_partition:
                 idx, total = self._collection_partition
                 pending_url += f"&partition={idx}&partition_total={total}"
