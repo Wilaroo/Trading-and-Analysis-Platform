@@ -20,7 +20,7 @@ echo.
 :: =====================================================
 :: CONFIGURATION
 :: =====================================================
-set CLOUD_URL=https://tradecommand.trade
+set CLOUD_URL=http://localhost:8001
 set GITHUB_RAW=https://raw.githubusercontent.com/Wilaroo/Trading-and-Analysis-Platform/main/documents
 set SCRIPT_DIR=%~dp0
 set IB_GATEWAY_PATH=C:\Jts\ibgateway\1037\ibgateway.exe
