@@ -254,7 +254,7 @@ class IBDataPusher:
         # Symbols that IB says "No security definition found" — skip all remaining requests
         self._dead_symbols: set = set()
         self._symbol_nodata_count: Dict[str, int] = {}  # Track consecutive no-data per symbol
-        self._DEAD_SYMBOL_THRESHOLD = 2  # Mark dead after this many consecutive failures
+        self._DEAD_SYMBOL_THRESHOLD = 3  # Mark dead after this many consecutive qualifyContracts failures
         
         # Collection mode partitioning (set via configure_collection_filter)
         self._collection_bar_sizes = None   # e.g., ["5 mins", "15 mins"]
@@ -1414,12 +1414,9 @@ class IBDataPusher:
                 })
             
             # Track no-data for dead symbol detection
-            if not bar_data:
-                self._symbol_nodata_count[symbol] = self._symbol_nodata_count.get(symbol, 0) + 1
-                if self._symbol_nodata_count[symbol] >= self._DEAD_SYMBOL_THRESHOLD:
-                    self._mark_symbol_dead(symbol)
-            else:
-                self._symbol_nodata_count.pop(symbol, None)
+            # NOTE: Empty bars for a valid contract is NORMAL (stock didn't exist yet
+            # for older end_dates, e.g., CFLT IPO'd 2021 but chain goes to 2018).
+            # Do NOT flag as dead here — only qualifyContracts failure counts.
             
             return {
                 "request_id": request_id,
@@ -1892,14 +1889,10 @@ class IBDataPusher:
                 status=status
             )
             
-            # Track no-data results for dead symbol detection
-            if not bar_data:
-                self._symbol_nodata_count[symbol] = self._symbol_nodata_count.get(symbol, 0) + 1
-                if self._symbol_nodata_count[symbol] >= self._DEAD_SYMBOL_THRESHOLD:
-                    self._mark_symbol_dead(symbol)
-            else:
-                # Got data — reset failure counter (symbol is alive)
-                self._symbol_nodata_count.pop(symbol, None)
+            # NOTE: Empty bars for a valid contract is NORMAL (stock didn't exist yet
+            # for older end_dates, e.g., CFLT IPO'd 2021 but chain goes to 2018).
+            # Do NOT flag as dead here — only qualifyContracts failure or
+            # "No security definition" IB error should trigger dead symbol detection.
             
             logger.info(f"[Collection] {symbol} ({bar_size}): {len(bar_data)} bars")
             return True
