@@ -1602,11 +1602,21 @@ class IBDataPusher:
                         else:
                             rolling_rate = 0
                         
-                        # ETA calculation
+                        # ETA calculation — fetch actual pending count for THIS instance's bar_sizes
                         if rolling_rate > 0:
                             try:
-                                # Fetch current pending count from last known or estimate
-                                remaining = max(0, 153000 - requests_completed)  # rough estimate
+                                progress = self.api.get_safe("/api/ib-collector/queue-progress-detailed", timeout=10)
+                                if progress and progress.get("by_bar_size"):
+                                    # Sum pending only for bar_sizes this instance handles
+                                    my_bar_sizes = set(self._collection_bar_sizes) if self._collection_bar_sizes else None
+                                    remaining = 0
+                                    for bs_info in progress["by_bar_size"]:
+                                        bs = bs_info.get("bar_size", "")
+                                        if my_bar_sizes is None or bs in my_bar_sizes:
+                                            remaining += bs_info.get("pending", 0)
+                                else:
+                                    remaining = max(0, 80000 - requests_completed)  # fallback
+                                
                                 eta_hours = remaining / rolling_rate
                                 if eta_hours < 1:
                                     eta_str = f"{eta_hours * 60:.0f} min"
@@ -1614,6 +1624,7 @@ class IBDataPusher:
                                     eta_str = f"{eta_hours:.1f} hrs"
                                 else:
                                     eta_str = f"{eta_hours / 24:.1f} days"
+                                eta_str += f" ({remaining:,} left)"
                             except:
                                 eta_str = "calculating..."
                         else:
@@ -1644,7 +1655,7 @@ class IBDataPusher:
                                 "completed": requests_completed,
                                 "failed": requests_failed,
                                 "pacing_violations": pacing_violations,
-                                "rate_per_hour": rate,
+                                "rate_per_hour": rolling_rate,
                                 "elapsed_minutes": elapsed / 60,
                                 "current_batch_delay": current_batch_delay,
                                 "timestamp": datetime.now().isoformat()
