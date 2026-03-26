@@ -86,27 +86,30 @@ class TradeExecutorService:
         """
         Initialize Interactive Brokers client.
         
-        Note: IB Gateway runs locally on user's machine. The cloud backend
-        receives data via the pusher but cannot directly place orders.
-        We check if the pusher is connected and use simulated mode if needed.
+        IB Gateway runs locally on user's machine. The cloud backend
+        communicates via the pusher/order-queue system.
+        When pusher is connected, orders are routed through the queue
+        to the local IB Gateway for real execution (paper account).
         """
         try:
-            # Check if IB pusher is connected (provides live data)
             import routers.ib as ib_module
             if ib_module.is_pusher_connected():
-                logger.info("IB pusher connected - using IB data for trade decisions")
-                # Note: Can't place orders through pusher yet, but can use data
-                # For now, orders go to simulated mode but decisions use real IB data
-                self._mode = ExecutorMode.SIMULATED
-                logger.info("Orders in SIMULATED mode (IB order routing not yet implemented)")
+                logger.info("IB pusher connected - LIVE order routing via order queue enabled")
+                logger.info("Orders will be queued and executed by local IB Gateway (paper account)")
+                # Keep LIVE mode — orders go through the queue to the local IB Gateway
+                self._mode = ExecutorMode.LIVE
             else:
                 # Try direct IB connection (only works if running locally)
-                from services.ib_service import get_ib_service
-                self._ib_client = get_ib_service()
-                logger.info("IB trading client initialized via IB Service")
+                try:
+                    from services.ib_service import get_ib_service
+                    self._ib_client = get_ib_service()
+                    logger.info("IB trading client initialized via direct IB Service")
+                except Exception:
+                    # No pusher and no direct connection — simulate
+                    self._mode = ExecutorMode.SIMULATED
+                    logger.info("No IB connection available - using SIMULATED mode for orders")
         except Exception as e:
             logger.warning(f"IB initialization: {e}")
-            # Fall back to simulated mode
             self._mode = ExecutorMode.SIMULATED
             logger.info("Using SIMULATED mode for orders")
     

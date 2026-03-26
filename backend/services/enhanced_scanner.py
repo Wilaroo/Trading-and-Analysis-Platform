@@ -3682,6 +3682,37 @@ class EnhancedBackgroundScanner:
         except Exception as e:
             logger.debug(f"Could not populate SMB fields: {e}")
         
+        # === DMA DIRECTIONAL FILTER ===
+        # Swing trades: require alignment with EMA50
+        # Investment trades: require alignment with SMA200
+        try:
+            trade_style = alert.trade_style or "intraday"
+            direction = getattr(alert, 'direction_bias', 'long')
+            
+            if trade_style in ("swing", "multi_day", "position"):
+                snapshot = await self.technical_service.get_technical_snapshot(alert.symbol)
+                if snapshot and hasattr(snapshot, 'ema_50') and snapshot.ema_50 > 0:
+                    price = snapshot.last or alert.trigger_price
+                    if direction == "long" and price < snapshot.ema_50:
+                        logger.info(f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} LONG swing — price ${price:.2f} below EMA50 ${snapshot.ema_50:.2f}")
+                        return
+                    elif direction == "short" and price > snapshot.ema_50:
+                        logger.info(f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} SHORT swing — price ${price:.2f} above EMA50 ${snapshot.ema_50:.2f}")
+                        return
+                
+                # Investment: also check SMA200
+                if trade_style == "position":
+                    if snapshot and hasattr(snapshot, 'sma_200') and snapshot.sma_200 > 0:
+                        price = snapshot.last or alert.trigger_price
+                        if direction == "long" and price < snapshot.sma_200:
+                            logger.info(f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} LONG investment — price ${price:.2f} below SMA200 ${snapshot.sma_200:.2f}")
+                            return
+                        elif direction == "short" and price > snapshot.sma_200:
+                            logger.info(f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} SHORT investment — price ${price:.2f} above SMA200 ${snapshot.sma_200:.2f}")
+                            return
+        except Exception as e:
+            logger.debug(f"DMA filter check: {e}")
+        
         # === LEARNING LOOP: Capture context (Phase 1) ===
         try:
             from services.learning_loop_service import get_learning_loop_service

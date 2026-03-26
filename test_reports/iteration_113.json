@@ -1,0 +1,103 @@
+{
+  "summary": "Backend testing for Gap 2 (IB paper order execution, commission tracking, stale alert timeout, price recalculation) and Gap 6 (DMA directional filter). All 17 unit tests passed. 2 API tests timed out during pytest but verified working via curl.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/ai-training/confidence-gate/evaluate", "issue": "Slow response time (>15s) causing pytest timeout, but works via curl", "priority": "LOW"},
+      {"endpoint": "/api/trading-bot/status", "issue": "Slow response time (>10s) causing pytest timeout, but works via curl", "priority": "LOW"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_commission_stale_dma.py",
+    "/app/test_reports/pytest/pytest_commission_stale_dma.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "VERIFIED: _calculate_commission(100) returns $1.00 (minimum applied correctly)",
+    "VERIFIED: _calculate_commission(5000) returns $25.00 (5000 * $0.005)",
+    "VERIFIED: BotTrade dataclass has commission_per_share=0.005, commission_min=1.00, total_commissions=0.0, net_pnl=0.0",
+    "VERIFIED: BotTrade.to_dict() includes total_commissions and net_pnl fields (lines 503-504)",
+    "VERIFIED: confirm_trade has stale alert check with thresholds: scalp=300s, swing=900s, investment=3600s (lines 3137-3143)",
+    "VERIFIED: confirm_trade recalculates price from IB pushed quotes before execution (lines 3159-3205)",
+    "VERIFIED: trade_executor_service _init_ib keeps LIVE mode when pusher is connected (lines 96-100)",
+    "VERIFIED: _build_entry_context handles None technicals with 'or {}' fallback (line 2760)",
+    "VERIFIED: _build_entry_context includes confidence_gate field in entry context (lines 2805-2812)",
+    "VERIFIED: enhanced_scanner _process_new_alert has DMA filter for swing/position trades (lines 3685-3714)",
+    "VERIFIED: DMA filter checks EMA50 for swings (lines 3694-3700)",
+    "VERIFIED: DMA filter checks SMA200 for position/investment trades (lines 3704-3711)",
+    "VERIFIED: POST /api/ai-training/confidence-gate/evaluate returns decision with reasoning (tested via curl)",
+    "VERIFIED: GET /api/trading-bot/status returns healthy response with mode, risk_params, enabled_setups",
+    "BUG FIXED: Line 3188 used self.risk_params.risk_per_trade (non-existent) - changed to max_risk_per_trade"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_commission_stale_dma.py",
+    "/app/backend/services/trading_bot_service.py"
+  ],
+  "success_rate": {
+    "backend": "100% (17/17 unit tests passed, 2 API tests timeout but verified via curl)"
+  },
+  "test_credentials": null,
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Gap 2 and Gap 6 features fully implemented and verified. Commission tracking uses IB tiered pricing ($0.005/share, $1.00 min). Stale alert timeouts: scalp=5min, swing=15min, investment=60min. DMA filter skips swing longs below EMA50 and investment longs below SMA200. IB pusher not connected on preview env so executor falls back to SIMULATED mode (expected). Fixed bug in confirm_trade where risk_per_trade was used instead of max_risk_per_trade.",
+  "features_verified": {
+    "commission_tracking": {
+      "rate": "$0.005/share",
+      "minimum": "$1.00 per order",
+      "fields_in_bottrade": ["commission_per_share", "commission_min", "total_commissions", "net_pnl"],
+      "to_dict_includes": ["total_commissions", "net_pnl"],
+      "apply_commission_method": "Updates total_commissions and calculates net_pnl = realized_pnl - total_commissions"
+    },
+    "stale_alert_timeout": {
+      "scalp": "300 seconds (5 min)",
+      "day": "600 seconds (10 min)",
+      "swing": "900 seconds (15 min)",
+      "investment": "3600 seconds (60 min)",
+      "default": "600 seconds (10 min)",
+      "behavior": "Rejects trade with EXPIRED status if alert age exceeds threshold"
+    },
+    "price_recalculation": {
+      "trigger": "On confirm_trade before execution",
+      "data_source": "IB pushed quotes (primary), Alpaca (fallback)",
+      "recalculates": ["entry_price", "shares", "remaining_shares", "original_shares", "target_prices"]
+    },
+    "ib_live_mode": {
+      "default_mode": "LIVE",
+      "pusher_connected": "Keeps LIVE mode, routes orders through queue",
+      "pusher_not_connected": "Falls back to SIMULATED mode",
+      "preview_env_behavior": "SIMULATED (expected - no local IB pusher)"
+    },
+    "dma_directional_filter": {
+      "swing_trades": "Requires price above EMA50 for longs, below EMA50 for shorts",
+      "position_trades": "Also requires price above SMA200 for longs, below SMA200 for shorts",
+      "behavior": "Skips alert if DMA filter fails"
+    },
+    "build_entry_context": {
+      "none_technicals_handling": "Uses 'or {}' fallback to prevent NoneType errors",
+      "confidence_gate_field": "Includes decision, confidence_score, position_multiplier, trading_mode, ai_regime, reasoning"
+    }
+  },
+  "api_endpoints_tested": {
+    "POST /api/ai-training/confidence-gate/evaluate": {
+      "status": "PASSED (via curl)",
+      "response_fields": ["decision", "confidence_score", "regime_state", "reasoning", "position_multiplier"],
+      "note": "Uses query parameters, not JSON body"
+    },
+    "GET /api/trading-bot/status": {
+      "status": "PASSED (via curl)",
+      "response_fields": ["success", "running", "mode", "risk_params", "enabled_setups"]
+    }
+  },
+  "bug_fixed": {
+    "file": "/app/backend/services/trading_bot_service.py",
+    "line": 3188,
+    "issue": "Used self.risk_params.risk_per_trade which doesn't exist",
+    "fix": "Changed to self.risk_params.max_risk_per_trade"
+  }
+}

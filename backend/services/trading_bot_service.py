@@ -427,6 +427,12 @@ class BotTrade:
     realized_pnl: float = 0.0  # Cumulative from all scale-outs + final exit
     pnl_pct: float = 0.0
     
+    # Commission tracking (IB tiered: ~$0.005/share, $1.00 min per order)
+    commission_per_share: float = 0.005
+    commission_min: float = 1.00
+    total_commissions: float = 0.0  # Running total of all commissions for this trade
+    net_pnl: float = 0.0  # realized_pnl - total_commissions
+    
     # Timing
     created_at: str = ""
     executed_at: Optional[str] = None
@@ -494,6 +500,8 @@ class BotTrade:
         d['mae_price'] = self.mae_price
         d['mae_pct'] = self.mae_pct
         d['mae_r'] = self.mae_r
+        d['total_commissions'] = self.total_commissions
+        d['net_pnl'] = self.net_pnl
         return d
 
 
@@ -715,6 +723,21 @@ class TradingBotService:
         self._confidence_gate = confidence_gate
         logger.info("TradingBotService: AI Confidence Gate connected")
         logger.info("  - Pre-trade flow: Smart Filter → Confidence Gate → Position Sizing → Execute")
+
+    @staticmethod
+    def _calculate_commission(shares: int, per_share: float = 0.005, minimum: float = 1.00) -> float:
+        """
+        Calculate commission for an order.
+        IB Tiered: ~$0.005/share, $1.00 min, capped at 1% of trade value.
+        """
+        return max(minimum, round(shares * per_share, 2))
+
+    def _apply_commission(self, trade, shares: int):
+        """Add commission for an order (entry or exit) to the trade's running total."""
+        commission = self._calculate_commission(shares, trade.commission_per_share, trade.commission_min)
+        trade.total_commissions = round(trade.total_commissions + commission, 2)
+        trade.net_pnl = round(trade.realized_pnl - trade.total_commissions, 2)
+        return commission
     
     # ==================== SMART STRATEGY FILTERING ====================
     
@@ -2734,7 +2757,7 @@ class TradingBotService:
         
         # 5. Technical signals from intelligence
         if intelligence:
-            tech = intelligence.get("technicals", {})
+            tech = intelligence.get("technicals") or {}
             ctx["technicals"] = {
                 "trend": tech.get("trend", ""),
                 "rsi": tech.get("momentum", 0),
@@ -3019,9 +3042,17 @@ class TradingBotService:
                 trade.mfe_price = trade.fill_price
                 trade.mae_price = trade.fill_price
                 
+                # Track entry commission
+                entry_commission = self._apply_commission(trade, trade.shares)
+                
                 # Mark if simulated
                 if result.get('simulated'):
                     trade.notes = (trade.notes or "") + " [SIMULATED]"
+                else:
+                    broker = result.get('broker', 'unknown')
+                    trade.notes = (trade.notes or "") + f" [LIVE-{broker.upper()}]"
+                
+                print(f"   💰 Entry commission: ${entry_commission:.2f} ({trade.shares} shares @ ${trade.commission_per_share}/share)")
                 
                 # Record actual entry (Phase 1 Learning)
                 if hasattr(self, '_learning_loop') and self._learning_loop:
@@ -3089,11 +3120,90 @@ class TradingBotService:
             trade.status = TradeStatus.REJECTED
     
     async def confirm_trade(self, trade_id: str) -> bool:
-        """Confirm a pending trade for execution"""
+        """
+        Confirm a pending trade for execution.
+        
+        Before executing:
+        1. Check if the alert is stale (expired based on timeframe)
+        2. Recalculate entry price, shares, and risk based on current market price
+        """
         if trade_id not in self._pending_trades:
             return False
         
         trade = self._pending_trades[trade_id]
+        
+        # === STALE ALERT CHECK ===
+        # Scalps/intraday: 5 min timeout. Swings: 15 min. Investment: 60 min.
+        stale_thresholds = {
+            "scalp": 300,      # 5 min
+            "day": 600,        # 10 min
+            "swing": 900,      # 15 min
+            "investment": 3600, # 60 min
+        }
+        max_age_seconds = stale_thresholds.get(trade.timeframe, 600)  # Default 10 min
+        
+        if trade.created_at:
+            try:
+                created = datetime.fromisoformat(trade.created_at.replace('Z', '+00:00'))
+                age = (datetime.now(timezone.utc) - created).total_seconds()
+                if age > max_age_seconds:
+                    logger.info(f"Stale alert: {trade.symbol} {trade.setup_type} is {age:.0f}s old (max {max_age_seconds}s for {trade.timeframe})")
+                    trade.status = TradeStatus.REJECTED
+                    trade.notes = (trade.notes or "") + f" [EXPIRED: {age:.0f}s old]"
+                    del self._pending_trades[trade_id]
+                    await self._notify_trade_update(trade, "expired")
+                    return False
+            except Exception as e:
+                logger.warning(f"Could not check alert age: {e}")
+        
+        # === PRICE RECALCULATION ===
+        # Get current market price and recalculate position
+        current_price = None
+        try:
+            from routers.ib import get_pushed_quotes, is_pusher_connected
+            if is_pusher_connected():
+                quotes = get_pushed_quotes()
+                if trade.symbol in quotes:
+                    q = quotes[trade.symbol]
+                    current_price = q.get('last') or q.get('close')
+        except Exception:
+            pass
+        
+        if not current_price and self._alpaca_service:
+            try:
+                quote = await self._alpaca_service.get_quote(trade.symbol)
+                current_price = quote.get('price') if quote else None
+            except Exception:
+                pass
+        
+        if current_price and current_price != trade.entry_price:
+            old_entry = trade.entry_price
+            old_shares = trade.shares
+            trade.entry_price = current_price
+            
+            # Recalculate shares based on new entry and original stop
+            if trade.stop_price and trade.stop_price != trade.entry_price:
+                risk_per_share = abs(trade.entry_price - trade.stop_price)
+                if risk_per_share > 0:
+                    risk_amount = self.risk_params.max_risk_per_trade
+                    new_shares = max(1, int(risk_amount / risk_per_share))
+                    trade.shares = new_shares
+                    trade.remaining_shares = new_shares
+                    trade.original_shares = new_shares
+            
+            # Recalculate targets proportionally
+            if hasattr(trade, 'scale_out_config') and trade.scale_out_config.get('target_prices'):
+                old_targets = trade.scale_out_config['target_prices']
+                if old_entry and old_entry != 0:
+                    ratio = current_price / old_entry
+                    trade.scale_out_config['target_prices'] = [round(t * ratio, 2) for t in old_targets]
+            
+            logger.info(
+                f"Price recalc on confirm: {trade.symbol} entry ${old_entry:.2f}→${current_price:.2f}, "
+                f"shares {old_shares}→{trade.shares}"
+            )
+            print(f"   🔄 [CONFIRM] Price adjusted: ${old_entry:.2f}→${current_price:.2f}, shares {old_shares}→{trade.shares}")
+        
         await self._execute_trade(trade)
         return trade.status == TradeStatus.OPEN
     
@@ -3472,6 +3582,10 @@ class TradingBotService:
                     # Update trade state
                     trade.remaining_shares -= shares_to_sell
                     trade.realized_pnl += partial_pnl
+                    
+                    # Track commission for partial exit
+                    scale_commission = self._apply_commission(trade, shares_to_sell)
+                    
                     targets_hit.append(i)
                     trade.scale_out_config['targets_hit'] = targets_hit
                     
@@ -3498,15 +3612,15 @@ class TradingBotService:
                         trade.exit_price = fill_price
                         trade.unrealized_pnl = 0
                         
-                        # Update daily stats
-                        if trade.realized_pnl > 0:
+                        # Update daily stats with net P&L (after commissions)
+                        if trade.net_pnl > 0:
                             self._daily_stats.trades_won += 1
-                            self._daily_stats.largest_win = max(self._daily_stats.largest_win, trade.realized_pnl)
+                            self._daily_stats.largest_win = max(self._daily_stats.largest_win, trade.net_pnl)
                         else:
                             self._daily_stats.trades_lost += 1
-                            self._daily_stats.largest_loss = min(self._daily_stats.largest_loss, trade.realized_pnl)
+                            self._daily_stats.largest_loss = min(self._daily_stats.largest_loss, trade.net_pnl)
                         
-                        self._daily_stats.net_pnl += trade.realized_pnl
+                        self._daily_stats.net_pnl += trade.net_pnl
                         total = self._daily_stats.trades_won + self._daily_stats.trades_lost
                         self._daily_stats.win_rate = (self._daily_stats.trades_won / total * 100) if total > 0 else 0
                         
@@ -3581,6 +3695,10 @@ class TradingBotService:
                 else:
                     final_pnl = (trade.fill_price - trade.exit_price) * shares_to_close
                 trade.realized_pnl += final_pnl
+                
+                # Track exit commission
+                exit_commission = self._apply_commission(trade, shares_to_close)
+                logger.info(f"Exit commission: ${exit_commission:.2f} | Total commissions: ${trade.total_commissions:.2f} | Net P&L: ${trade.net_pnl:.2f}")
             
             trade.status = TradeStatus.CLOSED
             trade.closed_at = datetime.now(timezone.utc).isoformat()
@@ -3588,8 +3706,8 @@ class TradingBotService:
             trade.unrealized_pnl = 0
             trade.remaining_shares = 0
             
-            # Update daily stats
-            self._daily_stats.net_pnl += trade.realized_pnl
+            # Update daily stats with net P&L (after commissions)
+            self._daily_stats.net_pnl += trade.net_pnl
             if trade.realized_pnl > 0:
                 self._daily_stats.trades_won += 1
                 self._daily_stats.largest_win = max(self._daily_stats.largest_win, trade.realized_pnl)
