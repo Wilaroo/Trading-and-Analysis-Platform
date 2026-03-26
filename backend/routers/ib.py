@@ -1308,13 +1308,32 @@ def _get_historical_data_service():
 
 
 @router.get("/historical-data/pending")
-async def get_pending_historical_data_requests(limit: int = 12):
+async def get_pending_historical_data_requests(
+    limit: int = 12,
+    bar_sizes: str = None,
+    partition: int = None,
+    partition_total: int = None
+):
     """
     Get pending historical data requests for the IB Data Pusher to fulfill.
     Called by the local IB Data Pusher to check for work.
     
     Args:
         limit: Maximum number of requests to return (default: 12, max: 50)
+        bar_sizes: Comma-separated bar sizes to filter (e.g., "5 mins,15 mins")
+                   Enables running multiple pusher instances on different timeframes.
+        partition: This instance's partition index (0-based). Use with partition_total.
+        partition_total: Total number of pusher instances. Symbols are hash-distributed.
+    
+    Examples:
+        Instance 1 (daily/weekly):  ?bar_sizes=1 day,1 week
+        Instance 2 (hourly):        ?bar_sizes=1 hour,30 mins,15 mins
+        Instance 3 (5-min):         ?bar_sizes=5 mins
+        
+        Or by symbol partition:
+        Instance 1: ?partition=0&partition_total=3
+        Instance 2: ?partition=1&partition_total=3
+        Instance 3: ?partition=2&partition_total=3
     """
     service = _get_historical_data_service()
     if not service:
@@ -1323,8 +1342,22 @@ async def get_pending_historical_data_requests(limit: int = 12):
     # Cap at 50 to prevent overload
     limit = min(max(limit, 1), 50)
     
+    # Parse bar_sizes filter
+    bar_sizes_list = None
+    if bar_sizes:
+        bar_sizes_list = [b.strip() for b in bar_sizes.split(",") if b.strip()]
+    
+    # Parse symbol partition
+    symbol_partition = None
+    if partition is not None and partition_total is not None and partition_total > 1:
+        symbol_partition = (partition, partition_total)
+    
     try:
-        requests = service.get_pending_requests(limit=limit)
+        requests = service.get_pending_requests(
+            limit=limit, 
+            bar_sizes=bar_sizes_list,
+            symbol_partition=symbol_partition
+        )
         return {"success": True, "requests": requests}
     except Exception as e:
         logger.error(f"Error getting pending historical data requests: {e}")

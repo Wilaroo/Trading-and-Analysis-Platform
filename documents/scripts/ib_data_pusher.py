@@ -256,6 +256,10 @@ class IBDataPusher:
         self._symbol_nodata_count: Dict[str, int] = {}  # Track consecutive no-data per symbol
         self._DEAD_SYMBOL_THRESHOLD = 2  # Mark dead after this many consecutive failures
         
+        # Collection mode partitioning (set via configure_collection_filter)
+        self._collection_bar_sizes = None   # e.g., ["5 mins", "15 mins"]
+        self._collection_partition = None    # e.g., (0, 3) = instance 0 of 3
+        
         # Fundamental data refresh tracking (don't need to refresh every second)
         self.last_fundamentals_refresh = 0
         self.fundamentals_refresh_interval = 300  # Refresh every 5 minutes
@@ -1705,8 +1709,15 @@ class IBDataPusher:
         Returns dict with completed/failed counts, or None if no requests.
         """
         try:
-            # Get a larger batch since we'll process them quickly
-            result = self.api.get_safe("/api/ib/historical-data/pending?limit=6", timeout=20)
+            # Build pending URL with optional filters
+            pending_url = "/api/ib/historical-data/pending?limit=6"
+            if self._collection_bar_sizes:
+                pending_url += f"&bar_sizes={','.join(self._collection_bar_sizes)}"
+            if self._collection_partition:
+                idx, total = self._collection_partition
+                pending_url += f"&partition={idx}&partition_total={total}"
+            
+            result = self.api.get_safe(pending_url, timeout=20)
             
             if not result:
                 return None
@@ -2297,6 +2308,16 @@ def main():
     parser.add_argument("--mode", choices=["trading", "collection", "auto"], default="trading",
                         help="Operating mode: 'trading' (live quotes/orders only), "
                              "'collection' (dedicated bulk collection), 'auto' (legacy)")
+    parser.add_argument("--bar-sizes", type=str, default=None,
+                        help="Collection mode: comma-separated bar sizes to process. "
+                             "Enables running multiple instances on different timeframes. "
+                             "Example: --bar-sizes '5 mins,15 mins' or --bar-sizes '1 day,1 week'")
+    parser.add_argument("--partition", type=int, default=None,
+                        help="Collection mode: this instance's partition index (0-based). "
+                             "Use with --partition-total for symbol-based work splitting.")
+    parser.add_argument("--partition-total", type=int, default=None,
+                        help="Collection mode: total number of pusher instances. "
+                             "Symbols are hash-distributed across instances.")
     
     args = parser.parse_args()
     
@@ -2309,6 +2330,13 @@ def main():
     print(f"  Symbols: {args.symbols}")
     print(f"  Level 2: {'Disabled' if args.no_level2 else 'Enabled'}")
     print(f"  Mode: {args.mode.upper()}")
+    if args.mode == "collection":
+        if args.bar_sizes:
+            print(f"  Bar sizes filter: {args.bar_sizes}")
+        else:
+            print(f"  Bar sizes filter: ALL")
+        if args.partition is not None and args.partition_total:
+            print(f"  Partition: {args.partition} of {args.partition_total}")
     print("")
     print("  This script handles:")
     print("  - Live quotes & market data")
@@ -2327,6 +2355,12 @@ def main():
     )
     
     if args.mode == "collection":
+        # Configure collection mode filters (for multi-instance partitioning)
+        if args.bar_sizes:
+            pusher._collection_bar_sizes = [b.strip() for b in args.bar_sizes.split(",") if b.strip()]
+        if args.partition is not None and args.partition_total:
+            pusher._collection_partition = (args.partition, args.partition_total)
+        
         # Dedicated bulk collection mode with AUTO-RECONNECT + AUTO-LOGIN
         # Survives IB Gateway restarts, daily logoffs, and connection drops
         max_retries = 999  # Effectively infinite

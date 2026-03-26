@@ -97,7 +97,8 @@ class HistoricalDataQueueService:
         
         return request_id
     
-    def get_pending_requests(self, limit: int = 10) -> List[Dict]:
+    def get_pending_requests(self, limit: int = 10, bar_sizes: List[str] = None, 
+                               symbol_partition: tuple = None) -> List[Dict]:
         """
         Get pending requests for the IB Data Pusher to fulfill.
         
@@ -107,24 +108,49 @@ class HistoricalDataQueueService:
         
         Strategy: Pick the symbol with the most pending requests, return all its
         pending timeframes (up to limit).
+        
+        Args:
+            limit: Max requests to return
+            bar_sizes: Optional list of bar sizes to filter (e.g., ["5 mins", "15 mins"])
+                       Enables multi-instance partitioning by timeframe.
+            symbol_partition: Optional (index, total) tuple for symbol-based partitioning.
+                       e.g., (0, 3) = this instance handles symbols whose hash % 3 == 0
         """
+        match_filter = {"status": "pending"}
+        
+        # Filter by bar_sizes if specified
+        if bar_sizes:
+            match_filter["bar_size"] = {"$in": bar_sizes}
+        
         # First, find a symbol that has pending requests
-        # We want to complete all timeframes for one symbol before moving on
         pipeline = [
-            {"$match": {"status": "pending"}},
+            {"$match": match_filter},
             {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
-            {"$sort": {"count": -1}},  # Start with symbols that have most pending
-            {"$limit": 1}
+            {"$sort": {"count": -1}},
         ]
         
-        result = list(self.collection.aggregate(pipeline))
-        
-        if not result:
-            return []
-        
-        target_symbol = result[0]["_id"]
+        # If symbol partitioning, get multiple candidates and filter by hash
+        if symbol_partition:
+            part_idx, part_total = symbol_partition
+            pipeline.append({"$limit": 50})  # Get top 50 candidates
+            result = list(self.collection.aggregate(pipeline))
+            # Filter to symbols that hash to this partition
+            result = [r for r in result if hash(r["_id"]) % part_total == part_idx]
+            if not result:
+                return []
+            target_symbol = result[0]["_id"]
+        else:
+            pipeline.append({"$limit": 1})
+            result = list(self.collection.aggregate(pipeline))
+            if not result:
+                return []
+            target_symbol = result[0]["_id"]
         
         # Get all pending requests for this symbol (ordered by timeframe priority)
+        find_filter = {"status": "pending", "symbol": target_symbol}
+        if bar_sizes:
+            find_filter["bar_size"] = {"$in": bar_sizes}
+        
         # Priority: 1 day first (most useful), then 1 hour, 5 mins, etc.
         timeframe_priority = {
             "1 day": 0,
@@ -137,7 +163,7 @@ class HistoricalDataQueueService:
         }
         
         cursor = self.collection.find(
-            {"status": "pending", "symbol": target_symbol},
+            find_filter,
             {"_id": 0}
         ).limit(limit)
         
