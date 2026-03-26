@@ -32,7 +32,7 @@ from pymongo import MongoClient
 
 BAR_CONFIGS = {
     "1 min": {"max_duration": "1 W", "max_history_days": 180},
-    "5 mins": {"max_duration": "1 M", "max_history_days": 730},
+    "5 mins": {"max_duration": "3 M", "max_history_days": 730},
     "15 mins": {"max_duration": "3 M", "max_history_days": 730},
     "30 mins": {"max_duration": "6 M", "max_history_days": 730},
     "1 hour": {"max_duration": "1 Y", "max_history_days": 1825},
