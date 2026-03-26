@@ -108,6 +108,32 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
   - Collector 1: Daily/Weekly (dark yellow), Collector 2: Hourly/15m/30m (light red), Collector 3: 5-min (aqua)
   - Updated terminal color guide and health check display
 
+### Session 4.6 (Mar 26, 2026 - Data Heatmap + WebSocket Migration + Refactor)
+
+- **P2: Data Coverage Heatmap** (`NIA/DataHeatmap.jsx`)
+  - Visual grid: rows = Tiers (Intraday/Swing/Investment), columns = bar sizes (1m/5m/15m/30m/1h/1D/1W)
+  - Cells gradient color-coded by coverage % (emerald 98%+ → red <25% → gray 0%)
+  - Hover tooltips show exact symbol counts and bar totals
+  - Pending queue badges on cells with active collections
+  - Summary strip: total symbols, bars, gaps
+  - Color legend at bottom
+  - Merged into DataCollectionPanel's Coverage tab, replacing the old per-tier card view
+
+- **P3: WebSocket Migration** (3 new push types)
+  - `stream_confidence_gate()` — pushes confidence gate summary + decisions every 15s (change-detected)
+  - `stream_training_status()` — pushes training pipeline status every 30s (change-detected)
+  - `stream_market_regime()` — pushes market regime data every 60s (change-detected)
+  - App.js creates `wsConfidenceGate`, `wsTrainingStatus`, `wsMarketRegime` state
+  - NIA panels (SentComIntelligencePanel, TrainingPipelinePanel) now accept WS data as props
+  - Removed `setInterval` polling from both panels — initial REST fetch only, WebSocket handles subsequent updates
+  - Total backend WS push types: 11 (quotes, ib_status, bot_status, bot_trades, scanner_status, scanner_alerts, smart_watchlist, coaching_notifications, confidence_gate, training_status, market_regime)
+
+- **P3: Smart Filter Extraction** (`services/smart_filter.py`)
+  - Extracted `SmartFilter` class from `trading_bot_service.py`
+  - Standalone module with: `evaluate()`, `add_thought()`, `get_thoughts()`, `update_config()`
+  - Includes cold-start bootstrap mode and full decision tree
+  - Trading bot still uses its inline version (migration to delegating is future work)
+
 ### Session 4.5 (Mar 26, 2026 - AI Confidence Gate & Cold-Start Fix)
 - **Cold-Start Smart Filter Fix**: `trading_bot_service.py`
   - Added bootstrap mode: when wins+losses=0 but sample_size>=5, proceeds with 50% sizing instead of blocking
@@ -258,14 +284,14 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
 - User to purchase vendor 1-min data and run import script
 
 ### P2 - Upcoming
-- Real-time collection dashboard (heatmap of data depth per symbol/bar_size)
 - MFE/MAE Scatter Chart per setup type
 - Auto-Optimize AI Settings (sweep confidence thresholds/lookback windows)
 - **Confidence Gate Tuner**: Once live trade decisions accumulate, auto-calibrate skip/reduce/go thresholds by analyzing which combinations produce the best results for your actual trading style
 
 ### P3 - Future
-- Refactor active polling to WebSocket (~44 intervals)
-- Refactor trading_bot_service.py (4,300+ lines → modules)
+- Complete WebSocket migration for remaining ~20+ polling components (beyond NIA panels)
+- Migrate trading_bot_service.py to use extracted smart_filter.py module (delegation instead of inline)
+- Further refactor trading_bot_service.py (4,300+ lines → trade_executor, position_manager, learning_loop, stop_manager, risk_calculator modules)
 
 ## Key Files
 - `/app/backend/services/ib_historical_collector.py` - Chaining logic
