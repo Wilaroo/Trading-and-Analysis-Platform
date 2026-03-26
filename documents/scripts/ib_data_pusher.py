@@ -1390,6 +1390,7 @@ class IBDataPusher:
             
             # Create contract with exchange fallback + cache
             contract = None
+            qualify_failed = True
             cached = self._symbol_exchange_cache.get(symbol)
             
             if cached:
@@ -1400,7 +1401,9 @@ class IBDataPusher:
                     contract.primaryExchange = cached[2]
                 try:
                     self.ib.qualifyContracts(contract)
-                    if not (contract.conId and contract.conId > 0):
+                    if contract.conId and contract.conId > 0:
+                        qualify_failed = False
+                    else:
                         cached = None
                 except:
                     cached = None
@@ -1917,6 +1920,7 @@ class IBDataPusher:
             # Create contract with exchange fallback + cache
             # Most symbols resolve on SMART. Cache avoids retrying fallbacks every request.
             contract = None
+            qualify_failed = True
             cached = self._symbol_exchange_cache.get(symbol)
             
             if cached:
@@ -1928,7 +1932,9 @@ class IBDataPusher:
                     contract.primaryExchange = cached[2]
                 try:
                     self.ib.qualifyContracts(contract)
-                    if not (contract.conId and contract.conId > 0):
+                    if contract.conId and contract.conId > 0:
+                        qualify_failed = False
+                    else:
                         cached = None  # Cache stale, try all
                 except:
                     cached = None
