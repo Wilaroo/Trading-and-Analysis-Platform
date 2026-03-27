@@ -1,66 +1,69 @@
-<analysis>**original_problem_statement**: 
-AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System, and IB historical data collection. In this session, the user requested fixes for a cold-start problem where the bot refused trades due to 0W/0L history. They also requested an AI Confidence Gate for pre-trade decisions, live IB paper order execution, data coverage heatmap visuals, and migrating the frontend's heavy REST polling to WebSockets to reduce backend load.
+<analysis>Here is the comprehensive handover summary based on the provided LLM message history:
 
-**PRODUCT REQUIREMENTS ADDED IN THIS SESSION:** 
-- Fix cold-start problem (Smart Filter blocking new strategies).
-- Build AI Confidence Gate & SentCom Intelligence Panel.
-- Build Data Coverage Heatmap.
-- Enable live IB Paper order execution via the local pusher, including commission tracking, stale alert timeouts, and price recalculation.
-- Add DMA directional filters (EMA50 for swings, SMA200 for investments).
-- Complete Phase 1 of WebSocket migration (centralized context provider + migrating heavy pollers).
+**original_problem_statement**: 
+The user requested help executing a massive 1-min OHLCV vendor data import script, diagnosing and fixing stuck historical data collectors, and optimizing collector speeds. Afterward, the user requested two major features: Phase 1: Short Setup Models (building inverse features for bearish setups) and Phase 2: Short Float Data Integration (fetching real-time shortable shares from IB and bi-monthly short interest from the FINRA free API). The user also requested a future task to build a Twitter/X social stream widget for specific handles without a paid API.
+
+**PRODUCT REQUIREMENTS ADDED IN THIS SESSION:**
+- Import ~11M+ rows of 1-min vendor data using the  script.
+- Optimize IB data collector speeds.
+- Phase 1: Build inverse feature extractors for Short Setup Models and register them in the training pipeline.
+- Phase 2: Integrate IB  (tick types 46, 236) and FINRA bi-monthly short interest data into the backend and DB.
+- Document the ideal physical hardware specs in the PRD for a future migration from Atlas to a fully local DB.
 
 **User's preferred language**: English
 (INSTRUCT next agent: You MUST respond in English only)
 
 **what currently exists?** 
-A highly sophisticated, fully-functional AI trading platform backend and frontend (Command Center & NIA dashboard). The system includes an active local IB data pusher, 142 LightGBM AI setup models, a Market Regime Engine, an AI Confidence Gate (pre-trade sizing/filtering), live paper trade execution through IB, and a robust WebSocket-driven React frontend that significantly reduces API polling.
+A heavy-duty AI trading platform backend with a massive MongoDB Atlas DB (~100M historical bars). It now includes 80 total LightGBM setup models (including 17 newly added  models). The data pusher locally streams market data and IB . A FINRA short interest API integration exists but the background data population script currently has a string-matching bug preventing it from saving qualifying symbols.
 
 **Last working item**: 
-    - Last item agent was working: P3 WebSocket Migration & SmartFilter Refactor. The agent built  to centralize WS state, migrated the heaviest frontend pollers (, ), and extracted the Smart Filter logic from  into a discrete  module.
-    - Status: USER VERIFICATION PENDING
-    - Agent Testing Done: Y
-    - Which testing method agent to use? NA (Testing already done successfully via  returning 100% pass rate).
+    - Last item agent was working: Debugging the FINRA Short Interest API background fetcher. The API correctly fetches paginated records (5,000 per page), but 0 records are being saved to MongoDB because the fetched  is failing to match the  list in the ADV qualifying cache.
+    - Status: IN PROGRESS
+    - Agent Testing Done: Y (Ran testing subagent for API surface which passed 18/18, but manual script testing revealed the data population bug afterwards).
+    - Which testing method agent to use? manual testing by python -c script / curl to trigger and verify the background fetch.
     - User Testing Done: N
 
 **All Pending/In progress Issue list**: 
-  Issue 1: Vendor 1-min Data Import Blocked (P1)
-     - Attempted fixes: Awaiting user to receive the  file from their vendor.
-     - Next debug checklist: Once user confirms receipt, guide them to run .
-     - Why fix this issue and what will be achieved with the fix?: Injects ~16M 1-min bars for model training.
-     - Status: BLOCKED
+  Issue 1: FINRA API Symbol Matching Bug (P0)
+     - Attempted fixes: Implemented  pagination to walk through 20,000+ FINRA records. Added  to prevent CSV responses. Moved fetch to a background task to avoid HTTP timeouts.
+     - Next debug checklist: Check  background task logic. The FINRA  (e.g., TSLA) is being fetched, but the  check is discarding it. Inspect the exact string formatting of  returned by FINRA (e.g., trailing whitespace, case mismatch) or if  set is not loaded properly in the async context.
+     - Why fix this issue and what will be achieved with the fix?: Will successfully populate the database with critical short interest/days-to-cover data for the user's trading universe.
+     - Status: IN PROGRESS
      - Is recurring issue? N
      - Should Test frontend/backend/both after fix? Backend
-     - Blocked on other issue: User awaiting delivery of vendor file.
+     - Blocked on other issue: None
 
 **In progress Task List**: 
-  None. All tasks requested during the session were completed and successfully verified by the testing agent.
+  Task 1: Complete Phase 2 Short Float Data Integration
+     - Where to resume: Fix the aforementioned FINRA symbol matching bug in .
+     - What will be achieved with this?: Proper storage of short data to be fed into the Short Setup Models.
+     - Status: IN PROGRESS
+     - Should Test frontend/backend/both after fix? Backend
+     - Blocked on something: Issue 1
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - 🔴 (P1) Short Setup Models (Gap 3): Build AI models specifically trained to recognize and execute short setups (inverse features of longs).
-    - 🔴 (P1) Short Float Data Integration (Gap 4): Implement data filters and calculations for short float to inform short setup viability.
+    - 🔴 (P1) Twitter/X Social Stream Widget: Build a widget for the Command Center that updates tweets/truths from specific followed handles (User explicitly noted they do *not* have a paid Twitter API account, so a creative/free RSS or scraping approach is needed).
     - 🟡 (P2) MFE/MAE Scatter Chart: Per-setup visualization for trade efficiency.
-    - 🟡 (P2) Confidence Gate Tuner: A tool to auto-calibrate the Confidence Gate's skip/reduce/go thresholds based on the user's live decision data.
+    - 🟡 (P2) Confidence Gate Tuner: A tool to auto-calibrate the Confidence Gate's skip/reduce/go thresholds based on live decision data.
     - 🟡 (P2) Auto-Optimize AI Settings: Sweep confidence thresholds and lookback windows per strategy.
     
     Future Tasks:
-    - 🟢 (P3) Complete WebSocket Migration: Convert the remaining ~20 minor frontend polling intervals to use the new .
-    - 🟢 (P3) Refactor : Extract remaining sub-systems (like position sizing, order management) into discrete modules to reduce the 4,000+ line file size.
+    - 🟢 (P3) Complete WebSocket Migration: Convert remaining minor frontend polling intervals.
+    - 🟢 (P3) Refactor : Extract Position Sizing and Order Management logic.
+    - 🟢 (Future) Post-Development Local DB Migration: Execute the hardware/DB migration to a local NVMe drive once development is finalized (Documented in PRD).
 
 **Completed work in this session**
-- Fixed Smart Filter cold-start issue by adding a bootstrap mode (50% sizing) for setups with 0W/0L history (DONE).
-- Built AI Confidence Gate () and wired it into the trade execution path (DONE).
-- Created  in the NIA dashboard to show Confidence Gate decisions (DONE).
-- Created  to visualize data coverage in a tiered grid (DONE).
-- Enabled real IB Paper Order execution, removing the forced  fallback (DONE).
-- Added commission tracking (/bin/bash.005/share, .00 min) to P&L calculations (DONE).
-- Added stale alert timeouts and price recalculation at trade confirmation time (DONE).
-- Added DMA directional filters (EMA50 for swing, SMA200 for investment) to the Enhanced Scanner (DONE).
-- Built  and migrated heavy frontend pollers (, ) to use WebSocket push streams (DONE).
-- Extracted  logic into its own module  (DONE).
+- Vendor 1-min data import execution support and script fixes (DONE)
+- Fixed stalled 5-min historical data collector by manually clearing stalled queue jobs (DONE)
+- Increased collector batch speeds ( 10s -> 3s) (DONE)
+- Built  for inverse long features (DONE)
+- Updated  and  to handle 10 short setup types and 17 short profiles (DONE)
+- Added IB  and shortable levels to  (DONE)
+- Created  endpoints and integrated IB push logic (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - None. All functional gaps identified during the session were successfully addressed or explicitly logged to the PRD backlog.
+   - None, aside from the active P0 FINRA matching bug.
 
 **Known issue recurrence from previous fork**
   - Issue recurrence in previous fork: None
@@ -71,73 +74,67 @@ A highly sophisticated, fully-functional AI trading platform backend and fronten
 
 
 **Key Technical Concepts**
-- **AI Confidence Gate:** Sits directly after the Smart Filter. Evaluates current market regime, model consensus, and AI consultation to output a decision (, , ) and a  before a trade executes.
-- **IB Order Routing:**  now properly checks if the local IB pusher is connected. If connected, it pushes real market orders to the user's paper account. If disconnected, it falls back to  mode.
-- **WebSocket Streaming Context:** The frontend now uses a  provider at the root level (). All real-time streams (bot status, quotes, alerts, scanner, intelligence, regime) are pushed through this context, entirely eliminating heavy REST  polling in key components.
-- **Cold-Start Bootstrap:** The smart filter now checks . If true, it allows the trade in bootstrap mode (halved size) rather than instantly rejecting it due to a 0% win rate.
+- **Short Setup Models:** Models built specifically for bearish setups. They use  which mathematically inverts the long-biased features (e.g., breakdown below support instead of breakout above resistance) but uses the same LightGBM training pipeline.
+- **FINRA Consolidated API:** Provides free bi-monthly short interest data. Requires  for pagination and  headers. Responses must be filtered against the user's ADV cache to prevent DB bloat.
+- **IB Shortable Shares:** Real-time data from IB Gateway using tick types 46 (Shortable level) and 236 (Shares available).
 
 **key DB schema**
   - 
-  - 
-  - 
+  - : {symbol, short_interest, prev_short_interest, days_to_cover, si_change_pct, settlement_date, avg_daily_volume}
+  - : {symbol, shortable, shortable_level, shortable_shares, updated_at}
 
 **changes in tech stack**
-  - None.
+  - **IMPORTANT:** User explicitly trashed the Emergent Cloud deployment in the deployment tab to save Atlas DB bandwidth. **DO NOT** attempt to debug 502 Bad Gateway errors for the preview URLs. The user is strictly running the platform locally against the Atlas cluster.
 
 **All files of reference**
-  - 
-  - 
-  -  
-  - 
   - 
   - 
   - 
   - 
 
 **Areas that need refactoring**
-  -  is still >4,000 lines. The smart filter was extracted, but Position Sizing and Order Management logic should be extracted next.
-  - Minor frontend components still using  should be migrated to .
+  -  (Still very large, needs extraction of Order Management).
 
 **key api endpoints**
-  - 
-  -  (Handles , , , , , etc.)
+  -  (Triggers background FINRA pagination)
+  -  (Returns counts of FINRA/IB data)
+  -  (Receives data from local )
 
 **Critical Info for New Agent**
-- **DO NOT TOUCH DATA COLLECTORS:** The user runs the IB data pusher locally. Simulated testing environments will show IB pusher not connected, which is the *expected behavior* in the cloud pod. Do not try to fix this connection.
-- **WebSocket Data First:** Whenever the frontend needs real-time backend updates, DO NOT add new  polling endpoints. Always add a new message type to 's background streaming tasks, and consume it via  on the frontend.
-- **Commissions:** Trade commission logic (/bin/bash.005/share, .00 min) is now strictly baked into  P&L calculations.
+- **Deployment is Dead:** The user trashed the cloud deployment. All components (backend, frontend, collectors, pusher, Ollama) are being run by the user *locally* on their PC, talking to the remote MongoDB Atlas cluster. Continue modifying files via the emergent platform, and the user will  locally.
+- **FINRA API:** If you query it, ensure you request , otherwise it returns CSV text. Offset pagination (5000 rows at a time) is required to reach later letters like TSLA.
+- **Do not modify IB connection configs:** Simulated connection errors in the cloud environment are expected because the IB Gateway runs on the user's PC.
 
 **documents and test reports created in this job**
-  -  through 
-  -  (Updated comprehensively)
+  - 
+  - 
 
 **Last 10 User Messages and any pending HUMAN messages** 
-1. **User**: Pointed out a bug where SentCom rejected trades due to 0% win rate on 0 trades (cold start).
-2. **Agent**: Built the AI Confidence Gate and fixed the cold-start Smart Filter bug.
-3. **User**: Approved completion. Asked about P2 and P3 tasks.
-4. **Agent**: Explained P2 (Data Heatmap) and P3 (WebSocket Migration).
-5. **User**: lets do p2 and p3... as long as this wont hurt our current data fetch
-6. **Agent**: Built , implemented , and proved it didn't touch collectors.
-7. **User**: Asked 6 behavioral questions about the bot (e.g., short models, short float data, order routing rules, DMA filters).
-8. **Agent**: Digged into codebase, identified 4 missing gaps in the logic based on user's questions. 
-9. **User**: Instructed to fix Gap 2 (IB paper routing + commissions) and Gap 6 (DMA filters for swings).
-10. **Agent**: Implemented Gap 2 and Gap 6 logic. User then instructed ok lets do p3 now (complete WebSocket migration & Smart Filter extraction). Agent finished P3 and ran the testing agent. (All passed).
+1. **User**: Confirmed FINRA was showing 2020 data.
+2. **Agent**: Added  to get 2026-03-13 data. Timeout issues occurred on the HTTP request.
+3. **User**: Noticed the HTTP request timeouts.
+4. **Agent**: Moved the FINRA fetch to a background task (). Noticed  was missing because it exceeded the 5000-record API limit.
+5. **Agent**: Implemented  pagination to fetch all 20,000+ records.
+6. **Agent**: Debugged the pagination. Realized FINRA was returning CSV. Added .
+7. **Agent**: Ran the fetch script in the background. Identified that 0 records were being stored out of the 21,589 fetched.
+8. **Agent**: Started investigating why the  returned from FINRA was failing the  check, directly resulting in the current P0 bug.
 
 **Project Health Check:**
-Healthy. No broken components. Testing agent reported 100% pass rates across 5 full testing runs this session.
+Broken (FINRA background ingestion task logic).
 
 **3rd Party Integrations**
   - Interactive Brokers (IB Gateway) — Requires local user instance.
   - MongoDB Atlas — Cloud DB.
+  - FINRA API — Free API for Short Interest.
 
 **Testing status**
-  - Testing agent used after significant changes: YES (Run 5 times. Iterations 110-114).
-  - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: Output to 
-  - Known regressions: None.
+  - Testing agent used after significant changes: YES (For Phase 2 API surface).
+  - Troubleshoot agent used after agent stuck in loop: NO.
+  - Test files created: 
+  - Known regressions: FINRA symbol string-matching logic is preventing DB writes.
 
 **Credentials to test flow:**
-Standard  variables.
+Standard  variables. Use  scripts to trigger background tasks and verify MongoDB documents.
 
 **What agent forgot to execute**
-Nothing. The agent executed everything requested seamlessly and passed all unit/E2E tests. Vendor data import script remains ready and waiting for the user to provide the physical file.</analysis>
+The agent was in the middle of fixing the FINRA string-matching bug when context ended. Furthermore, the user's request for a **Twitter/X Social Stream Widget** was planned but not started.</analysis>

@@ -54,14 +54,30 @@ async def push_ib_short_data(payload: IBShortDataPush):
 async def fetch_finra_data(request: FINRAFetchRequest):
     """
     Fetch and store short interest data from FINRA's free API.
-    Can filter by symbols and/or settlement date.
+    Runs as background task since it may take 30-60 seconds.
     """
+    from fastapi import BackgroundTasks
     svc = _get_service()
-    result = await svc.fetch_finra_short_interest(
+
+    # Run synchronously for small requests, async for full fetch
+    if request.symbols and len(request.symbols) <= 10:
+        result = await svc.fetch_finra_short_interest(
+            symbols=request.symbols,
+            settlement_date=request.settlement_date,
+        )
+        return result
+
+    # For large fetches, run in background
+    import asyncio
+    loop = asyncio.get_event_loop()
+    loop.create_task(svc.fetch_finra_short_interest(
         symbols=request.symbols,
         settlement_date=request.settlement_date,
-    )
-    return result
+    ))
+    return {
+        "success": True,
+        "message": "FINRA fetch started in background. Check /api/short-data/summary for progress.",
+    }
 
 
 @router.get("/symbol/{symbol}")
@@ -94,21 +110,28 @@ async def get_short_data_summary():
     svc = _get_service()
     db = svc.db
 
-    ib_count = db["ib_short_data"].count_documents({})
-    finra_count = db["finra_short_interest"].count_documents({})
+    ib_count = int(db["ib_short_data"].count_documents({}))
+    finra_count = int(db["finra_short_interest"].count_documents({}))
 
     # Get latest FINRA settlement date
-    latest_finra_cursor = db["finra_short_interest"].find(
-        {}, {"_id": 0, "settlement_date": 1}
-    ).sort("settlement_date", -1).limit(1)
-    latest_list = list(latest_finra_cursor)
-    latest_date = latest_list[0]["settlement_date"] if latest_list else None
+    latest_date = None
+    try:
+        latest_finra_cursor = db["finra_short_interest"].find(
+            {}, {"_id": 0, "settlement_date": 1}
+        ).sort("settlement_date", -1).limit(1)
+        latest_list = list(latest_finra_cursor)
+        latest_date = str(latest_list[0]["settlement_date"]) if latest_list else None
+    except Exception:
+        pass
 
-    # Get unique FINRA symbols
-    finra_symbols = len(db["finra_short_interest"].distinct("symbol"))
+    # Get unique FINRA symbols count
+    try:
+        finra_symbols = int(len(db["finra_short_interest"].distinct("symbol")))
+    except Exception:
+        finra_symbols = 0
 
     # Hard to borrow count
-    htb_count = db["ib_short_data"].count_documents({"shortable_level": {"$lte": 1.5}})
+    htb_count = int(db["ib_short_data"].count_documents({"shortable_level": {"$lte": 1.5}}))
 
     return {
         "success": True,

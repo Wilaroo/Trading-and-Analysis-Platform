@@ -58,39 +58,28 @@ class ShortInterestService:
     async def fetch_finra_short_interest(self, symbols: List[str] = None, settlement_date: str = None) -> Dict:
         """
         Fetch short interest data from FINRA's free Consolidated API.
-        Includes NYSE, NASDAQ, and OTC data.
-        Filters to ADV-qualifying symbols to keep storage efficient.
+        Paginates to get complete coverage. Filters to ADV-qualifying symbols.
         """
         try:
-            payload = {"limit": 5000}
-
+            # Build date range filter
             if settlement_date:
-                payload["filter"] = [{
+                date_filter = [{
                     "fieldName": "settlementDate",
-                    "fieldValueOperator": "eq",
-                    "fieldValue": settlement_date,
+                    "startDate": settlement_date,
+                    "endDate": settlement_date,
+                }]
+            else:
+                from datetime import timedelta
+                now = datetime.now(timezone.utc)
+                start = (now - timedelta(days=90)).strftime("%Y-%m-%d")
+                end = now.strftime("%Y-%m-%d")
+                date_filter = [{
+                    "fieldName": "settlementDate",
+                    "startDate": start,
+                    "endDate": end,
                 }]
 
-            async with httpx.AsyncClient(timeout=60) as client:
-                response = await client.post(
-                    FINRA_API_URL,
-                    json=payload,
-                    headers={
-                        "Content-Type": "application/json",
-                        "Accept": "application/json",
-                    },
-                )
-
-                if response.status_code != 200:
-                    logger.error(f"FINRA API error: {response.status_code}")
-                    return {"success": False, "error": f"FINRA API returned {response.status_code}"}
-
-                records = response.json()
-
-            if not records:
-                return {"success": True, "records": 0, "message": "No data returned"}
-
-            # Filter to qualifying symbols (ADV >= 500K) to avoid storing junk
+            # Load qualifying symbols for filtering
             qualifying = None
             try:
                 adv_symbols = set()
@@ -101,58 +90,91 @@ class ShortInterestService:
             except Exception:
                 pass
 
+            # Paginate through FINRA API using offset
             from pymongo import UpdateOne
-            ops = []
-            stored_count = 0
+            total_stored = 0
+            total_from_api = 0
             settle_date = ""
+            offset = 0
+            page_size = 5000
+            max_pages = 10
 
-            for record in records:
-                symbol = record.get("symbolCode", record.get("issueSymbolIdentifier", "")).upper()
-                if not symbol:
-                    continue
+            for page in range(max_pages):
+                payload = {
+                    "limit": page_size,
+                    "offset": offset,
+                    "dateRangeFilters": date_filter,
+                }
 
-                if symbols and symbol not in [s.upper() for s in symbols]:
-                    continue
+                async with httpx.AsyncClient(timeout=60) as client:
+                    response = await client.post(
+                        FINRA_API_URL,
+                        json=payload,
+                        headers={"Content-Type": "application/json", "Accept": "application/json"},
+                    )
 
-                if qualifying and symbol not in qualifying:
-                    continue
+                if response.status_code != 200:
+                    logger.error(f"FINRA API error page {page}: {response.status_code}")
+                    break
 
-                short_interest = record.get("currentShortPositionQuantity", record.get("currentShortShareNumber", 0))
-                prev_short_interest = record.get("previousShortPositionQuantity", record.get("previousShortShareNumber", 0))
-                change_pct = record.get("changePercent", 0)
-                adv = record.get("averageDailyVolumeQuantity", record.get("averageShortShareNumber", 0))
-                days_to_cover = record.get("daysToCoverQuantity", record.get("daysToCoverNumber", 0))
-                settle_date = record.get("settlementDate", settlement_date or "")
-                market_class = record.get("marketClassCode", record.get("marketCategoryCode", ""))
+                records = response.json()
+                total_from_api += len(records)
+                logger.info(f"FINRA page {page+1} (offset {offset}): {len(records)} records")
 
-                ops.append(UpdateOne(
-                    {"symbol": symbol, "settlement_date": settle_date},
-                    {"$set": {
-                        "symbol": symbol,
-                        "settlement_date": settle_date,
-                        "short_interest": short_interest,
-                        "prev_short_interest": prev_short_interest,
-                        "change_pct": change_pct,
-                        "avg_daily_volume": adv,
-                        "days_to_cover": days_to_cover,
-                        "market_class": market_class,
-                        "fetched_at": datetime.now(timezone.utc).isoformat(),
-                        "source": "finra",
-                    }},
-                    upsert=True,
-                ))
-                stored_count += 1
+                if not records:
+                    break
 
-            if ops:
-                result = self.db["finra_short_interest"].bulk_write(ops, ordered=False)
-                actual_stored = result.upserted_count + result.modified_count
-                logger.info(f"Stored FINRA short interest for {actual_stored} symbols (settlement: {settle_date})")
+                ops = []
+                for record in records:
+                    symbol = record.get("symbolCode", record.get("issueSymbolIdentifier", "")).upper()
+                    if not symbol:
+                        continue
+                    if symbols and symbol not in [s.upper() for s in symbols]:
+                        continue
+                    if qualifying and symbol not in qualifying:
+                        continue
 
+                    short_interest = record.get("currentShortPositionQuantity", record.get("currentShortShareNumber", 0))
+                    prev_short_interest = record.get("previousShortPositionQuantity", record.get("previousShortShareNumber", 0))
+                    change_pct = record.get("changePercent", 0)
+                    adv = record.get("averageDailyVolumeQuantity", record.get("averageShortShareNumber", 0))
+                    days_to_cover = record.get("daysToCoverQuantity", record.get("daysToCoverNumber", 0))
+                    settle_date = record.get("settlementDate", settlement_date or "")
+                    market_class = record.get("marketClassCode", record.get("marketCategoryCode", ""))
+
+                    ops.append(UpdateOne(
+                        {"symbol": symbol, "settlement_date": settle_date},
+                        {"$set": {
+                            "symbol": symbol,
+                            "settlement_date": settle_date,
+                            "short_interest": short_interest,
+                            "prev_short_interest": prev_short_interest,
+                            "change_pct": change_pct,
+                            "avg_daily_volume": adv,
+                            "days_to_cover": days_to_cover,
+                            "market_class": market_class,
+                            "fetched_at": datetime.now(timezone.utc).isoformat(),
+                            "source": "finra",
+                        }},
+                        upsert=True,
+                    ))
+
+                if ops:
+                    result = self.db["finra_short_interest"].bulk_write(ops, ordered=False)
+                    page_stored = result.upserted_count + result.modified_count
+                    total_stored += page_stored
+                    logger.info(f"FINRA page {page+1}: stored {page_stored} (total: {total_stored})")
+
+                if len(records) < page_size:
+                    break
+                offset += page_size
+
+            logger.info(f"FINRA fetch complete: {total_stored} stored from {total_from_api} records")
             return {
                 "success": True,
-                "records": stored_count,
-                "settlement_date": settle_date if stored_count > 0 else None,
-                "total_from_api": len(records),
+                "records": total_stored,
+                "settlement_date": settle_date if total_stored > 0 else None,
+                "total_from_api": total_from_api,
                 "filtered_by_adv": qualifying is not None,
             }
 

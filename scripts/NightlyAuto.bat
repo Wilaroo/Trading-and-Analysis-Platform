@@ -21,7 +21,7 @@ echo.
 :: CONFIGURATION
 :: =====================================================
 set SCRIPT_DIR=%~dp0
-set CLOUD_URL=https://bot-command-center-27.preview.emergentagent.com
+set CLOUD_URL=https://finra-symbol-match.preview.emergentagent.com
 set LOG_FILE=%SCRIPT_DIR%nightly_auto.log
 
 :: Log start time
