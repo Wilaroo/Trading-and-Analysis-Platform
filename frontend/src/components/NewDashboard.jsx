@@ -57,7 +57,7 @@ const DashboardHeader = ({
     };
     
     fetchSession();
-    return safePolling(fetchSession, 30000, { immediate: false });
+    return safePolling(fetchSession, 60000, { immediate: false });
   }, []);
   // Risk status calculations
   const dailyLossLimit = riskStatus?.daily_loss_limit || 10000;
@@ -533,14 +533,21 @@ const NewDashboard = ({
   }, []);
   
   // Initial fetch and auto-refresh
+  // Only poll for data NOT available via WebSocket props
   useEffect(() => {
-    fetchDashboardData();
+    // Account data and dashboard data still need REST — no WS equivalent
     fetchAccountData();
+    fetchDashboardData();
+    
+    // Order queue is now WS-pushed in some setups, but still poll as fallback
     fetchOrderQueue();
     
-    const cleanupDashboard = safePolling(fetchDashboardData, DASHBOARD_REFRESH_INTERVAL, { immediate: false });
-    const cleanupAccount = safePolling(fetchAccountData, ACCOUNT_REFRESH_INTERVAL, { immediate: false, essential: true });
-    const cleanupOrders = safePolling(fetchOrderQueue, 15000, { immediate: false, essential: true });
+    // Dashboard data refresh at 30s (reduced from 15s — WS handles real-time updates)
+    const cleanupDashboard = safePolling(fetchDashboardData, 30000, { immediate: false });
+    // Account data at 30s (was 15s — polling is fallback for WS)
+    const cleanupAccount = safePolling(fetchAccountData, 30000, { immediate: false, essential: true });
+    // Order queue at 30s (was 15s)
+    const cleanupOrders = safePolling(fetchOrderQueue, 30000, { immediate: false, essential: true });
     
     return () => {
       cleanupDashboard();

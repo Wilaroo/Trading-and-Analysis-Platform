@@ -31,6 +31,7 @@ import StreamOfConsciousness from './StreamOfConsciousness';
 import ConversationPanel from './ConversationPanel';
 import StatusDot from './StatusDot';
 import api, { safeGet, safePost } from '../utils/api';
+import { useWsData } from '../contexts/WebSocketDataContext';
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -1624,6 +1625,7 @@ const useMarketSession = (pollInterval = 30000) => {
 
 const useSentComStatus = (pollInterval = 60000) => {  // Increased to 60s to avoid 429s
   const { getCached, setCached } = useDataCache();
+  const { sentcomData: wsSentcom } = useWsData();
   const isFirstMount = useRef(true);
   
   // Initialize from cache if available
@@ -1664,11 +1666,20 @@ const useSentComStatus = (pollInterval = 60000) => {  // Increased to 60s to avo
     return safePolling(fetchStatus, pollInterval, { immediate: false });
   }, [fetchStatus, pollInterval, getCached]);
 
+  // Subscribe to WS SentCom status updates (supplements polling)
+  useEffect(() => {
+    if (!wsSentcom?.status) return;
+    setStatus(wsSentcom.status);
+    setCached('sentcomStatus', wsSentcom.status, 30000);
+    setLoading(false);
+  }, [wsSentcom?.status, setCached]);
+
   return { status, loading, error, refresh: fetchStatus };
 };
 
 const useSentComStream = (pollInterval = 45000) => {  // Increased to 45s to avoid 429s
   const { getCached, setCached } = useDataCache();
+  const { sentcomData: wsSentcom } = useWsData();
   const isFirstMount = useRef(true);
   
   // Initialize from cache if available
@@ -1729,11 +1740,26 @@ const useSentComStream = (pollInterval = 45000) => {  // Increased to 45s to avo
     return safePolling(fetchStream, pollInterval, { immediate: false });
   }, [fetchStream, pollInterval, getCached]);
 
+  // Subscribe to WS SentCom stream updates (supplements polling)
+  useEffect(() => {
+    if (!wsSentcom?.stream || !Array.isArray(wsSentcom.stream)) return;
+    const streamMessages = wsSentcom.stream.map(m => ({ ...m, source: 'stream' }));
+    if (streamMessages.length > 0) {
+      setMessages(prev => {
+        const chatMsgs = prev.filter(p => p.type === 'chat' || p.action_type === 'chat_response' || p.action_type === 'user_message');
+        const merged = [...streamMessages.slice(0, 2), ...chatMsgs];
+        return merged;
+      });
+      setLoading(false);
+    }
+  }, [wsSentcom?.stream]);
+
   return { messages, loading, refresh: fetchStream };
 };
 
 const useSentComPositions = (pollInterval = 30000) => {  // Increased to 30s to avoid 429s
   const { getCached, setCached } = useDataCache();
+  const { sentcomData: wsSentcom } = useWsData();
   const isFirstMount = useRef(true);
   
   // Initialize from cache if available
@@ -1774,6 +1800,19 @@ const useSentComPositions = (pollInterval = 30000) => {  // Increased to 30s to 
     
     return safePolling(fetchPositions, pollInterval, { immediate: false, essential: true });
   }, [fetchPositions, pollInterval, getCached]);
+
+  // Subscribe to WS positions data (supplements polling)
+  useEffect(() => {
+    if (!wsSentcom?.positions) return;
+    const p = wsSentcom.positions;
+    if (p.positions) {
+      const positionsArray = Array.isArray(p.positions) ? p.positions : Object.values(p.positions);
+      setPositions(positionsArray);
+      if (p.total_pnl !== undefined) setTotalPnl(p.total_pnl);
+      setCached('sentcomPositions', { positions: positionsArray, totalPnl: p.total_pnl || totalPnl }, 15000);
+      setLoading(false);
+    }
+  }, [wsSentcom?.positions, setCached, totalPnl]);
 
   return { positions, totalPnl, loading, refresh: fetchPositions };
 };
@@ -1823,6 +1862,7 @@ const useSentComSetups = (pollInterval = 30000) => {
 
 const useSentComContext = (pollInterval = 30000) => {
   const { getCached, setCached } = useDataCache();
+  const { sentcomData: wsSentcom } = useWsData();
   const isFirstMount = useRef(true);
   
   // Initialize from cache if available
@@ -1861,11 +1901,19 @@ const useSentComContext = (pollInterval = 30000) => {
     return safePolling(fetchContext, pollInterval, { immediate: false });
   }, [fetchContext, pollInterval, getCached]);
 
+  // Subscribe to WS market context (supplements polling)
+  useEffect(() => {
+    if (!wsSentcom?.market_context) return;
+    setContext(prev => ({ ...prev, ...wsSentcom.market_context }));
+    setLoading(false);
+  }, [wsSentcom?.market_context]);
+
   return { context, loading, refresh: fetchContext };
 };
 
 const useSentComAlerts = (pollInterval = 5000) => {
   const { getCached, setCached } = useDataCache();
+  const { scannerAlerts: wsAlerts } = useWsData();
   const isFirstMount = useRef(true);
   
   // Initialize from cache if available
@@ -1903,6 +1951,13 @@ const useSentComAlerts = (pollInterval = 5000) => {
     
     return safePolling(fetchAlerts, pollInterval, { immediate: false, essential: true });
   }, [fetchAlerts, pollInterval, getCached]);
+
+  // Subscribe to WS scanner alerts (supplements polling)
+  useEffect(() => {
+    if (!wsAlerts || wsAlerts.length === 0) return;
+    setAlerts(wsAlerts.slice(0, 5));
+    setLoading(false);
+  }, [wsAlerts]);
 
   return { alerts, loading, refresh: fetchAlerts };
 };

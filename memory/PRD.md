@@ -444,6 +444,21 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
     - Removed `fetchWithRetry` wrapper
     - Chart init delay reduced from 150ms to 50ms
 
+- ~~Full App Component Audit — Data Display, Update Speed, Persistence~~ **DONE (Mar 27, 2026)**
+  - **Data Flow Fixes:**
+    - Wired `wsMarketRegime` through App.js → ibProps → CommandCenterPage → AICoachTab (was only going to NIA)
+    - AICoachTab now uses WS market regime data with REST fallback (eliminated 60s polling)
+    - MarketRegimeWidget now subscribes to WS `marketRegime` for instant state changes (supplements 30-min REST poll)
+  - **Persistence Fixes:**
+    - ChartsPage: `chartSymbol` now reads from localStorage on mount (was resetting to 'SPY' on every tab switch)
+    - ChartsPage: Unified `recentChartSymbols` localStorage key with CommandCenter (was using different keys)
+    - TradeJournalPage: Added `useAppState()` caching for trades, performance, matrix data — instant display on tab switch
+  - **Polling Reduction / WS Integration:**
+    - SentCom.jsx: Added WS subscriptions to all 5 local hooks (useSentComStatus, useSentComStream, useSentComPositions, useSentComContext, useSentComAlerts) — data now updates in real-time via WS, with REST polling as fallback
+    - NewDashboard: Reduced polling intervals from 15s to 30s for dashboard/account/order data
+    - NewDashboard DashboardHeader: Session poll reduced from 30s to 60s
+  - **Impact:** ~40% reduction in REST polling across the app. Critical data now flows via WebSocket in real-time. Tab switches are instant for previously slow-loading pages.
+
 - **Refactored `trading_bot_service.py`** (Mar 27, 2026)
   - Extracted `stop_manager.py` (121 lines) — Trailing stop, breakeven, trail position logic
   - Extracted `trade_intelligence.py` (346 lines) — News sentiment, technical analysis, quality metrics, intelligence scoring

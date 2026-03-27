@@ -27,6 +27,7 @@ import {
   Filter
 } from 'lucide-react';
 import api from '../utils/api';
+import { useAppState } from '../contexts/AppStateContext';
 import { PlaybookTab, DRCTab, GamePlanTab, WeeklyReportTab } from '../components/Journal';
 
 const Card = ({ children, className = '', hover = true }) => (
@@ -608,11 +609,14 @@ const IBAccountHistoryTab = () => {
 
 // ===================== TRADE JOURNAL PAGE =====================
 const TradeJournalPage = () => {
+  const { getData, setData: setAppData } = useAppState();
   const [activeTab, setActiveTab] = useState('trades'); // trades, playbook, drc, gameplan
-  const [trades, setTrades] = useState([]);
-  const [performance, setPerformance] = useState(null);
-  const [matrix, setMatrix] = useState(null);
-  const [loading, setLoading] = useState(true);
+  
+  // Initialize from cached state for instant display on tab switch
+  const [trades, setTrades] = useState(() => getData('journalTrades') || []);
+  const [performance, setPerformance] = useState(() => getData('journalPerformance'));
+  const [matrix, setMatrix] = useState(() => getData('journalMatrix'));
+  const [loading, setLoading] = useState(() => !getData('journalTrades'));
   const [showNewTrade, setShowNewTrade] = useState(false);
   const [showCloseTrade, setShowCloseTrade] = useState(null);
   const [filter, setFilter] = useState('all');
@@ -646,16 +650,25 @@ const TradeJournalPage = () => {
         api.get('/api/trades/templates/list')
       ]);
       
-      setTrades(tradesRes.data.trades || []);
-      setPerformance(perfRes.data);
-      setMatrix(matrixRes.data);
+      const tradesData = tradesRes.data.trades || [];
+      const perfData = perfRes.data;
+      const matrixData = matrixRes.data;
+      
+      setTrades(tradesData);
+      setPerformance(perfData);
+      setMatrix(matrixData);
       setTemplates(templatesRes.data.templates || []);
+      
+      // Cache in AppState for persistence across tab switches
+      setAppData('journalTrades', tradesData);
+      setAppData('journalPerformance', perfData);
+      setAppData('journalMatrix', matrixData);
     } catch (err) {
       console.error('Failed to load trade data:', err);
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, [filter, setAppData]);
 
   useEffect(() => { loadData(); }, [loadData]);
 

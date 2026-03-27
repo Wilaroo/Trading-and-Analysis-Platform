@@ -15,11 +15,15 @@ const ChartsPage = ({
   wsConnected = false,
   wsLastUpdate = null,
 }) => {
-  // Local state for chart symbol
-  const [chartSymbol, setChartSymbol] = React.useState('SPY');
+  // Local state for chart symbol - persist with localStorage
+  const [chartSymbol, setChartSymbol] = React.useState(() => {
+    try {
+      return localStorage.getItem('tradecommand_chart_symbol') || 'SPY';
+    } catch { return 'SPY'; }
+  });
   const [recentCharts, setRecentCharts] = React.useState(() => {
     try {
-      const saved = localStorage.getItem('tradecommand_recentCharts');
+      const saved = localStorage.getItem('recentChartSymbols');
       return saved ? JSON.parse(saved) : ['SPY', 'QQQ', 'AAPL'];
     } catch {
       return ['SPY', 'QQQ', 'AAPL'];
@@ -29,9 +33,14 @@ const ChartsPage = ({
   const addToRecentCharts = (symbol) => {
     setRecentCharts(prev => {
       const updated = [symbol, ...prev.filter(s => s !== symbol)].slice(0, 10);
-      localStorage.setItem('tradecommand_recentCharts', JSON.stringify(updated));
+      localStorage.setItem('recentChartSymbols', JSON.stringify(updated));
       return updated;
     });
+  };
+
+  const handleSetChartSymbol = (sym) => {
+    setChartSymbol(sym);
+    localStorage.setItem('tradecommand_chart_symbol', sym);
   };
 
   return (
@@ -41,7 +50,7 @@ const ChartsPage = ({
         isBusy={ibBusy}
         busyOperation={ibBusyOperation}
         chartSymbol={chartSymbol}
-        setChartSymbol={setChartSymbol}
+        setChartSymbol={handleSetChartSymbol}
         watchlist={[]}
         recentCharts={recentCharts}
         onAddToRecent={addToRecentCharts}

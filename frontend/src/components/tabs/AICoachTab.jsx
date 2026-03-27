@@ -32,6 +32,7 @@ const AICoachTab = ({
   wsScannerStatus = null,
   wsSmartWatchlist = [],
   wsCoachingNotifications = [],
+  wsMarketRegime = null,
   // Navigation callback
   onNavigateToTab = null,
   // Layout mode: 'new' for NewDashboard, 'classic' for original
@@ -40,15 +41,26 @@ const AICoachTab = ({
   // Use the global ticker modal hook
   const { openTickerModal } = useTickerModal();
   
-  // State for regime data (fetch from API)
+  // State for regime data — WS-first, REST fallback
   const [regime, setRegime] = useState(null);
   const [marketSession, setMarketSession] = useState(null);
   
   // State for Brief Me modal
   const [isBriefMeOpen, setIsBriefMeOpen] = useState(false);
   
-  // Fetch regime data
+  // Use WS market regime if available
+  useEffect(() => {
+    if (wsMarketRegime) {
+      setRegime({
+        name: wsMarketRegime.state || wsMarketRegime.name || 'HOLD',
+        score: wsMarketRegime.composite_score || wsMarketRegime.score || 50
+      });
+    }
+  }, [wsMarketRegime]);
+  
+  // REST fallback for regime — only if WS hasn't provided it
   const fetchRegimeData = useCallback(async () => {
+    if (wsMarketRegime) return; // WS is providing data, skip REST
     try {
       const data = await safeGet('/api/market-regime/summary');
       if (data) {
@@ -60,7 +72,7 @@ const AICoachTab = ({
     } catch (err) {
       console.error('Failed to fetch regime:', err);
     }
-  }, []);
+  }, [wsMarketRegime]);
   
   // Fetch session data
   const fetchSessionData = useCallback(async () => {
@@ -75,15 +87,21 @@ const AICoachTab = ({
   }, []);
   
   // Initial fetch
+  // Initial fetch + fallback polling only when WS isn't providing data
   useEffect(() => {
     fetchRegimeData();
     fetchSessionData();
     
-    return safePolling(() => {
-      fetchRegimeData();
-      fetchSessionData();
-    }, 60000, { immediate: false });
-  }, [fetchRegimeData, fetchSessionData]);
+    // Only poll if WS isn't providing market regime
+    if (!wsMarketRegime) {
+      return safePolling(() => {
+        fetchRegimeData();
+        fetchSessionData();
+      }, 60000, { immediate: false });
+    }
+    // Session still needs periodic refresh (no WS equivalent)
+    return safePolling(fetchSessionData, 60000, { immediate: false });
+  }, [fetchRegimeData, fetchSessionData, wsMarketRegime]);
   
   // Handle ticker click - opens the enhanced chart modal
   // Can receive either a string ticker or an object { symbol, quote, ... }

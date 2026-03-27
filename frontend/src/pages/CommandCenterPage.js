@@ -25,7 +25,8 @@ const CommandCenterPage = ({
   wsScannerAlerts = [],
   wsScannerStatus = null,
   wsSmartWatchlist = [],
-  wsCoachingNotifications = []
+  wsCoachingNotifications = [],
+  wsMarketRegime = null,
 }) => {
   const data = useCommandCenterData({
     ibConnected, ibConnectionChecked, connectToIb, checkIbConnection, isActiveTab,
@@ -108,6 +109,7 @@ const CommandCenterPage = ({
           wsScannerStatus={wsScannerStatus}
           wsSmartWatchlist={wsSmartWatchlist}
           wsCoachingNotifications={wsCoachingNotifications}
+          wsMarketRegime={wsMarketRegime}
         />
       )}
 

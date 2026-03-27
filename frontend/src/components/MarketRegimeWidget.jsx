@@ -24,6 +24,7 @@ import {
 import { toast } from 'sonner';
 import { CustomTip } from './shared/Tooltip';
 import { safeGet } from '../utils/api';
+import { useWsData } from '../contexts/WebSocketDataContext';
 
 const UPDATE_INTERVAL = 30 * 60 * 1000;
 
@@ -156,6 +157,27 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
   const [error, setError] = useState(null);
   const [expanded, setExpanded] = useState(false);
   const lastStateRef = useRef(null);
+  
+  // Subscribe to WS market regime updates for real-time state changes
+  const { marketRegime: wsMarketRegime } = useWsData();
+  
+  // Apply WS updates immediately when they arrive
+  useEffect(() => {
+    if (!wsMarketRegime) return;
+    setRegime(prev => {
+      // Merge WS data with existing regime data (WS may be partial)
+      const merged = prev ? { ...prev, ...wsMarketRegime } : wsMarketRegime;
+      
+      // Check for state change notification
+      if (lastStateRef.current && lastStateRef.current !== merged.state) {
+        if (onStateChange) onStateChange(merged.state, lastStateRef.current);
+      }
+      if (merged.state) lastStateRef.current = merged.state;
+      
+      return merged;
+    });
+    setLoading(false);
+  }, [wsMarketRegime, onStateChange]);
 
     const fetchRegime = useCallback(async (showToast = false) => {
     try {
