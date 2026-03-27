@@ -99,10 +99,11 @@ class TimeSeriesAIService:
     }
     
     # Training defaults — PRODUCTION settings
-    # Maximize data usage: all ADV-qualified symbols, all available bars
+    # Use ALL ADV-qualified symbols — no artificial ceiling
+    # ADV thresholds in setup_training_config.py are the real filter
     # Batch processing prevents OOM on intraday timeframes
-    DEFAULT_MAX_SYMBOLS = 2000   # Use all ADV-qualified symbols (up to this cap)
-    DEFAULT_MAX_BARS_PER_SYMBOL = 10000  # Use all available bars per symbol
+    DEFAULT_MAX_SYMBOLS = 99999   # Effectively uncapped — ADV filter is the real gate
+    DEFAULT_MAX_BARS_PER_SYMBOL = 99999  # Use all available bars per symbol
     
     # Setup types that have enough strategies to justify a dedicated model
     SETUP_TYPES = {
@@ -1293,12 +1294,12 @@ class TimeSeriesAIService:
         self._available_data_cache_time = current_time
         return FALLBACK_DATA
             
-    async def _get_training_symbols_from_db(self, bar_size: str = "1 day", limit: int = 1000) -> List[str]:
-        """Get symbols with most historical data from MongoDB for a specific bar_size,
-        filtered by ADV (Average Daily Volume) threshold.
+    async def _get_training_symbols_from_db(self, bar_size: str = "1 day", limit: int = None) -> List[str]:
+        """Get ALL ADV-qualified symbols with sufficient historical data for a specific bar_size.
         
+        The ADV (Average Daily Volume) threshold is the ONLY filter — no artificial symbol cap.
         ADV thresholds ensure models only train on liquid stocks:
-          - 500K+ ADV for intraday (1min, 5min, 1hr)
+          - 500K+ ADV for intraday (1min, 5min, 15min, 30min, 1hr)
           - 100K+ ADV for swing (1day)
           - 50K+ ADV for position (1week)
         
@@ -1312,7 +1313,7 @@ class TimeSeriesAIService:
         def _blocking_query():
             """This runs in a thread pool"""
             try:
-                # Step 1: Get ADV-qualified symbols from cache
+                # Step 1: Get ADV-qualified symbols from cache — this IS the filter
                 adv_qualified = set()
                 adv_cursor = self._db["symbol_adv_cache"].find(
                     {"avg_volume": {"$gte": adv_threshold}},
@@ -1330,14 +1331,17 @@ class TimeSeriesAIService:
                     f"(threshold for {bar_size})"
                 )
                 
-                # Step 2: From those, find symbols with enough bars
+                # Step 2: From those, find symbols with enough bars — no artificial limit
                 pipeline = [
                     {"$match": {"bar_size": bar_size, "symbol": {"$in": list(adv_qualified)}}},
                     {"$group": {"_id": "$symbol", "count": {"$sum": 1}}},
                     {"$match": {"count": {"$gte": self.MIN_BARS_FOR_TRAINING}}},
                     {"$sort": {"count": -1}},
-                    {"$limit": limit}
                 ]
+                # Only apply limit if explicitly set (not the default uncapped value)
+                if limit and limit < 99999:
+                    pipeline.append({"$limit": limit})
+                
                 result = list(self._db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True))
                 return [r["_id"] for r in result]
             except Exception as e:

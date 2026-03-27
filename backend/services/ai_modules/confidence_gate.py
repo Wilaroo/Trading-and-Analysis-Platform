@@ -152,7 +152,7 @@ class ConfidenceGate:
             reasoning.append("AI confirms BEAR TREND — additional confidence for shorts")
 
         # --- 2. MODEL CONSENSUS ---
-        model_signals = await self._query_model_consensus(symbol, setup_type)
+        model_signals = await self._query_model_consensus(symbol, setup_type, direction)
 
         if model_signals.get("has_models"):
             avg_confidence = model_signals.get("avg_confidence", 0)
@@ -180,7 +180,18 @@ class ConfidenceGate:
             confidence_points -= 10
             reasoning.append(f"Quality score LOW ({quality_score}) — weaker setup")
 
-        # --- 4. DETERMINE DECISION ---
+        # --- 4. LEARNING LOOP FEEDBACK ---
+        # Query historical win rate for this specific setup + regime + time context
+        # This closes the loop: real outcomes dynamically adjust the gate
+        learning_adjustment = await self._get_learning_feedback(setup_type, regime_state)
+        if learning_adjustment["has_data"]:
+            confidence_points += learning_adjustment["points"]
+            if learning_adjustment["reasoning"]:
+                reasoning.append(learning_adjustment["reasoning"])
+            if learning_adjustment.get("multiplier_adj"):
+                position_multiplier *= learning_adjustment["multiplier_adj"]
+
+        # --- 5. DETERMINE DECISION ---
         confidence_score = max(0, min(100, confidence_points))
 
         if confidence_score >= 65:
@@ -268,34 +279,85 @@ class ConfidenceGate:
             logger.debug(f"AI regime classification failed: {e}")
             return "unknown"
 
-    async def _query_model_consensus(self, symbol: str, setup_type: str) -> Dict[str, Any]:
+    async def _query_model_consensus(self, symbol: str, setup_type: str, direction: str = "long") -> Dict[str, Any]:
         """
-        Query trained models relevant to this setup type for consensus.
-        Returns agreement percentage and average confidence.
+        Query trained models RELEVANT to this specific setup type and direction for live consensus.
+        
+        Relevance rules:
+        - Setup-specific models: ONLY models matching this exact setup type
+        - Direction filtering: SHORT models don't vote on LONG trades and vice versa
+        - General direction model: Always included as a baseline (direction-agnostic)
+        - Ensemble model: Included only if available
+        
+        Returns agreement percentage, average confidence, and per-model votes.
         """
         if self._db is None:
             return {"has_models": False, "summary": "No DB connection"}
 
         try:
-            # Find models matching this setup type
-            base_setup = setup_type.split("_long")[0].split("_short")[0]
-            patterns = [
-                {"model_name": {"$regex": f".*{base_setup}.*", "$options": "i"}},
-                {"model_name": {"$regex": ".*direction.*", "$options": "i"}},
-                {"model_name": {"$regex": ".*ensemble.*", "$options": "i"}},
-            ]
+            # Determine which models are relevant to this setup
+            base_setup = setup_type.upper().replace("_LONG", "").replace("_SHORT", "")
+            is_short = direction.lower() == "short" or "SHORT" in setup_type.upper()
+            
+            # Build TARGETED model search — only models that should vote
+            relevant_patterns = []
+            
+            # 1. Exact setup-type models (e.g., scalp_1min_predictor, scalp_5min_predictor)
+            relevant_patterns.append(
+                {"model_name": {"$regex": f"^{base_setup.lower()}_.*_predictor$", "$options": "i"}}
+            )
+            # 2. Short-specific variant if this is a short trade
+            if is_short:
+                relevant_patterns.append(
+                    {"model_name": {"$regex": f"^short_{base_setup.lower()}_.*_predictor$", "$options": "i"}}
+                )
+            
+            # 3. General direction model (always relevant — it's direction-agnostic)
+            relevant_patterns.append(
+                {"model_name": {"$regex": "^direction_.*_predictor$", "$options": "i"}}
+            )
+            
+            # 4. Ensemble model (cross-timeframe consensus — always relevant)
+            relevant_patterns.append(
+                {"model_name": {"$regex": "^ensemble_", "$options": "i"}}
+            )
 
             models = list(self._db["timeseries_models"].find(
-                {"$or": patterns},
-                {"_id": 0, "model_name": 1, "accuracy": 1, "training_samples": 1}
+                {"$or": relevant_patterns},
+                {"_id": 0, "model_name": 1, "accuracy": 1, "training_samples": 1, 
+                 "setup_type": 1, "bar_size": 1}
             ))
 
             if not models:
                 return {"has_models": False, "summary": f"No trained models for {base_setup}"}
 
-            # Calculate consensus from model accuracies
-            # Models with high accuracy = higher confidence signal
-            accuracies = [m.get("accuracy", 0) for m in models if m.get("accuracy", 0) > 0]
+            # Filter out OPPOSITE direction models that slipped through regex
+            # E.g., if trade is LONG, exclude any model with "short_" prefix
+            filtered_models = []
+            for m in models:
+                name = m.get("model_name", "").lower()
+                if is_short:
+                    # For short trades: include short-specific + general, exclude long-specific
+                    # General models (direction_, ensemble_) are always included
+                    if name.startswith("short_") or name.startswith("direction_") or name.startswith("ensemble_"):
+                        filtered_models.append(m)
+                    elif not any(name.startswith(f"{s.lower()}_") for s in [
+                        "scalp", "orb", "gap_and_go", "vwap", "breakout", "range",
+                        "mean_reversion", "reversal", "trend_continuation", "momentum"
+                    ]):
+                        # Not a known long setup prefix — include (could be general)
+                        filtered_models.append(m)
+                    # else: it's a long setup model, skip it
+                else:
+                    # For long trades: include long-specific + general, exclude short-specific
+                    if not name.startswith("short_"):
+                        filtered_models.append(m)
+
+            if not filtered_models:
+                return {"has_models": False, "summary": f"No relevant models for {base_setup} {direction}"}
+
+            # Calculate consensus from filtered models
+            accuracies = [m.get("accuracy", 0) for m in filtered_models if m.get("accuracy", 0) > 0]
 
             if not accuracies:
                 return {"has_models": False, "summary": "Models exist but no accuracy data"}
@@ -304,19 +366,129 @@ class ConfidenceGate:
             high_confidence_models = sum(1 for a in accuracies if a > 0.55)
             agreement_pct = high_confidence_models / len(accuracies) if accuracies else 0
 
+            # Categorize what voted
+            setup_models = [m for m in filtered_models if base_setup.lower() in m.get("model_name", "").lower()]
+            general_models = [m for m in filtered_models if "direction_" in m.get("model_name", "")]
+            ensemble_models = [m for m in filtered_models if "ensemble_" in m.get("model_name", "")]
+
             return {
                 "has_models": True,
-                "models_checked": len(models),
+                "models_checked": len(filtered_models),
                 "models_with_accuracy": len(accuracies),
                 "avg_confidence": round(avg_accuracy, 3),
                 "agreement_pct": round(agreement_pct, 3),
                 "high_confidence_count": high_confidence_models,
-                "summary": f"{len(models)} models, {high_confidence_models} high-conf, avg acc {avg_accuracy:.1%}",
+                "setup_models_count": len(setup_models),
+                "general_models_count": len(general_models),
+                "ensemble_models_count": len(ensemble_models),
+                "direction_filter": direction,
+                "summary": (
+                    f"{len(setup_models)} setup + {len(general_models)} general + {len(ensemble_models)} ensemble models, "
+                    f"{high_confidence_models} high-conf, avg acc {avg_accuracy:.1%}"
+                ),
             }
 
         except Exception as e:
             logger.warning(f"Model consensus query failed: {e}")
             return {"has_models": False, "summary": f"Query error: {str(e)[:50]}"}
+
+
+    async def _get_learning_feedback(self, setup_type: str, regime_state: str) -> Dict[str, Any]:
+        """
+        Query the Learning Loop for real historical win rates on this setup type + regime context.
+        
+        Closes the feedback loop: actual trade outcomes dynamically adjust the gate's confidence.
+        
+        Logic:
+        - If this setup type has been winning at 60%+ recently → boost confidence
+        - If this setup type has been losing at <40% recently → penalize confidence
+        - If this setup type is in edge decay → further penalize + reduce size
+        - Minimum sample size of 5 trades to influence (avoids noise)
+        """
+        result = {"has_data": False, "points": 0, "reasoning": None, "multiplier_adj": None}
+        
+        try:
+            from services.learning_loop_service import get_learning_loop_service
+            learning = get_learning_loop_service()
+            
+            if learning._db is None:
+                return result
+            
+            # Get contextual win rate for this setup + regime combo
+            base_setup = setup_type.upper().replace("_LONG", "").replace("_SHORT", "")
+            
+            win_rate_data = await learning.get_contextual_win_rate(
+                setup_type=base_setup,
+                market_regime=regime_state
+            )
+            
+            sample_size = win_rate_data.get("sample_size", 0)
+            win_rate = win_rate_data.get("win_rate", 0.5)
+            confidence_level = win_rate_data.get("confidence", "low")
+            ev_r = win_rate_data.get("expected_value_r", 0)
+            
+            # Need minimum 5 trades to influence the gate
+            if sample_size < 5:
+                return result
+            
+            result["has_data"] = True
+            
+            # Scale impact by sample size confidence
+            weight = 1.0 if confidence_level == "high" else 0.6 if confidence_level == "medium" else 0.3
+            
+            if win_rate >= 0.65:
+                # Hot streak — this setup has been winning. Boost confidence.
+                pts = int(15 * weight)
+                result["points"] = pts
+                result["reasoning"] = (
+                    f"Learning Loop: {base_setup} winning at {win_rate:.0%} "
+                    f"({sample_size} trades, EV {ev_r:.1f}R) — boosting confidence +{pts}"
+                )
+            elif win_rate >= 0.50:
+                # Average performance — slight boost
+                pts = int(5 * weight)
+                result["points"] = pts
+                result["reasoning"] = (
+                    f"Learning Loop: {base_setup} at {win_rate:.0%} win rate "
+                    f"({sample_size} trades) — slight confidence boost +{pts}"
+                )
+            elif win_rate >= 0.40:
+                # Below average — slight penalty
+                pts = int(-5 * weight)
+                result["points"] = pts
+                result["reasoning"] = (
+                    f"Learning Loop: {base_setup} underperforming at {win_rate:.0%} "
+                    f"({sample_size} trades) — reducing confidence {pts}"
+                )
+            else:
+                # Losing setup — strong penalty + reduce size
+                pts = int(-15 * weight)
+                result["points"] = pts
+                result["multiplier_adj"] = 0.6
+                result["reasoning"] = (
+                    f"Learning Loop: {base_setup} COLD at {win_rate:.0%} win rate "
+                    f"({sample_size} trades, EV {ev_r:.1f}R) — penalizing confidence {pts}, reducing size 40%"
+                )
+            
+            # Check for edge decay (declining win rate)
+            try:
+                stats = list(learning._learning_stats_col.find({
+                    "setup_type": base_setup,
+                    "edge_declining": True
+                }))
+                if stats:
+                    result["points"] -= 5
+                    result["reasoning"] = (result["reasoning"] or "") + " | EDGE DECAY detected"
+                    if not result.get("multiplier_adj"):
+                        result["multiplier_adj"] = 0.8
+            except Exception:
+                pass
+            
+            return result
+            
+        except Exception as e:
+            logger.debug(f"Learning feedback query failed (non-critical): {e}")
+            return result
 
     def _update_trading_mode(self, regime_state: str, ai_regime: str, regime_score: int):
         """

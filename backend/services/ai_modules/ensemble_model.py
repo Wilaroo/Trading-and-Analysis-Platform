@@ -11,9 +11,17 @@ Architecture:
     - hourly_model -> {prob_up, prob_down, confidence, direction}
     - 5min_model   -> {prob_up, prob_down, confidence, direction}
 
-  Layer 2: Meta-learner combines these predictions
+  Layer 1b: Setup-specific models predict independently
+    - scalp_5min_predictor -> {prob_up, prob_down, confidence, direction}
+    - scalp_1min_predictor -> {prob_up, prob_down, confidence, direction}
+    (only models matching the active setup type)
+
+  Layer 2: Meta-learner combines ALL predictions
     Input features (per sub-model):
       - prob_up, prob_down, confidence
+    Plus setup-model features:
+      - setup_prob_up, setup_prob_down, setup_confidence
+      - setup_agreement — How many setup-specific models agree with general models
     Plus derived meta-features:
       - agreement_count   — How many models agree on direction
       - avg_confidence     — Average confidence across models
@@ -24,8 +32,8 @@ Architecture:
     Output: Final UP/DOWN/FLAT with calibrated probability
 
 Why? Individual models are noisy. When daily says UP, hourly says UP,
-and 5-min says UP, the win rate is dramatically higher than any single
-model alone.
+5-min says UP, AND the scalp-specific model agrees — win rate is dramatically
+higher than any single model alone.
 """
 
 import logging
@@ -40,6 +48,14 @@ STACKED_TIMEFRAMES = ["1 day", "1 hour", "5 mins"]
 
 # Per-sub-model features extracted from their predictions
 _PER_MODEL_FEATURES = ["prob_up", "prob_down", "confidence"]
+
+# Setup-specific model features (added when setup model predictions are available)
+_SETUP_MODEL_FEATURES = [
+    "setup_prob_up",
+    "setup_prob_down",
+    "setup_confidence",
+    "setup_agreement",  # 0 or 1: does the setup model agree with general consensus?
+]
 
 # Derived meta-features
 _META_FEATURES = [
@@ -56,18 +72,22 @@ for tf in STACKED_TIMEFRAMES:
     prefix = tf.replace(" ", "_")
     for feat in _PER_MODEL_FEATURES:
         ENSEMBLE_FEATURE_NAMES.append(f"stack_{prefix}_{feat}")
+ENSEMBLE_FEATURE_NAMES.extend(_SETUP_MODEL_FEATURES)
 ENSEMBLE_FEATURE_NAMES.extend(_META_FEATURES)
 
 
 def extract_ensemble_features(
     predictions: Dict[str, Dict[str, Any]],
+    setup_predictions: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, float]:
     """
-    Extract meta-learner features from sub-model predictions.
+    Extract meta-learner features from sub-model AND setup-specific predictions.
 
     Args:
         predictions: Dict of timeframe -> prediction dict
             Each prediction dict has: prob_up, prob_down, confidence, direction
+        setup_predictions: Optional list of setup-specific model predictions
+            Each has: prob_up, prob_down, confidence, direction
 
     Returns:
         Dict of ensemble feature name -> value
@@ -96,13 +116,45 @@ def extract_ensemble_features(
         if direction == "up":
             bull_count += 1
 
-    # Meta-features
+    # Setup-specific model features
+    if setup_predictions:
+        setup_prob_ups = [float(sp.get("prob_up", 0.5)) for sp in setup_predictions]
+        setup_prob_downs = [float(sp.get("prob_down", 0.5)) for sp in setup_predictions]
+        setup_confs = [float(sp.get("confidence", 0.0)) for sp in setup_predictions]
+        setup_dirs = [sp.get("direction", "flat") for sp in setup_predictions]
+        
+        feats["setup_prob_up"] = np.mean(setup_prob_ups) if setup_prob_ups else 0.5
+        feats["setup_prob_down"] = np.mean(setup_prob_downs) if setup_prob_downs else 0.5
+        feats["setup_confidence"] = np.mean(setup_confs) if setup_confs else 0.0
+        
+        # Do setup models agree with the general model consensus direction?
+        if directions:
+            from collections import Counter
+            general_consensus = Counter(directions).most_common(1)[0][0]
+            setup_agrees = sum(1 for d in setup_dirs if d == general_consensus)
+            feats["setup_agreement"] = setup_agrees / len(setup_dirs) if setup_dirs else 0.0
+        else:
+            feats["setup_agreement"] = 0.0
+        
+        # Include setup predictions in the overall voting pool
+        confidences.extend(setup_confs)
+        directions.extend(setup_dirs)
+        bull_count += sum(1 for d in setup_dirs if d == "up")
+    else:
+        feats["setup_prob_up"] = 0.5
+        feats["setup_prob_down"] = 0.5
+        feats["setup_confidence"] = 0.0
+        feats["setup_agreement"] = 0.0
+
+    # Meta-features (now includes both general AND setup model votes)
+    total_models = len(STACKED_TIMEFRAMES) + len(setup_predictions or [])
+    
     # Agreement: how many models agree on the most common direction
     if directions:
         from collections import Counter
         dir_counts = Counter(directions)
         most_common = dir_counts.most_common(1)[0][1]
-        feats["agreement_count"] = most_common / len(STACKED_TIMEFRAMES)
+        feats["agreement_count"] = most_common / total_models if total_models > 0 else 0.0
     else:
         feats["agreement_count"] = 0.0
 
@@ -121,7 +173,7 @@ def extract_ensemble_features(
     else:
         feats["direction_entropy"] = 1.0
 
-    feats["bull_vote_pct"] = bull_count / len(STACKED_TIMEFRAMES)
+    feats["bull_vote_pct"] = bull_count / total_models if total_models > 0 else 0.0
 
     return feats
 

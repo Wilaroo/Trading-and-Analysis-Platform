@@ -465,6 +465,30 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
   - `StartupModal.jsx`: Uses `useWsData().isConnected` to supplement backend WS check. Shows "Live (N conns)" detail text.
   - All checks remain in-memory only — zero I/O, zero startup slowdown.
 
+- ~~AI Model Architecture Buildout — Super Model + Training Maximization~~ **DONE (Mar 27, 2026)**
+  - **Part A: Training Data Maximization**
+    - Removed artificial `max_symbols` cap (was 2,000-2,500) — ADV qualification is now the sole filter
+    - Removed artificial `max_bars_per_symbol` cap (was 2,500-5,000) — models train on ALL available IB historical data
+    - `_get_training_symbols_from_db` now returns ALL ADV-qualified symbols with no `$limit` stage
+    - Memory safety preserved: per-symbol processing discards bars after feature extraction
+  - **Part B: Confidence Gate — Relevant Model Consensus**
+    - Rewrote `_query_model_consensus()` with direction-aware filtering
+    - Only setup-type-matching models vote (SCALP models don't influence SWING evaluations)
+    - SHORT models excluded from LONG evaluations and vice versa
+    - General direction model always included as baseline
+    - Returns detailed breakdown: setup_models_count, general_models_count, ensemble_models_count
+  - **Part C: Ensemble Model — Setup-Specific Integration**
+    - Enhanced `extract_ensemble_features()` to accept `setup_predictions` parameter
+    - New features: `setup_prob_up`, `setup_prob_down`, `setup_confidence`, `setup_agreement`
+    - `setup_agreement` measures whether setup-specific models agree with general consensus
+    - All votes (general + setup) now included in meta-features (agreement, entropy, bull_vote_pct)
+  - **Part D: Learning Loop → Confidence Gate Feedback**
+    - New `_get_learning_feedback()` method closes the feedback loop
+    - Queries per-setup win rates from `trade_outcomes` via Learning Loop service
+    - Dynamic confidence adjustment: hot setups (65%+ WR) get +15 pts, cold setups (<40% WR) get -15 pts + 40% size reduction
+    - Edge decay detection: additional -5 pts + 20% size reduction when rolling win rate is declining
+    - Minimum 5 trade sample size to avoid noise influence
+
 - **Refactored `trading_bot_service.py`** (Mar 27, 2026)
   - Extracted `stop_manager.py` (121 lines) — Trailing stop, breakeven, trail position logic
   - Extracted `trade_intelligence.py` (346 lines) — News sentiment, technical analysis, quality metrics, intelligence scoring
