@@ -488,6 +488,12 @@ AI trading platform with 5-Phase Auto-Validation Pipeline, Data Inventory System
     - Dynamic confidence adjustment: hot setups (65%+ WR) get +15 pts, cold setups (<40% WR) get -15 pts + 40% size reduction
     - Edge decay detection: additional -5 pts + 20% size reduction when rolling win rate is declining
     - Minimum 5 trade sample size to avoid noise influence
+  - **Part E: Full Pipeline Wiring**
+    - Wired `predict_for_setup()` into Confidence Gate via new `_get_live_prediction()` — models now make live predictions during trade evaluation (was missing — models trained but never ran inference in live flow)
+    - Live prediction influences confidence: model agrees → +15 pts, model disagrees → -15 pts + 30% size reduction
+    - Entry context now includes `live_prediction` and `learning_feedback` for post-trade analysis
+    - SentCom filter thoughts expanded from 2 to 4 reasoning items — shows model predictions and learning feedback
+    - Full data flow: Scanner → Opportunity Evaluator → Confidence Gate (regime + model consensus + live prediction + learning feedback + quality) → Trading Bot → Trade Record → SentCom Stream → WebSocket → Frontend
 
 - **Refactored `trading_bot_service.py`** (Mar 27, 2026)
   - Extracted `stop_manager.py` (121 lines) — Trailing stop, breakeven, trail position logic

@@ -170,6 +170,47 @@ class ConfidenceGate:
         else:
             reasoning.append("No trained models for this setup — using regime + quality score only")
 
+        # --- 2b. LIVE MODEL PREDICTION ---
+        # Actually run predict_for_setup() to get real-time directional signal
+        live_prediction = await self._get_live_prediction(symbol, setup_type, direction)
+        if live_prediction.get("has_prediction"):
+            pred_direction = live_prediction["direction"]
+            pred_confidence = live_prediction["confidence"]
+            pred_model = live_prediction.get("model_used", "unknown")
+            
+            # Does the model agree with the proposed trade direction?
+            trade_is_long = direction.lower() in ("long", "buy")
+            model_agrees = (
+                (trade_is_long and pred_direction == "up") or
+                (not trade_is_long and pred_direction == "down")
+            )
+            
+            if model_agrees and pred_confidence >= 0.6:
+                confidence_points += 15
+                reasoning.append(
+                    f"Live {pred_model} model CONFIRMS {direction.upper()} "
+                    f"({pred_direction}, {pred_confidence:.0%} conf)"
+                )
+            elif model_agrees:
+                confidence_points += 5
+                reasoning.append(
+                    f"Live {pred_model} model leans {direction.upper()} "
+                    f"({pred_confidence:.0%} conf)"
+                )
+            elif pred_direction == "flat":
+                confidence_points -= 5
+                reasoning.append(
+                    f"Live {pred_model} model sees NO EDGE (flat, {pred_confidence:.0%} conf)"
+                )
+            else:
+                # Model disagrees with proposed direction
+                confidence_points -= 15
+                position_multiplier *= 0.7
+                reasoning.append(
+                    f"Live {pred_model} model DISAGREES — predicts {pred_direction.upper()} "
+                    f"vs proposed {direction.upper()} ({pred_confidence:.0%} conf) — reducing size 30%"
+                )
+
         # --- 3. QUALITY SCORE ---
         if quality_score >= 80:
             confidence_points += 10
@@ -223,6 +264,8 @@ class ConfidenceGate:
             "position_multiplier": round(position_multiplier, 2),
             "reasoning": reasoning,
             "model_signals": model_signals,
+            "live_prediction": live_prediction if live_prediction.get("has_prediction") else None,
+            "learning_feedback": learning_adjustment if learning_adjustment.get("has_data") else None,
             "symbol": symbol,
             "setup_type": setup_type,
             "direction": direction,
@@ -488,6 +531,85 @@ class ConfidenceGate:
             
         except Exception as e:
             logger.debug(f"Learning feedback query failed (non-critical): {e}")
+            return result
+
+
+    async def _get_live_prediction(self, symbol: str, setup_type: str, direction: str) -> Dict[str, Any]:
+        """
+        Run predict_for_setup() to get the model's real-time prediction for this symbol.
+        
+        This is the critical "super model" wire — it takes the setup-specific (or general)
+        trained model and asks it: "Right now, for this symbol, what direction do you predict?"
+        
+        The prediction feeds directly into confidence scoring:
+        - Model agrees with proposed direction → confidence boost
+        - Model disagrees → confidence penalty + size reduction
+        - Model says flat → slight penalty (no edge detected)
+        
+        Runs in a thread pool since predict_for_setup() does synchronous DB queries
+        for regime features.
+        """
+        result = {"has_prediction": False}
+        
+        try:
+            from services.ai_modules.timeseries_service import get_timeseries_ai
+            import asyncio
+            
+            ts_ai = get_timeseries_ai()
+            if ts_ai is None or ts_ai._db is None:
+                return result
+            
+            # Get recent bars for this symbol (need bars for feature extraction)
+            # Use the most recent bars from ib_historical_data
+            def _fetch_and_predict():
+                try:
+                    bars = list(ts_ai._db["ib_historical_data"].find(
+                        {"symbol": symbol, "bar_size": "5 mins"},
+                        {"_id": 0}
+                    ).sort("date", -1).limit(200))
+                    
+                    if len(bars) < 50:
+                        # Try daily bars as fallback
+                        bars = list(ts_ai._db["ib_historical_data"].find(
+                            {"symbol": symbol, "bar_size": "1 day"},
+                            {"_id": 0}
+                        ).sort("date", -1).limit(200))
+                    
+                    if len(bars) < 50:
+                        return None
+                    
+                    # Reverse to chronological order (oldest first)
+                    bars.reverse()
+                    
+                    # Call predict_for_setup — this is the core ML inference
+                    prediction = ts_ai.predict_for_setup(symbol, bars, setup_type)
+                    return prediction
+                except Exception as e:
+                    logger.debug(f"Live prediction fetch/predict failed for {symbol}: {e}")
+                    return None
+            
+            # Run in thread pool to avoid blocking event loop
+            loop = asyncio.get_event_loop()
+            prediction = await loop.run_in_executor(None, _fetch_and_predict)
+            
+            if prediction is None:
+                return result
+            
+            result["has_prediction"] = True
+            result["direction"] = prediction.get("direction", "flat")
+            result["confidence"] = prediction.get("confidence", 0.0)
+            result["prob_up"] = prediction.get("probability_up", 0.5)
+            result["prob_down"] = prediction.get("probability_down", 0.5)
+            result["model_used"] = prediction.get("model_used", "unknown")
+            result["model_type"] = prediction.get("model_type", "unknown")
+            
+            if prediction.get("regime_adjustment"):
+                result["regime_adjustment"] = prediction["regime_adjustment"]
+            
+            return result
+            
+        except Exception as e:
+            logger.debug(f"Live prediction failed (non-critical): {e}")
             return result
 
     def _update_trading_mode(self, regime_state: str, ai_regime: str, regime_score: int):

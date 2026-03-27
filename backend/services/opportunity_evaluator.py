@@ -108,7 +108,7 @@ class OpportunityEvaluator:
                     confidence_multiplier = confidence_gate_result.get("position_multiplier", 1.0)
                     gate_mode = confidence_gate_result.get("trading_mode", "normal")
 
-                    reasoning_summary = "; ".join(gate_reasoning[:2]) if gate_reasoning else "No reasoning"
+                    reasoning_summary = "; ".join(gate_reasoning[:4]) if gate_reasoning else "No reasoning"
                     bot._add_filter_thought({
                         "text": f"🧠 [CONFIDENCE GATE] {gate_decision} ({gate_confidence}% conf, {gate_mode} mode) — {reasoning_summary}",
                         "symbol": symbol,
@@ -554,8 +554,23 @@ class OpportunityEvaluator:
                 "position_multiplier": confidence_gate_result.get("position_multiplier", 1.0),
                 "trading_mode": confidence_gate_result.get("trading_mode", ""),
                 "ai_regime": confidence_gate_result.get("ai_regime", ""),
-                "reasoning": confidence_gate_result.get("reasoning", [])[:3],
+                "reasoning": confidence_gate_result.get("reasoning", [])[:5],
             }
+            # Include live model prediction if available
+            if confidence_gate_result.get("live_prediction"):
+                pred = confidence_gate_result["live_prediction"]
+                ctx["confidence_gate"]["live_prediction"] = {
+                    "direction": pred.get("direction", "flat"),
+                    "confidence": pred.get("confidence", 0),
+                    "model_used": pred.get("model_used", ""),
+                }
+            # Include learning loop feedback if available
+            if confidence_gate_result.get("learning_feedback"):
+                fb = confidence_gate_result["learning_feedback"]
+                ctx["confidence_gate"]["learning_feedback"] = {
+                    "points": fb.get("points", 0),
+                    "reasoning": fb.get("reasoning", ""),
+                }
 
         return ctx
 
